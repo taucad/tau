@@ -7,6 +7,7 @@ import {
   UnstoredLargeObjectsError,
 } from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
+import type { FillPathContent } from '#large-object-fill.js';
 import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { Checkout, ReadTreeOptions } from '#revision-port.js';
@@ -37,6 +38,8 @@ const setup = (
     /* The checkout's attributes, and whether its repository folds case (`core.ignoreCase`). */
     attributes?: string;
     ignoreCase?: boolean;
+    /* Ordinary files beside the placeholders, which a flush never has to touch (#2010). */
+    plainFiles?: number;
   }> = {},
 ) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([
@@ -48,6 +51,12 @@ const setup = (
   for (const [path, content] of Object.entries(parts)) {
     files.set(path, pointerOf(content).bytes);
   }
+  for (let index = 0; index < (options.plainFiles ?? 0); index++) {
+    files.set(`src/part-${String(index)}.scad`, encoder.encode(`cube(${String(index)});`));
+  }
+  /* Every path a flush read or wrote: what its cost grows with. */
+  let pathsRead = 0;
+  let pathsWritten = 0;
   const reports: LargeObjectsReport[] = [];
   let onLargeObject: ReadTreeOptions['onLargeObject'];
   let signal: AbortSignal | undefined;
@@ -86,10 +95,25 @@ const setup = (
       ['notes/pointer.txt', files.get('notes/pointer.txt')!],
       ...Object.entries(parts).map(([path, content]) => [path, encoder.encode(content)] as const),
     ]);
-  let captures = 0;
-  const capture = async (): Promise<ImmutableRevisionTree> => {
-    captures += 1;
-    return new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const));
+  /* Flushes that read the checkout, and looks for every placeholder it holds. */
+  let sweeps = 0;
+  let looks = 0;
+  const placeholders = async (): Promise<ReturnType<typeof largeObjectPlaceholders>> => {
+    looks += 1;
+    return largeObjectPlaceholders(
+      new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const)),
+      options.ignoreCase === undefined ? {} : { ignoreCase: options.ignoreCase },
+    );
+  };
+  const readPaths = async (_place: Checkout, paths: readonly string[]): Promise<Map<string, FillPathContent>> => {
+    sweeps += 1;
+    pathsRead += paths.length;
+    return new Map(
+      paths.flatMap((path) => {
+        const content = files.get(path);
+        return content === undefined ? [] : [[path, { content, mode: '100644' }] as const];
+      }),
+    );
   };
   /* A gate the test may close, so a materialization waits like a slow OPFS write; open by default. */
   let gate: Promise<void> = Promise.resolve();
@@ -108,12 +132,16 @@ const setup = (
       throw new RevisionPortError('CHECKOUT_CONFLICT', 'These files changed while they were written.');
     }
     for (const { path, content } of target.entries()) {
+      pathsWritten += 1;
       files.set(path, content);
     }
   });
+  const declareFilled = vi.fn(async (_place: Checkout, _paths: readonly string[]) => undefined);
   const fill = createLargeObjectFill({
     port: options.byOid === true ? { readTree, fetchLargeObjects } : { readTree },
-    capture,
+    placeholders,
+    readPaths,
+    declareFilled,
     withCheckoutFence: async (_id, operation) => operation(),
     materializeTree,
     report: (report) => reports.push(report),
@@ -163,8 +191,13 @@ const setup = (
       };
     },
     mostWriting: () => mostWriting,
-    /** How many sweeps (one capture each) have run. */
-    captures: () => captures,
+    /** How many flushes have read the checkout (only the paths each one fills). */
+    captures: () => sweeps,
+    /** How many times the fill looked for every placeholder the checkout holds. */
+    looks: () => looks,
+    pathsRead: () => pathsRead,
+    declareFilled,
+    pathsWritten: () => pathsWritten,
   };
 };
 
@@ -448,6 +481,62 @@ describe('large-object fill', () => {
     expect(harness.reports.at(-1)?.facet).toBeUndefined();
   });
 
+  /* #2010: a flush reads and writes the placeholders it fills, never the checkout around them. */
+  it('reads and writes only the paths each flush fills, however many other files the checkout holds', async () => {
+    const harness = setup({ flushBytes: 1, flushMilliseconds: 60_000, plainFiles: 500 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const readBefore = harness.pathsRead();
+    const looksBefore = harness.looks();
+    harness.land('models/a.step');
+    await vi.waitFor(() => {
+      expect(harness.text('models/a.step')).toBe('solid a');
+    });
+    harness.land('models/b.step');
+    await vi.waitFor(() => {
+      expect(harness.text('models/b.step')).toBe('solid bb');
+    });
+    /* Two flushes, one object each: what they wrote is those two paths, and what they read is bounded by them. */
+    expect(
+      harness.materializeTree.mock.calls.map(([, target]) => target.entries().map(({ path }) => path)),
+    ).toStrictEqual([['models/a.step'], ['models/b.step']]);
+    expect(harness.pathsWritten()).toBe(2);
+    /* Each flush says what it filled is no placeholder now, for those paths alone (D9). */
+    expect(harness.declareFilled.mock.calls.map(([, paths]) => paths)).toStrictEqual([
+      ['models/a.step'],
+      ['models/b.step'],
+    ]);
+    expect(harness.pathsRead() - readBefore).toBeLessThan(20);
+    /* The checkout as a whole is looked at once, when the fill's placeholders run out, never per flush. */
+    expect(harness.looks() - looksBefore).toBeLessThanOrEqual(1);
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  /* A flush reads the attributes on its paths' way, so one the person stopped tracking meanwhile stays their text (D9). */
+  it('leaves a placeholder whose attributes stopped tracking it meanwhile, reading only the attributes on its way', async () => {
+    const harness = setup({ flushMilliseconds: 60_000, flushBytes: 1 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.files.set('models/.gitattributes', encoder.encode('*.step -filter\n'));
+    harness.land('models/a.step');
+    await vi.waitFor(() => {
+      expect(harness.captures()).toBe(1);
+    });
+    harness.land('models/b.step');
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/a.step')).toContain('version https://git-lfs.github.com/spec/v1');
+    expect(harness.text('models/b.step')).toContain('version https://git-lfs.github.com/spec/v1');
+    expect(harness.materializeTree).not.toHaveBeenCalled();
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
   it('runs one timed flush at a time, flushing again after a slow one instead of queueing behind it', async () => {
     const harness = setup();
     const done = harness.fill.fill(place, head);
@@ -724,7 +813,8 @@ describe('large-object fill', () => {
     expect(harness.text('models/renamed.step')).toBe('solid a');
   });
 
-  it('fills a placeholder renamed or copied after the open, and tracks it until it lands', async () => {
+  /* #2010: no flush reads past its own paths, so the look that finds them is the one when the fill's own run out. */
+  it('fills a placeholder renamed or copied after the open, found once its own placeholders run out', async () => {
     const harness = setup();
     const done = harness.fill.fill(place, head);
     await vi.waitFor(() => {
@@ -735,17 +825,18 @@ describe('large-object fill', () => {
     harness.files.set('models/copy.step', harness.files.get('models/b.step')!);
     harness.land('models/b.step');
     await vi.waitFor(() => {
-      expect(harness.text('models/copy.step')).toBe('solid bb');
+      expect(harness.text('models/b.step')).toBe('solid bb');
     });
-    expect(harness.text('models/b.step')).toBe('solid bb');
-    await vi.waitFor(() => {
-      expect(harness.reports.at(-1)?.facet?.paths).toStrictEqual(['models/moved.step']);
-    });
+    /* The moved path is still owed under its old name until its object lands and the flush finds it gone. */
+    expect(harness.text('models/copy.step')).not.toBe('solid bb');
+    const looksBefore = harness.looks();
     harness.land('models/a.step');
     harness.finish(harness.fullTree());
     await done;
     expect(harness.text('models/moved.step')).toBe('solid a');
+    expect(harness.text('models/copy.step')).toBe('solid bb');
     expect(harness.files.has('models/a.step')).toBe(false);
+    expect(harness.looks() - looksBefore).toBeGreaterThanOrEqual(1);
     expect(harness.reports.at(-1)?.facet).toBeUndefined();
   });
 
@@ -950,7 +1041,17 @@ describe('a fill over the host store', () => {
           return new Map(pointers.map(({ oid }) => [oid, remote.get(oid)!] as const));
         },
       },
-      capture: async () => new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const)),
+      placeholders: async () =>
+        largeObjectPlaceholders(
+          new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const)),
+        ),
+      readPaths: async (_place, paths) =>
+        new Map(
+          paths.flatMap((path) => {
+            const content = files.get(path);
+            return content === undefined ? [] : [[path, { content, mode: '100644' }] as const];
+          }),
+        ),
       withCheckoutFence: async (_id, operation) => operation(),
       landsFromStore: async () => true,
       materializeTree: async (_place, target, { largeObjects }) => {

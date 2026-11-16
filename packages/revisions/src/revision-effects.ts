@@ -2429,10 +2429,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* The versioned tree of one checkout: every path the registry versions. */
   const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
     captureCheckout(place, { modeBasis, bypassMemo: false });
-  /* The same, for a fill's placeholder check: it warms the memo, and an import's one-shot record
-   * stays for the cut that builds the next revision, which reuses these bytes (D12). */
-  const captureForFill = async (place: Checkout): Promise<ImmutableRevisionTree> =>
-    captureCheckout(place, { bypassMemo: false, leavesRecords: true });
   /*
    * The placeholders a checkout holds, found from the Project Index's stats
    * (D4, I3; Tau #2013): a pointer is a few lines of fixed form, so only a
@@ -2726,7 +2722,33 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               ),
           }),
     },
-    capture: captureForFill,
+    /* The fill's own look, and its closing one: the index's stats and the pointer-sized files, not a capture (D9). */
+    placeholders: async (place) => placeholdersOf(place, generationOf(place.id)),
+    /* One flush reads the paths it fills and the attributes on their way, never the checkout (#2010). */
+    readPaths: async (place, paths) =>
+      useFileSystem(place, async (rooted) => {
+        const read = await mapConcurrent(paths, captureModeConcurrency, async (path) => {
+          const entry = await entryOf(rooted, path).catch((error: unknown) => {
+            /* Gone, or a folder where a file was: no placeholder, as a capture would not list it. */
+            if (isMissingFile(error) || (error as { code?: unknown } | undefined)?.code === 'EISDIR') {
+              return undefined;
+            }
+            throw error;
+          });
+          return entry === undefined ? undefined : ([path, entry] as const);
+        });
+        return new Map(read.flatMap((entry) => (entry === undefined ? [] : [entry])));
+      }),
+    /* What a flush filled is no placeholder now, said for those paths alone (D9). */
+    declareFilled: async (place, paths) =>
+      useFileSystem(place, async (rooted) => {
+        try {
+          await rooted.declarePending?.(new Map(), paths);
+        } catch (error) {
+          /* The write ended the marks itself; an index that cannot open answers no mark at all. */
+          console.warn('[revisions] the checkout index could not learn what a fill wrote', error);
+        }
+      }),
     attributesReading,
     withCheckoutFence,
     materializeTree,

@@ -8,27 +8,41 @@
  * placeholder is never work to save, and a cut over it records the head's tree.
  *
  * This fills each placeholder with its object's bytes as the object lands. A
- * path is filled only while it still holds exactly the pointer it was written
- * with: the bytes are content-addressed, so a filled file is the file the
- * pointer names, whichever head named it, and a path someone wrote meanwhile is
- * theirs and left alone. A placeholder is known by the object it names, not by
- * its path, so one renamed, moved, duplicated or restored meanwhile is filled
- * where it now is.
+ * path is filled only while it still holds a pointer to a wanted object: the
+ * bytes are content-addressed, so a filled file is the file the pointer names,
+ * whichever head named it, and a path someone wrote meanwhile is theirs and
+ * left alone. A flush reads and writes only the paths it fills (#2010), never
+ * the checkout around them, so its cost follows its batch and not the tree. A
+ * placeholder is known by the object it names, not by its path, so one renamed,
+ * moved, duplicated or restored meanwhile is filled where it now is: the fill
+ * looks for the checkout's placeholders once more each time its own run out.
  */
 import { workerTimings } from '@taucad/filesystem';
-import type { DeclaredPlaceholder } from '@taucad/filesystem';
+import type { DeclaredPlaceholder, FileMode } from '@taucad/filesystem';
 import { ImmutableRevisionTree } from '#algorithms/index.js';
 import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
 import type { LargeObjectsFacet, LargeObjectsReport } from '#project-revisions.types.js';
 import { RevisionPortError } from '#revision-port.js';
-import { attributesOf, placeholderPathMatcher } from '#workspace-config.js';
+import { attributesOf, generatedGitattributesPath, placeholderPathMatcher } from '#workspace-config.js';
 import type { AttributesReading } from '#workspace-config.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 
 /** One placeholder: the pointer bytes on disk and the object they name. */
 type Placeholder = Readonly<{ oid: string; size: number; pointer: Uint8Array<ArrayBuffer> }>;
+
+/** What one checkout path holds, read raw. @internal */
+export type FillPathContent = Readonly<{ content: Uint8Array<ArrayBuffer>; mode: FileMode }>;
+
+/* The attributes files git reads for one path: the root's and each folder's on its way. */
+const attributesPathsOn = (path: string): string[] => {
+  const folders = path.split('/').slice(0, -1);
+  return [
+    generatedGitattributesPath,
+    ...folders.map((_, depth) => `${folders.slice(0, depth + 1).join('/')}/${generatedGitattributesPath}`),
+  ];
+};
 
 type Fill = {
   readonly place: Checkout;
@@ -165,8 +179,9 @@ export const declaredPlaceholders = (
 /**
  * Build the fill over one project's checkout seams.
  *
- * @param dependencies - The port the objects come from, the caller's capture,
- *   fence and materialization, and who is told about progress.
+ * @param dependencies - The port the objects come from, how the checkout's
+ *   placeholders are found and its paths read, the caller's fence and
+ *   materialization, and who is told about progress.
  * @returns `fill`, which starts (or restarts) one checkout's fill, `resume`,
  *   which starts one only when none is running (or restarts a running one),
  *   `forget`, which ends one checkout's fill without a word, and `stop`, which
@@ -176,7 +191,15 @@ export const declaredPlaceholders = (
 export const createLargeObjectFill = (
   dependencies: Readonly<{
     port: Pick<RevisionPort, 'readTree' | 'fetchLargeObjects'>;
-    capture: (place: Checkout) => Promise<ImmutableRevisionTree>;
+    /**
+     * Every placeholder the checkout holds, found and declared as a declaration finds them (D9): the fill's look
+     * when its caller names none, and its closing look each time its own placeholders run out.
+     */
+    placeholders: (place: Checkout) => Promise<ReadonlyMap<string, Placeholder>>;
+    /** What these checkout paths hold now, read raw; a path that is gone is absent. One flush reads only its batch. */
+    readPaths: (place: Checkout, paths: readonly string[]) => Promise<ReadonlyMap<string, FillPathContent>>;
+    /** Say these paths, which a flush just filled, are no placeholders any more (D9), under the flush's fence. */
+    declareFilled?: (place: Checkout, paths: readonly string[]) => Promise<void>;
     withCheckoutFence: <Result>(checkoutId: string, operation: () => Promise<Result>) => Promise<Result>;
     materializeTree: (
       place: Checkout,
@@ -218,7 +241,8 @@ export const createLargeObjectFill = (
   /** Move these paths to the front of the checkout's running fill (D10); nothing when none runs. */
   prioritize: (checkoutId: string, paths: readonly string[]) => void;
 }> => {
-  const { port, capture, withCheckoutFence, materializeTree, report, landsFromStore } = dependencies;
+  const { port, readPaths, declareFilled, withCheckoutFence, materializeTree, report, landsFromStore } = dependencies;
+  const findPlaceholders = dependencies.placeholders;
   const flushMilliseconds = dependencies.flushMilliseconds ?? defaultFlushMilliseconds;
   const reportMilliseconds = dependencies.reportMilliseconds ?? defaultReportMilliseconds;
   const flushBytes = dependencies.flushBytes ?? defaultFlushBytes;
@@ -381,15 +405,6 @@ export const createLargeObjectFill = (
       : { oid: pointer.oid, size: pointer.size, pointer: content };
   };
 
-  /*
-   * One pass over the checkout: every placeholder naming an arrived object is
-   * filled, wherever it now is; one naming an object still on its way is
-   * tracked at its path; a tracked path that no longer holds its pointer is
-   * someone else's now and dropped. At most {@link flushBytes} are written
-   * (always at least one file); the rest stay tracked for the next flush.
-   *
-   * Answers whether arrived objects were left for the next flush.
-   */
   /* The landed bytes a later flush still has to write: one count per object a tracked placeholder still names. */
   const unflushedOf = (fill: Fill): number => {
     let total = 0;
@@ -400,56 +415,79 @@ export const createLargeObjectFill = (
     return total;
   };
 
+  /*
+   * One flush's writes (#2010): the tracked placeholders whose objects are here, at most {@link flushBytes} of
+   * them (always at least one file, and every object an open file waits for), read back at their paths and the
+   * paths alone, then written as a tree of just those paths. A path that no longer holds a pointer to a wanted
+   * object, or one its attributes no longer track, is someone else's now and dropped; one that now names another
+   * wanted object is tracked as that one. Nothing else in the checkout is read or written, so a flush costs what
+   * it fills, never the checkout. A write over a path someone changed since this read refuses as a conflict
+   * (the apply moves each replaced file aside and checks it is the pointer read here), and the flush sweeps again.
+   *
+   * Answers whether arrived objects were left for the next flush.
+   */
   const sweep = async (fill: Fill): Promise<boolean> => {
-    const before = await capture(fill.place);
-    /* Only a pointer the attributes track is a placeholder: a person's pointer text is never filled (D9). */
-    const tracked = placeholderPathMatcher(attributesOf(before.entries()), await attributesReading());
-    const filled: string[] = [];
-    const gone: string[] = [];
+    type Candidate = Readonly<{ path: string; known: Placeholder; bytes: Uint8Array<ArrayBuffer> | undefined }>;
+    const batch: Candidate[] = [];
     let written = 0;
     let more = false;
+    for (const [path, known] of fill.pending) {
+      const bytes = intactLanded(fill, known.oid);
+      if (bytes === undefined && !(fill.fromStore && fill.arrived.has(known.oid))) {
+        continue;
+      }
+      const size = bytes?.byteLength ?? known.size;
+      /* A promoted object is never left for a later batch: someone has its file open. */
+      if (batch.length > 0 && written + size > flushBytes && !fill.promoted.has(known.oid)) {
+        more = true;
+        continue;
+      }
+      batch.push({ path, known, bytes });
+      written += size;
+    }
+    if (batch.length === 0) {
+      return more;
+    }
+    const attributesPaths = [...new Set(batch.flatMap(({ path }) => attributesPathsOn(path)))];
+    const current = await readPaths(fill.place, [...batch.map(({ path }) => path), ...attributesPaths]);
+    /* Only a pointer the attributes track is a placeholder: a person's pointer text is never filled (D9). */
+    const tracked = placeholderPathMatcher(
+      attributesOf(attributesPaths.flatMap((path) => (current.has(path) ? [{ path, ...current.get(path)! }] : []))),
+      await attributesReading(),
+    );
+    const filled: string[] = [];
+    const gone: string[] = [];
+    const before: RevisionTreeInput[] = [];
+    const target: RevisionTreeInput[] = [];
     /* Paths a store-landing flush writes from the store, by the object they name. */
     const sourced = new Map<string, Readonly<{ oid: string; size: number }>>();
-    const entries: RevisionTreeInput[] = before.entries().map(({ path, content, mode }) => {
-      const known = fill.pending.get(path);
-      const placeholder = tracked(path) ? placeholderAt(fill, known, content) : undefined;
-      if (placeholder === undefined) {
-        if (known !== undefined) {
-          gone.push(path);
-        }
-        return [path, content, mode];
+    for (const { path, known, bytes } of batch) {
+      const held = current.get(path);
+      const placeholder = held === undefined || !tracked(path) ? undefined : placeholderAt(fill, known, held.content);
+      if (held === undefined || placeholder === undefined) {
+        gone.push(path);
+        continue;
       }
-      const bytes = intactLanded(fill, placeholder.oid);
-      const fromStore = bytes === undefined && fill.fromStore && fill.arrived.has(placeholder.oid);
-      if (bytes === undefined && !fromStore) {
+      if (placeholder.oid !== known.oid) {
+        /* Written meanwhile with a pointer to another wanted object: tracked as that one, for the next flush. */
         fill.pending.set(path, placeholder);
-        return [path, content, mode];
-      }
-      const size = bytes?.byteLength ?? placeholder.size;
-      /* A promoted object is never left for a later batch: someone has its file open. */
-      if (filled.length > 0 && written + size > flushBytes && !fill.promoted.has(placeholder.oid)) {
-        fill.pending.set(path, placeholder);
-        more = true;
-        return [path, content, mode];
+        more ||= fill.landed.has(placeholder.oid) || (fill.fromStore && fill.arrived.has(placeholder.oid));
+        continue;
       }
       filled.push(path);
-      written += size;
-      if (fromStore) {
+      before.push([path, held.content, held.mode]);
+      if (bytes === undefined) {
         /* The pointer stays the entry; the checkout clones the stored object in its place. */
         sourced.set(path, { oid: placeholder.oid, size: placeholder.size });
-        return [path, placeholder.pointer, mode];
-      }
-      return [path, bytes!, mode];
-    });
-    for (const path of fill.pending.keys()) {
-      if (!before.has(path)) {
-        gone.push(path);
+        target.push([path, held.content, held.mode]);
+      } else {
+        target.push([path, bytes, held.mode]);
       }
     }
     if (filled.length > 0) {
       try {
-        await materializeTree(fill.place, new ImmutableRevisionTree(entries), {
-          before,
+        await materializeTree(fill.place, new ImmutableRevisionTree(target), {
+          before: new ImmutableRevisionTree(before),
           purpose: 'fill',
           ...(sourced.size === 0 ? {} : { largeObjects: sourced }),
         });
@@ -457,7 +495,7 @@ export const createLargeObjectFill = (
         if (!(error instanceof UnstoredLargeObjectsError)) {
           throw error;
         }
-        /* Nothing this sweep meant is written: every placeholder stays tracked, and the objects the store
+        /* Nothing this flush meant is written: every placeholder stays tracked, and the objects the store
          * lacks are owed as bytes, which the run fetches by their oids. */
         let marked = 0;
         for (const oid of error.oids) {
@@ -472,18 +510,15 @@ export const createLargeObjectFill = (
         if (marked === 0) {
           throw error;
         }
-        for (const path of filled) {
-          const placeholder = tracked(path)
-            ? placeholderAt(fill, fill.pending.get(path), before.get(path) ?? new Uint8Array())
-            : undefined;
-          if (placeholder !== undefined) {
-            fill.pending.set(path, placeholder);
-          }
+        for (const path of gone) {
+          fill.pending.delete(path);
         }
         fill.unflushedBytes = unflushedOf(fill);
         wake(fill);
         return true;
       }
+      /* The filled paths are no placeholders now (D9): said for those paths alone, as the flush wrote them. */
+      await declareFilled?.(fill.place, filled);
     }
     for (const path of [...filled, ...gone]) {
       fill.pending.delete(path);
@@ -497,15 +532,39 @@ export const createLargeObjectFill = (
   };
 
   /*
-   * A sweep under the checkout's fence. A writer that moved the checkout under
-   * it is swept again, never a failure. Answers whether arrived objects were
-   * left for the next flush.
+   * The closing look (#2010): once the fill's own placeholders have all been filled or dropped, or the fill
+   * failed, the checkout is asked once for the placeholders it holds, so one renamed, moved, copied or restored
+   * meanwhile, which no flush read, is tracked where it now is before the fill says it is done, and one somebody
+   * replaced is no longer counted as owed. Answers whether arrived objects were found for the next flush.
+   */
+  const reconcile = async (fill: Fill): Promise<boolean> => {
+    const found = await findPlaceholders(fill.place);
+    if (!isCurrent(fill)) {
+      return false;
+    }
+    fill.pending.clear();
+    for (const [path, placeholder] of found) {
+      if (fill.wanted.has(placeholder.oid)) {
+        fill.pending.set(path, placeholder);
+      }
+    }
+    fill.unflushedBytes = unflushedOf(fill);
+    wake(fill);
+    return fill.unflushedBytes > 0;
+  };
+
+  /*
+   * One flush's writes under the checkout's fence, held for those writes alone so other work interleaves
+   * between flushes. A writer that moved a path under it is swept again, never a failure. Once the fill's own
+   * placeholders run out, it looks for any left elsewhere before it can read done. Answers whether arrived
+   * objects were left for the next flush.
    */
   const flushNow = async (fill: Fill): Promise<boolean> => {
     if (!isCurrent(fill)) {
       return false;
     }
     let more = false;
+    const owed = fill.pending.size > 0;
     const swept = await workerTimings.span('fill.flush', async () =>
       withCheckoutFence(fill.place.id, async () => {
         for (let attempt = 1; ; attempt += 1) {
@@ -527,6 +586,10 @@ export const createLargeObjectFill = (
     if (!swept) {
       scheduleFlush(fill);
       return false;
+    }
+    /* Only the flush that filled or dropped the last of them looks: one look each time they run out. */
+    if (owed && fill.pending.size === 0 && isCurrent(fill)) {
+      more = await reconcile(fill);
     }
     return more;
   };
@@ -769,8 +832,11 @@ export const createLargeObjectFill = (
       if (!isCurrent(fill)) {
         return;
       }
-      /* Whatever arrived before the failure is still written, and what changed meanwhile swept. */
+      /* Whatever arrived before the failure is still written, and what changed meanwhile found again. */
       await flushAll(fill).catch(() => undefined);
+      if (isCurrent(fill) && fill.pending.size > 0 && (await reconcile(fill).catch(() => false))) {
+        await flushAll(fill).catch(() => undefined);
+      }
       fill.error = error instanceof Error ? error.message : String(error);
       fill.failures += 1;
       tell(fill);
@@ -809,7 +875,7 @@ export const createLargeObjectFill = (
     head: RevisionId | undefined,
     placeholders?: ReadonlyMap<string, Placeholder>,
   ): Promise<void> => {
-    const pending = new Map(placeholders ?? largeObjectPlaceholders(await capture(place), await attributesReading()));
+    const pending = new Map(placeholders ?? (await findPlaceholders(place)));
     const previous = fills.get(place.id);
     if (previous !== undefined) {
       fills.delete(place.id);

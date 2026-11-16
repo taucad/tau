@@ -1434,8 +1434,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.16(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
       three-viewport-gizmo:
-        specifier: file:/private/tmp/claude-501/-Users-rifont-git-tau--claude-worktrees-viewport-gizmo-quaternion-audit-61e68d/4eb1231a-391f-45a3-9fb6-0a557ca2c95a/scratchpad/ta/candidate/taulabs-three-viewport-gizmo-2.3.0.tgz
-        version: '@taulabs/three-viewport-gizmo@file:../../../../private/tmp/claude-501/-Users-rifont-git-tau--claude-worktrees-viewport-gizmo-quaternion-audit-61e68d/4eb1231a-391f-45a3-9fb6-0a557ca2c95a/scratchpad/ta/candidate/taulabs-three-viewport-gizmo-2.3.0.tgz(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
+        specifier: npm:@taulabs/three-viewport-gizmo@3.0.0-beta.0
+        version: '@taulabs/three-viewport-gizmo@3.0.0-beta.0(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -7632,8 +7632,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.16(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
       three-viewport-gizmo:
-        specifier: file:/private/tmp/claude-501/-Users-rifont-git-tau--claude-worktrees-viewport-gizmo-quaternion-audit-61e68d/4eb1231a-391f-45a3-9fb6-0a557ca2c95a/scratchpad/ta/candidate/taulabs-three-viewport-gizmo-2.3.0.tgz
-        version: '@taulabs/three-viewport-gizmo@file:../../../../private/tmp/claude-501/-Users-rifont-git-tau--claude-worktrees-viewport-gizmo-quaternion-audit-61e68d/4eb1231a-391f-45a3-9fb6-0a557ca2c95a/scratchpad/ta/candidate/taulabs-three-viewport-gizmo-2.3.0.tgz(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
+        specifier: npm:@taulabs/three-viewport-gizmo@3.0.0-beta.0
+        version: '@taulabs/three-viewport-gizmo@3.0.0-beta.0(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
     devDependencies:
       '@react-three/fiber':
         specifier: 9.8.2
@@ -15576,13 +15576,12 @@ packages:
   '@taulabs/replicad@1.1.0-taulabs.1':
     resolution: {integrity: sha512-lyCe6PKiZ1BIVQ0NZShUsJQxmfQc1jZyx15WXcGMivzCBWuZQwFqFw38DqaKBz8xRC2Ir8tECGjpeiTVLiSMCA==}
 
-  '@taulabs/three-viewport-gizmo@file:../../../../private/tmp/claude-501/-Users-rifont-git-tau--claude-worktrees-viewport-gizmo-quaternion-audit-61e68d/4eb1231a-391f-45a3-9fb6-0a557ca2c95a/scratchpad/ta/candidate/taulabs-three-viewport-gizmo-2.3.0.tgz':
-    resolution: {integrity: sha512-wooFJkbPhtjhZLZGwQCq/uZokUzJ9sQvoy0MoMouCqPBXvMMqwYc5SCQWs5hQEoYjVPtuAuXza92qIpzwy6PSg==, tarball: file:../../../../private/tmp/claude-501/-Users-rifont-git-tau--claude-worktrees-viewport-gizmo-quaternion-audit-61e68d/4eb1231a-391f-45a3-9fb6-0a557ca2c95a/scratchpad/ta/candidate/taulabs-three-viewport-gizmo-2.3.0.tgz}
-    version: 2.3.0
+  '@taulabs/three-viewport-gizmo@3.0.0-beta.0':
+    resolution: {integrity: sha512-jUC5lI2tGov3RtgHOOCqHP7QLkwUz3UbyPitv9TYz0Ka05EdCfKeMjq1VGH3yEJvXmr2y23M6RM4omA1ame4ZQ==}
     engines: {node: '>=20'}
     peerDependencies:
       camera-controls: ^3.0.0
-      three: '>=0.162.0 <1.0.0'
+      three: '>=0.167.0 <1.0.0'
     peerDependenciesMeta:
       camera-controls:
         optional: true
@@ -36406,7 +36405,7 @@ snapshots:
       flatbush: 4.6.2
       opentype.js: 1.3.4
 
-  '@taulabs/three-viewport-gizmo@file:../../../../private/tmp/claude-501/-Users-rifont-git-tau--claude-worktrees-viewport-gizmo-quaternion-audit-61e68d/4eb1231a-391f-45a3-9fb6-0a557ca2c95a/scratchpad/ta/candidate/taulabs-three-viewport-gizmo-2.3.0.tgz(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))':
+  '@taulabs/three-viewport-gizmo@3.0.0-beta.0(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))':
     dependencies:
       three: 0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)
     optionalDependencies:

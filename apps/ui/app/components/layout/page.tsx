@@ -55,7 +55,7 @@ const phoneHeaderOffsetClasses = 'max-md:mt-(--header-height) max-md:h-[calc(100
  *
  * @public
  */
-export const desktopTitlebarInset = 'md:group-data-[sidebar-open=false]/app-shell:pt-9';
+export const desktopTitlebarInset = 'md:sidebar-closed:pt-9';
 
 /*
  * Each history entry keeps its place in the shell's scroller. React Router's
@@ -339,7 +339,7 @@ function PageShellHeader({
     >
       <div
         className={cn(
-          'pointer-events-auto ml-2 flex h-full items-center gap-1 md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
+          'pointer-events-auto ml-2 flex h-full items-center gap-1 md:sidebar-closed:ml-(--titlebar-controls-width)',
           !hasBreadcrumbItems && 'md:hidden',
           phoneBar.cluster,
           isDesktopTarget && '[app-region:no-drag]',
@@ -427,10 +427,10 @@ const WebTitlebarControls = ({
  * full width.
  */
 const shellPaneClasses = {
-  sidebar: 'left-0 w-(--sidebar-panel-width) max-md:hidden group-data-[sidebar-open=false]/app-shell:hidden',
+  sidebar: 'left-0 w-(--sidebar-panel-width) max-md:hidden sidebar-closed:hidden',
   content: cn(
     'left-(--sidebar-panel-width) w-[calc(100%-var(--sidebar-panel-width))]',
-    'max-md:left-0 max-md:w-full group-data-[sidebar-open=false]/app-shell:left-0 group-data-[sidebar-open=false]/app-shell:w-full',
+    'max-md:left-0 max-md:w-full sidebar-closed:left-0 sidebar-closed:w-full',
   ),
 } as const;
 

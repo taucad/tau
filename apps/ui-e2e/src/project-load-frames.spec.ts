@@ -25,8 +25,6 @@ import {
   projectLoadProbe,
   readDelayedRequests,
   requireFrameTimes,
-  readLongTasks,
-  untilHidden,
   holdRequestsUntilReleased,
   releaseHeldRequests,
   readProjectLoad,
@@ -1071,13 +1069,13 @@ const findSidebarStandIns = (html: Document): string[] =>
     .filter((node) => node.closest('[data-slot="sidebar"]') === null && !node.classList.contains('fixed'))
     .map((node) => `${node.tagName.toLowerCase()}.${node.className.split(' ').slice(0, 6).join('.')}`);
 
-knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a project draws no sidebar stand-in', {
+knownDefect('F4 (A11, A15b, P2): the server HTML for a project draws no sidebar stand-in', {
   artifact: 'f4-wide',
   expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
     const { path } = await seedProjects('wide');
-    await target.addCookies([{ domain: 'localhost', name: 'tau-shell-op-sidebar', path: '/', value: '0' }]);
+    /* P2: the sidebar state is a client fact the server never reads, so this HTML is every visitor's. */
     const server = await target.evaluate(async (url) => {
       const response = await fetch(url, { credentials: 'same-origin' });
       const text = await response.text();
@@ -1091,7 +1089,7 @@ knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a proj
     return standIns;
   },
   assert: (standIns) => {
-    expectMeasured(standIns, 'F4: the server HTML, with tau-shell-op-sidebar=0, draws a sidebar stand-in', []);
+    expectMeasured(standIns, 'F4: the server HTML draws a sidebar stand-in', []);
   },
 });
 
@@ -1374,46 +1372,145 @@ knownDefect(
 /** The viewer stage's parts F8 reads. */
 const viewerRegions = {
   preparing: '[aria-label="Preparing model"]',
+  stage: '[data-slot="viewer-stage"]',
   canvas: '[data-slot="viewer-canvas-region"] canvas',
   pill: '[data-slot="viewer-stage"] [data-slot="wait-indicator-body"]',
 } as const;
 
 /** The first file check: the revision status that reports the tree filled, delivered 3 s late. */
-const filledStatus: WorkerReadDelay = { method: 'revisionStatus', path: '^"filled"$', milliseconds: readDelay };
+const filledStatus: WorkerReadDelay = {
+  method: 'revisionStatus',
+  path: '^"filled"$',
+  milliseconds: readDelay,
+};
+
+/**
+ * Which backend the stage's last canvas draws on, and whether the page could have started WebGPU at all (an adapter
+ * answers). The canvas has its context by now, so asking for WebGL hands back the context it has, or nothing on WebGPU.
+ */
+const readCanvasBackend = async (): Promise<{
+  readonly backend: string;
+  readonly hasWebGpuAdapter: boolean;
+}> =>
+  target.evaluate(async (selector) => {
+    const canvases = [...document.querySelectorAll(selector)];
+    const canvas = canvases.at(-1);
+    const backend =
+      canvas instanceof HTMLCanvasElement
+        ? canvas.getContext('webgl2') === null && canvas.getContext('webgl') === null
+          ? 'webgpu'
+          : 'webgl'
+        : 'none';
+    const { gpu } = navigator as Navigator & {
+      readonly gpu?: { requestAdapter: () => Promise<unknown> };
+    };
+    const adapter = gpu === undefined ? undefined : await gpu.requestAdapter().catch(() => undefined);
+    return {
+      backend,
+      hasWebGpuAdapter: adapter !== undefined && adapter !== null,
+    };
+  }, viewerRegions.canvas);
+
+/** Make WebGPU unavailable to every document of this target, as on a browser without it: no adapter answers. */
+function withoutWebGpu(): void {
+  Object.defineProperty(Navigator.prototype, 'gpu', {
+    configurable: true,
+    get: () => undefined,
+  });
+}
+
+type ViewerStageLoad = Readonly<{
+  record: ProjectLoadRecord;
+  backend: Awaited<ReturnType<typeof readCanvasBackend>>;
+}>;
+
+/** F8's forced load: the first check held 3 s past a reload, then the stage read once its canvas shows. */
+const measureViewerStage = async (artifact: string): Promise<ViewerStageLoad> => {
+  await seedProjects('wide', { regions: viewerRegions });
+  await armWorkerReadDelay([filledStatus]);
+  await target.reload();
+  await settleProject();
+  await target.delay(readDelay);
+  await target.expectVisible(selectors.getByCss(viewerRegions.canvas), 60_000);
+  const backend = await readCanvasBackend();
+  const record = await keepRecord(artifact, { backend });
+  await requireReadDelayed('F8', filledStatus);
+  return { record, backend };
+};
+
+/**
+ * F8's assertion. The stage is created once and never removed. One canvas is created, except where the renderer starts
+ * on WebGPU and remounts once on WebGL because the adapter's renderer fails to start (`ThreeProvider`'s fallback, a
+ * viewer-owned remount ruled outside A15e by programme control on 2026-11-15T23:47Z): then two, the last on WebGL.
+ * `strict` is the variant with WebGPU unavailable, where that fallback cannot happen, so exactly one canvas counts.
+ */
+const assertViewerStage = ({ record, backend }: ViewerStageLoad, strict: boolean): void => {
+  const preparing = regionsOf(record, 'preparing').filter((entry) => entry.present);
+  const stages = record.regionMounts['stage'] ?? [];
+  const stageRemovals = record.regionRemovals['stage'] ?? [];
+  const canvases = record.regionMounts['canvas'] ?? [];
+  const firstCanvas = regionsOf(record, 'canvas').find((entry) => entry.present);
+  const pill = shownSpans(regionsOf(record, 'pill'));
+  const isRendererFallback = !strict && backend.hasWebGpuAdapter && backend.backend === 'webgl';
+  expectMeasured(
+    {
+      preparing: preparing.slice(0, 3).map((entry) => describeEntry(entry)),
+      stages: stages.length,
+      stageRemovals: stageRemovals.length,
+      canvases: canvases.length,
+      defaultSize: firstCanvas?.width === 300 && firstCanvas.height === 150,
+      pillShown: pill.length > 0,
+      pillEarly: pill.filter((span) => span.from < 1000).map((span) => span.from),
+    },
+    `F8: the viewer stage during the held file check (canvases created in ${describeFrames(canvases) || 'no frame'}, last on ${backend.backend}; a WebGPU adapter ${backend.hasWebGpuAdapter ? 'answers' : 'does not answer'})`,
+    {
+      preparing: [],
+      stages: 1,
+      stageRemovals: 0,
+      canvases: isRendererFallback ? 2 : 1,
+      defaultSize: false,
+      pillShown: true,
+      pillEarly: [],
+    },
+  );
+};
 
 knownDefect(
-  'F8 (A14, A15e): with the first file check 3 s late, no "Preparing model" block shows, one canvas is created at a real size, and the pill shows from 1,000 ms',
+  'F8 (A14, A15e): with the first file check 3 s late, no "Preparing model" block shows, the stage mounts once with one canvas per renderer backend at a real size, and the pill shows from 1,000 ms',
   {
     artifact: 'f8-wide',
-    expectedFailure: true,
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => measureViewerStage('f8-wide'),
+    assert: (load) => {
+      assertViewerStage(load, false);
+    },
+  },
+);
+
+knownDefect(
+  'F8 strict (A15e): with WebGPU unavailable and the first file check 3 s late, exactly one canvas is created, on WebGL, and the stage mounts once',
+  {
+    artifact: 'f8-wide-no-webgpu',
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
-      await seedProjects('wide', { regions: viewerRegions });
-      await armWorkerReadDelay([filledStatus]);
-      await target.reload();
-      await settleProject();
-      await target.delay(readDelay);
-      await target.expectVisible(selectors.getByCss(viewerRegions.canvas), 60_000);
-      const record = await keepRecord('f8-wide');
-      await requireReadDelayed('F8', filledStatus);
-      return record;
+      /* A fresh target, so the stub reaches no other row: the next row opens its own again below. */
+      await target.commands.uiOpenTarget();
+      try {
+        await target.addInitScript(withoutWebGpu);
+        const load = await measureViewerStage('f8-wide-no-webgpu');
+        if (load.backend.hasWebGpuAdapter) {
+          throw new Error('F8 strict: a WebGPU adapter still answered, so the variant did not run without WebGPU');
+        }
+        return load;
+      } finally {
+        await target.commands.uiOpenTarget();
+      }
     },
-    assert: (record) => {
-      const preparing = regionsOf(record, 'preparing').filter((entry) => entry.present);
-      const canvases = record.regionMounts['canvas'] ?? [];
-      const firstCanvas = regionsOf(record, 'canvas').find((entry) => entry.present);
-      const pill = shownSpans(regionsOf(record, 'pill'));
-      expectMeasured(
-        {
-          preparing: preparing.slice(0, 3).map((entry) => describeEntry(entry)),
-          canvases: canvases.length,
-          defaultSize: firstCanvas?.width === 300 && firstCanvas.height === 150,
-          pillShown: pill.length > 0,
-          pillEarly: pill.filter((span) => span.from < 1000).map((span) => span.from),
-        },
-        `F8: the viewer stage during the held file check (canvases created in ${describeFrames(canvases) || 'no frame'})`,
-        { preparing: [], canvases: 1, defaultSize: false, pillShown: true, pillEarly: [] },
-      );
+    assert: (load) => {
+      expect(load.backend.backend, 'F8 strict: the last canvas draws on WebGL').toBe('webgl');
+      assertViewerStage(load, true);
     },
   },
 );
@@ -1479,7 +1576,7 @@ const measureSourcePaneLoad = async (): Promise<SourcePaneLoad> => {
 };
 
 knownDefect(
-  'F9 (A15f): with the editor runtime 3 s late and the code pane open, the file text shows within 100 ms of its read, with no skeleton, and the pane and its first line hold still when the editor mounts',
+  'F9 (A15f): with the editor runtime 3 s late and the code pane open, the file text shows within 100 ms of its read, replaces the line skeletons, and the pane and its first line hold still when the editor mounts',
   {
     artifact: 'f9-wide',
     expectedFailure: false,
@@ -1503,7 +1600,10 @@ knownDefect(
           Math.abs(entry.glyph!.x - mountedGlyph.x) > 1 ||
           Math.abs(entry.glyph!.y - mountedGlyph.y) > 1,
       );
-      const skeletons = [...panes, ...regionsOf(record, 'text')].filter((entry) => entry.skeletons > 0);
+      /* The pane holds line skeletons until the read answers; none may remain once the text shows. */
+      const skeletons = [...panes, ...regionsOf(record, 'text')].filter(
+        (entry) => entry.skeletons > 0 && entry.t >= shown.t,
+      );
       expectMeasured(
         {
           textWithin100: before !== undefined && before < readAt + 100,
@@ -1562,53 +1662,52 @@ knownDefect(
 /** The History pane's body. */
 const historyRegions = {
   history: '[data-slot="revisions-panel-body"]',
-  historyIndicator: '[data-slot="revisions-panel-body"] [data-slot="wait-indicator-body"]',
 } as const;
 const historyChip = selectors.getByRole('button', { name: /^Open History\./u });
 
 /** A delay on History's own read of the line (`log`). */
 const historyRead = (milliseconds: number): WorkerReadDelay => ({ method: 'revision:log', path: '', milliseconds });
 
-knownDefect('F10 (A15f): with the History read 2 s late and History open, the pane draws no skeleton', {
-  artifact: 'f10-wide',
-  expectedFailure: false,
-  budget: loadBudget,
-  measure: async () => {
-    await seedProjects('wide', { regions: historyRegions });
-    await target.click(historyChip);
-    await target.expectVisible(selectors.getByCss('[data-slot="revisions-panel-body"]'), 60_000);
-    /* History stays open across the measured load. */
-    await target.delay(settleWindow);
-    await armWorkerReadDelay([historyRead(2000)]);
-    await target.reload();
-    await settleProject();
-    await target.delay(2000);
-    const record = await keepRecord('f10-wide');
-    await requireReadDelayed('F10', historyRead(2000));
-    precondition(
-      regionsOf(record, 'history').some((entry) => entry.present),
-      'F10: History was not open on the measured load',
-    );
-    return record;
+knownDefect(
+  'F10 (skeleton restoration): with the History read 2 s late and History open, the pane draws row skeletons until the read answers, then none',
+  {
+    artifact: 'f10-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => {
+      await seedProjects('wide', { regions: historyRegions });
+      await target.click(historyChip);
+      await target.expectVisible(selectors.getByCss('[data-slot="revisions-panel-body"]'), 60_000);
+      /* History stays open across the measured load. */
+      await target.delay(settleWindow);
+      await armWorkerReadDelay([historyRead(2000)]);
+      await target.reload();
+      await settleProject();
+      await target.delay(2000);
+      const record = await keepRecord('f10-wide');
+      await requireReadDelayed('F10', historyRead(2000));
+      precondition(
+        regionsOf(record, 'history').some((entry) => entry.present),
+        'F10: History was not open on the measured load',
+      );
+      return record;
+    },
+    assert: (record) => {
+      const history = regionsOf(record, 'history').filter((entry) => entry.present);
+      const settled = history.at(-1);
+      expectMeasured(
+        {
+          skeletonWhileWaiting: history.some((entry) => entry.skeletons > 0),
+          skeletonSettled: settled === undefined ? 'absent' : settled.skeletons,
+        },
+        `F10: History's body changed in ${history.length} frames; it settled as ${settled === undefined ? 'absent' : describeEntry(settled)}`,
+        { skeletonWhileWaiting: true, skeletonSettled: 0 },
+      );
+    },
   },
-  assert: (record) => {
-    const skeletons = regionsOf(record, 'history').filter((entry) => entry.skeletons > 0);
-    expectMeasured(
-      skeletons.map((entry) => describeEntry(entry)),
-      'F10: History drew [data-slot=skeleton] blocks',
-      [],
-    );
-  },
-});
+);
 
-/*
- * A15f2: the 500 ms minimum (UI Policy § 5) on History's "Loading history", seen at 164 ms in a local F10 record,
- * where the load's long tasks painted the reveal 222 ms late. The forcing: a long task from the first frame the reveal
- * is timed in to 500 ms past its due time (read off its `wait-reveal` animation), so the frame that draws it runs that
- * late, and History's read answered in the frame after the first that shows the words. A span is measured on screen,
- * from the first frame with the words to the first without.
- */
-/** A15f2's assertion for both minimums (`minimumBreaches`). */
+/** A15f2's assertion for the "Opening file" minimum (`minimumBreaches`). */
 type MinimumMeasure = { shown: readonly ShownSpan[]; answeredAt: number; stamps: readonly number[] };
 const expectMinimum = (label: string, { shown, answeredAt, stamps }: MinimumMeasure): void => {
   expectMeasured(
@@ -1617,55 +1716,6 @@ const expectMinimum = (label: string, { shown, answeredAt, stamps }: MinimumMeas
     { short: [], lingering: [], unended: [], unstamped: [] },
   );
 };
-
-const historyHold: WorkerReadDelay = {
-  ...historyRead(0),
-  afterShown: historyRegions.historyIndicator,
-  longTask: { selector: historyRegions.historyIndicator, milliseconds: 500, acrossReveal: true },
-};
-
-knownDefect(
-  'History minimum (A15f2): with History open, a long task across its reveal and its read answered as "Loading history" shows, the words stay at least 500 ms',
-  {
-    artifact: 'history-minimum-wide',
-    expectedFailure: false,
-    budget: loadBudget,
-    measure: async () => {
-      await seedProjects('wide', { regions: historyRegions, frameTimes: true });
-      await target.click(historyChip);
-      await target.expectVisible(selectors.getByCss('[data-slot="revisions-panel-body"]'), 60_000);
-      /* History stays open across the measured load. */
-      await target.delay(settleWindow);
-      await armWorkerReadDelay([historyHold]);
-      await target.reload();
-      await settleProject();
-      /* The answer waits on the words, which the long task and the load put late: wait for it, then the minimum. */
-      await target.waitFor(
-        () =>
-          (
-            globalThis as typeof globalThis & { __TAU_WORKER_READS__: { delivered: ReadonlyArray<{ method: string }> } }
-          ).__TAU_WORKER_READS__.delivered.some((delivery) => delivery.method === 'revision:log'),
-        undefined,
-        { timeout: 60_000 },
-      );
-      await untilHidden(historyRegions.historyIndicator);
-      await target.delay(1500);
-      const record = await keepRecord('history-minimum-wide');
-      requireFrameTimes('History minimum', record);
-      const longTasks = await readLongTasks();
-      precondition(longTasks.length > 0, 'History minimum: the reveal was due before the long task could hold it late');
-      await requireReadDelayed('History minimum', historyHold);
-      const shown = regionShownOnFrames(record, 'historyIndicator');
-      precondition(shown.length > 0, 'History minimum: "Loading history" never showed');
-      const deliveries = await readWorkerDeliveries();
-      const answeredAt = deliveries.find((delivery) => delivery.method === 'revision:log')!.t;
-      return { shown, answeredAt, stamps: record.frameStamps };
-    },
-    assert: (measured) => {
-      expectMinimum('History minimum: "Loading history"', measured);
-    },
-  },
-);
 
 /**
  * F12 on a wait a person starts: opening a file from the Files tree with its read held, so the clock starts at the

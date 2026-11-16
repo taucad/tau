@@ -15,6 +15,7 @@ import type { ComponentProps, ComponentType, ReactNode } from 'react';
 import { CircleAlert, EllipsisVertical } from 'lucide-react';
 import { Link } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -282,6 +283,20 @@ export function SidebarFailureRow({
       ) : (
         <span className='sr-only'>Tau tries again when you return to this window.</span>
       )}
+    </div>
+  );
+}
+
+/**
+ * One loading row: a bar that sits exactly where the real row's name starts.
+ *
+ * @returns The row's content.
+ * @public
+ */
+export function SidebarRowSkeleton(): React.JSX.Element {
+  return (
+    <div className='flex h-7 items-center pr-2 pl-7.5'>
+      <Skeleton className='h-3.5 flex-1' />
     </div>
   );
 }

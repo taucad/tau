@@ -2,25 +2,17 @@ import type { LinksFunction, LoaderFunctionArgs, MetaFunction, ShouldRevalidateF
 import { lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
-import { readThemeCookie } from '#theme-cookie.js';
 import { getClientEnvironment } from '#environment.config.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isOfflineShellPath } from '#lib/static-paths.js';
-import { remoteHostHarnessPath } from '#utils/remote-host-harness.js';
 import { OfflineShell } from '#offline/offline-shell.js';
 import { webManifestLinks } from '#lib/web-manifest.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
 import { CookieConsentBanner } from '#components/cookie-consent-banner.js';
 import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
-import { readConsentStatusFromHeader } from '#lib/cookie-consent.lib.js';
-import { readProjectListCountFromHeader } from '#lib/project-list-shape.lib.js';
-import { readShellRequestHints } from '#lib/shell-request-hints.js';
-import { readLayoutFlagsFromHeader, resolveServerLayoutFlags } from '#flags/layout-flags.js';
-import { isSeededFlagSourceAllowed } from '#flags/remote-flags.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 import type { Handle } from '#types/matches.types.js';
-import { readServerPreferences } from '#hooks/use-cookie.js';
 import { prefetchModelCatalog } from '#lib/model-catalog.server.js';
 import { timeModelCatalogRead } from '#lib/server-timing.server.js';
 
@@ -63,50 +55,27 @@ export const meta: MetaFunction = () => [
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders require type inference
 export async function loader({ request, context }: LoaderFunctionArgs) {
   throwRedirectIfSubdomain(request, 'www');
-  const globalPrivacyControl = request.headers.get('Sec-GPC') === '1';
-  const { pathname } = new URL(request.url);
-  /* R3: the model label is final on first paint. The offline shell is a neutral prerendered document. */
+  /* P2: nothing here reads the visitor. Theme, sidebar, project count, flags, preferences and consent are client facts
+   * (`#lib/client-facts`), applied before first paint by the head script, so the document is the same for everyone. */
+  /* R3: the model catalog is in the first paint. The offline shell is a neutral prerendered document. */
   /* LB0a: how the catalog cache was found and how long it was waited on go out in the document's `Server-Timing`. */
-  const queries = isOfflineShellPath(pathname) ? undefined : timeModelCatalogRead(context, prefetchModelCatalog);
-  const consentStatus = readConsentStatusFromHeader(request.headers.get('Cookie') ?? undefined, globalPrivacyControl);
-  const env = await getClientEnvironment();
+  const queries = isOfflineShellPath(new URL(request.url).pathname)
+    ? undefined
+    : timeModelCatalogRead(context, prefetchModelCatalog);
   return {
-    consentStatus,
-    globalPrivacyControl,
-    env,
-    pathname,
-    // R5: the remembered project count, so the sidebar and library reserve their slots on the server.
-    projectListCount: readProjectListCountFromHeader(request.headers.get('Cookie') ?? undefined),
-    // H2: the settled layout-affecting flags, so the server renders, omits or holds a flagged row.
-    // A flag no PostHog answer can reach in this page view is known as its default, so nothing is held for it.
-    layoutFlags: resolveServerLayoutFlags(
-      readLayoutFlagsFromHeader(request.headers.get('Cookie') ?? undefined),
-      isSeededFlagSourceAllowed || (Boolean(env.POSTHOG_CLIENT_KEY) && consentStatus === 'accepted'),
-    ),
-    // R4/R7: sidebar state and request platform, so the shell's first paint is final.
-    shellHints: readShellRequestHints(request),
-    theme: await readThemeCookie(request),
-    preferences: readServerPreferences(request.headers.get('Cookie') ?? undefined),
+    env: await getClientEnvironment(),
     queries: await queries,
   };
 }
 
 /**
- * The root loader reads request headers, cookies and the server environment, none of which a
- * client navigation changes, so a GET navigation that changes the pathname or the query string
- * does not re-run it, and a click never waits for the server before the URL changes (U23). The
- * `pathname` it returns is then the path the root data was last loaded for, not the current one.
+ * The root loader reads the server environment and the model catalog, neither of which a client navigation changes,
+ * so a GET navigation that changes the pathname or the query string does not re-run it, and a click never waits for
+ * the server before the URL changes (U23). The client's own catalog query keeps the catalog fresh, through its
+ * `staleTime` and `refetchInterval`.
  *
- * What that gives up: the `HydrationBoundary` over `queries` used to rehydrate the model
- * catalog from the server on every navigation. The client's own catalog query now refreshes it,
- * through its `staleTime` and `refetchInterval`. The cookie-backed values (consent, theme,
- * sidebar, preferences, project count) are read from loader data only as the server snapshot.
- *
- * The default is kept for submissions, an explicit revalidation of the same URL, leaving the
- * offline shell path (its neutral prerendered document has no real root data), and a navigation
- * into or out of the remote-host harness: the root layout's harness check reads `pathname` from
- * this loader's data, so revalidating there keeps that value correct whenever the check depends
- * on it. The offline shell path itself never revalidates the root.
+ * The default is kept for submissions, an explicit revalidation of the same URL, and leaving the offline shell path
+ * (its neutral prerendered document has no real root data). The offline shell path itself never revalidates the root.
  */
 export const shouldRevalidate: ShouldRevalidateFunction = ({
   currentUrl,
@@ -117,10 +86,8 @@ export const shouldRevalidate: ShouldRevalidateFunction = ({
   if (isOfflineShellPath(nextUrl.pathname)) {
     return false;
   }
-  const touchesHarness = currentUrl.pathname === remoteHostHarnessPath || nextUrl.pathname === remoteHostHarnessPath;
   const isClientNavigation =
     formMethod === undefined &&
-    !touchesHarness &&
     !isOfflineShellPath(currentUrl.pathname) &&
     (currentUrl.pathname !== nextUrl.pathname || currentUrl.search !== nextUrl.search);
   return isClientNavigation ? false : defaultShouldRevalidate;

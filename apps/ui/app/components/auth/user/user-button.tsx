@@ -89,7 +89,7 @@ export function UserButton({
 }: UserButtonProps): React.JSX.Element {
   const { authClient, basePaths, viewPaths, localization, plugins, Link } = useAuth();
 
-  const { data: session } = useSession(authClient);
+  const { data: session, isPending: isSessionPending } = useSession(authClient);
   const isCompact = size === 'sm';
 
   const userLinks = links?.flatMap((link, index) => {
@@ -122,11 +122,15 @@ export function UserButton({
             className={cn('font-normal', size === 'default' && 'h-auto py-2.5', className)}
             size={isCompact ? 'sm' : 'lg'}
           >
-            {/* Until a session is known the row is the signed-out one, a neutral avatar and "Account",
-                which the server can render too: no skeleton stage, and a signed-in session only fills
-                the avatar and name into the same box (home page loading audit, R7). */}
+            {/* Until the session is known the row draws skeletons for the avatar and name, so a signed-in
+                person never sees the signed-out "Account" row first. */}
             {session ? (
               <UserView isCompact={isCompact} />
+            ) : isSessionPending ? (
+              <>
+                <UserView isCompact={isCompact} isPending />
+                <span className='sr-only'>{localization.auth.account}</span>
+              </>
             ) : (
               <>
                 <UserAvatar className={cn(isCompact && 'size-4 text-[10px]')} isPending={false} />

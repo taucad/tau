@@ -6,14 +6,14 @@ import type { ExportResult, Rendering, SourceRevision } from '@taucad/runtime';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { CadContext, cadMachine } from '#machines/cad.machine.js';
-import { bestRouteForActiveKernel } from '#utils/export-formats.utils.js';
-import type { AppRuntimeExportRoute } from '#utils/export-formats.utils.js';
-import type * as ExportFormats from '#utils/export-formats.utils.js';
+import { bestRouteForActiveKernel } from '@taucad/files-ui/utils/export-formats.utils';
+import type { AppRuntimeExportRoute } from '@taucad/files-ui/utils/export-formats.utils';
+import type * as ExportFormats from '@taucad/files-ui/utils/export-formats.utils';
 import { runExactRequest } from '#workers/measurement-exact.transport.js';
 import { measureExactOccurrenceDistance } from '#workers/measurement-exact.client.js';
 
 vi.mock('#workers/measurement-exact.transport.js', () => ({ runExactRequest: vi.fn() }));
-vi.mock('#utils/export-formats.utils.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/utils/export-formats.utils', async (importOriginal) => ({
   ...(await importOriginal<typeof ExportFormats>()),
   bestRouteForActiveKernel: vi.fn(),
 }));

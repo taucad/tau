@@ -165,22 +165,33 @@ CONFIG
   qemu_pid=$!
 fi
 if [[ "$host" == gcp ]]; then
-  # T4 capacity varies by zone; try each configured zone once, in order (primary region first, then fallbacks). The client key is the only login path, and the
-  # host keys are read back through the guest agent before the first SSH, so StrictHostKeyChecking stays on.
+  # GPU capacity varies by zone and by minute; try every configured zone in order (primary region first, then
+  # fallbacks), and repeat the pass until TAU_GCP_CAPACITY_WAIT_SECONDS (default 40 minutes) have passed: on
+  # 2026-11-16 one pass found an L4 at 00:07Z and the next two found none across twelve zones. The client key is the
+  # only login path, and the host keys are read back through the guest agent before the first SSH, so
+  # StrictHostKeyChecking stays on.
   printf 'tau:%s\n' "$(cat "$work/client.pub")" > "$work/ssh-keys"
   template=''
-  for zone in $TAU_GCP_ZONES; do
-    zone_template="$(region_template "${zone%-*}")"
-    [[ -n "$zone_template" ]] || { printf 'No GPU host template for %s in %s\n' "$template_distro" "${zone%-*}" >&2; continue; }
-    if gcloud compute instances create "$instance" --project "$TAU_GCP_PROJECT" --zone "$zone" \
-      --source-instance-template "$zone_template" --metadata-from-file "ssh-keys=$work/ssh-keys" \
-      --metadata enable-guest-attributes=TRUE; then
-      template="$zone_template"
-      instance_zone="$zone"
-      break
-    fi
+  capacity_deadline=$((SECONDS + ${TAU_GCP_CAPACITY_WAIT_SECONDS:-2400}))
+  pass=1
+  while :; do
+    for zone in $TAU_GCP_ZONES; do
+      zone_template="$(region_template "${zone%-*}")"
+      [[ -n "$zone_template" ]] || { printf 'No GPU host template for %s in %s\n' "$template_distro" "${zone%-*}" >&2; continue; }
+      if gcloud compute instances create "$instance" --project "$TAU_GCP_PROJECT" --zone "$zone" \
+        --source-instance-template "$zone_template" --metadata-from-file "ssh-keys=$work/ssh-keys" \
+        --metadata enable-guest-attributes=TRUE; then
+        template="$zone_template"
+        instance_zone="$zone"
+        break
+      fi
+    done
+    [[ -z "$instance_zone" && SECONDS -lt capacity_deadline ]] || break
+    printf 'No zone had GPU capacity on pass %d; trying again in 120 s\n' "$pass" >&2
+    pass=$((pass + 1))
+    sleep 120
   done
-  [[ -n "$instance_zone" ]] || { printf 'No zone had GPU capacity\n' >&2; exit 1; }
+  [[ -n "$instance_zone" ]] || { printf 'No zone had GPU capacity after %d passes\n' "$pass" >&2; exit 1; }
   # The trusted host identity is what the Compute API reports for the instance this job created, never a value the
   # guest or its creator could set (the instance-template metadata attribute exists only for managed-group members).
   # Only clean-host receipts carry host facts, so only that mode depends on the description; CI qualification keeps

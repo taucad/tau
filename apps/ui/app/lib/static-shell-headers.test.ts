@@ -3,7 +3,7 @@
  * Shell invariant 5 (progressive loading G4, PL3): a static shell answers with the same isolation, content security,
  * reporting and document policies as a function document of the same site.
  *
- * A function document gets its headers from `entry.server.tsx`; a static file gets `netlify.toml`'s `[[headers]]`
+ * A function document gets its headers from the root middleware and `entry.server.tsx`; a static file gets `netlify.toml`'s `[[headers]]`
  * merged with the `_headers` file the build writes (`scripts/write-content-security-policy-headers.mts`). Netlify
  * applies neither of those to function responses, and both to a rewritten static response. Which path Netlify
  * matches the header rules against on a 200 rewrite is not documented, so the shell's headers are taken for both the
@@ -14,7 +14,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { AppLoadContext, EntryContext } from 'react-router';
+import { RouterContextProvider } from 'react-router';
+import type { EntryContext } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import handleRequest from '#entry.server.js';
 import {
@@ -22,6 +23,7 @@ import {
   reportOnlyContentSecurityPolicy,
   resolveContentSecurityPolicyEnvironment,
 } from '#lib/content-security-policy.server.js';
+import { rootMiddleware } from '#lib/root-middleware.server.js';
 import { shellDocumentFile, shellSkewCookie, staticShellClasses } from '#lib/route-classes.js';
 import { skewProtectionCookieName } from '#lib/skew-protection.server.js';
 import { contentSecurityPolicyHeaders } from '#scripts/write-content-security-policy-headers.mts';
@@ -115,19 +117,28 @@ const pick = (headers: Headers | ReadonlyMap<string, string>): Record<string, st
   Object.fromEntries(parityHeaders.map((name) => [name, headers.get(name.toLowerCase()) ?? undefined]));
 
 /**
- * A function document for a project URL, rendered by `entry.server.tsx` as the site `frontendUrl` names serves it. The
+ * A document as React Router serves it (RR3): the entry inside the root middleware, which sets the isolation, CSP and
+ * reporting headers on every response.
+ */
+const serveDocument = async (request: Request, context: EntryContext): Promise<Response> => {
+  const routerContext = new RouterContextProvider();
+  return rootMiddleware(
+    { request, url: new URL(request.url), params: {}, pattern: '/*', context: routerContext },
+    async () => handleRequest(request, 200, new Headers(), context, routerContext),
+  ) as Promise<Response>;
+};
+
+/**
+ * A function document for a project URL, rendered through the root middleware and `entry.server.tsx` as the site `frontendUrl` names serves it. The
  * server module chooses its CSP once, from `TAU_FRONTEND_URL` when it loads, so for another site the CSP is the one
  * that module computes for it ({@link siteContentSecurityPolicy}); every other header is chosen per request.
  */
 const functionDocumentHeaders = async (frontendUrl: string, token?: string): Promise<Headers> => {
   vi.stubEnv('NETLIFY_SKEW_PROTECTION_TOKEN', token ?? '');
   const context = { staticHandlerContext: { matches: [{ route: { id: 'root' } }] } } as unknown as EntryContext;
-  const response = await handleRequest(
+  const response = await serveDocument(
     new Request(new URL('/w/home/bracket-v2', frontendUrl), { method: 'HEAD' }),
-    200,
-    new Headers(),
     context,
-    {} as unknown as AppLoadContext,
   );
   const headers = new Headers(response.headers);
   headers.set('Content-Security-Policy-Report-Only', siteContentSecurityPolicy(frontendUrl));
@@ -148,12 +159,9 @@ afterEach(() => {
 
 it("should send the CSP this site's server module loaded with", async () => {
   const context = { staticHandlerContext: { matches: [{ route: { id: 'root' } }] } } as unknown as EntryContext;
-  const response = await handleRequest(
+  const response = await serveDocument(
     new Request('http://localhost:3000/w/home/bracket-v2', { method: 'HEAD' }),
-    200,
-    new Headers(),
     context,
-    {} as unknown as AppLoadContext,
   );
   expect(response.headers.get('Content-Security-Policy-Report-Only')).toBe(reportOnlyContentSecurityPolicy);
   expect(reportOnlyContentSecurityPolicy).toBe(siteContentSecurityPolicy(process.env['TAU_FRONTEND_URL'] ?? ''));

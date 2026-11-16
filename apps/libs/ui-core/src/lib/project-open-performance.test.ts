@@ -4,6 +4,7 @@ import {
   pageProjectOpenPerformance,
   readLocalProjectOpenPerformance,
   resetPageProjectOpenPerformance,
+  setProjectOpenRouteClassReader,
 } from '#lib/project-open-performance.js';
 import type { ProjectOpenPerformanceConfig } from '#lib/project-open-performance.js';
 
@@ -82,7 +83,7 @@ describe('local project-open performance recorder', () => {
     expect(measure).toHaveBeenCalledTimes(1);
     expect(measure.mock.calls[0]?.[0]).toBe('tau.load.tree.list');
     expect(measure.mock.calls[0]?.[1]?.detail).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       buildId: 'cc200962038bb96efab158c77c821c8322a34740',
       fixtureId: 'root-10',
       runId,
@@ -196,7 +197,7 @@ describe('deployed project-open performance recorder', () => {
     expect(measure.mock.calls[1]?.[1]).toMatchObject({
       start: 10,
       detail: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         environment: 'deployed',
         realm: 'page',
         phase: 'composer.mount',
@@ -207,6 +208,7 @@ describe('deployed project-open performance recorder', () => {
         buildId: null,
         fixtureId: null,
         routeTemplate: null,
+        routeClass: null,
         outcome: 'ok',
         counters: { fileCount: 3 },
       },
@@ -291,5 +293,32 @@ describe('deployed project-open performance recorder', () => {
     createProjectOpenPerformance().begin('tree.list').finish('ok');
 
     expect(measure).not.toHaveBeenCalled();
+  });
+});
+
+describe('route class (RR7)', () => {
+  afterEach(() => {
+    setProjectOpenRouteClassReader(undefined);
+    resetPageProjectOpenPerformance();
+    vi.unstubAllGlobals();
+  });
+
+  it('should tag each measure with the route class the page shows when it is written', () => {
+    const measure = vi.fn<(name: string, options: PerformanceMeasureOptions) => void>();
+    vi.stubGlobal('location', { origin: 'https://taucad.dev' });
+    vi.stubGlobal('document', {});
+    vi.stubGlobal('performance', { now: () => 1, timeOrigin: 1000, measure, clearMeasures: () => undefined });
+    let routeClass: string | undefined = 'project';
+    setProjectOpenRouteClassReader(() => routeClass);
+
+    const recorder = pageProjectOpenPerformance();
+    recorder.record('viewer.firstFrame', { start: 1, end: 2, outcome: 'ok' });
+    routeClass = undefined;
+    recorder.record('viewer.firstFrame', { start: 3, end: 4, outcome: 'ok' });
+
+    expect(measure.mock.calls.map(([, options]) => (options.detail as { routeClass: unknown }).routeClass)).toEqual([
+      'project',
+      null,
+    ]);
   });
 });

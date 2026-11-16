@@ -1,7 +1,7 @@
-import type { LinksFunction, MetaFunction, ShouldRevalidateFunction } from 'react-router';
+import type { LinksFunction, MetaFunction, MiddlewareFunction, ShouldRevalidateFunction } from 'react-router';
 import { lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
-import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
+import { rootMiddleware } from '#lib/root-middleware.server.js';
 import { getClientEnvironment } from '#environment.config.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isOfflineShellPath } from '#lib/static-paths.js';
@@ -54,10 +54,12 @@ export const meta: MetaFunction = () => [
   { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
 ];
 
+/** C1: the `www.` redirect, Server-Timing and the headers every response carries, documents, `.data` and resources. */
+export const middleware: Array<MiddlewareFunction<Response>> = [rootMiddleware];
+
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders require type inference
 export async function loader({ url, context }: Route.LoaderArgs) {
   /* B4: `url` is the page's URL; `request.url` is `/<path>.data?_routes=…` on a client navigation or revalidation. */
-  throwRedirectIfSubdomain(url, 'www');
   /* P2: nothing here reads the visitor. Theme, sidebar, project count, flags, preferences and consent are client facts
    * (`#lib/client-facts`), applied before first paint by the head script, so the document is the same for everyone. */
   /* R3: the model catalog is in the first paint. The offline shell is a neutral prerendered document; a static shell

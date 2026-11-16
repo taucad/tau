@@ -9,6 +9,8 @@ const send = vi.fn();
 const setWorkbenchOpen = vi.hoisted(() => vi.fn());
 const sidebar = vi.hoisted(() => ({ open: true }));
 const renderViewer = vi.hoisted(() => vi.fn());
+/* Whether the mocked split view reports its first layout, as the native one does once it has measured. */
+const splitView = vi.hoisted(() => ({ laysOut: false }));
 const desktopLayout = {
   chatOpen: true,
   workbenchOpen: true,
@@ -32,15 +34,14 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (imp
 }));
 vi.mock('#routes/w.$workspace.$project/chat-history.js', () => ({
   ChatHistory: ({ className }: { readonly className?: string }) => (
-    <div className={className} data-testid='chat-lane' />
+    <div className={className} data-testid='chat-lane'>
+      <textarea aria-label='Chat message' />
+    </div>
   ),
 }));
 vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
   ChatHistoryGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   ChatInterfaceSessionGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-}));
-vi.mock('@taucad/project-workspace/components/chat-pane-skeleton', () => ({
-  ChatPaneSkeleton: () => <div data-testid='chat-skeleton' />,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({
   ViewerDockview: () => {
@@ -59,7 +60,8 @@ vi.mock('#components/ui/sidebar.js', () => ({ useSidebar: () => sidebar }));
 vi.mock('@taucad/chat-ui/components/chat-context-insertion', () => ({
   ChatContextInsertionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('allotment', () => {
+vi.mock('allotment', async () => {
+  const { useLayoutEffect } = await import('react');
   const Pane = ({
     children,
     visible = true,
@@ -70,7 +72,25 @@ vi.mock('allotment', () => {
     </div>
   );
   const Allotment = Object.assign(
-    ({ children }: React.PropsWithChildren) => <div data-testid='allotment'>{children}</div>,
+    ({
+      children,
+      className,
+      onChange,
+    }: React.PropsWithChildren<{
+      readonly className?: string;
+      readonly onChange?: (sizes: number[]) => void;
+    }>) => {
+      useLayoutEffect(() => {
+        if (splitView.laysOut) {
+          onChange?.([320, 500, 420]);
+        }
+      }, [onChange]);
+      return (
+        <div data-testid='allotment' className={className}>
+          {children}
+        </div>
+      );
+    },
     { Pane },
   );
   return { Allotment, LayoutPriority: { Low: 0, High: 1 } };
@@ -104,16 +124,22 @@ const resizeObserver: ResizeObserver = {
 const { ChatInterfaceDesktop, compactWorkspaceWidth } = await import('./chat-interface-desktop.js');
 const { panelMinSizeChat, panelMinSizeViewer, panelMinSizeViewerTight, panelMinSizeWorkbench, tightWorkspaceWidth } =
   await import('@taucad/ui-core/constants/editor.constants');
-const { revealDelayMilliseconds } = await import('./workspace-skeleton.js');
+const { WorkspaceFrame } = await import('./workspace-frame.js');
+const { MemoryRouter } = await import('react-router');
 
-const renderDesktop = () =>
-  render(
+/* `mount` remounts the workspace below one frame, as the gates above it hand over. */
+const desktopTree = (mount = 'first'): React.JSX.Element => (
+  <MemoryRouter initialEntries={['/w/home/one']}>
     <KeyboardProvider>
       <TooltipProvider>
-        <ChatInterfaceDesktop />
+        <WorkspaceFrame>
+          <ChatInterfaceDesktop key={mount} />
+        </WorkspaceFrame>
       </TooltipProvider>
-    </KeyboardProvider>,
-  );
+    </KeyboardProvider>
+  </MemoryRouter>
+);
+const renderDesktop = () => render(desktopTree());
 
 const resizeTo = (width: number): void => {
   act(() => {
@@ -137,6 +163,7 @@ describe('ChatInterfaceDesktop', () => {
     desktopLayout.workbenchOpen = true;
     desktopLayout.compactAuxiliary = 'chat';
     editorState.isReady = true;
+    splitView.laysOut = false;
     sidebar.open = true;
     vi.clearAllMocks();
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
@@ -218,47 +245,119 @@ describe('ChatInterfaceDesktop', () => {
     );
   });
 
-  /* The editor state loads from storage before the lanes can take their
-   * persisted widths; the lanes stand in at their defaults, never a blank. */
-  it('shows the workspace skeleton instead of a blank while the editor state loads', async () => {
+  /* The editor state loads from storage before the lanes can take their persisted widths. The workspace
+   * draws nothing of its own meanwhile: the persistent frame's lanes show beneath, never a blank (A15b). */
+  it('shows the workspace frame instead of a blank while the editor state loads', async () => {
     editorState.isReady = false;
-    /* Inside the load's first blink, where the lanes still ease in. */
-    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
     renderDesktop();
 
-    const skeleton = await screen.findByRole('status', { name: 'Opening project' });
-    expect(skeleton).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByTestId('chat-skeleton')).toBeInTheDocument();
+    const opening = await screen.findByRole('status', { name: 'Opening project' });
+    expect(opening).toHaveAttribute('aria-busy', 'true');
+    expect(opening).toHaveClass('sr-only');
     expect(screen.queryByTestId('allotment')).not.toBeInTheDocument();
-    /* The workbench lane drops at the compact width through the skeleton's own container query,
-     * which jsdom does not evaluate: the class is the assertion, the width is checked in a browser. */
-    const workbenchLane = skeleton.querySelector('.border-l');
-    expect(workbenchLane).toHaveClass('@min-[1120px]:flex');
-    expect(compactWorkspaceWidth).toBe(1120);
-    /* The frame paints at once; its stand-in lanes wait out a blink, so a warm load never flashes them. The chat
-     * lane's composer frame does not wait: it takes text from first paint (PL6). */
-    expect(skeleton).toHaveClass('bg-background');
-    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"]')).not.toHaveClass('animate-in');
-    expect(workbenchLane).toHaveClass(
-      'animate-in',
-      'fade-in',
-      'fill-mode-both',
-      '[animation-delay:300ms]',
-      'motion-reduce:animate-none',
+    const frame = document.querySelector('[data-slot="workspace-frame"]');
+    expect(frame).toHaveClass('bg-background');
+    expect(frame?.querySelector('[data-testid="chat-lane-frame"]')).toBeInTheDocument();
+    /* The workbench lane drops at the compact width through the frame's own container query, which jsdom
+     * does not evaluate: the class is the assertion, the width is checked in a browser. */
+    expect(frame?.querySelector('[data-lane="workbench"]')?.className).toContain(
+      '@max-[1120px]:[display:var(--frame-workbench-compact-display,none)]',
     );
-    clock.mockRestore();
+    expect(compactWorkspaceWidth).toBe(1120);
+    /* No wait is held back and nothing eases in: the frame is at rest from its first paint (U15). */
+    expect(frame?.innerHTML).not.toMatch(/animate-in|fade-in|animation-delay/u);
   });
 
-  /* Opening a project hands the skeleton from gate to gate. The blink belongs to the load, not to
-   * each mount, or the lanes would fade in again at every handover and spend the wait invisible. */
-  it('spends the blink once per load, so a later gate shows the lanes at once', async () => {
+  /* The frame belongs to the load, not to each gate: a gate that hands over to the next mounts nothing in the
+   * frame's place, so there is no blink to spend and the lanes show at once at every handover. */
+  it('keeps one frame across the hand-over from the editor state to the lanes', async () => {
     editorState.isReady = false;
-    const clock = vi.spyOn(performance, 'now').mockReturnValue(revealDelayMilliseconds);
-    renderDesktop();
+    const view = renderDesktop();
+    const frame = document.querySelector('[data-slot="workspace-frame"]');
 
-    const skeleton = await screen.findByRole('status', { name: 'Opening project' });
-    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"] > .border-l')).not.toHaveClass('animate-in');
-    clock.mockRestore();
+    editorState.isReady = true;
+    view.rerender(desktopTree('second'));
+    await screen.findByTestId('allotment');
+    expect(document.querySelector('[data-slot="workspace-frame"]')).toBe(frame);
+  });
+
+  // C4 (blueprint, § Red-first tests): the frame element before the lanes are laid out is the same element after;
+  // no descendant draws a skeleton; no animation class on the lane container.
+  it('C4: the frame before the lanes are laid out is the same element after, with no skeleton and no animation', async () => {
+    renderDesktop();
+    const frame = document.querySelector('[data-slot="workspace-frame"]');
+    const lanes = await screen.findByTestId('allotment');
+    const workspace = document.querySelector('[data-project-workspace]');
+
+    expect(workspace).not.toHaveAttribute('data-workspace-lanes');
+    expect(frame?.querySelector('[data-slot=skeleton]')).toBeNull();
+    expect(workspace?.querySelector('[data-testid="workspace-skeleton"]')).toBeNull();
+    expect(workspace?.innerHTML).not.toMatch(/animate-in|fade-in/u);
+    expect(document.querySelector('[data-slot="workspace-frame"]')).toBe(frame);
+    expect(lanes.className).not.toMatch(/animate-|fade-/u);
+  });
+
+  it('C4: the split view lays out under the same frame, which then marks the lanes ready and reveals the panes', async () => {
+    splitView.laysOut = true;
+    renderDesktop();
+    const frame = document.querySelector('[data-slot="workspace-frame"]');
+    const lanes = await screen.findByTestId('allotment');
+
+    expect(document.querySelector('[data-project-workspace]')).toHaveAttribute('data-workspace-lanes', 'ready');
+    expect(lanes.className).not.toContain('content-visibility');
+    expect(document.querySelector('[data-slot="workspace-frame"]')).toBe(frame);
+    expect(frame?.className).toContain(
+      '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
+    );
+  });
+
+  it('holds the panes unrendered until the split view has laid them out', async () => {
+    renderDesktop();
+    const lanes = await screen.findByTestId('allotment');
+
+    expect(lanes.className).toContain('[&_.split-view-container]:[content-visibility:hidden]');
+  });
+
+  /* Review round 1: the chat lane's mount-time composer focus lands while the panes are unrendered, where nothing can
+   * take focus, so it is given again when they are revealed. */
+  it('gives a navigation-requested composer focus when the panes are revealed', async () => {
+    splitView.laysOut = true;
+    globalThis.history.replaceState({ usr: { focusChatComposer: true } }, '');
+    try {
+      renderDesktop();
+      await screen.findByTestId('allotment');
+
+      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Chat message' }));
+    } finally {
+      globalThis.history.replaceState(null, '');
+    }
+  });
+
+  /* Review round 2: the control that navigated (the sidebar's "New chat") still holds focus when the panes are
+   * revealed; the requested focus still goes to the composer. */
+  it('gives the requested composer focus even while the navigating control still holds focus', async () => {
+    splitView.laysOut = true;
+    const navigating = document.createElement('button');
+    document.body.append(navigating);
+    navigating.focus();
+    globalThis.history.replaceState({ usr: { focusChatComposer: true } }, '');
+    try {
+      renderDesktop();
+      await screen.findByTestId('allotment');
+
+      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Chat message' }));
+    } finally {
+      globalThis.history.replaceState(null, '');
+      navigating.remove();
+    }
+  });
+
+  it('leaves focus alone when the navigation asked for none', async () => {
+    splitView.laysOut = true;
+    renderDesktop();
+    await screen.findByTestId('allotment');
+
+    expect(document.activeElement).toBe(document.body);
   });
 
   it('reserves fixed-control space inside the chat header without shifting its border', async () => {

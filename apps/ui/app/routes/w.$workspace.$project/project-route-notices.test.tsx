@@ -210,7 +210,7 @@ describe('ProjectRouteNotice', () => {
 
     const skeleton = screen.getByRole('status');
     expect(skeleton).toHaveAccessibleName('Opening project');
-    expect(skeleton).toHaveAttribute('data-testid', 'workspace-skeleton');
+    expect(skeleton).toHaveAttribute('data-testid', 'workspace-opening');
     expect(screen.queryByRole('button', { name: 'Toggle Sidebar' })).not.toBeInTheDocument();
   });
 

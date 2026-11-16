@@ -1,7 +1,7 @@
 // @vitest-environment node
+import { RouterContextProvider } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppLoadContext, LoaderFunctionArgs } from 'react-router';
-import { mock } from 'vitest-mock-extended';
+import type { LoaderFunctionArgs } from 'react-router';
 import { parameterEntryPath, projectToManifest } from '@taucad/types';
 import type { ShareOpenedArtifact } from '@taucad/share/artifact';
 
@@ -45,7 +45,13 @@ const portableArtifact = (parameterRecord: unknown): ShareOpenedArtifact => ({
 
 const loaderArgs = (slug: string): Parameters<typeof loader>[0] => {
   const request = new Request(`https://tau.new/s/${slug}`);
-  return { context: mock<AppLoadContext>(), params: { slug }, request, url: new URL(request.url), pattern: '/s/:slug' };
+  return {
+    context: new RouterContextProvider(),
+    params: { slug },
+    request,
+    url: new URL(request.url),
+    pattern: '/s/:slug',
+  };
 };
 
 describe('/s provider dispatch', () => {

@@ -377,6 +377,8 @@ export type DraftAttachmentOptions = {
   readonly filename?: string;
   /** Keep a generated lossless artifact byte-for-byte instead of applying the upload compression policy. */
   readonly preserveOriginal?: boolean;
+  /** The picked, dropped or pasted file's declared `type`, for the intake counter; the bytes decide the label (I1). */
+  readonly declaredType?: string;
 };
 
 const sourceFields = (
@@ -389,8 +391,8 @@ export type DraftActions = {
   /**
    * Add a raw image or PDF data URL to the new-message draft. Synchronous: the
    * `draftMachine` enqueues it through its single `attachmentProcessing`
-   * chokepoint (see `apps/ui/app/hooks/draft.machine.ts`), which resizes
-   * images and stores the bytes before the draft references them. Pass the
+   * chokepoint (see `apps/ui/app/hooks/draft.machine.ts`), which converts
+   * images through the storage policy and stores the bytes before the draft references them. Pass the
    * original data URL. Generated captures pass `preserveOriginal` so their
    * lossless bytes bypass upload compression. Failures and refusals are
    * emitted by the machine for one toast subscriber, so callers MUST NOT wrap

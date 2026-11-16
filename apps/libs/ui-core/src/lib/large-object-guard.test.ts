@@ -5,7 +5,13 @@ import type { RpcFileSystem, RpcGeoSpecClient, RpcGraphicsClient, RpcRuntimeClie
 import { toRpcError } from '@taucad/chat/rpc';
 import type { LargeObjectsFacet } from '@taucad/revisions';
 import { lfsPointerFor } from '@taucad/revisions';
-import { guardLargeObjectFiles, guardLargeObjectKernel, isLargeObjectPlaceholder } from '#lib/large-object-guard.js';
+import {
+  closureHasPending,
+  guardLargeObjectFiles,
+  guardLargeObjectKernel,
+  isLargeObjectPlaceholder,
+  kernelClosure,
+} from '#lib/large-object-guard.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -141,7 +147,7 @@ describe('the agent tools while large objects download', () => {
     expect(files.get('/models/part.step')).toStrictEqual(placeholder);
   });
 
-  it('answers kernel calls with a retryable wait until every object has landed', async () => {
+  it('answers kernel calls with a retryable wait until every object their closure reads has landed', async () => {
     let facet: LargeObjectsFacet | undefined = downloading;
     const kernelClient = mock<RpcRuntimeClient>();
     const graphics = mock<RpcGraphicsClient>();
@@ -150,9 +156,10 @@ describe('the agent tools while large objects download', () => {
     graphics.exportModel.mockResolvedValue(mock());
     geospec.runTests.mockResolvedValue(mock());
     const guarded = guardLargeObjectKernel({ kernelClient, graphics, geospec }, () => facet);
-    const evaluate = mock<Parameters<RpcRuntimeClient['evaluateModel']>[0]>();
-    const exported = mock<Parameters<RpcGraphicsClient['exportModel']>[0]>();
-    const tests = mock<Parameters<RpcGeoSpecClient['runTests']>[0]>();
+    /* A run whose entry is the pending object. */
+    const evaluate: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'models/part.step' };
+    const exported: Parameters<RpcGraphicsClient['exportModel']>[0] = { targetFile: 'models/part.step', to: 'stl' };
+    const tests: Parameters<RpcGeoSpecClient['runTests']>[0] = {};
 
     const waiting = await guarded.kernelClient.evaluateModel(evaluate);
     expect(waiting).toMatchObject({ success: false, errorCode: 'OPERATION_TIMEOUT', retryable: true });
@@ -170,5 +177,64 @@ describe('the agent tools while large objects download', () => {
     expect(kernelClient.evaluateModel).toHaveBeenCalledWith(evaluate, undefined);
     expect(graphics.exportModel).toHaveBeenCalledTimes(1);
     expect(geospec.runTests).toHaveBeenCalledTimes(1);
+  });
+
+  /* T6: a kernel that reads only its entry runs while other objects download; a pending path it reads goes through. */
+  it('runs a kernel call whose closure holds no pending object, and stays gated for a failed fill', async () => {
+    let facet: LargeObjectsFacet | undefined = downloading;
+    const kernelClient = mock<RpcRuntimeClient>();
+    const graphics = mock<RpcGraphicsClient>();
+    kernelClient.evaluateModel.mockResolvedValue(mock());
+    graphics.exportModel.mockResolvedValue(mock());
+    const guarded = guardLargeObjectKernel({ kernelClient, graphics }, () => facet);
+    const evaluate: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'main.scad' };
+    const exported: Parameters<RpcGraphicsClient['exportModel']>[0] = { targetFile: 'main.scad', to: 'stl' };
+
+    await guarded.kernelClient.evaluateModel(evaluate);
+    await guarded.graphics.exportModel(exported);
+    expect(kernelClient.evaluateModel).toHaveBeenCalledWith(evaluate, undefined);
+    expect(graphics.exportModel).toHaveBeenCalledTimes(1);
+
+    const ofPart: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'models/part.step' };
+    await expect(guarded.kernelClient.evaluateModel(ofPart)).resolves.toMatchObject({ retryable: true });
+    facet = { ...downloading, phase: 'failed', error: 'offline' };
+    await expect(guarded.kernelClient.evaluateModel(evaluate)).resolves.toMatchObject({ retryable: true });
+    expect(kernelClient.evaluateModel).toHaveBeenCalledTimes(1);
+  });
+
+  /* A workspace mirror (build123d) lists a pending file at its object's size and its read waits (D9): no wider gate. */
+  it('runs a mirroring kernel call over its own closure, as any other', async () => {
+    const kernelClient = mock<RpcRuntimeClient>();
+    kernelClient.evaluateModel.mockResolvedValue(mock());
+    const guarded = guardLargeObjectKernel({ kernelClient }, () => downloading);
+    const mirrored: Parameters<RpcRuntimeClient['evaluateModel']>[0] = { targetFile: 'main.py' };
+    await guarded.kernelClient.evaluateModel(mirrored);
+    expect(kernelClient.evaluateModel).toHaveBeenCalledExactlyOnceWith(mirrored, undefined);
+  });
+});
+
+describe('kernel closure', () => {
+  it('is the manifest and the entry for a kernel that reads only what it opens', () => {
+    expect(kernelClosure('main.scad')).toStrictEqual(['tau.json', 'main.scad']);
+    expect(kernelClosure('main.ts')).toStrictEqual(['tau.json', 'main.ts']);
+    expect(kernelClosure('')).toStrictEqual(['tau.json']);
+  });
+  /* An agent's `targetFile` may carry a leading `/` or `./`; the facet's paths are checkout-relative. */
+  it('names its entry as the facet does, whatever spelling the caller used', () => {
+    expect(kernelClosure('/main.scad')).toStrictEqual(['tau.json', 'main.scad']);
+    expect(kernelClosure('./lib/gear.ts')).toStrictEqual(['tau.json', 'lib/gear.ts']);
+    expect(kernelClosure('/')).toStrictEqual(['tau.json']);
+    expect(kernelClosure('../outside.scad')).toStrictEqual(['tau.json', '../outside.scad']);
+    expect(closureHasPending(kernelClosure('/models/part.step'), ['models/part.step'])).toBe(true);
+  });
+  it('is the manifest and the entry for a kernel that mirrors the workspace too', () => {
+    expect(kernelClosure('main.py')).toStrictEqual(['tau.json', 'main.py']);
+    expect(kernelClosure('main.cs')).toStrictEqual(['tau.json', 'main.cs']);
+  });
+  it('is pending when a closure path is, or for a workspace closure when anything is', () => {
+    expect(closureHasPending(['tau.json', 'main.ts'], ['assets/a.png'])).toBe(false);
+    expect(closureHasPending(['tau.json', 'main.ts'], ['main.ts'])).toBe(true);
+    expect(closureHasPending('workspace', ['assets/a.png'])).toBe(true);
+    expect(closureHasPending('workspace', [])).toBe(false);
   });
 });

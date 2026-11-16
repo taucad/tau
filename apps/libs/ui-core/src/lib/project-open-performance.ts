@@ -192,6 +192,20 @@ const localConfigSlot = '__TAU_LOCAL_PROJECT_OPEN_PERFORMANCE__';
  * been given each cleared entry).
  */
 const deployedMeasureLimit = 256;
+/** Reads the route class the page shows (`apps/ui`'s route-class registry), which this library cannot import. */
+let readRouteClass: (() => string | undefined) | undefined;
+
+/**
+ * Set where each measure reads the class of the route the page shows (React Router 8 migration RR7), so the loading
+ * gate can split field timings by route class. `undefined` clears it, and measures then carry `null`.
+ *
+ * @param reader - Returns the route class id (for example `project`), or `undefined` while no route is shown.
+ * @public
+ */
+export const setProjectOpenRouteClassReader = (reader: (() => string | undefined) | undefined): void => {
+  readRouteClass = reader;
+};
+
 const noopSpan: ProjectOpenSpan = { spanId: '', finish: () => undefined };
 const disabled: ProjectOpenPerformance = { begin: () => noopSpan, record: () => undefined };
 
@@ -360,7 +374,7 @@ const createRecorder = (
         start,
         end,
         detail: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           runId: identity.runId,
           journeyId: identity.journeyId,
           spanId,
@@ -369,6 +383,7 @@ const createRecorder = (
           buildId: identity.buildId,
           fixtureId: identity.fixtureId,
           routeTemplate: identity.routeTemplate,
+          routeClass: readRouteClass?.() ?? null,
           environment: identity.environment,
           profile: identity.profile,
           cacheCohort: identity.cacheCohort,

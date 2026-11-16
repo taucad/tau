@@ -48,7 +48,8 @@ const recordFirstPaint = (): void => {
         element.textContent.includes('Loading editor…') &&
         element.closest('[data-slot="editor-pane-placeholder"]') === null,
     );
-    const skeleton = document.querySelector('[data-testid="workspace-skeleton"]') !== null;
+    /* From A15b the workspace frame's lanes stand where the skeleton stood, until the split view takes their boxes. */
+    const skeleton = document.querySelector('[data-slot="workspace-frame-lanes"]')?.checkVisibility() === true;
     const editor = document.querySelector('.cm-editor .cm-content') !== null;
     const next: FirstPaintSample = {
       path: location.pathname,
@@ -69,7 +70,14 @@ const recordFirstPaint = (): void => {
       samples.push(next);
     }
   };
-  new MutationObserver(sample).observe(document, { subtree: true, childList: true, characterData: true });
+  /* The reveal is an attribute change on the desktop container (`data-workspace-lanes`), which hides the lanes. */
+  new MutationObserver(sample).observe(document, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['data-workspace-lanes'],
+  });
   new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
       if (entry.name.includes('cdn.jsdelivr.net')) {

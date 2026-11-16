@@ -58,7 +58,7 @@ import type {
   FileSystemBridgeWorkspaceService,
 } from '#filesystem-bridge-protocol.js';
 import { nextFileSystemBridgeConnectionId, timeFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
-import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
+import { bindFileSystemLongCall, withBoundedReadFile, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
 import type { HostContentCallOptions } from '#filesystem-bridge-host-calls.js';
 import type { ComputeEventSource } from '#filesystem-bridge-compute-events.js';
 import { recordFileSystemBridgeCrossing } from '#filesystem-bridge-crossings.js';
@@ -1406,7 +1406,9 @@ function exposeFileSystemHandlers(
     const { portHandlers, unavailableError } =
       requestedRoot === undefined
         ? {
-            portHandlers: withChangeSetWatch(bindMutationContextForPort(handlers, mutationContext)),
+            portHandlers: withChangeSetWatch(
+              withBoundedReadFile(bindMutationContextForPort(handlers, mutationContext)),
+            ),
             unavailableError: undefined,
           }
         : serveRootedPort(port, event.data, mutationContext);

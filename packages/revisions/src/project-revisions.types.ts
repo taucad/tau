@@ -143,8 +143,9 @@ export type RevisionStatusProjection = Readonly<{
 /**
  * The readiness vocabulary of D10: `connected → treeReady → entryReady →
  * materialized → filled`. The editor, tree and viewer open at `treeReady` and
- * `entryReady`; search, export, the LSP workspace and a revision cut wait for
- * `materialized`; a model render waits for `filled`.
+ * `entryReady`; search, export, the LSP workspace, a revision cut and a model
+ * render wait for `materialized`. A render then waits only on the large objects
+ * its own closure reads (T6); `filled` is every large object here.
  *
  * @public
  */
@@ -154,8 +155,9 @@ export type ProjectReadiness = 'connected' | 'treeReady' | 'entryReady' | 'mater
  * The large objects one checkout is still waiting for.
  *
  * The files open as soon as the checkout is written; a file whose object has
- * not arrived holds its pointer until it does, and a reader that must see real
- * bytes — a model render — waits for `paths` to empty.
+ * not arrived holds its pointer until it does. A model render waits only while
+ * `paths` holds a path its closure reads (T6); other readers, a kernel that
+ * mirrors the whole workspace among them, read pending paths through.
  *
  * @public
  */

@@ -35,6 +35,7 @@ import type * as AgentHostClientModule from '#services/agent-host-client.js';
 import type * as HandleStoreModule from '#filesystem/handle-store.js';
 import type * as ProjectWorkspaceContextModule from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type * as PartThumbnailProviderModule from '#providers/part-thumbnail-provider.js';
+import type * as WorkspaceFrameModule from '#routes/w.$workspace.$project/workspace-frame.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type * as ViewerDockviewModule from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
@@ -454,8 +455,9 @@ vi.mock('#components/tour/tour-host.js', () => ({
   TourHost: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#components/layout/command-palette.js', () => ({ useCommandPaletteItems: () => undefined }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({
-  WorkspaceSkeleton: () => <div data-testid='workspace-skeleton' />,
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof WorkspaceFrameModule>()),
+  WorkspaceOpening: () => <div data-testid='workspace-opening' />,
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   ActiveChatProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -765,9 +767,9 @@ describe('project open order (A0.7)', () => {
     await settle();
     expect(isSessionLive()).toBe(true);
 
-    /* The revision client's first projection: the fill has not answered for this tree yet. */
+    /* The revision client's first projection: the authored files of this tree are still landing. */
     await act(async () => {
-      revisionStatus.set(statusAt('materialized'));
+      revisionStatus.set(statusAt('entryReady'));
     });
     await settle();
     expect(
@@ -791,8 +793,8 @@ describe('project open order (A0.7)', () => {
     const preparing = recordAdditions(
       '[role="region"][aria-label="Preparing model"], [data-testid="viewer-dock"] [role="region"][aria-label="Checking model files"]',
     );
-    /* Local files: no Tau Cloud open is owed, and the fill's word on this tree is still out. */
-    revisionStatus.set(statusAt('materialized'));
+    /* Local files: no Tau Cloud open is owed, and this tree's authored files are still landing. */
+    revisionStatus.set(statusAt('entryReady'));
     const session = createFact(false);
     const unsubscribe = sessionsActor.subscribe(() => {
       if (!session.get() && isSessionLive()) {
@@ -866,7 +868,7 @@ describe('viewer stage through the file check (A15e; C11, P-j, U13 remainder)', 
   it('C11: should show the viewer stage with its canvas, and no "Preparing model" block, during a first file check past the open bound', async () => {
     admitViewGraphics();
     const preparingAdded = recordAdditions(preparing);
-    revisionStatus.set(statusAt('materialized'));
+    revisionStatus.set(statusAt('entryReady'));
     try {
       render(<OpenRoute />);
       await settle();
@@ -889,7 +891,7 @@ describe('viewer stage through the file check (A15e; C11, P-j, U13 remainder)', 
     admitViewGraphics();
     const preparingAdded = recordAdditions(preparing);
     const canvases = recordAdditions('[data-testid="stage-canvas"]');
-    revisionStatus.set(statusAt('materialized'));
+    revisionStatus.set(statusAt('entryReady'));
     try {
       render(<OpenRoute />);
       await settle();
@@ -908,7 +910,7 @@ describe('viewer stage through the file check (A15e; C11, P-j, U13 remainder)', 
 
       /* A later check of the same tree. */
       await act(async () => {
-        revisionStatus.set(statusAt('materialized'));
+        revisionStatus.set(statusAt('entryReady'));
       });
       await settle();
       expect(screen.getByTestId('stage-canvas')).toBe(canvas);
@@ -982,7 +984,9 @@ describe('phone viewer box while the focused chat is ensured (A0.7)', () => {
     /* Today the layout mounts while the chat is ensured and its pane waits below the viewer; once the open waits for
      * the chat, nothing of the layout mounts until it is ready. Either way, no viewer box shows an empty state. */
     const boxes = viewerBoxes();
-    expect(boxes.length === 0 || screen.queryByTestId('chat-pane-skeleton-ensuring') !== null).toBe(true);
+    expect(
+      boxes.length === 0 || document.querySelector('[data-testid="chat-lane-frame"][aria-busy="true"]') !== null,
+    ).toBe(true);
     expect(boxes.filter((box) => box.querySelector(emptyState) !== null)).toEqual([]);
     expect(added.map((node) => node.textContent)).toEqual([]);
   });

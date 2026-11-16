@@ -285,6 +285,8 @@ process.exit(result.status ?? 1);
         `version https://git-lfs.github.com/spec/v1\noid sha256:${object.oid}\nsize ${String(object.size)}\n`,
       );
     const files = new Map<string, Uint8Array<ArrayBuffer>>([
+      /* The attributes that make both pointers placeholders (D9). */
+      ['.gitattributes', new TextEncoder().encode('*.bin filter=lfs diff=lfs merge=lfs -text\n')],
       ['large.bin', pointerText(pointer)],
       ['restored.bin', pointerText(olderPointer)],
       ['small.txt', new TextEncoder().encode('small\n')],

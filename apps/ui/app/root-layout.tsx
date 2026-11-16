@@ -2,7 +2,16 @@ import { ObservabilityHarnessHydrationProbe } from '#lib/observability-harness-h
 import { onDesktopMachineNavigation } from '#filesystem/desktop-bridge.js';
 import { installLoopbackHandOff } from '#lib/agent-host-placement.js';
 import type { ComponentType, ReactNode } from 'react';
-import { Links, Meta, Scripts, ScrollRestoration, useNavigate, useRouteLoaderData, useLocation } from 'react-router';
+import {
+  Links,
+  Meta,
+  Scripts,
+  ScrollRestoration,
+  useMatches,
+  useNavigate,
+  useRouteLoaderData,
+  useLocation,
+} from 'react-router';
 import { HydrationBoundary, QueryClientProvider } from '@tanstack/react-query';
 import type { DehydratedState } from '@tanstack/react-query';
 import { Fragment, useEffect } from 'react';
@@ -11,6 +20,7 @@ import { ClientFactsHead, Theme, ThemeProvider, useTheme } from '#hooks/use-them
 import { ENV } from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
+import { buildFrameHintScript } from '#lib/frame-hint.js';
 import { Page } from '#components/layout/page.js';
 import { useDocumentFact } from '#lib/client-facts.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -37,6 +47,7 @@ import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-bill
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
 import { selectRuntimeIdleFileManagers, selectRuntimeQueryClient } from '#runtime/app-runtime.js';
 import { useAppRuntime, useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
+import { publishRoute } from '#lib/sentry-context.lib.js';
 
 /**
  * The root loader's data. It carries nothing about the visitor: per-visitor view facts reach the page through the
@@ -148,6 +159,15 @@ function LayoutDocument({
     setFaviconColor(color.serialized.hex);
   }, [setFaviconColor, color]);
 
+  /* RR7: the matched routes this page rendered, for the error `route` tags and the transaction names, through
+   * React Router's public matches instead of its private router global. Route ids hold no space. */
+  const routeIds = useMatches()
+    .map((match) => match.id)
+    .join(' ');
+  useEffect(() => {
+    publishRoute(routeIds.split(' '));
+  }, [routeIds]);
+
   return (
     <html
       lang='en'
@@ -162,12 +182,18 @@ function LayoutDocument({
       )}
       data-pointer-cursors={usePointerCursors ? 'true' : undefined}
       style={color.rootStyles}
+      /* A15b: the pre-paint script sets the frame hint's variables in this style attribute before hydration; React's
+       * per-property style updates leave them alone. */
+      suppressHydrationWarning
     >
       <head>
         <meta charSet='utf-8' />
         <meta name='viewport' content='width=device-width, initial-scale=1' />
         <Meta />
         <ClientFactsHead />
+        {/* A15b: the frame hint's variables and `--wait-offset` on <html> before first paint; before <Links />, so it never waits on a stylesheet. */}
+        {/* oxlint-disable-next-line react/no-danger -- static inline script must run before first paint, as the client facts' does */}
+        <script dangerouslySetInnerHTML={{ __html: buildFrameHintScript() }} suppressHydrationWarning />
         <Links />
       </head>
       <body>

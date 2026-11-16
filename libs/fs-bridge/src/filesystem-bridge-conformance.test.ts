@@ -385,6 +385,53 @@ describe('bridge conformance: long calls outlive the ordinary deadline (W10, I10
     expect(result.get('missing-10.ts')).toBe('missing');
     expect(reports.at(-1)).toEqual({ done: 12, total: 12, bytes: 5 });
   });
+
+  /* T6: a render no longer waits for the whole fill, so a kernel's read of a pending large object waits on the wire
+     while the authority reads it through; the authority's own stall bound (D9, I10) ends it, never the 30 s deadline. */
+  const slowRead = async (milliseconds: number, pending: readonly string[]): Promise<FileSystemBridgeProxy> => {
+    const provider = await seeded(files);
+    const read = provider.readFile.bind(provider);
+    vi.spyOn(provider, 'readFile').mockImplementation((async (path: string) => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, milliseconds);
+      });
+      return read(path);
+    }) as MemoryProvider['readFile']);
+    /* What the authority's index answers: which of these paths still wait for their large object. */
+    const pendingPaths = vi.fn(async (paths: readonly string[]) => paths.filter((path) => pending.includes(path)));
+    const proxy = createFileSystemBridgeProxy(createFileSystemBridgePort(Object.assign(provider, { pendingPaths })));
+    opened.push({
+      proxy,
+      hostCrossings: async () => new Map(),
+      async close() {
+        proxy.dispose();
+      },
+    });
+    await proxy.ready;
+    fakeClocks();
+    return proxy;
+  };
+
+  it('keeps a readFile of a pending path alive past 30 s while its authority reads it, and resolves it', async () => {
+    const proxy = await slowRead(45_000, ['a.ts']);
+    const pending = proxy.readFile('a.ts');
+    const outcome = track(pending);
+    await advance(40_000);
+    expect(outcome.settled()).toBe(false);
+    await advance(6000);
+    expect(text(await pending)).toBe('alpha');
+  });
+
+  it('fails a readFile of a path that is not pending at the ordinary 30 s deadline, after a short grace', async () => {
+    const proxy = await slowRead(300_000, []);
+    const pending = proxy.readFile('a.ts');
+    const failure = expect(pending).rejects.toMatchObject({ code: 'BRIDGE_CALL_TIMEOUT' });
+    const outcome = track(pending);
+    await advance(29_000);
+    expect(outcome.settled()).toBe(false);
+    await advance(7000);
+    await failure;
+  });
 });
 
 describe('bridge conformance: authority death after ready (W10)', () => {

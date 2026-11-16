@@ -138,6 +138,9 @@
 \* PL6 review: the composer adopts only an input its own project's placeholder served, and the queued submit waits,
 \* still queued, until the composer's guards permit a send, then carries the editor's text through the same submit.
 \* The composer's guard refs update in a layout effect. No action or verdict changes.
+\* WP5 (composer image formats): the store and the composer draft provide the image step from the app's
+\* attachment image actor, and a queued image carries its declared type for the intake counter only; admission,
+\* delivery, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

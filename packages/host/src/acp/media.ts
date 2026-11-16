@@ -11,7 +11,9 @@
  *
  * Only what the attachment vocabulary can name is moved (the `file-ref` path
  * pattern's image and PDF types); audio and any other media stays inline,
- * readable exactly as before (D14).
+ * readable exactly as before (D14). A host with a runtime transcoder first
+ * converts an image the storage policy would (`normalizeImageAttachment`), so
+ * an AVIF block is stored as JPEG rather than left inline.
  */
 
 import { createHash } from 'node:crypto';
@@ -19,17 +21,32 @@ import { basename, join } from 'node:path';
 
 import type { ExternalAgentLogEvent, JsonObject, JsonValue } from '@taucad/agent-host';
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
-import { sniffAttachmentMediaType } from '@taucad/agent-host/wire';
+import {
+  attachmentExtensionOf,
+  isAttachmentMediaType,
+  normalizeImageAttachment,
+  sniffAttachmentMediaType,
+} from '@taucad/agent-host/wire';
+import type { AttachmentTranscodePort } from '@taucad/agent-host/wire';
 import { isRecord } from '@taucad/utils/schema';
 
-/** The media a `file-ref` path can name, by the extension its path carries. */
-const attachmentExtensions: Readonly<Record<string, string>> = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-  'application/pdf': 'pdf',
-  'application/json': 'json',
+import type { HostRuntimeClient } from '#agent-tools.js';
+
+/** Milliseconds one conversion may take before it is abandoned (I5: the transcoder's 30 s limit). */
+const transcodeTimeout = 30_000;
+
+/**
+ * The extension a chat attachment of this media type is written with: a stored type's from `attachmentMedia` (I2),
+ * or `json` for a GeoSpec report, which only a writer saves and no `file-ref` names.
+ *
+ * @param mimeType - The media type the bytes are stored under.
+ * @returns The extension, or `undefined` for a type no chat attachment may hold.
+ */
+const extensionOf = (mimeType: string): string | undefined => {
+  if (isAttachmentMediaType(mimeType)) {
+    return attachmentExtensionOf(mimeType);
+  }
+  return mimeType === 'application/json' ? 'json' : undefined;
 };
 
 /**
@@ -43,10 +60,147 @@ const labelOf = (bytes: Uint8Array<ArrayBuffer>, declared: string): string =>
   sniffAttachmentMediaType(bytes) ?? declared;
 
 /**
+ * How a host converts agent media its chats cannot store as sent: a port over its runtime client's `transcode`, and
+ * the formats that runtime's registered transcoders convert to `jpeg` (`deriveTranscodeSources(runtime, 'jpeg')`).
+ *
+ * @public
+ */
+export type AgentMediaTranscoding = {
+  readonly transcode: AttachmentTranscodePort;
+  readonly transcodeSources: readonly string[];
+};
+
+/**
+ * Resolves the host's {@link AgentMediaTranscoding} on first need, or `undefined` when its runtime converts nothing.
+ * Called only for an image the storage policy will not store unchanged, so canonical media never starts a runtime (I6).
+ *
+ * @public
+ */
+export type AgentMediaTranscoder = () => Promise<AgentMediaTranscoding | undefined>;
+
+/**
+ * A {@link AttachmentTranscodePort} over a host runtime client's `transcode` (I3), abandoned after 30 seconds.
+ *
+ * @param client - The runtime client whose registered transcoders convert the image.
+ * @returns The port: resolves to the converted bytes, rejects on any failure.
+ */
+export const runtimeTranscodePort =
+  (client: Pick<HostRuntimeClient, 'transcode'>): AttachmentTranscodePort =>
+  async (input) => {
+    const result = await client.transcode({
+      from: input.from,
+      to: input.to,
+      files: input.files.map((file) => ({ name: file.name, mimeType: file.mimeType, bytes: file.bytes })),
+      options: input.options,
+      signal: AbortSignal.timeout(transcodeTimeout),
+    });
+    if (!result.success) {
+      throw new Error(result.issues.map(({ message }) => message).join('; ') || 'The image could not be converted.');
+    }
+    const [file] = result.data;
+    if (file === undefined) {
+      throw new Error('The image conversion returned no file.');
+    }
+    return new Uint8Array(file.bytes);
+  };
+
+/**
+ * The bytes to store for one decoded payload, and the media type they hold.
+ *
+ * Canonical media is stored unchanged without a runtime (I6). An image the storage policy would convert is
+ * converted through the host's transcoder when it has one (`normalizeImageAttachment`, I3). Anything else, and any
+ * image the policy refuses even with a port, keeps today's rule: labelled from its bytes (I1), stored when the
+ * attachment vocabulary names it.
+ *
+ * @param bytes - The decoded payload.
+ * @param declared - The media type the agent declared.
+ * @param transcoder - The host's transcoder, if it has one.
+ * @returns The bytes to store and their media type.
+ */
+const canonicalOf = async (
+  bytes: Uint8Array<ArrayBuffer>,
+  declared: string,
+  transcoder: AgentMediaTranscoder | undefined,
+): Promise<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly mimeType: string; readonly converted: boolean }> => {
+  const unchanged = { bytes, mimeType: labelOf(bytes, declared), converted: false };
+  if (transcoder === undefined) {
+    return unchanged;
+  }
+  const local = await normalizeImageAttachment({ bytes });
+  if (local.status === 'stored') {
+    return { bytes: local.bytes, mimeType: local.mediaType, converted: false };
+  }
+  if (local.format === 'pdf' || (local.reason !== 'unsupported-format' && local.reason !== 'too-large')) {
+    return unchanged;
+  }
+  // A runtime that cannot start leaves the media as it was sent, never fails the append.
+  const transcoding = await transcoder().catch(() => undefined);
+  if (transcoding === undefined) {
+    return unchanged;
+  }
+  const outcome = await normalizeImageAttachment({ bytes, ...transcoding });
+  return outcome.status === 'stored'
+    ? { bytes: outcome.bytes, mimeType: outcome.mediaType, converted: outcome.converted }
+    : unchanged;
+};
+
+/** One stored attachment: its `attachments/<sha256>.<ext>` reference, the real file and its digest. */
+type SavedChatAttachment = {
+  readonly path: string;
+  readonly absolutePath: string;
+  readonly byteLength: number;
+  readonly sha256: string;
+};
+
+/**
+ * Write bytes to a chat's attachments under the extension of the media type they hold.
+ *
+ * @param input - The workspace root whose `.tau/chats` holds the chat, the chat, the bytes and the media type they hold.
+ * @returns The stored attachment.
+ */
+const writeChatAttachment = async ({
+  workspaceRoot,
+  chatId,
+  bytes,
+  mimeType,
+}: {
+  readonly workspaceRoot: string;
+  readonly chatId: string;
+  readonly bytes: Uint8Array<ArrayBuffer>;
+  readonly mimeType: string;
+}): Promise<SavedChatAttachment> => {
+  if (!/^[\w-]+$/u.test(chatId)) {
+    throw new Error('Chat attachment has an invalid chat id.');
+  }
+  const extension = extensionOf(mimeType);
+  if (extension === undefined) {
+    throw new Error(`Chat attachment media type ${mimeType} is unsupported.`);
+  }
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const path = `attachments/${sha256}.${extension}`;
+  const absolutePath = join(workspaceRoot, '.tau', 'chats', chatId, path);
+  // The chat store's own writer: one atomic, content-addressed Node writer for every chat attachment (D-UI-04).
+  await createNodeAttachmentReader(workspaceRoot).write!(chatId, path, bytes);
+  return { path, absolutePath, byteLength: bytes.length, sha256 };
+};
+
+/**
+ * Decode canonical base64, or `undefined` for an empty or non-canonical payload.
+ *
+ * @param data - The base64 payload.
+ * @returns The bytes.
+ */
+const decodeBase64 = (data: string): Uint8Array<ArrayBuffer> | undefined => {
+  const bytes = Buffer.from(data, 'base64');
+  return bytes.length === 0 || bytes.toString('base64') !== data ? undefined : new Uint8Array(bytes);
+};
+
+/**
  * Persist one attachment for a chat and return both the transcript and local paths.
  *
  * The bytes are published through the Node chat store's attachment writer, which the
- * agent host's own screenshot captures use too.
+ * agent host's own screenshot captures use too. Nothing is converted: the MCP endpoint files Tau's own PNG and WebP
+ * screenshots, whose contract admits only those types, and GeoSpec reports.
  * @param input - Workspace, chat, MIME type and canonical base64 bytes.
  * @returns Content-addressed chat and local file references.
  */
@@ -55,31 +209,18 @@ export const saveChatAttachment = async (input: {
   readonly chatId: string;
   readonly data: string;
   readonly mimeType: string;
-}): Promise<{
-  readonly path: string;
-  readonly absolutePath: string;
-  readonly byteLength: number;
-  readonly sha256: string;
-}> => {
-  if (!/^[\w-]+$/u.test(input.chatId)) {
-    throw new Error('Chat attachment has an invalid chat id.');
-  }
-  const bytes = Buffer.from(input.data, 'base64');
-  if (bytes.length === 0 || bytes.toString('base64') !== input.data) {
+}): Promise<SavedChatAttachment> => {
+  const decoded = decodeBase64(input.data);
+  if (decoded === undefined) {
     throw new Error('Chat attachment contains invalid base64 bytes.');
   }
   // The file is named for what the bytes are, not what the agent declared (I1).
-  const mimeType = labelOf(bytes, input.mimeType);
-  const extension = attachmentExtensions[mimeType];
-  if (extension === undefined) {
-    throw new Error(`Chat attachment media type ${mimeType} is unsupported.`);
-  }
-  const sha256 = createHash('sha256').update(bytes).digest('hex');
-  const path = `attachments/${sha256}.${extension}`;
-  const absolutePath = join(input.workspaceRoot, '.tau', 'chats', input.chatId, path);
-  // The chat store's own writer: one atomic, content-addressed Node writer for every chat attachment (D-UI-04).
-  await createNodeAttachmentReader(input.workspaceRoot).write!(input.chatId, path, new Uint8Array(bytes));
-  return { path, absolutePath, byteLength: bytes.length, sha256 };
+  return writeChatAttachment({
+    workspaceRoot: input.workspaceRoot,
+    chatId: input.chatId,
+    bytes: decoded,
+    mimeType: labelOf(decoded, input.mimeType),
+  });
 };
 
 /**
@@ -133,11 +274,14 @@ const filenameOf = (uri: string | undefined): string | undefined => {
  *
  * @param workspaceRoot - Absolute root whose `.tau/chats` holds the chat.
  * @param chatId - The chat the turn belongs to.
+ * @param transcoder - The host's transcoder. With one, an image the storage policy converts (an AVIF, a GIF, an
+ * oversized JPEG) is stored as the JPEG it converts to; without one, media is stored as sent, as before.
  * @returns A transform from appended events to the same events with media moved.
  */
 export const createAcpMediaStore = (
   workspaceRoot: string,
   chatId: string,
+  transcoder?: AgentMediaTranscoder,
 ): ((events: readonly ExternalAgentLogEvent[]) => Promise<readonly ExternalAgentLogEvent[]>) => {
   /* The durable `file-ref` block (agent-host's `FileRefContentBlock`, validated by its strict schema). */
   const stored = new Map<string, JsonObject & { readonly path: string }>();
@@ -147,16 +291,21 @@ export const createAcpMediaStore = (
     if (known !== undefined) {
       return known;
     }
-    const bytes = Buffer.from(media.data, 'base64');
-    if (bytes.length === 0 || bytes.toString('base64') !== media.data) {
+    const decoded = decodeBase64(media.data);
+    if (decoded === undefined) {
       return undefined;
     }
-    const mimeType = labelOf(bytes, media.mimeType);
-    if (attachmentExtensions[mimeType] === undefined || mimeType === 'application/json') {
+    const { bytes, mimeType, converted } = await canonicalOf(decoded, media.mimeType, transcoder);
+    if (!isAttachmentMediaType(mimeType)) {
       return undefined;
     }
-    const saved = await saveChatAttachment({ workspaceRoot, chatId, data: media.data, mimeType });
-    const filename = filenameOf(media.uri);
+    const saved = await writeChatAttachment({ workspaceRoot, chatId, bytes, mimeType });
+    const named = filenameOf(media.uri);
+    // A converted image downloads under the extension of what it now is.
+    const filename =
+      named === undefined || !converted
+        ? named
+        : `${named.replace(/\.[^.]*$/u, '')}.${attachmentExtensionOf(mimeType)}`;
     const reference = {
       type: 'file-ref',
       path: saved.path,

@@ -112,10 +112,31 @@ runs:
 
     # Postinstall scripts fetch release binaries (Electron) from GitHub, which can answer 504 for
     # minutes at a time. A frozen install is idempotent, so retry it a bounded number of times.
+    # Each attempt is also bounded in time: a cold install on `macos-26-intel` takes 5–11 minutes,
+    # and three Intel jobs that stalled in this setup on 2026-11-16 (runs 43801415465 and
+    # 43813916763) held it until the job's timeout or a lost runner. Outside Windows a watchdog ends
+    # an attempt's process group after `INSTALL_ATTEMPT_SECONDS`, so the next attempt runs instead.
     - name: Install dependencies
+      env:
+        INSTALL_ATTEMPT_SECONDS: '900'
       run: |
+        bounded() {
+          if [ "$RUNNER_OS" = Windows ] || ! command -v perl > /dev/null; then "$@"; return; fi
+          perl -e '
+            my $seconds = shift;
+            my $pid = fork() // die "fork: $!";
+            if ($pid == 0) { setpgrp(0, 0); exec { $ARGV[0] } @ARGV or die "exec: $!"; }
+            local $SIG{ALRM} = sub {
+              print STDERR "::warning title=pnpm install stalled::no result after ${seconds}s; stopping this attempt\n";
+              kill "TERM", -$pid; sleep 10; kill "KILL", -$pid; waitpid($pid, 0); exit 124;
+            };
+            alarm $seconds;
+            waitpid($pid, 0);
+            exit($? & 127 ? 128 + ($? & 127) : $? >> 8);
+          ' "$INSTALL_ATTEMPT_SECONDS" "$@"
+        }
         for attempt in 1 2 3; do
-          pnpm install --frozen-lockfile && exit 0
+          bounded pnpm install --frozen-lockfile && exit 0
           if [ "$attempt" -lt 3 ]; then
             echo "::warning title=pnpm install failed::attempt $attempt failed; retrying" >&2
             sleep $((attempt * 30))

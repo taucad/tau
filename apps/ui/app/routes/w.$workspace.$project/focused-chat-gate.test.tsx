@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import {
@@ -6,7 +7,7 @@ import {
   ChatInterfaceSessionGate,
   FocusedChatErrorPanel,
 } from '#routes/w.$workspace.$project/focused-chat-gate.js';
-import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
+import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
 
 type StateValue = string | { [key: string]: StateValue };
 
@@ -45,21 +46,24 @@ const buildState = ({
   matches: (target: StateValue) => matchesValue(value, target),
 });
 
-const { mockEditorRefSend, mockState, syncNow, chatSync } = vi.hoisted(() => ({
+const { mockEditorRefSend, mockState, syncNow, chatSync, availability } = vi.hoisted(() => ({
   mockEditorRefSend: vi.fn(),
   syncNow: vi.fn(),
   chatSync: { state: 'loading' },
   mockState: { current: undefined as unknown },
+  /* The whole apply's availability, and the chats surface's own (SP2h). */
+  availability: { whole: 'ready', chats: 'ready' },
 }));
 
 vi.mock('#hooks/use-project-availability.js', () => ({
-  useProjectAvailability: () => 'ready',
+  useProjectAvailability: (surface?: string) => (surface === 'chats' ? availability.chats : availability.whole),
   useModelAvailability: () => 'ready',
   useLargeObjectPending: () => false,
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionStatus: () => ({ sync: { chats: chatSync.state } }),
-  useRevisionCommands: () => ({ syncNow }),
+  useRevisionClient: () => undefined,
+  useRevisionCommands: () => ({ syncNow, connectRemote: vi.fn() }),
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -87,36 +91,39 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   ),
 }));
 
-describe('ChatPaneSkeleton', () => {
-  it('renders the loading variant with an aria-label and testid', () => {
-    render(<ChatPaneSkeleton variant='loading' />);
+/* A15b: the chat pane's skeleton became the chat lane's bare frame, which the workspace frame draws while the
+ * workspace opens and the chat gate shows while the focused chat is ensured. */
+describe('ChatLaneFrame', () => {
+  it("renders the workspace frame's chat lane with its testid and no busy state of its own", () => {
+    render(<ChatLaneFrame />);
 
-    const placeholder = screen.getByTestId('chat-pane-skeleton-loading');
+    const placeholder = screen.getByTestId('chat-lane-frame');
     expect(placeholder).toBeDefined();
-    expect(placeholder.getAttribute('aria-busy')).toBe('true');
-    expect(placeholder.getAttribute('aria-label')).toContain('Loading');
+    expect(placeholder.getAttribute('aria-busy')).toBeNull();
+    expect(placeholder.querySelector('[data-slot=skeleton]')).toBeNull();
   });
 
-  it('renders the ensuring variant with the matching aria-label', () => {
-    render(<ChatPaneSkeleton variant='ensuring' />);
+  it('renders the ensuring wait with the matching aria-label', () => {
+    render(<ChatLaneFrame busyLabel='Preparing chat session…' />);
 
-    const placeholder = screen.getByTestId('chat-pane-skeleton-ensuring');
+    const placeholder = screen.getByTestId('chat-lane-frame');
     expect(placeholder).toBeDefined();
     expect(placeholder.getAttribute('aria-busy')).toBe('true');
     expect(placeholder.getAttribute('aria-label')).toContain('Preparing');
+    expect(screen.getByRole('status', { name: /Preparing chat session/u })).toBe(placeholder);
   });
 
   it('carries the floating-panel data-slot so it inherits chat-pane chrome', () => {
-    render(<ChatPaneSkeleton variant='loading' />);
+    render(<ChatLaneFrame />);
 
-    const placeholder = screen.getByTestId('chat-pane-skeleton-loading');
+    const placeholder = screen.getByTestId('chat-lane-frame');
     expect(placeholder.dataset['slot']).toBe('floating-panel');
   });
 
   it('draws the composer as the live empty composer frame rather than a pulsing block', () => {
-    render(<ChatPaneSkeleton variant='loading' />);
+    render(<ChatLaneFrame />);
 
-    const composer = screen.getByTestId('chat-pane-skeleton-composer');
+    const composer = screen.getByTestId('chat-lane-frame-composer');
     expect(composer.className).toContain('rounded-2xl');
     expect(composer.className).toContain('min-h-20.5');
     expect(composer.className).not.toContain('animate-pulse');
@@ -142,8 +149,34 @@ describe('FocusedChatErrorPanel', () => {
 describe('ChatHistoryGate', () => {
   beforeEach(() => {
     chatSync.state = 'loading';
+    availability.whole = 'ready';
+    availability.chats = 'ready';
     syncNow.mockClear();
     mockEditorRefSend.mockClear();
+  });
+
+  /* SP2h: a chat opens on its records while the apply still writes the files. */
+  it('opens the focused chat on the chats surface, before the whole apply lands', () => {
+    chatSync.state = 'ready';
+    availability.whole = 'preparing';
+    mockState.current = buildState({ value: { ready: { operation: 'idle' } }, focusedChatId: 'chat-123' });
+    const { rerender } = render(
+      <ChatHistoryGate>
+        <div data-testid='chat-pane-child'>chat content</div>
+      </ChatHistoryGate>,
+    );
+    expect(screen.getByTestId('chat-pane-child')).toBeDefined();
+
+    /* Until the chats surface opens, its placeholder speaks: never a partial history (I7). */
+    availability.chats = 'preparing';
+    rerender(
+      <MemoryRouter>
+        <ChatHistoryGate>
+          <div data-testid='chat-pane-child'>chat content</div>
+        </ChatHistoryGate>
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('chat-pane-child')).toBeNull();
   });
 
   it('should retry failed chat discovery without hiding available project files', () => {
@@ -225,7 +258,7 @@ describe('ChatHistoryGate', () => {
     // Provider mount is now owned by ChatInterfaceSessionGate upstream, not by ChatHistoryGate.
     expect(screen.queryByTestId('active-chat-provider')).toBeNull();
     expect(screen.queryByTestId('focused-chat-error-panel')).toBeNull();
-    expect(screen.queryByTestId('chat-pane-skeleton-ensuring')).toBeNull();
+    expect(screen.queryByTestId('chat-lane-frame')).toBeNull();
   });
 });
 

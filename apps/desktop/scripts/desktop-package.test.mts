@@ -109,7 +109,7 @@ const unpackedPackageDirectories = [
   '@anthropic-ai/sandbox-runtime/vendor/{seccomp,java-proxy-agent}',
 ];
 assert.equal(runtimeAsarOptions.unpackDir, `**/node_modules/{${unpackedPackageDirectories.join(',')}}`);
-assert.equal(runtimeAsarOptions.unpack, '{*.node,*.dll,esbuild,esbuild.exe}');
+assert.equal(runtimeAsarOptions.unpack, '{*.node,*.dll,esbuild,esbuild.exe,libheif-*.wasm}');
 console.log('✓ the ASAR unpack globs keep every spawned adapter, libvips, node-pty and sandbox-runtime vendor payload');
 
 /* ASAR matches absolute filenames: hidden checkout ancestors must not hide spawned payloads. */
@@ -132,9 +132,11 @@ try {
     /* The node-pty fork path runs `spawn-helper` from `app.asar.unpacked`. */
     'node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper',
     'node_modules/@gltf-transform/functions/node_modules/ndarray-pixels/node_modules/sharp/node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips.dylib',
+    /* The libheif WASM file (LGPL-3.0) stays a separate, replaceable file beside the archive. */
+    'dist/main/chunks/libheif-Bq3x9_Zk.wasm',
   ];
   await Promise.all(
-    [...unpacked, 'app.js'].map(async (file) => {
+    [...unpacked, 'app.js', 'dist/main/chunks/mozjpeg_enc-Bq3x9_Zk.wasm'].map(async (file) => {
       const path = join(source, file);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, 'fixture');
@@ -147,6 +149,10 @@ try {
     assert.equal(readFileSync(join(`${archive}.unpacked`, file), 'utf8'), 'fixture');
   }
   assert.ok(!('unpacked' in statFile(archive, 'app.js')), 'ordinary JavaScript remains packed');
+  assert.ok(
+    !('unpacked' in statFile(archive, join('dist/main/chunks/mozjpeg_enc-Bq3x9_Zk.wasm'))),
+    'other WASM remains packed',
+  );
   if (process.platform === 'linux') {
     const helper = `node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp/${process.arch}/apply-seccomp`;
     const dependency = dirname(dirname(fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime'))));

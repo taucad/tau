@@ -3,6 +3,7 @@ import {
   desktopRuntimeDrift,
   enginePlatformPackages,
   generateNotices,
+  splitLibheifLicense,
   parseOcctRevision,
   parseVendoredComponents,
   platformFamilyName,
@@ -72,6 +73,11 @@ describe('generateNotices', () => {
     lgpl: 'GNU LESSER GENERAL PUBLIC LICENSE\n',
     occtException: 'Open CASCADE exception (version 1.0) to GNU LGPL version 2.1.\n',
     engine: { version: '0.1.0-next.19', occtRevision: '3d097a0328e71b826377d4814ab05ec3c3d23871' },
+    libheif: {
+      version: '1.23.5',
+      lgpl3: 'GNU LESSER GENERAL PUBLIC LICENSE\n  Version 3, 29 June 2007\n',
+      gpl3: 'GNU GENERAL PUBLIC LICENSE\n  Version 3, 29 June 2007\n',
+    },
   });
 
   it('names the installed GeoSpec engine release and the OCCT revision it compiles in', () => {
@@ -99,10 +105,59 @@ describe('generateNotices', () => {
     expect(notices).toContain('## MIT License\n\n```text\nPermission is hereby granted, free of charge,');
   });
 
+  it('names libheif and libde265 with the exact sources of the WebAssembly the apps load', () => {
+    expect(notices).toContain('## libheif and libde265');
+    expect(notices).toContain('`libheif-js` 1.23.5 ([source](https://github.com/catdad-experiments/libheif-js))');
+    expect(notices).toContain('- libheif 1.23.5, upstream commit `413e2a87`');
+    expect(notices).toContain(
+      '([source](https://github.com/strukturag/libde265/releases/download/v1.0.15/libde265-1.0.15.tar.gz))',
+    );
+    expect(notices).toContain('reverse engineer Tau to debug such');
+    expect(notices).toContain('it grants no patent license for HEVC');
+  });
+
+  it('reproduces the LGPL-3.0 and GPL-3.0 texts in full', () => {
+    expect(notices).toContain('## GNU Lesser General Public License version 3\n\n```text\nGNU LESSER GENERAL');
+    expect(notices).toContain('## GNU General Public License version 3\n\n```text\nGNU GENERAL PUBLIC LICENSE');
+  });
+
   it('lists packages and vendored components with their licenses', () => {
     expect(notices).toContain('| [zod](https://github.com/colinhacks/zod) | 4.1.12 | MIT |');
     expect(notices).toContain('| unlabelled | 1.0.0 | Not declared |');
     expect(notices).toContain('| circuit-json | 0.0.485 | ISC, license text pending |');
+  });
+});
+
+describe('splitLibheifLicense', () => {
+  const rule = '-'.repeat(70);
+  const file = [
+    '* The library `libheif` is distributed under the terms of the GNU Lesser General Public License.',
+    '',
+    rule,
+    '',
+    '                   GNU LESSER GENERAL PUBLIC LICENSE',
+    '                       Version 3, 29 June 2007',
+    'lesser terms',
+    rule,
+    '',
+    '                    GNU GENERAL PUBLIC LICENSE',
+    '                       Version 3, 29 June 2007',
+    'general terms',
+    rule,
+    'MIT License',
+  ].join('\n');
+
+  it('returns the LGPL-3.0 and GPL-3.0 texts the libheif-js license file holds', () => {
+    const { lgpl3, gpl3 } = splitLibheifLicense(file);
+    expect(lgpl3).toContain('GNU LESSER GENERAL PUBLIC LICENSE');
+    expect(lgpl3).toContain('lesser terms');
+    expect(lgpl3).not.toContain('general terms');
+    expect(gpl3).toContain('GNU GENERAL PUBLIC LICENSE');
+    expect(gpl3).not.toContain('MIT License');
+  });
+
+  it('refuses a file without both texts', () => {
+    expect(() => splitLibheifLicense('MIT License')).toThrow('does not hold the LGPL-3.0 and GPL-3.0 texts');
   });
 });
 

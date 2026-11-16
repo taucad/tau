@@ -13,8 +13,8 @@
  * draft. `addDraftAttachment` / `addEditDraftAttachment` accept a raw data URL
  * (or a document's bytes) and enqueue it in `context.attachmentQueue`, after refusing a kind the
  * selected model cannot read (D20). Entries are processed FIFO: images pass
- * through `resizing` (`resizeImageActor`), documents skip it, and every entry
- * then enters `storing`, where `storeAttachmentActor` hashes and writes the
+ * through `resizing` (`resizeImageActor`, which applies the storage policy and
+ * converts through the runtime), documents skip it, and every entry then enters `storing`, where `storeAttachmentActor` hashes and writes the
  * bytes. Only a stored attachment is referenced by the draft, so the blob is
  * durable before the reference (D18). Failures emit `imageResizeFailed` or
  * `attachmentStoreFailed` and add nothing; refusals emit `attachmentRefused`.
@@ -66,6 +66,8 @@ type AttachmentQueueEntry = {
   /** An image awaiting `resizing`. */
   readonly dataUrl?: string;
   readonly preserveOriginal: boolean;
+  /** The file's declared type, for the intake counter only. */
+  readonly declaredType?: string;
   /** Set once the entry is ready for `storing`: at enqueue for a document, after `resizing` for an image. */
   readonly bytes?: Uint8Array<ArrayBuffer>;
 };
@@ -137,6 +139,8 @@ type AddAttachment = AttachmentInput & {
   filename?: string;
   /** Keep a generated capture byte for byte instead of resizing it. */
   preserveOriginal?: boolean;
+  /** The picked or pasted file's declared `type`, counted at intake; never used to label the bytes (I1). */
+  declaredType?: string;
   model: DraftAttachmentModel;
 };
 
@@ -222,7 +226,13 @@ type Enqueued = { entry: AttachmentQueueEntry } | { error: Error };
  */
 const queueEntryFor = (
   source: AttachmentInput,
-  options: { target: DraftTarget; editMessageId?: string; filename?: string; preserveOriginal: boolean },
+  options: {
+    target: DraftTarget;
+    editMessageId?: string;
+    filename?: string;
+    preserveOriginal: boolean;
+    declaredType?: string;
+  },
 ): Enqueued => {
   const mediaType =
     'bytes' in source ? source.mediaType.toLowerCase() : dataUrlPattern.exec(source.dataUrl)?.[1]?.toLowerCase();
@@ -235,6 +245,7 @@ const queueEntryFor = (
     preserveOriginal: options.preserveOriginal,
     ...(options.editMessageId === undefined ? {} : { editMessageId: options.editMessageId }),
     ...(options.filename === undefined ? {} : { filename: options.filename }),
+    ...(options.declaredType === undefined ? {} : { declaredType: options.declaredType }),
   };
   if ('bytes' in source) {
     return attachmentKind(mediaType) === 'image'
@@ -372,14 +383,14 @@ const clearMessageEditActor = createAsyncLogic<void, { messageId: string }>({
 });
 
 /**
- * Placeholder resize actor. The real implementation lives in
- * `apps/libs/chat-ui/src/hooks/resize-image.actor.ts` and is provided via
+ * Placeholder image step. The real implementation lives in
+ * `apps/ui/app/hooks/attachment-image.actor.ts` and is provided via
  * `.provide({ actors: { resizeImageActor } })` by every ownership site.
  * Tests override with a deterministic fake.
  */
 const resizeImageActor = createAsyncLogic<
   { type: 'imageResized'; resized: string },
-  { image: string; preserveOriginal: boolean }
+  { image: string; preserveOriginal: boolean; declaredType?: string }
 >({
   run: async () => {
     throw new Error('draftMachine: the resizeImageActor actor was not provided.');
@@ -428,6 +439,7 @@ const enqueueAttachment = (
     editMessageId: target === 'edit' ? context.activeEditMessageId : undefined,
     filename: event.filename,
     preserveOriginal: event.preserveOriginal ?? false,
+    declaredType: event.declaredType,
   });
   if ('error' in result) {
     enq.emit({ type: 'attachmentStoreFailed', error: result.error });
@@ -807,10 +819,14 @@ export const draftMachine = setup({
         resizing: {
           invoke: {
             src: 'resizeImageActor',
-            input: ({ context }) => ({
-              image: context.attachmentQueue[0]!.dataUrl!,
-              preserveOriginal: context.attachmentQueue[0]!.preserveOriginal,
-            }),
+            input: ({ context }) => {
+              const head = context.attachmentQueue[0]!;
+              return {
+                image: head.dataUrl!,
+                preserveOriginal: head.preserveOriginal,
+                ...(head.declaredType === undefined ? {} : { declaredType: head.declaredType }),
+              };
+            },
             /* The result is the `imageResized` event its handler below reads. */
             onDone: ({ event }, enq) => {
               enq.raise(event.output);

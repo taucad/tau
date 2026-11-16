@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /** A newly focused chat owns its own session and chat-record writes. */
-import { expect, it, vi } from 'vitest';
+import { beforeAll, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
 
@@ -50,6 +51,12 @@ const emptyClient = (): ChatSessionDeps['client'] => {
     rmdir: vi.fn().mockResolvedValue(undefined),
   };
 };
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 it('keeps a newly focused chat’s error write on its own chatId', async () => {
   const patchChat = vi.fn().mockResolvedValue(undefined);

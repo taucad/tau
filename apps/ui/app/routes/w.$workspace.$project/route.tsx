@@ -9,7 +9,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
 import { recoverFromCaughtError } from '#lib/stale-build-recovery.js';
-import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
+import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import { ProjectRouteNotice } from '#routes/w.$workspace.$project/project-route-notices.js';
 import type { Handle } from '#types/matches.types.js';
@@ -77,7 +77,7 @@ function DeferredProjectChatRoute(): React.JSX.Element {
       </div>
     );
   }
-  return <WorkspaceSkeleton />;
+  return <WorkspaceOpening />;
 }
 
 export default function WorkspaceProjectRoute(): React.JSX.Element {

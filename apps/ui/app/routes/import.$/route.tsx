@@ -126,9 +126,9 @@ export function meta({ params, location }: Route.MetaArgs): MetaDescriptor[] {
  * React Router SPA mode (`ui:build:desktop`) bans server `loader` exports.
  */
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- inferred type
-export function clientLoader({ request, params }: Route.ClientLoaderArgs) {
+export function clientLoader({ url, params }: Route.ClientLoaderArgs) {
   /* An address that is not a GitHub repository opens the form holding it, never the crash page. */
-  return resolveImportRoute(readSplatPath(params), new URL(request.url).search);
+  return resolveImportRoute(readSplatPath(params), url.search);
 }
 
 type ImportMode = 'github' | 'disk';

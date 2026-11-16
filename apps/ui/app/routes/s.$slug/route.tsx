@@ -1,7 +1,7 @@
 import { Heading } from '@taucad/ui/components/heading';
 import { SharedProjectPassword } from '#components/share/shared-project-password.js';
 import { useEffect, useMemo, useState } from 'react';
-import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
+import type { MetaFunction } from 'react-router';
 import { useLoaderData, useLocation, useParams } from 'react-router';
 import {
   getActiveGroupValues,
@@ -31,6 +31,7 @@ import type { ParsedPublication } from '#components/share/parsed-publication.js'
 import { GithubGistManagement } from '#components/share/github-gist-management.js';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { shareProviderRegistry, withBrowserShareProviderContext } from '#lib/share-providers.js';
+import type { Route } from './+types/route.js';
 
 export const handle: Handle = { enablePageWrapper: false };
 
@@ -124,7 +125,7 @@ export const resolvePortableArtifact = (
   };
 };
 
-export const loader = async (arguments_: LoaderFunctionArgs): Promise<unknown> => {
+export const loader = async (arguments_: Route.LoaderArgs): Promise<unknown> => {
   const { slug } = arguments_.params;
   if (!slug) {
     // oxlint-disable-next-line typescript-eslint/only-throw-error -- route loaders use Response for HTTP status control.
@@ -144,7 +145,7 @@ export const loader = async (arguments_: LoaderFunctionArgs): Promise<unknown> =
         description: example.manifest.description,
         ...(example.thumbnailUrl
           ? {
-              thumbnail: new URL(example.thumbnailUrl, arguments_.request.url).toString(),
+              thumbnail: new URL(example.thumbnailUrl, arguments_.url).toString(),
             }
           : {}),
       },

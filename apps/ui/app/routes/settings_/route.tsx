@@ -11,9 +11,10 @@ import type { Route } from './+types/route.js';
  * The rest of the query survives, as it does for `/settings/<section>`, so a Checkout return to
  * `/settings?payment_action=…` still reaches the dialog with its payment context.
  */
-export function loader({ request }: Route.LoaderArgs): Response {
+export function loader({ url }: Route.LoaderArgs): Response {
   const search = new URLSearchParams({ settings: 'general' });
-  for (const [key, value] of new URL(request.url).searchParams) {
+  // `url`, not `request.url`: a client navigation's request also carries `_routes` (B4).
+  for (const [key, value] of url.searchParams) {
     if (key !== 'settings') {
       search.append(key, value);
     }

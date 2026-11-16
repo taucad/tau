@@ -18,6 +18,30 @@ export const harnessSentryEnvironments = ['staging', 'staging-e2e'] as const;
  */
 export const harnessNavigationTimeout = 120_000;
 
+/**
+ * Whether a Sentry envelope carries an error event: an item whose header is `{"type":"event"}`. The SDK also posts
+ * session updates and transactions to the tunnel, and in WebKit a session update usually answers first, so a wait on
+ * the first tunnel response closes the browser while the error is still in flight.
+ *
+ * @param body - The posted envelope: its header line, then each item's header line and its one-line payload.
+ * @returns `true` for an envelope with an error event in it.
+ */
+export const isEventEnvelope = (body: string | undefined): boolean => {
+  const lines = body?.split('\n') ?? [];
+  // ponytail: one payload line per item, as the browser SDK writes them; a multi-line binary attachment would misalign.
+  for (let index = 1; index < lines.length; index += 2) {
+    try {
+      const header: unknown = JSON.parse(lines[index] ?? '');
+      if (typeof header === 'object' && header !== null && 'type' in header && header.type === 'event') {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return false;
+};
+
 /** One correlation id per failure, browser and consent decision. */
 export function createObservabilityRunId(): string {
   return `e2e-${randomUUID()}`;

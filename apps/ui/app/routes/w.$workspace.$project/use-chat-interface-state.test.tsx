@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   activeTab: 'viewer',
   ready: true,
+  /** The editor machine's state while it is not ready: `idle`, `loading.hydrating` or `loading.ensuringFocusedChat`. */
+  loading: 'idle' as 'idle' | 'loading.hydrating' | 'loading.ensuringFocusedChat',
 }));
 const send = vi.fn();
 const snapshot = {
@@ -18,7 +20,10 @@ const snapshot = {
       },
     };
   },
-  matches: () => state.ready,
+  matches: (value: string | { readonly loading: string }) => {
+    const current = state.ready ? 'ready' : state.loading;
+    return typeof value === 'string' ? current.split('.')[0] === value : current === `loading.${value.loading}`;
+  },
 };
 
 vi.mock('@xstate/react', () => ({
@@ -35,6 +40,7 @@ describe('useChatInterfaceState mobile drawer', () => {
   beforeEach(() => {
     state.activeTab = 'viewer';
     state.ready = true;
+    state.loading = 'idle';
     send.mockClear();
     send.mockImplementation((event: { readonly panelState?: { readonly mobileActiveTab?: string } }) => {
       if (event.panelState?.mobileActiveTab) {
@@ -175,6 +181,26 @@ describe('useChatInterfaceState mobile drawer', () => {
     state.ready = false;
     rerender();
     expect(result.current.isEditorReady).toBe(false);
+  });
+
+  /* A15c: the phone frame hands over once the stored panel state is read, before the editor ensures its chat. */
+  it('reports the layout restored once the editor has left idle and hydrating, before it is ready', () => {
+    state.ready = false;
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+    expect(result.current.isLayoutRestored).toBe(false);
+
+    state.loading = 'loading.hydrating';
+    rerender();
+    expect(result.current.isLayoutRestored).toBe(false);
+
+    state.loading = 'loading.ensuringFocusedChat';
+    rerender();
+    expect(result.current.isLayoutRestored).toBe(true);
+    expect(result.current.isEditorReady).toBe(false);
+
+    state.ready = true;
+    rerender();
+    expect(result.current.isLayoutRestored).toBe(true);
   });
 
   it('offers half and full detents, in that order: collapsed is the sheet closed on the model', () => {

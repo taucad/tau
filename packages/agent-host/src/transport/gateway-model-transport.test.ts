@@ -1990,12 +1990,12 @@ describe('createGatewayModelTransport', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('refuses unsupported Vertex xhigh reasoning before fetch', async () => {
+  it('refuses unsupported Vertex max reasoning before fetch', async () => {
     const fetchSpy = vi.fn();
     const transport = createGatewayModelTransport({ baseUrl: 'https://gateway.example', fetch: fetchSpy });
 
     await expect(
-      collect(transport.stream(request({ providerKind: 'vertexai', reasoning: { effort: 'xhigh' } }))),
+      collect(transport.stream(request({ providerKind: 'vertexai', reasoning: { effort: 'max' } }))),
     ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
     expect(fetchSpy).not.toHaveBeenCalled();
   });

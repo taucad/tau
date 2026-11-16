@@ -79,7 +79,7 @@ export const reactE2ETargets = [
     artifactInspection: { kind: 'runtime', root: resolve(reactRouterRoot, 'build-isolated/client/assets') },
     metadata: {
       deployment: 'isolated',
-      expectedVersions: { 'react-router': '7.18.2', '@react-router/dev': '7.18.2', vite: '7.3.6' },
+      expectedVersions: { 'react-router': '7.18.5', '@react-router/dev': '7.18.5', vite: '7.3.6' },
       framework: 'react-router',
       mode: 'production',
       version: '7',
@@ -116,7 +116,7 @@ export const reactE2ETargets = [
     artifactInspection: { kind: 'runtime', root: resolve(reactRouterRoot, 'build-non-isolated/client/assets') },
     metadata: {
       deployment: 'non-isolated',
-      expectedVersions: { 'react-router': '7.18.2', '@react-router/dev': '7.18.2', vite: '7.3.6' },
+      expectedVersions: { 'react-router': '7.18.5', '@react-router/dev': '7.18.5', vite: '7.3.6' },
       framework: 'react-router',
       mode: 'production',
       version: '7',
@@ -209,7 +209,7 @@ export const reactE2ETargets = [
     },
     metadata: {
       deployment: 'isolated',
-      expectedVersions: { 'react-router': '7.18.2', '@react-router/dev': '7.18.2', vite: '7.3.6' },
+      expectedVersions: { 'react-router': '7.18.5', '@react-router/dev': '7.18.5', vite: '7.3.6' },
       framework: 'react-router',
       mode: 'development',
       version: '7',

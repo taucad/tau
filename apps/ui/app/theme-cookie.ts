@@ -7,6 +7,7 @@ import type { ThemeWithSystem } from '#hooks/use-theme.js';
  * The theme cookie from before the client-facts record, reading half. Only the one-time migration route reads it
  * (`routes/action.migrate-theme.ts`); the theme itself is a client fact (`#lib/client-facts`).
  */
+/* `requestUrl` is `request.url`, read for its protocol only, which a `.data` suffix never changes (B4). */
 export const createThemeCookie = (requestUrl: string): ReturnType<typeof createCookie> =>
   createCookie(`${metaConfig.cookiePrefix}theme`, {
     path: '/',

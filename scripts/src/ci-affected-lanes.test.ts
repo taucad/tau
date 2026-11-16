@@ -242,11 +242,13 @@ describe('ci.yml affected-only lanes', () => {
     const run = steps.find((step) => step.name === "Run the lane's tasks")?.run ?? '';
     const build = /^\s*build\) (.*) ;;$/mu.exec(run)?.[1] ?? '';
     expect(build).toBe(
-      'pnpm nx affected -t build size check-desktop-payload check-critical-budget check-server-output --parallel=1',
+      'pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output --parallel=1',
     );
     expect(nxTargets(build)).toContainEqual({ target: 'check-desktop-payload', affected: true });
     // The critical-path budget (PL0) runs beside it in the same lane, so a ui change is held to its budget.
     expect(nxTargets(build)).toContainEqual({ target: 'check-critical-budget', affected: true });
+    // So do the static-shell invariants (PL3), on the same build.
+    expect(nxTargets(build)).toContainEqual({ target: 'check-static-shells', affected: true });
     // The SSR bundle budget (`ui:size`) and the server-output check (RR0) run there too.
     expect(nxTargets(build)).toContainEqual({ target: 'size', affected: true });
     expect(nxTargets(build)).toContainEqual({ target: 'check-server-output', affected: true });
@@ -262,6 +264,7 @@ describe('ci.yml affected-only lanes', () => {
     // `size` and `check-server-output` exist on ui, so the lane's names select them, and each reads the builds it
     // checks; the docs site checks its own build.
     expect(ui.targets['size']?.dependsOn).toEqual(['build']);
+    expect(ui.targets['check-static-shells']?.dependsOn).toEqual(['build']);
     expect(ui.targets['check-server-output']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
     const docs = JSON.parse(read('apps/docs/project.json')) as {
       targets: Record<string, { readonly dependsOn?: readonly unknown[] }>;

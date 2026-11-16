@@ -53,7 +53,6 @@ const onDemandModules = [
  */
 const knownHeavyReach: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   project: {
-    ai: 'PL1: entry.client -> runtime/app-runtime -> services/chat-session-store',
     editor: 'PL5: the code viewer of the workbench dock (chat-editor-code-viewer)',
     'react-three': 'PL5: the printer viewer of the workbench dock',
     runtime: "PL5: the viewer's runtime client (chat-viewer)",
@@ -61,9 +60,7 @@ const knownHeavyReach: Readonly<Record<string, Readonly<Record<string, string>>>
     three: 'PL5: part thumbnails and the printer viewer',
   },
   home: {
-    ai: 'PL1: entry.client -> runtime/app-runtime -> services/chat-session-store',
     sentry: 'PL5: error reporting (lib/sentry-event.lib)',
-    three: "PL1: the composer's static edge to runtime/project-runtime and its view records",
   },
 };
 

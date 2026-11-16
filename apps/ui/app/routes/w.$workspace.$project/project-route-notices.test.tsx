@@ -17,7 +17,10 @@ import type { SessionRuntimeOpenerStandIn } from '#runtime/project-runtime.sessi
 import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 
 const navigate = vi.fn();
-vi.mock('react-router', () => ({ useNavigate: () => navigate }));
+vi.mock('react-router', () => ({
+  useNavigate: () => navigate,
+  useParams: () => ({ workspace: 'home', project: 'one' }),
+}));
 
 const send = vi.fn();
 const focusSend = vi.fn();
@@ -207,7 +210,7 @@ describe('ProjectRouteNotice', () => {
 
     const skeleton = screen.getByRole('status');
     expect(skeleton).toHaveAccessibleName('Opening project');
-    expect(skeleton).toHaveAttribute('data-testid', 'workspace-skeleton');
+    expect(skeleton).toHaveAttribute('data-testid', 'workspace-opening');
     expect(screen.queryByRole('button', { name: 'Toggle Sidebar' })).not.toBeInTheDocument();
   });
 

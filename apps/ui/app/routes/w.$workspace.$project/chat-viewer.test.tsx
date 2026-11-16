@@ -92,8 +92,8 @@ let mockFileContent: { kind: string; text?: string };
 let mockMainEntryPath = 'main.scad';
 let mockSyncStatus: {
   readonly sync: { readonly state: 'checking' | 'backedUp' };
-  /** The checkout's published readiness: before `filled` the model's files are still being checked (D10). */
-  readonly readiness?: 'materialized' | 'treeReady' | 'filled';
+  /** The checkout's published readiness: before `materialized` the model's files are still being checked (D10, T6). */
+  readonly readiness?: 'treeReady' | 'entryReady' | 'filled';
   /** A running or failed download of the model's large files. */
   readonly largeObjects?: Readonly<{
     phase: 'fetching' | 'failed';
@@ -1845,7 +1845,7 @@ const publishSyncStatus = (next: typeof mockSyncStatus): void => {
 describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U20, P-j)', () => {
   const checking = {
     sync: { state: 'backedUp' },
-    readiness: 'materialized',
+    readiness: 'entryReady',
   } as const;
   const filled = { sync: { state: 'backedUp' }, readiness: 'filled' } as const;
   const largeObjects = (phase: 'fetching' | 'failed') =>
@@ -1953,6 +1953,8 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
   });
 
   it('should show a download of the model files as the stage pill with its percent (K-e, component half)', () => {
+    /* The view runs the entry the download fetches, so it is in the render closure (T6). */
+    mockViewSettings = { 'view-1': { entryPath: helperEntryPath, graphicsSettings: defaultGraphicsSettings } };
     mockSyncStatus = largeObjects('fetching');
     renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 

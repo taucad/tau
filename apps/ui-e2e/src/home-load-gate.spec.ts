@@ -25,6 +25,7 @@ import {
   readDelayedRequests,
   holdRequestsUntilReleased,
   releaseHeldRequests,
+  readFirstInputAccepted,
   readHomeLoad,
   readProjectLoad,
   firstDelayedRead,
@@ -189,6 +190,33 @@ test.each(
       `${label} reload`,
       await measure(async () => target.reload(), { label: `${label}-reload`, projects, rate }),
     );
+  },
+);
+
+/*
+ * PL6 (progressive loading, OD1): the gate's first mark is "first input accepted", the first frame a native input could
+ * take text. Home's served input is held for first paint (`rel=expect`), so the mark falls no later than first
+ * contentful paint, one frame of slack for the paint's own timestamp. The bundle reports it as `tau.load.input.accepted`
+ * from navigation start. The values are kept as evidence for the trend (G5).
+ */
+test.each(['wide', 'phone'] as const)(
+  'should mark the first input accepted at first paint on a $0 viewport',
+  async (viewport) => {
+    await target.setViewport(viewports[viewport]);
+    await target.installModelCatalogFixture(catalogLatency);
+    await target.startModelCatalogApi();
+    await target.navigate('/');
+    await target.expectVisible(richComposer, 60_000);
+    const accepted = await readFirstInputAccepted();
+    await target.writeArtifact(
+      `home-load-gate/first-input-accepted-${viewport}.json`,
+      `${JSON.stringify(accepted, null, 2)}\n`,
+    );
+
+    expect(accepted.mark, 'the served recorder left no first-input mark').toEqual(expect.any(Number));
+    expect(accepted.measure).toEqual({ start: 0, end: accepted.mark, phase: 'input.accepted' });
+    expect(accepted.firstContentfulPaint).toEqual(expect.any(Number));
+    expect(accepted.mark!).toBeLessThanOrEqual(accepted.firstContentfulPaint! + 17);
   },
 );
 

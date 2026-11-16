@@ -1,7 +1,8 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router';
+import { Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router';
+import { DataBrowserRouter } from '#test-utils/data-memory-router.js';
 import type { NavigateOptions } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -401,7 +402,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => undefined,
 }));
 
-vi.mock('#hooks/use-project.js', () => ({
+vi.mock('#hooks/project-provider.js', () => ({
   SessionProjectProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
     projectProviderInputs.push(projectId);
     return (
@@ -410,12 +411,17 @@ vi.mock('#hooks/use-project.js', () => ({
       </projectIdContext.Provider>
     );
   },
+}));
+vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     projectId: useContext(projectIdContext),
     projectRef,
     editorRef,
     parameterService,
     viewGraphics,
+    mainEntryPath: '',
+    viewRecords: new Map(),
+    geometryUnits: new Map(),
   }),
 }));
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({
@@ -495,7 +501,7 @@ vi.mock('#routes/w.$workspace.$project/project-print-route-intent.js', () => ({ 
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
   ProjectShareRouteIntent: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+vi.mock('#routes/w.$workspace.$project/project-workspace-provider.js', () => ({
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({
@@ -560,6 +566,7 @@ vi.mock('#hooks/use-projects.js', () => ({
     ),
 }));
 const routeModule = await import('./project-route.js');
+const { WorkspaceFrame } = await import('./workspace-frame.js');
 const intentModule = await import('./project-route-intent.js');
 const sessionsModule = await import('./project-live-sessions.js');
 const { startFocusHost } = await import('#runtime/app-runtime-focus.fixture.js');
@@ -1519,7 +1526,7 @@ const navigateTo = async (target: string, options?: NavigateOptions): Promise<vo
  */
 const renderHost = (initialEntry: string, shell?: React.ReactNode): ReturnType<typeof render> =>
   render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <DataBrowserRouter initialEntry={initialEntry}>
       <RouterProbe />
       <SessionsProvider actor={sessionsActor} focus={focusHost}>
         <routeModule.ProjectSessionsHost>
@@ -1538,7 +1545,7 @@ const renderHost = (initialEntry: string, shell?: React.ReactNode): ReturnType<t
           </Routes>
         </routeModule.ProjectSessionsHost>
       </SessionsProvider>
-    </MemoryRouter>,
+    </DataBrowserRouter>,
   );
 
 const providerRequestsOf = (projectId: string) =>
@@ -2447,29 +2454,33 @@ describe('project route shell identity (A0.7)', () => {
     listing.set([listed(projectA, 'ws', 'alpha')]);
     sharedWorkerState = 'pending';
     const tree = (): React.JSX.Element => (
-      <MemoryRouter initialEntries={['/w/ws/alpha']}>
+      <DataBrowserRouter initialEntry='/w/ws/alpha'>
         <SessionsProvider actor={sessionsActor} focus={focusHost}>
           <routeModule.ProjectSessionsHost>
             <ShellMarker />
-            <Routes>
-              <Route
-                path='/w/:workspace/:project'
-                element={
-                  <routeModule.ProjectRouteProviders>
-                    <sessionsModule.ProjectChatRoute />
-                  </routeModule.ProjectRouteProviders>
-                }
-              />
-            </Routes>
+            {/* A15b2: the shell hosts the workspace frame (`Page`), around the route's providers. */}
+            <WorkspaceFrame>
+              <Routes>
+                <Route
+                  path='/w/:workspace/:project'
+                  element={
+                    <routeModule.ProjectRouteProviders>
+                      <sessionsModule.ProjectChatRoute />
+                    </routeModule.ProjectRouteProviders>
+                  }
+                />
+              </Routes>
+            </WorkspaceFrame>
           </routeModule.ProjectSessionsHost>
         </SessionsProvider>
-      </MemoryRouter>
+      </DataBrowserRouter>
     );
     const view = render(tree());
     await flushTasks();
-    /* Connecting: the shell is there and the content region holds the workspace's placeholder. */
+    /* Connecting: the shell is there and the content region holds the workspace frame, with nothing over it. */
     expect(shellNodes()).toHaveLength(1);
-    expect(screen.getByTestId('workspace-skeleton')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-slot="workspace-frame"]')).toHaveLength(1);
+    expect(screen.getByTestId('workspace-opening')).toBeInTheDocument();
     expect(screen.queryByTestId('focused-project')).not.toBeInTheDocument();
 
     sharedWorkerState = 'ready';

@@ -911,10 +911,13 @@ describe('the external agent run kind', () => {
         providerPermission: {
           owner: 'provider',
           persistence: 'unverified',
-          options: ['allow', 'allow-session', 'allow-always', 'reject'].map((optionId) => ({
-            optionId,
-            requestedScope: 'unspecified',
-          })),
+          /* The unreviewed adapter claims no saved scope; ACP's own once kinds are still once. */
+          options: [
+            { optionId: 'allow', requestedScope: 'once' },
+            { optionId: 'allow-session', requestedScope: 'unspecified' },
+            { optionId: 'allow-always', requestedScope: 'unspecified' },
+            { optionId: 'reject', requestedScope: 'once' },
+          ],
         },
       });
       expect(JSON.stringify(pending?.payload)).not.toContain('permission-metadata-canary');

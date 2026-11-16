@@ -2,7 +2,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
 import { writeChatPlacement } from '@taucad/chat-ui/db/chat-placements';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { mock } from 'vitest-mock-extended';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { chatMessageQueuePath } from '@taucad/chat-ui/db/chat-message-queue-store';
@@ -392,6 +393,12 @@ function publishAdmission(
     request: await request(gesture),
   }));
 }
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
   // An SDK watch requires a visible admitted input; lifecycle-only logs cannot
@@ -4041,6 +4048,54 @@ describe('ChatSessionStore', () => {
     unsubscribe();
   });
 
+  it.each([
+    ['a summary of an ancestor', { type: 'change', path: '.tau/chats' }, 2],
+    ['a summary of the project root', { type: 'change', path: '' }, 2],
+    ['a deletion of an ancestor', { type: 'delete', path: '.tau' }, 2],
+    ['a summary of a sibling chat', { type: 'change', path: '.tau/chats/chat_other' }, 1],
+    ['a summary of a sibling whose name shares a prefix', { type: 'change', path: '.tau/chat' }, 1],
+  ] satisfies Array<[string, WatchEvent, number]>)(
+    'refolds a foreign segment directory on %s',
+    async (_case, event, reads) => {
+      const store = new ChatSessionStore({ projectSessions: liveSessions, chatSession });
+      const client = createMemoryClient();
+      client.files.set(
+        '/projects/project/.tau/chats/chat_foreign/events/peer.jsonl',
+        new TextEncoder().encode(JSON.stringify(lifecycleRow(0, 'running'))),
+      );
+      const readFile = vi.spyOn(client, 'readFile');
+      let listener: ((event: WatchEvent) => void) | undefined;
+      store.setDependencies({
+        ...createStubDeps(client),
+        watchRecordFile: (_directory, callback) => {
+          listener = callback;
+          return {
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              /* Owner-controlled watch. */
+            }),
+            dispose: vi.fn(),
+          };
+        },
+      });
+      const release = store.observe('chat_foreign', 'project');
+      try {
+        await vi.waitFor(() => {
+          expect(readFile).toHaveBeenCalledOnce();
+        });
+        listener?.(event);
+        await settle();
+        await vi.waitFor(() => {
+          expect(readFile).toHaveBeenCalledTimes(reads);
+        });
+        await settle();
+        expect(readFile).toHaveBeenCalledTimes(reads);
+      } finally {
+        release();
+      }
+    },
+  );
+
   it('updates the active tool name from the log when counts stay unchanged (PV-S7)', () => {
     const store = createStore();
     const session = store.acquire('chat_tool_name', 'project_1');
@@ -5468,12 +5523,11 @@ describe('ChatSessionStore', () => {
       const cancel = hostCommand.mock.calls[0]?.[0];
       expect(cancel?.type).toBe('cancel');
       /* The host labels every cancel USER_STOPPED; only this line says which gesture sent it. */
-      expect(info).toHaveBeenCalledWith('[ChatSessionStore] host cancel', {
-        chatId,
-        runId,
-        commandId: cancel?.commandId,
-        origin: 'stop-button',
-      });
+      // As JSON text: the desktop log flattens an object argument to `[object Object]`.
+      expect(info).toHaveBeenCalledWith(
+        '[ChatSessionStore] host cancel',
+        JSON.stringify({ chatId, runId, commandId: cancel?.commandId, origin: 'stop-button' }),
+      );
       info.mockRestore();
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
 

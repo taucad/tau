@@ -87,8 +87,8 @@ vi.mock('#flags/use-feature.js', () => ({
 }));
 
 const { workbenchSurfaces } = await import('#routes/w.$workspace.$project/chat-workbench-dockview.js');
-const { ProjectWorkspaceProvider, useProjectWorkspace } =
-  await import('#routes/w.$workspace.$project/project-workspace-context.js');
+const { useProjectWorkspace } = await import('#routes/w.$workspace.$project/project-workspace-context.js');
+const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-provider.js');
 const { mobilePanelByWorkbenchPanel } =
   await import('#routes/w.$workspace.$project/project-workspace-context.panels.js');
 const { ChatInterfaceNav, surfaceTitle } = await import('#routes/w.$workspace.$project/chat-interface-nav.js');

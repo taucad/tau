@@ -93,7 +93,7 @@ const row = (modelId: string): ModelListEntry => {
 /**
  * The environment variable one catalog row's provider needs.
  *
- * @param modelId - Tau catalog model id, such as `google-gemini-3.8-flash`.
+ * @param modelId - Tau catalog model id, such as `google-gemini-4-hydrogen`.
  * @returns The credential's environment variable name.
  */
 export const liveCredentialName = (modelId: string): string => {

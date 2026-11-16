@@ -2,17 +2,18 @@ import * as React from 'react';
 import { useLoaderData } from 'react-router';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import type { Route } from './+types/route.js';
 
 const validFixture = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
 
-export const loader = async ({ request }: { readonly request: Request }): Promise<{ readonly fixture: string }> => {
+export const loader = async ({ url }: Route.LoaderArgs): Promise<{ readonly fixture: string }> => {
   const environment = await getEnvironment();
   if (!environment.TAU_DEBUG) {
     // oxlint-disable-next-line typescript/only-throw-error -- React Router uses Response for route control flow.
     throw new Response('Not found', { status: 404 });
   }
 
-  const fixture = new URL(request.url).searchParams.get('fixture') ?? '';
+  const fixture = url.searchParams.get('fixture') ?? '';
   if (!validFixture.test(fixture)) {
     // oxlint-disable-next-line typescript/only-throw-error -- React Router uses Response for route control flow.
     throw new Response('Invalid fixture', { status: 400 });

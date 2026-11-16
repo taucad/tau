@@ -170,6 +170,8 @@ export type {
   AcpSupportedPlatform,
   AcpTurnOutcome,
   AcpWireFrame,
+  AgentMediaTranscoder,
+  AgentMediaTranscoding,
   OpenAcpSessionOptions,
   ReviewedAcpAgentProfile,
   SpawnedAcpAdapter,

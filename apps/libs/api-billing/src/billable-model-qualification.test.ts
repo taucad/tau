@@ -26,7 +26,7 @@ const resolver = new CodeOwnedBillableModelQualificationResolver({
     ['anthropic-claude-opus-5', adapter],
     ['together-glm-5.3', adapter],
     ['morph-deepseek-v4.1-flash', adapter],
-    ['google-gemini-3.5-flash', adapter],
+    ['google-gemini-4-hydrogen', adapter],
     ['xai-grok-4.6', adapter],
   ]),
   executionTimeout: 30_000,
@@ -44,11 +44,11 @@ const intent = (body: unknown): Omit<BillableInvocationIntent, 'authUserId' | 's
 
 describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should preserve every intended static funded route identity', () => {
-    expect(billableModelRouteIds).toHaveLength(32);
-    expect(new Set(billableModelRouteIds).size).toBe(32);
+    expect(billableModelRouteIds).toHaveLength(29);
+    expect(new Set(billableModelRouteIds).size).toBe(29);
     expect(billableModelRouteIds).toContain('anthropic-claude-fable-5.2');
     expect(billableModelRouteIds).toContain('anthropic-claude-sonnet-5.5');
-    expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
+    expect(billableModelRouteIds).toContain('google-gemini-4-hydrogen');
     expect(billableModelRouteIds).toContain('morph-deepseek-v4.1-flash');
   });
 
@@ -87,7 +87,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should emit the exact Vertex OpenAI compatibility model name', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'google-gemini-3.5-flash',
+        model: 'google-gemini-4-hydrogen',
         messages: [{ role: 'user', content: 'hello' }],
         max_completion_tokens: 16,
         stream: true,
@@ -96,7 +96,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     });
 
     expect(result.normalizedRequest.body).toMatchObject({
-      model: 'google/gemini-3.5-flash',
+      model: 'google/gemini-4-hydrogen',
       messages: [{ role: 'user', content: 'hello' }],
       max_completion_tokens: 16,
     });
@@ -110,30 +110,30 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
       failure: 'no output maximum',
       limits: {},
       message:
-        'Model request must carry exactly one output-token maximum; route google-gemini-3.5-flash expects max_completion_tokens',
+        'Model request must carry exactly one output-token maximum; route google-gemini-4-hydrogen expects max_completion_tokens',
     },
     {
       failure: 'two output maxima',
       limits: { max_tokens: 16, max_completion_tokens: 16 },
       message:
-        'Model request must carry exactly one output-token maximum; route google-gemini-3.5-flash expects max_completion_tokens',
+        'Model request must carry exactly one output-token maximum; route google-gemini-4-hydrogen expects max_completion_tokens',
     },
     {
       failure: 'the field the route does not accept',
       limits: { max_tokens: 16 },
       message:
-        'Model request bounds output with a field route google-gemini-3.5-flash does not accept; it expects max_completion_tokens',
+        'Model request bounds output with a field route google-gemini-4-hydrogen does not accept; it expects max_completion_tokens',
     },
     {
       failure: 'a maximum past the route ceiling',
       limits: { max_completion_tokens: 65_537 },
-      message: "Model request max_completion_tokens of 65537 exceeds route google-gemini-3.5-flash's maximum of 65536",
+      message: "Model request max_completion_tokens of 65537 exceeds route google-gemini-4-hydrogen's maximum of 65536",
     },
   ])('should refuse $failure naming the route and its output field', ({ limits, message }) => {
     expect(() =>
       resolver.resolve({
         ...intent({
-          model: 'google-gemini-3.5-flash',
+          model: 'google-gemini-4-hydrogen',
           messages: [{ role: 'user', content: 'hello' }],
           stream: true,
           ...limits,
@@ -488,7 +488,7 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
   it('should carry a supplier valuation for Vertex operations so Gemini spend can settle', () => {
     const result = resolver.resolve({
       ...intent({
-        model: 'google-gemini-3.5-flash',
+        model: 'google-gemini-4-hydrogen',
         messages: [{ role: 'user', content: 'hello' }],
         max_completion_tokens: 16,
         stream: true,
@@ -498,13 +498,13 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
 
     expect(result.invocation.supplierValuation).toEqual({
       version: 'supplier-valuation-v1',
-      sourceRevision: 'official-pricing:2026-09-06:google-gemini-3.5-flash',
+      sourceRevision: 'official-pricing:2026-11-16:google-gemini-4-hydrogen',
       longContextMinimumInputTokens: null,
       longContextRates: null,
       baseRates: [
         { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1500000000000', denominatorUnits: '1000000' },
-        { dimension: 'cache_read', tier: null, numeratorPicoUsd: '150000000000', denominatorUnits: '1000000' },
-        { dimension: 'output', tier: null, numeratorPicoUsd: '9000000000000', denominatorUnits: '1000000' },
+        { dimension: 'cache_read', tier: null, numeratorPicoUsd: '75000000000', denominatorUnits: '1000000' },
+        { dimension: 'output', tier: null, numeratorPicoUsd: '7500000000000', denominatorUnits: '1000000' },
       ],
     });
   });
@@ -620,6 +620,18 @@ describe('catalog route vocabulary', () => {
       ]);
     },
   );
+
+  it('should bill gemini-4-hydrogen at its standard rate with no expiry', () => {
+    const result = qualifyRoute('google-gemini-4-hydrogen');
+
+    expect(result.normalizedRequest.body).toMatchObject({ model: 'google/gemini-4-hydrogen' });
+    expect(result.invocation.supplierRatesValidUntil).toBeNull();
+    expect(result.invocation.supplierRates).toEqual([
+      { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1500000000000', denominatorUnits: '1000000' },
+      { dimension: 'cache_read', tier: null, numeratorPicoUsd: '75000000000', denominatorUnits: '1000000' },
+      { dimension: 'output', tier: null, numeratorPicoUsd: '7500000000000', denominatorUnits: '1000000' },
+    ]);
+  });
 
   it.each([
     { input: 'hello', suffix: '', amounts: ['1000000000000', '50000000000', '1250000000000', '5000000000000'] },

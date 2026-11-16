@@ -35,6 +35,7 @@
     "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/gltf": "workspace:*",
+    "@taucad/heif": "workspace:*",
     "@taucad/grbl": "workspace:*",
     "@taucad/host": "workspace:*",
     "@taucad/image": "workspace:*",

@@ -482,6 +482,21 @@
           "querystring",
           "colors",
           {
+            "name": "react-router",
+            "allowTypeImports": true,
+            "importNames": [
+              "UNSAFE_DataRouterContext",
+              "UNSAFE_DataRouterStateContext",
+              "UNSAFE_FetchersContext",
+              "UNSAFE_FrameworkContext",
+              "UNSAFE_LocationContext",
+              "UNSAFE_NavigationContext",
+              "UNSAFE_RouteContext",
+              "UNSAFE_ViewTransitionContext"
+            ],
+            "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The exceptions are the live router reads in project-route-intent.tsx (RD9 amendment) and use-workspace-frame-state.ts (A15b2, F11)."
+          },
+          {
             "name": "@nx/vite/plugins/nx-tsconfig-paths.plugin",
             "message": "nxViteTsPaths applies tsconfig paths to every importer before Vite's resolver. Resolve # through package.json#imports, or add a scoped resolve.alias. See docs/research/scoped-hash-import-resolution.md."
           }
@@ -611,6 +626,10 @@
       "error",
       {
         "types": {
+          "AppLoadContext": {
+            "message": "React Router 8 removes AppLoadContext: with middleware on, loaders, actions and the entry take a RouterContextProvider (RR3). Type the context as RouterContextProvider and read per-request values through createContext keys.",
+            "fixWith": "RouterContextProvider"
+          },
           "object": {
             "message": "The `object` type is hard to use. Use `Record<string, unknown>` instead. See: https://github.com/typescript-eslint/typescript-eslint/pull/848",
             "fixWith": "Record<string, unknown>"
@@ -1407,7 +1426,31 @@
         "no-restricted-imports": [
           "error",
           {
-            "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"],
+            "paths": [
+              "error",
+              "domain",
+              "freelist",
+              "smalloc",
+              "punycode",
+              "sys",
+              "querystring",
+              "colors",
+              {
+                "name": "react-router",
+                "allowTypeImports": true,
+                "importNames": [
+                  "UNSAFE_DataRouterContext",
+                  "UNSAFE_DataRouterStateContext",
+                  "UNSAFE_FetchersContext",
+                  "UNSAFE_FrameworkContext",
+                  "UNSAFE_LocationContext",
+                  "UNSAFE_NavigationContext",
+                  "UNSAFE_RouteContext",
+                  "UNSAFE_ViewTransitionContext"
+                ],
+                "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The exceptions are the live router reads in project-route-intent.tsx (RD9 amendment) and use-workspace-frame-state.ts (A15b2, F11)."
+              }
+            ],
             "patterns": [
               {
                 "group": ["#components/*", "#routes/*"],
@@ -1434,7 +1477,31 @@
         "no-restricted-imports": [
           "error",
           {
-            "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"],
+            "paths": [
+              "error",
+              "domain",
+              "freelist",
+              "smalloc",
+              "punycode",
+              "sys",
+              "querystring",
+              "colors",
+              {
+                "name": "react-router",
+                "allowTypeImports": true,
+                "importNames": [
+                  "UNSAFE_DataRouterContext",
+                  "UNSAFE_DataRouterStateContext",
+                  "UNSAFE_FetchersContext",
+                  "UNSAFE_FrameworkContext",
+                  "UNSAFE_LocationContext",
+                  "UNSAFE_NavigationContext",
+                  "UNSAFE_RouteContext",
+                  "UNSAFE_ViewTransitionContext"
+                ],
+                "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The exceptions are the live router reads in project-route-intent.tsx (RD9 amendment) and use-workspace-frame-state.ts (A15b2, F11)."
+              }
+            ],
             "patterns": [
               {
                 "group": ["#components/*", "#hooks/*", "#routes/*"],
@@ -1935,9 +2002,10 @@
               "posthog-js/*",
               "@sentry/react"
             ],
-            // Reached only through a dynamic import: the editor, the viewer's loaders and debug tools, the
-            // language services, the conversion and preview routes and the e2e fixtures.
+            // Reached only through a dynamic import: the chat's AI SDK (PL1), the editor, the viewer's loaders and
+            // debug tools, the language services, the conversion and preview routes and the e2e fixtures.
             "deferredLeaves": [
+              "apps/libs/chat-ui/src/chat-clients/_internal/shared-chat-transport.ts",
               "apps/libs/ui-core/src/lib/lsp-completion-apply.ts",
               "apps/ui/app/components/cad/ar-webxr-scene.ts",
               "apps/ui/app/components/code/code-editor-view.client.tsx",
@@ -1973,13 +2041,10 @@
               "apps/ui/app/routes/w.$workspace.$project_.preview/",
               "apps/ui/app/runtime/ui-runtime.definition.ts",
               "apps/ui/app/runtime/usdz-runtime.definition.ts",
+              "apps/ui/app/services/chat-sdk.ts",
               "apps/ui/app/workers/geospec-runner.impl.ts"
             ],
             "known": [
-              // PL1 (runtime entry cut): the chat session store's transport and the `ai` SDK.
-              "apps/libs/chat-ui/src/chat-clients/_internal/shared-chat-transport.ts",
-              "apps/ui/app/machines/chat-projection.logic.ts",
-              "apps/ui/app/services/chat-session-store.ts",
               // PL5 (interactive-tier cut): the viewer, three.js and the runtime's root entry.
               "apps/libs/ui-core/src/services/headless-capture-presentation.ts",
               "apps/ui/app/components/printer/printer-camera-controls.tsx",

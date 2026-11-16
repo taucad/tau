@@ -115,7 +115,9 @@ describe('Home chat composer', () => {
     expect(container.textContent).not.toContain('Rich composer');
     document.body.append(container);
     const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
-    Object.assign(input, { tauEarlyDraft: { edited: false, composing: false } });
+    Object.assign(input, {
+      tauHandOff: { edited: false, composing: false, submitQueued: false, acceptedAt: undefined },
+    });
     const onRecoverableError = vi.fn();
     const root = hydrateRoot(container, content, { onRecoverableError });
     try {
@@ -124,7 +126,9 @@ describe('Home chat composer', () => {
       });
       await act(async () => {
         input.value = 'A bracket for a 3 mm shaft';
-        Object.assign(input, { tauEarlyDraft: { edited: true, composing: false } });
+        Object.assign(input, {
+          tauHandOff: { edited: true, composing: false, submitQueued: false, acceptedAt: undefined },
+        });
         input.dispatchEvent(new InputEvent('input', { bubbles: true }));
       });
       expect(within(container).getByRole('textbox')).toBe(input);

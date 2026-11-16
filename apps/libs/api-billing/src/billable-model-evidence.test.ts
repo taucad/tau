@@ -395,7 +395,7 @@ describe('createBillableModelEvidenceCollector', () => {
     });
   });
 
-  /* Production pins `cache_read` on every Gemini route (`rates('.75', '.075', undefined, '3.75')`), and Vertex
+  /* Production pins `cache_read` on every Gemini route (`rates('1.5', '.075', undefined, '7.5')`), and Vertex
    * omits `prompt_tokens_details` on a cache miss; the same live envelope must still settle. */
   it('should meter a Vertex cache miss as zero cache read when the tariff pins it', () => {
     const collector = createBillableModelEvidenceCollector(

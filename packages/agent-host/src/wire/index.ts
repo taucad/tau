@@ -2,8 +2,8 @@
 
 /**
  * `@taucad/agent-host/wire`: the one seam contract (D11). Strict payload-only schemas, the answers, the reads, the
- * hello and limits, and the refusal registry. Imports only `zod` and zod-only schemas, so the page, the CLI,
- * apps/api and the run actor share it.
+ * hello and limits, the refusal registry and the attachment media table. Imports only `zod`, zod-only schemas and
+ * the dependency-free image header reader, so the page, the CLI, apps/api and the run actor share it.
  */
 
 export {
@@ -17,6 +17,8 @@ export {
 } from '#wire/admission.schema.js';
 export type { AgentChannelAdmissionConfig, AgentChannelModel } from '#wire/admission.schema.js';
 export { agentWireLimits } from '#wire/limits.js';
+export { attachmentMedia, isAttachmentMediaType, sniffAttachmentMediaType } from '#wire/attachment-media.js';
+export type { AttachmentMediaType } from '#wire/attachment-media.js';
 export {
   providerPermissionSchema,
   providerPermissionObservationSchema,

@@ -5454,6 +5454,9 @@ importers:
       '@taucad/nx':
         specifier: workspace:*
         version: link:../../tools/nx
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
       '@taucad/xstate-testing':
         specifier: workspace:*
         version: link:../../libs/xstate-testing

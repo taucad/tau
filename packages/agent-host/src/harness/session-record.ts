@@ -5,6 +5,7 @@ import type { DurableEventLog, HostRunFailure, MaterializedDocument } from '#wai
 import { encodeBase64 } from '#harness/base64.js';
 import { EventLogError } from '#log/event-log-error.js';
 import { attachmentPathPattern, fileRefBlockSchema } from '#log/event-schema.js';
+import { sniffAttachmentMediaType } from '#wire/attachment-media.js';
 import type {
   AgentLogEvent,
   AssistantProviderMessage,
@@ -518,13 +519,16 @@ export const materializeAttachments = async (
       return [];
     }
     const data = encodeBase64(bytes);
-    if (reference.mimeType.startsWith('image/')) {
-      return [{ type: 'image', mimeType: reference.mimeType, data }];
+    /* The bytes name their type (I1). A row recorded with a declared type the bytes contradict — PNG or WebP
+     * stored as `image/jpeg` — is repaired here, on every read, without rewriting the row (I10). */
+    const mimeType = sniffAttachmentMediaType(bytes) ?? reference.mimeType;
+    if (mimeType.startsWith('image/')) {
+      return [{ type: 'image', mimeType, data }];
     }
     const hash = hashOf(reference.path);
     const document: MaterializedDocument = {
       data,
-      mediaType: reference.mimeType,
+      mediaType: mimeType,
       ...(reference.filename === undefined ? {} : { filename: reference.filename }),
     };
     documents.set(hash, document);

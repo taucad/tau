@@ -20,7 +20,7 @@ import { materializeAttachments, reduceEventLog } from '@taucad/agent-host';
 import type { AgentLogEvent, ExternalAgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
 
-import { createAcpMediaStore } from '#acp/media.js';
+import { createAcpMediaStore, saveChatAttachment } from '#acp/media.js';
 import { createTurnProjection } from '#acp/session.js';
 
 /** A real 1×1 PNG, so the stored file is an image a viewer can open. */
@@ -213,6 +213,39 @@ describe('ACP agent media', () => {
         content: [{ type: 'file-ref', path: expect.stringMatching(pngPath) as string, mimeType: 'image/png' }],
       },
     });
+  });
+
+  it('should store an agent image declared image/jpeg that holds PNG bytes as the PNG it is', async () => {
+    const { workspaceRoot, messages } = await record([
+      {
+        sessionUpdate: 'agent_message_chunk',
+        messageId: 'm1',
+        content: { type: 'image', data: png, mimeType: 'image/jpeg' },
+      },
+    ]);
+
+    expect(messages.find((message) => message.role === 'assistant')?.content).toEqual([
+      {
+        type: 'file-ref',
+        path: expect.stringMatching(pngPath) as string,
+        mimeType: 'image/png',
+        byteLength: Buffer.from(png, 'base64').length,
+      },
+    ]);
+    const files = await readdir(join(workspaceRoot, '.tau', 'chats', chatId, 'attachments'));
+    expect(files).toEqual([expect.stringMatching(/^[\da-f]{64}\.png$/u)]);
+  });
+
+  it('should name a saved attachment by its bytes, not by the declared media type', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-media-'));
+    roots.push(workspaceRoot);
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x20, 0x00, 0x30, 0x03]).toString(
+      'base64',
+    );
+
+    const saved = await saveChatAttachment({ workspaceRoot, chatId, data: jpeg, mimeType: 'image/png' });
+
+    expect(saved.path).toMatch(/^attachments\/[\da-f]{64}\.jpg$/u);
   });
 
   it.each([

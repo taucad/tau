@@ -32,8 +32,6 @@ const clientFactsSchema = z.object({
   sidebarOpen: z.boolean().optional(),
   /** The pointer-cursors preference. */
   pointerCursors: z.boolean().optional(),
-  /** The settled values of the layout-affecting flags (H2), by registry name. */
-  layoutFlags: z.record(z.string(), z.boolean()).optional(),
 });
 
 /** The client facts. @public */

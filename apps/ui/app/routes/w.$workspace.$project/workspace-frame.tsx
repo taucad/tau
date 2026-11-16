@@ -64,6 +64,7 @@ export function WorkspaceFrame({
   if (!isDrawn) {
     return (
       <div className='contents'>
+        {/* The drawn frame's own nodes take this one slot, so the content keeps its position either way. */}
         {null}
         {children}
       </div>
@@ -83,6 +84,21 @@ export function WorkspaceFrame({
       )}
       style={wide === undefined ? undefined : (frameHintVariables(wide) as React.CSSProperties)}
     >
+      <WorkspaceFrameLanes />
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The frame's own nodes: the lanes layer, and the render-blocking marker after it. One element, so the content
+ * after it keeps its slot whether or not the frame is drawn.
+ *
+ * @returns The lanes and the marker.
+ */
+function WorkspaceFrameLanes(): React.JSX.Element {
+  return (
+    <>
       <div
         aria-hidden='true'
         data-slot='workspace-frame-lanes' /* The query container is the lanes layer, the frame's own width, so the content over it gains none. */
@@ -109,8 +125,7 @@ export function WorkspaceFrame({
        * page, so the gated content still streams in after first paint. A browser without `rel=expect` ignores it. */}
       <link rel='expect' href={`#${workspaceFrameEndId}`} blocking='render' />
       <span id={workspaceFrameEndId} hidden />
-      {children}
-    </div>
+    </>
   );
 }
 

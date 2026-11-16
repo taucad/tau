@@ -152,6 +152,23 @@ describe('WorkspaceFrame', () => {
     expect(marker).toBeLessThan(html.indexOf('<p>content</p>'));
   });
 
+  /* Merge with main: the render-blocking marker moved the content's slot, so a non-project visit remounted it. */
+  it('keeps the content node whether or not the frame is drawn', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    const content = (isDrawn: boolean): React.JSX.Element => (
+      <WorkspaceFrame isDrawn={isDrawn}>
+        <input aria-label='Page input' />
+      </WorkspaceFrame>
+    );
+    const view = render(content(true));
+    const input = document.querySelector('input[aria-label="Page input"]');
+    view.rerender(content(false));
+
+    expect(document.querySelector('input[aria-label="Page input"]')).toBe(input);
+    view.rerender(content(true));
+    expect(document.querySelector('input[aria-label="Page input"]')).toBe(input);
+  });
+
   it('draws only frame: no skeleton, no animation, and the content over its lanes', () => {
     const frame = renderFrame('/w/home/one');
 

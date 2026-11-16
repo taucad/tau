@@ -27,7 +27,8 @@
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { createContext, useContext, useEffect } from 'react';
 import { act, render, screen } from '@testing-library/react';
-import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { Link, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { DataMemoryRouter } from '#test-utils/data-memory-router.js';
 import { createActor, createCallbackLogic, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -744,7 +745,7 @@ const renderRouteFamily = async (
   initialEntry = `/w/workspace/${projectId}`,
 ): Promise<{ navigate: (target: string) => Promise<void>; unmount: () => void }> => {
   const view = render(
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <DataMemoryRouter initialEntries={[initialEntry]}>
       <NavigationProbe />
       <QueryClientProvider client={queryClient}>
         <SessionsProvider actor={sessionsActor} focus={focusHost}>
@@ -765,7 +766,7 @@ const renderRouteFamily = async (
           </routeModule.ProjectSessionsHost>
         </SessionsProvider>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </DataMemoryRouter>,
   );
   await settle();
   return {
@@ -1818,7 +1819,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
         return !snapshot.matches('opening') && !snapshot.matches('closing');
       });
     const view = render(
-      <MemoryRouter initialEntries={[initialEntry]}>
+      <DataMemoryRouter initialEntries={[initialEntry]}>
         <NavigationProbe />
         <QueryClientProvider client={queryClient}>
           <SessionsProvider actor={registry.actor} focus={registry.slice}>
@@ -1829,7 +1830,7 @@ describe('sessions composition — a one-project device (A0.2 item 6, B-08)', ()
             </routeModule.ProjectSessionsHost>
           </SessionsProvider>
         </QueryClientProvider>
-      </MemoryRouter>,
+      </DataMemoryRouter>,
     );
     unmounts.push(view.unmount);
     await settle(quiet);

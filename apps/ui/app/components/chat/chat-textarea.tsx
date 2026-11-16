@@ -409,17 +409,26 @@ export const ChatTextarea = memo(function ({
     session?.activeChatId,
     mode === 'main',
   );
-  /* A painted draft nobody edited is the hint's copy of this chat's draft: while the draft holds nothing yet (its record
-   * not read), it is the draft, as on Home, so the text does not leave the box and come back when the record lands. The
-   * record still wins: `hydrateDraft` leaves an untouched draft open to it. */
-  const takeFrameInput = useCallback((): void => {
-    if (handedOverInput?.prefilled === true && !handedOverInput.edited && logic.inputText === '') {
+  /* Whether this chat's composer record is still being read: until it is, an empty draft says nothing about it. */
+  const isRecordUnread = useSelector(
+    session?.composerRecordRef,
+    (state) => state?.matches({ lifecycle: 'loading' }) ?? false,
+  );
+  /* A painted draft nobody edited is the hint's copy of this chat's draft: while the record is not read yet and the
+   * draft holds nothing, it is the draft, as on Home, so the text does not leave the box and come back when the record
+   * lands. The record still wins: `hydrateDraft` leaves an untouched draft open to it. A record already read is the
+   * draft as it stands, empty or not (the hint may be older: sent on another device). */
+  const takeFrameInput = useCallback((): boolean => {
+    const isPaintedDraftTaken =
+      handedOverInput?.prefilled === true && !handedOverInput.edited && isRecordUnread && logic.inputText === '';
+    if (isPaintedDraftTaken) {
       draftActorRef.send({ type: 'hydrateDraft', draft: buildDraftMessage(handedOverInput.text, []) });
     }
     earlyInputHandover?.taken();
-  }, [draftActorRef, earlyInputHandover, handedOverInput, logic.inputText]);
+    return isPaintedDraftTaken;
+  }, [draftActorRef, earlyInputHandover, handedOverInput, isRecordUnread, logic.inputText]);
 
-  const content = (earlyInput?: EarlyChatInput, onEarlyInputAdopted?: () => void): React.ReactNode => (
+  const content = (earlyInput?: EarlyChatInput, onEarlyInputAdopted?: () => boolean): React.ReactNode => (
     <>
       {composerNotices}
       <ChatTextareaDesktop

@@ -74,8 +74,11 @@ const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
 
 type ChatTextareaDesktopProperties = {
   readonly earlyInput?: EarlyChatInput;
-  /** Called once `earlyInput` is in the editor, so its owner does not hand it over again. */
-  readonly onEarlyInputAdopted?: () => void;
+  /**
+   * Called once `earlyInput` is in the editor, so its owner does not hand it over again. Returns whether a painted
+   * draft becomes the draft (its owner's record is not read yet and holds nothing), so the editor keeps it.
+   */
+  readonly onEarlyInputAdopted?: () => boolean;
   readonly className?: string;
   readonly enableAutoFocus?: boolean;
   readonly enableContextActions?: boolean;
@@ -413,6 +416,9 @@ export const ChatTextareaDesktop = memo(function ({
   }, [editor]);
 
   const rehydratedTokensRef = useRef(knownTokens);
+  /* A painted draft goes into the editor as plain text (Home's `initialText`, or the handover below): when the draft
+   * delivers that text, its tokens are built into chips once, as a restored draft's are. */
+  const paintedTextRef = useRef(earlyInput?.prefilled === true ? earlyInput.text : undefined);
   useEffect(() => {
     if (!editor) {
       return undefined;
@@ -428,6 +434,10 @@ export const ChatTextareaDesktop = memo(function ({
     }
     const tokensChanged = rehydratedTokensRef.current !== knownTokens;
     rehydratedTokensRef.current = knownTokens;
+    const isPaintedText = inputText !== '' && paintedTextRef.current === inputText;
+    if (isPaintedText) {
+      paintedTextRef.current = undefined;
+    }
     if (inputText === '') {
       if (current.text !== '') {
         editor.commands.clearContent(false);
@@ -443,7 +453,7 @@ export const ChatTextareaDesktop = memo(function ({
     /* Same text is a no-op (typing must not move the caret) unless tokens that arrived
      * late (catalog, agent commands) now resolve to more chips — a restored draft rehydrates. */
     const chipCount = segments.filter((segment) => segment.type === 'chip').length;
-    if (inputText === current.text && (!tokensChanged || chipCount <= current.contextChips.length)) {
+    if (inputText === current.text && (!(tokensChanged || isPaintedText) || chipCount <= current.contextChips.length)) {
       return undefined;
     }
     /* F20: each chip's node view calls `flushSync`, which React refuses inside
@@ -547,13 +557,14 @@ export const ChatTextareaDesktop = memo(function ({
       return;
     }
     handedOverRef.current = earlyInput;
-    onEarlyInputAdopted?.();
+    const isPaintedDraftTaken = onEarlyInputAdopted?.() ?? false;
     if (earlyInput.edited && extractContent(editor).text !== earlyInput.text) {
       editor.commands.setContent(plainTextDocument(earlyInput.text), { emitUpdate: true });
-    } else if (earlyInput.prefilled && extractContent(editor).text === '') {
+    } else if (isPaintedDraftTaken && earlyInput.prefilled && extractContent(editor).text === '') {
       /* A painted draft stays in the box while the draft takes it (`onEarlyInputAdopted`), not written as an edit, so
        * the chat's record still wins when it lands (P-a: nothing leaves and comes back on arrival). */
       editor.commands.setContent(plainTextDocument(earlyInput.text), { emitUpdate: false });
+      paintedTextRef.current = earlyInput.text;
     }
     if (!(earlyInput.focused || (enableAutoFocus && !earlyInput.edited && earlyInput.focusUnclaimed))) {
       return;

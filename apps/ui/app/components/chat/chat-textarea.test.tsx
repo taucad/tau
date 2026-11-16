@@ -29,8 +29,9 @@ const mocks = vi.hoisted(() => {
     inputText: '',
     earlyInput: undefined as unknown,
     activeChatId: undefined as string | undefined,
-    onEarlyInputAdopted: undefined as (() => void) | undefined,
+    onEarlyInputAdopted: undefined as (() => boolean) | undefined,
     draftSend: vi.fn(),
+    isRecordUnread: true,
   };
 });
 
@@ -70,7 +71,7 @@ vi.mock('#components/chat/chat-textarea-desktop.js', () => ({
     readonly onScreenshotAction: (item: ContextSuggestionItem) => void;
     readonly actionItems: ContextSuggestionItem[];
     readonly earlyInput?: unknown;
-    readonly onEarlyInputAdopted?: () => void;
+    readonly onEarlyInputAdopted?: () => boolean;
   }) => {
     mocks.earlyInput = earlyInput;
     mocks.onEarlyInputAdopted = onEarlyInputAdopted;
@@ -110,7 +111,15 @@ vi.mock('#hooks/use-chat.js', () => ({
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
-    session: mocks.activeChatId === undefined ? undefined : { activeChatId: mocks.activeChatId },
+    session:
+      mocks.activeChatId === undefined
+        ? undefined
+        : {
+            activeChatId: mocks.activeChatId,
+            composerRecordRef: {
+              getSnapshot: () => ({ matches: () => mocks.isRecordUnread }),
+            },
+          },
     execution: { execution: { kind: 'native' } },
     runElsewhere: mocks.runElsewhere,
     draftActorRef: { send: mocks.draftSend },
@@ -302,13 +311,17 @@ describe('ChatTextarea frame early input', () => {
   });
 
   it.each([
-    { draftText: '', isHydrated: true },
+    { draftText: '', isRecordUnread: true, isHydrated: true },
     /* The record is read already and holds a draft, which wins. */
-    { draftText: 'from the record', isHydrated: false },
+    { draftText: 'from the record', isRecordUnread: false, isHydrated: false },
+    /* Review round 9: the record is read already and holds no draft (sent on another device): the hint is older. */
+    { draftText: '', isRecordUnread: false, isHydrated: false },
   ])(
-    'takes a painted draft nobody edited as the draft while the draft holds $draftText (hydrated: $isHydrated)',
-    ({ draftText, isHydrated }) => {
+    'takes a painted draft nobody edited as the draft while the draft holds "$draftText" and the record is unread: $isRecordUnread (hydrated: $isHydrated)',
+    ({ draftText, isRecordUnread, isHydrated }) => {
       mocks.inputText = draftText;
+      mocks.isRecordUnread = isRecordUnread;
+      mocks.activeChatId = 'c1';
       mocks.draftSend.mockClear();
       const painted: EarlyChatInput = {
         ...input,
@@ -326,10 +339,13 @@ describe('ChatTextarea frame early input', () => {
           <ChatTextarea onSubmit={vi.fn()} />
         </EarlyInputHandoverContext.Provider>,
       );
+      let isTaken: boolean | undefined;
       act(() => {
-        mocks.onEarlyInputAdopted?.();
+        isTaken = mocks.onEarlyInputAdopted?.();
       });
       expect(pending.taken).toHaveBeenCalledOnce();
+      /* The editor keeps the painted text only where the draft takes it. */
+      expect(isTaken).toBe(isHydrated);
       if (isHydrated) {
         expect(mocks.draftSend).toHaveBeenCalledOnce();
         const [event] = mocks.draftSend.mock.calls[0] as [{ type: string; draft: { parts: unknown[] } }];
@@ -339,6 +355,8 @@ describe('ChatTextarea frame early input', () => {
         expect(mocks.draftSend).not.toHaveBeenCalled();
       }
       mocks.inputText = '';
+      mocks.isRecordUnread = true;
+      mocks.activeChatId = undefined;
     },
   );
 });

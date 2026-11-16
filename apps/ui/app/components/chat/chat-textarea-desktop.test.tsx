@@ -795,7 +795,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       }),
     );
     const setDraftText = vi.fn();
-    const adopted = vi.fn();
+    const adopted = vi.fn(() => true);
     /* Stable across renders, as the route's are: the draft rehydration effect re-runs on a new list. */
     const chats: never[] = [];
     const attachments: never[] = [];
@@ -1083,6 +1083,34 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     expect(editorContent).not.toHaveClass('overflow-y-auto');
     expect(bar?.parentElement).toBe(editorScroller?.parentElement);
     expect(bar).not.toHaveClass('absolute');
+  });
+
+  /* Review round 9: a painted draft enters the editor as plain text; its tokens are chipped once the draft holds it. */
+  it("chips a painted draft's $skill the agent already advertises, without changing the draft text", async () => {
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    const text = 'Make a render of this using $imagegen';
+    const view = renderComposer(
+      text,
+      { ...codexSession, commands: [{ name: '$imagegen', description: 'Generate images' }] },
+      {
+        earlyInput: {
+          text,
+          edited: false,
+          focused: false,
+          focusUnclaimed: false,
+          start: 0,
+          end: 0,
+          direction: 'none',
+          queuedSend: false,
+          prefilled: true,
+        },
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(view.container.querySelector('.ProseMirror svg')).not.toBeNull();
+    });
+    expect(view.container.querySelector('.ProseMirror')).toHaveTextContent(text);
   });
 
   it('chips a restored $skill once the agent advertises it, without changing the draft text', async () => {

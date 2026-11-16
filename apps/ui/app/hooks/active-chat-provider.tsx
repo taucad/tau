@@ -182,6 +182,8 @@ export type ActiveChatSessionContextValue = {
   chat: ChatView;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine>;
   draftActorRef: ActorRefFrom<typeof draftMachine>;
+  /** This chat's composer record on this device: whether it is read yet decides whether a painted draft hint is taken. */
+  composerRecordRef: ComposerRecordRef;
 };
 
 /**
@@ -491,8 +493,9 @@ function ActiveChatSessionProvider({
       chat: session.chat,
       persistenceActorRef: session.persistenceActorRef,
       draftActorRef: session.draftActorRef,
+      composerRecordRef: session.composerRecordRef,
     }),
-    [chatId, session.chat, session.persistenceActorRef, session.draftActorRef],
+    [chatId, session.chat, session.persistenceActorRef, session.draftActorRef, session.composerRecordRef],
   );
 
   const composerValue = useMemo<ChatComposerContextValue>(

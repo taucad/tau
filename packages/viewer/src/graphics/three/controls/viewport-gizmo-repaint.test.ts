@@ -6,6 +6,9 @@ import * as THREE from 'three';
 import { ViewportGizmo } from 'three-viewport-gizmo';
 import type { ViewportGizmoEventMap } from 'three-viewport-gizmo';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createActor } from 'xstate';
+import { createCameraView } from '@taucad/camera';
+import { cameraMachine } from '@taucad/camera/machine';
 import { readViewportGizmoPose, viewportGizmoOptions } from '#graphics/three/controls/viewport-gizmo-adapter.js';
 import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
 import { gizmoStyleIds, resolveViewportGizmoStyleConfig } from '#graphics/three/controls/viewport-gizmo-styles.js';
@@ -115,9 +118,32 @@ describe('view cube pole views', () => {
       verticalSpan: 1,
     });
 
-    // The camera presents an upright view from the pose's direction; it has to be the one the cube reported.
+    // The camera actor takes the pose (Finding T1): the view it presents has to be the one the cube reported, so the
+    // Bottom label reads as the cube shows it, not turned half a turn.
+    const cameraActor = createActor(cameraMachine, {
+      input: {
+        initialView: createCameraView({
+          frameId: 'test-root',
+          requestedVerticalFieldOfView: 60,
+          perspectiveZoom: 1,
+          target: [0, 0, 0],
+          direction: [3, 4, 5],
+          up: [up === 'x' ? 1 : 0, up === 'y' ? 1 : 0, up === 'z' ? 1 : 0],
+          verticalSpan: 1,
+          viewport: { width: 800, height: 600, pixelRatio: 1 },
+          bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+        }),
+      },
+    }).start();
+    cameraActor.send({ type: 'poseObserved', source: 'gizmo', ...pose });
+    const { view } = cameraActor.getSnapshot().context;
+    cameraActor.stop();
     const presented = new THREE.Quaternion().setFromRotationMatrix(
-      new THREE.Matrix4().lookAt(new THREE.Vector3(...pose.direction), new THREE.Vector3(), end.pose.up),
+      new THREE.Matrix4().lookAt(
+        new THREE.Vector3(...view.direction),
+        new THREE.Vector3(),
+        new THREE.Vector3(...view.up),
+      ),
     );
     const reported = new THREE.Quaternion().setFromRotationMatrix(
       new THREE.Matrix4().lookAt(end.pose.direction, new THREE.Vector3(), end.pose.up),

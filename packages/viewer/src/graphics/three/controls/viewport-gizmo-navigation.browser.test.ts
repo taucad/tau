@@ -181,6 +181,19 @@ describe.each(['turntable', 'tumble'] as const)('view cube navigation in %s', (o
     expect(isUpright(cube.camera)).toBe(true);
   });
 
+  it('returns upright on a double-click on the cube', async () => {
+    const cube = await mountCube(orbitStyle);
+    if (orbitStyle === 'tumble') {
+      await press(cube, 'roll-clockwise');
+      expect(isUpright(cube.camera)).toBe(false);
+    }
+    await userEvent.dblClick(cube.gizmo.domElement);
+    await vi.waitFor(() => {
+      expect(cube.gizmo.animating).toBe(false);
+      expect(isUpright(cube.camera)).toBe(true);
+    });
+  });
+
   it(orbitStyle === 'tumble' ? 'rolls a quarter turn with the roll key' : 'takes no roll key', async () => {
     const cube = await mountCube(orbitStyle);
     cube.gizmo.domElement.focus();

@@ -43,6 +43,13 @@ const cameraView = {
   perspectiveZoom: 1,
 } as const;
 
+/** A view a Tumble drag left upside down, over the top pole and on, as a reload restores it. */
+const rolledView = {
+  ...cameraView,
+  direction: [1, 0, 0.2],
+  up: [-0.2, 0, -1],
+} as const;
+
 const viewers: Viewer[] = [];
 
 afterEach(() => {
@@ -53,10 +60,14 @@ afterEach(() => {
   }
 });
 
-const mountViewer = (orbitStyle: OrbitStyle, projection: 'perspective' | 'orthographic' = 'perspective'): Viewer => {
+const mountViewer = (
+  orbitStyle: OrbitStyle,
+  projection: 'perspective' | 'orthographic' = 'perspective',
+  view: typeof cameraView | typeof rolledView = cameraView,
+): Viewer => {
   const graphics = createActor(
     graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
-    { input: { camera: { cameraView, ...(projection === 'orthographic' && { cameraFovAngle: 0 }) } } },
+    { input: { camera: { cameraView: view, ...(projection === 'orthographic' && { cameraFovAngle: 0 }) } } },
   ).start();
   const { cameraRef } = graphics.getSnapshot().context;
   const connectorRef: { current: CameraUpdateHandler | undefined } = { current: undefined };
@@ -253,5 +264,19 @@ describe('orbit style in the browser (TA5)', () => {
       viewer.settle();
     }
     expect(readView(viewer).up.angleTo(before)).toBeLessThan(1e-9);
+  });
+
+  it('keeps a rolled Tumble view across a reload, and the next drag tumbles on from it', () => {
+    // A reload restores the persisted view: upside down after a Tumble drag over the top pole.
+    const viewer = mountViewer('tumble', 'perspective', rolledView);
+    const restored = readView(viewer);
+    expect(restored.direction.angleTo(new Vector3(...rolledView.direction).normalize())).toBeLessThan(1e-9);
+    expect(restored.up.angleTo(new Vector3(...rolledView.up).normalize())).toBeLessThan(1e-9);
+
+    const directions = verticalDrag(viewer, { steps: 10 });
+    // The drag turns on about the restored screen up: the view and its up turn together, down below the horizon.
+    expect(directions.at(-1)!.dot(worldUp)).toBeLessThan(-0.5);
+    expect(readView(viewer).up.angleTo(restored.up)).toBeGreaterThan(0.5);
+    expect(largestStep(directions)).toBeLessThan(0.2);
   });
 });

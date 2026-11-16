@@ -29,14 +29,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
 import { generatedSetupPaths } from '@taucad/revisions';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { DiffViewer } from '#components/code/diff-viewer.js';
-import { useWaitStart } from '#hooks/use-wait-start.js';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '#components/revisions/name-popover.js';
@@ -123,7 +122,11 @@ function FileComparison({
   const isRegion = !isLoading && error === undefined && comparison !== undefined && comparison.change !== 'unchanged';
   let body: React.ReactNode = null;
   if (isLoading) {
-    body = null;
+    body = (
+      <div className='px-2 py-1.5'>
+        <ComparisonSkeleton />
+      </div>
+    );
   } else if (error !== undefined) {
     body = (
       <div role='alert' className='flex flex-wrap items-center gap-2 px-2 py-1.5 text-xs'>
@@ -184,60 +187,23 @@ function FileComparison({
           '[scrollbar-width:thin] overflow-x-auto bg-background focus-visible:focus-outline [&_.line:empty]:min-h-[1.6em] [&_.whitespace-nowrap]:text-xs',
       )}
     >
-      <ComparisonWait isActive={isLoading} label='Loading comparison' onRetry={retry} className='px-2 py-1.5' />
       {body}
     </div>
   );
 }
 
 /**
- * A comparison's wait slot: the one line its words or its Try again take, with the wait's words in it once the wait
- * passes 1,000 ms (loading states UX blueprint, U17; M7). It is rendered in every state of its frame, so a shown
- * indicator keeps its 500 ms minimum after the comparison arrives, and the line folds away only once the indicator is
- * idle. Compare is a gesture after the route opened, so the wait is its own group and its slot is live.
+ * A comparison that has not arrived: two skeleton lines, with the words kept for screen readers only (M7).
  *
- * From 10,000 ms Retry sits beside the slow words; it reads again and starts a new wait, timed from the Retry.
- *
- * @param props - Whether the comparison is waiting, what is being waited for, how to read it again, and the line's
- *   spacing.
- * @returns The indicator slot.
+ * @returns The skeleton.
  */
-function ComparisonWait({
-  isActive,
-  label,
-  onRetry,
-  className,
-}: {
-  readonly isActive: boolean;
-  readonly label: string;
-  readonly onRetry: () => void;
-  readonly className?: string;
-}): React.JSX.Element {
-  const { startedAt, restart } = useWaitStart(isActive);
-  const slot = useRef<HTMLDivElement>(null);
+function ComparisonSkeleton(): React.JSX.Element {
   return (
-    /* Focus lands here after Retry, which replaces the indicator's words and its button; it never falls to the page. */
-    <div
-      ref={slot}
-      tabIndex={-1}
-      data-slot='comparison-wait'
-      className={cn(
-        'flex w-fit rounded-md outline-none focus-visible:focus-outline has-[>[data-state=idle]]:hidden',
-        className,
-      )}
-    >
-      <WaitIndicator
-        active={isActive}
-        label={label}
-        slowLabel={`Still ${label.toLowerCase()}`}
-        startedAt={startedAt}
-        onRetry={() => {
-          restart();
-          onRetry();
-          slot.current?.focus();
-        }}
-      />
-    </div>
+    <span data-testid='comparison-skeleton' className='flex flex-col gap-1.5 py-0.5'>
+      <span className='sr-only'>Loading comparison…</span>
+      <Skeleton aria-hidden className='h-3 w-3/4' />
+      <Skeleton aria-hidden className='h-3 w-1/2' />
+    </span>
   );
 }
 
@@ -393,7 +359,9 @@ function CurrentComparison({
         ) : (
           <FileList revision={revision} changes={changes} compareAgainst='checkout' label={`Changed since ${name}`} />
         )
-      ) : null
+      ) : (
+        <ComparisonSkeleton />
+      )
     ) : (
       <div role='alert' className='flex flex-wrap items-center gap-2 text-xs'>
         <span className='min-w-0 flex-auto'>Couldn’t compare with your current files.</span>
@@ -412,10 +380,7 @@ function CurrentComparison({
           Done
         </Button>
       </p>
-      {/* One frame in every state, holding the wait's slot: arrival changes only the body, so a shown indicator keeps
-          its 500 ms minimum in place. */}
       <div data-slot='current-comparison' aria-busy={isWaiting ? 'true' : undefined} className='flex flex-col gap-1'>
-        <ComparisonWait isActive={isWaiting} label='Loading changes' onRetry={retry} />
         {body}
       </div>
     </div>

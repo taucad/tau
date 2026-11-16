@@ -156,8 +156,8 @@ export function NavUser(): React.JSX.Element {
     </DropdownMenuItem>,
   ];
 
-  /* Server-rendered at its final 38px height: the account trigger renders its signed-out row
-     until the session is known, so the footer neither appears late nor passes through a skeleton. */
+  /* Server-rendered at its final 38px height: the account trigger draws avatar and name skeletons
+     until the session is known, so the footer never appears late. */
   return (
     <div className='flex w-full items-center gap-1'>
       <div className='relative min-w-0 flex-1'>

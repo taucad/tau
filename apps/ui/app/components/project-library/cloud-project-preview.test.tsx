@@ -110,17 +110,17 @@ describe('cloud project preview recovery', () => {
   });
 
   /* C15 (P-g, H-d): a Tau Cloud card's media box stays plain until its saved preview's read has settled. */
-  it('C15: draws no icon and no skeleton before the saved preview is asked for', () => {
+  it('C15: draws a skeleton, and no icon, before the saved preview is asked for', () => {
     const { container } = render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();
-    expect(container.querySelector('[data-slot="skeleton"]')).toBeNull();
+    expect(container.querySelector('[data-slot="skeleton"]')).not.toBeNull();
   });
 
-  it('C15: draws no icon and no skeleton while the saved preview is read', () => {
+  it('C15: draws a skeleton, and no icon, while the saved preview is read', () => {
     preview.isLoading = true;
-    const { container } = render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
+    render(<CloudProjectPreview projectId='cloud' name='Cloud cube' />);
     expect(screen.queryByLabelText('No saved preview')).not.toBeInTheDocument();
-    expect(container.querySelector('[data-slot="skeleton"]')).toBeNull();
+    expect(screen.getByRole('status', { name: 'Loading saved preview' })).toHaveAttribute('data-slot', 'skeleton');
   });
 
   it('C15: draws the "no saved preview" icon once the read has settled as absent', () => {

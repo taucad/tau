@@ -512,7 +512,9 @@ export const sendSentryEventDirectly = async (
     return;
   }
   markCaptured(error);
-  await loadStackParser();
+  // Never wait for the parser here: the page may leave in that time, and the event must still go.
+  // Until the parser is in, the event keeps its raw stack under `extra.stack`.
+  void loadStackParser();
   const envelope = buildEnvelope({ dsn: target.dsn, error, tags, stackLimit: directEventTextLimit.stack });
   await post(target.endpoint, envelope, fitsKeepalive(envelope.size, 1));
 };

@@ -7,7 +7,12 @@ import { getAllFlags, isFeatureEnabled, resetFlagCache, resolveFlags } from '#fl
 import { featureFlagDefaults, featureFlagNames, flagRegistry } from '#flags/flag.constants.js';
 import type { FlagDefinition } from '#flags/flag.constants.js';
 import type { RemoteFlagClient } from '#flags/remote-flags.js';
-import { connectRemoteFlags, disconnectRemoteFlags, readRemoteFlagValues } from '#flags/remote-flags.js';
+import {
+  connectRemoteFlags,
+  disconnectRemoteFlags,
+  readRemoteFlagStatus,
+  readRemoteFlagValues,
+} from '#flags/remote-flags.js';
 import { useFeature } from '#flags/use-feature.js';
 
 /** A PostHog client stand-in: `evaluate` plays a `/flags` response or a console override. */
@@ -135,6 +140,61 @@ describe('remote flag resolution', () => {
       },
     });
     expect(getAllFlags()).toStrictEqual(featureFlagDefaults);
+  });
+});
+
+describe('remote flag status', () => {
+  /** A client that answers when told to, as a `/flags` response or a failed flag load would. */
+  const createAnsweringClient = (): RemoteFlagClient & {
+    answer(variants: Record<string, string | boolean>, errorsLoading?: boolean): void;
+  } => {
+    let variants: Record<string, string | boolean> | undefined;
+    const listeners = new Set<Parameters<RemoteFlagClient['onFeatureFlags']>[0]>();
+    return {
+      onFeatureFlags(callback) {
+        listeners.add(callback);
+        return () => {
+          listeners.delete(callback);
+        };
+      },
+      featureFlags: { getFlagVariants: () => variants ?? {} },
+      answer(next, errorsLoading = false) {
+        variants = next;
+        for (const listener of listeners) {
+          listener([], next, { errorsLoading });
+        }
+      },
+    };
+  };
+
+  it('is pending while a connected client has not answered, then evaluated', () => {
+    const client = createAnsweringClient();
+    connectRemoteFlags(client);
+    expect(readRemoteFlagStatus()).toBe('pending');
+    client.answer({ onboarding: true });
+    expect(readRemoteFlagStatus()).toBe('evaluated');
+  });
+
+  it('is absent once analytics are withdrawn', () => {
+    connectRemoteFlags(createAnsweringClient());
+    disconnectRemoteFlags();
+    expect(readRemoteFlagStatus()).toBe('absent');
+  });
+
+  it('is absent when PostHog reports that loading the flags failed', () => {
+    const client = createAnsweringClient();
+    connectRemoteFlags(client);
+    client.answer({}, true);
+    expect(readRemoteFlagStatus()).toBe('absent');
+  });
+
+  it('is absent when the client throws while subscribing', () => {
+    connectRemoteFlags({
+      onFeatureFlags: () => {
+        throw new Error('not ready');
+      },
+    });
+    expect(readRemoteFlagStatus()).toBe('absent');
   });
 });
 

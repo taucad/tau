@@ -26,7 +26,7 @@ import {
   loadAttachmentTranscodeSources,
   noAttachmentTranscodeSources,
   subscribeAttachmentTranscodeSources,
-} from '#services/attachment-image.service.js';
+} from '#services/attachment-transcode-sources-store.js';
 import { recordAttachmentIntake } from '#telemetry/attachment-intake-telemetry.js';
 import { osClass } from '#telemetry/platform-class.js';
 import { attachmentAccept } from '#utils/attachment-accept.js';

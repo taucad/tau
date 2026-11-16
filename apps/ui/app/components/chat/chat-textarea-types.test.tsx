@@ -142,7 +142,7 @@ vi.mock('@taucad/ui/components/sonner', () => ({
 
 /** The conversion runtime's derived sources, without loading its definition in jsdom. */
 const rasterSources: readonly string[] = ['jpeg', 'png', 'webp', 'gif', 'avif', 'bmp', 'tiff'];
-vi.mock('#services/attachment-image.service.js', () => ({
+vi.mock('#services/attachment-transcode-sources-store.js', () => ({
   loadAttachmentTranscodeSources: async () => rasterSources,
   subscribeAttachmentTranscodeSources: () => () => undefined,
   attachmentTranscodeSourcesSnapshot: () => rasterSources,

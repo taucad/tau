@@ -159,7 +159,12 @@ describe('runtime import boundary', () => {
   });
 
   it('should keep the composer image step off the conversion runtime', () => {
-    const composer = staticGraph(['hooks/attachment-image.actor.ts', 'components/chat/chat-textarea-types.ts']);
+    /* The image step imports the conversion service on its first conversion, so walk the service as well. */
+    const composer = staticGraph([
+      'hooks/attachment-image.actor.ts',
+      'components/chat/chat-textarea-types.ts',
+      'services/attachment-image.service.ts',
+    ]);
     const problems = lazyOnlyEdges(composer).filter((problem) =>
       problem.startsWith('runtime/attachment-image-runtime'),
     );
@@ -167,6 +172,13 @@ describe('runtime import boundary', () => {
     expect([...composer.keys()].map((file) => toPosix(relative(appRoot, file)))).toContain(
       'services/attachment-image-backend.ts',
     );
+  });
+
+  it("should keep the composer's conversion service off Home's critical path", () => {
+    /* Both draft ownership sites and the composer render on Home; the service loads with the first conversion. */
+    const composer = staticGraph(['hooks/attachment-image.actor.ts', 'components/chat/chat-textarea-types.ts']);
+    const reached = [...composer.keys()].map((file) => toPosix(relative(appRoot, file)));
+    expect(reached).not.toContain('services/attachment-image.service.ts');
   });
 
   it('should find a static edge to a lazy-only module when one exists', () => {

@@ -28,6 +28,7 @@ import {
   holdRequestsUntilReleased,
   releaseHeldRequests,
   readProjectLoad,
+  readFirstInputAccepted,
   firstDelayedRead,
   readLaneBordersNow,
   readWorkerDeliveries,
@@ -442,6 +443,26 @@ test(
     }
   },
 );
+
+/*
+ * PL6 (progressive loading, OD1): a project URL's placeholder serves the composer's native input, so the gate's first
+ * mark, "first input accepted", is set on a direct load, before the workspace is live, and the bundle reports it as
+ * `tau.load.input.accepted`. Its distance from first contentful paint is kept as evidence (G5), not asserted: the
+ * project document is not held for first paint.
+ */
+test('should mark the first input accepted on a direct project load', { timeout: loadBudget }, async () => {
+  const { path } = await seedProjects('wide');
+  await target.navigate(path);
+  await settleProject();
+  const accepted = await readFirstInputAccepted();
+  await target.writeArtifact(
+    'project-load-frames/first-input-accepted-wide.json',
+    `${JSON.stringify(accepted, null, 2)}\n`,
+  );
+
+  expect(accepted.mark, 'the served recorder left no first-input mark').toEqual(expect.any(Number));
+  expect(accepted.measure).toEqual({ start: 0, end: accepted.mark, phase: 'input.accepted' });
+});
 
 knownDefect('U4: the workspace placeholder node is created at most once per load with the workspace chunk 3 s late', {
   artifact: 'u4-wide',

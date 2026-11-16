@@ -1466,6 +1466,41 @@ export type EarlyInput = {
   readonly after?: string;
 };
 
+/** The "first input accepted" mark of a load (progressive loading PL6, OD1), as the page left it. */
+export type FirstInputAccepted = {
+  /** The served recorder's User Timing mark, `tau.input.accepted`: the first frame a native input could take text. */
+  readonly mark?: number;
+  /** The bundle's `tau.load.input.accepted` measure: its start, end and phase. */
+  readonly measure?: { readonly start: number; readonly end: number; readonly phase: unknown };
+  readonly firstContentfulPaint?: number;
+};
+
+/**
+ * Read the current document's "first input accepted" mark and measure, beside its first contentful paint. Milliseconds
+ * from navigation start. The mark needs no bundle; the measure needs the bundle to have seen the input.
+ *
+ * @returns What the page recorded.
+ */
+export const readFirstInputAccepted = async (): Promise<FirstInputAccepted> =>
+  target.evaluate(() => {
+    const [mark] = performance.getEntriesByName('tau.input.accepted', 'mark');
+    const [measure] = performance.getEntriesByName('tau.load.input.accepted', 'measure') as PerformanceMeasure[];
+    const [paint] = performance.getEntriesByName('first-contentful-paint', 'paint');
+    const detail = (measure as { readonly detail?: unknown } | undefined)?.detail;
+    return {
+      mark: mark?.startTime,
+      measure:
+        measure === undefined
+          ? undefined
+          : {
+              start: measure.startTime,
+              end: measure.startTime + measure.duration,
+              phase: (detail as { readonly phase?: unknown } | undefined)?.phase,
+            },
+      firstContentfulPaint: paint?.startTime,
+    };
+  });
+
 /**
  * Open `path` without waiting for its load and act on its served input before hydration (A15 frame rows).
  *

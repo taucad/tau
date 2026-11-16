@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { EventLogError } from '#log/event-log-error.js';
 import { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
+import { attachmentExtensions } from '#wire/attachment-media.js';
 import type { AgentLogEvent, FileRefContentBlock, JsonValue } from '#log/event-types.js';
 
 const nonEmptyString = z.string().min(1);
@@ -80,11 +81,15 @@ const metadataSchema = z
  * and no reader can resolve.
  */
 /**
- * A durable `file-ref` path: `attachments/<sha256>.<ext>`.
+ * A durable `file-ref` path: `attachments/<sha256>.<ext>`, `<ext>` being a stored media type's canonical extension
+ * from `attachmentMedia` (I2).
  *
  * @internal
  */
-export const attachmentPathPattern = /^attachments\/[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/u;
+export const attachmentPathPattern = new RegExp(
+  `^attachments/[\\da-f]{64}\\.(?:${attachmentExtensions.join('|')})$`,
+  'u',
+);
 const attachmentPath = z.string().regex(attachmentPathPattern);
 /**
  * Schema for a content-addressed attachment reference in durable message content.

@@ -1201,13 +1201,15 @@ describe('FileContentService', () => {
 
   /* STO-25, I7: a page told out of band that a file's bytes landed reads it afresh and never shows the earlier read. */
   describe('rereadOutcome', () => {
-    it('should replace an outcome read before with one read now', async () => {
-      vi.mocked(proxy.readFile).mockResolvedValueOnce(new TextEncoder().encode('old'));
-      await service.resolve('lib/gear.ts');
-      vi.mocked(proxy.readFile).mockResolvedValueOnce(new TextEncoder().encode('new'));
+    const text = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
 
-      expect(await service.rereadOutcome('lib/gear.ts')).toBe(true);
-      expectTextContent(service.peekOutcome('lib/gear.ts'), new TextEncoder().encode('new'));
+    it('should replace an outcome read before with one read now', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(text('old'));
+      await service.resolve('lib/gear.ts');
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(text('new'));
+
+      expectTextContent(await service.rereadOutcome('lib/gear.ts'), text('new'));
+      expectTextContent(service.peekOutcome('lib/gear.ts'), text('new'));
     });
 
     it('should keep a read begun earlier from publishing over it', async () => {
@@ -1215,30 +1217,59 @@ describe('FileContentService', () => {
       vi.mocked(proxy.readFile).mockReturnValueOnce(stale.promise);
       /* A direct read, begun before the landing was known. */
       const earlier = service.resolve('lib/gear.ts', { forceText: true });
-      vi.mocked(proxy.readFile).mockResolvedValueOnce(new TextEncoder().encode('new'));
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(text('new'));
 
-      expect(await service.rereadOutcome('lib/gear.ts')).toBe(true);
-      stale.resolve(new TextEncoder().encode('old'));
+      expectTextContent(await service.rereadOutcome('lib/gear.ts'), text('new'));
+      stale.resolve(text('old'));
       await earlier;
-      expectTextContent(service.peekOutcome('lib/gear.ts'), new TextEncoder().encode('new'));
+      expectTextContent(service.peekOutcome('lib/gear.ts'), text('new'));
     });
 
-    it('should say when a later read has begun since, so its answer is awaited', async () => {
+    /* Two fresh reads on one path settle on one answer instead of superseding each other for ever. */
+    it('should settle on a later read begun before it settled, without reading again', async () => {
       const first = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
       vi.mocked(proxy.readFile).mockReturnValueOnce(first.promise);
-      const reread = service.rereadOutcome('lib/gear.ts');
-      vi.mocked(proxy.readFile).mockResolvedValueOnce(new TextEncoder().encode('newer'));
-      expect(await service.rereadOutcome('lib/gear.ts')).toBe(true);
-      first.resolve(new TextEncoder().encode('new'));
+      const one = service.rereadOutcome('lib/gear.ts');
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(text('newer'));
+      const two = service.rereadOutcome('lib/gear.ts');
+      first.resolve(text('new'));
 
-      expect(await reread).toBe(false);
-      expectTextContent(service.peekOutcome('lib/gear.ts'), new TextEncoder().encode('newer'));
+      expectTextContent(await one, text('newer'));
+      expectTextContent(await two, text('newer'));
+      expect(proxy.readFile).toHaveBeenCalledTimes(2);
+    });
+
+    it('should read again itself when a later read begun meanwhile never settles', async () => {
+      vi.useFakeTimers();
+      try {
+        const first = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+        vi.mocked(proxy.readFile).mockReturnValueOnce(first.promise);
+        const reread = service.rereadOutcome('lib/gear.ts');
+        /* Something begins a generation and never reads (an invalidation with nobody reading). */
+        service.observeContent('lib/gear.ts').invalidate();
+        vi.mocked(proxy.readFile).mockResolvedValueOnce(text('again'));
+        first.resolve(text('new'));
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expectTextContent(await reread, text('again'));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should answer a failed read with its error, never a value held from before', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(text('old'));
+      await service.resolve('lib/gear.ts');
+      vi.mocked(proxy.readFile).mockRejectedValueOnce(Object.assign(new Error('disk on fire'), { code: 'EIO' }));
+
+      const outcome = await service.rereadOutcome('lib/gear.ts');
+      expect(outcome.kind).toBe('error');
     });
 
     it('should hold a missing file as orphaned once read afresh', async () => {
       vi.mocked(proxy.readFile).mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
 
-      expect(await service.rereadOutcome('lib/gone.ts')).toBe(true);
+      expect(await service.rereadOutcome('lib/gone.ts')).toEqual({ kind: 'orphaned' });
       expect(service.peekOutcome('lib/gone.ts')).toEqual({ kind: 'orphaned' });
     });
   });

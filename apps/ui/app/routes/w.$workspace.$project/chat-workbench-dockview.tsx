@@ -1424,14 +1424,15 @@ export const FileEditor = memo(function ({
      earlier reader cached reaches the page late (I7). */
   const absence = useProjectAvailability('absence');
   const gate = useFilePaneAvailability(filePath, kernelClosure(mainEntryPath).includes(filePath));
-  const isFresh = useFreshContent(
+  const fresh = useFreshContent(
     virtualDeclaration === undefined ? filePath : undefined,
     gate === 'ready',
     useCloudOpenPending(),
   );
-  const availability = gate === 'ready' && !isFresh ? 'waiting' : gate;
+  const availability = gate === 'ready' && fresh.state !== 'open' ? 'waiting' : gate;
   const fileContent = useFileContent(
     virtualDeclaration === undefined && availability === 'ready' ? filePath : undefined,
+    { retainValue: !fresh.readAfresh },
   );
   // A declaration held in memory has nothing to observe on disk, so it is always current.
   const result = useMemo(
@@ -1731,6 +1732,21 @@ export const FileEditor = memo(function ({
     </FileWorkbenchPane>
   );
 
+  if (fresh.state === 'failed') {
+    /* The fresh read failed: say so and offer it again, never the content held before (I7). */
+    return (
+      <div className='flex h-full flex-col bg-background'>
+        <div className='min-h-0 flex-1'>
+          <ChatEditorErrorPlaceholder cause={fresh.cause} />
+        </div>
+        <div className='flex justify-center pb-4'>
+          <Button variant='outline' size='sm' onClick={fresh.retry}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
   if (availability === 'waiting') {
     return <EditorPanePlaceholder label={`Waiting for ${name}`} />;
   }

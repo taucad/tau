@@ -196,6 +196,9 @@ export class EditorSaveConflictError extends Error {
  */
 const loadingOutcome: FileContentResult = { kind: 'loading' };
 
+/** How long a fresh read waits for a later read that superseded it to settle before it reads again itself. */
+const supersededReadPatienceMilliseconds = 1000;
+
 /**
  * Orphan state transition for editor routing.
  *
@@ -307,6 +310,9 @@ export class FileContentService {
   private readonly pathNotifyRegistry = new PathSubscriberRegistry();
   private readonly contentChangeRegistry = new PathSubscriberRegistry<ContentChangeEvent>();
   private readonly orphanedPaths = new Set<string>();
+  /** The latest generation whose read settled as each path's answer, and who waits for the next. */
+  private readonly settledReads = new Map<string, number>();
+  private readonly settleWaiters = new Map<string, Set<() => void>>();
   /** Paths a consumer keeps state for without a view, by how many times each is retained. */
   private readonly retainedPaths = new Map<string, number>();
   private readonly editorSaves = new Map<string, EditorSaveState>();
@@ -578,20 +584,64 @@ export class FileContentService {
   }
 
   /**
-   * Read a path afresh now, and say whether what this service holds for it is that read's answer.
+   * Read a path afresh now, and answer with the outcome this service then holds for it (STO-25, I7).
    *
-   * A read begun earlier can no longer publish (its generation is superseded), so once this resolves `true` the held
-   * outcome comes from a read begun after this call: a caller that learned out of band that the bytes changed (a tree
-   * write landed them, STO-25) never shows what was read before (I7). `false` means a later read has begun since, and
-   * its answer is the one to wait for; asking again settles on it.
+   * The answer comes from a read begun at or after this call: a read begun earlier can no longer publish (its
+   * generation is superseded). When a later read begins before this one settles, its answer, or any later one's, is
+   * just as fresh, so this waits for it rather than reading again; only when none settles in a while does it read
+   * again itself. Two callers on one path therefore settle on the same read and never supersede each other for ever.
+   * A failed read answers its `error` outcome, never a value retained from before.
    *
    * @param path - Workspace-relative path.
-   * @returns `true` once the held outcome is this read's.
+   * @returns The held outcome, from a read begun at or after this call.
    */
-  public async rereadOutcome(path: string): Promise<boolean> {
-    const generation = this.refreshGuard.begin(path);
-    await this.computeOutcome(path, generation);
-    return this.refreshGuard.isCurrent(path, generation);
+  public async rereadOutcome(path: string): Promise<FileContentResult> {
+    const since = this.refreshGuard.begin(path);
+    await this.computeOutcome(path, since);
+    while ((this.settledReads.get(path) ?? 0) < since) {
+      // oxlint-disable-next-line no-await-in-loop -- each wait is for the read that superseded the one before.
+      if (!(await this.settledSince(path, since))) {
+        // oxlint-disable-next-line no-await-in-loop -- nothing settled: read again, once.
+        await this.computeOutcome(path, this.refreshGuard.begin(path));
+      }
+    }
+    return this.outcomes.get(path) ?? loadingOutcome;
+  }
+
+  /* Whether a read of `path` at or after `since` settles within the patience. */
+  private async settledSince(path: string, since: number): Promise<boolean> {
+    if ((this.settledReads.get(path) ?? 0) >= since) {
+      return true;
+    }
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    const waiters = this.settleWaiters.get(path) ?? new Set<() => void>();
+    const settled = (): void => {
+      if ((this.settledReads.get(path) ?? 0) >= since) {
+        finish(true);
+      }
+    };
+    const timer = setTimeout(() => {
+      finish(false);
+    }, supersededReadPatienceMilliseconds);
+    const finish = (answer: boolean): void => {
+      clearTimeout(timer);
+      waiters.delete(settled);
+      resolve(answer);
+    };
+    waiters.add(settled);
+    this.settleWaiters.set(path, waiters);
+    return promise;
+  }
+
+  /* A read settled as the path's answer: those waiting on a generation at or below it are answered. */
+  private noteSettled(path: string, generation: number): void {
+    if ((this.settledReads.get(path) ?? 0) >= generation) {
+      return;
+    }
+    this.settledReads.set(path, generation);
+    for (const waiter of this.settleWaiters.get(path) ?? []) {
+      waiter();
+    }
   }
 
   /**
@@ -1297,6 +1347,7 @@ export class FileContentService {
     this.pendingResolves.clear();
     this.orphanedPaths.clear();
     this.outcomes.clear();
+    this.settledReads.clear();
     this.refreshGuard.reset();
   }
 
@@ -1893,6 +1944,18 @@ export class FileContentService {
   }
 
   private async computeOutcome(path: string, generation: number, options?: ResolveOptions): Promise<FileContentResult> {
+    const outcome = await this.computeOutcomeOnce(path, generation, options);
+    if (this.refreshGuard.isCurrent(path, generation)) {
+      this.noteSettled(path, generation);
+    }
+    return outcome;
+  }
+
+  private async computeOutcomeOnce(
+    path: string,
+    generation: number,
+    options?: ResolveOptions,
+  ): Promise<FileContentResult> {
     const read = await this.readBytes(path, generation);
     if (read === undefined) {
       return this.outcomes.get(path) ?? loadingOutcome;

@@ -229,10 +229,26 @@ const mockUseFileContent =
   >();
 
 /* Paths whose fresh read after opening has not settled yet (STO-25, I7). */
-const freshState = vi.hoisted(() => ({ held: new Set<string>() }));
+const freshState = vi.hoisted(() => ({
+  held: new Set<string>(),
+  failed: new Map<string, unknown>(),
+  retry: (() => undefined) as () => void,
+}));
 vi.mock('#hooks/use-file-content.js', () => ({
-  useFreshContent: (path: string | undefined, open: boolean) =>
-    open && (path === undefined || !freshState.held.has(path)),
+  useFreshContent: (path: string | undefined, open: boolean) => ({
+    state: open
+      ? path !== undefined && freshState.failed.has(path)
+        ? 'failed'
+        : path !== undefined && freshState.held.has(path)
+          ? 'waiting'
+          : 'open'
+      : 'waiting',
+    cause: path === undefined ? undefined : freshState.failed.get(path),
+    readAfresh: false,
+    retry: () => {
+      freshState.retry();
+    },
+  }),
   useFileContent: (path: string | undefined) => {
     const result = mockUseFileContent(path);
     return {
@@ -1029,6 +1045,25 @@ describe('FileEditor routing', () => {
       surfaceAvailability.current = new Map();
       landedState.paths.clear();
       freshState.held.clear();
+    }
+  });
+
+  /* A fresh read that failed is shown failed with a way to try again, never as the bytes held before (I7). */
+  it('should show a failed fresh read with Try again, not the content held before', async () => {
+    const user = userEvent.setup();
+    const retry = vi.fn();
+    freshState.retry = retry;
+    freshState.failed.set('lib/gear.ts', new Error('disk on fire'));
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('old') });
+    try {
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByText(/disk on fire/)).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(retry).toHaveBeenCalledOnce();
+    } finally {
+      freshState.failed.clear();
+      freshState.retry = () => undefined;
     }
   });
 

@@ -17,7 +17,7 @@ import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
 import { DictationControl, DictationFeedback } from '#components/dictation/dictation-controls.js';
-import type { AcpSessionData } from '@taucad/chat';
+import type { AcpSessionData, CadAgentExecution } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
@@ -207,6 +207,18 @@ const sendRefusalOf = (input: {
 };
 
 /**
+ * Whether a send queued in the native input (P4) may go now: Send would send, and the chat has an agent to send with.
+ * A first visit has no Tau model until the catalog answers, and a send made then is refused.
+ *
+ * @returns Whether the queued send may go.
+ */
+const isQueuedSendPermitted = (
+  input: Omit<Parameters<typeof sendRefusalOf>[0], 'isEmpty'> & { readonly execution: CadAgentExecution },
+): boolean =>
+  (input.execution.kind !== 'tau' || input.execution.model !== '') &&
+  sendRefusalOf({ ...input, isEmpty: false }) === undefined;
+
+/**
  * The chat composer, on every device (C11): the Tiptap rich text editor with
  * inline context chips via @-mentions, slash commands, drag-drop from dockview
  * tabs, and one bar of controls.
@@ -332,7 +344,10 @@ export const ChatTextareaDesktop = memo(function ({
       .insertContent({ type: 'text', text: separator + text })
       .run();
   }, []);
-  const { draftActorRef } = useChatComposer();
+  const {
+    draftActorRef,
+    execution: { execution },
+  } = useChatComposer();
   const latestDraftOwner = useRef(draftActorRef);
   useLayoutEffect(() => {
     latestDraftOwner.current = draftActorRef;
@@ -554,9 +569,14 @@ export const ChatTextareaDesktop = memo(function ({
 
   /* The queued send (above): an edit in the native input after its Enter had already cancelled it (`submitQueued` is
    * false then). It waits, still queued, while sending is not permitted, and carries the editor's text, since the
-   * draft this composer was rendered with can still be the previous one. */
-  const isQueuedSubmitPermitted =
-    sendRefusalOf({ sendBlockReason, isSubmitting, isAttaching, isSubmitDisabled, isEmpty: false }) === undefined;
+   * draft this composer was rendered with can still be the previous one; it also waits for a model to send with. */
+  const isQueuedSubmitPermitted = isQueuedSendPermitted({
+    sendBlockReason,
+    isSubmitting,
+    isAttaching,
+    isSubmitDisabled,
+    execution,
+  });
   useEffect(() => {
     if (!editor || !queuedSubmitRef.current || !isQueuedSubmitPermitted) {
       return;

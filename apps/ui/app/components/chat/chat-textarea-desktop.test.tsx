@@ -583,6 +583,28 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       expect(submit.mock.calls[0]?.[0]).toBe('Make a bracket.');
     });
 
+    /* A first visit has no model until the catalog answers, and a send then is refused: the queued one waits for it. */
+    it('should keep the send queued until the chat has a model to send with', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      execution.current = { kind: 'tau', model: '' };
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(submit).not.toHaveBeenCalled();
+
+      execution.current = { kind: 'tau', model: 'm' };
+      view.rerenderWith(codexSession);
+
+      await vi.waitFor(() => {
+        expect(submit).toHaveBeenCalledOnce();
+      });
+      expect(submit.mock.calls[0]?.[0]).toBe('Make a bracket.');
+    });
+
     /* Any edit after the Enter cancels it, as in the native input: an edit undone back to the same text included. */
     it('should drop the queued send after an edit, even one undone back to the queued text', async () => {
       const submit = vi.fn(async (_text?: string) => undefined);

@@ -1,12 +1,47 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry span fields are SDK wire names. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Event } from '@sentry/react';
+import type * as SentryReact from '@sentry/react';
+import { publishRoute, routePathInstrumentation } from '#lib/sentry-context.lib.js';
 import {
+  nameSpansByRoute,
   scrubTransaction,
   tracePropagationTargets,
   tracesSampleRate,
   tracingIntegrations,
 } from '#lib/sentry-tracing.lib.js';
+
+const rootSpan = vi.hoisted(() => ({ updateName: vi.fn(), setAttribute: vi.fn() }));
+const activeSpan = vi.hoisted(() => ({ value: undefined as Record<string, unknown> | undefined }));
+vi.mock('@sentry/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof SentryReact>()),
+  getActiveSpan: () => activeSpan.value,
+  getRootSpan: () => rootSpan,
+}));
+
+describe('nameSpansByRoute (RR7)', () => {
+  it('should name the active page load after the published route, and each navigation after its own', () => {
+    for (const [id, path] of [
+      ['root', ''],
+      ['routes/projects', 'projects'],
+      ['routes/w.$workspace.$project', 'w/:workspace/:project'],
+    ] as const) {
+      routePathInstrumentation.route?.({ id, path, index: undefined, instrument: () => undefined });
+    }
+    activeSpan.value = {};
+    publishRoute(['root', 'routes/projects']);
+
+    const stop = nameSpansByRoute();
+    publishRoute(['root', 'routes/w.$workspace.$project']);
+    stop();
+    publishRoute(['root']);
+
+    expect(rootSpan.updateName.mock.calls).toStrictEqual([['routes/projects'], ['routes/w.$workspace.$project']]);
+    expect(rootSpan.setAttribute).toHaveBeenCalledWith('sentry.source', 'route');
+    expect(rootSpan.setAttribute).toHaveBeenCalledWith('route.pattern', '/w/:workspace/:project');
+    activeSpan.value = undefined;
+  });
+});
 
 describe('tracesSampleRate', () => {
   it.each(['staging', 'staging-e2e', 'development'])('should trace every page load in %s', (environment) => {

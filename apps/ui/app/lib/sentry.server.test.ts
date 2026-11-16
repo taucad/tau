@@ -2,7 +2,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names and header names are wire names. */
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ErrorEvent } from '@sentry/node';
-import type { EntryContext } from 'react-router';
+import { createRequestHandler } from 'react-router';
+import type { EntryContext, ServerBuild } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readBuildId } from '#lib/build-identity.js';
 import { sentryRelease } from '#lib/sentry-event.lib.js';
@@ -310,6 +311,95 @@ describe('queueSsrError and claimSsrErrors', () => {
 
     expect(mocks.captured).toEqual([]);
   });
+});
+
+describe('routeErrorInstrumentation (RR7)', () => {
+  /** The smallest server build with the reporter's route instrumentation: a page and a resource whose loaders fail. */
+  const buildWith = async (): Promise<ServerBuild> => {
+    const { queueSsrError, routeErrorInstrumentation } = await loadReporter();
+    const route = (id: string, path: string, module: Readonly<Record<string, unknown>>) => ({
+      id,
+      parentId: id === 'root' ? undefined : 'root',
+      path,
+      index: undefined,
+      caseSensitive: undefined,
+      module,
+    });
+    const manifestRoute = (id: string, path: string, hasLoader: boolean) => ({
+      id,
+      parentId: id === 'root' ? undefined : 'root',
+      path,
+      module: `/${id}.js`,
+      hasLoader,
+      hasAction: false,
+      hasClientAction: false,
+      hasClientLoader: false,
+      hasClientMiddleware: false,
+      hasErrorBoundary: id === 'root',
+    });
+    const fails = () => {
+      throw new Error('loader failed');
+    };
+    return {
+      entry: {
+        module: {
+          default: () => new Response('document'),
+          handleError: (error: unknown, { request }: { request: Request }) => {
+            queueSsrError(error, request);
+          },
+          instrumentations: [routeErrorInstrumentation],
+        },
+      },
+      routes: {
+        root: route('root', '', { default: () => null }),
+        'routes/w.$workspace.$project': route('routes/w.$workspace.$project', 'w/:workspace/:project', {
+          default: () => null,
+          loader: fails,
+        }),
+        'routes/assets.$': route('routes/assets.$', 'assets/*', { loader: fails }),
+      },
+      assets: {
+        entry: { module: '/entry.js', imports: [] },
+        routes: {
+          root: manifestRoute('root', '', false),
+          'routes/w.$workspace.$project': manifestRoute('routes/w.$workspace.$project', 'w/:workspace/:project', true),
+          'routes/assets.$': manifestRoute('routes/assets.$', 'assets/*', true),
+        },
+        url: '/manifest.js',
+        version: 'test',
+      },
+      publicPath: '/',
+      assetsBuildDirectory: 'build/client',
+      future: { v8_middleware: true, v8_passThroughRequests: true },
+      ssr: true,
+      isSpaMode: false,
+      prerender: [],
+      routeDiscovery: { mode: 'initial', manifestPath: '/__manifest' },
+    } as unknown as ServerBuild;
+  };
+
+  it.each([
+    {
+      kind: '.data',
+      path: '/w/home/bracket.data',
+      routeId: 'routes/w.$workspace.$project',
+      pattern: '/w/:workspace/:project',
+    },
+    { kind: 'resource', path: '/assets/model.glb', routeId: 'routes/assets.$', pattern: '/assets/*' },
+  ])(
+    'should tag a $kind loader error with its route id and pattern, which no document render names',
+    async ({ path, routeId, pattern }) => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const handler = createRequestHandler(await buildWith());
+
+      const response = await handler(new Request(`https://taucad.dev${path}`));
+      await response.text();
+      await settle();
+
+      expect(mocks.captured).toHaveLength(1);
+      expect(mocks.captured[0]?.tags).toMatchObject({ route: routeId, 'route.pattern': pattern, http_status: '500' });
+    },
+  );
 });
 
 /** The error response React Router builds for a path no route matches. */

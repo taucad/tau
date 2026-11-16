@@ -54,7 +54,15 @@ export type BrowserIdentity =
 export type AnalyticsDecision = 'accepted' | 'declined' | 'unknown';
 
 /** Who issued an attempt on this page. */
-export type PageCaller = 'editor' | 'agent' | 'geospec' | 'quicklook' | 'converter' | 'capture' | 'viewer';
+export type PageCaller =
+  | 'editor'
+  | 'agent'
+  | 'geospec'
+  | 'quicklook'
+  | 'converter'
+  | 'capture'
+  | 'viewer'
+  | 'attachment';
 
 /** The observable part of a runtime client; `observe` is absent on adapters that never ask for worker facts. */
 export type ObservedRuntimeClient = {

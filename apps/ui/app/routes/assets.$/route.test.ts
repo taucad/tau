@@ -1,7 +1,6 @@
 import { RouterContextProvider } from 'react-router';
 import { describe, it, expect } from 'vitest';
 import { loader } from '#routes/assets.$/route.js';
-import type { LoaderFunctionArgs } from 'react-router';
 
 const callLoader = async (pathname: string): Promise<Response> => {
   try {
@@ -10,10 +9,9 @@ const callLoader = async (pathname: string): Promise<Response> => {
       request,
       url: new URL(request.url),
       pattern: '/assets/*',
-      params: {},
+      params: { '*': pathname.replace(/^\/assets\//u, '') },
       context: new RouterContextProvider(),
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- LoaderFunctionArgs has many optional fields we don't exercise
-    } as LoaderFunctionArgs);
+    });
     throw new Error('Loader did not throw');
   } catch (error) {
     if (error instanceof Response) {

@@ -179,7 +179,6 @@
     "rehype-stringify": "catalog:",
     "remark-parse": "catalog:",
     "remark-rehype": "catalog:",
-    "remix-themes": "^2.0.4",
     "replicad": "catalog:",
     "replicad-opencascadejs": "catalog:",
     "rxjs": "^7.8.2",

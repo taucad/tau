@@ -157,6 +157,13 @@ const permissionStatus = ({
 }): string => {
   if (approval.providerPermission && (outcome === 'approved' || outcome === 'denied')) {
     const selected = approval.providerPermission.options.find((option) => option.optionId === resolution?.optionId);
+    /* ACP's `allow_once` and `reject_once` mean once for every adapter; a request recorded before the host said so
+     * carries `unspecified` for them, and is still once. */
+    const kind = approval.options.find((option) => option.optionId === selected?.optionId)?.kind;
+    const scope =
+      selected?.requestedScope === 'unspecified' && (kind === 'allow_once' || kind === 'reject_once')
+        ? 'once'
+        : selected?.requestedScope;
     if (outcome === 'approved') {
       const observation = resolution?.observation;
       if (selected?.requestedScope === 'persistent' && observation?.optionId === selected.optionId) {
@@ -174,13 +181,13 @@ const permissionStatus = ({
         }
         return `Response recorded · saving unverified`;
       }
-      if (selected?.requestedScope === 'once') {
+      if (scope === 'once') {
         return 'Allowed once · response recorded';
       }
-      if (selected?.requestedScope === 'session') {
+      if (scope === 'session') {
         return 'Session approval requested';
       }
-    } else if (selected?.requestedScope === 'once') {
+    } else if (scope === 'once') {
       return 'Denied · response recorded';
     }
     return 'Response recorded · saving unverified';

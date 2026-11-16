@@ -32,6 +32,7 @@
  * | `abandon` | asks for permission and exits without answering it, leaving the request outstanding on the host |
  * | `tools` | emits a Codex-style `read`/`execute`/`think`/`fetch`/`edit` tool sequence with locations, diff and terminal content, each `pending → in_progress → completed` |
  * | `clear-title` | clears the write call title on its terminal update, exercising ACP presence semantics |
+ * | `update-while-asking` | refines the write call with an `in_progress` update while its permission request is outstanding, then says a line before the call completes, as claude-agent-acp can |
  * | `skills` / `skill-names` | reports complete native skill files, or only their names for packaged-host checks |
  * | `fail:quota` / `fail:rate` / `fail:context` / `fail:model` | stops on that provider failure the way both pinned adapters do: a typed AIR `sessionFailure` on an `end_turn` response when the client advertised it, else the provider sentence as text and a `-32603` rejection; `model` is a service failure whose title is a raw provider JSON body, as Codex sends one |
  * | `reset:soon` / `reset:lifted` / `reset:past` | reports Claude Code's `_claude/rateLimit` on `usage_update` before answering: rejected with a reset an hour out then a report no client can read, rejected then allowed again, or rejected with a reset that has already passed |
@@ -371,6 +372,7 @@ const toolCallUpdate = async (
   result: {
     readonly toolCallId: string;
     readonly status: 'in_progress' | 'completed' | 'failed';
+    readonly rawInput?: unknown;
     readonly rawOutput?: unknown;
     readonly content?: readonly unknown[];
   },
@@ -741,9 +743,9 @@ const writeGatedFile = async (sessionId: string, session: SessionState, text: st
   await toolCall(sessionId, { toolCallId: 'write-1', title: 'write hello.txt', rawInput: { path: 'hello.txt' } });
   /* SP-4 Result 3: a real adapter under the user's own `approval_policy =
    * "never"` writes without asking at all, so the fixture models that too. */
-  const permission = text.includes('noask')
-    ? { result: { outcome: { outcome: 'selected', optionId: 'allow' } } }
-    : await request('session/request_permission', {
+  const asked = text.includes('noask')
+    ? Promise.resolve({ result: { outcome: { outcome: 'selected', optionId: 'allow' } } })
+    : request('session/request_permission', {
         sessionId,
         toolCall: { toolCallId: 'write-1', title: 'write hello.txt', _meta: { token: 'permission-metadata-canary' } },
         options: [
@@ -758,6 +760,17 @@ const writeGatedFile = async (sessionId: string, session: SessionState, text: st
           { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
         ],
       });
+  if (text.includes('update-while-asking')) {
+    /* Long enough for the host to record the request durably before the refinement lands. */
+    await pause(250);
+    await toolCallUpdate(sessionId, { toolCallId: 'write-1', status: 'in_progress', rawInput: { path: 'hello.txt' } });
+  }
+  const permission = await asked;
+  if (text.includes('update-while-asking')) {
+    await textChunk(sessionId, 'Writing hello.txt now.');
+    /* Past the host's idle flush, so the line is its own durable message before the call completes. */
+    await pause(400);
+  }
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the permission response shape is fixed by ACP.
   const outcome = (permission.result as { outcome?: { outcome?: string; optionId?: string } } | undefined)?.outcome;
   if (outcome?.outcome !== 'selected' || !outcome.optionId?.startsWith('allow')) {

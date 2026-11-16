@@ -367,18 +367,44 @@ export const runRoutingCase = async (
       )
     );
   };
-  await expect
-    .poll(
-      async () => {
-        const approve = page.getByRole('button', { name: /^(?:Yes|Yes, allow once|Allow once)$/iu });
-        if (await approve.isVisible()) {
-          await approve.click();
-        }
-        return decided();
-      },
-      { timeout: 1_200_000, interval: 5000 },
-    )
-    .toBe(true);
+  /* A closed page or a quit app answers nothing: the poll below would retry its throwing probe for its whole budget. */
+  let closed: string | undefined;
+  const pageClosed = (): void => {
+    closed ??= 'the page closed';
+  };
+  const appClosed = (): void => {
+    closed ??= 'the app quit';
+  };
+  page.once('close', pageClosed);
+  session.application.once('close', appClosed);
+  try {
+    await expect
+      .poll(
+        async () => {
+          if (page.isClosed()) {
+            pageClosed();
+          }
+          if (closed !== undefined) {
+            return true;
+          }
+          const approve = page.getByRole('button', { name: /^(?:Yes|Yes, allow once|Allow once)$/iu });
+          if (await approve.isVisible()) {
+            await approve.click();
+          }
+          return decided();
+        },
+        { timeout: 1_200_000, interval: 5000 },
+      )
+      .toBe(true);
+  } finally {
+    page.off('close', pageClosed);
+    session.application.off('close', appClosed);
+  }
+  if (closed !== undefined) {
+    throw new Error(
+      `Routing case ${routingCase.id} stopped: ${closed} while its run was ${caseRun()?.lifecycle ?? 'not started'}.`,
+    );
+  }
   const run = caseRun()!;
   if (!settledStates.has(run.lifecycle ?? '')) {
     // The entry's kernel is decided: stop spending the turn.

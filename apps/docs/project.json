@@ -30,6 +30,25 @@
         "files": "app *.test.ts vite.config.ts vitest.config.ts react-router.config.ts vite-environment.d.ts scripts/*.mts"
       }
     },
+    "check-server-output": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Server-output gate (React Router 8 migration RR0, ruling RD8), with the web UI's script: fails when build/server holds a .wasm file, a worker bundle or a file also in build/client/assets. The site is ssr: false, so React Router 7 deletes build/server after prerendering and the check passes on its absence. CI's build lane runs it whenever this site is affected."
+      },
+      "dependsOn": ["build"],
+      "inputs": [
+        "{workspaceRoot}/apps/ui/scripts/check-server-output.mts",
+        {
+          "dependentTasksOutputFiles": "apps/docs/build/{server,client/assets}/**"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-server-output.mts --spa apps/docs/build"
+      }
+    },
     "verify-deploy": {
       "executor": "nx:run-commands",
       "cache": false,

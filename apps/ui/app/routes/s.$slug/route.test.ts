@@ -43,13 +43,15 @@ const portableArtifact = (parameterRecord: unknown): ShareOpenedArtifact => ({
   ],
 });
 
-const loaderArgs = (slug: string): LoaderFunctionArgs => {
-  // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- route test fixture omits unstable router internals.
+const loaderArgs = (slug: string): Parameters<typeof loader>[0] => {
+  const request = new Request(`https://tau.new/s/${slug}`);
   return {
     context: new RouterContextProvider(),
     params: { slug },
-    request: new Request(`https://tau.new/s/${slug}`),
-  } as unknown as LoaderFunctionArgs;
+    request,
+    url: new URL(request.url),
+    pattern: '/s/:slug',
+  };
 };
 
 describe('/s provider dispatch', () => {

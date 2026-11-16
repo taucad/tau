@@ -80,8 +80,9 @@ const build = (handleError: ServerBuild['entry']['module']['handleError']): Serv
     },
     publicPath: '/',
     assetsBuildDirectory: 'build/client',
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's future flag.
-    future: { v8_middleware: true },
+    // As `apps/ui` builds: raw requests (RR2), so the redirect must be built from `url`.
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's future flags.
+    future: { v8_middleware: true, v8_passThroughRequests: true },
     ssr: true,
     isSpaMode: false,
     prerender: [],

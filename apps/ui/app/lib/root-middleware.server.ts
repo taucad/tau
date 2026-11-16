@@ -39,8 +39,7 @@ const applyEveryResponseHeaders = (headers: Headers): void => {
  */
 export const rootMiddleware: MiddlewareFunction<Response> = async ({ url, context }, next) => {
   try {
-    // ponytail: RR2 makes `throwRedirectIfSubdomain` take the URL; until then it reads it from a request.
-    throwRedirectIfSubdomain(new Request(url), 'www');
+    throwRedirectIfSubdomain(url, 'www');
     beginServerTiming(context);
     const response = await next();
     applyEveryResponseHeaders(response.headers);

@@ -482,6 +482,21 @@
           "querystring",
           "colors",
           {
+            "name": "react-router",
+            "allowTypeImports": true,
+            "importNames": [
+              "UNSAFE_DataRouterContext",
+              "UNSAFE_DataRouterStateContext",
+              "UNSAFE_FetchersContext",
+              "UNSAFE_FrameworkContext",
+              "UNSAFE_LocationContext",
+              "UNSAFE_NavigationContext",
+              "UNSAFE_RouteContext",
+              "UNSAFE_ViewTransitionContext"
+            ],
+            "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The one exception is the live router read in project-route-intent.tsx (RD9 amendment)."
+          },
+          {
             "name": "@nx/vite/plugins/nx-tsconfig-paths.plugin",
             "message": "nxViteTsPaths applies tsconfig paths to every importer before Vite's resolver. Resolve # through package.json#imports, or add a scoped resolve.alias. See docs/research/scoped-hash-import-resolution.md."
           }
@@ -611,6 +626,10 @@
       "error",
       {
         "types": {
+          "AppLoadContext": {
+            "message": "React Router 8 removes AppLoadContext: with middleware on, loaders, actions and the entry take a RouterContextProvider (RR3). Type the context as RouterContextProvider and read per-request values through createContext keys.",
+            "fixWith": "RouterContextProvider"
+          },
           "object": {
             "message": "The `object` type is hard to use. Use `Record<string, unknown>` instead. See: https://github.com/typescript-eslint/typescript-eslint/pull/848",
             "fixWith": "Record<string, unknown>"
@@ -1407,7 +1426,31 @@
         "no-restricted-imports": [
           "error",
           {
-            "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"],
+            "paths": [
+              "error",
+              "domain",
+              "freelist",
+              "smalloc",
+              "punycode",
+              "sys",
+              "querystring",
+              "colors",
+              {
+                "name": "react-router",
+                "allowTypeImports": true,
+                "importNames": [
+                  "UNSAFE_DataRouterContext",
+                  "UNSAFE_DataRouterStateContext",
+                  "UNSAFE_FetchersContext",
+                  "UNSAFE_FrameworkContext",
+                  "UNSAFE_LocationContext",
+                  "UNSAFE_NavigationContext",
+                  "UNSAFE_RouteContext",
+                  "UNSAFE_ViewTransitionContext"
+                ],
+                "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The one exception is the live router read in project-route-intent.tsx (RD9 amendment)."
+              }
+            ],
             "patterns": [
               {
                 "group": ["#components/*", "#routes/*"],
@@ -1434,7 +1477,31 @@
         "no-restricted-imports": [
           "error",
           {
-            "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"],
+            "paths": [
+              "error",
+              "domain",
+              "freelist",
+              "smalloc",
+              "punycode",
+              "sys",
+              "querystring",
+              "colors",
+              {
+                "name": "react-router",
+                "allowTypeImports": true,
+                "importNames": [
+                  "UNSAFE_DataRouterContext",
+                  "UNSAFE_DataRouterStateContext",
+                  "UNSAFE_FetchersContext",
+                  "UNSAFE_FrameworkContext",
+                  "UNSAFE_LocationContext",
+                  "UNSAFE_NavigationContext",
+                  "UNSAFE_RouteContext",
+                  "UNSAFE_ViewTransitionContext"
+                ],
+                "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The one exception is the live router read in project-route-intent.tsx (RD9 amendment)."
+              }
+            ],
             "patterns": [
               {
                 "group": ["#components/*", "#hooks/*", "#routes/*"],

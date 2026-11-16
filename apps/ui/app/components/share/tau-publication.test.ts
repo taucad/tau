@@ -422,6 +422,13 @@ describe('Tau publication client environment', () => {
   });
 });
 
+/**
+ * The meta function's arguments with only what it reads. React Router 7 types still require the deprecated `data`,
+ * which 8 removes (B10), so the cast keeps one fixture valid on both.
+ */
+const metaArgs = (loaderData: Parameters<typeof meta>[0]['loaderData']): Parameters<typeof meta>[0] =>
+  ({ loaderData, params: { id: 'pub_1' }, location: {}, matches: [] }) as unknown as Parameters<typeof meta>[0];
+
 describe('Tau publication metadata', () => {
   it('emits social image metadata only when the canonical thumbnail is present in files', () => {
     const thumbnail = 'https://cdn.example/blobs/thumb.webp';
@@ -430,13 +437,7 @@ describe('Tau publication metadata', () => {
       files: { ...sampleLoaderData.files, [thumbnailPath]: thumbnail },
     };
 
-    const tags = meta({
-      data: loaderData,
-      loaderData,
-      params: { id: 'pub_1' },
-      location: {} as unknown as Parameters<typeof meta>[0]['location'],
-      matches: [],
-    });
+    const tags = meta(metaArgs(loaderData));
 
     expect(tags).toEqual(
       expect.arrayContaining([
@@ -448,13 +449,7 @@ describe('Tau publication metadata', () => {
   });
 
   it('does not treat the API fallback thumbnail URL as evidence of a published thumbnail', () => {
-    const tags = meta({
-      data: sampleLoaderData,
-      loaderData: sampleLoaderData,
-      params: { id: 'pub_1' },
-      location: {} as unknown as Parameters<typeof meta>[0]['location'],
-      matches: [],
-    });
+    const tags = meta(metaArgs(sampleLoaderData));
 
     expect(tags?.some((tag) => 'property' in tag && tag.property === 'og:image')).toBe(false);
     expect(tags?.some((tag) => 'name' in tag && typeof tag.name === 'string' && tag.name.startsWith('twitter:'))).toBe(
@@ -463,13 +458,7 @@ describe('Tau publication metadata', () => {
   });
 
   it('adds noindex and no-referrer for private publications', () => {
-    const tags = meta({
-      data: sampleLoaderData,
-      loaderData: sampleLoaderData,
-      params: { id: 'pub_1' },
-      location: {} as unknown as Parameters<typeof meta>[0]['location'],
-      matches: [],
-    });
+    const tags = meta(metaArgs(sampleLoaderData));
 
     expect(tags).toEqual(
       expect.arrayContaining([
@@ -485,13 +474,7 @@ describe('Tau publication metadata', () => {
       publication: { ...sampleLoaderData.publication, visibility: 'public' },
     };
 
-    const tags = meta({
-      data: loaderData,
-      loaderData,
-      params: { id: 'pub_1' },
-      location: {} as unknown as Parameters<typeof meta>[0]['location'],
-      matches: [],
-    });
+    const tags = meta(metaArgs(loaderData));
 
     expect(tags?.some((t) => 'name' in t && t.name === 'robots')).toBe(false);
   });

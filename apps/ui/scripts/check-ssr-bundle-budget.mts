@@ -11,8 +11,12 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-/** `du -sk build/server` total; ~10.1 MiB observed (hybrid `ssr.external`: runtime and the active `.scad` kernel only). */
-const ssrBundleByteBudget = 11 * 1024 * 1024;
+/**
+ * `du -sk build/server` total. Re-based in RR0 (React Router 8 migration) on the cleaned output: 33,928 KiB (33.1 MiB)
+ * once no worker bundle, WASM file or client asset is left in it (`check-server-output.mts`), down from 82,080 KiB.
+ * The old 11 MiB budget predated the server graph's growth and was not run in CI; this one is, with ~8% headroom.
+ */
+const ssrBundleByteBudget = 36 * 1024 * 1024;
 
 /** Main SSR entry path — cap cold-parse surface even when code splits into `assets/`. */
 const ssrIndexFileByteBudget = 3 * 1024 * 1024;

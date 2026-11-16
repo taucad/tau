@@ -5,7 +5,7 @@
  */
 import { QueryClientProvider } from '@tanstack/react-query';
 import { renderToString } from 'react-dom/server';
-import { MemoryRouter } from 'react-router';
+import { DataMemoryRouter } from '#test-utils/data-memory-router.js';
 import { expect, it, vi } from 'vitest';
 import type * as FocusRouteStateModule from '#machines/focus.route-state.js';
 import type * as ProjectHookModule from '#hooks/use-project.js';
@@ -73,9 +73,9 @@ const renderProjectUrl = (shell: React.ReactNode): string => {
           <UnloadProvider>
             <ChatSessionStoreProvider>
               <SessionsProvider>
-                <MemoryRouter initialEntries={['/w/ws/alpha?chat=c1']}>
+                <DataMemoryRouter initialEntries={['/w/ws/alpha?chat=c1']}>
                   <ProjectSessionsHost>{shell}</ProjectSessionsHost>
-                </MemoryRouter>
+                </DataMemoryRouter>
               </SessionsProvider>
             </ChatSessionStoreProvider>
           </UnloadProvider>
@@ -111,11 +111,11 @@ it('should derive resolving for a project URL on the server and call no project 
           <UnloadProvider>
             <ChatSessionStoreProvider>
               <SessionsProvider>
-                <MemoryRouter initialEntries={['/w/ws/alpha?chat=c1']}>
+                <DataMemoryRouter initialEntries={['/w/ws/alpha?chat=c1']}>
                   <ProjectSessionsHost>
                     <p>editor</p>
                   </ProjectSessionsHost>
-                </MemoryRouter>
+                </DataMemoryRouter>
               </SessionsProvider>
             </ChatSessionStoreProvider>
           </UnloadProvider>

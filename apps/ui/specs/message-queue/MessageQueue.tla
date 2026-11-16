@@ -126,6 +126,11 @@
 \* cancel goes through the one targeted host cancel it always used; the host cancel log line is JSON
 \* text. Only the control and logging change, so admission, delivery, persistence and the queue
 \* barrier are unchanged.
+\* PL1 (runtime entry cut): the store's per-chat SDK `Chat` loads on demand behind `DeferredChat`, an ordered
+\* queue that replays every send made before the load in order, rejects one past its bound rather than dropping
+\* it, and settles every queued send as failed when the load fails. Once loaded, a send runs synchronously as
+\* before. Delivery order, admission, persistence and the queue barrier are unchanged, so no action or verdict
+\* changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

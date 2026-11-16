@@ -117,7 +117,12 @@ export function WorkspaceFrame({
       document.documentElement.setAttribute(frameTabAttribute, tab);
     }
   }, [isDrawn, tab]);
-  const served = useServedComposer(isDrawn, pathname, navigationType);
+  const served = useServedComposer(
+    isDrawn,
+    pathname,
+    /* While pending, the router's type is the committed page's, not the navigation to this project's. */
+    isPending ? undefined : navigationType,
+  );
 
   if (!isDrawn) {
     return (

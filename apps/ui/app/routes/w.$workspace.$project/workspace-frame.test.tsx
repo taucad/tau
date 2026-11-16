@@ -311,13 +311,19 @@ describe('WorkspaceFrame served composer', () => {
   /* The shell's project path for the frame (A15b2), where a row passes one. */
   let framePath: string | undefined;
   let frameNavigation: 'POP' | 'PUSH' | 'REPLACE' | undefined;
+  let isFramePending = false;
   const served = (url: string, isDrawn = true): React.JSX.Element => (
     <MemoryRouter initialEntries={[url]}>
       <Routes>
         <Route
           path='/w/:workspace/:project'
           element={
-            <WorkspaceFrame isDrawn={isDrawn} pathname={framePath} navigationType={frameNavigation}>
+            <WorkspaceFrame
+              isDrawn={isDrawn}
+              isPending={isFramePending}
+              pathname={framePath}
+              navigationType={frameNavigation}
+            >
               <Consumer />
             </WorkspaceFrame>
           }
@@ -367,6 +373,7 @@ describe('WorkspaceFrame served composer', () => {
     handover = undefined;
     framePath = undefined;
     frameNavigation = undefined;
+    isFramePending = false;
   });
 
   afterEach(() => {
@@ -633,6 +640,26 @@ describe('WorkspaceFrame served composer', () => {
       /* A later push to another project still ends a served input. */
       framePath = '/w/home/two';
       frameNavigation = 'PUSH';
+      rerender(true);
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
+    } finally {
+      await done();
+    }
+  });
+
+  /* Review round 13: a pending draw's navigation type is the committed page's, which may be a replace. */
+  it("ends the served input when a pending draw for another project reads the committed page's replace", async () => {
+    framePath = '/w/home/one';
+    frameNavigation = 'POP';
+    const { container, rerender, done } = await serveAndHydrate('/w/home/one', (input) => {
+      input.value = 'add fillets';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    try {
+      rerender(true);
+      framePath = '/w/home/two';
+      frameNavigation = 'REPLACE';
+      isFramePending = true;
       rerender(true);
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
     } finally {

@@ -2,7 +2,26 @@ import { waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '#components/chat-paste-handler.js';
 
-const makeFile = (name: string, type = 'image/png'): File => new File([new Blob(['stub'])], name, { type });
+/** A PNG header: intake labels a pasted file from its bytes, so every image fixture must hold real image bytes. */
+const pngBytes = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00,
+  0x30, 0x00, 0x00, 0x00, 0x20, 0x08, 0x02, 0x00, 0x00, 0x00,
+]);
+const jpegBytes = new Uint8Array([
+  0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x20, 0x00, 0x30, 0x03, 0x01, 0x22, 0x00,
+]);
+const webpBytes = new Uint8Array([
+  0x52, 0x49, 0x46, 0x46, 0x1a, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x4c, 0x0d, 0x00, 0x00,
+  0x00, 0x2f, 0x2f, 0xc0, 0x07, 0x00,
+]);
+
+const pdfLike = new TextEncoder().encode('%PDF-1.7\n');
+
+// The jsdom File has no `arrayBuffer`; every browser the app supports does.
+const makeFile = (name: string, type = 'image/png', bytes: Uint8Array<ArrayBuffer> = pngBytes): File =>
+  Object.assign(new File([new Blob(['stub'])], name, { type }), {
+    arrayBuffer: async () => new Uint8Array(bytes).buffer,
+  });
 
 const makeItem = (file: File): DataTransferItem => ({
   kind: 'file',
@@ -163,6 +182,54 @@ describe('chat paste image handling', () => {
       'data:image/png;base64,RAW_C.png',
     ]);
     expect(onReadError).toHaveBeenCalledOnce();
+  });
+
+  it('should attach a pasted JPEG whose declared type is empty, labelled from its bytes', async () => {
+    const event = {
+      clipboardData: makeClipboardData({ items: [makeItem(makeFile('small.jpg', '', jpegBytes))] }),
+      preventDefault: vi.fn(),
+    };
+    const onImage = vi.fn<(dataUrl: string) => void>();
+
+    expect(handleClipboardImagePaste({ event, onImage })).toBe(true);
+
+    await waitFor(() => {
+      expect(onImage).toHaveBeenCalledOnce();
+    });
+    expect(onImage).toHaveBeenCalledWith('data:image/jpeg;base64,RAW_small.jpg');
+  });
+
+  it('should label a pasted WebP named .jpg as image/webp', async () => {
+    const event = {
+      clipboardData: makeClipboardData({ items: [makeItem(makeFile('photo.jpg', 'image/jpeg', webpBytes))] }),
+      preventDefault: vi.fn(),
+    };
+    const onImage = vi.fn<(dataUrl: string) => void>();
+
+    expect(handleClipboardImagePaste({ event, onImage })).toBe(true);
+
+    await waitFor(() => {
+      expect(onImage).toHaveBeenCalledWith('data:image/webp;base64,RAW_photo.jpg');
+    });
+  });
+
+  it('should refuse a pasted file whose bytes are not a stored image', async () => {
+    const event = {
+      clipboardData: makeClipboardData({
+        items: [makeItem(makeFile('photo.heic', 'image/heic')), makeItem(makeFile('blob', '', pdfLike))],
+      }),
+      preventDefault: vi.fn(),
+    };
+    const onImage = vi.fn<(dataUrl: string) => void>();
+    const onRefused = vi.fn<(reason: 'unsupported' | 'too-large') => void>();
+
+    expect(handleClipboardImagePaste({ event, onImage, onRefused })).toBe(true);
+
+    await waitFor(() => {
+      expect(onRefused).toHaveBeenCalledTimes(2);
+    });
+    expect(onRefused.mock.calls).toEqual([['unsupported'], ['unsupported']]);
+    expect(onImage).not.toHaveBeenCalled();
   });
 
   it('should leave non-image paste events to the caller fallback', () => {

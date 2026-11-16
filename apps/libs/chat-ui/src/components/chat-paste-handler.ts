@@ -1,3 +1,5 @@
+import { readAttachmentFile } from '#utils/attachment-intake.js';
+
 export type ClipboardPasteEvent = {
   readonly clipboardData?: DataTransfer;
   preventDefault(): void;
@@ -5,33 +7,19 @@ export type ClipboardPasteEvent = {
 
 type HandleClipboardImagePasteOptions = {
   readonly event: ClipboardPasteEvent;
+  /** Receives each pasted image as a `data:` URL labelled from its bytes. */
   readonly onImage: (dataUrl: string) => void;
   readonly onReadError?: () => void;
+  /** A pasted file whose bytes are not an image Tau stores, or that is too large to read. */
+  readonly onRefused?: (reason: 'unsupported' | 'too-large') => void;
 };
 
 /**
- * Reads a file as a data URL using FileReader.
- * Returns a Promise that resolves with the data URL string.
+ * Whether a clipboard file may be an image. Some sources (a file copied in a
+ * file manager, some screenshot tools) give no type at all, so an untyped file
+ * is read and its bytes decide.
  */
-export const readFileAsDataUrl = async (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener('load', (event) => {
-      const result = event.target?.result;
-      if (typeof result === 'string' && result !== '') {
-        resolve(result);
-      } else {
-        reject(new Error('Invalid file read result'));
-      }
-    });
-
-    reader.addEventListener('error', () => {
-      reject(new Error('Failed to read file'));
-    });
-
-    reader.readAsDataURL(file);
-  });
-};
+const mayBeImage = (type: string): boolean => type.startsWith('image/') || type === '';
 
 const getImageFilesFromItems = (items: DataTransferItemList | undefined): File[] => {
   if (!items) {
@@ -40,7 +28,7 @@ const getImageFilesFromItems = (items: DataTransferItemList | undefined): File[]
 
   const files: File[] = [];
   for (const item of items) {
-    if (!item.type.startsWith('image/')) {
+    if (item.kind !== 'file' || !mayBeImage(item.type)) {
       continue;
     }
     const file = item.getAsFile();
@@ -55,7 +43,7 @@ const getImageFilesFromFileList = (fileList: FileList | undefined): File[] => {
   if (!fileList) {
     return [];
   }
-  return [...fileList].filter((file) => file.type.startsWith('image/'));
+  return [...fileList].filter((file) => mayBeImage(file.type));
 };
 
 export const getClipboardImageFiles = (clipboardData: DataTransfer | undefined): File[] => {
@@ -72,12 +60,20 @@ const readClipboardImageFiles = async ({
   files,
   onImage,
   onReadError,
+  onRefused,
 }: Omit<HandleClipboardImagePasteOptions, 'event'> & { readonly files: readonly File[] }): Promise<void> => {
   for (const file of files) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- preserving clipboard image order is observable UI behavior.
-      const dataUrl = await readFileAsDataUrl(file);
-      onImage(dataUrl);
+      const intake = await readAttachmentFile(file);
+      if (intake.outcome === 'refused') {
+        onRefused?.(intake.reason);
+      } else if (typeof intake.source === 'string') {
+        onImage(intake.source);
+      } else {
+        // Paste attaches images only; a document pasted as an untyped file is refused like any other.
+        onRefused?.('unsupported');
+      }
     } catch {
       onReadError?.();
     }
@@ -88,6 +84,7 @@ export const handleClipboardImagePaste = ({
   event,
   onImage,
   onReadError,
+  onRefused,
 }: HandleClipboardImagePasteOptions): boolean => {
   const files = getClipboardImageFiles(event.clipboardData);
   if (files.length === 0) {
@@ -95,6 +92,6 @@ export const handleClipboardImagePaste = ({
   }
 
   event.preventDefault();
-  void readClipboardImageFiles({ files, onImage, onReadError });
+  void readClipboardImageFiles({ files, onImage, onReadError, onRefused });
   return true;
 };

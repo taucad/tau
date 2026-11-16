@@ -194,6 +194,11 @@ export type WorkerRevisionCommand =
   /* An opened file still holding its pointer: its object jumps the fill queue (D10). */
   | Readonly<{ command: 'prioritizeLargeObjects'; paths: readonly string[] }>
   /**
+   * The paths one open file pane waits on while a tree write lands them (STO-25): the projection's `landedPaths`
+   * names each once this tab's write has landed it. Replaces what the watcher asked before; no paths ends its watch.
+   */
+  | Readonly<{ command: 'watchLanding'; watcher: string; paths: readonly string[] }>
+  /**
    * Pull the remote now (XD3, round 18): another device's run on one of this project's chats has been quiet here a
    * while, and only pulls show whether it stayed quiet there. A question since round 27: answered `pulled`, with
    * whether this device can pull the chat at all, as the placement session's own pull answers it.
@@ -726,6 +731,31 @@ export type RemoteAttention = Readonly<{
 }>;
 
 /**
+ * One root's tree write in progress (D10): the entry closure it lands first, the view whose index answers what has
+ * landed, whether the closure has, every path the write moves aside or writes, and those of them whose own change has
+ * been observed since it began.
+ */
+export type TreeWriteWatch = {
+  closure: readonly string[];
+  view?: RootedFileSystem;
+  landed: boolean;
+  touched: ReadonlySet<string>;
+  observed: Set<string>;
+};
+
+/**
+ * Whether a tree write has landed one path for good (STO-25, I7): a path it removes or writes once its own change has
+ * been observed and the index no longer has it arriving; any other once the index has none of it arriving, so a
+ * placeholder waits for its object's bytes. Unknown (no view, or no tree expected) is never landed.
+ *
+ * @param write - The root's tree write.
+ * @param path - A checkout-relative path.
+ * @returns `true` once the write has landed it.
+ */
+export const treeWriteLanded = (write: TreeWriteWatch, path: string): boolean =>
+  (!write.touched.has(path) || write.observed.has(path)) && write.view?.entriesLanded?.([path]) === true;
+
+/**
  * Start unfocused: the page says which project is focused as it binds it.
  *
  * @returns One project's attention.
@@ -893,7 +923,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * first, and the view whose index answers when that closure has landed.
    * `landed` is set once the index says so, and stays until the write ends.
    */
-  const entryClosures = new Map<string, { closure: readonly string[]; view?: RootedFileSystem; landed: boolean }>();
+  const entryClosures = new Map<string, TreeWriteWatch>();
   const entryClosureLanded = (root: string | undefined): boolean => {
     const entry = root === undefined ? undefined : entryClosures.get(root);
     if (entry !== undefined && !entry.landed && entry.view?.entriesLanded?.(entry.closure) === true) {
@@ -901,9 +931,43 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
     return entry?.landed === true;
   };
-  const watchEntryClosure = async (root: string, closure: readonly string[]): Promise<void> => {
-    const entry: { closure: readonly string[]; view?: RootedFileSystem; landed: boolean } = { closure, landed: false };
+  /*
+   * STO-25: the paths open file panes wait on (`watchLanding`), by watcher, and of each root the ones its tree write
+   * has landed. Only what the write itself proves counts (I7): a path it touches once its own change was observed and
+   * the index no longer has it arriving, any other once the index has none of it arriving (a placeholder arrives until
+   * its object's bytes do). Kept until the next tree write or a failed one, so a pane never closes again on the same
+   * tree; unknown is never landed.
+   */
+  const landingWatchers = new Map<string, readonly string[]>();
+  const landedPaths = new Map<string, Set<string>>();
+  const watchedLanding = (): ReadonlySet<string> => new Set([...landingWatchers.values()].flat());
+  const landedOf = (root: string | undefined): readonly string[] | undefined => {
+    if (root === undefined || landingWatchers.size === 0) {
+      return undefined;
+    }
+    const watched = watchedLanding();
+    const entry = entryClosures.get(root);
+    const landed = landedPaths.get(root) ?? new Set<string>();
+    if (entry?.view?.entriesLanded !== undefined) {
+      for (const path of watched) {
+        if (!landed.has(path) && treeWriteLanded(entry, path)) {
+          landed.add(path);
+          landedPaths.set(root, landed);
+        }
+      }
+    }
+    const answered = [...watched].filter((path) => landed.has(path)).toSorted();
+    return answered.length === 0 ? undefined : answered;
+  };
+  const watchEntryClosure = async (
+    root: string,
+    closure: readonly string[],
+    touched: readonly string[],
+  ): Promise<void> => {
+    const entry: TreeWriteWatch = { closure, landed: false, touched: new Set(touched), observed: new Set() };
     entryClosures.set(root, entry);
+    /* A new tree: what the last write landed says nothing of this one's. */
+    landedPaths.delete(root);
     try {
       entry.view = await options.filesystem(root);
     } catch (error) {
@@ -1070,7 +1134,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
       if (bracket?.closure !== undefined) {
         // async-iife: bootstrap -- the view is opened once per write; the reading follows as it lands.
-        void watchEntryClosure(root, bracket.closure);
+        void watchEntryClosure(root, bracket.closure, paths);
       }
       writing.set(root, (writing.get(root) ?? 0) + 1);
       republish();
@@ -1080,6 +1144,10 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           return;
         }
         released = true;
+        if (outcome?.failed === true && bracket?.closure !== undefined) {
+          /* A failed write's tree is not the tree (I7): nothing it landed opens a pane. */
+          landedPaths.delete(root);
+        }
         if (bracket?.purpose === 'tree' && outcome?.failed === true) {
           failedTreeWrites.set(id, { seen: false });
         } else if (holdsTree && outcome?.failed !== true) {
@@ -1112,10 +1180,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     const status = selectRevisionStatus(snapshot);
     const facet = status.checkoutId === undefined ? undefined : largeObjects.get(status.checkoutId)?.facet;
     const applyingRoots = [...applying.keys()].toSorted();
+    const landed = landedOf(status.checkoutRoot);
     const merged = {
       ...status,
       ...(facet === undefined ? {} : { largeObjects: facet }),
       ...(applyingRoots.length === 0 ? {} : { applyingRoots }),
+      ...(landed === undefined ? {} : { landedPaths: landed }),
     };
     if (status.checkoutId !== undefined && failedTreeWrites.has(status.checkoutId)) {
       const failedAt = failedTreeWrites.get(status.checkoutId);
@@ -1204,9 +1274,22 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       changed(checkoutId, paths);
       return;
     }
-    /* A tree write's own files: the reading may reach `entryReady` as its closure lands (D10). */
-    if (entryClosures.get(root)?.landed === false) {
-      republish();
+    /* A tree write's own files: the reading may reach `entryReady` as its closure lands (D10), and a watched path may
+       land; until the index has caught up with a watched path's own change, each change asks again. */
+    const entry = entryClosures.get(root);
+    if (entry !== undefined) {
+      for (const path of paths) {
+        if (entry.touched.has(path)) {
+          entry.observed.add(path);
+        }
+      }
+      const landed = landedPaths.get(root);
+      if (
+        !entry.landed ||
+        [...watchedLanding()].some((path) => entry.observed.has(path) && landed?.has(path) !== true)
+      ) {
+        republish();
+      }
     }
     const held = deferredChanges.get(checkoutId) ?? { root, paths: new Set<string>() };
     for (const path of paths) {
@@ -1755,6 +1838,15 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         case 'prioritizeLargeObjects': {
           largeObjects.get(selectRevisionStatus(actor.getSnapshot()).checkoutId ?? '')?.prioritize(command.paths);
+          return;
+        }
+        case 'watchLanding': {
+          if (command.paths.length === 0) {
+            landingWatchers.delete(command.watcher);
+          } else {
+            landingWatchers.set(command.watcher, [...command.paths]);
+          }
+          republish();
           return;
         }
         case 'recordsChanged': {

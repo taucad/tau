@@ -157,6 +157,89 @@ export function useProjectAvailability(surface?: ReadinessSurface): ProjectAvail
   });
 }
 
+/** What a file pane shows: its project's availability, or `waiting` while the open has yet to land its own file. */
+export type FilePaneAvailability = ProjectAvailability | 'waiting';
+
+/**
+ * What one file pane shows while a Tau Cloud open may still be owed (STO-25, I7).
+ *
+ * The entry closure's own pane opens on the open's first view, `entryReady`. Any other file may hold the previous
+ * revision's bytes, or be absent, until the open's write lands it (D9: an unlanded path is what is on disk), so its
+ * pane opens once every authored file has landed, or, from that same first view on, once this tab's own write has
+ * landed that very file ({@link usePathLanded}); until then it waits on its own file alone. A failed open and an
+ * account that may not open the project speak as the project does, whatever has landed.
+ *
+ * @param input - Whether the file is in the entry closure; the project's availability for the editor's first view and
+ *   for an absence (every authored file); and whether this tab's write has landed the file.
+ * @returns What the pane shows.
+ */
+export function filePaneAvailability(
+  input: Readonly<{
+    inClosure: boolean;
+    firstView: ProjectAvailability;
+    absence: ProjectAvailability;
+    landed: boolean;
+  }>,
+): FilePaneAvailability {
+  const { inClosure, firstView, absence, landed } = input;
+  if (inClosure) {
+    return firstView;
+  }
+  if (absence === 'ready') {
+    return 'ready';
+  }
+  if (firstView !== 'ready') {
+    return absence;
+  }
+  return landed ? 'ready' : 'waiting';
+}
+
+/**
+ * {@link filePaneAvailability} for one open file pane: while it waits on its own file it asks this tab's revision host
+ * to say when the open's write lands it.
+ *
+ * @param path - The pane's checkout-relative path.
+ * @param inClosure - Whether the path is in the entry closure.
+ * @returns What the pane shows.
+ */
+export function useFilePaneAvailability(path: string, inClosure: boolean): FilePaneAvailability {
+  const absence = useProjectAvailability('absence');
+  const firstView = useProjectAvailability('editor');
+  const asks = !inClosure && absence !== 'ready' && firstView === 'ready';
+  const landed = usePathLanded(asks ? path : undefined);
+  return filePaneAvailability({ inClosure, firstView, absence, landed });
+}
+
+/* One watcher id per pane, unique in this tab whatever React root it renders in. */
+let landingWatchers = 0;
+
+/**
+ * Whether this tab's own Tau Cloud open has landed one path for good (STO-25): the revision host is asked to watch it
+ * while a path is given, and its projection names it once the open's write has landed it (`landedPaths`). Absent is
+ * unknown, never landed (I7).
+ *
+ * @param path - The checkout-relative path to watch; `undefined` watches nothing.
+ * @returns `true` once the write has landed it.
+ */
+export function usePathLanded(path: string | undefined): boolean {
+  const client = useRevisionClient();
+  const [watcher] = useState(() => {
+    landingWatchers += 1;
+    return `pane-${String(landingWatchers)}`;
+  });
+  const landed = useRevisionStatus()?.landedPaths;
+  useEffect(() => {
+    if (client === undefined || path === undefined) {
+      return undefined;
+    }
+    client.send({ command: 'watchLanding', watcher, paths: [path] });
+    return () => {
+      client.send({ command: 'watchLanding', watcher, paths: [] });
+    };
+  }, [client, path, watcher]);
+  return path !== undefined && landed !== undefined && pendingPathSet(landed).has(path);
+}
+
 /**
  * What a model surface waits for: the project first, then every authored file,
  * then the large objects of its own render closure (T6).

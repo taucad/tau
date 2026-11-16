@@ -27,9 +27,11 @@ import {
   createPendingObjectSource,
   createRemoteAttention,
   createWorkerRevisionRegistry,
+  treeWriteLanded,
   versionedChangePaths,
 } from '#machines/file-manager.worker.revisions.js';
 import type {
+  TreeWriteWatch,
   WorkerProjectRevisions,
   WorkerRevisionRegistryOptions,
   WorkerRevisionRequest,
@@ -1235,6 +1237,180 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(atEntryReady).toEqual({ 'main.scad': 'cube(20);', 'lib/a.scad': 'b();' });
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
     expect(await project.readFile('lib/a.scad', 'utf8')).toBe('a();');
+  });
+
+  /*
+   * STO-25: a file pane outside the entry closure opens on its own landing. At `entryReady` a path the write has yet
+   * to land is never named landed, though its previous bytes are on disk; one the write leaves as it is, is; and once
+   * the write lands a path, it is named, until the next tree (I7).
+   */
+  it('should name a watched path landed only once the tree write has landed it', async () => {
+    let gate: (() => Promise<void>) | undefined;
+    const fixture = harness(['alpha'], (port) => port, {
+      observeFileEvents: true,
+      wrapFileSystem: (filesystem) => ({
+        ...filesystem,
+        ...(filesystem.apply === undefined
+          ? {}
+          : {
+              apply: async (changeset) => {
+                const held = gate;
+                if (
+                  held !== undefined &&
+                  changeset.entries.some((entry) => entry.op === 'write' && entry.path.startsWith('lib/'))
+                ) {
+                  gate = undefined;
+                  await held();
+                }
+                return filesystem.apply!(changeset);
+              },
+            }),
+      }),
+    });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile(
+      'tau.json',
+      serializeProjectManifest({
+        $schema: projectManifestSchemaUrl,
+        name: 'Alpha',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.scad' } },
+      }),
+    );
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('lib/a.scad', 'a();');
+    await project.writeFile('lib/keep.scad', 'keep();');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await settle(10);
+
+    alpha.send({ command: 'watchLanding', watcher: 'pane-1', paths: ['lib/a.scad', 'lib/keep.scad'] });
+    await settle(10);
+    /* No tree write yet: nothing is known to have landed. */
+    expect(alpha.frames.findLast((frame) => frame.type === 'status')?.status.landedPaths).toBeUndefined();
+    const statusesBefore = alpha.frames.filter((frame) => frame.type === 'status').length;
+
+    await project.writeFile('main.scad', 'cube(30);');
+    await project.writeFile('lib/a.scad', 'b();');
+    const before = await root.log();
+    let atEntryReady: readonly string[] | undefined;
+    gate = async () => {
+      await vi.waitFor(
+        () => {
+          const frame = alpha.frames
+            .slice(statusesBefore)
+            .findLast((candidate) => candidate.type === 'status' && candidate.status.readiness === 'entryReady');
+          expect(frame).toBeDefined();
+          atEntryReady = frame?.type === 'status' ? (frame.status.landedPaths ?? []) : undefined;
+        },
+        { timeout: 5000 },
+      );
+    };
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      async () => {
+        expect(await root.log()).toHaveLength(before.length + 2);
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+
+    /* At entryReady `lib/a.scad` still held `b();`: never named; `lib/keep.scad` the write leaves as it is. */
+    expect(atEntryReady).toEqual(['lib/keep.scad']);
+    const named = alpha.frames
+      .slice(statusesBefore)
+      .flatMap((frame) => (frame.type === 'status' ? [frame.status.landedPaths ?? []] : []));
+    expect(named.at(-1)).toEqual(['lib/a.scad', 'lib/keep.scad']);
+    expect(await project.readFile('lib/a.scad', 'utf8')).toBe('a();');
+
+    /* The watch ends with the pane. */
+    alpha.send({ command: 'watchLanding', watcher: 'pane-1', paths: [] });
+    await settle(10);
+    expect(alpha.frames.findLast((frame) => frame.type === 'status')?.status.landedPaths).toBeUndefined();
+  });
+
+  /* STO-25, I7: a failed tree write's tree is not the tree, so nothing it landed stays named. */
+  it('should stop naming what a failed tree write landed', async () => {
+    let failNext = false;
+    const fixture = harness(['alpha'], (port) => port, {
+      observeFileEvents: true,
+      wrapFileSystem: (filesystem) => ({
+        ...filesystem,
+        ...(filesystem.apply === undefined
+          ? {}
+          : {
+              apply: async (changeset) => {
+                if (
+                  failNext &&
+                  changeset.entries.some((entry) => entry.op === 'write' && entry.path.startsWith('lib/'))
+                ) {
+                  failNext = false;
+                  throw new Error('The disk went away.');
+                }
+                return filesystem.apply!(changeset);
+              },
+            }),
+      }),
+    });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile(
+      'tau.json',
+      serializeProjectManifest({
+        $schema: projectManifestSchemaUrl,
+        name: 'Alpha',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.scad' } },
+      }),
+    );
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('lib/a.scad', 'a();');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await project.writeFile('main.scad', 'cube(30);');
+    await project.writeFile('lib/a.scad', 'b();');
+    await settle(10);
+    alpha.send({ command: 'watchLanding', watcher: 'pane-1', paths: ['main.scad', 'lib/a.scad'] });
+    await settle(10);
+    const statusesBefore = alpha.frames.filter((frame) => frame.type === 'status').length;
+
+    failNext = true;
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      () => {
+        expect(failNext).toBe(false);
+        const statuses = alpha.frames.slice(statusesBefore).filter((frame) => frame.type === 'status');
+        expect(statuses.at(-1)?.status.applyingRoots).toBeUndefined();
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+
+    const frames = alpha.frames
+      .slice(statusesBefore)
+      .flatMap((frame) => (frame.type === 'status' ? [frame.status] : []))
+      .map((status) => ({ landed: status.landedPaths ?? [], applying: status.applyingRoots !== undefined }));
+    /* The failed write landed its closure first, then failed: what it landed is no longer named. */
+    const closureLanded = frames.findIndex(({ landed }) => landed.includes('main.scad'));
+    expect(closureLanded).toBeGreaterThan(-1);
+    expect(frames[closureLanded]?.landed).toEqual(['main.scad']);
+    expect(frames[closureLanded + 1]).toEqual({ landed: [], applying: true });
+    /* The rollback writes the checkout whole again, and is named as it lands its own bytes. */
+    expect(frames.at(-1)?.landed).toEqual(['lib/a.scad', 'main.scad']);
+    expect(await project.readFile('lib/a.scad', 'utf8')).toBe('b();');
   });
 
   /* D10, I7: an aborted restore's tree is never read as written, and its rollback, which writes the checkout whole again, is. */
@@ -2866,5 +3042,75 @@ describe('the sync attempt reporter follows the page consent (runtime observabil
     } finally {
       restore();
     }
+  });
+});
+
+/* STO-25, I7: only what the tree write itself proves names a path landed. */
+describe('treeWriteLanded', () => {
+  const write = (
+    entriesLanded: ((paths: readonly string[]) => boolean | undefined) | undefined,
+    observed: readonly string[] = [],
+  ): TreeWriteWatch => ({
+    closure: ['tau.json', 'main.ts'],
+    landed: true,
+    touched: new Set(['lib/a.ts', 'lib/gone.ts']),
+    observed: new Set(observed),
+    ...(entriesLanded === undefined
+      ? {}
+      : { view: { entriesLanded } as unknown as NonNullable<TreeWriteWatch['view']> }),
+  });
+
+  it('names a path the write touches once its own change was observed and the index has it landed', () => {
+    expect(
+      treeWriteLanded(
+        write(() => true),
+        'lib/a.ts',
+      ),
+    ).toBe(false);
+    expect(
+      treeWriteLanded(
+        write(() => false, ['lib/a.ts']),
+        'lib/a.ts',
+      ),
+    ).toBe(false);
+    expect(
+      treeWriteLanded(
+        write(() => true, ['lib/a.ts']),
+        'lib/a.ts',
+      ),
+    ).toBe(true);
+  });
+  it('never names a path the write removes before its removal was observed', () => {
+    /* A removed path is no entry of the tree, so the index never has it arriving. */
+    expect(
+      treeWriteLanded(
+        write(() => true),
+        'lib/gone.ts',
+      ),
+    ).toBe(false);
+  });
+  it('names a path the write leaves as it is once the index has none of it arriving', () => {
+    expect(
+      treeWriteLanded(
+        write(() => true),
+        'README.md',
+      ),
+    ).toBe(true);
+    /* A placeholder stays arriving until its object's bytes land. */
+    expect(
+      treeWriteLanded(
+        write(() => false),
+        'model.step',
+      ),
+    ).toBe(false);
+  });
+  it('names nothing while it is unknown', () => {
+    expect(treeWriteLanded(write(undefined, ['lib/a.ts']), 'lib/a.ts')).toBe(false);
+    expect(
+      treeWriteLanded(
+        write(() => undefined, ['lib/a.ts']),
+        'lib/a.ts',
+      ),
+    ).toBe(false);
   });
 });

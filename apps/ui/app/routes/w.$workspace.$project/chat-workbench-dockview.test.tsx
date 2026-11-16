@@ -6,6 +6,10 @@ import { isValidElement, useEffect, useRef, useState, StrictMode, Fragment } fro
 import { MemoryRouter } from 'react-router';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { createPortal } from 'react-dom';
+import type {
+  filePaneAvailability as FilePaneAvailabilityOf,
+  ProjectAvailability,
+} from '#hooks/use-project-availability.js';
 import { Printer } from 'lucide-react';
 import type {
   DockviewApi,
@@ -69,17 +73,33 @@ vi.mock('#routes/w.$workspace.$project/project-sync-placeholder.js', async (impo
 }));
 /* What each surface shows; a surface not named here is ready. */
 const surfaceAvailability = vi.hoisted(() => ({ current: new Map<string | undefined, string>() }));
-vi.mock('#hooks/use-project-availability.js', () => ({
-  useProjectAvailability: (surface?: string) => surfaceAvailability.current.get(surface) ?? 'ready',
-  useModelAvailability: () => 'ready',
-  useLargeObjectPending: (path: string | undefined) => path !== undefined && largeObjectState.pending.has(path),
-  useOpenedLargeObjectPending(path: string | undefined) {
-    if (path !== undefined) {
-      largeObjectState.opened.push(path);
-    }
-    return path !== undefined && largeObjectState.pending.has(path);
-  },
-}));
+/* The paths this tab's open has landed, as the revision host names them (STO-25). */
+const landedState = vi.hoisted(() => ({ paths: new Set<string>() }));
+vi.mock('#hooks/use-project-availability.js', async (importOriginal) => {
+  const { filePaneAvailability } = await importOriginal<{
+    filePaneAvailability: typeof FilePaneAvailabilityOf;
+  }>();
+  const availabilityOf = (surface?: string): ProjectAvailability =>
+    (surfaceAvailability.current.get(surface) ?? 'ready') as ProjectAvailability;
+  return {
+    useProjectAvailability: availabilityOf,
+    useFilePaneAvailability: (path: string, inClosure: boolean) =>
+      filePaneAvailability({
+        inClosure,
+        firstView: availabilityOf('editor'),
+        absence: availabilityOf('absence'),
+        landed: landedState.paths.has(path),
+      }),
+    useModelAvailability: () => 'ready',
+    useLargeObjectPending: (path: string | undefined) => path !== undefined && largeObjectState.pending.has(path),
+    useOpenedLargeObjectPending(path: string | undefined) {
+      if (path !== undefined) {
+        largeObjectState.opened.push(path);
+      }
+      return path !== undefined && largeObjectState.pending.has(path);
+    },
+  };
+});
 
 vi.mock('#routes/w.$workspace.$project/chat-print.js', () => ({
   PrintPanelBody: ({ isShown }: { readonly isShown?: boolean }) => {
@@ -927,14 +947,14 @@ describe('FileEditor routing', () => {
   });
 
   /* STO-25, I7: a pane opened before the open's apply has landed every file never calls an arriving file missing. */
-  it('should show a file still to land as preparing, not as not found, while the apply writes the rest', () => {
+  it('should show a file still to land as waiting, not as not found, while the apply writes the rest', () => {
     surfaceAvailability.current = new Map([['absence', 'preparing']]);
     mockUseFileContent.mockReturnValue({ kind: 'orphaned' });
     try {
       render(<FileEditor paneId='test-pane' filePath='lib/gear.scad' panelApi={mockPanelApi} />);
 
       expect(screen.queryByText(/file not found/i)).not.toBeInTheDocument();
-      expect(screen.getByTestId('sync-placeholder-preparing')).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Waiting for gear.scad' })).toBeInTheDocument();
     } finally {
       surfaceAvailability.current = new Map();
     }
@@ -949,10 +969,61 @@ describe('FileEditor routing', () => {
     mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('old') });
     try {
       render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
-      expect(screen.getByTestId('sync-placeholder-preparing')).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Waiting for gear.ts' })).toBeInTheDocument();
       expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
     } finally {
       surfaceAvailability.current = new Map();
+    }
+  });
+
+  /* STO-25 gap 3: a file outside the closure opens on its own landing, and waits on it alone until then (I7). */
+  it('should wait on a file outside the entry closure alone until the open lands it, then open it', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('new') });
+    try {
+      const { unmount } = render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByRole('group', { name: 'Waiting for gear.ts' })).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+      unmount();
+
+      /* The host names it landed: the same pane opens on its new bytes. */
+      landedState.paths.add('lib/gear.ts');
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('viewer')).toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+      landedState.paths.clear();
+    }
+  });
+
+  it('should never call a landed path missing before every authored file has landed', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    landedState.paths.add('lib/gone.ts');
+    mockUseFileContent.mockReturnValue({ kind: 'orphaned' });
+    try {
+      render(<FileEditor paneId='other-pane' filePath='lib/gone.ts' panelApi={mockPanelApi} />);
+      expect(screen.queryByText(/file not found/i)).not.toBeInTheDocument();
+      expect(screen.getByTestId('sync-placeholder-preparing')).toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+      landedState.paths.clear();
+    }
+  });
+
+  it('should let a failed open win over a file the open had landed', () => {
+    surfaceAvailability.current = new Map([
+      ['absence', 'failed'],
+      ['editor', 'failed'],
+    ]);
+    landedState.paths.add('lib/gear.ts');
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('partial') });
+    try {
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('sync-placeholder-failed')).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+      landedState.paths.clear();
     }
   });
 

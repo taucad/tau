@@ -5,6 +5,7 @@ import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } fr
 import type { RevisionClient } from '#types/revision-client.types.js';
 import {
   chatsOpen,
+  filePaneAvailability,
   modelAvailability,
   pendingOpenReadiness,
   pendingPathSet,
@@ -12,8 +13,10 @@ import {
   projectRenderClosure,
   readyFor,
   surfaceReadiness,
+  useFilePaneAvailability,
   useLargeObjectPending,
   useOpenedLargeObjectPending,
+  usePathLanded,
   useProjectAvailability,
 } from '#hooks/use-project-availability.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -395,5 +398,134 @@ describe('a first view in a tab that follows another tab’s open', () => {
       readiness: 'entryReady',
     } as unknown as RevisionStatusProjection);
     expect(renderHook(() => useProjectAvailability('tree')).result.current).toBe('ready');
+  });
+});
+
+/*
+ * STO-25 gap 3: a file outside the entry closure opens on its own landing, not on the whole apply, and never shows
+ * bytes the open's write has yet to replace, nor calls such a file missing (I7).
+ */
+describe('a file pane during a Tau Cloud open', () => {
+  /* Both of a pane's readings, as {@link projectAvailability} gives them for one status. */
+  const readings = (
+    projection: RevisionStatusProjection,
+    readiness: ProjectReadiness,
+    canOpen = true,
+  ): Readonly<{
+    firstView: ReturnType<typeof projectAvailability>;
+    absence: ReturnType<typeof projectAvailability>;
+  }> => ({
+    firstView: projectAvailability(true, projection, { canOpen, firstView: { surface: 'editor', readiness } }),
+    absence: projectAvailability(true, projection, { canOpen, firstView: { surface: 'absence', readiness } }),
+  });
+  const applying = status({ state: 'pending', pullPhase: 'applying' });
+
+  it('opens a file the write has landed at the first view, and waits on one it has not', () => {
+    const atEntry = readings(applying, 'entryReady');
+    expect(filePaneAvailability({ inClosure: false, ...atEntry, landed: true })).toBe('ready');
+    expect(filePaneAvailability({ inClosure: false, ...atEntry, landed: false })).toBe('waiting');
+  });
+  it('waits for the first view even for a file the write has landed', () => {
+    expect(filePaneAvailability({ inClosure: false, ...readings(applying, 'treeReady'), landed: true })).toBe(
+      'preparing',
+    );
+  });
+  it('opens every file once every authored file has landed, and the closure’s own at the first view', () => {
+    expect(filePaneAvailability({ inClosure: false, ...readings(applying, 'materialized'), landed: false })).toBe(
+      'ready',
+    );
+    expect(filePaneAvailability({ inClosure: true, ...readings(applying, 'entryReady'), landed: false })).toBe('ready');
+    expect(filePaneAvailability({ inClosure: true, ...readings(applying, 'treeReady'), landed: true })).toBe(
+      'preparing',
+    );
+  });
+  it('lets a failed open win over a file the write had landed', () => {
+    for (const failed of [
+      status({ state: 'failed' }),
+      status({ state: 'queued', reason: 'offline' }),
+      status({ state: 'conflicted' }),
+    ]) {
+      for (const inClosure of [false, true]) {
+        expect(filePaneAvailability({ inClosure, ...readings(failed, 'entryReady'), landed: true })).toBe('failed');
+      }
+    }
+  });
+  it('never opens a landed file for an account that cannot open the project', () => {
+    for (const readiness of ['entryReady', 'materialized', 'filled'] as const) {
+      expect(filePaneAvailability({ inClosure: false, ...readings(applying, readiness, false), landed: true })).toBe(
+        'account',
+      );
+    }
+  });
+  it('keeps a landed file closed across a failed retry after the checkout applied', () => {
+    const failedAfterApply = status({ state: 'queued', reason: 'offline', hasAppliedRemote: true });
+    for (const inClosure of [false, true]) {
+      expect(filePaneAvailability({ inClosure, ...readings(failedAfterApply, 'filled'), landed: true })).not.toMatch(
+        /^(?:ready|waiting)$/u,
+      );
+    }
+  });
+  it('waits again on its own file once a retry’s write announces the next tree', () => {
+    /* The retry fetches first: no tree is being written, whatever was landed before. */
+    const retrying = status({ state: 'pending', pullPhase: 'fetching' });
+    expect(filePaneAvailability({ inClosure: false, ...readings(retrying, 'entryReady'), landed: true })).toBe(
+      'downloading',
+    );
+    /* Its write lands its closure; this file is not landed for the new tree until the host says so. */
+    expect(filePaneAvailability({ inClosure: false, ...readings(applying, 'entryReady'), landed: false })).toBe(
+      'waiting',
+    );
+  });
+  it('is the project’s availability once no open is owed', () => {
+    const ready = projectAvailability(false, applying);
+    expect(filePaneAvailability({ inClosure: false, firstView: ready, absence: ready, landed: false })).toBe('ready');
+  });
+});
+
+describe('a file pane’s own landing', () => {
+  const pendingOpen = (
+    readiness: ProjectReadiness,
+    landedPaths?: readonly string[],
+  ): Readonly<{ send: ReturnType<typeof vi.fn> }> => {
+    const send = vi.fn();
+    vi.mocked(useProject).mockReturnValue({ projectId: 'project-1' } as ReturnType<typeof useProject>);
+    vi.mocked(useTauCloudIntent).mockReturnValue('open');
+    vi.mocked(canOpenCloudProject).mockReturnValue(true);
+    vi.mocked(useRevisionStatus).mockReturnValue({
+      ...status({ state: 'pending', pullPhase: 'applying' }),
+      remote: { kind: 'tau', phase: 'connected' },
+      readiness,
+      ...(landedPaths === undefined ? {} : { landedPaths }),
+    } as unknown as RevisionStatusProjection);
+    vi.mocked(useRevisionClient).mockReturnValue(mock<RevisionClient>({ send }));
+    return { send };
+  };
+
+  it('asks this tab’s host to watch the file while it waits, and stops when the pane goes', () => {
+    const { send } = pendingOpen('entryReady');
+    const { result, unmount } = renderHook(() => useFilePaneAvailability('lib/gear.ts', false));
+    expect(result.current).toBe('waiting');
+    const [[{ watcher }]] = send.mock.calls as [[{ watcher: string }]];
+    expect(send).toHaveBeenCalledExactlyOnceWith({ command: 'watchLanding', watcher, paths: ['lib/gear.ts'] });
+    unmount();
+    expect(send).toHaveBeenLastCalledWith({ command: 'watchLanding', watcher, paths: [] });
+  });
+  it('opens once the host names the file landed', () => {
+    pendingOpen('entryReady', ['README.md', 'lib/gear.ts']);
+    expect(renderHook(() => useFilePaneAvailability('lib/gear.ts', false)).result.current).toBe('ready');
+  });
+  it('asks nothing before the first view, for the closure’s own file, or once every file has landed', () => {
+    const { send } = pendingOpen('treeReady');
+    expect(renderHook(() => useFilePaneAvailability('lib/gear.ts', false)).result.current).toBe('preparing');
+    pendingOpen('entryReady').send.mockImplementation(send);
+    expect(renderHook(() => useFilePaneAvailability('main.ts', true)).result.current).toBe('ready');
+    pendingOpen('materialized').send.mockImplementation(send);
+    expect(renderHook(() => useFilePaneAvailability('lib/gear.ts', false)).result.current).toBe('ready');
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('reads a path the host has not named as not landed (I7)', () => {
+    pendingOpen('entryReady', ['README.md']);
+    expect(renderHook(() => usePathLanded('lib/gear.ts')).result.current).toBe(false);
+    expect(renderHook(() => usePathLanded(undefined)).result.current).toBe(false);
   });
 });

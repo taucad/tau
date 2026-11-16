@@ -347,6 +347,51 @@ describe('composer image conversion through the attachment worker', () => {
     }
   });
 
+  it('should convert a HEIC typed application/octet-stream to JPEG, by pick and by paste', async () => {
+    service = new AttachmentImageService();
+    const draft = composerDraft(service);
+    const heic = await heifFixture('small.heic');
+    try {
+      await draft.pick(new File([heic], 'IMG_0001.HEIC', { type: 'application/octet-stream' }));
+      await draft.paste(new File([heic], 'IMG_0001.HEIC', { type: 'application/octet-stream' }));
+
+      expect(draft.failures).toEqual([]);
+      expect(draft.stored.map(({ mediaType }) => mediaType)).toEqual(['image/jpeg', 'image/jpeg']);
+    } finally {
+      draft.stop();
+    }
+  });
+
+  it('should refuse a PSD typed application/octet-stream by its format, and a ZIP as any other file', async () => {
+    // A 32×48, 8-bit Photoshop header: recognised from its bytes, never stored or converted.
+    const psd = new Uint8Array(26);
+    const view = new DataView(psd.buffer);
+    psd.set(new TextEncoder().encode('8BPS'));
+    view.setUint16(4, 1);
+    view.setUint16(12, 3);
+    view.setUint32(14, 32);
+    view.setUint32(18, 48);
+    view.setUint16(22, 8);
+    const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+    const transcodeSources = await loadAttachmentTranscodeSources();
+    const copyOf = async (bytes: Uint8Array<ArrayBuffer>, name: string) => {
+      const intake = await readAttachmentFile(new File([bytes], name, { type: 'application/octet-stream' }), {
+        transcodeSources,
+      });
+      return intake.outcome === 'refused' ? attachmentRefusalCopy(intake) : intake;
+    };
+
+    await expect(copyOf(psd, 'layout.psd')).resolves.toEqual({
+      title: "Couldn't attach this image",
+      description: "Photoshop (PSD) images can't be attached. Save it as JPEG or PNG and attach it again.",
+    });
+    await expect(copyOf(zip, 'models.zip')).resolves.toEqual({
+      title: "Couldn't attach this file",
+      description: 'Only images and PDFs can be attached.',
+    });
+    service = new AttachmentImageService();
+  });
+
   it('should store a 12 MP JPEG as a JPEG at 1568 px', async () => {
     service = new AttachmentImageService();
     const draft = composerDraft(service);

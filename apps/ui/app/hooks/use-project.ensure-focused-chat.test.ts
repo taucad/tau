@@ -41,6 +41,11 @@ describe('mayCreateChat', () => {
   it('asks only for the chats outside a cloud open, and nothing of a project with no Tau remote', () => {
     expect(mayCreateChat(cloudStatus({ chats: 'ready' }, 'connected'), false, true)).toBe(true);
     expect(mayCreateChat(cloudStatus({ chats: 'loading' }, 'filled'), false, true)).toBe(false);
+    /* Chat sync off: no history is coming, so a chat may be made at once, during an open or after it. */
+    expect(mayCreateChat(cloudStatus({ chats: 'disabled' }, 'connected'), false, true)).toBe(true);
+    expect(mayCreateChat(cloudStatus({ pullPhase: 'applying', chats: 'disabled' }, 'entryReady'), true, true)).toBe(
+      true,
+    );
     expect(mayCreateChat(undefined, false, true)).toBe(true);
   });
 });

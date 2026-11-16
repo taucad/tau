@@ -42,7 +42,16 @@ const firstViewOpens = (view: FirstView, status: Pick<RevisionStatusProjection, 
   readyFor(view.surface, view.readiness) &&
   reachesReadiness(view.readiness, 'entryReady') &&
   /* Chats open on their own records too (SP2h), never on a partial history (I7). */
-  (view.surface !== 'chats' || status?.sync.chats === 'ready' || status?.sync.chats === 'disabled');
+  (view.surface !== 'chats' || chatsLanded(status));
+
+/**
+ * Whether the chats' records have all landed: projected, or chat sync is off and none is coming.
+ *
+ * @param status - The revision client's projection.
+ * @returns `true` once no chat history is still arriving.
+ */
+export const chatsLanded = (status: Pick<RevisionStatusProjection, 'sync'> | undefined): boolean =>
+  status?.sync.chats === 'ready' || status?.sync.chats === 'disabled';
 
 /**
  * Whether the open's pull failed, was abandoned, conflicted, or its remote needs reconnecting.
@@ -121,7 +130,7 @@ export function chatsOpen(
   canOpen = true,
 ): boolean {
   return (
-    status?.sync.chats === 'ready' &&
+    chatsLanded(status) &&
     projectAvailability(isPending, status, {
       canOpen,
       firstView: { surface: 'chats', readiness: ownOpenReadiness(status) },

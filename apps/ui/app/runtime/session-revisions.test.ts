@@ -970,6 +970,15 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     session.stop();
   });
 
+  it('S1: should tell the session the chats may open when chat sync is off', async () => {
+    const { client, received, session } = await startSession();
+    client.setStatus({ sync: { ...revisionStatusHarness.status.sync, chats: 'disabled' } });
+    expect(received.filter((event) => event.type === 'revisionChatsChanged')).toEqual([
+      { type: 'revisionChatsChanged', ready: true },
+    ]);
+    session.stop();
+  });
+
   /* A14: the session's file check, which focus's open waits for (U13, U20). */
   const fileChecks = (received: readonly SessionRevisionsEmitted[]) =>
     received.filter((event) => event.type === 'fileCheckChanged');

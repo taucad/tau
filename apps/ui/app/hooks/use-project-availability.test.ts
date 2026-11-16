@@ -164,7 +164,9 @@ describe('first-open availability', () => {
       mock<RevisionStatusProjection>({ ...status(sync), remote: mock(connected), readiness });
     expect(chatsOpen(open({ pullPhase: 'applying', chats: 'ready' }, 'entryReady'), true)).toBe(true);
     expect(chatsOpen(open({ pullPhase: 'applying', chats: 'ready' }, 'treeReady'), true)).toBe(false);
-    expect(chatsOpen(open({ pullPhase: 'applying', chats: 'disabled' }, 'entryReady'), true)).toBe(false);
+    /* With chat sync off no history is coming: the chats open, and a chat may be made, as the pane does (review). */
+    expect(chatsOpen(open({ pullPhase: 'applying', chats: 'disabled' }, 'entryReady'), true)).toBe(true);
+    expect(chatsOpen(open({ chats: 'disabled' }, 'connected'), false)).toBe(true);
     expect(chatsOpen(open({ pullPhase: 'applying', chats: 'ready' }, 'entryReady'), true, false)).toBe(false);
     expect(chatsOpen(open({ chats: 'ready' }, 'connected'), false)).toBe(true);
     expect(chatsOpen(open({ chats: 'loading' }, 'filled'), false)).toBe(false);

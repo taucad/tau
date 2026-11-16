@@ -6,6 +6,7 @@ import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { HandOffSlot } from '#components/hand-off/hand-off-slot.js';
 import { handOffRevealContext, resetHandOffStoreForTest } from '#components/hand-off/hand-off-store.js';
+import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
 
 /* PL6: the project composer adopts the native input the workspace placeholder served (P4). */
 const mocks = vi.hoisted(() => {
@@ -97,7 +98,7 @@ vi.mock('#services/headless-capture.js', () => ({
 }));
 vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
 
-const target = { surface: 'project-composer', scope: 'home/one' } as const;
+const target: HandOffTarget = { surface: 'project-composer', scope: 'home/one' };
 const slot = <HandOffSlot surface='project-composer' scope='home/one' label='Chat message' placeholder='Ask Tau' />;
 
 describe('ChatTextarea hand-off (PL6)', () => {

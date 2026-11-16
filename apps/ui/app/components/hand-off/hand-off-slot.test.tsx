@@ -4,6 +4,7 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HandOffSlot } from '#components/hand-off/hand-off-slot.js';
 import { handOffStore, resetHandOffStoreForTest, useHandOffAdoption } from '#components/hand-off/hand-off-store.js';
+import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
 import type * as HandOff from '#components/hand-off/hand-off.js';
 import type { HandOffElement } from '#components/hand-off/hand-off.js';
 
@@ -14,7 +15,7 @@ vi.mock('#components/hand-off/hand-off.js', async (importOriginal) => ({
 }));
 
 /** The project the slots belong to. */
-const target = { surface: 'project-composer', scope: 'home/one' } as const;
+const target: HandOffTarget = { surface: 'project-composer', scope: 'home/one' };
 
 /** Two different parents, so swapping them remounts the slot, as any placeholder that remounts before its adopter does. */
 function Stage({

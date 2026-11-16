@@ -139,6 +139,24 @@ const virtuosoComponents = {
 /** One transcript wait as the header indicator times it. */
 type TranscriptWait = Readonly<{ active: boolean; startedAt: number; isGesture: boolean }>;
 
+/** The parts of the Navigation API read here; absent where the browser has none. */
+type HistoryEntryNavigation = Readonly<{
+  activation?: Readonly<{ entry?: Readonly<{ key: string }> }>;
+  currentEntry?: Readonly<{ key: string }>;
+}>;
+
+/**
+ * Whether the page is on the history entry its document loaded, as the Navigation API says: a `replaceState` keeps the
+ * entry's key, so the route's rewrites (`?chat=`, canonical slugs) leave it the same entry.
+ *
+ * @returns `true` on the document's own entry, `false` on another or where the API is missing.
+ */
+const isOnDocumentEntry = (): boolean => {
+  const { navigation } = globalThis as { navigation?: HistoryEntryNavigation };
+  const loaded = navigation?.activation?.entry?.key;
+  return loaded !== undefined && loaded === navigation?.currentEntry?.key;
+};
+
 /**
  * Whether the page is still on the project its document loaded: the route open the document began with, whose waits
  * are timed from navigation start (0). A client navigation to another project has its own start.
@@ -146,12 +164,16 @@ type TranscriptWait = Readonly<{ active: boolean; startedAt: number; isGesture: 
  * @returns `true` while the document's own project is the current one.
  */
 const isOnDocumentProject = (): boolean => {
+  /* The history entry first: the route corrects the URL's slugs to the canonical ones with `replaceState`, which keeps
+   * the entry but changes the project's path. */
+  if (isOnDocumentEntry()) {
+    return true;
+  }
   const [entry] = globalThis.performance.getEntriesByType('navigation');
   if (entry === undefined) {
     return false;
   }
-  /* The project, not the exact URL: the route rewrites the URL it opened with (`?chat=`, canonical slugs) before the
-   * transcript waits. */
+  /* Without the Navigation API, the project's path: the `?chat=` rewrite keeps it, a slug correction does not. */
   const opened = frameHintKey(new URL(entry.name).pathname);
   return opened !== undefined && opened === frameHintKey(globalThis.location.pathname);
 };

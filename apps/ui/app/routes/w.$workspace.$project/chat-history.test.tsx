@@ -859,6 +859,35 @@ describe('ChatHistory — transcript wait indicator (A15d)', () => {
     },
   );
 
+  /* Review round 8: the route corrects the slugs with `replaceState`, which keeps the history entry. */
+  it('counts the open from navigation start after the route corrects the URL to canonical slugs', () => {
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
+      navigationEntry('http://localhost/w/ws_01/proj_0123456789ABCDEFGHIJK'),
+    ]);
+    vi.stubGlobal('navigation', { activation: { entry: { key: 'loaded' } }, currentEntry: { key: 'loaded' } });
+    vi.spyOn(performance, 'now').mockReturnValue(400);
+    try {
+      renderOverDeferredTranscript(history);
+      expect(revealDelay()).toBe(600);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('times a load from its own start on another history entry than the document loaded', () => {
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/')]);
+    vi.stubGlobal('navigation', { activation: { entry: { key: 'loaded' } }, currentEntry: { key: 'pushed' } });
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    try {
+      renderOverDeferredTranscript(history);
+      expect(revealDelay()).toBe(1000);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('times a return to the document project, after leaving it, from its own start', () => {
     const clock = freshPerformanceClock();
     globalThis.history.replaceState(null, '', '/w/acme/bracket');

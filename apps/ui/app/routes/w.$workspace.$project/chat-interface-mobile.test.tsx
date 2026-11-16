@@ -4,6 +4,8 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
+import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
+import type { EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
 import { mobileDrawerOpenSnapPoint } from '@taucad/ui-core/constants/editor.constants';
 import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
 import { mobilePanelByWorkbenchPanel } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
@@ -232,7 +234,30 @@ afterAll(async () => {
   });
 });
 
+/** A served project input's handover that records its calls. */
+const servedHandoverDouble = (): EarlyInputHandover => ({
+  pending: undefined,
+  release: vi.fn(),
+  claim: vi.fn(() => () => undefined),
+  taken: vi.fn(),
+  decline: vi.fn(),
+});
+
 describe('ChatInterfaceMobile', () => {
+  /* Review round 8: the served project input is the desktop lane's; the phone layout declines it at mount. */
+  it('should decline the served project input', () => {
+    const handover = servedHandoverDouble();
+    render(
+      <EarlyInputHandoverContext.Provider value={handover}>
+        <TooltipProvider>
+          <ChatInterfaceMobile />
+        </TooltipProvider>
+      </EarlyInputHandoverContext.Provider>,
+    );
+    expect(handover.decline).toHaveBeenCalled();
+    expect(handover.release).not.toHaveBeenCalled();
+  });
+
   it('should preserve the Terminal across sheet hiding and surface switches until named Close', async () => {
     const viewport = Object.assign(new EventTarget(), {
       height: globalThis.innerHeight,

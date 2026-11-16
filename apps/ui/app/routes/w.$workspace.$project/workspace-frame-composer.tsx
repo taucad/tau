@@ -1,7 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Plus } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
 import {
   chatComposerAddTriggerClassName,
@@ -229,9 +228,10 @@ function ServedComposer({
 /**
  * The served composer's bar (programme control's ruling, 2026-11-16T13:30Z): each control the rich bar draws at rest
  * has its final box here, so adoption moves nothing. The add trigger and Send are drawn as themselves, inert. The mode
- * and model controls follow the chat's agent and model, which the frame cannot read before the route chunk, so they
- * are skeleton shapes in their slots: the mode at its icon face, the model at its pending face, as Home's static bar
- * draws a model whose name is not known yet. Their widths then follow their labels (label parity is A10's).
+ * and model controls follow the chat's agent and model, which the frame cannot read before the route chunk, so their
+ * boxes are reserved empty: the mode at its icon face, the model at its pending face. No skeleton is drawn (F1: the
+ * content region draws none); the labels arrive into the reserved boxes, and their widths then follow the labels
+ * (label parity is A10's).
  *
  * @param props - Whether the input holds nothing to send.
  * @returns The bar.
@@ -252,7 +252,7 @@ function ServedComposerBar({ isEmpty }: { readonly isEmpty: boolean }): React.JS
             aria-hidden='true'
             className={cn(chatComposerGhostPillClassName, 'flex w-7 items-center justify-center px-0')}
           >
-            <Skeleton className='size-4 rounded-full' />
+            <span className='size-4' />
           </span>
         </div>
       </div>
@@ -266,7 +266,7 @@ function ServedComposerBar({ isEmpty }: { readonly isEmpty: boolean }): React.JS
             aria-hidden='true'
             className={cn(chatComposerModelTriggerClassName, 'flex items-center')}
           >
-            <Skeleton className='h-3 w-20 shrink-0 rounded-sm' />
+            <span className='h-3 w-20 shrink-0' />
           </span>
         </div>
         <ServedSendButton isEmpty={isEmpty} />

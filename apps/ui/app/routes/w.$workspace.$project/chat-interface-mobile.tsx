@@ -31,6 +31,7 @@ import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 import { MobileProjectTopBar } from '#routes/w.$workspace.$project/mobile-project-top-bar.js';
+import { DeclineServedComposer } from '#routes/w.$workspace.$project/workspace-frame-composer.js';
 
 /* B-27, D-UI-16: every panel but the chat is its own chunk, loaded when its surface
  * first opens. Only the active surface is mounted (Terminal survives hiding), so a phone that
@@ -592,145 +593,150 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const sheetHeight = snapPointLength(activeSnapPoint);
 
   return (
-    <ChatInterfaceSessionGate fallback={<WorkspaceOpening />}>
-      <div
-        className={cn(
-          // --nav-height is the height of the navigation tabs
-          'absolute inset-0 flex size-full flex-col overflow-hidden',
-          mobileWorkbenchNavigationHeight,
-          'md:hidden', // Hidden on desktop
-          // No entrance on load (U9, LI5): the workspace paints in its final state over the skeleton's place.
-        )}
-      >
-        {/* W2 (D2, EQ2 = H1): the project's top bar — sidebar, title with status line, Share. */}
-        <MobileProjectTopBar />
-        {/* Main viewer - always visible. Its box changes size in one step: an animated size
-          reallocates the canvas and every render target on each frame of the transition. */}
+    <>
+      {/* The served project input is the desktop lane's (hidden below `md`): the phone layout's composer does not take it,
+       * so a later desktop layout does not hand over a draft painted before this one was used. */}
+      <DeclineServedComposer />
+      <ChatInterfaceSessionGate fallback={<WorkspaceOpening />}>
         <div
-          className='relative min-h-0 flex-1'
-          style={{
-            paddingBottom: isViewerTab ? 'var(--nav-offset)' : `calc(${sheetHeight})`,
-          }}
-        >
-          <ViewerDockview onApiChange={setViewerApi} onFileActionsChange={setViewerFileActions} />
-          <ProjectManifestIssueBanner />
-
-          {/* Renders the shared failure notice or WorkspaceUnavailableRecovery
-            depending on which gate has failed. See Audit R8 for rationale. */}
-          <ProjectUnavailableOverlay />
-        </div>
-
-        <Drawer
-          handleOnly
-          modal={false}
-          open={drawerOpen}
-          snapPoints={snapPoints}
-          detentNames={mobileDrawerDetentNames}
-          activeSnapPoint={activeSnapPoint}
-          setActiveSnapPoint={chooseSnapPoint}
-          onOpenChange={handleDrawerChange}
-        >
-          <DrawerTitle className='sr-only' id='drawer-title'>
-            Chat Interface
-          </DrawerTitle>
-          <DrawerDescription className='sr-only' id='drawer-description'>
-            Chat Interface - use navigation tabs to switch between panels
-          </DrawerDescription>
-
-          {/* This docked panel shares interaction with the viewer and persistent navigation. */}
-          {drawerOpen ? (
-            <DrawerContent
-              ref={sheetRef}
-              aria-labelledby='drawer-title'
-              aria-describedby='drawer-description'
-              className={cn(
-                'flex-1 bg-sidebar',
-                'z-40', // Position below the navigation tabs
-                // The drawer is portalled out of the shell, so it takes the nav's height variables itself.
-                mobileWorkbenchNavigationHeight,
-                //
-                'data-[vaul-drawer-direction=bottom]:max-h-[100dvh]',
-                'data-[vaul-drawer-direction=bottom]:mt-0',
-                '[&_[data-slot=drawer-handle-indicator]]:bg-sidebar-primary/15',
-              )}
-              style={{
-                height: '100%',
-                ...(entersAtRest ? restingEntrance : undefined),
-              }}
-              onEscapeKeyDown={(event) => {
-                if (isEditingTarget(event.target ?? undefined)) {
-                  event.preventDefault();
-                }
-              }}
-              onCloseAutoFocus={(event) => {
-                // Closing returns focus to the nav's current destination (the Model), not to the page.
-                event.preventDefault();
-                const focused = document.activeElement;
-                if (!focused || focused === document.body || sheetRef.current?.contains(focused)) {
-                  navigationRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
-                }
-              }}
-            >
-              {/* The active surface, named by its title; the nav's destinations are buttons, not tabs. */}
-              <section
-                ref={attachSection}
-                tabIndex={-1}
-                aria-label={surfaceTitle(activeTab)}
-                data-slot='mobile-surface'
-                className={cn(
-                  'flex h-full flex-col p-0 outline-none',
-                  // Its top corners follow the sheet's, less the grabber row above them, so the panel stays inside the curve.
-                  'overflow-hidden rounded-t-[calc(var(--drawer-radius)-var(--drawer-handle-height))]',
-                  // While typing, the drawer is the frame above the keyboard and the panel fills it.
-                  'group-data-[keyboard=open]/drawer-content:h-auto! group-data-[keyboard=open]/drawer-content:min-h-0 group-data-[keyboard=open]/drawer-content:flex-1',
-                )}
-                style={{
-                  // The visible sheet less its grabber row, its 1px top border and the nav (with the home-indicator inset) over its foot.
-                  height: `calc(${sheetHeight} - var(--drawer-handle-height) - var(--nav-offset) - 1px)`,
-                }}
-              >
-                <div className='flex h-full flex-1 flex-col'>
-                  {activeTab === 'terminal' ? (
-                    <div ref={attachTerminalSlot} className='size-full' />
-                  ) : (
-                    <Suspense fallback={null}>
-                      <MobileSurface id={activeTab} />
-                    </Suspense>
-                  )}
-                </div>
-              </section>
-            </DrawerContent>
-          ) : null}
-        </Drawer>
-
-        {terminalHost
-          ? createPortal(
-              <MobilePane id='terminal' onOpenChange={closeTerminal}>
-                <ProjectTerminalPane />
-              </MobilePane>,
-              terminalHost,
-            )
-          : null}
-
-        {/* Navigation tabs - Always visible and sticky to bottom */}
-        <div
-          ref={navigationRef}
           className={cn(
-            'pointer-events-auto fixed right-0 bottom-0 left-0 z-50',
-            // Safari pans the page to show a focused field, which would lift the nav over the composer.
-            '[:root:has([data-slot=drawer-content][data-keyboard=open])_&]:hidden',
+            // --nav-height is the height of the navigation tabs
+            'absolute inset-0 flex size-full flex-col overflow-hidden',
+            mobileWorkbenchNavigationHeight,
+            'md:hidden', // Hidden on desktop
+            // No entrance on load (U9, LI5): the workspace paints in its final state over the skeleton's place.
           )}
         >
-          <ChatInterfaceNav
-            activeTab={activeTab}
-            chatCue={chatCue}
-            viewerApi={viewerApi}
-            viewerNames={viewerNames}
-            fileActions={viewerFileActions}
-            onTabChange={chooseSurface}
-          />
+          {/* W2 (D2, EQ2 = H1): the project's top bar — sidebar, title with status line, Share. */}
+          <MobileProjectTopBar />
+          {/* Main viewer - always visible. Its box changes size in one step: an animated size
+          reallocates the canvas and every render target on each frame of the transition. */}
+          <div
+            className='relative min-h-0 flex-1'
+            style={{
+              paddingBottom: isViewerTab ? 'var(--nav-offset)' : `calc(${sheetHeight})`,
+            }}
+          >
+            <ViewerDockview onApiChange={setViewerApi} onFileActionsChange={setViewerFileActions} />
+            <ProjectManifestIssueBanner />
+
+            {/* Renders the shared failure notice or WorkspaceUnavailableRecovery
+            depending on which gate has failed. See Audit R8 for rationale. */}
+            <ProjectUnavailableOverlay />
+          </div>
+
+          <Drawer
+            handleOnly
+            modal={false}
+            open={drawerOpen}
+            snapPoints={snapPoints}
+            detentNames={mobileDrawerDetentNames}
+            activeSnapPoint={activeSnapPoint}
+            setActiveSnapPoint={chooseSnapPoint}
+            onOpenChange={handleDrawerChange}
+          >
+            <DrawerTitle className='sr-only' id='drawer-title'>
+              Chat Interface
+            </DrawerTitle>
+            <DrawerDescription className='sr-only' id='drawer-description'>
+              Chat Interface - use navigation tabs to switch between panels
+            </DrawerDescription>
+
+            {/* This docked panel shares interaction with the viewer and persistent navigation. */}
+            {drawerOpen ? (
+              <DrawerContent
+                ref={sheetRef}
+                aria-labelledby='drawer-title'
+                aria-describedby='drawer-description'
+                className={cn(
+                  'flex-1 bg-sidebar',
+                  'z-40', // Position below the navigation tabs
+                  // The drawer is portalled out of the shell, so it takes the nav's height variables itself.
+                  mobileWorkbenchNavigationHeight,
+                  //
+                  'data-[vaul-drawer-direction=bottom]:max-h-[100dvh]',
+                  'data-[vaul-drawer-direction=bottom]:mt-0',
+                  '[&_[data-slot=drawer-handle-indicator]]:bg-sidebar-primary/15',
+                )}
+                style={{
+                  height: '100%',
+                  ...(entersAtRest ? restingEntrance : undefined),
+                }}
+                onEscapeKeyDown={(event) => {
+                  if (isEditingTarget(event.target ?? undefined)) {
+                    event.preventDefault();
+                  }
+                }}
+                onCloseAutoFocus={(event) => {
+                  // Closing returns focus to the nav's current destination (the Model), not to the page.
+                  event.preventDefault();
+                  const focused = document.activeElement;
+                  if (!focused || focused === document.body || sheetRef.current?.contains(focused)) {
+                    navigationRef.current?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
+                  }
+                }}
+              >
+                {/* The active surface, named by its title; the nav's destinations are buttons, not tabs. */}
+                <section
+                  ref={attachSection}
+                  tabIndex={-1}
+                  aria-label={surfaceTitle(activeTab)}
+                  data-slot='mobile-surface'
+                  className={cn(
+                    'flex h-full flex-col p-0 outline-none',
+                    // Its top corners follow the sheet's, less the grabber row above them, so the panel stays inside the curve.
+                    'overflow-hidden rounded-t-[calc(var(--drawer-radius)-var(--drawer-handle-height))]',
+                    // While typing, the drawer is the frame above the keyboard and the panel fills it.
+                    'group-data-[keyboard=open]/drawer-content:h-auto! group-data-[keyboard=open]/drawer-content:min-h-0 group-data-[keyboard=open]/drawer-content:flex-1',
+                  )}
+                  style={{
+                    // The visible sheet less its grabber row, its 1px top border and the nav (with the home-indicator inset) over its foot.
+                    height: `calc(${sheetHeight} - var(--drawer-handle-height) - var(--nav-offset) - 1px)`,
+                  }}
+                >
+                  <div className='flex h-full flex-1 flex-col'>
+                    {activeTab === 'terminal' ? (
+                      <div ref={attachTerminalSlot} className='size-full' />
+                    ) : (
+                      <Suspense fallback={null}>
+                        <MobileSurface id={activeTab} />
+                      </Suspense>
+                    )}
+                  </div>
+                </section>
+              </DrawerContent>
+            ) : null}
+          </Drawer>
+
+          {terminalHost
+            ? createPortal(
+                <MobilePane id='terminal' onOpenChange={closeTerminal}>
+                  <ProjectTerminalPane />
+                </MobilePane>,
+                terminalHost,
+              )
+            : null}
+
+          {/* Navigation tabs - Always visible and sticky to bottom */}
+          <div
+            ref={navigationRef}
+            className={cn(
+              'pointer-events-auto fixed right-0 bottom-0 left-0 z-50',
+              // Safari pans the page to show a focused field, which would lift the nav over the composer.
+              '[:root:has([data-slot=drawer-content][data-keyboard=open])_&]:hidden',
+            )}
+          >
+            <ChatInterfaceNav
+              activeTab={activeTab}
+              chatCue={chatCue}
+              viewerApi={viewerApi}
+              viewerNames={viewerNames}
+              fileActions={viewerFileActions}
+              onTabChange={chooseSurface}
+            />
+          </div>
         </div>
-      </div>
-    </ChatInterfaceSessionGate>
+      </ChatInterfaceSessionGate>
+    </>
   );
 });

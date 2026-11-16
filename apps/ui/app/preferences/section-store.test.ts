@@ -2,19 +2,11 @@ import * as Cookies from 'es-cookie';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { onboardingSection, viewerPreferencesSection } from '@taucad/preferences';
-import { cookieName, serverVisiblePreferences } from '@taucad/ui-core/constants/cookie.constants';
-import { readServerPreferences } from '#hooks/use-cookie.js';
+import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { createSectionStore } from '#preferences/section-store.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { useDeviceRecord } from '#preferences/use-device-record.js';
 
-const personKeys = [
-  cookieName.personProfile,
-  cookieName.viewerPreferences,
-  cookieName.onboarding,
-  cookieName.device,
-  cookieName.viewExceptions,
-] as const;
 const onboardingKey = `tau-${cookieName.onboarding}`;
 const viewerKey = `tau-${cookieName.viewerPreferences}`;
 
@@ -163,12 +155,6 @@ describe('unknown version (RC4)', () => {
 });
 
 describe('device only (RC1)', () => {
-  it('keeps every person and device key out of the server-visible preferences', () => {
-    for (const key of personKeys) {
-      expect(serverVisiblePreferences).not.toContain(key);
-    }
-  });
-
   it('writes no cookie, so no request carries a section', () => {
     const { result } = renderHook(() => usePersonRecord());
     act(() => {
@@ -177,9 +163,6 @@ describe('device only (RC1)', () => {
       result.current.writeOnboarding({ setupStatus: 'completed' });
     });
     expect(Object.keys(Cookies.getAll()).filter((name) => name.startsWith('tau-'))).toEqual([]);
-    // A forged request cookie is not read on the server either.
-    const header = personKeys.map((key) => `tau-${key}=${encodeURIComponent('{"value":{}}')}`).join('; ');
-    expect(readServerPreferences(header)).toEqual({});
   });
 
   it('stores each section under its own fixed key as `{ value }`, keyed by no account', () => {

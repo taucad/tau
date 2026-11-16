@@ -7,16 +7,12 @@ import { HydrationBoundary, QueryClientProvider } from '@tanstack/react-query';
 import type { DehydratedState } from '@tanstack/react-query';
 import { Fragment, useEffect } from 'react';
 import { toast } from 'sonner';
-import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
-import type { ThemeWithSystem } from '#hooks/use-theme.js';
+import { ClientFactsHead, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
 import { ENV } from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { Page } from '#components/layout/page.js';
-import { useCookie } from '#hooks/use-cookie.js';
-import { ServerPreferencesProvider } from '#hooks/server-preferences.js';
-import type { ServerPreferences } from '#hooks/server-preferences.js';
-import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
+import { useDocumentFact } from '#lib/client-facts.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Toaster } from '@taucad/ui/components/sonner';
 import { ColorProvider, useColor } from '#hooks/use-color.js';
@@ -42,17 +38,15 @@ import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
 import { selectRuntimeIdleFileManagers, selectRuntimeQueryClient } from '#runtime/app-runtime.js';
 import { useAppRuntime, useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 
+/**
+ * The root loader's data. It carries nothing about the visitor: per-visitor view facts reach the page through the
+ * client-facts record and its head script (`#lib/client-facts`), so the document is the same for everyone.
+ */
 export type RootLoaderData = {
   readonly env: ClientEnvironment;
-  readonly pathname: string;
-  readonly theme: ThemeWithSystem;
-  /** The server-visible preferences the request's cookies carried; `useCookie`'s server snapshot. */
-  readonly preferences?: ServerPreferences;
   /** Queries the server already answered (the model catalog), hydrated into the root `QueryClient`. */
   readonly queries?: DehydratedState;
 };
-
-const noPreferences: ServerPreferences = {};
 
 export function RootLayout({
   analyticsBoundary: AnalyticsBoundary = Fragment,
@@ -64,8 +58,7 @@ export function RootLayout({
   readonly documentChrome?: ReactNode;
 }): React.JSX.Element {
   const data = useRouteLoaderData<RootLoaderData>('root');
-  // Preserve null so the theme provider can resolve the system preference before hydration.
-  const ssrTheme = data?.theme ?? null;
+  const { pathname } = useLocation();
   /* D9 (A2): the runtime creates the browser `QueryClient`, above the billing fence, and the project library writes
    * into the same instance. Each server request's runtime has its own. */
   const queryClient = selectRuntimeQueryClient(useAppRuntime());
@@ -92,7 +85,7 @@ export function RootLayout({
       </ProjectManagerProvider>
     </HeadlessImageProvider>
   );
-  const isHarness = isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname);
+  const isHarness = isRemoteHostHarness(data?.env.TAU_DEBUG, pathname);
   const application = isHarness ? (
     children
   ) : (
@@ -109,28 +102,26 @@ export function RootLayout({
    * relative order of the auth, billing, and analytics providers is the same.
    *
    * The server renders from the same loader data the client hydrates from, so
-   * the model label and the mirrored preferences are final on first paint
-   * (R3). Hydration never replaces a newer cached catalog.
+   * the model catalog is in the first paint (R3); hydration never replaces a
+   * newer cached catalog. The person's model choice is read after hydration.
    */
   return (
     <QueryClientProvider client={queryClient}>
       <HydrationBoundary state={data?.queries}>
-        <ServerPreferencesProvider value={data?.preferences ?? noPreferences}>
-          <CloudRootBoundary>
-            <AnalyticsBoundary>
-              <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
-                <ColorProvider>
-                  <AppViewerEnvironment>
-                    <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
-                      <HarnessDocumentLoad />
-                      {application}
-                    </LayoutDocument>
-                  </AppViewerEnvironment>
-                </ColorProvider>
-              </ThemeProvider>
-            </AnalyticsBoundary>
-          </CloudRootBoundary>
-        </ServerPreferencesProvider>
+        <CloudRootBoundary>
+          <AnalyticsBoundary>
+            <ThemeProvider>
+              <ColorProvider>
+                <AppViewerEnvironment>
+                  <LayoutDocument env={data?.env ?? {}} documentChrome={documentChrome}>
+                    <HarnessDocumentLoad />
+                    {application}
+                  </LayoutDocument>
+                </AppViewerEnvironment>
+              </ColorProvider>
+            </ThemeProvider>
+          </AnalyticsBoundary>
+        </CloudRootBoundary>
       </HydrationBoundary>
     </QueryClientProvider>
   );
@@ -140,22 +131,18 @@ function LayoutDocument({
   children,
   documentChrome,
   env,
-  ssrTheme,
 }: {
   readonly children: ReactNode;
   readonly documentChrome: ReactNode | undefined;
   readonly env: Partial<ClientEnvironment>;
-  readonly ssrTheme: ThemeWithSystem;
 }): React.JSX.Element {
-  // Use ssrTheme (the raw resolved theme) for the HTML className.
-  // This is null during SSR when no theme preference is stored (system theme mode),
-  // which allows PreventFlashOnWrongTheme's script to correctly detect and apply the
-  // system preference before the page renders (prevents light mode flash on dark systems).
+  /* The server renders no theme and no pointer preference: the client-facts head script applies the stored ones before
+   * first paint, and the first client render reads the same record, so `<html>` hydrates as the script left it. */
   const location = useLocation();
   const { theme, ssrTheme: resolvedTheme } = useTheme();
   const color = useColor();
   const { setFaviconColor } = useFavicon();
-  const [usePointerCursors] = useCookie(cookieName.pointerCursors, false);
+  const usePointerCursors = useDocumentFact('pointerCursors') === true;
 
   useEffect(() => {
     setFaviconColor(color.serialized.hex);
@@ -180,7 +167,7 @@ function LayoutDocument({
         <meta charSet='utf-8' />
         <meta name='viewport' content='width=device-width, initial-scale=1' />
         <Meta />
-        <PreventFlashOnWrongTheme hasSsrTheme={ssrTheme !== null} />
+        <ClientFactsHead />
         <Links />
       </head>
       <body>
@@ -225,14 +212,11 @@ export function ProductApp(): React.JSX.Element {
   );
   useCloudPaymentActionReturn();
   const data = useRouteLoaderData<RootLoaderData>('root');
+  const { pathname } = useLocation();
   /* D24, I19 (A11): the app shell, at one tree position on every route. The host renders it beside the live
    * projects, never inside one, so a project open, a move between projects or a Home visit never remounts it. */
   const page = <Page />;
-  return isRemoteHostHarness(data?.env.TAU_DEBUG, data?.pathname) ? (
-    page
-  ) : (
-    <ProjectSessionsHost>{page}</ProjectSessionsHost>
-  );
+  return isRemoteHostHarness(data?.env.TAU_DEBUG, pathname) ? page : <ProjectSessionsHost>{page}</ProjectSessionsHost>;
 }
 
 /**

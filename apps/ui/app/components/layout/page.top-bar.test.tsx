@@ -260,7 +260,7 @@ describe('Page header on wide viewports', () => {
     expect(container.querySelector('main')).toHaveClass('md:[--header-height:0px]');
     const section = container.querySelector('main > section');
     expect(section).not.toHaveClass('mt-(--header-height)');
-    expect(section).toHaveClass('max-md:mt-(--header-height)', 'md:group-data-[sidebar-open=false]/app-shell:pt-9');
+    expect(section).toHaveClass('max-md:mt-(--header-height)', 'md:sidebar-closed:pt-9');
   });
 
   it('keeps New project in the title row and out of the header', () => {

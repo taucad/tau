@@ -1439,7 +1439,8 @@ function UnifiedProjectList({
                       : Math.max(placeholderCount - rememberedCards.length, 0),
               },
               (_, index) => (
-                <li key={`room-${String(index)}`} aria-hidden>
+                /* The head script's remembered count hides the rooms past it before hydration (`#lib/client-facts`). */
+                <li key={`room-${String(index)}`} aria-hidden data-project-room={isShowingDeleted ? undefined : ''}>
                   <ProjectCardRoom />
                 </li>
               ),

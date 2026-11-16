@@ -64,7 +64,7 @@ it('marks the prerendered usage document noindex, nofollow', () => {
 it('keeps request cookies out of loader data', async () => {
   const data = await callLoader('tau-cad-kernel=%22openscad%22; better-auth.session_token=synthetic-session-value');
 
-  expect(data.consentStatus).toBe('unknown');
+  expect(Object.keys(data).sort()).toStrictEqual(['env', 'queries']);
   expect(JSON.stringify(data)).not.toContain('synthetic-session-value');
   expect(JSON.stringify(data)).not.toContain('session_token');
   expect(JSON.stringify(data)).not.toContain('openscad');

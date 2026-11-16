@@ -1,9 +1,9 @@
-import * as Cookies from 'es-cookie';
 import { z } from 'zod';
 import { Topic } from '@taucad/events';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { metaConfig } from '#constants/meta.constants.js';
+import { readClientFacts, writeClientFacts } from '#lib/client-facts.js';
 
 /**
  * The listing snapshot: the remembered shape of this device's project list (home page loading audit R5; loading-states
@@ -12,12 +12,9 @@ import { metaConfig } from '#constants/meta.constants.js';
  * Projects are listed by the browser file-manager worker, which the server cannot reach and which boots after
  * hydration. So the last listing is kept in `localStorage`: each project's id, name, slugs and activity, and its newest
  * chat rows, which the sidebar renders as real rows in the first client commit; the listing reconciles them by id in
- * place when it arrives. Only the count rides a request cookie, so the server reserves the Home grid's height. Names
- * never leave the device, and the rows are cleared on sign-out.
+ * place when it arrives. Only the count is also a client fact (`#lib/client-facts`), so the head script reserves the
+ * Home grid's height before first paint. Nothing rides a request, and the rows are cleared on sign-out.
  */
-
-/** The request cookie carrying only the remembered project count. */
-export const projectListCountCookieName = `${metaConfig.cookiePrefix}project-count`;
 
 /** The `localStorage` key holding the listing snapshot. */
 export const projectListShapeStorageKey = `${metaConfig.cookiePrefix}project-listing`;
@@ -36,11 +33,8 @@ export const rememberedProjectLimit = 100;
 /** @public */
 export const rememberedChatLimit = 20;
 
-/** A count past this is not a list shape any page reserves; it is a corrupt cookie. */
+/** A count past this is not a list shape any page reserves; it is a corrupt record. */
 const maxRememberedCount = 100_000;
-
-/** Cookie lifetime in days, below the 400-day cap browsers apply. */
-const cookieLifetimeDays = 365;
 
 /** A remembered chat row: what the sidebar draws and sorts it by. @public */
 export type RememberedChat = {
@@ -71,7 +65,7 @@ export type RememberedProject = {
 
 /**
  * The remembered list shape: how many live projects the last listing held and, on the client, the snapshot's rows.
- * A shape read from the cookie, as the server and the hydrating render have it, carries the count only.
+ * The server and the hydrating render know no shape.
  */
 export type ProjectListShape = {
   readonly count: number;
@@ -113,38 +107,6 @@ const snapshotSchema = z.object({
 const countOnlySchema = z.object({
   count: z.number().int().min(0).max(maxRememberedCount),
 });
-
-/**
- * Parse a remembered count from its cookie value.
- *
- * @param value - The raw cookie value.
- * @returns The count, or `undefined` when absent or malformed.
- */
-export const parseProjectListCount = (value: string | undefined): number | undefined => {
-  if (value === undefined || !/^\d+$/u.test(value)) {
-    return undefined;
-  }
-  const count = Number(value);
-  return count <= maxRememberedCount ? count : undefined;
-};
-
-/**
- * The remembered count a document request carried, for the server render.
- *
- * @param header - The request's `Cookie` header.
- * @returns The count, or `undefined` when this browser has never listed its projects.
- */
-export const readProjectListCountFromHeader = (header: string | undefined): number | undefined =>
-  header ? parseProjectListCount(Cookies.parse(header)[projectListCountCookieName]) : undefined;
-
-/**
- * The shape for a remembered count.
- *
- * @param count - The remembered count, if any.
- * @returns The shape, or `undefined` when the count is unknown.
- */
-export const projectListShapeFromCount = (count: number | undefined): ProjectListShape | undefined =>
-  count === undefined ? undefined : { count };
 
 /** What a listing's project rows carry that the snapshot remembers. */
 type ListedProject = {
@@ -237,28 +199,6 @@ const readStoredShape = (): ProjectListShape | undefined => {
   }
 };
 
-const readCookieShape = (): ProjectListShape | undefined =>
-  typeof document === 'undefined'
-    ? undefined
-    : projectListShapeFromCount(parseProjectListCount(Cookies.get(projectListCountCookieName)));
-
-const writeCountCookie = (count: number): void => {
-  if (typeof document === 'undefined') {
-    return;
-  }
-  const value = String(count);
-  if (globalThis.location.protocol === 'https:') {
-    Cookies.set(projectListCountCookieName, value, {
-      path: '/',
-      sameSite: 'lax',
-      expires: cookieLifetimeDays,
-      secure: true,
-    });
-  } else {
-    Cookies.set(projectListCountCookieName, value, { path: '/', sameSite: 'lax', expires: cookieLifetimeDays });
-  }
-};
-
 const createProjectListShapeStore = () => {
   /* Read once and kept, so the snapshot identity is stable between writes. */
   let isRead = false;
@@ -270,8 +210,14 @@ const createProjectListShapeStore = () => {
 
   const get = (): ProjectListShape | undefined => {
     if (!isRead) {
-      cached = readStoredShape() ?? readCookieShape();
+      /* With no snapshot (signed out, or a store that cannot be read), the count fact still gives the list its shape. */
+      const { projectCount } = readClientFacts();
+      cached = readStoredShape() ?? (projectCount === undefined ? undefined : { count: projectCount });
       isRead = true;
+      /* A device that listed before the count was a client fact: carry it over once. */
+      if (cached !== undefined && readClientFacts().projectCount === undefined) {
+        writeClientFacts({ projectCount: cached.count });
+      }
     }
     return cached;
   };
@@ -286,7 +232,7 @@ const createProjectListShapeStore = () => {
       );
       globalThis.localStorage.removeItem(countOnlyStorageKey);
     } catch {
-      // Best effort: the cookie still carries the count, and this page keeps the rows in memory.
+      // Best effort: the client facts still carry the count, and this page keeps the rows in memory.
     }
     notify();
   };
@@ -309,8 +255,8 @@ const createProjectListShapeStore = () => {
           : { ...project, chatCount: earlier.chatCount, chats: earlier.chats };
       }),
     };
-    if (previous?.count !== next.count) {
-      writeCountCookie(next.count);
+    if (readClientFacts().projectCount !== next.count) {
+      writeClientFacts({ projectCount: next.count });
     }
     if (!isSameShape(previous, next)) {
       write(next);
@@ -363,7 +309,7 @@ const createProjectListShapeStore = () => {
     }
   };
 
-  /** Forget the snapshot's rows (sign-out). The count cookie stays: it names nothing. */
+  /** Forget the snapshot's rows (sign-out). The count fact stays: it names nothing. */
   const clear = (): void => {
     try {
       globalThis.localStorage.removeItem(projectListShapeStorageKey);

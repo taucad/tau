@@ -1,12 +1,9 @@
-import * as Cookies from 'es-cookie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { forgetClientFacts, readClientFacts, writeClientFacts } from '#lib/client-facts.js';
 import {
-  parseProjectListCount,
-  projectListCountCookieName,
   projectListShapeOf,
   projectListShapeStorageKey,
   projectListShapeStore,
-  readProjectListCountFromHeader,
   rememberedChatLimit,
   rememberedProjectLimit,
 } from '#lib/project-list-shape.lib.js';
@@ -20,26 +17,8 @@ const project = (id: string, lastActivityAt: number, deletedAt?: number) => ({
 
 afterEach(() => {
   globalThis.localStorage.clear();
-  Cookies.remove(projectListCountCookieName, { path: '/' });
+  forgetClientFacts();
   projectListShapeStore.reset();
-});
-
-describe('project list count cookie', () => {
-  it('reads the count a request carried', () => {
-    expect(readProjectListCountFromHeader(`a=1; ${projectListCountCookieName}=12`)).toBe(12);
-  });
-
-  it('treats an absent or malformed count as unknown', () => {
-    expect(readProjectListCountFromHeader(undefined)).toBeUndefined();
-    expect(readProjectListCountFromHeader('a=1')).toBeUndefined();
-    expect(parseProjectListCount('-1')).toBeUndefined();
-    expect(parseProjectListCount('3.5')).toBeUndefined();
-    expect(parseProjectListCount('99999999')).toBeUndefined();
-  });
-
-  it('keeps zero, so the server can render the empty state', () => {
-    expect(parseProjectListCount('0')).toBe(0);
-  });
 });
 
 describe('projectListShapeOf', () => {
@@ -89,7 +68,7 @@ describe('projectListShapeStore', () => {
     expect(projectListShapeStore.get()).toBeUndefined();
   });
 
-  it('persists the snapshot and mirrors only the count into the request cookie', () => {
+  it('persists the snapshot and keeps only the count as a client fact, with nothing in a request cookie', () => {
     const listener = vi.fn();
     const unsubscribe = projectListShapeStore.subscribe(listener);
 
@@ -97,8 +76,8 @@ describe('projectListShapeStore', () => {
     unsubscribe();
 
     expect(listener).toHaveBeenCalledOnce();
-    expect(Cookies.get(projectListCountCookieName)).toBe('1');
-    expect(document.cookie).not.toContain('Name');
+    expect(readClientFacts().projectCount).toBe(1);
+    expect(document.cookie).toBe('');
     expect(JSON.parse(globalThis.localStorage.getItem(projectListShapeStorageKey) ?? 'null')).toEqual({
       v: 1,
       savedAt: expect.any(Number) as number,
@@ -192,10 +171,21 @@ describe('projectListShapeStore', () => {
     expect(projectListShapeStore.get()).toEqual({ count: 1 });
   });
 
-  it('falls back to the cookie count when local storage holds nothing', () => {
-    Cookies.set(projectListCountCookieName, '4', { path: '/' });
+  it('falls back to the count fact when local storage holds no snapshot', () => {
+    writeClientFacts({ projectCount: 4 });
 
     expect(projectListShapeStore.get()).toEqual({ count: 4 });
+  });
+
+  it('carries the count of a snapshot from before the count fact into it', () => {
+    globalThis.localStorage.setItem(
+      projectListShapeStorageKey,
+      JSON.stringify({ v: 1, savedAt: 1, count: 2, projects: [] }),
+    );
+
+    projectListShapeStore.get();
+
+    expect(readClientFacts().projectCount).toBe(2);
   });
 
   it('carries the count a count-only record kept, with no rows', () => {

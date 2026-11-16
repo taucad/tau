@@ -1,15 +1,7 @@
 import { useSyncExternalStore } from 'react';
-import { useRouteLoaderData } from 'react-router';
 import { consentChannelName, consentCookieName } from '@taucad/consent';
-import type { RootLoaderData } from '#root-layout.js';
 import { readConsentStatus } from '#lib/cookie-consent.lib.js';
-import { recordRequestGlobalPrivacyControl } from '@taucad/ui-core/lib/global-privacy-control.lib';
 import type { ConsentStatus } from '@taucad/consent';
-
-type ConsentLoaderData = RootLoaderData & {
-  readonly consentStatus: ConsentStatus;
-  readonly globalPrivacyControl?: boolean;
-};
 
 /*
  * The cookie is the source of truth; these signals only prompt a re-read. `writeConsent` posts on the
@@ -41,15 +33,17 @@ const subscribe = (listener: () => void): (() => void) => {
   };
 };
 
+const readServerConsentStatus = (): ConsentStatus => 'unknown';
+
 /**
  * Web-only analytics consent, read from the shared `@taucad/consent` cookie. The website's consent panel
  * and the app's Help → Cookie preferences dialog both write it; every write is announced on the channel.
  *
+ * The server and the hydrating render see `unknown` (P2: the document is the same for every visitor), which admits no
+ * analytics; the decision is read right after hydration.
+ *
  * @returns The effective decision, overridden by Global Privacy Control.
  */
 export function useCookieConsent(): ConsentStatus {
-  const loaderData = useRouteLoaderData<ConsentLoaderData>('root');
-  // Before the first client snapshot, so hydration never resolves a stale acceptance.
-  recordRequestGlobalPrivacyControl(loaderData?.globalPrivacyControl === true);
-  return useSyncExternalStore(subscribe, readConsentStatus, () => loaderData?.consentStatus ?? 'unknown');
+  return useSyncExternalStore(subscribe, readConsentStatus, readServerConsentStatus);
 }

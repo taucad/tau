@@ -25,7 +25,8 @@ import {
 import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
 import type { TestRootFiles } from '#runtime/project-library.fixture.js';
-import { projectListCountCookieName, projectListShapeStore } from '#lib/project-list-shape.lib.js';
+import { projectListShapeStore } from '#lib/project-list-shape.lib.js';
+import { readClientFacts } from '#lib/client-facts.js';
 import type { ChatStorage } from '#types/storage.types.js';
 
 const worker = vi.hoisted(() => ({
@@ -421,7 +422,7 @@ describe('ProjectLibrary', () => {
           },
         ],
       });
-      expect(document.cookie).toContain(`${projectListCountCookieName}=2`);
+      expect(readClientFacts().projectCount).toBe(2);
       expect(document.cookie).not.toContain('Name');
 
       /* A workspace connect or disconnect publishes its listing without a fetch. */

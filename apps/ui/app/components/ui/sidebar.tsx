@@ -6,10 +6,9 @@ import { cn } from '@taucad/ui/utils/cn';
 import { PanelLeft } from 'lucide-react';
 import { useLocation } from 'react-router';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
-import { RequestPlatformProvider, usePlatform } from '@taucad/ui/hooks/use-platform';
-import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
-import { useCookie } from '#hooks/use-cookie.js';
-import { useShellRequestHints, writeSidebarOpenCookie } from '#lib/shell-request-hints.js';
+import { usePlatform } from '@taucad/ui/hooks/use-platform';
+import { sidebarDefaultOpen } from '@taucad/ui-core/constants/sidebar.constants';
+import { useClientFact, writeClientFacts } from '#lib/client-facts.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { formatKeyCombination } from '@taucad/ui/utils/keys';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
@@ -72,10 +71,10 @@ const SidebarBehavior = () => {
 };
 
 /**
- * The application shell's sidebar state. The open preference lives in local storage; the
- * server renders and hydrates with the state the request's cookie mirror carried (see
- * `#lib/shell-request-hints.js`), so the first paint has the person's sidebar, and the
- * mirror follows every change. The request's platform labels the shell's shortcut hints.
+ * The application shell's sidebar state. The open preference is a client fact (`#lib/client-facts`): the server and
+ * the hydrating render draw the default, open, and the head script's `data-sidebar-closed` on `<html>` closes it in
+ * CSS before first paint (the `sidebar-closed:` variant and `application-shell.css`), so a closed sidebar paints
+ * closed and React's render right after hydration matches it.
  */
 const SidebarProvider = ({
   onOpenChange: setOpenProperty,
@@ -84,11 +83,7 @@ const SidebarProvider = ({
 }: React.ComponentProps<'div'> & {
   readonly onOpenChange?: (open: boolean) => void;
 }): React.JSX.Element => {
-  const { isSidebarOpen, platform } = useShellRequestHints();
-  const [open, setOpenCookie] = useCookie(cookieName.sidebarOp, isSidebarOpen);
-  React.useEffect(() => {
-    writeSidebarOpenCookie(open);
-  }, [open]);
+  const open = useClientFact('sidebarOpen') ?? sidebarDefaultOpen;
   const setOpen = React.useCallback(
     (nextOpen: boolean) => {
       if (setOpenProperty) {
@@ -96,18 +91,16 @@ const SidebarProvider = ({
         return;
       }
 
-      setOpenCookie(nextOpen);
+      writeClientFacts({ sidebarOpen: nextOpen });
     },
-    [setOpenCookie, setOpenProperty],
+    [setOpenProperty],
   );
 
   return (
-    <RequestPlatformProvider platform={platform}>
-      <DesignSystemSidebarProvider {...properties} open={open} onOpenChange={setOpen} keyboardShortcutKey=''>
-        <SidebarBehavior />
-        {children}
-      </DesignSystemSidebarProvider>
-    </RequestPlatformProvider>
+    <DesignSystemSidebarProvider {...properties} open={open} onOpenChange={setOpen} keyboardShortcutKey=''>
+      <SidebarBehavior />
+      {children}
+    </DesignSystemSidebarProvider>
   );
 };
 

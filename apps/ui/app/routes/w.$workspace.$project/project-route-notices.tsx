@@ -375,7 +375,7 @@ export const ProjectRouteNotice = ({ state }: { readonly state: ProjectRouteStat
         className={cn(
           'flex h-9 shrink-0 items-center gap-1 border-b bg-sidebar pr-1 pl-2 text-sm font-medium text-muted-foreground',
           // Same clearance the page header takes under the fixed titlebar controls.
-          'md:group-data-[sidebar-open=false]/app-shell:pl-(--titlebar-controls-width)',
+          'md:sidebar-closed:pl-(--titlebar-controls-width)',
           isMobile && 'h-10',
         )}
       >

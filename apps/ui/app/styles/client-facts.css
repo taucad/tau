@@ -1,0 +1,96 @@
+/*
+ * Client facts before first paint (`#lib/client-facts`). The head script sets these attributes on `<html>` from the
+ * device's record; the markup is the same for every visitor, so whatever a fact changes on screen is drawn here.
+ */
+
+:root.light {
+  color-scheme: light;
+}
+
+:root.dark {
+  color-scheme: dark;
+}
+
+/*
+ * The project library reserves one invisible card per remembered project (R5). The markup reserves the smallest page;
+ * these rules keep only as many rooms as the device's last listing held. The attribute is capped at that page size.
+ */
+:root[data-project-count='0'] [data-project-room]:nth-child(n + 1 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='1'] [data-project-room]:nth-child(n + 2 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='2'] [data-project-room]:nth-child(n + 3 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='3'] [data-project-room]:nth-child(n + 4 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='4'] [data-project-room]:nth-child(n + 5 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='5'] [data-project-room]:nth-child(n + 6 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='6'] [data-project-room]:nth-child(n + 7 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='7'] [data-project-room]:nth-child(n + 8 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='8'] [data-project-room]:nth-child(n + 9 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='9'] [data-project-room]:nth-child(n + 10 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='10'] [data-project-room]:nth-child(n + 11 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='11'] [data-project-room]:nth-child(n + 12 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='12'] [data-project-room]:nth-child(n + 13 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='13'] [data-project-room]:nth-child(n + 14 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='14'] [data-project-room]:nth-child(n + 15 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='15'] [data-project-room]:nth-child(n + 16 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='16'] [data-project-room]:nth-child(n + 17 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='17'] [data-project-room]:nth-child(n + 18 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='18'] [data-project-room]:nth-child(n + 19 of [data-project-room]) {
+  display: none;
+}
+
+:root[data-project-count='19'] [data-project-room]:nth-child(n + 20 of [data-project-room]) {
+  display: none;
+}

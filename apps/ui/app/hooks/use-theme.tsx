@@ -1,10 +1,9 @@
 import type { ReactNode } from 'react';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
-// The desktop SPA drops the `action.set-theme` route (SPA mode bans server
-// `action` exports), so the preference is stored locally instead.
 import { isDesktopTarget } from '#lib/build-target.js';
 import { setDesktopAppIconTheme } from '#filesystem/desktop-bridge.js';
+import { clientFactsScript, readClientFacts, subscribeClientFacts, writeClientFacts } from '#lib/client-facts.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- Preserve the existing enum-style public API with erasable object syntax. */
 export const Theme = {
@@ -66,11 +65,6 @@ type ThemeState = {
   metadata: ThemeMetadata;
 };
 
-const themeStateSchema = z.strictObject({
-  theme: themeSchema,
-  metadata: z.strictObject({ definedBy: z.enum(['USER', 'SYSTEM']) }),
-});
-
 type ThemeContextValue = ThemeState & {
   prefersMoreContrast: boolean;
   setTheme: (theme: ThemeWithSystem) => void;
@@ -93,80 +87,94 @@ export const isTheme = (value: unknown): value is Theme => themeSchema.safeParse
 const getPreferredTheme = (): Theme =>
   globalThis.matchMedia(prefersLightMediaQuery).matches ? Theme.LIGHT : Theme.DARK;
 
-const themeStorageKey = 'tau-theme';
-/** Distinguishes "explicitly follow the system" from "never chose". */
-const systemThemeStorageValue = 'system';
+/** The stored choice: `undefined` = never chose, `null` = an explicit System choice. */
+const readStoredTheme = (): ThemeWithSystem | undefined => {
+  const stored = readClientFacts().theme;
+  return stored === 'system' ? null : stored;
+};
 
-const readStoredValue = (): string | undefined => {
+/** Where a web visitor's theme cookie from before the client-facts record is moved into it, once (P2). */
+export const themeMigrationAction = '/action/migrate-theme';
+
+const stateFor = (preference: ThemeWithSystem | undefined): ThemeState => ({
+  theme: preference ?? (import.meta.env.SSR ? undefined : getPreferredTheme()),
+  metadata: { definedBy: preference === null || preference === undefined ? 'SYSTEM' : 'USER' },
+});
+
+/**
+ * Move the theme a web visitor chose before the client-facts record from its `HttpOnly` cookie into the record, once
+ * per device. That first load paints the system theme, so a choice that differs from the OS flashes once.
+ *
+ * @returns The migrated preference, or `undefined` when the request failed and should be retried on a later load.
+ */
+const migrateThemeCookie = async (): Promise<ThemeWithSystem | undefined> => {
   try {
-    return globalThis.localStorage.getItem(themeStorageKey) ?? undefined;
+    const response = await fetch(themeMigrationAction, { method: 'POST' });
+    if (response.status === 404) {
+      // A build without the route (`tau serve`) has no cookie to move.
+      return null;
+    }
+    if (!response.ok) {
+      return undefined;
+    }
+    const parsed = themePreferenceSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data.theme : null;
   } catch {
-    // No localStorage during the SPA index.html prerender, or when blocked.
     return undefined;
   }
 };
 
-/** `undefined` = nothing usable stored; `null` = an explicit System choice. */
-const readStoredTheme = (): ThemeWithSystem | undefined => {
-  const raw = readStoredValue();
-  if (raw === systemThemeStorageValue) {
-    return null;
-  }
-
-  const parsed = themeSchema.safeParse(raw);
-  return parsed.success ? parsed.data : undefined;
-};
-
-const writeStoredTheme = (theme: ThemeWithSystem): void => {
-  try {
-    globalThis.localStorage.setItem(themeStorageKey, theme ?? systemThemeStorageValue);
-  } catch {
-    // Persistence is best-effort; a blocked store must not break the toggle.
-  }
-};
-
+/**
+ * The theme preference and its resolved theme. The choice is a client fact (`#lib/client-facts`): the head script
+ * applies it to `<html>` before first paint, the server renders no theme, and the first client render reads the same
+ * stored choice, so `<html>`'s class hydrates as the script set it. Other tabs follow through the record's `storage`
+ * event.
+ */
 export const ThemeProvider = ({
   children,
-  specifiedTheme,
-  themeAction,
+  initialTheme,
 }: {
   readonly children: ReactNode;
-  readonly specifiedTheme: ThemeWithSystem;
-  readonly themeAction: string;
+  /** A theme this subtree starts in instead of the stored choice: calibration pages and visual tests. */
+  readonly initialTheme?: Theme;
 }): React.JSX.Element => {
-  const [state, setState] = useState<ThemeState>(() => {
-    // Desktop has no root loader, so `specifiedTheme` is always null there and
-    // the stored preference is the only pre-paint source of truth.
-    const preference = isDesktopTarget() ? (readStoredTheme() ?? specifiedTheme) : specifiedTheme;
-    return {
-      theme: preference ?? (import.meta.env.SSR ? undefined : getPreferredTheme()),
-      metadata: { definedBy: preference === null ? 'SYSTEM' : 'USER' },
-    };
-  });
+  const [state, setState] = useState<ThemeState>(() => stateFor(initialTheme ?? readStoredTheme()));
   const [prefersMoreContrast, setPrefersMoreContrast] = useState(
     () => !import.meta.env.SSR && globalThis.matchMedia(prefersMoreContrastMediaQuery).matches,
   );
-  const broadcastChannel = useRef<BroadcastChannel | undefined>(undefined);
+
+  /* Another tab's choice. */
+  useEffect(
+    () =>
+      subscribeClientFacts(() => {
+        const stored = readStoredTheme();
+        setState((current) => {
+          const next = stateFor(stored);
+          return current.theme === next.theme && current.metadata.definedBy === next.metadata.definedBy
+            ? current
+            : next;
+        });
+      }),
+    [],
+  );
 
   useEffect(() => {
-    if (!('BroadcastChannel' in globalThis)) {
+    if (isDesktopTarget() || readClientFacts().theme !== undefined) {
       return;
     }
-
-    const channel = new globalThis.BroadcastChannel('tau-theme');
-    const handleMessage = ({ data }: MessageEvent<unknown>): void => {
-      const parsed = themeStateSchema.safeParse(data);
-      if (!parsed.success) {
+    let isCurrent = true;
+    // async-iife: bootstrap — a failed migration is retried on the next load.
+    void (async () => {
+      const migrated = await migrateThemeCookie();
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- cleanup can flip isCurrent while the POST is pending
+      if (migrated === undefined || !isCurrent || readClientFacts().theme !== undefined) {
         return;
       }
-      setState(parsed.data);
-    };
-    channel.addEventListener('message', handleMessage);
-    broadcastChannel.current = channel;
-
+      writeClientFacts({ theme: migrated ?? 'system' });
+      setState(stateFor(migrated));
+    })();
     return () => {
-      channel.removeEventListener('message', handleMessage);
-      channel.close();
+      isCurrent = false;
     };
   }, []);
 
@@ -202,28 +210,10 @@ export const ThemeProvider = ({
     }
   }, [state.theme]);
 
-  const setTheme = useCallback(
-    (theme: ThemeWithSystem) => {
-      const nextState: ThemeState = {
-        theme: theme ?? getPreferredTheme(),
-        metadata: { definedBy: theme === null ? 'SYSTEM' : 'USER' },
-      };
-      setState(nextState);
-      broadcastChannel.current?.postMessage(nextState);
-
-      if (isDesktopTarget()) {
-        writeStoredTheme(theme);
-        return;
-      }
-
-      void fetch(themeAction, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ theme }),
-      });
-    },
-    [themeAction],
-  );
+  const setTheme = useCallback((theme: ThemeWithSystem) => {
+    setState(stateFor(theme));
+    writeClientFacts({ theme: theme ?? 'system' });
+  }, []);
 
   const value = useMemo(() => ({ ...state, prefersMoreContrast, setTheme }), [prefersMoreContrast, setTheme, state]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
@@ -291,50 +281,16 @@ export const useTheme = (): UseThemeReturn => {
   };
 };
 
-/*
- * Desktop-only prelude: the SPA's prerendered `index.html` is built with no
- * `localStorage`, so without this the stored preference is only applied once
- * React hydrates — a user with a light theme on a dark OS flashes dark on
- * every launch. Web keeps `stored` null and behaves exactly as before.
- */
-const storedThemeSnippet = String.raw`
-  try { stored = window.localStorage.getItem(${JSON.stringify(themeStorageKey)}); } catch { stored = null; }`;
-
 /**
- * Inline script that resolves the theme before first paint.
+ * The client-facts head script and the color-scheme declaration, before any stylesheet in `<head>`. The script is the
+ * same for every visitor and every build; the CSP admits it by hash.
  *
- * Built per call rather than captured at module scope so tests can drive both
- * targets with `vi.stubEnv`.
- *
- * @returns The script body.
+ * @returns The head elements.
  */
-export const buildClientThemeCode = (): string => String.raw`
-(() => {
-  const names = ${JSON.stringify([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])};
-  const classList = document.documentElement.classList;
-  const system = window.matchMedia(${JSON.stringify(prefersLightMediaQuery)}).matches ? 'light' : 'dark';
-  let stored = null;${isDesktopTarget() ? storedThemeSnippet : ''}
-  if (names.indexOf(stored) === -1) stored = null;
-  const applied = stored === null ? system : stored;
-  if (!names.some((name) => classList.contains(name))) {
-    if (applied === ${JSON.stringify(Theme.BLACK)} || applied === ${JSON.stringify(Theme.HIGH_CONTRAST)}) classList.add(${JSON.stringify(Theme.DARK)});
-    classList.add(applied);
-  }
-  const meta = document.querySelector('meta[name=color-scheme]');
-  if (meta) meta.content = applied === 'light' ? 'light dark' : 'dark light';
-})();
-`;
-
-export const PreventFlashOnWrongTheme = ({ hasSsrTheme }: { readonly hasSsrTheme: boolean }): React.JSX.Element => {
-  const { theme } = useTheme();
-
-  return (
-    <>
-      <meta name='color-scheme' content={theme === Theme.LIGHT ? 'light dark' : 'dark light'} />
-      {hasSsrTheme ? null : (
-        // oxlint-disable-next-line react/no-danger -- static inline script must run before hydration to prevent a theme flash
-        <script dangerouslySetInnerHTML={{ __html: buildClientThemeCode() }} suppressHydrationWarning />
-      )}
-    </>
-  );
-};
+export const ClientFactsHead = (): React.JSX.Element => (
+  <>
+    <meta name='color-scheme' content='light dark' />
+    {/* oxlint-disable-next-line react/no-danger -- static inline script must run before first paint to apply the client facts */}
+    <script dangerouslySetInnerHTML={{ __html: clientFactsScript }} suppressHydrationWarning />
+  </>
+);

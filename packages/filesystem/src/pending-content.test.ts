@@ -795,7 +795,9 @@ describe('expected entries (D10)', () => {
     const top = byName(await view.readdirWithStats!(''));
     expect(Object.keys(top).toSorted()).toStrictEqual(['lib', 'main.scad', 'models', 'tau.json']);
     expect(top['tau.json']).not.toHaveProperty('pending');
-    expect(top['lib']).toMatchObject({ type: 'dir' });
+    /* A folder only arriving entries make is pending too: nothing may be renamed, moved or made inside it yet. */
+    expect(top['lib']).toMatchObject({ type: 'dir', pending: true });
+    expect(top['models']).not.toHaveProperty('pending');
     /* A folder nothing has landed in yet lists what will arrive in it. */
     const lib = byName(await view.readdirWithStats!('lib'));
     expect(lib['gear.scad']).toMatchObject({ type: 'file', size: 300, pending: true });

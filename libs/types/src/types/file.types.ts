@@ -63,6 +63,8 @@ export type FileTreeEntry =
       name: string;
       type: 'dir';
       size: number;
+      /** A folder only a tree write's arriving entries make (see {@link FileStat}): it is not on disk yet. */
+      pending?: true;
     }
   | ({
       path: string;
@@ -108,6 +110,11 @@ export type FileStat =
       readonly mtimeMs: number;
       /** What a composed view says about this path; absent on a raw provider stat. */
       readonly provenance?: FileProvenance;
+      /**
+       * Present on a folder only a tree write's arriving entries make (`@taucad/filesystem` D10): a listing shows it
+       * before it is on disk, and nothing may be renamed, moved or made inside it until it is.
+       */
+      readonly pending?: true;
     }
   | ({
       readonly type: 'file';

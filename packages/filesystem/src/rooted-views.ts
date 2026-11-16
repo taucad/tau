@@ -639,7 +639,7 @@ export class RootedViews {
             if (!names.has(entry.path)) {
               answered.push(
                 entry.type === 'dir'
-                  ? { name: entry.path, type: 'dir', size: 0, mtimeMs: 0 }
+                  ? { name: entry.path, type: 'dir', size: 0, mtimeMs: 0, pending: true }
                   : { name: entry.path, type: 'file', size: entry.size, mtimeMs: 0, pending: true },
               );
             }

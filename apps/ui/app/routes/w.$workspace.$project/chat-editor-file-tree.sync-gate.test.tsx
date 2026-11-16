@@ -3,7 +3,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
 import type { ProjectReadiness, SyncFacet } from '@taucad/revisions';
@@ -186,6 +186,31 @@ describe('the Files tree while the open pull is running', () => {
     expect(row.querySelector('[data-arriving]')).not.toBeNull();
     expect(row).toHaveTextContent('Arriving');
     expect(screen.queryByRole('region', { name: 'Preparing project files' })).not.toBeInTheDocument();
+  });
+
+  /* An arriving row is not on disk yet: renaming, moving or making something inside it would act on nothing (I7). */
+  it.each([
+    [
+      'file',
+      { path: 'gear.scad', name: 'gear.scad', type: 'file', size: 300, mtimeMs: 0, isLoaded: false, pending: true },
+    ],
+    ['folder', { path: 'lib', name: 'lib', type: 'dir', size: 0, mtimeMs: 0, isLoaded: false, pending: true }],
+  ] as const)('should offer no rename on an arriving %s', (_kind, entry) => {
+    pending.current = true;
+    sync.current = { ...facet('pending'), pullPhase: 'applying' };
+    readiness.current = 'entryReady';
+    tree.current = new Map<string, FileEntry>([arrived, [entry.path, { ...entry }]]);
+
+    renderTree();
+
+    const landedRow = screen.getByRole('treeitem', { name: /bracket\.scad/u });
+    fireEvent.doubleClick(landedRow.querySelector('[style]') ?? landedRow);
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+
+    const row = screen.getByRole('treeitem', { name: new RegExp(entry.name, 'u') });
+    fireEvent.doubleClick(row.querySelector('[style]') ?? row);
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 
   it('should keep the tree waiting until the write has announced its entries', () => {

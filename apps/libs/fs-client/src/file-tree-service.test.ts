@@ -801,9 +801,11 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     const { tree, proxy, disposeChannel } = createTreeHarness();
     vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
       { id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 0, pending: true },
+      { id: 'lib', name: 'lib', size: 0, mtimeMs: 0, children: [], pending: true },
     ]);
     await tree.listDirectory('');
     expect(tree.getTreeSnapshot().get('a.ts')).toMatchObject({ type: 'file', size: 5, pending: true });
+    expect(tree.getTreeSnapshot().get('lib')).toMatchObject({ type: 'dir', pending: true });
     vi.mocked(proxy.readDirectory).mockResolvedValueOnce([{ id: 'a.ts', name: 'a.ts', size: 5, mtimeMs: 0 }]);
 
     tree.scheduleRefresh('');

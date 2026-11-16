@@ -156,7 +156,10 @@ type RowPresentation = FileProvenanceLabel & {
   readonly provenance: FileProvenance | undefined;
   readonly isSubtreeRoot: boolean;
   readonly subtreeRootLevel?: number;
-  /** A file a tree write has yet to land (STO-25, I7): shown arriving, never missing and never as stale text. */
+  /**
+   * A file a tree write has yet to land, or a folder only such files make (STO-25, I7): shown arriving, never missing,
+   * and read-only until it lands.
+   */
   readonly isArriving?: boolean;
 };
 
@@ -189,7 +192,8 @@ const sameProvenance = (previous?: FileProvenance, next?: FileProvenance): boole
     previous?.identity === next?.identity &&
     previous?.overrides === next?.overrides);
 
-const isPendingFile = (entry: FileEntry): boolean => entry.type === 'file' && entry.pending === true;
+/* A row a tree write has yet to land, or a folder only such rows make (STO-25, I7). */
+const isArrivingEntry = (entry: FileEntry): boolean => entry.pending === true;
 
 /**
  * Whether two tree snapshots draw the same rows.
@@ -207,7 +211,7 @@ function sameTreeRows(previous: ReadonlyMap<string, FileEntry>, next: ReadonlyMa
       before !== entry &&
       (before?.name !== entry.name ||
         before.type !== entry.type ||
-        isPendingFile(before) !== isPendingFile(entry) ||
+        isArrivingEntry(before) !== isArrivingEntry(entry) ||
         !sameProvenance(before.provenance, entry.provenance))
     ) {
       return false;
@@ -225,7 +229,8 @@ function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<
 
   const presentation = new Map<string, RowPresentation>();
   for (const [path, label] of labels) {
-    const arriving = isPendingFile(fileTreeMap.get(path)!) ? { isArriving: true } : {};
+    /* Not on disk yet: nothing may rename, move, delete or make anything inside it until it lands. */
+    const arriving = isArrivingEntry(fileTreeMap.get(path)!) ? { isArriving: true, readOnly: true } : {};
     if (!label.readOnly) {
       presentation.set(path, { ...label, isSubtreeRoot: true, ...arriving });
       continue;
@@ -2376,7 +2381,7 @@ function TreeItem({
         <>
           <Item disabled>
             <Lock aria-hidden />
-            Read-only
+            {presentation.isArriving === true ? 'Arriving' : 'Read-only'}
           </Item>
           {overridableUnit ? (
             <Item

@@ -342,6 +342,8 @@ export type FileTreeNode =
       children: FileTreeNode[];
       /** What a composed view says about this entry; absent on a raw authority listing. */
       provenance?: FileProvenance;
+      /** A folder only a tree write's arriving entries make (D10): not on disk yet. */
+      pending?: true;
     }
   | ({
       id: string;

@@ -149,7 +149,6 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/agent-host": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/project-core": "workspace:*",
     "buffer": "catalog:",

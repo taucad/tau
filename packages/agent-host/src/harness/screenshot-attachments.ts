@@ -15,13 +15,9 @@ import { util as zodUtility } from 'zod';
 import { encodeBase64 } from '#harness/base64.js';
 import { attachmentPathPattern } from '#log/event-schema.js';
 import type { JsonObject, JsonValue, ProviderMessage } from '#log/event-types.js';
-import {
-  attachmentExtensionOf,
-  attachmentMedia,
-  isAttachmentMediaType,
-  sniffAttachmentMediaType,
-} from '#wire/attachment-media.js';
-import type { AttachmentMediaType } from '#wire/attachment-media.js';
+import { attachmentExtensionOf, attachmentMedia, isAttachmentMediaType } from '@taucad/utils/attachment-media';
+import type { AttachmentMediaType } from '@taucad/utils/attachment-media';
+import { sniffAttachmentMediaType } from '#wire/attachment-media.js';
 
 /* Captures are PNG or WebP and a machine camera still is JPEG (WP5); any stored image type is admitted, so the
  * stored set has one owner (I2). */

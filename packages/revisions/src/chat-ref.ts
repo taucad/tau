@@ -28,7 +28,7 @@
  * what the fetch path calls with the refs the fetch wrote.
  */
 
-import { attachmentExtensions } from '@taucad/agent-host/wire';
+import { attachmentExtensions } from '@taucad/utils/attachment-media';
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
@@ -98,8 +98,8 @@ const isOwnSegment = (context: ChatRefContext, path: string): boolean =>
  * One attachment blob as the closed tree spells it: `attachments/<64 hex>.<ext>`
  * over the canonical extensions of the media types Tau stores (blueprint D12).
  *
- * Built from `attachmentMedia` in `@taucad/agent-host/wire`, the one stored-media
- * table (I2), so a type added there is admitted here at once. Lower-case hex only,
+ * Built from `attachmentMedia` in `@taucad/utils/attachment-media` (bundled), the one
+ * stored-media table (I2), so a type added there is admitted here at once. Lower-case hex only,
  * because the store writes lower-case and two spellings of one hash would be two
  * entries for one blob — the opposite of what content addressing buys.
  */

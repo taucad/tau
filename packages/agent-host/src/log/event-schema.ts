@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { EventLogError } from '#log/event-log-error.js';
 import { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
-import { attachmentExtensions } from '#wire/attachment-media.js';
+import { attachmentExtensions } from '@taucad/utils/attachment-media';
 import type { AgentLogEvent, FileRefContentBlock, JsonValue } from '#log/event-types.js';
 
 const nonEmptyString = z.string().min(1);

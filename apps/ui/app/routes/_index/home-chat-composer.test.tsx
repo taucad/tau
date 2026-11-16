@@ -4,10 +4,15 @@ import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { HomeChatComposer, homeComposerEndId } from '#routes/_index/home-chat-composer.js';
-import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
 
 const send = vi.hoisted(() => vi.fn());
-const draftActorRef = { send };
+/* The draft owner's surface the early input reads: its sends, and an empty draft to select from. */
+const draftActorRef = {
+  send,
+  getSnapshot: () => ({ context: { draftText: '', draftAttachments: [] } }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
 const composer = {
   draftActorRef,
   model: {

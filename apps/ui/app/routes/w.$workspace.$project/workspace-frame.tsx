@@ -1,5 +1,17 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
+import {
+  chatComposerBarClassName,
+  chatComposerBarLeftClassName,
+  chatComposerBarRightClassName,
+} from '@taucad/chat-ui/components/chat-input-styles';
+import { ServedSendButton } from '#components/chat/chat-textarea-submit-button.js';
+import {
+  EarlyComposerField,
+  EarlyInputHandoverContext,
+  readEarlyInput,
+} from '#components/chat/chat-early-input-field.js';
+import type { EarlyChatInput, EarlyInputHandover, EarlyTextarea } from '#components/chat/chat-early-input-field.js';
 import { defaultWideFrameHint, frameHintKey, frameHintVariables, readWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 
@@ -60,13 +72,15 @@ export function WorkspaceFrame({
 }): React.JSX.Element {
   /* The document's URL, as the pre-paint script reads it: the frame also renders in suites with no router. */
   const wide = useSyncExternalStore(subscribeToNothing, readDocumentFrameHint, noHintOnServer);
+  const served = useServedComposer();
 
   if (!isDrawn) {
     return (
       <div className='contents'>
         {/* The drawn frame's own nodes take this one slot, so the content keeps its position either way. */}
         {null}
-        {children}
+        <EarlyInputHandoverContext.Provider value={undefined}>{children}</EarlyInputHandoverContext.Provider>
+        {null}
       </div>
     );
   }
@@ -78,14 +92,152 @@ export function WorkspaceFrame({
         'size-full bg-background md:relative md:isolate',
         /* Literal for Tailwind: `workspaceLanesReadyAttribute`. */
         '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
+        '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-composer]]:hidden',
         /* A failure that stands in the content region in the workspace's place (the file service's, the route
          * chunk's) shows alone, as it did before the frame: no lane or composer box under it. */
         '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
+        '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
       )}
       style={wide === undefined ? undefined : (frameHintVariables(wide) as React.CSSProperties)}
     >
-      <WorkspaceFrameLanes />
-      {children}
+      <WorkspaceFrameLanes isComposerServed={served.field !== undefined} />
+      <EarlyInputHandoverContext.Provider value={served.handover}>{children}</EarlyInputHandoverContext.Provider>
+      {served.field}
+    </div>
+  );
+}
+
+const isClientRender = (): boolean => true;
+const isServerRender = (): boolean => false;
+
+/** Where the served input stands: served, handed over (until a composer takes it), or gone. */
+type ServedComposerState = 'served' | EarlyChatInput | 'gone';
+
+/**
+ * The chat lane's served composer (loading states UX blueprint, § Editor-route composer; F7): the native input the
+ * document is served with, typeable from first paint, and its handover to the rich composer.
+ *
+ * It exists only in a frame the document was served with (the hydration pass): a frame first rendered by a client
+ * navigation has no served script to record its edits, and the rich composer is moments away, so it draws the lane's
+ * empty composer box as before. The rich editor sits under `content-visibility: hidden` until the lanes are revealed and
+ * cannot take focus there, so the desktop workspace calls `release` in the commit that reveals them: the input's text,
+ * caret, focus and queued send are read then, and the composer takes them in the same commit. An open composition
+ * defers the handover to its end, read at `compositionend` (Home also waits a microtask there for a browser that sends
+ * the final input after it; the frame adds no timer).
+ *
+ * @returns The served field to draw over the content, and the handover the composer reads.
+ */
+function useServedComposer(): { field: React.ReactNode; handover: EarlyInputHandover } {
+  const isOnClient = useSyncExternalStore(subscribeToNothing, isClientRender, isServerRender);
+  const [state, setState] = useState<ServedComposerState>(() => (isOnClient ? 'gone' : 'served'));
+  const inputRef = useRef<EarlyTextarea>(null);
+  const isServed = state === 'served';
+  const [isEmpty, setIsEmpty] = useState(true);
+  /* Text typed, or a draft painted, before hydration is already in the input; Send reads it once React is here. */
+  useEffect(() => {
+    setIsEmpty((inputRef.current?.value.trim() ?? '') === '');
+  }, []);
+  const handover = useMemo<EarlyInputHandover>(
+    () => ({
+      pending: typeof state === 'object' ? state : undefined,
+      release: () => {
+        const input = inputRef.current;
+        if (!isServed) {
+          return;
+        }
+        if (input?.tauEarlyDraft?.composing === true) {
+          input.addEventListener(
+            'compositionend',
+            () => {
+              /* Read at `compositionend`, as Chromium has delivered the composition's final input by then. */
+              setState((current) => (current === 'served' ? releasedState(input) : current));
+            },
+            { once: true },
+          );
+          return;
+        }
+        setState(input === null ? 'gone' : releasedState(input));
+      },
+      taken: () => {
+        setState('gone');
+      },
+    }),
+    [isServed, state],
+  );
+  return {
+    field: isServed ? (
+      <ServedComposer
+        inputRef={inputRef}
+        isEmpty={isEmpty}
+        onChange={(event) => {
+          setIsEmpty(event.currentTarget.value.trim() === '');
+        }}
+      />
+    ) : undefined,
+    handover,
+  };
+}
+
+/**
+ * What the served input hands over: its snapshot when it holds anything a composer must take (an edit, a queued send,
+ * or focus), otherwise nothing.
+ *
+ * @param input - The served input.
+ * @returns The snapshot, or `'gone'`.
+ */
+const releasedState = (input: EarlyTextarea): ServedComposerState => {
+  const snapshot = readEarlyInput(input);
+  return snapshot.edited || snapshot.queuedSend || snapshot.focused ? snapshot : 'gone';
+};
+
+/**
+ * The served composer, over the chat lane's composer box: the chat lane's width and open state come from the same
+ * frame-hint variables and compact rule as the lane, and the composer sits at the lane's foot in the box the rich
+ * composer takes (`chat-history.tsx`). It is a layer over the content, so it takes clicks; the content beneath has no
+ * pixels of its own until the lanes are revealed, when this layer is gone. The lanes layer stays hidden from assistive
+ * technology, so before adoption the served input is the only part of the frame exposed; the layer itself passes
+ * pointer events through to it.
+ *
+ * @param props - The served input's ref, whether it holds nothing to send, and its change handler.
+ * @returns The layer.
+ */
+function ServedComposer({
+  inputRef,
+  isEmpty,
+  onChange,
+}: {
+  readonly inputRef: React.Ref<EarlyTextarea>;
+  readonly isEmpty: boolean;
+  readonly onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
+}): React.JSX.Element {
+  return (
+    <div
+      data-slot='workspace-frame-composer'
+      className='@container pointer-events-none absolute inset-0 flex max-md:hidden'
+    >
+      <div className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 flex-col justify-end border-r border-transparent @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'>
+        <div className='pointer-events-auto mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+          <EarlyComposerField inputRef={inputRef} bar={<ServedComposerBar isEmpty={isEmpty} />} onChange={onChange} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The served composer's bar: Send at its resting place, inert, so a send queued by Enter shows its pending state from
+ * first paint. The other controls (mode, model, attachments) arrive with the rich composer.
+ *
+ * @param props - Whether the input holds nothing to send.
+ * @returns The bar.
+ */
+function ServedComposerBar({ isEmpty }: { readonly isEmpty: boolean }): React.JSX.Element {
+  return (
+    <div inert data-slot='composer-bar' className={chatComposerBarClassName}>
+      <div data-slot='composer-left' className={chatComposerBarLeftClassName} />
+      <div data-slot='composer-right' className={chatComposerBarRightClassName}>
+        <ServedSendButton isEmpty={isEmpty} />
+      </div>
     </div>
   );
 }
@@ -96,7 +248,7 @@ export function WorkspaceFrame({
  *
  * @returns The lanes and the marker.
  */
-function WorkspaceFrameLanes(): React.JSX.Element {
+function WorkspaceFrameLanes({ isComposerServed }: { readonly isComposerServed: boolean }): React.JSX.Element {
   return (
     <>
       <div
@@ -109,7 +261,7 @@ function WorkspaceFrameLanes(): React.JSX.Element {
           data-lane='chat'
           className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 border-r border-border @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'
         >
-          <ChatLaneFrame />
+          <ChatLaneFrame isComposerServed={isComposerServed} />
         </div>
         <div data-slot='workspace-lane' data-lane='viewer' className='h-full min-w-0 flex-1' />
         <div
@@ -137,7 +289,14 @@ function WorkspaceFrameLanes(): React.JSX.Element {
  * @param props - When the lane is waiting inside a live workspace, the label of its busy state.
  * @returns The chat lane frame.
  */
-export function ChatLaneFrame({ busyLabel }: { readonly busyLabel?: string }): React.JSX.Element {
+export function ChatLaneFrame({
+  busyLabel,
+  isComposerServed = false,
+}: {
+  readonly busyLabel?: string;
+  /** The served composer stands over this box (`ServedComposer`), so the box itself draws nothing. */
+  readonly isComposerServed?: boolean;
+}): React.JSX.Element {
   return (
     <div
       className='flex size-full flex-col bg-sidebar/50'
@@ -154,7 +313,10 @@ export function ChatLaneFrame({ busyLabel }: { readonly busyLabel?: string }): R
       <div className='mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
         <div
           data-testid='chat-lane-frame-composer'
-          className='flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md'
+          className={cn(
+            'flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md',
+            isComposerServed && 'invisible',
+          )}
         />
       </div>
     </div>

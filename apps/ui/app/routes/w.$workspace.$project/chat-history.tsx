@@ -48,6 +48,9 @@ import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import type { WaitClock } from '@taucad/ui/hooks/use-wait-clock';
 
 // One conversational turn per virtual row, sized only by its content.
 const TurnGroup = memo(function ({
@@ -130,6 +133,53 @@ const virtuosoComponents = {
   Header: ChatHistoryHeader,
   EmptyPlaceholder: ChatHistoryEmptyPlaceholder,
 };
+
+/** One transcript wait as the header indicator times it. */
+type TranscriptWait = Readonly<{ active: boolean; startedAt: number; isGesture: boolean }>;
+
+/**
+ * Whether the page is still on the URL its document loaded: the route open the document began with, whose waits are
+ * timed from navigation start (0). A client navigation since then has its own start.
+ *
+ * @returns `true` while the document's own URL is the current one.
+ */
+const isDocumentOpen = (): boolean => {
+  const [entry] = globalThis.performance.getEntriesByType('navigation');
+  if (entry === undefined) {
+    return false;
+  }
+  const opened = new URL(entry.name);
+  return opened.pathname === globalThis.location.pathname && opened.search === globalThis.location.search;
+};
+
+const startTranscriptWait = (clock: WaitClock, isFirst: boolean): Omit<TranscriptWait, 'active'> => {
+  if (isFirst && isDocumentOpen()) {
+    return { startedAt: 0, isGesture: false };
+  }
+  const { navigator } = globalThis;
+  const activation = 'userActivation' in navigator ? navigator.userActivation : undefined;
+  return { startedAt: clock.now(), isGesture: activation?.isActive ?? false };
+};
+
+/**
+ * When the chat's current transcript wait started (loading states UX blueprint, § Chat lane; one clock per wait, never
+ * per mount): a lane that mounts loading during the document's own open counts from navigation start, so its
+ * indicator shows 1,000 ms after it whenever the lane mounted; every later wait (a chat switch, a reload of the log)
+ * counts from now. Read in render with React's "information from previous renders" pattern: no effect, no timer.
+ *
+ * @param active - Whether the transcript is loading now.
+ * @returns The wait's start on the wait clock, and whether a person's gesture started it.
+ */
+function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'> {
+  const clock = useWaitClockSource();
+  const [tracked, setTracked] = useState<TranscriptWait>(() => ({ active, ...startTranscriptWait(clock, true) }));
+  let current = tracked;
+  if (tracked.active !== active) {
+    current = active ? { active, ...startTranscriptWait(clock, false) } : { ...tracked, active };
+    setTracked(current);
+  }
+  return { startedAt: current.startedAt, isGesture: current.isGesture };
+}
 
 type ChatHistoryProps = {
   readonly className?: string;
@@ -241,6 +291,7 @@ const ExpandedChatHistory = memo(function ({
 
   const groups = useChatSelector((state) => state.turnGroups);
   const transcript = useChatSelector((state) => state.transcript);
+  const transcriptWait = useTranscriptWaitStart(transcript === 'loading');
   const reservesTaskList = useChatSelector((state) => state.rememberedComposerTrays.includes('todo'));
 
   const renderItem = useCallback(
@@ -303,6 +354,17 @@ const ExpandedChatHistory = memo(function ({
                     )}
                   />
                 }
+              />
+              {/* The header's trailing slot (U7, F6): words from 1,000 ms into the transcript's wait, kept 500 ms. The
+               * feed carries `aria-busy`; a load that is part of the route open is seen, not announced. */}
+              <WaitIndicator
+                active={transcript === 'loading'}
+                label='Loading chat'
+                slowLabel='Still loading chat'
+                startedAt={transcriptWait.startedAt}
+                live={transcriptWait.isGesture}
+                variant='inline'
+                className='shrink-0'
               />
             </FloatingPanelContentHeader>
 

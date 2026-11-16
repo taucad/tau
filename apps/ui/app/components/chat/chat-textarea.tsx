@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -6,7 +6,11 @@ import type { ChatTextareaProperties } from '#components/chat/chat-textarea-type
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
 import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
-import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
+import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
+import { writeDraftHint } from '#lib/frame-hint-draft.js';
+import type { DraftHintScope } from '#lib/frame-hint-draft.js';
+import { frameHintKey } from '#lib/frame-hint.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 import { ChatTextareaSkeleton } from '@taucad/chat-ui/components/chat-textarea-skeleton';
 import { useProject } from '#hooks/use-project.js';
@@ -29,6 +33,22 @@ import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { prewarmChatSdk } from '#services/chat-sdk-loader.js';
 import { latestAcpSessionData } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+
+/**
+ * Which draft hint a main composer mirrors: Home's on `/`, a project's on its route, none elsewhere (another new-project
+ * surface, a preview).
+ *
+ * @param pathname - The document's path.
+ * @param isProjectComposer - Whether the composer belongs to a project.
+ * @returns The scope, or undefined.
+ */
+const draftHintScopeOf = (pathname: string, isProjectComposer: boolean): DraftHintScope | undefined => {
+  if (!isProjectComposer) {
+    return pathname === '/' ? { kind: 'home' } : undefined;
+  }
+  const key = frameHintKey(pathname);
+  return key === undefined ? undefined : { kind: 'project', key };
+};
 
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the
@@ -127,6 +147,23 @@ export const ChatTextarea = memo(function ({
         ),
   );
   const { setDraftText: setMainDraftText, setEditDraftText } = useDraftActions();
+
+  /* The draft hint mirrors the main composer's draft, so the next load paints it in its first frame (A15d, H-e): Home's
+   * on `/`, a project's under its URL key with the chat it belongs to. */
+  const draftHintChatId = session?.activeChatId;
+  const isProjectComposer = projectContext !== undefined;
+  useEffect(() => {
+    if (mode !== 'main') {
+      return;
+    }
+    const scope = draftHintScopeOf(globalThis.location.pathname, isProjectComposer);
+    if (scope !== undefined) {
+      writeDraftHint(scope, {
+        text: logic.inputText,
+        ...(scope.kind === 'project' && draftHintChatId !== undefined ? { chatId: draftHintChatId } : {}),
+      });
+    }
+  }, [mode, logic.inputText, draftHintChatId, isProjectComposer]);
 
   const setDraftText = useCallback(
     (text: string) => {
@@ -343,11 +380,17 @@ export const ChatTextarea = memo(function ({
       </>
     ) : undefined;
 
-  const content = (earlyInput?: EarlyChatInput): React.ReactNode => (
+  /* The project route's served composer (the workspace frame's) hands its input to the main composer once the lane is
+   * revealed; it is applied once, then the frame forgets it. */
+  const earlyInputHandover = useContext(EarlyInputHandoverContext);
+  const handedOverInput = mode === 'main' ? earlyInputHandover?.pending : undefined;
+
+  const content = (earlyInput?: EarlyChatInput, onEarlyInputAdopted?: () => void): React.ReactNode => (
     <>
       {composerNotices}
       <ChatTextareaDesktop
         earlyInput={earlyInput}
+        onEarlyInputAdopted={onEarlyInputAdopted}
         className={className}
         enableAutoFocus={enableAutoFocus}
         enableContextActions={enableContextActions}
@@ -412,6 +455,6 @@ export const ChatTextarea = memo(function ({
   return enableEarlyInput ? (
     <ChatEarlyInput className={className}>{content}</ChatEarlyInput>
   ) : (
-    <ClientOnly fallback={skeleton}>{content()}</ClientOnly>
+    <ClientOnly fallback={skeleton}>{content(handedOverInput, earlyInputHandover?.taken)}</ClientOnly>
   );
 });

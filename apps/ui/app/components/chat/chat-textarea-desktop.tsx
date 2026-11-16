@@ -11,8 +11,8 @@ import {
   chatComposerShellClassName,
 } from '@taucad/chat-ui/components/chat-input-styles';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
-import type { Editor } from '@tiptap/core';
+import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
+import type { Editor, JSONContent } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
@@ -73,6 +73,8 @@ const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
 
 type ChatTextareaDesktopProperties = {
   readonly earlyInput?: EarlyChatInput;
+  /** Called once `earlyInput` is in the editor, so its owner does not hand it over again. */
+  readonly onEarlyInputAdopted?: () => void;
   readonly className?: string;
   readonly enableAutoFocus?: boolean;
   readonly enableContextActions?: boolean;
@@ -207,6 +209,20 @@ const sendRefusalOf = (input: {
 };
 
 /**
+ * A native input's text as the editor's document: one paragraph per line, as the editor reports its text back.
+ *
+ * @param text - The text.
+ * @returns The document.
+ */
+const plainTextDocument = (text: string): JSONContent => ({
+  type: 'doc',
+  content: text.split('\n').map((line) => ({
+    type: 'paragraph',
+    ...(line === '' ? {} : { content: [{ type: 'text', text: line }] }),
+  })),
+});
+
+/**
  * The chat composer, on every device (C11): the Tiptap rich text editor with
  * inline context chips via @-mentions, slash commands, drag-drop from dockview
  * tabs, and one bar of controls.
@@ -221,6 +237,7 @@ const sendRefusalOf = (input: {
  */
 export const ChatTextareaDesktop = memo(function ({
   earlyInput,
+  onEarlyInputAdopted,
   className,
   enableAutoFocus = true,
   enableContextActions = true,
@@ -369,7 +386,7 @@ export const ChatTextareaDesktop = memo(function ({
   }, [dictation.cancel, dictation.phase, onEscapePressed]);
 
   const chatEditor = useChatEditor({
-    initialText: earlyInput?.edited ? earlyInput.text : undefined,
+    initialText: earlyInput?.edited === true || earlyInput?.prefilled === true ? earlyInput.text : undefined,
     onSubmit: submitWithDictation,
     onEscape: escapeWithDictation,
     onUpdate: handleEditorUpdate,
@@ -518,12 +535,20 @@ export const ChatTextareaDesktop = memo(function ({
       document.removeEventListener('focusin', endHandover);
     };
   }, [isHandoverOutlined]);
-  /* The editor takes the native input's selection and focus in the commit that replaces it, before the
+  const handedOverRef = useRef<EarlyChatInput | undefined>(undefined);
+  /* The editor takes the native input's text, selection and focus in the commit that replaces it, before the
    * browser can deliver another key: anything later (a microtask, a frame) lets keys typed during the
-   * handover land on the page and vanish. Its text is already in place (`initialText`). */
+   * handover land on the page and vanish. On Home its text is already in place (`initialText`); the project
+   * route's served input is handed over once its lane is revealed, after this editor exists, so the edit is
+   * written into the editor here, as an edit, so the draft follows it. */
   useLayoutEffect(() => {
-    if (!editor || !earlyInput) {
+    if (!editor || !earlyInput || handedOverRef.current === earlyInput) {
       return;
+    }
+    handedOverRef.current = earlyInput;
+    onEarlyInputAdopted?.();
+    if (earlyInput.edited && extractContent(editor).text !== earlyInput.text) {
+      editor.commands.setContent(plainTextDocument(earlyInput.text), { emitUpdate: true });
     }
     if (!(earlyInput.focused || (enableAutoFocus && !earlyInput.edited && earlyInput.focusUnclaimed))) {
       return;
@@ -543,7 +568,7 @@ export const ChatTextareaDesktop = memo(function ({
     }
     // Tiptap's `focus` command waits a frame; the next key may already be on its way, so focus the view now.
     editor.view.focus();
-  }, [editor, earlyInput, enableAutoFocus]);
+  }, [editor, earlyInput, enableAutoFocus, onEarlyInputAdopted]);
 
   useEffect(() => {
     // With an early input, focus is the native input's to hand over (above), not the mount's.
@@ -606,6 +631,12 @@ export const ChatTextareaDesktop = memo(function ({
         isSubmitDisabled,
         isEmpty: !dictationActive && !canResume && inputText.trim().length === 0 && attachments.length === 0,
       });
+  const queuedSend = useQueuedSend({
+    earlyInput,
+    isEditorReady: editor !== null,
+    sendRefusal,
+    submit: submitWithDictation,
+  });
   const dictationControl = useMemo(
     () =>
       dictation.available === true ? (
@@ -653,6 +684,10 @@ export const ChatTextareaDesktop = memo(function ({
           className,
         )}
         data-collapsed={isCollapsed ? '' : undefined}
+        data-queued-send={queuedSend.isQueued ? '' : undefined}
+        onKeyDownCapture={queuedSend.cancelOnKey}
+        onPasteCapture={queuedSend.cancel}
+        onDropCapture={queuedSend.cancel}
         onFocus={handleTextareaFocus}
         onBlur={handleTextareaBlur}
         onDragOver={handleDragOver}
@@ -734,6 +769,69 @@ export const ChatTextareaDesktop = memo(function ({
 });
 
 ChatTextareaDesktop.displayName = 'ChatTextareaDesktop';
+
+/**
+ * A queued send is the person's Enter, pressed before this composer was here (C10, H-f, F7): it is replayed once,
+ * through the submit that Enter would have called, after the adopted text is in the draft and once nothing refuses a
+ * send (Home's creation location can still be loading). Until then Send shows it as queued; a key that edits the text,
+ * a paste, a drop or Escape cancels it, as they do before hydration.
+ */
+const useQueuedSend = ({
+  earlyInput,
+  isEditorReady,
+  sendRefusal,
+  submit,
+}: {
+  readonly earlyInput: EarlyChatInput | undefined;
+  readonly isEditorReady: boolean;
+  readonly sendRefusal: string | undefined;
+  readonly submit: () => Promise<void>;
+}): {
+  readonly isQueued: boolean;
+  readonly cancel: () => void;
+  readonly cancelOnKey: (event: React.KeyboardEvent) => void;
+} => {
+  /* The early input whose queued send was sent or cancelled. */
+  const [settled, setSettled] = useState<EarlyChatInput>();
+  const sentRef = useRef<EarlyChatInput | undefined>(undefined);
+  const submitRef = useRef(submit);
+  useLayoutEffect(() => {
+    submitRef.current = submit;
+  }, [submit]);
+  const isQueued = earlyInput?.queuedSend === true && isEditorReady && settled !== earlyInput;
+  useEffect(() => {
+    if (!isQueued || sendRefusal !== undefined || sentRef.current === earlyInput) {
+      return;
+    }
+    sentRef.current = earlyInput;
+    const replayEnter = async (): Promise<void> => {
+      try {
+        await submitRef.current();
+      } finally {
+        setSettled(earlyInput);
+      }
+    };
+    void replayEnter();
+  }, [earlyInput, isQueued, sendRefusal]);
+  const cancel = useCallback((): void => {
+    setSettled(earlyInput);
+  }, [earlyInput]);
+  const cancelOnKey = useCallback(
+    (event: React.KeyboardEvent): void => {
+      const edits =
+        event.key === 'Escape' ||
+        event.key === 'Backspace' ||
+        event.key === 'Delete' ||
+        (event.key === 'Enter' && event.shiftKey) ||
+        (event.key.length === 1 && !event.ctrlKey && !event.metaKey);
+      if (isQueued && edits) {
+        setSettled(earlyInput);
+      }
+    },
+    [earlyInput, isQueued],
+  );
+  return { isQueued, cancel, cancelOnKey };
+};
 
 /**
  * A collapsible composer's own classes: the box's corners, and the editor's

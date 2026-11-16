@@ -1,0 +1,169 @@
+import { createContext } from 'react';
+import { cn } from '@taucad/ui/utils/cn';
+import { draftHintReaderSource } from '#lib/frame-hint-draft.js';
+import {
+  chatComposerEditorAreaClassName,
+  chatComposerEditorTextClassName,
+  chatComposerFrameClassName,
+  chatComposerMainEditorAreaClassName,
+  chatComposerPlaceholder,
+  chatComposerShellClassName,
+} from '@taucad/chat-ui/components/chat-input-styles';
+
+/*
+ * The served composer: the native input that accepts text from first paint, its inline script and the snapshot a rich
+ * composer adopts. Kept apart from `ChatEarlyInput` (Home's adoption, which needs the draft owner) so the project
+ * route's workspace frame can serve it without the composer providers in its bundle.
+ */
+
+export type EarlyChatInput = {
+  readonly text: string;
+  readonly edited: boolean;
+  readonly focused: boolean;
+  readonly focusUnclaimed: boolean;
+  readonly start: number;
+  readonly end: number;
+  readonly direction: 'forward' | 'backward' | 'none';
+  /**
+   * Enter was pressed before the rich composer was here, and no edit or Escape has cancelled it since: the send it
+   * asked for is owed, and goes through the composer's own path (and its guards) once the composer has the text.
+   */
+  readonly queuedSend: boolean;
+  /** The text is the stored draft the served page painted (the draft hint), not an edit. */
+  readonly prefilled: boolean;
+};
+
+/** What the served input's inline script records on the element, before any bundle runs. */
+export type EarlyInputState = {
+  edited: boolean;
+  composing: boolean;
+  /** A queued send (Enter before adoption). */
+  queued: boolean;
+  /** The stored draft the script painted into the input, or `''`. */
+  prefill: string;
+};
+
+export type EarlyTextarea = HTMLTextAreaElement & { tauEarlyDraft?: EarlyInputState };
+
+/** The attribute the served composer carries while a send is queued; the send button shows its pending state. */
+export const queuedSendAttribute = 'data-queued-send';
+
+// This fixed script runs right after the server-rendered composer, before the application bundle. DOM-local state
+// records type-then-delete, an IME still in progress and a queued send. It also paints the stored draft (the draft
+// hint) into an input nothing has been typed into, so the first painted frame holds it. It sits after the whole box
+// rather than beside the input because a browser may paint the half-parsed document when the parser reaches a script:
+// here that cut can only fall after the box and its bar, never between them.
+//
+// Enter (no modifier, no composition) queues a send instead of breaking the line, and marks the box so the send
+// button shows its pending state at once; any edit or Escape cancels it. Shift+Enter still breaks the line.
+export const earlyInputScript =
+  `(()=>{const box=document.currentScript.previousElementSibling;const input=box.querySelector('textarea');` +
+  `const state=input.tauEarlyDraft={edited:false,composing:false,queued:false,prefill:''};` +
+  `if(input.value===''){const t=(${draftHintReaderSource})(location);if(t!==''){input.value=t;state.prefill=t}}` +
+  `const q=(v)=>{state.queued=v;if(v){box.setAttribute(${JSON.stringify(queuedSendAttribute)},'')}else{box.removeAttribute(${JSON.stringify(queuedSendAttribute)})}};` +
+  `input.addEventListener('input',()=>{state.edited=true;if(state.queued)q(false)});` +
+  `input.addEventListener('keydown',(e)=>{if(e.key==='Escape'){if(state.queued)q(false);return}` +
+  `if(e.key!=='Enter'||e.shiftKey||e.altKey||e.ctrlKey||e.metaKey||e.isComposing||state.composing)return;` +
+  `e.preventDefault();if(input.value.trim()!=='')q(true)});` +
+  `input.addEventListener('compositionstart',()=>{state.composing=true});` +
+  `input.addEventListener('compositionend',()=>{state.composing=false})})()`;
+
+/**
+ * What the served input holds now, as the rich composer takes it over.
+ *
+ * @param input - The served native input.
+ * @returns Its text, caret, focus and the script's records.
+ */
+export const readEarlyInput = (input: EarlyTextarea): EarlyChatInput => {
+  const state = input.tauEarlyDraft;
+  const prefill = state?.prefill ?? '';
+  const isPrefilled = prefill !== '' && input.value === prefill && state?.edited !== true;
+  return {
+    text: input.value,
+    edited: state?.edited === true || (input.value !== input.defaultValue && !isPrefilled),
+    focused: document.activeElement === input,
+    focusUnclaimed: document.activeElement === document.body,
+    start: input.selectionStart,
+    end: input.selectionEnd,
+    direction: input.selectionDirection,
+    queuedSend: state?.queued === true && input.value.trim() !== '',
+    prefilled: isPrefilled,
+  };
+};
+
+/** What the bar under the native input is drawn from. */
+export type EarlyChatInputBarState = {
+  /** Whether the input holds nothing to send, as the rich composer's Send reads it. */
+  readonly isEmpty: boolean;
+};
+
+/**
+ * The served native input in the rich composer's own box — the same frame, editor inset, text metrics and focus
+ * outline — over `bar`, with the inline script after it. Without a `bar` the bar's height is reserved instead. It holds
+ * no state of its own: a host adopts it (`readEarlyInput`) and replaces it.
+ *
+ * @param props - The input's ref, the bar, the box's classes, focus at first paint and the input's change handler.
+ * @returns The served composer.
+ */
+export function EarlyComposerField({
+  inputRef,
+  className,
+  enableAutoFocus = false,
+  bar,
+  onChange,
+}: {
+  readonly inputRef: React.Ref<EarlyTextarea>;
+  readonly className?: string;
+  readonly enableAutoFocus?: boolean;
+  readonly bar?: React.ReactNode;
+  readonly onChange?: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
+}): React.JSX.Element {
+  return (
+    <div className={chatComposerShellClassName} data-chat-composer='main'>
+      <div
+        className={cn(chatComposerFrameClassName, 'rounded-2xl has-[textarea:focus-visible]:focus-outline', className)}
+      >
+        <div className={cn(chatComposerEditorAreaClassName, chatComposerMainEditorAreaClassName)}>
+          <textarea
+            ref={inputRef}
+            aria-label='Chat message'
+            placeholder={chatComposerPlaceholder}
+            rows={1}
+            /* Served as `autofocus`: the browser focuses it at its first rendering update, so the first
+             * paint already shows focus and the first keystroke lands without any bundle (R11). It does
+             * not move focus that is already elsewhere, and hydration does not move it either. */
+            autoFocus={enableAutoFocus}
+            className={cn(
+              chatComposerEditorTextClassName,
+              'block resize-none bg-transparent outline-none field-sizing-content placeholder:text-muted-foreground',
+            )}
+            onChange={onChange}
+          />
+        </div>
+        {bar ?? <div aria-hidden='true' className='h-7' />}
+      </div>
+      <script
+        // oxlint-disable-next-line react/no-danger -- Fixed source with no interpolated input; records native edits before hydration.
+        dangerouslySetInnerHTML={{ __html: earlyInputScript }}
+      />
+    </div>
+  );
+}
+
+/**
+ * The project route's handover: the workspace frame serves the native input in the chat lane, and the rich composer
+ * takes it over once the lane is revealed (the rich editor cannot take focus before).
+ *
+ * @public
+ */
+export type EarlyInputHandover = Readonly<{
+  /** What the served input held when it was handed over, until a composer has taken it; `undefined` otherwise. */
+  pending: EarlyChatInput | undefined;
+  /** Hand the served input over now. Called in the commit that reveals the lane; later calls do nothing. */
+  release: () => void;
+  /** The composer has taken `pending`: it is not applied again, by this composer or a later one. */
+  taken: () => void;
+}>;
+
+/** The frame's handover, for the composer below it; absent off the project route. */
+export const EarlyInputHandoverContext = createContext<EarlyInputHandover | undefined>(undefined);

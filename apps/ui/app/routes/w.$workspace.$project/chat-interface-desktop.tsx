@@ -1,4 +1,5 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
 import { flushSync } from 'react-dom';
 import type { DockviewApi } from 'dockview-react';
 import { LayoutPriority } from 'allotment';
@@ -123,9 +124,16 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   useLayoutEffect(() => {
     focusAtMountRef.current = document.activeElement ?? undefined;
   }, []);
+  const earlyInputHandover = useContext(EarlyInputHandoverContext);
   useLayoutEffect(() => {
+    if (!areLanesLaidOut) {
+      return;
+    }
+    /* The served composer's text, caret, focus and queued send go to the rich composer in this commit, the first in
+     * which its editor can take focus (A15d, F7). */
+    earlyInputHandover?.release();
     const state = globalThis.history.state as { usr?: { focusChatComposer?: unknown } } | undefined;
-    if (!areLanesLaidOut || state?.usr?.focusChatComposer !== true) {
+    if (state?.usr?.focusChatComposer !== true) {
       return;
     }
     /* Only if nothing has taken focus since the workspace mounted (the control that navigated may still hold it). */
@@ -138,6 +146,8 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
         '[aria-label="Ask Tau to build anything..."][contenteditable="true"], textarea[aria-label="Chat message"]',
       )
       ?.focus();
+    // Only at the reveal: the handover's identity changes as it is used.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- runs when the lanes are first laid out
   }, [areLanesLaidOut]);
 
   /* Allotment sizes the panes it adds at their preferred widths before it applies `visible`, so a

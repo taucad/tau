@@ -1,5 +1,5 @@
 import type { CadReference } from '@taucad/chat/references';
-import { useState, useRef, useEffect, useCallback, useImperativeHandle, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useImperativeHandle, useLayoutEffect, useMemo } from 'react';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
@@ -17,7 +17,7 @@ import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { toast } from '@taucad/ui/components/sonner';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useComposerExit } from '@taucad/chat-ui/components/use-composer-exit';
-import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
 import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
@@ -441,7 +441,9 @@ export function useChatTextareaLogic({
   const isSubmitDisabledRef = useRef(isSubmitDisabled);
   const onSubmitRef = useRef(onSubmit);
   const resumeRef = useRef(canResume ? resume : undefined);
-  useEffect(() => {
+  /* A layout effect, so a child's effect in the same commit (the composer's queued send, C10) submits with this
+   * render's values rather than the last commit's. */
+  useLayoutEffect(() => {
     inputTextRef.current = inputText;
     attachmentsRef.current = attachments;
     sendBlockReasonRef.current = sendBlockReason;

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { Profiler, useImperativeHandle, useSyncExternalStore } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import type { MyUIMessage } from '@taucad/chat';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
@@ -762,5 +762,72 @@ describe('ChatHistory — transcript load (I21)', () => {
     expect(load.commits.filter((frame) => !frame.loading && frame.turns === 0)).toEqual([]);
     // The list leaves `loading` once the load settles, so the filter above holds that commit to its turns.
     expect(load.commits.at(-1)).toMatchObject({ loading: false, loaded: true, turns: 2 });
+  });
+});
+
+/*
+ * A15d, C9's new rows (loading states UX blueprint, § Chat lane; U7): while the transcript loads, the chat header's
+ * trailing slot holds the wait indicator, which reveals 1,000 ms into the wait; a lane mounted during the document's own
+ * open counts from navigation start, a later wait from its own start. jsdom runs no CSS, so the rows read the reveal
+ * delay the indicator hands its animation.
+ */
+describe('ChatHistory — transcript wait indicator (A15d)', () => {
+  const history = [message('u1', 'user'), message('a1', 'assistant')];
+  const headerIndicator = (): HTMLElement | undefined =>
+    document.querySelector<HTMLElement>('[data-slot="floating-panel-content-header"] [data-slot="wait-indicator"]') ??
+    undefined;
+  const navigationEntry = (name: string): PerformanceEntry => ({
+    name,
+    entryType: 'navigation',
+    startTime: 0,
+    duration: 0,
+    toJSON: () => ({ name }),
+  });
+  const revealDelay = (): number => {
+    const body = headerIndicator()?.querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
+    const revealValue = body?.style.getPropertyValue('--wait-reveal-delay') ?? '';
+    const match = /^calc\((-?[\d.]+)ms \+ var\(--wait-offset, 0ms\)\)$|^(-?[\d.]+)ms$/u.exec(revealValue);
+    return Number(match?.[1] ?? match?.[2] ?? Number.NaN);
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setMockMessages([]);
+    archiveOpen = false;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows 'Loading chat' in the header's trailing slot only from 1,000 ms after navigation for the open's own load", () => {
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry(location.href)]);
+    vi.spyOn(performance, 'now').mockReturnValue(400);
+    renderOverDeferredTranscript(history);
+
+    const indicator = headerIndicator();
+    expect(indicator).toHaveAttribute('data-state', 'waiting');
+    expect(indicator).toHaveTextContent('Loading chat…');
+    /* 600 ms left of the 1,000 ms, counted from navigation start, not from this mount. */
+    expect(revealDelay()).toBe(600);
+    /* A route open is announced once, by the route: the slot is seen, not live. */
+    expect(indicator).not.toHaveAttribute('role', 'status');
+  });
+
+  it('times a load that starts after the open from its own start', () => {
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([navigationEntry('http://localhost/elsewhere')]);
+    vi.spyOn(performance, 'now').mockReturnValue(5000);
+    renderOverDeferredTranscript(history);
+
+    expect(headerIndicator()).toHaveAttribute('data-state', 'waiting');
+    expect(revealDelay()).toBe(1000);
+  });
+
+  it('leaves the slot empty for a chat whose transcript is known', () => {
+    publishChatState({ messages: history, transcript: 'loaded' });
+    render(<ChatHistory />);
+
+    expect(headerIndicator()).toHaveAttribute('data-state', 'idle');
+    expect(headerIndicator()).toBeEmptyDOMElement();
   });
 });

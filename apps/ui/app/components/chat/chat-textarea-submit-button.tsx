@@ -114,6 +114,7 @@ export const ChatTextareaSubmitButton = memo(function ({
           className={cn(
             chatComposerActionButtonClassName,
             'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
+            '[[data-queued-send]_&]:opacity-100',
           )}
           // Only when set: an explicit `undefined` would replace the tooltip's own description.
           {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}
@@ -123,7 +124,16 @@ export const ChatTextareaSubmitButton = memo(function ({
             }
           }}
         >
-          {isSubmitting ? <Loader className='size-4' /> : icon}
+          {isSubmitting ? (
+            <Loader className='size-4' />
+          ) : (
+            /* Before the rich composer is here, an Enter in the served input queues the send and marks the box
+             * (`data-queued-send`, set by the early input's script): the button shows its pending state at once. */
+            <>
+              <span className='contents [[data-queued-send]_&]:hidden'>{icon}</span>
+              <Loader className='hidden size-4 [[data-queued-send]_&]:block' />
+            </>
+          )}
           {canResume ? label : undefined}
         </Button>
       </TooltipTrigger>
@@ -137,3 +147,34 @@ export const ChatTextareaSubmitButton = memo(function ({
     </Tooltip>
   );
 });
+
+/**
+ * Send at rest, as the served composer draws it before the rich composer is here: the same button face as
+ * {@link ChatTextareaSubmitButton}'s Send, with no tooltip (nothing can act on it yet, and the served page has no
+ * tooltip provider). Its pending state shows while an Enter typed into the served input queues the send.
+ *
+ * @param props - Whether the input holds nothing to send.
+ * @returns The button.
+ */
+export function ServedSendButton({ isEmpty }: { readonly isEmpty: boolean }): React.JSX.Element {
+  return (
+    <Button
+      type='button'
+      variant='ghost'
+      size='icon-sm'
+      aria-label='Send'
+      aria-keyshortcuts='Enter'
+      aria-disabled={isEmpty}
+      className={cn(
+        chatComposerActionButtonClassName,
+        'aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-foreground',
+        '[[data-queued-send]_&]:opacity-100',
+      )}
+    >
+      <span className='contents [[data-queued-send]_&]:hidden'>
+        <ArrowUp aria-hidden='true' className='size-5' />
+      </span>
+      <Loader className='hidden size-4 [[data-queued-send]_&]:block' />
+    </Button>
+  );
+}

@@ -1,49 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { cn } from '@taucad/ui/utils/cn';
+import { useSelector } from '@xstate/react';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
+import { buildDraftMessage } from '#hooks/draft.machine.js';
 import { markPageUsed } from '#components/onboarding/home-interaction.js';
-import {
-  chatComposerEditorAreaClassName,
-  chatComposerEditorTextClassName,
-  chatComposerFrameClassName,
-  chatComposerMainEditorAreaClassName,
-  chatComposerPlaceholder,
-  chatComposerShellClassName,
-} from '@taucad/chat-ui/components/chat-input-styles';
-
-export type EarlyChatInput = {
-  readonly text: string;
-  readonly edited: boolean;
-  readonly focused: boolean;
-  readonly focusUnclaimed: boolean;
-  readonly start: number;
-  readonly end: number;
-  readonly direction: 'forward' | 'backward' | 'none';
-};
-
-type EarlyTextarea = HTMLTextAreaElement & {
-  tauEarlyDraft?: { edited: boolean; composing: boolean };
-};
-
-// This fixed script runs right after the server-rendered composer, before the application
-// bundle. DOM-local state records type-then-delete and an IME still in progress. It sits
-// after the whole box rather than beside the input because a browser may paint the
-// half-parsed document when the parser reaches a script: here that cut can only fall
-// after the box and its bar, never between them.
-const earlyInputScript = `(()=>{const input=document.currentScript.previousElementSibling.querySelector('textarea');const state=input.tauEarlyDraft={edited:false,composing:false};input.addEventListener('input',()=>{state.edited=true});input.addEventListener('compositionstart',()=>{state.composing=true});input.addEventListener('compositionend',()=>{state.composing=false})})()`;
-
-/** What the bar under the native input is drawn from. */
-export type EarlyChatInputBarState = {
-  /** Whether the input holds nothing to send, as the rich composer's Send reads it. */
-  readonly isEmpty: boolean;
-};
+import { EarlyComposerField, readEarlyInput } from '#components/chat/chat-early-input-field.js';
+import type { EarlyChatInput, EarlyChatInputBarState, EarlyTextarea } from '#components/chat/chat-early-input-field.js';
 
 /**
  * Keep Home's native input alive until its edit can enter the existing draft owner.
  *
- * The input sits in the rich composer's own box — the same frame, editor inset, text metrics and
- * focus outline — over `bar`, so that when adoption swaps in the rich composer nothing on screen
- * moves (R2, R11). Without a `bar` the bar's height is reserved instead.
+ * The input sits in the rich composer's own box — the same frame, editor inset, text metrics and focus outline — over
+ * `bar`, so that when adoption swaps in the rich composer nothing on screen moves (R2, R11). Without a `bar` the bar's
+ * height is reserved instead.
+ *
+ * An edit is handed to the draft owner as an adopted edit. A stored draft the served page painted (and nothing typed)
+ * hydrates the draft only while the draft is still empty, as the record's own load does, so the record still wins
+ * where the two differ and a draft the record already loaded is kept.
  *
  * `isHostReady` is for a host that loads the rich composer on demand: adoption hands the edit over and
  * replaces this input with `children`, so a host whose children are not loaded yet passes `false`
@@ -69,6 +41,16 @@ export function ChatEarlyInput({
   const [adopted, setAdopted] = useState<EarlyChatInput>();
   const [isEmpty, setIsEmpty] = useState(true);
   const { draftActorRef } = useChatComposer();
+  /* Read in render: a stored draft hydrates only a draft that is still empty (adoption runs in an effect below). */
+  const isDraftEmpty = useSelector(
+    draftActorRef,
+    (state) => state.context.draftText === '' && state.context.draftAttachments.length === 0,
+  );
+  const isDraftEmptyRef = useRef(isDraftEmpty);
+  /* Declared before adoption's effect, so adoption reads this commit's value. */
+  useEffect(() => {
+    isDraftEmptyRef.current = isDraftEmpty;
+  }, [isDraftEmpty]);
 
   /* Text typed before hydration is already in the input; the bar reads it once React is here. */
   useEffect(() => {
@@ -85,19 +67,13 @@ export function ChatEarlyInput({
       if (!active || input.tauEarlyDraft?.composing) {
         return;
       }
-      const snapshot: EarlyChatInput = {
-        text: input.value,
-        edited: input.tauEarlyDraft?.edited === true || input.value !== input.defaultValue,
-        focused: document.activeElement === input,
-        focusUnclaimed: document.activeElement === document.body,
-        start: input.selectionStart,
-        end: input.selectionEnd,
-        direction: input.selectionDirection,
-      };
+      const snapshot = readEarlyInput(input);
       if (snapshot.edited) {
         /* Keys typed before the bundle ran reached no listener: the edit is the only record that home was used. */
         markPageUsed();
         draftActorRef.send({ type: 'setDraftText', text: snapshot.text, adoptedEdit: true });
+      } else if (snapshot.prefilled && isDraftEmptyRef.current) {
+        draftActorRef.send({ type: 'hydrateDraft', draft: buildDraftMessage(snapshot.text, []) });
       }
       setAdopted(snapshot);
     };
@@ -117,35 +93,14 @@ export function ChatEarlyInput({
     return <>{children(adopted)}</>;
   }
   return (
-    <div className={chatComposerShellClassName} data-chat-composer='main'>
-      <div
-        className={cn(chatComposerFrameClassName, 'rounded-2xl has-[textarea:focus-visible]:focus-outline', className)}
-      >
-        <div className={cn(chatComposerEditorAreaClassName, chatComposerMainEditorAreaClassName)}>
-          <textarea
-            ref={inputRef}
-            aria-label='Chat message'
-            placeholder={chatComposerPlaceholder}
-            rows={1}
-            /* Served as `autofocus`: the browser focuses it at its first rendering update, so the first
-             * paint already shows focus and the first keystroke lands without any bundle (R11). It does
-             * not move focus that is already elsewhere, and hydration does not move it either. */
-            autoFocus={enableAutoFocus}
-            className={cn(
-              chatComposerEditorTextClassName,
-              'block resize-none bg-transparent outline-none field-sizing-content placeholder:text-muted-foreground',
-            )}
-            onChange={(event) => {
-              setIsEmpty(event.currentTarget.value.trim() === '');
-            }}
-          />
-        </div>
-        {bar ? bar({ isEmpty }) : <div aria-hidden='true' className='h-7' />}
-      </div>
-      <script
-        // oxlint-disable-next-line react/no-danger -- Fixed source with no interpolated input; records native edits before hydration.
-        dangerouslySetInnerHTML={{ __html: earlyInputScript }}
-      />
-    </div>
+    <EarlyComposerField
+      inputRef={inputRef}
+      className={className}
+      enableAutoFocus={enableAutoFocus}
+      bar={bar?.({ isEmpty })}
+      onChange={(event) => {
+        setIsEmpty(event.currentTarget.value.trim() === '');
+      }}
+    />
   );
 }

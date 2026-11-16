@@ -3,8 +3,9 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
-import type { EarlyChatInput, EarlyChatInputBarState } from '#components/chat/chat-early-input.js';
+import type { EarlyChatInput, EarlyChatInputBarState } from '#components/chat/chat-early-input-field.js';
 import { hasUsedPageSince } from '#components/onboarding/home-interaction.js';
+import { draftHintStorageKey, writeDraftHint } from '#lib/frame-hint-draft.js';
 import {
   chatComposerEditorTextClassName,
   chatComposerFrameClassName,
@@ -20,7 +21,12 @@ const runEarlyScript = (container: HTMLElement): void => {
 };
 
 const send = vi.hoisted(() => vi.fn());
-const draftActorRef = { send };
+/* The draft owner's surface the early input reads: its sends, and an empty draft to select from. */
+const draftActorRef = {
+  send,
+  getSnapshot: () => ({ context: { draftText: '', draftAttachments: [] } }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
 vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => ({ draftActorRef }) }));
 
 describe('Home early input', () => {
@@ -68,6 +74,8 @@ describe('Home early input', () => {
         start: Math.min(1, text.length),
         end: text.length,
         direction: 'backward',
+        queuedSend: false,
+        prefilled: false,
       });
       expect(send.mock.calls).toEqual(edited ? [[{ type: 'setDraftText', text, adoptedEdit: true }]] : []);
       expect(onRecoverableError).not.toHaveBeenCalled();
@@ -252,7 +260,7 @@ describe('Home early input', () => {
       const input = within(container).getByRole<HTMLTextAreaElement & { tauEarlyDraft?: { edited: boolean } }>(
         'textbox',
       );
-      expect(input.tauEarlyDraft).toEqual({ edited: false, composing: false });
+      expect(input.tauEarlyDraft).toEqual({ edited: false, composing: false, queued: false, prefill: '' });
       input.dispatchEvent(new InputEvent('input', { bubbles: true }));
       expect(input.tauEarlyDraft?.edited).toBe(true);
     } finally {
@@ -288,6 +296,191 @@ describe('Home early input', () => {
       await act(async () => {
         root.unmount();
       });
+      container.remove();
+    }
+  });
+});
+
+/* A15d, C10 (loading states UX blueprint, § Input during loading): Enter before adoption queues one send, which an edit
+ * or Escape cancels, and a stored draft is the served input's value from its first frame. */
+describe('Home early input: queued send and stored draft (C10)', () => {
+  beforeEach(() => {
+    send.mockClear();
+    localStorage.clear();
+  });
+
+  /** Serve the composer, run its script where it was served, and return the input and its box. */
+  const serve = (
+    content: React.JSX.Element,
+  ): { container: HTMLElement; input: HTMLTextAreaElement & { tauEarlyDraft?: Record<string, unknown> } } => {
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(content);
+    document.body.append(container);
+    runEarlyScript(container);
+    return { container, input: within(container).getByRole('textbox') };
+  };
+
+  const press = (input: HTMLElement, init: KeyboardEventInit): KeyboardEvent => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    input.dispatchEvent(event);
+    return event;
+  };
+
+  const type = (input: HTMLTextAreaElement, value: string): void => {
+    input.value = value;
+    input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+  };
+
+  const adopting = (): { content: React.JSX.Element; adopted: () => EarlyChatInput | undefined } => {
+    let snapshot: EarlyChatInput | undefined;
+    return {
+      content: (
+        <ChatEarlyInput>
+          {(input) => {
+            snapshot = input;
+            return <div>Rich editor</div>;
+          }}
+        </ChatEarlyInput>
+      ),
+      adopted: () => snapshot,
+    };
+  };
+
+  const hydrateAndAdopt = async (container: HTMLElement, content: React.JSX.Element): Promise<() => Promise<void>> => {
+    const root = hydrateRoot(container, content);
+    await within(container).findByText('Rich editor');
+    return async () => {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    };
+  };
+
+  it('should queue one send on Enter before adoption, without breaking the line, and hand it over', async () => {
+    const { content, adopted } = adopting();
+    const { container, input } = serve(content);
+    type(input, 'Make a bracket.');
+    const enter = press(input, { key: 'Enter' });
+    expect(enter.defaultPrevented).toBe(true);
+    expect(input.value).toBe('Make a bracket.');
+    /* The box is marked at once, so the send button shows its pending state before any bundle runs. */
+    expect(container.querySelector('[data-queued-send]')).not.toBeNull();
+    const done = await hydrateAndAdopt(container, content);
+    try {
+      expect(adopted()).toMatchObject({ text: 'Make a bracket.', edited: true, queuedSend: true });
+      expect(send.mock.calls).toEqual([[{ type: 'setDraftText', text: 'Make a bracket.', adoptedEdit: true }]]);
+    } finally {
+      await done();
+    }
+  });
+
+  it.each([
+    {
+      cancel: 'an edit',
+      act: (input: HTMLTextAreaElement): void => {
+        type(input, 'Make a bracket. Twice');
+      },
+    },
+    {
+      cancel: 'Escape',
+      act: (input: HTMLTextAreaElement): void => {
+        press(input, { key: 'Escape' });
+      },
+    },
+  ])('should cancel a queued send on $cancel and keep the text', async ({ act: cancel }) => {
+    const { content, adopted } = adopting();
+    const { container, input } = serve(content);
+    type(input, 'Make a bracket.');
+    press(input, { key: 'Enter' });
+    cancel(input);
+    expect(container.querySelector('[data-queued-send]')).toBeNull();
+    const done = await hydrateAndAdopt(container, content);
+    try {
+      expect(adopted()?.queuedSend).toBe(false);
+      expect(adopted()?.text.startsWith('Make a bracket.')).toBe(true);
+    } finally {
+      await done();
+    }
+  });
+
+  it.each([
+    { name: 'Shift+Enter', init: { key: 'Enter', shiftKey: true }, value: 'A line' },
+    { name: 'Enter in an empty input', init: { key: 'Enter' }, value: '' },
+    { name: 'Enter that ends a composition', init: { key: 'Enter', isComposing: true }, value: 'に' },
+  ])('should queue no send for $name', ({ init, value }) => {
+    const { content } = adopting();
+    const { container, input } = serve(content);
+    try {
+      type(input, value);
+      const event = press(input, init);
+      expect(container.querySelector('[data-queued-send]')).toBeNull();
+      expect(input.tauEarlyDraft?.['queued']).toBe(false);
+      /* Shift+Enter and a composition's Enter are the input's own; only an empty input's plain Enter is swallowed. */
+      expect(event.defaultPrevented).toBe(value === '');
+    } finally {
+      container.remove();
+    }
+  });
+
+  it("should paint Home's stored draft as the input's first value and hydrate the draft with it", async () => {
+    writeDraftHint({ kind: 'home' }, { text: 'A bracket for the shelf' });
+    const { content, adopted } = adopting();
+    const { container, input } = serve(content);
+    expect(input.value).toBe('A bracket for the shelf');
+    const done = await hydrateAndAdopt(container, content);
+    try {
+      expect(adopted()).toMatchObject({ text: 'A bracket for the shelf', edited: false, prefilled: true });
+      expect(send.mock.calls).toHaveLength(1);
+      expect(send.mock.calls[0]?.[0]).toMatchObject({
+        type: 'hydrateDraft',
+        draft: { parts: [{ type: 'text', text: 'A bracket for the shelf' }] },
+      });
+    } finally {
+      await done();
+    }
+  });
+
+  it('should keep an early edit over the stored draft', async () => {
+    writeDraftHint({ kind: 'home' }, { text: 'A bracket for the shelf' });
+    const { content, adopted } = adopting();
+    const { container, input } = serve(content);
+    type(input, 'A hinge');
+    const done = await hydrateAndAdopt(container, content);
+    try {
+      expect(adopted()).toMatchObject({ text: 'A hinge', edited: true, prefilled: false });
+      expect(send.mock.calls).toEqual([[{ type: 'setDraftText', text: 'A hinge', adoptedEdit: true }]]);
+    } finally {
+      await done();
+    }
+  });
+
+  it.each([
+    { url: '/w/acme/bracket', painted: 'Fillet the edges' },
+    { url: '/w/acme/bracket?chat=chat-1', painted: 'Fillet the edges' },
+    { url: '/w/acme/bracket?chat=chat-2', painted: '' },
+    { url: '/w/acme/hinge', painted: '' },
+  ])("should paint a project's stored draft on $url only for its own chat", ({ url, painted }) => {
+    writeDraftHint({ kind: 'project', key: 'acme/bracket' }, { text: 'Fillet the edges', chatId: 'chat-1' });
+    const previous = `${location.pathname}${location.search}`;
+    history.replaceState(null, '', url);
+    const { content } = adopting();
+    const { container, input } = serve(content);
+    try {
+      expect(input.value).toBe(painted);
+    } finally {
+      container.remove();
+      history.replaceState(null, '', previous);
+    }
+  });
+
+  it('should paint no draft from a malformed or unreadable record', () => {
+    localStorage.setItem(draftHintStorageKey, '{"v":1,"home":{"text":7}}');
+    const { content } = adopting();
+    const { container, input } = serve(content);
+    try {
+      expect(input.value).toBe('');
+    } finally {
       container.remove();
     }
   });

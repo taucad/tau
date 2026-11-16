@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { captureDictation } from '#components/dictation/dictation-capture.js';
 import type { transcribeDictation } from '#components/dictation/dictation-client.js';
 import type { AcpSessionData } from '@taucad/chat';
-import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
@@ -385,13 +385,19 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       isFocused?: boolean;
       earlyInput?: EarlyChatInput;
       setDraftText?: (text: string) => void;
+      isSubmitDisabled?: boolean;
     } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
-    const element = (session: AcpSessionData, text = inputText): React.JSX.Element => (
+    const element = (
+      session: AcpSessionData,
+      text = inputText,
+      isSubmitDisabled = options.isSubmitDisabled ?? false,
+    ): React.JSX.Element => (
       <TooltipProvider>
         <ChatTextareaDesktop
           earlyInput={options.earlyInput}
+          isSubmitDisabled={isSubmitDisabled}
           enableAutoFocus={options.enableAutoFocus ?? false}
           mode={options.mode}
           enableMobileCollapse={options.enableMobileCollapse}
@@ -436,8 +442,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     const view = render(element(acpSessionData));
     return {
       ...view,
-      rerenderWith: (session: AcpSessionData, text?: string): void => {
-        view.rerender(element(session, text));
+      rerenderWith: (session: AcpSessionData, text?: string, isSubmitDisabled?: boolean): void => {
+        view.rerender(element(session, text, isSubmitDisabled));
       },
     };
   };
@@ -486,6 +492,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         start: 0,
         end: 0,
         direction: 'none',
+        queuedSend: false,
+        prefilled: false,
       },
     });
     // No waiting: a frame's delay is where typed keys were lost.
@@ -510,6 +518,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           start: 0,
           end: 0,
           direction: 'none',
+          queuedSend: false,
+          prefilled: false,
         },
       });
       const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
@@ -530,10 +540,196 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         start: 0,
         end: 0,
         direction: 'none',
+        queuedSend: false,
+        prefilled: false,
       },
     });
     const box = screen.getByRole('textbox').closest<HTMLElement>(String.raw`.group\/chat-textarea`)!;
     expect(box).not.toHaveClass('focus-outline');
+  });
+
+  /* A15d (C10, H-f, F7): Enter pressed before this composer was here is replayed once, through the submit Enter calls. */
+  it('should replay a queued send once, through the submit Enter calls', async () => {
+    const handleSubmit = vi.fn(asyncNoop);
+    const earlyInput: EarlyChatInput = {
+      text: 'Make a bracket.',
+      edited: true,
+      focused: true,
+      focusUnclaimed: false,
+      start: 15,
+      end: 15,
+      direction: 'none',
+      queuedSend: true,
+      prefilled: false,
+    };
+    const view = renderComposer('Make a bracket.', codexSession, { earlyInput, handleSubmit });
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledOnce();
+    });
+    view.rerenderWith(codexSession);
+    await Promise.resolve();
+    expect(handleSubmit).toHaveBeenCalledOnce();
+  });
+
+  const queuedEarlyInput: EarlyChatInput = {
+    text: 'Make a bracket.',
+    edited: true,
+    focused: true,
+    focusUnclaimed: false,
+    start: 15,
+    end: 15,
+    direction: 'none',
+    queuedSend: true,
+    prefilled: false,
+  };
+
+  /* Home's creation location can still be loading at adoption (H-f): the queued send waits, shown on Send. */
+  it('should hold a queued send, shown as queued, until nothing refuses it', async () => {
+    const handleSubmit = vi.fn(asyncNoop);
+    const view = renderComposer('Make a bracket.', codexSession, {
+      earlyInput: queuedEarlyInput,
+      handleSubmit,
+      isSubmitDisabled: true,
+    });
+    await waitFor(() => {
+      expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+    });
+    expect(handleSubmit).not.toHaveBeenCalled();
+    view.rerenderWith(codexSession, 'Make a bracket.', false);
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledOnce();
+    });
+    expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+  });
+
+  it.each([
+    { name: 'a typed key', init: { key: 'x' } },
+    { name: 'Escape', init: { key: 'Escape' } },
+    { name: 'Backspace', init: { key: 'Backspace' } },
+  ])('should cancel a held queued send on $name', async ({ init }) => {
+    const handleSubmit = vi.fn(asyncNoop);
+    const view = renderComposer('Make a bracket.', codexSession, {
+      earlyInput: queuedEarlyInput,
+      handleSubmit,
+      isSubmitDisabled: true,
+    });
+    const box = await waitFor(() => {
+      const queued = view.container.querySelector('[data-queued-send]');
+      expect(queued).not.toBeNull();
+      return queued!;
+    });
+    fireEvent.keyDown(box, init);
+    expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+    view.rerenderWith(codexSession, 'Make a bracket.', false);
+    await Promise.resolve();
+    expect(handleSubmit).not.toHaveBeenCalled();
+  });
+
+  it('should not send for an early input that queued none', async () => {
+    const handleSubmit = vi.fn(asyncNoop);
+    renderComposer('Make a bracket.', codexSession, {
+      handleSubmit,
+      earlyInput: {
+        text: 'Make a bracket.',
+        edited: true,
+        focused: false,
+        focusUnclaimed: true,
+        start: 0,
+        end: 0,
+        direction: 'none',
+        queuedSend: false,
+        prefilled: false,
+      },
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(handleSubmit).not.toHaveBeenCalled();
+  });
+
+  /* The project route's served input is handed over once its lane is revealed, after this editor exists (F7). */
+  it('should take an edit handed over after the editor exists, as an edit, with its caret and focus', async () => {
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() =>
+      Object.assign(createRange(), {
+        getClientRects: () => [],
+        getBoundingClientRect: () => new DOMRect(),
+      }),
+    );
+    const setDraftText = vi.fn();
+    const adopted = vi.fn();
+    /* Stable across renders, as the route's are: the draft rehydration effect re-runs on a new list. */
+    const chats: never[] = [];
+    const attachments: never[] = [];
+    const props = (earlyInput?: EarlyChatInput): React.ComponentProps<typeof ChatTextareaDesktop> => ({
+      earlyInput,
+      onEarlyInputAdopted: earlyInput === undefined ? undefined : adopted,
+      enableAutoFocus: false,
+      dragKind: undefined,
+      isSubmitting: false,
+      isAttaching: false,
+      canResume: false,
+      inputText: '',
+      attachments,
+      attachmentDirectory: undefined,
+      sendBlockReason: undefined,
+      attachmentAccept: 'image/png',
+      attachmentInputSupported: true,
+      status: 'ready',
+      formattedCancelKeyCombination: '⇧⌘⌫',
+      treeService: undefined,
+      chats,
+      setDraftText,
+      acpAgentId: 'codex',
+      acpSessionData: codexSession,
+      fileInputReference: { current: null },
+      containerReference: { current: null },
+      focusEditorRef: { current: undefined },
+      addContextChipsRef: { current: undefined },
+      addContextReferencesRef: { current: undefined },
+      handleSubmit: asyncNoop,
+      handleCancelClick: noop,
+      handleDragOver: noop,
+      handleDragLeave: noop,
+      handleDrop: asyncNoop,
+      handlePaste: () => false,
+      handleFileSelect: noop,
+      handleFileChange: noop,
+      handleAddImage: noop,
+      onScreenshotAction: noop,
+      handleTextareaBlur: noop,
+      removeAttachment: noop,
+    });
+    const view = render(
+      <TooltipProvider>
+        <ChatTextareaDesktop {...props()} />
+      </TooltipProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toHaveAttribute('contenteditable', 'true');
+    });
+    view.rerender(
+      <TooltipProvider>
+        <ChatTextareaDesktop
+          {...props({
+            text: 'abc',
+            edited: true,
+            focused: true,
+            focusUnclaimed: false,
+            start: 3,
+            end: 3,
+            direction: 'none',
+            queuedSend: false,
+            prefilled: false,
+          })}
+        />
+      </TooltipProvider>,
+    );
+    expect(screen.getByRole('textbox')).toHaveTextContent('abc');
+    expect(screen.getByRole('textbox')).toHaveFocus();
+    expect(globalThis.getSelection()?.anchorOffset).toBe(3);
+    expect(setDraftText).toHaveBeenLastCalledWith('abc');
+    expect(adopted).toHaveBeenCalledOnce();
   });
 
   describe('enableMobileCollapse', () => {

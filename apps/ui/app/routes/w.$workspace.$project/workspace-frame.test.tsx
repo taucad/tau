@@ -1,10 +1,14 @@
-import { render } from '@testing-library/react';
+import { act, render, within } from '@testing-library/react';
+import { useContext } from 'react';
+import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
+import type { EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
 
 /*
  * The persisted `workbenchOpen` lives in the project's own layout record and is read only once the session is live.
@@ -178,5 +182,169 @@ describe('WorkspaceFrame', () => {
     expect(frame.querySelector('[data-slot=workspace-frame-lanes]')).toHaveAttribute('aria-hidden', 'true');
     expect(frame).toHaveTextContent('content');
     expect(frame.querySelectorAll('[data-slot=workspace-lane]')).toHaveLength(3);
+  });
+});
+
+/*
+ * A15d, F7 (loading states UX blueprint, § Editor-route composer): the served document holds a typeable composer in the
+ * chat lane, and the rich composer takes its text, caret, focus and queued send once the lane is revealed.
+ */
+describe('WorkspaceFrame served composer', () => {
+  let handover: EarlyInputHandover | undefined;
+  const Consumer = (): React.JSX.Element => {
+    handover = useContext(EarlyInputHandoverContext);
+    return <p>content</p>;
+  };
+  const served = (url: string): React.JSX.Element => (
+    <MemoryRouter initialEntries={[url]}>
+      <Routes>
+        <Route
+          path='/w/:workspace/:project'
+          element={
+            <WorkspaceFrame>
+              <Consumer />
+            </WorkspaceFrame>
+          }
+        />
+      </Routes>
+    </MemoryRouter>
+  );
+
+  /** Serve the frame, run its inline script where it was served, and hydrate it. */
+  const serveAndHydrate = async (
+    url: string,
+    beforeHydration?: (input: HTMLTextAreaElement, container: HTMLElement) => void,
+  ): Promise<{ container: HTMLElement; done: () => Promise<void> }> => {
+    globalThis.history.replaceState(null, '', url);
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(served(url));
+    document.body.append(container);
+    const script = container.querySelector('[data-slot=workspace-frame-composer] script')!;
+    const running = document.createElement('script');
+    running.textContent = script.textContent;
+    script.replaceWith(running);
+    beforeHydration?.(within(container).getByRole('textbox', { name: 'Chat message' }), container);
+    const onRecoverableError = vi.fn();
+    const root = hydrateRoot(container, served(url), { onRecoverableError });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(onRecoverableError).not.toHaveBeenCalled();
+    return {
+      container,
+      done: async () => {
+        await act(async () => {
+          root.unmount();
+        });
+        container.remove();
+      },
+    };
+  };
+
+  beforeEach(() => {
+    globalThis.localStorage.clear();
+    handover = undefined;
+  });
+
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  it('serves a native input in the chat lane, the only part of the frame exposed before adoption', async () => {
+    const { container, done } = await serveAndHydrate('/w/home/one');
+    try {
+      const frame = container.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
+      const input = within(frame).getByRole('textbox', { name: 'Chat message' });
+      expect(input.closest('[data-slot=workspace-frame-composer]')).not.toBeNull();
+      /* Everything else in the frame is hidden from assistive technology: the lanes layer, and the inert bar. */
+      expect(frame.querySelector('[data-slot=workspace-frame-lanes]')).toHaveAttribute('aria-hidden', 'true');
+      const exposed = [...frame.querySelectorAll<HTMLElement>('button, textarea, input, [role], [tabindex]')].filter(
+        (element) => element.closest('[aria-hidden=true], [inert]') === null && element.textContent !== 'content',
+      );
+      expect(exposed).toEqual([input]);
+      /* The lane's own composer box stays in place under the served one, drawing nothing. */
+      expect(within(frame).getByTestId('chat-lane-frame-composer')).toHaveClass('invisible');
+    } finally {
+      await done();
+    }
+  });
+
+  it('hands over text, caret, focus and a queued send at release, once, and then draws the empty box', async () => {
+    const { container, done } = await serveAndHydrate('/w/home/one', (input) => {
+      input.focus();
+      input.value = 'abc';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    try {
+      expect(handover?.pending).toBeUndefined();
+      act(() => {
+        handover?.release();
+      });
+      expect(handover?.pending).toMatchObject({
+        text: 'abc',
+        edited: true,
+        focused: true,
+        start: 3,
+        end: 3,
+        queuedSend: true,
+      });
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
+      expect(within(container).getByTestId('chat-lane-frame-composer')).not.toHaveClass('invisible');
+      act(() => {
+        handover?.release();
+        handover?.taken();
+      });
+      expect(handover?.pending).toBeUndefined();
+    } finally {
+      await done();
+    }
+  });
+
+  it('hands nothing over when nothing was typed or focused', async () => {
+    const { container, done } = await serveAndHydrate('/w/home/one');
+    try {
+      act(() => {
+        handover?.release();
+      });
+      expect(handover?.pending).toBeUndefined();
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
+    } finally {
+      await done();
+    }
+  });
+
+  it('waits for an open composition to end before handing over', async () => {
+    let state: { composing: boolean } | undefined;
+    let served: HTMLTextAreaElement | undefined;
+    const { done } = await serveAndHydrate('/w/home/one', (input) => {
+      served = input;
+      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      input.value = 'に';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      state = (input as HTMLTextAreaElement & { tauEarlyDraft?: { composing: boolean } }).tauEarlyDraft;
+    });
+    try {
+      expect(state?.composing).toBe(true);
+      act(() => {
+        handover?.release();
+      });
+      expect(handover?.pending).toBeUndefined();
+      await act(async () => {
+        served!.value = '日本';
+        served!.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(handover?.pending).toMatchObject({ text: '日本', edited: true });
+    } finally {
+      await done();
+    }
+  });
+
+  it('serves no composer in a frame first rendered by a client navigation', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    render(served('/w/home/one'));
+    expect(document.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
+    expect(handover?.pending).toBeUndefined();
   });
 });

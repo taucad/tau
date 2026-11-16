@@ -23,18 +23,18 @@
   "sources": {
     "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "a9293c32f2cd43071ad44214c879c3d9d30af67491f1c23730998a18cb62a13f",
     "apps/libs/chat-ui/src/db/chat-message-queue-store.ts": "ab89825172dbc3da1a4acf792f7ef8591e2eefda49a3a89fe26c58a01116f6cb",
-    "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "8f184158d52a06e2ff84eaf2f108565bd67b55aa45c95e3cad8b9f734d9896bd",
-    "apps/ui/app/chat-clients/chat-turn-host.tsx": "27bfdcc7984263686778a13b121f79cd281fa6ab39725a14e1e1ea0450c6b775",
+    "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "45d76eeadc6d75e25ac182410fb15444261937cb06ed97c1ab4071dfc0be3079",
+    "apps/ui/app/chat-clients/chat-turn-host.tsx": "a478fcb3045a194470f71e779e190f1e40616d50368c20febaab68ede296f643",
     "apps/ui/app/chat-clients/use-cad-chat-client.ts": "99d8efe4866b3d8ebc23c988055b8d8ab0a1dc20f0a0bbb0951ab89530c9f9f7",
     "apps/ui/app/components/chat/chat-message-queue.tsx": "f8d1d4376c45e58a148138389b595e7d2f3d53d8d3ada3b108c3b4f11a32bfd0",
-    "apps/ui/app/components/chat/chat-textarea.tsx": "c1ec64d4bbd87b852ebf64a29dffe32cc20853ff8e71e04c901132ae73034c11",
+    "apps/ui/app/components/chat/chat-textarea.tsx": "94e764059ed55e2a431381f3df32c8dcd776bbe032d21da33c80dbc2b8483ae4",
     "apps/ui/app/hooks/use-chat.tsx": "f74277a6da72983da814962450e18d2815e987d3358ab8d67adb7d2e12cf833e",
     "apps/ui/app/machines/chat-message-queue.machine.ts": "ccc4dbfa9faa5903637829610d0c420e3fb3b12d80eb4c376c7b282a4b158f72",
     "apps/ui/app/machines/chat-session.machine.ts": "6591885571ef8134b175eaaa4a5662357276623613b2a3f9d7c18f13f638815c",
     "apps/ui/app/services/chat-session-store.ts": "abe96525506e3cb66781df2a263dc485853a2a023eb732c8cd33d5afc64da335"
   },
   "specs": {
-    "MessageQueue.tla": "b530f5bbaa250435e9926406e36bd2217054f663a15bcd4d3e1562e20673dbf8",
+    "MessageQueue.tla": "f77fc6fe48f229e8e547ac99895f7ff53d464509aef25c61a383993b6b1a369d",
     "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
   },
   "tables": {

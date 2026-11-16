@@ -138,6 +138,11 @@
 \* summary of that directory or any ancestor (the project root included), as the coalescer now delivers scoped
 \* `directoryChanged` resets; a refold only re-reads segments, so admission, delivery, persistence and the queue
 \* barrier are unchanged.
+\* SP2h (chats before the whole download): the chats and the composer open once their records land, before a Tau
+\* Cloud open has written the files. A turn this document hosts waits inside its admission, as it already waits for
+\* the host probe, until the open's intent clears; the wait ends in a placement refusal when the open fails or this
+\* account may not continue it, and with the stop's reason on Stop or the turn host's unmount. The composer disables
+\* send meanwhile. Admission still decides once, so delivery order, persistence and the queue barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

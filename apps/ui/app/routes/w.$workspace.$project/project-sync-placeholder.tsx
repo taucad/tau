@@ -7,8 +7,9 @@ import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { Progress } from '@taucad/ui/components/progress';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
-import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import { useWaitClock, useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
 import { indicatorDelayMilliseconds } from '@taucad/ui/utils/wait-timing';
+import { cn } from '@taucad/ui/utils/cn';
 import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-stage';
 import { useProject } from '#hooks/use-project.js';
 import { useSessions } from '#hooks/use-sessions.js';
@@ -155,14 +156,26 @@ function useModelFilesWaitStart(active: boolean): number {
  * whole life, so a shown pill keeps its minimum after the files arrive. The open's route announcement speaks for it,
  * so it is not live. Mount it once the stage has waited for its files: it reads the project's session.
  *
- * @param props - The wait the stage is in, or `undefined` once the files are here.
+ * The stage's other status (`children`, the build status) shares the pill's cell and stays mounted: it gives way from
+ * the frame the pill reveals in and while the pill holds, on the same CSS delays, so a check too short to show the pill
+ * never hides it. A failed download drops the pill at once: the stage's failure overlay says it.
+ *
+ * @param props - The wait the stage is in, or `undefined` once the files are here, and the status it shares a cell with.
  * @returns The status slot's wait content.
  */
-export function ModelFilesStageStatus({ wait }: { readonly wait: ModelFilesWait | undefined }): React.JSX.Element {
+export function ModelFilesStageStatus({
+  wait,
+  children,
+}: {
+  readonly wait: ModelFilesWait | undefined;
+  readonly children?: React.ReactNode;
+}): React.JSX.Element {
   const isSlow = useFileCheckSlow();
   const facet = useLargeObjects();
   const isActive = wait === 'filesChecking' || wait === 'files';
   const startedAt = useModelFilesWaitStart(isActive);
+  /* The same timing the pill reads: pure, from the wait's start and end, so no clock or timer is added. */
+  const { timing } = useWaitClock({ active: isActive, startedAt });
   /* A shown pill keeps its words while it holds its minimum after the wait. */
   const [heldWait, setHeldWait] = useState(wait);
   if (isActive && wait !== heldWait) {
@@ -180,17 +193,35 @@ export function ModelFilesStageStatus({ wait }: { readonly wait: ModelFilesWait 
     : isSlowCheck
       ? 'Still checking model files'
       : 'Checking model files';
+  const concealStyle: (React.CSSProperties & Record<'--wait-slow-delay', string>) | undefined =
+    timing.state === 'waiting' ? { '--wait-slow-delay': timing.revealDelay } : undefined;
   return (
-    <div data-slot='model-files-status' className='flex items-center justify-center gap-1.5'>
-      <WaitIndicator
-        active={isActive}
-        variant='pill'
-        live={false}
-        startedAt={startedAt}
-        label={label}
-        progress={progress}
-      />
-      {isSlowCheck ? <ModelFilesRetry /> : null}
+    <div className='group/viewer-wait grid justify-items-center *:[grid-area:1/1]'>
+      <div data-slot='model-files-status' className='flex items-center justify-center gap-1.5'>
+        {wait === 'filesFailed' ? null : (
+          <WaitIndicator
+            active={isActive}
+            variant='pill'
+            live={false}
+            startedAt={startedAt}
+            label={label}
+            progress={progress}
+          />
+        )}
+        {isSlowCheck ? <ModelFilesRetry /> : null}
+      </div>
+      {children === undefined ? null : (
+        /* `wait-until-slow` conceals at its delay, set here to the pill's reveal. */
+        <div
+          className={cn(
+            'group-has-[[data-slot=wait-indicator][data-state=holding]]/viewer-wait:invisible',
+            concealStyle === undefined ? undefined : 'wait-until-slow',
+          )}
+          style={concealStyle}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 }

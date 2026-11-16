@@ -591,6 +591,46 @@ describe('viewer adapter (A8d)', () => {
     expect(project.sent).toEqual([]);
   });
 
+  /* D21 round 2, D2: a view with no recorded entry is not bound to main, nor main persisted, while the files are
+     checked: main can still change, and the record is not written in the middle of the tree write. */
+  it('should bind and persist main for a view without an entry only once the files settle, to the main they settle on', async () => {
+    const api = mountDock();
+    const project = mountProject();
+    const setViewEntryPath = vi.fn();
+    const facts = createViewerAdapterFactsPort(baseFacts({ mainEntryPath: 'a.ts', setViewEntryPath }));
+    const { edit } = facts.get().viewCommands;
+    await act(async () => {
+      api.addPanel({
+        id: 'front',
+        component: 'viewer',
+        title: 'front',
+        params: { viewId: 'front', entryPath: undefined },
+      });
+      startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: undefined, facts },
+      });
+    });
+
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsView: true });
+    });
+    await act(async () => {
+      facts.set({ ...facts.get(), mainEntryPath: 'b.ts' });
+    });
+    expect(edit).not.toHaveBeenCalled();
+    expect((api.getPanel('front')!.params as { entryPath?: string }).entryPath).toBeUndefined();
+    expect(setViewEntryPath).toHaveBeenLastCalledWith('front', 'b.ts');
+
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsGeometry: true });
+    });
+    expect((api.getPanel('front')!.params as { entryPath?: string }).entryPath).toBe('b.ts');
+    expect(edit).toHaveBeenCalledTimes(1);
+    const units = project.sent.filter((event) => event.type === 'createGeometryUnit').map((event) => event.entryPath);
+    expect(units).toEqual(['b.ts']);
+  });
+
   it('should delete the record of a view an apply removes once, not again as a person removal', async () => {
     const harness = mountLayout('desktop');
     const api = mountDock();

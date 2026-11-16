@@ -161,6 +161,29 @@ export function bindViewerPanelEntry(
   return mainEntryPath;
 }
 
+/**
+ * The entry of a panel that has none in its params. Once the model's files have settled, or from the view's own record,
+ * it is bound as {@link bindViewerPanelEntry} binds it. While the files are checked a view with no recorded entry
+ * follows main without being bound to it: main can still change, and the record is not written in the middle of the
+ * tree write (A15e).
+ *
+ * @param panel - The panel.
+ * @param facts - What the adapter reads: whether geometry is admitted, the view records and main.
+ * @param options - Writes main into the view's record when it binds.
+ * @returns The entry the view shows, if any.
+ */
+function resolveViewerPanelEntry(
+  panel: DockviewApi['panels'][number],
+  facts: Pick<ViewerAdapterFacts, 'admitsGeometry' | 'viewRecords' | 'mainEntryPath'>,
+  { persistMainEntry }: Readonly<{ persistMainEntry: ((entryPath: string) => void) | undefined }>,
+): string | undefined {
+  const record = facts.viewRecords.get(panel.id);
+  if (!facts.admitsGeometry && !record?.entryPath) {
+    return facts.mainEntryPath;
+  }
+  return bindViewerPanelEntry(panel, { record, mainEntryPath: facts.mainEntryPath, persistMainEntry });
+}
+
 /** Give an empty dock a group, so its watermark has somewhere to show. */
 export function ensureViewerGroup(api: DockviewApi): void {
   if (api.groups.length === 0) {
@@ -473,9 +496,7 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
       }
       const entryPath =
         panel.params.entryPath ??
-        bindViewerPanelEntry(panel, {
-          record: current.viewRecords.get(viewId),
-          mainEntryPath: current.mainEntryPath,
+        resolveViewerPanelEntry(panel, current, {
           persistMainEntry: isEditor
             ? (path) => {
                 void facts.get().viewCommands.edit(viewId, keepDurableEntry(path));

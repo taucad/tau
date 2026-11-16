@@ -71,6 +71,8 @@ const presentPreviewSource = (artifact: Artifact, key: string): void => {
   }
 };
 let mockCaptureRendering: (() => Promise<Rendering>) | undefined;
+/** The per-view commands the controls were last given. */
+let mockViewFields: unknown;
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 let mockViewSettings: Record<
   string,
@@ -530,13 +532,16 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
     leading,
     aboveControls,
     mobileAction,
+    viewFields,
   }: {
+    viewFields?: unknown;
     captureRendering: () => Promise<Rendering>;
     leading?: React.ReactNode;
     aboveControls?: React.ReactNode;
     mobileAction?: React.ReactNode;
   }) => {
     mockCaptureRendering = captureRendering;
+    mockViewFields = viewFields;
     return (
       <div role='group' aria-label='Viewer controls'>
         {aboveControls}
@@ -1870,6 +1875,17 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     mockGraphicsSend.mockClear();
     vi.mocked(mockPanelApi.updateParameters).mockClear();
     mockMainEntryPath = 'main.scad';
+    mockViewFields = undefined;
+    /* The last render, presented by the graphics double, so a row can see whether a check keeps or clears it. */
+    mockGraphicsProjection = { artifact: mockRendering.artifact, artifactKey: mockRendering.hash };
+    mockGraphicsSend.mockImplementation((event: { type: string; artifact?: Artifact; hash?: string }) => {
+      if (event.type === 'clearArtifact') {
+        mockGraphicsProjection = { artifact: undefined, artifactKey: undefined };
+        for (const listener of mockGraphicsListeners) {
+          listener();
+        }
+      }
+    });
   });
 
   it('C11 (A15e): should keep the viewer stage and its canvas in the DOM during the first file check, with no "Preparing model" block and no "Reopen renderer"', () => {
@@ -1900,8 +1916,12 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
     expect(screen.getByTestId('cad-viewer-canvas-region')).not.toHaveAttribute('aria-busy');
 
+    expect(screen.getByTestId('cad-viewer-canvas')).toHaveAttribute('data-artifact', 'model/gltf-binary');
+
     /* A later check: the last render stays under the pill and the stage is never replaced. */
+    mockGraphicsSend.mockClear();
     publishSyncStatus(checking);
+    expect(mockGraphicsSend).not.toHaveBeenCalledWith({ type: 'clearArtifact' });
     expect(screen.getByTestId('cad-viewer-canvas')).toBe(canvas);
     expect(screen.getByTestId('cad-viewer-canvas')).toHaveAttribute('data-artifact', 'model/gltf-binary');
     expect(screen.queryByRole('region', { name: 'Preparing model' })).not.toBeInTheDocument();
@@ -2015,6 +2035,79 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     publishSyncStatus(filled);
     expect(screen.getByText('File not found')).toBeInTheDocument();
     expect(mockGraphicsSend).toHaveBeenCalledWith({ type: 'clearArtifact' });
+  });
+
+  /* D21 round 2, D1: a known absence stays through a later check, so a pull never swaps it for a stage and back. */
+  it('U13 (A15e): should keep a settled "File not found" through a later check, mounting no canvas', () => {
+    mockFileTree = new Map();
+    mockFileContent = { kind: 'orphaned' };
+    mockSyncStatus = filled;
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    const notFound = screen.getByText('File not found');
+    const canvases = new Set<Element>();
+    const observer = new MutationObserver(() => {
+      for (const canvas of document.querySelectorAll('[data-testid="cad-viewer-canvas"]')) {
+        canvases.add(canvas);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      publishSyncStatus(checking);
+      expect(screen.getByText('File not found')).toBe(notFound);
+      publishSyncStatus(filled);
+      expect(screen.getByText('File not found')).toBe(notFound);
+      expect([...canvases]).toEqual([]);
+    } finally {
+      observer.disconnect();
+    }
+  });
+
+  /* D21 round 2, D3: a main renamed by the tree write is followed in the settle commit, before its old file reads
+     missing, so the last render is not cleared and "File not found" never shows. */
+  it('U13 (A15e): should follow a main renamed during a later check without flashing "File not found" or clearing the render', () => {
+    mockFileTree = new Map([['bracket.scad', { type: 'file', name: 'bracket.scad' }]]);
+    mockFileContent = { kind: 'orphaned' };
+    mockSyncStatus = checking;
+    const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} />);
+    const canvas = screen.getByTestId('cad-viewer-canvas');
+    mockMainEntryPath = 'bracket.scad';
+    viewer.rerender(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} profile='editor' />);
+    const notFound: Element[] = [];
+    const observer = new MutationObserver(() => {
+      notFound.push(...screen.queryAllByText('File not found'));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      publishSyncStatus(filled);
+    } finally {
+      observer.disconnect();
+    }
+    expect(notFound).toEqual([]);
+    expect(mockGraphicsSend).not.toHaveBeenCalledWith({ type: 'clearArtifact' });
+    expect(screen.getByTestId('cad-viewer-canvas')).toBe(canvas);
+    expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ entryPath: 'bracket.scad' });
+  });
+
+  /* D21 round 2, D4: an unbound view has no record to write, so its controls get no per-view commands. */
+  it('should give an unbound view no per-view commands while the files are checked', () => {
+    mockSyncStatus = checking;
+    renderViewer(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);
+
+    expect(screen.getByRole('group', { name: 'Viewer controls' })).toBeInTheDocument();
+    expect(mockViewFields).toBeUndefined();
+  });
+
+  /* D21 round 2, D6: the build status stays mounted through a later check; it gives way only while the pill shows. */
+  it('should keep the build status mounted through a later check', () => {
+    mockSyncStatus = checking;
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    publishSyncStatus(filled);
+    const status = screen.getByTestId('chat-viewer-status');
+
+    publishSyncStatus(checking);
+    expect(screen.getByTestId('chat-viewer-status')).toBe(status);
+    publishSyncStatus(filled);
+    expect(screen.getByTestId('chat-viewer-status')).toBe(status);
   });
 
   it('U13 (A15e): should show no empty state for an unbound view while the files are checked', () => {

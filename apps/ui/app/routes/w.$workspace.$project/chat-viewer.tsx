@@ -308,37 +308,59 @@ function MissingViewerFile({
   );
 }
 
+type ViewerEntryAbsence = 'unbound' | 'directory' | 'missing' | undefined;
+
 /**
- * Why the view has no entry to render: none is bound, it names a directory, or the file is not there. While the model's
- * files are checked or downloaded none of these is known yet, so the stage and its last render stay (A15e; UI Policy
- * § 5: no empty state before the content is known to be empty).
+ * Why the view has no entry to render (none is bound, it names a directory, or the file is not there), and the main it
+ * is moving to. While the model's files are checked or downloaded an absence is not known afresh: the one known when
+ * they last settled for this entry stays, and otherwise the stage and its last render stay (A15e; UI Policy § 5: no
+ * empty state before the content is known to be empty). A main that changed during the check is followed from the
+ * commit the files settle in, so the view's old file never reads missing on the way (P-j). Both are kept with React's
+ * "information from previous renders" pattern; no effect or timer runs.
  *
- * @param facts - The view's entry and what is known about it.
- * @returns The absence, `undefined` when the entry renders, and the path the stage renders: `''` for an unbound view
- *   that keeps its stage through a file check.
+ * @param facts - The view's entry, the project's main and what is known about the entry.
+ * @returns The absence, `undefined` when the entry renders; the path the stage renders (`''` for an unbound view that
+ *   keeps its stage through a file check); and the main to follow, if the view follows a changed one.
  */
-function viewerEntryAbsence({
+function useViewerEntryAbsence({
   entryPath,
+  mainEntryPath,
   isDirectory,
   isMissing,
   isFilesWait,
 }: Readonly<{
   entryPath: string | undefined;
+  mainEntryPath: string | undefined;
   isDirectory: boolean;
   isMissing: boolean;
   isFilesWait: boolean;
-}>): Readonly<{ absence: 'unbound' | 'directory' | 'missing' | undefined; renderedPath: string }> {
+}>): Readonly<{ absence: ViewerEntryAbsence; renderedPath: string; followTarget: string | undefined }> {
+  const [followedMain, setFollowedMain] = useState(mainEntryPath);
+  const [settled, setSettled] = useState<Readonly<{ entryPath: string | undefined; absence: ViewerEntryAbsence }>>();
   const renderedPath = entryPath ?? '';
+  const followTarget =
+    !isFilesWait && mainEntryPath && mainEntryPath !== followedMain && entryPath === followedMain
+      ? mainEntryPath
+      : undefined;
+  if (!isFilesWait && followTarget === undefined && mainEntryPath !== followedMain) {
+    setFollowedMain(mainEntryPath);
+  }
+  if (followTarget !== undefined) {
+    return { absence: undefined, renderedPath, followTarget };
+  }
   if (isFilesWait) {
-    return { absence: undefined, renderedPath };
+    return {
+      absence: settled !== undefined && settled.entryPath === entryPath ? settled.absence : undefined,
+      renderedPath,
+      followTarget,
+    };
   }
-  if (!entryPath) {
-    return { absence: 'unbound', renderedPath };
+  const fileAbsence: ViewerEntryAbsence = isDirectory ? 'directory' : isMissing ? 'missing' : undefined;
+  const absence: ViewerEntryAbsence = entryPath ? fileAbsence : 'unbound';
+  if (settled === undefined || settled.entryPath !== entryPath || settled.absence !== absence) {
+    setSettled({ entryPath, absence });
   }
-  if (isDirectory) {
-    return { absence: 'directory', renderedPath };
-  }
-  return { absence: isMissing ? 'missing' : undefined, renderedPath };
+  return { absence, renderedPath, followTarget };
 }
 
 const ChatViewerContent = memo(function ({
@@ -413,7 +435,13 @@ const ChatViewerContent = memo(function ({
   /* While the model's files are checked or downloaded, an entry the tree has not landed yet is not known to be absent:
      the stage and its last render stay, and the empty states wait for the files (A15e; UI Policy § 5). */
   const isFilesWait = filesWait !== undefined;
-  const { absence, renderedPath } = viewerEntryAbsence({ entryPath, isDirectory, isMissing, isFilesWait });
+  const { absence, renderedPath, followTarget } = useViewerEntryAbsence({
+    entryPath,
+    mainEntryPath,
+    isDirectory,
+    isMissing,
+    isFilesWait,
+  });
 
   useEffect(() => {
     if (!graphicsActor || absence === undefined) {
@@ -504,17 +532,17 @@ const ChatViewerContent = memo(function ({
   // A cloud project opens with a placeholder main file. Follow the real main
   // when its synced manifest arrives, but keep viewers on other chosen files. A main that changes during a file check
   // is followed once the files settle, so the view record is not written in the middle of the tree write (A15e; P-j).
-  const previousMainEntryPath = useRef(mainEntryPath);
+  const followedTarget = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (isFilesWait) {
+    if (followTarget === undefined) {
+      followedTarget.current = undefined;
       return;
     }
-    const previous = previousMainEntryPath.current;
-    previousMainEntryPath.current = mainEntryPath;
-    if (entryPath === previous && mainEntryPath && mainEntryPath !== previous) {
-      handleFileSelect(mainEntryPath);
+    if (followedTarget.current !== followTarget) {
+      followedTarget.current = followTarget;
+      handleFileSelect(followTarget);
     }
-  }, [entryPath, handleFileSelect, mainEntryPath, isFilesWait]);
+  }, [followTarget, handleFileSelect]);
 
   // If no graphics actor yet, render a placeholder
   if (!graphicsActor) {
@@ -588,6 +616,22 @@ const ChatViewerContent = memo(function ({
   );
 });
 
+/**
+ * The view whose record the per-view controls write: the editor's, once the view is bound to an entry. An unbound view
+ * kept on the stage through a file check (`''`) has no record to write yet, so its controls change the live owner only.
+ *
+ * @param profile - The viewer's profile.
+ * @param viewId - The view.
+ * @param entryPath - The view's entry, `''` when it has none.
+ * @returns The target, or `undefined` for none.
+ */
+const viewFieldTarget = (
+  profile: 'editor' | 'shared',
+  viewId: string,
+  entryPath: string,
+): Readonly<{ viewId: string; entryPath: string }> | undefined =>
+  profile === 'editor' && entryPath !== '' ? { viewId, entryPath } : undefined;
+
 /** A check or download of the model's files is running: the stage is busy, and its pill shows (A15e). */
 const isFilesRunning = (filesWait: ModelFilesWait | undefined): boolean =>
   filesWait === 'filesChecking' || filesWait === 'files';
@@ -613,7 +657,7 @@ function stageStatus(
 /**
  * The build status, and from the stage's first wait for the model's files the files' pill in the same cell (A15e). The
  * pill mounts with that first wait and stays, so a shown pill keeps its minimum after the wait ends; the build status
- * gives way while the pill shows (a later check over the last render).
+ * stays mounted and gives way only while the pill shows (a later check over the last render).
  */
 function StageWaitStatus({ filesWait }: { readonly filesWait: ModelFilesWait | undefined }): React.JSX.Element {
   const [hasWaitedForFiles, setHasWaitedForFiles] = useState(filesWait !== undefined);
@@ -624,14 +668,9 @@ function StageWaitStatus({ filesWait }: { readonly filesWait: ModelFilesWait | u
     return <ChatViewerStatus />;
   }
   return (
-    <div className='group/viewer-wait grid justify-items-center *:[grid-area:1/1]'>
-      <ModelFilesStageStatus wait={filesWait} />
-      {isFilesRunning(filesWait) ? null : (
-        <div className='group-has-[[data-slot=wait-indicator][data-state=holding]]/viewer-wait:invisible'>
-          <ChatViewerStatus />
-        </div>
-      )}
-    </div>
+    <ModelFilesStageStatus wait={filesWait}>
+      <ChatViewerStatus />
+    </ModelFilesStageStatus>
   );
 }
 
@@ -668,7 +707,7 @@ const ViewerContent = memo(function ({
   const { projectRef, entriesRecord, viewRecords } = useProject();
   const viewCommands = useWorkbenchViewCommands();
   // The editor's per-view controls write the view record; a shared session keeps changing the live owner only.
-  const viewFields = useViewerViewFieldCommands(profile === 'editor' ? { viewId, entryPath } : undefined);
+  const viewFields = useViewerViewFieldCommands(viewFieldTarget(profile, viewId, entryPath));
   const cadRef = useCad();
   // Lines this pane shows; the unit's default view computes edges only while some pane shows them.
   const enableLines = useGraphicsSelector((state) => state.context.enableLines);

@@ -4,15 +4,14 @@ import type { ReactElement, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GeneralSettings } from '#components/settings/general-settings.js';
 import type { ThemeOption } from '#hooks/use-theme.js';
+import { forgetClientFacts, readClientFacts } from '#lib/client-facts.js';
 
 const mockSetTheme = vi.fn();
 const mockSetHue = vi.fn();
 const mockResetHue = vi.fn();
 const mockSetCodeInlayHints = vi.fn();
-const mockSetPointerCursors = vi.fn();
 
 let mockCodeInlayHintsValue: boolean;
-let mockPointerCursorsValue: boolean;
 
 vi.mock('react-router', () => ({
   Link: ({ children, className, to }: { children: ReactNode; className?: string; to: string }): ReactElement => (
@@ -88,9 +87,6 @@ vi.mock('#hooks/use-cookie.js', () => ({
     if (name === 'code-inlay-hints') {
       return [mockCodeInlayHintsValue, mockSetCodeInlayHints];
     }
-    if (name === 'pointer-cursors') {
-      return [mockPointerCursorsValue, mockSetPointerCursors];
-    }
     return [defaultValue, vi.fn()];
   },
 }));
@@ -136,7 +132,8 @@ describe('GeneralSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCodeInlayHintsValue = false;
-    mockPointerCursorsValue = false;
+    localStorage.clear();
+    forgetClientFacts();
   });
 
   it('should render code inlay hints disabled by default', () => {
@@ -180,7 +177,7 @@ describe('GeneralSettings', () => {
 
     await user.click(screen.getByRole('switch', { name: 'Pointer cursors' }));
 
-    expect(mockSetPointerCursors).toHaveBeenCalledWith(true);
+    expect(readClientFacts().pointerCursors).toBe(true);
   });
 
   it('should expose and select the High Contrast theme', async () => {

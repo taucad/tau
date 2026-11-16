@@ -157,6 +157,9 @@ const sourcedLargeObjects = (
  * @param object - The object it should hold.
  * @returns Whether the file is that object.
  */
+/** One path as a write's verification reads it back: its bytes only where they are compared. */
+type VerifiedEntry = Readonly<{ size: number; mode: FileMode; content?: Uint8Array<ArrayBuffer> }>;
+
 const holdsObject = (content: Uint8Array<ArrayBuffer>, object: LfsPointer): boolean =>
   content.byteLength === object.size &&
   readLfsPointer(content) === undefined &&
@@ -248,6 +251,48 @@ export const createApplyTreeEffects = (
       }
       throw error;
     }
+  };
+
+  /**
+   * What a fill flush wrote, read back path by path (#2010): a flush only
+   * replaces placeholders and removes nothing, so the paths it wrote are all it
+   * verifies, and walking the whole checkout to read them was most of a flush.
+   * A cloned object is checked by its size, never read; any other path by its
+   * bytes. A mode the checkout cannot hold is the target's, as a capture over
+   * that target reads it.
+   *
+   * @param live - The checkout's tree.
+   * @param written - The paths the flush wrote, the tree it wrote by path, and
+   *   the paths it cloned from the store by the object they name.
+   * @returns What each path holds now; a path that is gone is absent.
+   */
+  const writtenEntries = async (
+    live: RevisionFileSystem,
+    written: Readonly<{
+      paths: readonly string[];
+      targetFiles: ReadonlyMap<string, RevisionTreeEntry>;
+      sourced: ReadonlyMap<string, LfsPointer>;
+    }>,
+  ): Promise<Map<string, VerifiedEntry>> => {
+    const { paths, targetFiles, sourced } = written;
+    const entries = await Promise.all(
+      paths.map(async (path): Promise<readonly [string, VerifiedEntry] | undefined> => {
+        try {
+          const content = sourced.has(path) ? undefined : await live.readFile(path);
+          const stat = content === undefined ? await live.stat(path) : undefined;
+          const size = content?.byteLength ?? stat?.size ?? 0;
+          const mode = (await live.getFileMode?.(path)) ?? targetFiles.get(path)?.mode ?? '100644';
+          return [path, { size, mode, ...(content === undefined ? {} : { content }) }];
+        } catch (error) {
+          const code = typeof error === 'object' && error !== null ? (error as NodeJS.ErrnoException).code : undefined;
+          if (code === 'ENOENT' || code === 'ENOTDIR') {
+            return undefined;
+          }
+          throw error;
+        }
+      }),
+    );
+    return new Map(entries.filter((entry) => entry !== undefined));
   };
 
   /**
@@ -710,8 +755,19 @@ export const createApplyTreeEffects = (
           await land(changedFiles);
         }
         signal?.throwIfAborted();
-        const reread = await capture(place, target);
-        const verified = new Map(reread.entries().map((entry) => [entry.path, entry]));
+        const byPath = purpose === 'fill' && removedPaths.length === 0;
+        const reread = byPath ? undefined : await capture(place, target);
+        const verified =
+          reread === undefined
+            ? await writtenEntries(live, { paths: writtenPaths, targetFiles, sourced })
+            : new Map(
+                reread
+                  .entries()
+                  .map((entry): [string, VerifiedEntry] => [
+                    entry.path,
+                    { size: entry.content.byteLength, content: entry.content, mode: entry.mode },
+                  ]),
+              );
         const unverified = [
           ...removedPaths.filter((path) => verified.has(path)),
           ...writtenPaths.filter((path) => {
@@ -726,12 +782,12 @@ export const createApplyTreeEffects = (
                 applied === undefined ||
                 wanted === undefined ||
                 !landedObjects.has(path) ||
-                applied.content.byteLength !== object.size ||
+                applied.size !== object.size ||
                 applied.mode !== wanted.mode
               );
             }
             return (
-              applied === undefined ||
+              applied?.content === undefined ||
               wanted === undefined ||
               !equalBytes(applied.content, wanted.content) ||
               applied.mode !== wanted.mode

@@ -10,11 +10,16 @@
  */
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  /* The one private router context Tau reads, and the lint ban's single exception: the sink checks the router's live
+   * state when a focus command arrives (ProjectFocus I2: a `chatShown` applies only once the router is at rest).
+   * `useNavigation` is the rendered state, which lags a navigation React renders in a transition, and no public hook
+   * gives the live one. The context still carries `router` on 8.x; `router-context.test.tsx` fails if it stops. */
+  // oxlint-disable-next-line no-restricted-imports -- the live router read above (RD9 amendment, RR1).
   UNSAFE_DataRouterContext,
-  UNSAFE_DataRouterStateContext,
   useLocation,
   useMatch,
   useNavigate,
+  useNavigation,
 } from 'react-router';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
@@ -152,7 +157,7 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
   const navigate = useNavigate();
   const [, setCloudOpen] = useSearchParameter(searchParameterName.cloudOpen, cloudOpenParameter);
   const projectId = route.committed?.projectId;
-  /* The app's data router, read live when a command arrives; a test's plain router has none. */
+  /* The app's data router, read live when a command arrives. */
   const router = useContext(UNSAFE_DataRouterContext)?.router;
   /* Under the app's router, which drives the address bar, the canonical correction writes only while the bar still
    * shows this commit's path (I2). */
@@ -163,7 +168,7 @@ export function useRouterRouteSink(route: ProjectRouteIntentRoute): (command: Fo
   );
   const slugs = route.committed?.slugs;
   const currentUrl = `${location.pathname}${location.search}`;
-  const navigationState = useContext(UNSAFE_DataRouterStateContext)?.navigation.state;
+  const navigationState = useNavigation().state;
   const latest = useRef({
     canonicalSlugs,
     currentUrl,

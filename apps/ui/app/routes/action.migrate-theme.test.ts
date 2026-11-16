@@ -3,6 +3,8 @@ import { createCookie } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { Theme } from '#hooks/use-theme.js';
 import { action } from '#routes/action.migrate-theme.js';
+import { mock } from 'vitest-mock-extended';
+import type { AppLoadContext } from 'react-router';
 
 const migrate = async (headers: Record<string, string>): Promise<Response> => {
   const request = new Request('https://tau.new/action/migrate-theme', { method: 'POST', headers });
@@ -11,7 +13,7 @@ const migrate = async (headers: Record<string, string>): Promise<Response> => {
     url: new URL(request.url),
     pattern: '/action/migrate-theme',
     params: {},
-    context: {},
+    context: mock<AppLoadContext>(),
   });
   return response as Response;
 };

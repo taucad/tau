@@ -242,6 +242,11 @@ export function useChatTextareaLogic({
   attachmentAccept: string;
   selectedToolChoice: ToolSelection;
   status: string;
+  /**
+   * Whether the composer offers Stop: while a turn streams, and while its run waits on an approval or a stop the host
+   * has not settled yet. A paused run's SDK stream has closed, so the status alone reads `ready` (and hid Stop).
+   */
+  canStop: boolean;
   selectedModel: ResolvedModel;
   imageInputSupported: boolean;
   attachmentInputSupported: boolean;
@@ -303,7 +308,13 @@ export function useChatTextareaLogic({
     stop,
     resume,
     attachmentSource,
+    agentActivity,
   } = useChatComposer();
+  const canStop =
+    status === 'streaming' ||
+    status === 'submitted' ||
+    agentActivity === 'approval-required' ||
+    agentActivity === 'stopping';
   const attachmentModel = useMemo(
     () => attachmentModelForExecution(execution, selectedModel),
     [execution, selectedModel],
@@ -523,7 +534,7 @@ export function useChatTextareaLogic({
     cancelChatStreamKeyCombination,
     () => {
       /* F7: the same condition that shows Stop. */
-      if (status === 'streaming' || status === 'submitted') {
+      if (canStop) {
         stop('stop-shortcut');
       }
     },
@@ -872,6 +883,7 @@ export function useChatTextareaLogic({
     attachmentAccept: pickerAccept,
     selectedToolChoice,
     status,
+    canStop,
     selectedModel,
     imageInputSupported,
     attachmentInputSupported,

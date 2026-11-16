@@ -119,6 +119,13 @@
 \* binding, admission, delivery, persistence and the queue barrier are unchanged.
 \* PR-7: the turn host reads usage-metrics consent from the one telemetry consent rule; it gates only
 \* telemetry, so admission, delivery, persistence and the queue barrier are unchanged.
+\* Approval watch: a run watch or transcript read that fails on a dropped or replaced connection is
+\* retried a bounded number of times instead of latching the run; only presentation changes, so
+\* admission, delivery, persistence and the queue barrier are unchanged.
+\* Approval stop: the composer offers Stop while its run is paused on an approval or stopping, and the
+\* cancel goes through the one targeted host cancel it always used; the host cancel log line is JSON
+\* text. Only the control and logging change, so admission, delivery, persistence and the queue
+\* barrier are unchanged.
 \* WP5 (composer image formats): the store and the composer draft provide the image step from the app's
 \* attachment image actor, and a queued image carries its declared type for the intake counter only; admission,
 \* delivery, persistence and the queue barrier are unchanged.

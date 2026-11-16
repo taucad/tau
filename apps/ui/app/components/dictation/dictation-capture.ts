@@ -1,4 +1,4 @@
-import processorUrl from '#components/dictation/dictation-processor.js?worker&url';
+import { dictationProcessorUrl } from '#components/dictation/dictation-processor-url.client.js';
 import { DictationError, dictationMessages } from '#components/dictation/dictation-errors.js';
 
 export type DictationCapture = {
@@ -100,7 +100,7 @@ export async function captureDictation({
   try {
     signal.throwIfAborted();
     context = new AudioContext({ sampleRate: 24_000 });
-    await context.audioWorklet.addModule(processorUrl);
+    await context.audioWorklet.addModule(dictationProcessorUrl);
     signal.throwIfAborted();
     source = context.createMediaStreamSource(stream);
     processor = new AudioWorkletNode(context, 'tau-dictation');

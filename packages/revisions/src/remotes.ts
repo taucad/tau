@@ -138,6 +138,8 @@ const hostLocalRefPrefixes: readonly string[] = Object.freeze([
   'refs/tau/retention',
   /* A line this device gave way on at connect, kept here and never offered. */
   'refs/tau/superseded',
+  /* What this device has applied of a remote's records, advanced only once they are on disk. */
+  'refs/tau/applied',
   /* Fetch's own half of the store: a remote-tracking ref is what this host
    * last saw *of* a remote, so offering one back is meaningless. */
   'refs/remotes',

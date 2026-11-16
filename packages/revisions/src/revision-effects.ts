@@ -3277,6 +3277,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   const evidenceRefName = 'refs/tau/evidence/exports';
+  /*
+   * The remote's evidence record this device has written to disk (SP2h review). A projection's fetch moves the
+   * remote-tracking ref before it writes a file, and a projection can stop after that fetch (a failed apply beside it,
+   * a deadline, a close), so the tracking ref is no proof the exports landed. This ref moves only once they have.
+   */
+  const appliedEvidenceRef = (remote: string): string => `refs/tau/applied/${remote}/evidence/exports`;
   const candidateRefName = 'refs/tau/artifacts/geospec-candidates';
 
   /*
@@ -7234,9 +7240,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               (entry) => entry.operation === 'projection' && entry.ref === evidenceRefName,
             )
               ? undefined
-              : (trackingBefore.find(
-                  (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
-                )?.head ?? (await heldEvidenceHead(advertised.find((ref) => ref.name === evidenceRefName)?.head))),
+              : ((await port.readRef(appliedEvidenceRef(input.remote))) ??
+                (await heldEvidenceHead(advertised.find((ref) => ref.name === evidenceRefName)?.head))),
           },
           ...(advanced.length === 0 ? {} : { advanced }),
           ...(merged.length === 0 ? {} : { merged }),
@@ -7304,7 +7309,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                     reason: error instanceof Error ? error.message : 'This chat could not be restored.',
                   };
                 } finally {
-                  if (written.length > 0 && !signal.aborted) {
+                  /* A chat written before a stop is on disk: it is announced, since a later pull finds it current
+                   * and announces nothing (SP2h review). */
+                  if (written.length > 0) {
                     options.onChatsProjected?.(written);
                   }
                 }
@@ -7323,8 +7330,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * record that *changed* — and what it must never do for one that did
            * not, which is how a device that had already restored an export, and
            * then edited it, had its own file replaced by the same remote bytes on
-           * the very next pull. The remote-tracking ref this host held before the
-           * fetch is exactly "what I have already applied".
+           * the very next pull. What this device has already applied is the
+           * applied ref, which moves only once the record is on disk, or a record
+           * its own evidence ref already holds; never the tracking ref, which a
+           * projection's fetch moves before it writes anything (SP2h review).
            */
           const { priorEvidenceHead } = input;
           const fetchedEvidenceHead = fetchedEvidence?.head;
@@ -7338,6 +7347,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             recordTasks.push(async (): Promise<SyncRefOutcome> => {
               try {
                 await projectEvidence([fetchedEvidence], signal);
+                const applied = appliedEvidenceRef(input.remote);
+                await port.updateRef({
+                  name: applied,
+                  expectedHead: await port.readRef(applied),
+                  head: revisionId(fetchedEvidence.head),
+                });
                 return { name: evidenceRefName, status: 'upToDate', head: fetchedEvidence.head };
               } catch (error) {
                 return {

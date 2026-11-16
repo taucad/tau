@@ -4192,6 +4192,54 @@ describe('independent sync record failures', () => {
     );
   }, 30_000);
 
+  /* SP2h review: a projection stopped once a chat's files were written still announces it; the next pull finds the
+   * chat current and would announce nothing, leaving the page's chat list without it. */
+  it('announces a chat whose files were written before its projection stopped', async () => {
+    const context = await fixture({ 'tau.json': '{"syncChats":true}\n' });
+    const writing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const projecting = Object.assign(Object.create(context.filesystem) as RevisionFileSystem, {
+      writeFile: async (path: string, content: Parameters<RevisionFileSystem['writeFile']>[1]) => {
+        await context.filesystem.writeFile(path, content);
+        if (path.endsWith('/talk/events/device-a.jsonl')) {
+          writing.resolve();
+          await release.promise;
+        }
+      },
+    });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"sequence":0}\n']]),
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
+      summary: { generated: 'Chat talk' },
+    });
+    const fetchedRef = { name: 'refs/remotes/tau/tau/chats/talk', head: revisionId(receipt.commitId) };
+    await context.port.updateRef({ name: fetchedRef.name, expectedHead: undefined, head: fetchedRef.head });
+    const projected: string[][] = [];
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: context.port,
+      projectId: 'project-1',
+      filesystem: () => projecting,
+      deviceId: () => 'device-b',
+      onChatsProjected: (chatIds) => projected.push([...chatIds]),
+    });
+
+    const stopped = createActor(actors.sync.projectRecords, {
+      input: { remote: 'tau', fetchRefs: [], refs: [fetchedRef], syncChats: true, syncLargeExports: false },
+    });
+    stopped.start();
+    await writing.promise;
+    stopped.stop();
+    release.resolve();
+
+    await vi.waitFor(() => {
+      expect(projected).toEqual([['talk']]);
+    });
+    expect(await context.filesystem.readFile('.tau/chats/talk/events/device-a.jsonl', 'utf8')).toBe('{"sequence":0}\n');
+  }, 30_000);
+
   /* RV-W7 #5: a record conflict still wrote the other device's log, and the page has to hear of it. */
   it('announces a chat whose record conflicted, because its segments were still written', async () => {
     const context = await fixture({ '.tau/chats/talk/chat.json': '{"name":"Local name"}' });
@@ -4969,6 +5017,65 @@ describe('independent sync record failures', () => {
     },
     30_000,
   );
+
+  /* SP2h review: a projection stopped after its fetch moved the tracking ref, as a failed apply beside it stops it,
+   * leaves the exports owed: the next pull restores them rather than reading the moved tracking ref as applied. */
+  it('restores the exports on the next pull after a projection stopped once its fetch had landed', async () => {
+    const context = await fixture({ 'tau.json': '{"syncLargeExports":true}\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const recorded = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['exports/part.step', 'recorded output\n']]),
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
+      summary: { generated: 'Exports' },
+    });
+    const remoteHead = revisionId(recorded.commitId);
+    const tracking = 'refs/remotes/tau/tau/evidence/exports';
+    const landed = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let gate: Promise<void> | undefined = release.promise;
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head: remoteHead }],
+        fetch: async () => {
+          await context.port.updateRef({
+            name: tracking,
+            expectedHead: await context.port.readRef(tracking),
+            head: remoteHead,
+          });
+          landed.resolve();
+          if (gate !== undefined) {
+            await gate;
+          }
+          return { refs: [{ name: tracking, head: remoteHead }] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+    const fetchOnce = async () =>
+      run<SyncFetchActorOutput>(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+
+    const first = await fetchOnce();
+    const stopped = createActor(actors.sync.projectRecords, { input: first.recordProjection! });
+    stopped.start();
+    await landed.promise;
+    stopped.stop();
+    gate = undefined;
+    release.resolve();
+    expect(await context.filesystem.exists('exports/part.step')).toBe(false);
+
+    const retry = await fetchOnce();
+    expect(retry.recordProjection?.priorEvidenceHead).not.toBe(remoteHead);
+    await run(actors.sync.projectRecords, retry.recordProjection);
+    expect(await context.filesystem.readFile('exports/part.step', 'utf8')).toBe('recorded output\n');
+
+    /* Once restored, a later pull of the same record leaves the exports alone (C21). */
+    const after = await fetchOnce();
+    expect(after.recordProjection?.priorEvidenceHead).toBe(remoteHead);
+  }, 30_000);
 
   it('retains a differing local export before adopting and re-offering the fetched value', async () => {
     const context = await fixture({

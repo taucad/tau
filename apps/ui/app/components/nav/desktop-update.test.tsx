@@ -5,7 +5,7 @@ import { SidebarProvider } from '@taucad/ui/components/sidebar';
 import type { DesktopUpdateBridge, DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 import { DesktopUpdate, DesktopUpdateControl } from '#components/nav/desktop-update.js';
 
-vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopUpdates: () => undefined }));
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({ desktopUpdates: () => undefined }));
 afterEach(cleanup);
 const ready: DesktopUpdateSnapshot = {
   revision: 2,

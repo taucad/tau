@@ -139,7 +139,7 @@ import {
   getFileTreeDownloadErrorMessage,
   getFileTreeDownloadPolicy,
 } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { previewProjectFileInQuickLook } from '#filesystem/desktop-quick-look.js';
 import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
 import type { RevealInFileManager } from '#hooks/use-native-file-manager.js';

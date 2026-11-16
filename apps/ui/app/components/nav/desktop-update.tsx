@@ -4,7 +4,7 @@ import { Loader } from '@taucad/ui/components/loader';
 import type { DesktopUpdateBridge, DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 import { useSidebar } from '@taucad/ui/components/sidebar';
 import { UpdateControl } from '#components/nav/update-control.js';
-import { desktopUpdates } from '#filesystem/desktop-bridge.js';
+import { desktopUpdates } from '@taucad/files-ui/filesystem/desktop-bridge';
 
 /** Desktop-only subscription. Main owns checks, downloads and restart admission. */
 export function DesktopUpdate(): React.JSX.Element | undefined {

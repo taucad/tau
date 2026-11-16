@@ -20,7 +20,9 @@ const storage = vi.hoisted(() => ({
 }));
 
 vi.mock('#flags/feature-flags.js', () => ({ isFeatureEnabled: () => false }));
-vi.mock('#filesystem/handle-store.js', () => ({ getProjectFileSystemConfig: storage.getProjectFileSystemConfig }));
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
+  getProjectFileSystemConfig: storage.getProjectFileSystemConfig,
+}));
 
 /** A Tau chat placed on Tau Desktop, exactly as its stored `activeExecution` reads once synced to the web. */
 const desktopTauExecution: CadAgentExecution = { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'desktop' };

@@ -21,7 +21,7 @@ import { createActor, setup, waitFor } from 'xstate';
 import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 
-vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({ isBrowser: true }));
 
 const projectId = 'proj_a6e_flush';
 

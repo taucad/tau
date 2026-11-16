@@ -43,7 +43,7 @@ import type { EntriesRecordSession } from '#workbench-records/entries-record-ses
 import { createSessionsActor, createSessionsRegistryLogic } from '#services/sessions-store.js';
 import type { SessionRuntime, SessionRuntimeOpener, SessionWiring } from '#services/sessions-store.js';
 
-vi.mock('#constants/browser.constants.js', () => ({ isBrowser: true }));
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({ isBrowser: true }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));

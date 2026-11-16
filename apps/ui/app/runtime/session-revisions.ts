@@ -64,7 +64,7 @@ import {
   subscribeOwedEditorText,
 } from '#lib/editor-document-session.js';
 import type { EditorTextScope } from '#lib/editor-document-session.js';
-import { getProjectRootConfigs, setCheckoutRootConfigs } from '#filesystem/handle-store.js';
+import { getProjectRootConfigs, setCheckoutRootConfigs } from '@taucad/files-ui/filesystem/handle-store';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
 import { chatsOpen, isFileCheckSettled } from '#hooks/use-project-availability.js';
 import { canOpenCloudProject, tauCloudIntent } from '#lib/tau-cloud-intent.js';

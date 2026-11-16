@@ -50,22 +50,22 @@ import {
   workspaceMarkerPath,
   workspaceMarkerSchemaUrl,
 } from '@taucad/types';
-import { metaConfig } from '#constants/meta.constants.js';
+import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 import { allocateSlug, projectNameToSlug } from '@taucad/ui-core/utils/project-directory.utils';
 import { toStorageWriteError, WorkspaceIdentityConflictError } from '@taucad/ui-core/filesystem/workspace-errors';
-import { probeHomeOpfs } from '@taucad/files-ui/filesystem/home-opfs-probe';
+import { probeHomeOpfs } from '#filesystem/home-opfs-probe.js';
 import { desktopBridge, hostPathName, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
 
-const dbName = `${metaConfig.databasePrefix}fs-handles`;
+const dbName = `${appMetaConfig.databasePrefix}fs-handles`;
 const handlesStoreName = 'handles';
 const configsStoreName = 'configs';
 const workspacesStoreName = 'workspaces';
 const metaStoreName = 'meta';
 const dbVersion = 4;
-const projectRootConfigurationChannelName = `${metaConfig.databasePrefix}project-root-configuration`;
+const projectRootConfigurationChannelName = `${appMetaConfig.databasePrefix}project-root-configuration`;
 const homeBackendMetaKey = 'home-storage-backend';
 const projectCreationLocationMetaKey = 'project-creation-location';
 const persistentStorageRequestMetaKey = 'persistent-storage-request';
@@ -587,7 +587,7 @@ const isHomeStorageBackend = (value: unknown): value is HomeStorageBackend =>
  * is installed asynchronously, so a boot-time probe can run before
  * `window.tau` exists. Deciding from the bridge would let one early call pin
  * Home to OPFS **durably** and silently put the desktop data path in the
- * browser. `isDesktopTarget` is a build-time define and cannot race.
+ * browser. `isDesktopTarget` is a build-time constant and cannot race.
  */
 const detectHomeStorageBackend = async (): Promise<HomeStorageBackend> =>
   isDesktopTarget ? 'node' : (await probeHomeOpfs()) ? 'opfs' : 'indexeddb';

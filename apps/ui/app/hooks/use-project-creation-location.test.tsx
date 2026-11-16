@@ -2,7 +2,11 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectCreationLocationRead, Workspace, WorkspaceConnection } from '#filesystem/handle-store.js';
+import type {
+  ProjectCreationLocationRead,
+  Workspace,
+  WorkspaceConnection,
+} from '@taucad/files-ui/filesystem/handle-store';
 import type { ProjectCreationLocationState } from '#hooks/use-project-creation-location.js';
 import {
   WorkspaceIdentityConflictError,
@@ -53,7 +57,7 @@ const mockProjectManager = {
   refreshWorkspaceCatalog: mockRefreshWorkspaceCatalog,
 };
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   get isFileSystemAccessSupported() {
     return supported;
   },
@@ -77,7 +81,7 @@ vi.mock('#constants/browser.constants.js', () => ({
       : undefined,
 }));
 
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   listWorkspaces: mockListWorkspaces,
   getWorkspace: mockGetWorkspace,
   checkHandlePermission: mockCheckPermission,

@@ -2505,12 +2505,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   ): Promise<ReturnType<typeof largeObjectPlaceholders>> => {
     await compareIndex.call(rooted);
     const stats = await statTree.call(rooted, '', { admits: versionedAdmits });
-    const pointers = (
-      await readVersioned(
-        rooted,
-        stats.flatMap(({ path, size }) => (mayBeLfsPointerSize(size) ? [path] : [])),
-      )
-    ).filter(([, content]) => readLfsPointer(content) !== undefined);
+    const candidates = await readVersioned(
+      rooted,
+      stats.flatMap(({ path, size }) => (mayBeLfsPointerSize(size) ? [path] : [])),
+    );
+    const pointers = candidates.filter(([, content]) => readLfsPointer(content) !== undefined);
     if (pointers.length === 0) {
       return new Map();
     }

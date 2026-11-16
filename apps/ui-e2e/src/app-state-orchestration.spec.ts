@@ -60,12 +60,32 @@ const routeOf = async (name: string): Promise<RegExp> => {
   return new RegExp(`${path.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`)}(?:\\?.*)?$`, 'u');
 };
 
+/**
+ * A project's tree, read again when a file goes between the listing and its read. The app writes a file through a
+ * sibling it moves into place (a save, or A7e's replay on the next open), so a walk that lists the sibling can find it
+ * gone: that is a read of a tree mid-write, never an answer about the tree.
+ */
+const readSettledTree = async (config: StoredProjectConfig): Promise<Readonly<Record<string, string>>> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each attempt reads after the last one failed.
+      return await readProjectTree(config);
+    } catch (error) {
+      if (attempt >= 8 || !String(error).includes('NotFoundError')) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- each attempt reads after the last one failed.
+    await target.delay(100);
+  }
+};
+
 /** Each project's durable config, by its manifest name. */
 const configsByName = async (): Promise<Readonly<Record<string, StoredProjectConfig>>> => {
   const { configs } = await readProjectStorageState();
   const entries = await Promise.all(
     configs.map(async (config) => {
-      const tree = await readProjectTree(config);
+      const tree = await readSettledTree(config);
       const manifest = tree['/tau.json'];
       return manifest === undefined ? undefined : ([(JSON.parse(manifest) as { name: string }).name, config] as const);
     }),
@@ -74,7 +94,7 @@ const configsByName = async (): Promise<Readonly<Record<string, StoredProjectCon
 };
 
 const readLayout = async (config: StoredProjectConfig): Promise<{ lanes?: { workbench?: boolean } } | undefined> => {
-  const tree = await readProjectTree(config);
+  const tree = await readSettledTree(config);
   const text = tree[layoutPath];
   return text === undefined ? undefined : (JSON.parse(text) as { lanes?: { workbench?: boolean } });
 };
@@ -668,7 +688,7 @@ test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit ma
       if (configA === undefined) {
         return '';
       }
-      const tree = await readProjectTree(configA);
+      const tree = await readSettledTree(configA);
       return tree[`/${entryPaths.a}`] ?? '';
     },
     (current) => current.includes(marker),
@@ -735,7 +755,7 @@ test('A0.1 row 5b (I6 / S26 / D26, A7d): the close revision holding the edit is 
       if (configA === undefined) {
         return '';
       }
-      const tree = await readProjectTree(configA);
+      const tree = await readSettledTree(configA);
       return tree[`/${entryPaths.a}`] ?? '';
     },
     (text) => text.includes(marker),
@@ -860,7 +880,7 @@ test('A0.1 row 5c (S26 / D17, A7d): an edit made just before an immediate reload
       if (configA === undefined) {
         return '';
       }
-      const tree = await readProjectTree(configA);
+      const tree = await readSettledTree(configA);
       return tree[`/${entryPaths.a}`] ?? '';
     },
     (current) => current.includes(marker),
@@ -910,7 +930,7 @@ test('A0.1 row 5d (S26 / D17 / I6, A7e): an edit whose save is in flight when th
       if (configA === undefined) {
         return '';
       }
-      const tree = await readProjectTree(configA);
+      const tree = await readSettledTree(configA);
       return tree[`/${entryPaths.a}`] ?? '';
     },
     (current) => current.includes(marker),

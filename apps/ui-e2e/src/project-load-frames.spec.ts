@@ -1064,13 +1064,13 @@ const findSidebarStandIns = (html: Document): string[] =>
     .filter((node) => node.closest('[data-slot="sidebar"]') === null && !node.classList.contains('fixed'))
     .map((node) => `${node.tagName.toLowerCase()}.${node.className.split(' ').slice(0, 6).join('.')}`);
 
-knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a project draws no sidebar stand-in', {
+knownDefect('F4 (A11, A15b, P2): the server HTML for a project draws no sidebar stand-in', {
   artifact: 'f4-wide',
   expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
     const { path } = await seedProjects('wide');
-    await target.addCookies([{ domain: 'localhost', name: 'tau-shell-op-sidebar', path: '/', value: '0' }]);
+    /* P2: the sidebar state is a client fact the server never reads, so this HTML is every visitor's. */
     const server = await target.evaluate(async (url) => {
       const response = await fetch(url, { credentials: 'same-origin' });
       const text = await response.text();
@@ -1084,7 +1084,7 @@ knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a proj
     return standIns;
   },
   assert: (standIns) => {
-    expectMeasured(standIns, 'F4: the server HTML, with tau-shell-op-sidebar=0, draws a sidebar stand-in', []);
+    expectMeasured(standIns, 'F4: the server HTML draws a sidebar stand-in', []);
   },
 });
 

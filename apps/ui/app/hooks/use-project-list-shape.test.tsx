@@ -1,32 +1,28 @@
 // @vitest-environment jsdom
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
 import { renderHook } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-const { routeLoaderData } = vi.hoisted(() => ({
-  routeLoaderData: vi.fn((_routeId: string): unknown => undefined),
-}));
-vi.mock('react-router', () => ({ useRouteLoaderData: routeLoaderData }));
-
-const { useProjectListShape } = await import('#hooks/use-project-list-shape.js');
-const { projectListShapeOf, projectListShapeStore } = await import('#lib/project-list-shape.lib.js');
+import { afterEach, describe, expect, it } from 'vitest';
+import { useProjectListShape } from '#hooks/use-project-list-shape.js';
+import { projectListShapeOf, projectListShapeStore } from '#lib/project-list-shape.lib.js';
+import { forgetClientFacts } from '#lib/client-facts.js';
 
 afterEach(() => {
   globalThis.localStorage.clear();
+  forgetClientFacts();
   projectListShapeStore.reset();
-  routeLoaderData.mockReset();
 });
 
 describe('useProjectListShape', () => {
-  it('reads the remembered count from the root loader', () => {
-    routeLoaderData.mockReturnValue({ projectListCount: 4 });
+  /* P2: the document is the same for every visitor; the head script's count reserves the rows before paint. */
+  it('reports an unknown shape on the server, whatever this device remembers', () => {
+    projectListShapeStore.remember(projectListShapeOf([{}]));
+    const probe = (): React.JSX.Element => createElement('span', null, String(useProjectListShape()?.count));
 
-    renderHook(() => useProjectListShape());
-
-    expect(routeLoaderData).toHaveBeenCalledWith('root');
+    expect(renderToString(createElement(probe))).toContain('undefined');
   });
 
-  /* The desktop (SPA) root has no loader; the shape is unknown until the client reads its own. */
-  it('reports an unknown shape without root loader data or a remembered listing', () => {
+  it('reports an unknown shape without a remembered listing', () => {
     const { result } = renderHook(() => useProjectListShape());
 
     expect(result.current).toBeUndefined();

@@ -38,6 +38,7 @@ const fakeBackend = (results: Array<TranscodeResult | Error> = []) => {
         const next = results.shift() ?? {
           success: true,
           data: [{ name: 'attachment.jpg', mimeType: 'image/jpeg', bytes: converted }],
+          issues: [],
         };
         if (next instanceof Error) {
           throw next;
@@ -128,7 +129,7 @@ describe('AttachmentImageService', () => {
   });
 
   it('should refuse output that is not exactly one file', async () => {
-    const backend = fakeBackend([{ success: true, data: [] }]);
+    const backend = fakeBackend([{ success: true, data: [], issues: [] }]);
     const service = new AttachmentImageService({ createClient: backend.createClient });
 
     await expect(service.transcode(request)).rejects.toBeInstanceOf(AttachmentImageConversionError);

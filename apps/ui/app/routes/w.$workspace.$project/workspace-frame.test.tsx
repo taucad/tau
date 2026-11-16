@@ -121,7 +121,7 @@ describe('WorkspaceFrame', () => {
     const frame = renderFrame('/w/home/one');
 
     expect(frame.className).toContain(
-      '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
+      '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
     );
   });
 
@@ -207,6 +207,21 @@ describe('WorkspaceFrame', () => {
     expect(frame).not.toHaveAttribute('data-workspace-pending');
   });
 
+  /* A15b2 review: drawn ahead of the route, the frame renders before the router pushes the URL, so it reads the
+   * destination's hint from the shell's pathname, not the document's URL (still the page being left). */
+  it("draws the destination's remembered layout while the URL is still the page being left's", () => {
+    writeWideFrameHint('home/two', workbenchClosed);
+    globalThis.history.replaceState(null, '', '/');
+    const view = render(
+      <WorkspaceFrame isPending pathname='/w/home/two'>
+        <p>home</p>
+      </WorkspaceFrame>,
+    );
+    const frame = view.container.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
+
+    expect(frame.style.getPropertyValue('--frame-workbench-display')).toBe('none');
+  });
+
   // ── A15c: the phone frame (blueprint P-h; C6) ──
 
   /*
@@ -271,7 +286,9 @@ describe('WorkspaceFrame', () => {
     );
     expect(part('sheet')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden');
     expect(part('tab-bar')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden');
-    expect(phone.className).toContain('[[data-slot=workspace-frame]:has([data-slot=project-route-notice])_&]:hidden');
+    expect(phone.className).toContain(
+      '[[data-slot=workspace-frame]:not([data-workspace-pending]):has([data-slot=project-route-notice])_&]:hidden',
+    );
     expect(phone.className).toContain('md:hidden');
   });
 });

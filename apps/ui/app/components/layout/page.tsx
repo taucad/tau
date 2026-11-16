@@ -552,7 +552,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     titleItems,
     actionItems,
     pageWrapperMatches,
-    enableOverflowY,
+    enableOverflowY: routeEnablesOverflowY,
     providers,
     enablePageHeaderMatches,
   } = useTypedMatches((handles) => ({
@@ -567,6 +567,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   }));
   const { key: locationKey, pathname, hash } = useLocation();
   const workspaceFrame = useWorkspaceFrameState();
+  const enableOverflowY = routeEnablesOverflowY && !workspaceFrame.pending;
   const navigationType = useNavigationType();
   const pageScrollRef = useRef<HTMLDivElement>(null);
   const previousPathnameRef = useRef(pathname);
@@ -615,7 +616,11 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   // D11/I4: one header action, from the deepest route that declares one, unless a deeper
   // titled page (`/projects/new` under `/projects`) sits below it: a parent's action is not the child's.
   const actionMatch = selectPageAction(actionItems, pageTitles.path);
-  const enablePageHeader = !enablePageHeaderMatches.some((match) => match.handle.enablePageHeader === false);
+  /* A15b2 review: drawn ahead of the route, the shell lays out the destination as the project route does (no page header,
+   * no page scroller, `projectRouteHandle`), so the frame is drawn in its final box at the top of the section rather
+   * than in the page being left's layout, where it would move on the commit or sit above a scrolled-away offset. */
+  const enablePageHeader =
+    !workspaceFrame.pending && !enablePageHeaderMatches.some((match) => match.handle.enablePageHeader === false);
   const hasPageHeaderChrome =
     hasBreadcrumbItems || (actionMatch !== undefined && actionMatch.handle.actionsScope !== 'phone');
   const isMobile = useIsMobile();
@@ -715,7 +720,11 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                 <SettingsDialog />
                 {/* A15b2: the shell draws the workspace frame, above the route's providers, so a click on a project
                     draws it before the route's commit and the commit only fills it (`useWorkspaceFrameState`). */}
-                <WorkspaceFrame isDrawn={workspaceFrame.drawn} isPending={workspaceFrame.pending}>
+                <WorkspaceFrame
+                  isDrawn={workspaceFrame.drawn}
+                  isPending={workspaceFrame.pending}
+                  pathname={workspaceFrame.pathname}
+                >
                   <Compose components={Providers}>
                     <RouteCommandPaletteItems />
                     <HomeFileManagerNotice />

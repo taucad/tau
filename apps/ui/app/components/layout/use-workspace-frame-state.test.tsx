@@ -10,8 +10,8 @@ import { isProjectPath, useWorkspaceFrameState } from '#components/layout/use-wo
  */
 
 function Probe(): React.JSX.Element {
-  const { drawn, pending } = useWorkspaceFrameState();
-  return <output data-testid='frame-state'>{`${String(drawn)} ${String(pending)}`}</output>;
+  const { drawn, pending, pathname } = useWorkspaceFrameState();
+  return <output data-testid='frame-state'>{`${String(drawn)} ${String(pending)} ${pathname}`}</output>;
 }
 
 const readState = (): string => screen.getByTestId('frame-state').textContent;
@@ -24,6 +24,8 @@ describe('isProjectPath', () => {
     expect(isProjectPath('/w/home/gearbox/preview')).toBe(false);
     expect(isProjectPath('/w/home/gearbox.data')).toBe(false);
     expect(isProjectPath('/w/home')).toBe(false);
+    /* React Router matches paths case-insensitively. */
+    expect(isProjectPath('/W/home/gearbox')).toBe(true);
   });
 });
 
@@ -35,7 +37,7 @@ describe('useWorkspaceFrameState', () => {
       </MemoryRouter>,
     );
 
-    expect(readState()).toBe('true false');
+    expect(readState()).toBe('true false /w/home/gearbox');
   });
 
   it('draws nothing off a project route', () => {
@@ -45,7 +47,7 @@ describe('useWorkspaceFrameState', () => {
       </MemoryRouter>,
     );
 
-    expect(readState()).toBe('false false');
+    expect(readState()).toBe('false false /');
   });
 
   it('draws the frame ahead of the route while the router loads a project, and settles once it commits', async () => {
@@ -63,21 +65,23 @@ describe('useWorkspaceFrameState', () => {
       { initialEntries: ['/'] },
     );
     render(<RouterProvider router={router} />);
-    expect(readState()).toBe('false false');
+    expect(readState()).toBe('false false /');
 
     await act(async () => {
       void router.navigate('/w/home/gearbox');
       await Promise.resolve();
     });
     expect(router.state.navigation.state).toBe('loading');
-    expect(readState()).toBe('true true');
+    /* The router has not pushed the URL yet: the frame is drawn for the destination it reports. */
+    expect(router.state.location.pathname).toBe('/');
+    expect(readState()).toBe('true true /w/home/gearbox');
 
     await act(async () => {
       release();
       await held;
     });
     expect(router.state.location.pathname).toBe('/w/home/gearbox');
-    expect(readState()).toBe('true false');
+    expect(readState()).toBe('true false /w/home/gearbox');
   });
 
   it('keeps the frame drawn while leaving a project, until the next route commits', async () => {
@@ -95,18 +99,18 @@ describe('useWorkspaceFrameState', () => {
       { initialEntries: ['/w/home/gearbox'], hydrationData: { loaderData: {} } },
     );
     render(<RouterProvider router={router} />);
-    expect(readState()).toBe('true false');
+    expect(readState()).toBe('true false /w/home/gearbox');
 
     await act(async () => {
       void router.navigate('/');
       await Promise.resolve();
     });
-    expect(readState()).toBe('true false');
+    expect(readState()).toBe('true false /w/home/gearbox');
 
     await act(async () => {
       release();
       await held;
     });
-    expect(readState()).toBe('false false');
+    expect(readState()).toBe('false false /');
   });
 });

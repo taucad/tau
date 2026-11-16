@@ -14,6 +14,14 @@ import {
   recordCloudLoad,
 } from '#support/cloud-stand-ins.js';
 
+/** F14: what an offline reload of a project draws. */
+type OfflineRead = {
+  readonly url: string;
+  readonly frame: boolean;
+  readonly workspace: boolean;
+  readonly alerts: readonly string[];
+};
+
 /**
  * The cloud-build load tier (lane A0.11, `ui-e2e:test:e2e:cloud-load`): the loading defects a self-host build cannot
  * show, because it has no billing fence and asks for `/v1/projects` only for a project on the Tau remote. The tier
@@ -386,33 +394,35 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-offline-shell-/u);
       await setTargetOffline(true);
       let reloadError = '';
+      let offline: OfflineRead;
+      /* Back online whatever happens, so a later row never runs offline. */
       try {
-        await target.reload();
-      } catch (error) {
-        reloadError = error instanceof Error ? error.message.split('\n')[0]! : String(error);
+        try {
+          await target.reload();
+        } catch (error) {
+          reloadError = error instanceof Error ? error.message.split('\n')[0]! : String(error);
+        }
+        const readOffline = async (): Promise<OfflineRead> =>
+          target.evaluate(() => ({
+            url: location.href,
+            frame: document.querySelector('[data-slot="workspace-frame"]') !== null,
+            workspace: document.querySelector('[data-project-workspace]') !== null,
+            alerts: [...document.querySelectorAll('[role="alert"]')].map((node) =>
+              node.textContent.trim().slice(0, 120),
+            ),
+          }));
+        /* Up to 30 s for the workspace; a page that never draws it is the defect, read as it stands. */
+        await target
+          .waitFor(() => document.querySelector('[data-project-workspace]') !== null, undefined, { timeout: 30_000 })
+          .catch(() => undefined);
+        offline = await readOffline().catch(() => ({ url: '', frame: false, workspace: false, alerts: [] }));
+        await target.writeArtifact(
+          'cloud-load-gate/f14-offline-reload.json',
+          `${JSON.stringify({ route, reloadError, offline }, null, 2)}\n`,
+        );
+      } finally {
+        await setTargetOffline(false);
       }
-      const readOffline = async (): Promise<{
-        readonly url: string;
-        readonly frame: boolean;
-        readonly workspace: boolean;
-        readonly alerts: readonly string[];
-      }> =>
-        target.evaluate(() => ({
-          url: location.href,
-          frame: document.querySelector('[data-slot="workspace-frame"]') !== null,
-          workspace: document.querySelector('[data-project-workspace]') !== null,
-          alerts: [...document.querySelectorAll('[role="alert"]')].map((node) => node.textContent.trim().slice(0, 120)),
-        }));
-      /* Up to 30 s for the workspace; a page that never draws it is the defect, read as it stands. */
-      await target
-        .waitFor(() => document.querySelector('[data-project-workspace]') !== null, undefined, { timeout: 30_000 })
-        .catch(() => undefined);
-      const offline = await readOffline().catch(() => ({ url: '', frame: false, workspace: false, alerts: [] }));
-      await target.writeArtifact(
-        'cloud-load-gate/f14-offline-reload.json',
-        `${JSON.stringify({ route, reloadError, offline }, null, 2)}\n`,
-      );
-      await setTargetOffline(false);
       await defect(() => {
         expect(
           { frame: offline.frame, workspace: offline.workspace, alerts: offline.alerts },

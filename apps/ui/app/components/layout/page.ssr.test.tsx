@@ -3,13 +3,18 @@ import { renderToString } from 'react-dom/server';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('react-router', () => ({
-  Link: ({ children, to }: { readonly children: ReactNode; readonly to: string }) => <a href={to}>{children}</a>,
-  Outlet: () => <div>Server route content</div>,
-  useLocation: () => ({ key: 'default', pathname: '/' }),
-  NavigationType: { Pop: 'POP', Push: 'PUSH', Replace: 'REPLACE' },
-  useNavigationType: () => 'POP',
-}));
+vi.mock('react-router', async () => {
+  const { createContext } = await import('react');
+  return {
+    /* No data router here: the shell's workspace frame state reads the committed location (A15b2). */
+    UNSAFE_DataRouterContext: createContext(undefined),
+    Link: ({ children, to }: { readonly children: ReactNode; readonly to: string }) => <a href={to}>{children}</a>,
+    Outlet: () => <div>Server route content</div>,
+    useLocation: () => ({ key: 'default', pathname: '/' }),
+    NavigationType: { Pop: 'POP', Push: 'PUSH', Replace: 'REPLACE' },
+    useNavigationType: () => 'POP',
+  };
+});
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => 'authed' }));
 vi.mock('#flags/use-feature.js', () => ({ useFeatureFlags: () => ({}) }));
 vi.mock('#hooks/use-typed-matches.js', () => ({

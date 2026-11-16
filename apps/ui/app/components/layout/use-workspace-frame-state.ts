@@ -23,7 +23,7 @@ import {
 } from 'react-router';
 
 /** `/w/:workspace/:project`, the URLs the project route matches (`route-classes.ts`, the project class). */
-const projectPathPattern = /^\/w\/[^/.]+\/[^/.]+\/?$/u;
+const projectPathPattern = /^\/w\/[^/.]+\/[^/.]+\/?$/iu;
 
 /**
  * Whether a pathname is a project route's.
@@ -43,6 +43,11 @@ export type WorkspaceFrameState = {
   readonly drawn: boolean;
   /** The frame is drawn for the router's destination before the route has committed. */
   readonly pending: boolean;
+  /**
+   * The project the frame is drawn for: the destination while pending, else the committed location. The router reports
+   * the destination before it pushes the URL, so the frame reads its hint from this, not from the document's URL.
+   */
+  readonly pathname: string;
 };
 
 /**
@@ -62,5 +67,6 @@ export function useWorkspaceFrameState(): WorkspaceFrameState {
   );
   const committedProject = isProjectPath(committed);
   const destinationProject = isProjectPath(destination);
-  return { drawn: committedProject || destinationProject, pending: destinationProject && !committedProject };
+  const pending = destinationProject && !committedProject;
+  return { drawn: committedProject || destinationProject, pending, pathname: pending ? destination : committed };
 }

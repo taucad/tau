@@ -1114,7 +1114,7 @@ type DestinationFrameLoad = {
 };
 
 knownDefect(
-  'F11 (A15b): a click on a project row from Home, with the project route module and the workspace chunk 3 s late, commits the URL and paints the destination workspace frame within 100 ms',
+  'F11 (A15b): a click on a project row from Home, with the project route module and the workspace chunk 3 s late, commits the URL and paints the destination workspace frame within 100 ms, in its final box',
   {
     artifact: 'f11-wide',
     expectedFailure: false,
@@ -1166,14 +1166,31 @@ knownDefect(
       return { record, click: click!, pushAt, routeChunk };
     },
     assert: ({ record, click, pushAt }) => {
-      const frame = regionsOf(record, 'workspaceFrame').find((entry) => entry.present && entry.t >= click.t);
+      const drawn = regionsOf(record, 'workspaceFrame').filter((entry) => entry.present && entry.t >= click.t);
+      const frame = drawn[0];
+      /* A15b2 review: drawn ahead of the route, the frame is already the destination's, one node in its final box, on
+       * screen, so the route's commit moves and replaces nothing. */
+      const settled = drawn.at(-1);
+      const moved = drawn.filter(
+        (entry) =>
+          entry.node !== settled?.node ||
+          entry.x !== settled.x ||
+          entry.y !== settled.y ||
+          entry.width !== settled.width ||
+          entry.height !== settled.height,
+      );
       expectMeasured(
         {
           pushWithin: pushAt !== undefined && pushAt - click.t <= acknowledgeMilliseconds,
           frameWithin: frame !== undefined && frame.t - click.t <= acknowledgeMilliseconds,
+          frameVisible: frame?.visible === true,
+          frameMoves: moved.map(
+            (entry) =>
+              `${describeFrame(entry)}: node ${entry.node} ${entry.x},${entry.y} ${entry.width}x${entry.height}`,
+          ),
         },
-        `F11: after the click in ${describeFrame(click)}, pushState came ${pushAt === undefined ? 'never' : `${Math.round(pushAt - click.t)} ms`} later and the workspace frame ${frame === undefined ? 'never' : `${Math.round(frame.t - click.t)} ms later, in ${describeFrame(frame)}`}`,
-        { pushWithin: true, frameWithin: true },
+        `F11: after the click in ${describeFrame(click)}, pushState came ${pushAt === undefined ? 'never' : `${Math.round(pushAt - click.t)} ms`} later and the workspace frame ${frame === undefined ? 'never' : `${Math.round(frame.t - click.t)} ms later, in ${describeFrame(frame)}`}, settling at ${settled === undefined ? 'none' : `node ${settled.node} ${settled.x},${settled.y} ${settled.width}x${settled.height}`}`,
+        { pushWithin: true, frameWithin: true, frameVisible: true, frameMoves: [] },
       );
     },
   },

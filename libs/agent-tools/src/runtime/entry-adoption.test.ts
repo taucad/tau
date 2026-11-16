@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RpcGeoSpecClient, RpcRuntimeClient } from '@taucad/chat/rpc';
+import { checkProjectManifestReplacement, projectManifestSchemaUrl } from '@taucad/types';
 import { withEntryAdoption } from '#runtime/entry-adoption.js';
 import type { EntryAdoptionFileSystem } from '#runtime/entry-adoption.js';
 
@@ -121,6 +122,57 @@ describe('withEntryAdoption', () => {
     expect(packageFiles).toHaveBeenCalledWith(
       expect.objectContaining({ targetFile: 'main.py', projectName: 'Bracket' }),
     );
+  });
+
+  it('reports a refused main in the evaluate_model and test_model results, leaving the degraded tau.json as it was', async () => {
+    /* A hand-written manifest without description and tags: the host refuses an implicit write (manifest Rule 15). */
+    const degraded = JSON.stringify({ $schema: projectManifestSchemaUrl, name: 'Bracket', assets: {} });
+    const { files, fileSystem } = memoryFiles({ 'tau.json': degraded, 'bracket.ts': 'x' });
+    const guarded: typeof fileSystem = {
+      ...fileSystem,
+      writeFile: vi.fn(async (path: string, content: string) => {
+        const refusal =
+          path === 'tau.json' ? checkProjectManifestReplacement(new TextEncoder().encode(content)) : undefined;
+        if (refusal !== undefined) {
+          throw Object.assign(new Error(refusal), { code: 'VALIDATION_ERROR' });
+        }
+        await fileSystem.writeFile(path, content);
+      }),
+    };
+    const onAdopted = vi.fn();
+    const runTests: RpcGeoSpecClient['runTests'] = async () => {
+      const output: unknown = {
+        success: true,
+        lineage: [
+          {
+            file: 'check.geospec.ts',
+            lineage: {
+              loads: [{ status: 'complete', evidence: { sourceRevision: { entry: 'bracket.ts', files: {} } } }],
+            },
+          },
+        ],
+      };
+      return output as Awaited<ReturnType<RpcGeoSpecClient['runTests']>>;
+    };
+    const adopted = withEntryAdoption(
+      { kernelClient: ready(), geospec: { runTests } },
+      { fileSystem: guarded, onAdopted },
+    );
+
+    const evaluated = await adopted.kernelClient.evaluateModel({ targetFile: 'bracket.ts' });
+    const args: unknown = { files: ['check.geospec.ts'] };
+    const tested = await adopted.geospec.runTests(args as Parameters<RpcGeoSpecClient['runTests']>[0]);
+
+    const refusal =
+      'The main entry was not recorded: tau.json is not a valid project manifest (description: Invalid input: expected string, received undefined; tags: Invalid input: expected array, received undefined); fix it and set assets.main.entryPath to "bracket.ts".';
+    expect(evaluated).toMatchObject({
+      success: true,
+      status: 'ready',
+      kernelIssues: [{ code: 'INVALID_RECORD', severity: 'warning', message: refusal }],
+    });
+    expect(tested).toMatchObject({ success: true, manifestRefusal: refusal });
+    expect(files.get('tau.json')).toBe(degraded);
+    expect(onAdopted).not.toHaveBeenCalled();
   });
 
   it('passes a folder without tau.json, or with a manifest it cannot parse, through untouched', async () => {

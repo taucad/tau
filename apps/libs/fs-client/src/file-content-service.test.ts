@@ -2310,6 +2310,22 @@ describe('FileContentService', () => {
       expect(proxy.readFile).not.toHaveBeenCalled();
     });
 
+    it('should tell a retained path’s removal, and forget it once released', () => {
+      const orphans = vi.fn();
+      service.onDidChangeOrphaned(orphans);
+      const release = service.retain('kept.ts');
+
+      emitFileChanged({ type: 'fileDeleted', path: 'kept.ts', backend: 'indexeddb' });
+      expect(orphans).toHaveBeenCalledWith({ path: 'kept.ts', orphaned: true });
+      expect(service.peekOutcome('kept.ts')).toEqual({ kind: 'orphaned' });
+
+      release();
+      release();
+      orphans.mockClear();
+      emitFileChanged({ type: 'fileDeleted', path: 'other.ts', backend: 'indexeddb' });
+      expect(orphans).not.toHaveBeenCalled();
+    });
+
     it('should still answer a file it never held as orphaned once it is gone', async () => {
       emitFileChanged({ type: 'fileDeleted', path: 'gone.ts', backend: 'indexeddb' });
       vi.mocked(proxy.readFile).mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));

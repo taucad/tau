@@ -307,6 +307,8 @@ export class FileContentService {
   private readonly pathNotifyRegistry = new PathSubscriberRegistry();
   private readonly contentChangeRegistry = new PathSubscriberRegistry<ContentChangeEvent>();
   private readonly orphanedPaths = new Set<string>();
+  /** Paths a consumer keeps state for without a view, by how many times each is retained. */
+  private readonly retainedPaths = new Map<string, number>();
   private readonly editorSaves = new Map<string, EditorSaveState>();
   private readonly editorMutationBarriers: EditorMutationBarrier[] = [];
   private readonly fileOperationParticipants = new Set<FileOperationParticipant>();
@@ -1176,6 +1178,34 @@ export class FileContentService {
   }
 
   /**
+   * Hold a path's outcome for state kept without a view, such as an editor
+   * document language work opened: until released, the path is never pruned
+   * and every change or removal of it is told, as for a subscribed path, so
+   * the state never outlives the file or misses a write (STO-25 SP2g, I5, I7).
+   * Unlike {@link subscribe}, it registers no watch and reads nothing.
+   *
+   * @param path - Workspace-relative path.
+   * @returns Releases this hold; calling it again does nothing.
+   */
+  public retain(path: string): () => void {
+    this.retainedPaths.set(path, (this.retainedPaths.get(path) ?? 0) + 1);
+    let held = true;
+    return () => {
+      if (!held) {
+        return;
+      }
+      held = false;
+      const count = (this.retainedPaths.get(path) ?? 1) - 1;
+      if (count > 0) {
+        this.retainedPaths.set(path, count);
+      } else {
+        this.retainedPaths.delete(path);
+        this.pruneRetainedOutcomes();
+      }
+    };
+  }
+
+  /**
    * Sync check of cached orphan flag. A file is orphaned when a resolve
    * attempt fails with ENOENT or after an explicit delete.
    * @param path - Workspace-relative path.
@@ -1729,7 +1759,11 @@ export class FileContentService {
   }
 
   private onWorkerBackendChanged(): void {
-    const pathsToRefresh = new Set<string>([...this.outcomes.keys(), ...this.pathNotifyRegistry.subscribedPaths()]);
+    const pathsToRefresh = new Set<string>([
+      ...this.outcomes.keys(),
+      ...this.pathNotifyRegistry.subscribedPaths(),
+      ...this.retainedPaths.keys(),
+    ]);
     for (const [path] of this.cache.entries()) {
       pathsToRefresh.add(path);
     }
@@ -1764,7 +1798,7 @@ export class FileContentService {
         toRefresh.add(path);
       }
     }
-    for (const path of this.pathNotifyRegistry.subscribedPaths()) {
+    for (const path of [...this.pathNotifyRegistry.subscribedPaths(), ...this.retainedPaths.keys()]) {
       if (directoryPrefix === '' || path === relativeDirectory || path.startsWith(directoryPrefix)) {
         toRefresh.add(path);
       }
@@ -1778,7 +1812,10 @@ export class FileContentService {
 
   private shouldRefreshWorkerPath(relative: string): boolean {
     return (
-      this.outcomes.has(relative) || this.cache.has(relative) || this.pathNotifyRegistry.hasPathSubscribers(relative)
+      this.outcomes.has(relative) ||
+      this.cache.has(relative) ||
+      this.pathNotifyRegistry.hasPathSubscribers(relative) ||
+      this.retainedPaths.has(relative)
     );
   }
 
@@ -1976,13 +2013,14 @@ export class FileContentService {
     this.budget?.reclaim(this.budgetMember);
   }
 
-  /** Whether a subscriber, lease, save or pending read still holds this path's outcome. */
+  /** Whether a subscriber, lease, save, pending read or retention still holds this path's outcome. */
   private isOutcomeHeld(path: string): boolean {
     return (
       this.pathNotifyRegistry.hasPathSubscribers(path) ||
       (this.observations.get(path)?.deref()?.activeLeaseCount ?? 0) > 0 ||
       this.editorSaves.has(path) ||
-      this.pendingResolves.has(path)
+      this.pendingResolves.has(path) ||
+      this.retainedPaths.has(path)
     );
   }
 

@@ -150,6 +150,9 @@ jobs:
       KEY: ${{ needs.key.outputs.key }}
       TAG: ${{ needs.decide.outputs.tag }}
       TAGGED: ${{ needs.decide.outputs.tagged }}
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -315,6 +318,22 @@ jobs:
           # "Validate workspace" has proven every blob on both hosts; a failing proof leaves it open.
           gh pr merge "$PIN_BRANCH" --auto --squash
           printf -- '- pin pull request: %s\n' "$subject" >> "$GITHUB_STEP_SUMMARY"
+      # A new key's push reaches an already open pin pull request before its blobs publish, so that head's CI can
+      # fail on "not served". Nothing pushes again after the publish, so rerun that failed CI here; otherwise the
+      # failure would hold auto-merge until someone reran it.
+      - name: Rerun the pin pull request's CI if it failed before the publish
+        if: steps.published.outputs.ready == 'true' || steps.served.outputs.served == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=$(gh pr view "$PIN_BRANCH" --json headRefOid --jq .headRefOid)
+          run=$(gh run list --workflow ci.yml --branch "$PIN_BRANCH" --commit "$head" --event pull_request \
+            --json databaseId,conclusion --jq '[.[] | select(.conclusion == "failure")][0].databaseId // empty')
+          if [ -n "$run" ]; then
+            gh run rerun "$run" --failed
+            printf -- '- reran failed pin pull request CI run %s\n' "$run" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # ---- Publish, on a dependency@picogk-browser-* tag ------------------------------------------------
 

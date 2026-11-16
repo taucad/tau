@@ -2388,6 +2388,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               return head === undefined || tree === undefined ? undefined : { revisionId: head, tree };
             },
           };
+    /* Taken before it looks: a tree write that announces a newer tree meanwhile owns the next word (D10, I7). */
+    const basis = rooted.declarationBasis?.();
     const tree = await captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
       memos,
       bypassMemo,
@@ -2402,7 +2404,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
      * catches a checkout edited from outside. Every other view answers a path by this mark alone.
      */
     try {
-      await rooted.declarePending?.(declaredPlaceholders(tree, { reading: await attributesReading() }));
+      await rooted.declarePending?.(
+        declaredPlaceholders(tree, { reading: await attributesReading() }),
+        undefined,
+        basis === undefined ? undefined : { basis },
+      );
       declaredCheckouts.add(place.id);
     } catch (error) {
       /* An index that cannot open answers no mark at all: the capture stands, and the next one declares again. */

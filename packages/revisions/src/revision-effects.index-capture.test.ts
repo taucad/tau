@@ -119,12 +119,12 @@ const fixture = async (
         declarations.push('release');
         rooted.releaseDeclaration?.();
       },
-      declarePending: (async (declared, paths) => {
+      declarePending: (async (declared, paths, declareOptions) => {
         declarations.push('declare');
         if (options?.failingDeclarations === true) {
           throw new Error('the index could not open');
         }
-        return rooted.declarePending?.(declared, paths);
+        return rooted.declarePending?.(declared, paths, declareOptions);
       }) satisfies NonNullable<RevisionFileSystem['declarePending']>,
       readFile: (async (path: string, ...rest: readonly unknown[]) => {
         reads.push(path);

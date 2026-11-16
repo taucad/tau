@@ -785,6 +785,42 @@ describe('the fill check of a warm reopen (Tau #2013)', () => {
     expect(warn).toHaveBeenCalledWith('[revisions] large-object placeholders could not be checked', expect.any(Error));
   });
 
+  /* A compare is not fenced against a tree write: what its capture read is the older tree's, and never declared over the newer one. */
+  it('should never declare what a compare captured over a tree a write announced meanwhile', async () => {
+    const kept = pointerOf('a'.repeat(64), 123_456);
+    const added = pointerOf('b'.repeat(64), 654_321);
+    const { session } = await fixture({ ...files(10), 'assets/part.stl': kept });
+    const first = await session();
+    /* The compare's walk stops at an ordinary file; a tree write announces its tree and lands a new placeholder. */
+    const paused = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    let wrote = false;
+    first.hooks.afterRead = async (path) => {
+      if (path === 'dir1/f1.txt' && !wrote) {
+        wrote = true;
+        paused.resolve();
+        await resume.promise;
+      }
+    };
+    const compared = compare(first.actors);
+    await paused.promise;
+    await first.rooted.writeFile('assets/new.stl', added);
+    await first.rooted.expectEntries!([
+      { path: 'assets/part.stl', size: kept.length, pending: { oid: 'a'.repeat(64), size: 123_456 }, arriving: false },
+      { path: 'assets/new.stl', size: added.length, pending: { oid: 'b'.repeat(64), size: 654_321 }, arriving: false },
+    ]);
+    first.rooted.endExpectation!();
+    resume.resolve();
+    await compared;
+    await first.actors.settled();
+
+    expect(wrote).toBe(true);
+    expect(await first.rooted.pendingPaths!(['assets/part.stl', 'assets/new.stl'])).toStrictEqual([
+      'assets/part.stl',
+      'assets/new.stl',
+    ]);
+  });
+
   it('should still find a placeholder a pointer-sized file holds', async () => {
     const pointer = pointerOf('a'.repeat(64), 123_456);
     const { session } = await fixture({ ...files(10), 'assets/part.stl': pointer });

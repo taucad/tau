@@ -108,6 +108,46 @@ export type TranscoderRuntime = {
   signal: AbortSignal;
 };
 
+/**
+ * Fetches a transcoder's declared implementation assets on first use and checks each one against its pinned digest.
+ * @public
+ */
+export type ImplementationAssetLoader = {
+  /**
+   * Load one declared asset. The first call for an asset fetches it and checks its SHA-256 against the declared digest.
+   * Later calls in the same worker return the same verified bytes. A failed load is not cached, so the next call
+   * tries again.
+   *
+   * @param id - The `id` of an entry in the transcoder's `implementationAssets`.
+   * @returns The verified bytes. They are shared, so read them but never transfer or modify them.
+   * @throws {Error} When `id` is not declared, the fetch fails, or the digest does not match.
+   */
+  load(id: string): Promise<Uint8Array<ArrayBuffer>>;
+};
+
+/**
+ * Services provided to a transcoder's `initialize`.
+ * @public
+ */
+export type TranscoderInitializeRuntime = Omit<TranscoderRuntime, 'signal'> & {
+  /**
+   * Loader for the declared implementation assets. The runtime always provides it. It is missing only when code
+   * calls `initialize` directly, outside a runtime.
+   */
+  readonly implementationAssets?: ImplementationAssetLoader;
+};
+
+/**
+ * When the runtime fetches and verifies a transcoder's implementation assets.
+ *
+ * - `'initialize'` (default): fetch and verify every asset before `initialize` runs.
+ * - `'on-use'`: check only the declarations before `initialize`. The transcoder then fetches each asset with
+ *   `implementationAssets.load(id)` the first time it needs it, and that call verifies it. Use this when a
+ *   transcoder needs only some of its assets for a given request, as when each format has its own codec.
+ * @public
+ */
+export type ImplementationAssetLoading = 'initialize' | 'on-use';
+
 // =============================================================================
 // defineTranscoder API Types
 // =============================================================================
@@ -138,6 +178,9 @@ export type TranscoderDefinition<
   /** Selected implementation assets whose verified digests participate in artifact identity. */
   implementationAssets?: readonly RuntimeImplementationAsset[];
 
+  /** When the runtime fetches and verifies `implementationAssets`. Defaults to `'initialize'`. */
+  implementationAssetLoading?: ImplementationAssetLoading;
+
   /** Zod schema for validating and typing transcoder options */
   optionsSchema?: z.ZodType<Options>;
 
@@ -148,7 +191,7 @@ export type TranscoderDefinition<
   edges: Edges;
 
   /** Initialize transcoder with typed options */
-  initialize(options: Options, runtime: Omit<TranscoderRuntime, 'signal'>): Promise<Context>;
+  initialize(options: Options, runtime: TranscoderInitializeRuntime): Promise<Context>;
 
   /** Execute the format conversion */
   transcode(input: TranscodeInput<Edges>, runtime: TranscoderRuntime, context: Context): Promise<TranscodeResult>;
@@ -171,10 +214,12 @@ type TranscoderDefinitionConfig<
   version: string;
   /** Selected implementation assets. */
   implementationAssets?: readonly RuntimeImplementationAsset[];
+  /** When the runtime fetches and verifies `implementationAssets`. Defaults to `'initialize'`. */
+  implementationAssetLoading?: ImplementationAssetLoading;
   /** Statically declared format conversion edges. */
   edges: Edges;
   /** Initialize transcoder with typed options */
-  initialize(options: Options, runtime: Omit<TranscoderRuntime, 'signal'>): Promise<Context>;
+  initialize(options: Options, runtime: TranscoderInitializeRuntime): Promise<Context>;
   /** Execute the format conversion */
   transcode(input: TranscodeInput<Edges>, runtime: TranscoderRuntime, context: Context): Promise<TranscodeResult>;
   /** Tear down transcoder resources */

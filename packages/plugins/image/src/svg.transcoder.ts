@@ -445,13 +445,11 @@ const edges = [
   {
     from: 'svg',
     to: 'png',
-    fidelity: 'mesh',
     optionsSchema: svgPngOptionsSchema,
   },
   {
     from: 'svg',
     to: 'webp',
-    fidelity: 'mesh',
     optionsSchema: svgWebpOptionsSchema,
   },
 ] as const;

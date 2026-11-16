@@ -15,6 +15,7 @@ import { util as zodUtility } from 'zod';
 import { encodeBase64 } from '#harness/base64.js';
 import { attachmentPathPattern } from '#log/event-schema.js';
 import type { JsonObject, JsonValue, ProviderMessage } from '#log/event-types.js';
+import { sniffAttachmentMediaType } from '#wire/attachment-media.js';
 
 // JPEG is a machine camera still's encoding (WP5); captures themselves are PNG or WebP.
 const dataUrlPattern = /^data:(image\/(?:png|webp|jpeg));base64,(.+)$/u;
@@ -142,7 +143,9 @@ export const restoreScreenshotImages = async (
         absent.push(path);
         return [];
       }
-      return [{ ...facts, dataUrl: `data:${mimeType};base64,${encodeBase64(bytes)}` }];
+      // Labelled from the bytes, as a `file-ref` is (I1); the recorded type only names bytes no probe recognises.
+      const label = sniffAttachmentMediaType(bytes) ?? mimeType;
+      return [{ ...facts, dataUrl: `data:${label};base64,${encodeBase64(bytes)}` }];
     }),
   );
   return { ...screenshot.message, content: { ...screenshot.result, images: images.flat() } };

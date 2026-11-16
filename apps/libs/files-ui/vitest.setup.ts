@@ -5,3 +5,18 @@ import { afterEach, expect } from 'vitest';
 expect.extend(matchers);
 // Testing Library only unmounts on its own when Vitest globals are on; generated suites keep them off.
 afterEach(cleanup);
+
+// Jsdom has no ResizeObserver; the export grid's Radix tooltips observe their anchors. Same no-op as apps/ui.
+globalThis.ResizeObserver = class ResizeObserver {
+  public observe(): void {
+    // No-op
+  }
+
+  public unobserve(): void {
+    // No-op
+  }
+
+  public disconnect(): void {
+    // No-op
+  }
+};

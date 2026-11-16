@@ -8,6 +8,7 @@ import {
   isEventGloballyVisible,
   isWorkspaceMutationError,
   overflowLossSignals,
+  pruneDirectorySummaries,
   policyAtRoot,
   RootedFileSystemError,
 } from '@taucad/filesystem';
@@ -318,10 +319,11 @@ const scopeEventToRoot = (
   if (event.type === 'backendChanged') {
     return event;
   }
-  /* A summary, removal or move of an ancestor changed all the port can see: its whole-root reset (I5). */
+  /* A removal or move of an ancestor changed all the port can see: its whole-root reset (I5). An
+   * ancestor's summary says only that its listing changed, so it falls outside the root below. */
   const above = (path: string): boolean => path !== root && (path === '/' || root.startsWith(`${path}/`));
   if (
-    ((event.type === 'directoryChanged' || event.type === 'directoryDeleted') && above(event.path)) ||
+    (event.type === 'directoryDeleted' && above(event.path)) ||
     (event.type === 'directoryRenamed' && (above(event.oldPath) || above(event.newPath)))
   ) {
     return { type: 'directoryChanged', path: '', backend: event.backend };
@@ -1281,7 +1283,8 @@ function exposeFileSystemHandlers(
         }
       }
     }
-    for (const [recipientPort, facts] of perPort) {
+    for (const [recipientPort, scoped] of perPort) {
+      const facts = pruneDirectorySummaries(scoped);
       const message: ChangeEvent = facts.length === 1 ? facts[0]! : { type: 'changeSet', entries: facts };
       serverHandles.get(recipientPort)?.emit('fileChanged', message);
     }

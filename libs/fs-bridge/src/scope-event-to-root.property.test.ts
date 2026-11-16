@@ -135,15 +135,15 @@ describe('scopeEventToRoot', () => {
   };
 
   /*
-   * STO-25 SP2g review F1 (I5): a summary, removal or move of a directory at or
-   * above a port's root changed everything the port can see. It used to be
-   * dropped as "outside the root", so a root-wide observer reset never reached
-   * a project connection; it is the port's whole-root reset.
+   * STO-25 SP2g review F1 (I5): a removal or move of the root or a directory
+   * above it changed everything the port can see, so it is the port's
+   * whole-root reset. A summary of an ancestor is not (re-review a3): it says
+   * only that the ancestor's listing changed — another project deleted, a
+   * discovery-wide change — and cannot change what is under the root.
    */
   it.each<PathChangeEvent>([
-    { type: 'directoryChanged', path: '/', backend: 'memory' },
-    { type: 'directoryChanged', path: '/projects', backend: 'memory' },
     { type: 'directoryDeleted', path: '/projects', backend: 'memory' },
+    { type: 'directoryDeleted', path: '/', backend: 'memory' },
     { type: 'directoryRenamed', oldPath: '/projects', newPath: '/archive', backend: 'memory' },
     { type: 'directoryRenamed', oldPath: '/old', newPath: '/projects', backend: 'memory' },
   ])('should reset the whole root for $type above it', async (event) => {
@@ -160,10 +160,25 @@ describe('scopeEventToRoot', () => {
     }
   });
 
-  it('should reset the whole root when an overflowed window held a summary above it', async () => {
+  it.each<PathChangeEvent>([
+    /* `_emitGlobalDiscoveryChange`: an unmapped external fact, relayed to every tab. */
+    { type: 'directoryChanged', path: '/', backend: 'memory' },
+    /* `ProjectDirectories`: another project under `/projects` was deleted. */
+    { type: 'directoryChanged', path: '/projects', backend: 'memory' },
+  ])('should not reset the root for a summary of $path above it', async (event) => {
+    const { bus, emit, close } = await connectRooted();
+    try {
+      bus.emit(event);
+      expect(emit).not.toHaveBeenCalled();
+    } finally {
+      close();
+    }
+  });
+
+  it('should reset the whole root when an overflowed window lost a removal above it', async () => {
     const { bus, emit, close } = await connectRooted(2);
     try {
-      bus.emit({ type: 'directoryChanged', path: '/', backend: 'memory' });
+      bus.emit({ type: 'directoryDeleted', path: '/projects', backend: 'memory' });
       bus.emit({ type: 'fileWritten', path: '/elsewhere/a.txt', backend: 'memory' });
       bus.emit({ type: 'fileWritten', path: '/elsewhere/b.txt', backend: 'memory' });
       expect(emit).toHaveBeenCalledExactlyOnceWith('fileChanged', {
@@ -171,6 +186,37 @@ describe('scopeEventToRoot', () => {
         path: '',
         backend: 'memory',
       } satisfies ChangeEvent);
+    } finally {
+      close();
+    }
+  });
+
+  it.each<PathChangeEvent>([
+    { type: 'fileWritten', path: `${root}/a.txt`, backend: 'memory' },
+    { type: 'directoryCreated', path: root, backend: 'memory' },
+  ])('should reset the root when an overflowed window lost $type on it', async (lost) => {
+    const { bus, emit, close } = await connectRooted(2);
+    try {
+      bus.emit(lost);
+      bus.emit({ type: 'fileWritten', path: '/elsewhere/a.txt', backend: 'memory' });
+      bus.emit({ type: 'fileWritten', path: '/elsewhere/b.txt', backend: 'memory' });
+      expect(emit).toHaveBeenCalledExactlyOnceWith('fileChanged', {
+        type: 'directoryChanged',
+        path: '',
+        backend: 'memory',
+      } satisfies ChangeEvent);
+    } finally {
+      close();
+    }
+  });
+
+  it('should not reset the root when an overflowed window lost only a summary above it', async () => {
+    const { bus, emit, close } = await connectRooted(2);
+    try {
+      bus.emit({ type: 'directoryChanged', path: '/projects', backend: 'memory' });
+      bus.emit({ type: 'fileWritten', path: '/elsewhere/a.txt', backend: 'memory' });
+      bus.emit({ type: 'fileWritten', path: '/elsewhere/b.txt', backend: 'memory' });
+      expect(emit).not.toHaveBeenCalled();
     } finally {
       close();
     }

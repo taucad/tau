@@ -1037,8 +1037,9 @@ describe('exposeFileSystem coalesced delivery', () => {
     expect(emitSpy).toHaveBeenCalledOnce();
     expect(emitSpy).toHaveBeenCalledWith('fileChanged', {
       type: 'changeSet',
+      /* The removal as itself, then one re-list per directory no later re-list of an ancestor covers. */
       entries: [
-        { type: 'directoryChanged', path: '/projects/alpha/parts', backend: testBackend },
+        { type: 'directoryDeleted', path: '/projects/alpha/old', backend: testBackend },
         { type: 'directoryChanged', path: '/projects/alpha', backend: testBackend },
         { type: 'directoryChanged', path: '/projects/alpha/old', backend: testBackend },
         { type: 'directoryChanged', path: '/', backend: 'opfs' },

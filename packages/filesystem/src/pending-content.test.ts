@@ -383,15 +383,13 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
       }, milliseconds);
     });
 
-  /* Configuring the route makes it the revision layer's: a stat before any view of the revision layer's waits too. */
-  it('should hold a file the size of a pointer as soon as the route is configured, before the revision layer has a view', async () => {
-    const cold = await createService(undefined, { declared: false });
-    const view = cold.createRootedFileSystem(route);
-    const statting = view.stat('models/part.step');
-    expect(await Promise.race([statting, waiting()])).toBe('waiting');
-    await declarePart(cold);
-    expect(await statting).toMatchObject({ size: part.byteLength, pending: true });
-    cold.dispose();
+  /* Only the revision registry opening a project makes it the revision layer's: a project nobody opened is as it is. */
+  it('should neither hold nor refuse a pointer in a project the revision registry has not opened', async () => {
+    const unopened = await createService(undefined, { declared: false });
+    const view = unopened.createRootedFileSystem(route);
+    expect(await Promise.race([view.stat('models/part.step'), waiting()])).toMatchObject({ size: pointer.byteLength });
+    expect(await view.readFile('models/part.step')).toStrictEqual(pointer);
+    unopened.dispose();
   });
 
   /* Mounting the root is the revision layer's word that it will declare it: no capture has to start first. */

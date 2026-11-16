@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { normalizeImageAttachment } from '@taucad/agent-host/wire';
+import { heif } from '@taucad/heif';
 import { deriveTranscodeSources } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { attachmentTranscodeSources } from '#runtime/attachment-transcode-sources.js';
@@ -29,8 +30,8 @@ describe('attachment transcode sources', () => {
   });
 
   it('should admit only formats the desktop utility converts to jpeg', async () => {
-    // Dynamic, as the page loads `@taucad/image` and `@taucad/heif` lazily (`@nx/enforce-module-boundaries`).
-    const [{ image }, { heif }] = await Promise.all([import('@taucad/image'), import('@taucad/heif')]);
+    // Dynamic, as the page loads `@taucad/image` lazily (`@nx/enforce-module-boundaries`).
+    const { image } = await import('@taucad/image');
     const utilitySources = deriveTranscodeSources(defineRuntime({ plugins: [image(), heif()] }), 'jpeg');
     expect(utilitySources).toEqual(expect.arrayContaining([...attachmentTranscodeSources]));
   });

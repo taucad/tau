@@ -95,8 +95,8 @@ export function projectAvailability(
    * and so does the retry that follows until its own write announces the next tree. Only a write running now, or one
    * that landed, has a tree whose arriving rows the listing shows.
    */
-  const writing = status?.sync.pullPhase === 'applying' && !failed;
-  if (firstView !== undefined && !failed && firstViewOpens(firstView, status) && (writing || applied)) {
+  const hasTree = !failed && (status?.sync.pullPhase === 'applying' || applied);
+  if (firstView !== undefined && hasTree && firstViewOpens(firstView, status)) {
     return 'ready';
   }
   if (applied) {

@@ -420,6 +420,7 @@ function workspaceFor(files: Readonly<Record<string, string>>) {
   const stored = new Map(Object.entries(files).map(([path, text]) => [path, encoder.encode(text)]));
   const contentService = mock<FileContentService>();
   contentService.addEditorSaveFlusher.mockReturnValue(() => undefined);
+  contentService.retain.mockReturnValue(() => undefined);
   contentService.resolve.mockImplementation(async (path) => ({ kind: 'text', content: stored.get(path)! }));
   contentService.saveEditor.mockImplementation(async (path, content) => {
     stored.set(path, content);

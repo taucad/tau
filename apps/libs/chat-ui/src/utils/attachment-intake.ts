@@ -10,6 +10,8 @@
 
 import { attachmentMedia, isAttachmentMediaType, sniffAttachmentMediaType } from '@taucad/agent-host/wire';
 import type { AttachmentMediaType } from '@taucad/agent-host/wire';
+import { detectImageFormat, imageFormats, probeImage } from '@taucad/utils/image-probe';
+import type { ImageFormat } from '@taucad/utils/image-probe';
 
 /** The largest file intake reads; larger files are refused before any byte is read. */
 export const attachmentIntakeMaxBytes = 64 * 1024 * 1024;
@@ -20,11 +22,14 @@ const looseDeclaredTypes: ReadonlySet<string> = new Set(['image/jpg', 'image/pjp
 /**
  * Whether a file declared with this type may hold an attachment, and so is worth reading.
  *
+ * Any `image/*` type is read, so its bytes can name the format in a refusal ("HEIC images can't be attached") or be
+ * converted when the host has an edge for it.
+ *
  * @param declaredType - The file's `type`, as the browser reports it.
- * @returns `true` for a stored media type, a JPEG alias, or an unknown (empty) type.
+ * @returns `true` for a stored media type, any image type, a JPEG alias, or an unknown (empty) type.
  */
 export const mayHoldAttachment = (declaredType: string): boolean =>
-  isAttachmentMediaType(declaredType) || looseDeclaredTypes.has(declaredType);
+  isAttachmentMediaType(declaredType) || declaredType.startsWith('image/') || looseDeclaredTypes.has(declaredType);
 
 /**
  * What the composer hands the draft: an image as a `data:` URL whose media
@@ -34,15 +39,42 @@ export type AttachmentIntakeSource =
   | string
   | { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: AttachmentMediaType };
 
+/**
+ * Why intake refused a file, in the storage policy's vocabulary (`AttachmentRefusalReason`).
+ *
+ * - `not-an-image`: neither an image nor a PDF, by its declared type or its bytes.
+ * - `unsupported-format`: an image format this host neither stores nor converts; `format` names it.
+ * - `unreadable`: the signature names an image format but its header is damaged.
+ * - `too-large`: over {@link attachmentIntakeMaxBytes}, refused before any byte is read.
+ */
+export type AttachmentIntakeRefusalReason = 'not-an-image' | 'unsupported-format' | 'unreadable' | 'too-large';
+
+/** A file intake refused, with the format its bytes hold when they were read and recognised. */
+export type AttachmentIntakeRefusal = {
+  readonly outcome: 'refused';
+  readonly reason: AttachmentIntakeRefusalReason;
+  readonly format?: ImageFormat;
+};
+
 /** The outcome of reading one file at intake. */
 export type AttachmentIntake =
   | {
       readonly outcome: 'admitted';
       readonly kind: 'image' | 'document';
-      readonly mediaType: AttachmentMediaType;
+      /** A stored media type, or the media type of an image format the host converts. */
+      readonly mediaType: string;
       readonly source: AttachmentIntakeSource;
     }
-  | { readonly outcome: 'refused'; readonly reason: 'unsupported' | 'too-large' };
+  | AttachmentIntakeRefusal;
+
+/** What this host can convert at intake. */
+export type AttachmentIntakeOptions = {
+  /**
+   * The image formats the host converts to a stored type: `deriveTranscodeSources(runtime, 'jpeg')` over the
+   * host's runtime definition. A format outside it, and outside the stored set, is refused by name.
+   */
+  readonly transcodeSources?: readonly string[];
+};
 
 /**
  * Read a blob as a `data:` URL using `FileReader`.
@@ -67,37 +99,67 @@ export const readFileAsDataUrl = async (blob: Blob): Promise<string> =>
     reader.readAsDataURL(blob);
   });
 
+/** A `data:` URL of the bytes, labelled with the type they hold rather than the one the file claimed. */
+const dataUrlOf = async (bytes: Uint8Array<ArrayBuffer>, name: string, mediaType: string): Promise<string> =>
+  readFileAsDataUrl(new File([bytes], name, { type: mediaType }));
+
+const refused = (reason: AttachmentIntakeRefusalReason, format?: ImageFormat): AttachmentIntakeRefusal => ({
+  outcome: 'refused',
+  reason,
+  ...(format === undefined ? {} : { format }),
+});
+
 /**
  * Read one picked, dropped or pasted file and label it from its bytes.
  *
- * A declared type that cannot hold an attachment (`text/plain`, `image/heic`)
- * and a file over {@link attachmentIntakeMaxBytes} are refused without reading.
- * Otherwise the whole file is read once, labelled with
- * `sniffAttachmentMediaType`, and refused when its bytes are not a stored
- * type. A WebP named `.jpg` is admitted as `image/webp`; a JPEG typed `''`
- * is admitted as `image/jpeg`.
+ * A declared type that cannot hold an attachment (`text/plain`, `application/zip`) and a file over
+ * {@link attachmentIntakeMaxBytes} are refused without reading. Otherwise the whole file is read once and labelled
+ * from its bytes (I1):
+ *
+ * - bytes of a stored type are admitted under it: a WebP named `.jpg` as `image/webp`, a JPEG typed `''` as
+ *   `image/jpeg`;
+ * - an image whose format is in `transcodeSources` is admitted under its own media type, for the draft's
+ *   conversion step;
+ * - any other image is refused with its format, and anything else as `not-an-image`.
  *
  * @param file - The file the user chose.
+ * @param options - The formats this host converts.
  * @returns The admitted source and its media type, or the reason it was refused.
  * @throws When the file cannot be read.
  */
-export const readAttachmentFile = async (file: File): Promise<AttachmentIntake> => {
+export const readAttachmentFile = async (
+  file: File,
+  options: AttachmentIntakeOptions = {},
+): Promise<AttachmentIntake> => {
   if (!mayHoldAttachment(file.type)) {
-    return { outcome: 'refused', reason: 'unsupported' };
+    return refused('not-an-image');
   }
   if (file.size > attachmentIntakeMaxBytes) {
-    return { outcome: 'refused', reason: 'too-large' };
+    return refused('too-large');
   }
   const bytes = new Uint8Array(await file.arrayBuffer());
   const mediaType = sniffAttachmentMediaType(bytes);
-  if (mediaType === undefined) {
-    return { outcome: 'refused', reason: 'unsupported' };
+  if (mediaType !== undefined) {
+    const { kind } = attachmentMedia[mediaType];
+    return kind === 'document'
+      ? { outcome: 'admitted', kind, mediaType, source: { bytes, mediaType } }
+      : { outcome: 'admitted', kind, mediaType, source: await dataUrlOf(bytes, file.name, mediaType) };
   }
-  const { kind } = attachmentMedia[mediaType];
-  if (kind === 'document') {
-    return { outcome: 'admitted', kind, mediaType, source: { bytes, mediaType } };
+  const format = detectImageFormat(bytes);
+  if (format === undefined) {
+    return refused('not-an-image');
   }
-  // A re-typed copy, so the `data:` URL names what the bytes are rather than what the file claimed.
-  const dataUrl = await readFileAsDataUrl(new File([bytes], file.name, { type: mediaType }));
-  return { outcome: 'admitted', kind, mediaType, source: dataUrl };
+  if (probeImage(bytes) === undefined) {
+    return refused('unreadable', format);
+  }
+  if (!(options.transcodeSources ?? []).includes(format)) {
+    return refused('unsupported-format', format);
+  }
+  const converted = imageFormats[format].mediaType;
+  return {
+    outcome: 'admitted',
+    kind: 'image',
+    mediaType: converted,
+    source: await dataUrlOf(bytes, file.name, converted),
+  };
 };

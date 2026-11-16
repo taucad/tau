@@ -6,7 +6,8 @@ import { createMemoryRouter, RouterProvider, UNSAFE_DataRouterContext } from 're
 import { describe, expect, it } from 'vitest';
 
 /*
- * `project-route-intent.tsx` reads the router's live state through `UNSAFE_DataRouterContext` (ProjectFocus I2).
+ * `project-route-intent.tsx` (ProjectFocus I2) and `use-workspace-frame-state.ts` (A15b2, F11) read the router's live
+ * state through `UNSAFE_DataRouterContext`.
  * React Router changes its private contexts in minor releases, so this fails the bump that stops the context carrying
  * the router, before the route sink silently loses its deferral.
  */

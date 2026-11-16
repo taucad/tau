@@ -1,4 +1,5 @@
 import { readAttachmentFile } from '#utils/attachment-intake.js';
+import type { AttachmentIntakeRefusal } from '#utils/attachment-intake.js';
 
 export type ClipboardPasteEvent = {
   readonly clipboardData?: DataTransfer;
@@ -7,11 +8,16 @@ export type ClipboardPasteEvent = {
 
 type HandleClipboardImagePasteOptions = {
   readonly event: ClipboardPasteEvent;
-  /** Receives each pasted image as a `data:` URL labelled from its bytes. */
-  readonly onImage: (dataUrl: string) => void;
+  /** Receives each pasted image as a `data:` URL labelled from its bytes, with the file it was read from. */
+  readonly onImage: (dataUrl: string, file: File) => void;
   readonly onReadError?: () => void;
-  /** A pasted file whose bytes are not an image Tau stores, or that is too large to read. */
-  readonly onRefused?: (reason: 'unsupported' | 'too-large') => void;
+  /** A pasted file whose bytes are not an image Tau stores or converts, or that is too large to read. */
+  readonly onRefused?: (refusal: AttachmentIntakeRefusal, file: File) => void;
+  /**
+   * The image formats the host converts (`AttachmentIntakeOptions.transcodeSources`), read once per paste so a host
+   * may load them lazily. Without it only stored types are admitted.
+   */
+  readonly loadTranscodeSources?: () => Promise<readonly string[]>;
 };
 
 /**
@@ -61,18 +67,20 @@ const readClipboardImageFiles = async ({
   onImage,
   onReadError,
   onRefused,
+  loadTranscodeSources,
 }: Omit<HandleClipboardImagePasteOptions, 'event'> & { readonly files: readonly File[] }): Promise<void> => {
+  const transcodeSources = (await loadTranscodeSources?.()) ?? [];
   for (const file of files) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- preserving clipboard image order is observable UI behavior.
-      const intake = await readAttachmentFile(file);
+      const intake = await readAttachmentFile(file, { transcodeSources });
       if (intake.outcome === 'refused') {
-        onRefused?.(intake.reason);
+        onRefused?.(intake, file);
       } else if (typeof intake.source === 'string') {
-        onImage(intake.source);
+        onImage(intake.source, file);
       } else {
         // Paste attaches images only; a document pasted as an untyped file is refused like any other.
-        onRefused?.('unsupported');
+        onRefused?.({ outcome: 'refused', reason: 'not-an-image' }, file);
       }
     } catch {
       onReadError?.();
@@ -85,6 +93,7 @@ export const handleClipboardImagePaste = ({
   onImage,
   onReadError,
   onRefused,
+  loadTranscodeSources,
 }: HandleClipboardImagePasteOptions): boolean => {
   const files = getClipboardImageFiles(event.clipboardData);
   if (files.length === 0) {
@@ -92,6 +101,6 @@ export const handleClipboardImagePaste = ({
   }
 
   event.preventDefault();
-  void readClipboardImageFiles({ files, onImage, onReadError, onRefused });
+  void readClipboardImageFiles({ files, onImage, onReadError, onRefused, loadTranscodeSources });
   return true;
 };

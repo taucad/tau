@@ -18,7 +18,7 @@ import {
   readEarlyInput,
 } from '#components/chat/chat-early-input-field.js';
 import type { EarlyChatInput, EarlyInputHandover, EarlyTextarea } from '#components/chat/chat-early-input-field.js';
-import { ProjectRouteStateContext } from '#routes/w.$workspace.$project/project-route-state.js';
+import { frameHintKey } from '#lib/frame-hint.js';
 
 /** Nothing to subscribe to: only the hydration pass reads the server snapshot. */
 const subscribeToNothing = (): (() => void) => {
@@ -45,25 +45,24 @@ type ServedComposerState = 'served' | EarlyChatInput | 'gone';
  * composition defers the handover to its end, read at `compositionend` with the input still on screen and focused
  * (Home also waits a microtask there for a browser that sends the final input after it; the frame adds no timer).
  *
+ * @param isDrawn - Whether the frame is drawn (a project route, or a navigation to one).
+ * @param pathname - The frame's project path, where the shell passes it; none in a suite with no router.
  * @returns The served field to draw over the content, and the handover the composer reads.
  */
-export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; handover: EarlyInputHandover } {
+export function useServedComposer(
+  isDrawn: boolean,
+  pathname?: string,
+): { field: React.ReactNode; handover: EarlyInputHandover } {
   const isOnClient = useSyncExternalStore(subscribeToNothing, isClientRender, isServerRender);
   const [state, setState] = useState<ServedComposerState>(() => (isOnClient ? 'gone' : 'served'));
   /* A navigation off the project route ends the served input: a frame drawn again later was not served with it. So
-   * does a navigation to another project, which the route's resolved project says (the URL cannot: the route corrects
-   * it to the same project's canonical slugs). The first project the route resolves is the one it was served for. */
-  const routeState = useContext(ProjectRouteStateContext);
-  const routeProjectId = routeState !== undefined && 'projectId' in routeState ? routeState.projectId : undefined;
-  const [servedProjectId, setServedProjectId] = useState<string>();
-  if (state !== 'gone') {
-    if (!isDrawn) {
-      setState('gone');
-    } else if (routeProjectId !== undefined && servedProjectId === undefined) {
-      setServedProjectId(routeProjectId);
-    } else if (routeProjectId !== undefined && routeProjectId !== servedProjectId) {
-      setState('gone');
-    }
+   * does a navigation to another project, which the frame's project path says (the shell's, from the router: the
+   * route's correction to the canonical slugs is a `replaceState` the router does not see, so it keeps the path). The
+   * path the frame is first drawn for is the project it was served for. */
+  const projectKey = pathname === undefined ? undefined : frameHintKey(pathname);
+  const [servedProjectKey] = useState(projectKey);
+  if (state !== 'gone' && (!isDrawn || projectKey !== servedProjectKey)) {
+    setState('gone');
   }
   const inputRef = useRef<EarlyTextarea>(null);
   /* The two conditions of the handover, read by whichever call comes second, and the project they came from: the frame
@@ -99,10 +98,9 @@ export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; h
       }
       setState(input === null ? 'gone' : releasedState(input, claimedChatRef.current));
     };
-    /* Whether a call comes from the project the input was served for: the route's first resolved project, or where
-     * the route holds none (a suite with no route state), the first project to call. */
+    /* Whether a call comes from the project the input was served for: the first project to call. */
     const isServedProject = (projectId: string): boolean => {
-      projectRef.current ??= servedProjectId ?? projectId;
+      projectRef.current ??= projectId;
       if (projectRef.current === projectId) {
         return true;
       }
@@ -136,7 +134,7 @@ export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; h
         setState((current) => (current === 'served' ? 'gone' : current));
       },
     };
-  }, [isServed, servedProjectId, state]);
+  }, [isServed, state]);
   return {
     field: isServed ? (
       <ServedComposer

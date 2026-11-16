@@ -1,9 +1,24 @@
-import { useSyncExternalStore } from 'react';
+import { useLayoutEffect, useSyncExternalStore } from 'react';
+import { PanelLeft, Share2 } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
 import { useServedComposer } from '#routes/w.$workspace.$project/workspace-frame-composer.js';
-import { defaultWideFrameHint, frameHintKey, frameHintVariables, readWideFrameHint } from '#lib/frame-hint.js';
-import type { WideFrameHint } from '#lib/frame-hint.js';
+import {
+  defaultPhoneFrameHint,
+  defaultWideFrameHint,
+  frameHintKey,
+  frameHintVariables,
+  frameTabAttribute,
+  phoneFrameDestination,
+  phoneFrameHintVariables,
+  readPhoneFrameHint,
+  readWideFrameHint,
+} from '#lib/frame-hint.js';
+import type { FrameHintVariables, PhoneFrameHint, PhoneFrameHintVariables, WideFrameHint } from '#lib/frame-hint.js';
+import {
+  MobileWorkbenchNavigationFrame,
+  mobileWorkbenchNavigationHeight,
+} from '#components/mobile-workbench-navigation.js';
 
 /** The value never changes on its own: the frame reads the hint when it renders, which a navigation causes. */
 const subscribeToNothing = (): (() => void) => {
@@ -18,10 +33,25 @@ const noHintOnServer = (): undefined => undefined;
  * pushed the URL before the frame renders for it. The default is set explicitly on the client, so a project with no
  * hint never inherits the variables the pre-paint script left on `<html>` for the project the document first loaded.
  */
-const readDocumentFrameHint = (): WideFrameHint => {
-  const key = frameHintKey(globalThis.location.pathname);
+const readDocumentFrameHint = (pathname = globalThis.location.pathname): WideFrameHint => {
+  const key = frameHintKey(pathname);
   return (key === undefined ? undefined : readWideFrameHint(key)) ?? defaultWideFrameHint;
 };
+
+/** Both shapes' variables, which the frame sets on itself on the client. */
+const frameVariables = (wide: WideFrameHint, phone: PhoneFrameHint): FrameHintVariables & PhoneFrameHintVariables => ({
+  ...frameHintVariables(wide),
+  ...phoneFrameHintVariables(phone),
+});
+
+/** The phone hint for the document's current URL, or the default phone layout (the model, the sheet closed). */
+const readDocumentPhoneFrameHint = (pathname = globalThis.location.pathname): PhoneFrameHint => {
+  const key = frameHintKey(pathname);
+  return (key === undefined ? undefined : readPhoneFrameHint(key)) ?? defaultPhoneFrameHint;
+};
+
+/** The phone server render has no hint either: the pre-paint script's values on `<html>` stand. */
+const noPhoneHintOnServer = (): undefined => undefined;
 
 /**
  * The attribute the desktop workspace sets once its split view has sized its panes. The frame's lanes hide on that
@@ -48,21 +78,43 @@ export const workspaceFrameEndId = 'workspace-frame-end';
  * On a phone the lanes are not drawn: the phone frame is its own (A15c). Data slots are the frame rows' contract:
  * `[data-slot=workspace-frame]` and one `[data-slot=workspace-lane]` per lane.
  *
- * @param props - The project route's content, and whether the frame is drawn: off a project route (a suite that
- *   mounts the route with no app host) the same host element stays, with no frame, so the content keeps its tree
- *   position.
+ * @param props - The content, whether the frame is drawn, and whether it is drawn ahead of the route. The shell draws
+ *   it (`Page`, A15b2) on a project route and for a navigation to one; on any other route the same host element stays,
+ *   with no frame, so the content keeps its tree position.
  * @returns The frame with the content over it.
  */
 export function WorkspaceFrame({
   children,
   isDrawn = true,
+  isPending = false,
+  pathname,
 }: {
   readonly children?: React.ReactNode;
   readonly isDrawn?: boolean;
+  /** The frame is drawn for a project the route has not committed yet: the content is still the page being left. */
+  readonly isPending?: boolean;
+  /**
+   * The project's pathname, which the shell passes: drawn ahead of the route, the frame renders before the router has
+   * pushed the URL. Without it, the document's URL, as the pre-paint script reads it (suites with no router).
+   */
+  readonly pathname?: string;
 }): React.JSX.Element {
-  /* The document's URL, as the pre-paint script reads it: the frame also renders in suites with no router. */
-  const wide = useSyncExternalStore(subscribeToNothing, readDocumentFrameHint, noHintOnServer);
-  const served = useServedComposer(isDrawn);
+  const wide = useSyncExternalStore(subscribeToNothing, () => readDocumentFrameHint(pathname), noHintOnServer);
+  const phone = useSyncExternalStore(
+    subscribeToNothing,
+    () => readDocumentPhoneFrameHint(pathname),
+    noPhoneHintOnServer,
+  );
+  const tab = phone === undefined ? undefined : phoneFrameDestination(phone.tab);
+  /* The tab bar's selected destination is an attribute selector on `<html>`, which the pre-paint script set for the
+   * document's first project: on the client the frame names its own project's before paint, so a client move to
+   * another project never shows the first one's tab. */
+  useLayoutEffect(() => {
+    if (isDrawn && tab !== undefined) {
+      document.documentElement.setAttribute(frameTabAttribute, tab);
+    }
+  }, [isDrawn, tab]);
+  const served = useServedComposer(isDrawn, pathname);
 
   if (!isDrawn) {
     return (
@@ -78,16 +130,23 @@ export function WorkspaceFrame({
   return (
     <div
       data-slot='workspace-frame'
+      data-workspace-pending={isPending || undefined}
       className={cn(
         'size-full bg-background md:relative md:isolate',
+        /* A15b2: drawn ahead of the route, the frame's layers (the lanes, the phone frame) show alone; the page being
+         * left stays in place, unseen, until the route's commit replaces it. */
+        '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone])]:invisible',
         /* Literal for Tailwind: `workspaceLanesReadyAttribute`. */
         '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
         /* A failure that stands in the content region in the workspace's place (the file service's, the route
-         * chunk's) shows alone, as it did before the frame: no lane or composer box under it. */
-        '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
-        '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
+         * chunk's) shows alone, as it did before the frame: no lane or composer box under it. Not while pending: the
+         * content is then the page being left, hidden, and an alert of its own is not the destination's. */
+        '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
+        '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
       )}
-      style={wide === undefined ? undefined : (frameHintVariables(wide) as React.CSSProperties)}
+      style={
+        wide === undefined || phone === undefined ? undefined : (frameVariables(wide, phone) as React.CSSProperties)
+      }
     >
       <WorkspaceFrameLanes isComposerServed={served.field !== undefined} />
       <EarlyInputHandoverContext.Provider value={served.handover}>{children}</EarlyInputHandoverContext.Provider>
@@ -125,6 +184,7 @@ function WorkspaceFrameLanes({ isComposerServed }: { readonly isComposerServed: 
           className='[display:var(--frame-workbench-display,flex)] h-full w-(--frame-workbench-width,420px) shrink-0 border-l border-border @max-[1120px]:[display:var(--frame-workbench-compact-display,none)]'
         />
       </div>
+      <PhoneFrame />
       {/* Hoisted to the head by React. Until the parser reaches the marker after the lanes, Chromium holds rendering,
        * so a project load's first paint is never a document cut above the frame: no lanes, or the shell alone (the
        * blank first paint A11 reported, and F15's lane-less first frame). The held region ends at the lanes, not the
@@ -132,6 +192,71 @@ function WorkspaceFrameLanes({ isComposerServed }: { readonly isComposerServed: 
       <link rel='expect' href={`#${workspaceFrameEndId}`} blocking='render' />
       <span id={workspaceFrameEndId} hidden />
     </>
+  );
+}
+
+/**
+ * The phone frame (blueprint P-h, § Editor frame, phone; A15c): the top bar with its controls' places, the viewer's
+ * box, the sheet at the detent this project's sheet opens at, and the tab bar with the remembered destination
+ * selected, each at the box the phone workspace draws it in, read from the frame hint's variables with the default
+ * (the model, the sheet closed) as each fallback. Nothing in it stands for content, and nothing in it moves. The phone
+ * workspace mounts hidden until its stored layout is read (`data-mobile-workspace=ready`); in that commit the top
+ * bar, the sheet and the tab bar give way to the live ones in the same boxes, and the viewer's box gives way once the
+ * live viewer stage is drawn too. The live sheet is drawn in a portal outside the frame, so the hand-over is the
+ * workspace's attribute, not the live part's presence.
+ *
+ * It is inert and hidden from assistive technology: the route's busy state is the gates' `WorkspaceOpening`. A
+ * failure or a notice that stands in the workspace's place shows alone, as on a wide screen.
+ *
+ * @returns The phone frame.
+ */
+function PhoneFrame(): React.JSX.Element {
+  return (
+    <div
+      aria-hidden='true'
+      inert
+      data-slot='workspace-frame-phone'
+      className={cn(
+        'absolute inset-0 flex flex-col overflow-hidden md:hidden',
+        mobileWorkbenchNavigationHeight,
+        '[[data-slot=workspace-frame]:not([data-workspace-pending]):has([role=alert]:not([data-mobile-workspace]_*))_&]:hidden',
+        '[[data-slot=workspace-frame]:not([data-workspace-pending]):has([data-slot=project-route-notice])_&]:hidden',
+      )}
+    >
+      <div
+        data-frame-part='top-bar'
+        className='flex h-12 shrink-0 items-center gap-0.5 border-b bg-background px-1 [[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:invisible'
+      >
+        <span className='flex size-10 shrink-0 items-center justify-center'>
+          <PanelLeft aria-hidden className='size-5' />
+        </span>
+        <span className='h-10 min-w-0 flex-1' />
+        <span className='flex size-10 shrink-0 items-center justify-center'>
+          <Share2 aria-hidden className='size-5' />
+        </span>
+      </div>
+      {/* The live viewer box's inset: the sheet's visible height while it is open, the tab bar's otherwise. */}
+      <div className='relative min-h-0 flex-1 pb-[max(var(--frame-sheet-height,0px),var(--nav-offset))]'>
+        <div
+          data-frame-part='viewer'
+          className='size-full [[data-slot=workspace-frame]:has([data-mobile-workspace=ready]_[data-slot=viewer-stage])_&]:hidden'
+        />
+      </div>
+      <div
+        data-frame-part='sheet'
+        className={cn(
+          /* The live sheet is the viewport's height, moved down to its detent: the same box. */
+          'fixed inset-x-0 top-[calc(100dvh_-_var(--frame-sheet-height,0px))] h-dvh flex-col rounded-t-[calc(var(--spacing)*11)] border-x border-t bg-sidebar',
+          '[display:var(--frame-sheet-display,none)]',
+          '[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden',
+        )}
+      >
+        <div className='relative h-2 shrink-0'>
+          <div className='absolute inset-x-0 bottom-0 mx-auto h-1 w-15 rounded-full bg-sidebar-primary/15' />
+        </div>
+      </div>
+      <MobileWorkbenchNavigationFrame className='fixed inset-x-0 bottom-0 [[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden' />
+    </div>
   );
 }
 

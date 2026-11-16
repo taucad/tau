@@ -74,7 +74,7 @@ import { attachmentReferenceOf } from '@taucad/chat-ui/utils/attachment.utils';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import { deferredRecordStore, referencedAttachments, removeRecord } from '#services/chat-session-store-composer.js';
 import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
-import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
+import { resizeImageActor } from '#hooks/attachment-image.actor.js';
 import { clearLedger } from '@taucad/chat-ui/services/rpc-ledger';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { buildEditedUserMessage } from '#utils/chat.utils.js';
@@ -2660,7 +2660,16 @@ export class ChatSessionStore {
     if (this.#remoteObservations.has(chatId)) {
       return true;
     }
-    const directory = `/projects/${projectId}/${chatRecordsPath(chatId)}/events`;
+    const relativeDirectory = `${chatRecordsPath(chatId)}/events`;
+    const directory = `/projects/${projectId}/${relativeDirectory}`;
+    /* The directory itself or one above it, as the watch spells paths (project-relative) or absolutely. */
+    const holdsDirectory = (path: string): boolean =>
+      path === '' ||
+      path === relativeDirectory ||
+      relativeDirectory.startsWith(`${path}/`) ||
+      path === directory ||
+      directory.endsWith(`/${path}`) ||
+      directory.startsWith(`${path}/`);
     const observation = new ObservationService<void>({
       resource: directory,
       watch: (invalidate, reset) => {
@@ -2681,16 +2690,16 @@ export class ChatSessionStore {
             }
             const paths = event.type === 'rename' ? [event.oldPath, event.newPath] : [event.path];
             // This is the foreign segment directory, not the owned events.jsonl
-            // writer or chat.json metadata. Ancestor deletion/rename also refolds it,
-            // and so does a pull that brought nothing new (XD3, round 18).
+            // writer or chat.json metadata. A summary, deletion or rename of it or of
+            // any ancestor also refolds it, and so does a pull that brought nothing
+            // new (XD3, round 18).
             if (
               paths.some(
                 (path) =>
                   path.endsWith('.jsonl') ||
                   path.endsWith(`/${chatPulledAtFileName}`) ||
                   path === chatPulledAtFileName ||
-                  directory.endsWith(`/${path}`) ||
-                  directory === path,
+                  holdsDirectory(path),
               )
             ) {
               invalidate();

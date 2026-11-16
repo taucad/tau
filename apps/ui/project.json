@@ -452,14 +452,15 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Real-browser source editor and chat lane acceptance on the affected CI browser lane."
+        "description": "Real-browser source editor, chat lane and composer image conversion acceptance (raster host parity over the web-worker transport) on the affected CI browser lane."
       },
       "options": {
         "cwd": "{projectRoot}",
         "parallel": false,
         "commands": [
           "../../node_modules/.bin/vitest run --config app/components/code/code-editor.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts'"
+          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts'",
+          "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project chromium"
         ]
       }
     },
@@ -586,6 +587,24 @@
       "options": {
         "cwd": "{projectRoot}",
         "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/history-lanes.vitest.browser.config.ts'"
+      }
+    },
+    "test:e2e:queue": {
+      "executor": "nx:noop",
+      "dependsOn": ["test:e2e:attachment-image-engines"],
+      "metadata": {
+        "description": "The ui end-to-end suites admitted to the merge queue (ci.yml lane e2e-queue, CI decomposition blueprint DC-23/DC-24): each runs as its own row whenever ui is affected, and e2e-nightly.yml leaves it out."
+      }
+    },
+    "test:e2e:attachment-image-engines": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "metadata": {
+        "description": "Composer image conversion host parity (c): the attachment-image suite, raster golden parity included, in Firefox and WebKit over the web-worker transport (attachment-image.vitest.browser.config.ts). Admitted to the merge queue through test:e2e:queue (about 20 s, green twice from a cold cache); Chromium parity (b) stays on the browser lane's verify-browser."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project firefox --project webkit"
       }
     },
     "sourcemaps": {

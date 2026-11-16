@@ -4,10 +4,8 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { writeWideFrameHint } from '#lib/frame-hint.js';
+import { frameTabAttribute, writePhoneFrameHint, writeWideFrameHint } from '#lib/frame-hint.js';
 import { writeDraftHint } from '#lib/frame-hint-draft.js';
-import { ProjectRouteStateContext } from '#routes/w.$workspace.$project/project-route-state.js';
-import type { ProjectRouteState } from '#types/project-route-state.types.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
@@ -63,6 +61,8 @@ describe('WorkspaceFrame', () => {
 
   afterEach(() => {
     globalThis.history.replaceState(null, '', '/');
+    document.documentElement.removeAttribute('style');
+    document.documentElement.removeAttribute(frameTabAttribute);
   });
 
   // ── Known defects (A0.9), flipped by A15b ──
@@ -126,7 +126,7 @@ describe('WorkspaceFrame', () => {
     const frame = renderFrame('/w/home/one');
 
     expect(frame.className).toContain(
-      '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
+      '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
     );
   });
 
@@ -186,6 +186,116 @@ describe('WorkspaceFrame', () => {
     expect(frame).toHaveTextContent('content');
     expect(frame.querySelectorAll('[data-slot=workspace-lane]')).toHaveLength(3);
   });
+
+  /* A15b2 (F11): drawn for a project the route has not committed, the frame's layers show and the page being left is
+   * hidden in place, so nothing of it shows over the lanes or the phone frame. */
+  it('hides every child but the lanes and the phone frame while the route is pending', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    const view = render(
+      <WorkspaceFrame isPending>
+        <p>home</p>
+      </WorkspaceFrame>,
+    );
+    const frame = view.container.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
+
+    expect(frame).toHaveAttribute('data-workspace-pending');
+    expect(frame.className).toContain(
+      '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone])]:invisible',
+    );
+    expect(frame.querySelector(':scope > [data-slot=workspace-frame-lanes]')).not.toBeNull();
+    expect(frame.querySelector(':scope > [data-slot=workspace-frame-phone]')).not.toBeNull();
+    view.rerender(
+      <WorkspaceFrame>
+        <p>home</p>
+      </WorkspaceFrame>,
+    );
+    expect(frame).not.toHaveAttribute('data-workspace-pending');
+  });
+
+  /* A15b2 review: drawn ahead of the route, the frame renders before the router pushes the URL, so it reads the
+   * destination's hint from the shell's pathname, not the document's URL (still the page being left). */
+  it("draws the destination's remembered layout while the URL is still the page being left's", () => {
+    writeWideFrameHint('home/two', workbenchClosed);
+    globalThis.history.replaceState(null, '', '/');
+    const view = render(
+      <WorkspaceFrame isPending pathname='/w/home/two'>
+        <p>home</p>
+      </WorkspaceFrame>,
+    );
+    const frame = view.container.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
+
+    expect(frame.style.getPropertyValue('--frame-workbench-display')).toBe('none');
+  });
+
+  // ── A15c: the phone frame (blueprint P-h; C6) ──
+
+  /*
+   * C6: before any client render (the server's HTML, which a phone paints first), the frame already holds the phone
+   * workspace's four parts, each a bare box: the top bar, the viewer's box, the sheet and the tab bar. Nothing in them is
+   * a skeleton or animates in. The sheet's display and detent are the hint's variables, closed by default.
+   */
+  it('C6: the first render draws the phone top bar, viewer box, sheet and tab bar, with no skeleton and no animation', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(frameAt('/w/home/one'));
+    const phone = container.querySelector<HTMLElement>('[data-slot=workspace-frame-phone]');
+
+    expect(phone).not.toBeNull();
+    expect(phone).toHaveAttribute('aria-hidden', 'true');
+    expect(phone!.hasAttribute('inert')).toBe(true);
+    const parts = [...phone!.querySelectorAll<HTMLElement>('[data-frame-part]')].map(
+      (part) => part.dataset['framePart'],
+    );
+    expect(parts).toEqual(['top-bar', 'viewer', 'sheet', 'tab-bar']);
+    expect(phone!.querySelector('[data-slot=skeleton]')).toBeNull();
+    expect(phone!.innerHTML).not.toMatch(/animate-|fade-in|slide-in/u);
+    const sheet = phone!.querySelector<HTMLElement>('[data-frame-part=sheet]')!;
+    expect(sheet.className).toContain('[display:var(--frame-sheet-display,none)]');
+    expect(sheet.className).toContain('top-[calc(100dvh_-_var(--frame-sheet-height,0px))]');
+    /* The tab bar names every destination, so a phone's first paint is contentful. */
+    expect(phone!.querySelector('[data-frame-part=tab-bar]')).toHaveTextContent('ChatParametersModelAll');
+    /* The server sets no variable: the pre-paint script's on `<html>` stand until the client renders. */
+    expect(container.querySelector<HTMLElement>('[data-slot=workspace-frame]')!.getAttribute('style')).toBeNull();
+  });
+
+  it("C6: on the client the frame draws this project's remembered sheet and selects its tab", () => {
+    writePhoneFrameHint('home/one', 'parameters');
+    const frame = renderFrame('/w/home/one');
+
+    expect(frame.style.getPropertyValue('--frame-sheet-display')).toBe('flex');
+    expect(frame.style.getPropertyValue('--frame-sheet-height')).toBe('calc(0.5 * 100dvh)');
+    expect(document.documentElement.getAttribute(frameTabAttribute)).toBe('parameters');
+  });
+
+  it("does not carry the document's first project's sheet or tab to a project with no phone hint", () => {
+    /* The pre-paint script's values for the project the document loaded first. */
+    document.documentElement.setAttribute(frameTabAttribute, 'chat');
+    document.documentElement.style.setProperty('--frame-sheet-display', 'flex');
+    const frame = renderFrame('/w/home/two');
+
+    expect(frame.style.getPropertyValue('--frame-sheet-display')).toBe('none');
+    expect(frame.style.getPropertyValue('--frame-sheet-height')).toBe('0px');
+    expect(document.documentElement.getAttribute(frameTabAttribute)).toBe('model');
+  });
+
+  it('gives each phone part way to the live one in its own box, and the whole phone frame to a failure or notice', () => {
+    const frame = renderFrame('/w/home/one');
+    const phone = frame.querySelector<HTMLElement>('[data-slot=workspace-frame-phone]')!;
+    const part = (name: string): string => phone.querySelector<HTMLElement>(`[data-frame-part=${name}]`)!.className;
+
+    /* Every part waits for the workspace's restored layout; the top bar keeps its box in the column, so the viewer's
+     * box below it never moves, and the viewer's box also waits for the live stage. */
+    expect(part('top-bar')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:invisible');
+    expect(part('viewer')).toContain(
+      '[[data-slot=workspace-frame]:has([data-mobile-workspace=ready]_[data-slot=viewer-stage])_&]:hidden',
+    );
+    expect(part('sheet')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden');
+    expect(part('tab-bar')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden');
+    expect(phone.className).toContain(
+      '[[data-slot=workspace-frame]:not([data-workspace-pending]):has([data-slot=project-route-notice])_&]:hidden',
+    );
+    expect(phone.className).toContain('md:hidden');
+  });
 });
 
 /*
@@ -198,22 +308,21 @@ describe('WorkspaceFrame served composer', () => {
     handover = useContext(EarlyInputHandoverContext);
     return <p>content</p>;
   };
-  let routeState: ProjectRouteState | undefined;
+  /* The shell's project path for the frame (A15b2), where a row passes one. */
+  let framePath: string | undefined;
   const served = (url: string, isDrawn = true): React.JSX.Element => (
-    <ProjectRouteStateContext.Provider value={routeState}>
-      <MemoryRouter initialEntries={[url]}>
-        <Routes>
-          <Route
-            path='/w/:workspace/:project'
-            element={
-              <WorkspaceFrame isDrawn={isDrawn}>
-                <Consumer />
-              </WorkspaceFrame>
-            }
-          />
-        </Routes>
-      </MemoryRouter>
-    </ProjectRouteStateContext.Provider>
+    <MemoryRouter initialEntries={[url]}>
+      <Routes>
+        <Route
+          path='/w/:workspace/:project'
+          element={
+            <WorkspaceFrame isDrawn={isDrawn} pathname={framePath}>
+              <Consumer />
+            </WorkspaceFrame>
+          }
+        />
+      </Routes>
+    </MemoryRouter>
   );
 
   /** Serve the frame, run its inline script where it was served, and hydrate it. */
@@ -255,7 +364,7 @@ describe('WorkspaceFrame served composer', () => {
   beforeEach(() => {
     globalThis.localStorage.clear();
     handover = undefined;
-    routeState = undefined;
+    framePath = undefined;
   });
 
   afterEach(() => {
@@ -477,9 +586,9 @@ describe('WorkspaceFrame served composer', () => {
     }
   });
 
-  /* Review round 5: the route's resolved project binds the input, even before any composer calls. */
-  it('ends the served input when the route resolves another project, before any composer calls', async () => {
-    routeState = { kind: 'unavailable', projectId: 'p1' };
+  /* Review round 5, after A15b2: the frame's project path binds the input, even before any composer calls. */
+  it("ends the served input when the shell draws the frame for another project's path, before any composer calls", async () => {
+    framePath = '/w/home/one';
     const { container, rerender, done } = await serveAndHydrate('/w/home/one', (input) => {
       input.value = 'add fillets';
       input.dispatchEvent(new InputEvent('input', { bubbles: true }));
@@ -487,7 +596,7 @@ describe('WorkspaceFrame served composer', () => {
     try {
       rerender(true);
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).not.toBeNull();
-      routeState = { kind: 'unavailable', projectId: 'p2' };
+      framePath = '/w/home/two';
       rerender(true);
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
       act(() => {

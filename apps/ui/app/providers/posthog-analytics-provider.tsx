@@ -9,6 +9,10 @@ import type { AnalyticsLink } from '#lib/analytics-link.lib.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
 import { connectRemoteFlags, disconnectRemoteFlags } from '#flags/remote-flags.js';
 import { connectBaselineTelemetry, disconnectBaselineTelemetry } from '#telemetry/onboarding-telemetry.js';
+import {
+  connectAttachmentIntakeTelemetry,
+  disconnectAttachmentIntakeTelemetry,
+} from '#telemetry/attachment-intake-telemetry.js';
 import type { Analytics } from '#hooks/use-analytics.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog configuration keys are SDK wire names. */
@@ -134,6 +138,7 @@ function PostHogLifecycle({
       // PostHog-backed flags return to their defaults before the client forgets its flags.
       disconnectRemoteFlags();
       disconnectBaselineTelemetry();
+      disconnectAttachmentIntakeTelemetry();
       setConsoleClient(undefined);
       /* Nothing to stop where the singleton was never fetched: it captures nothing until `init`,
          which only an admission reaches. The storage a previous admission left is still cleared. */
@@ -189,6 +194,8 @@ function PostHogLifecycle({
       setConsoleClient(posthog);
       // The onboarding baseline (`first_seen` once per device, then first model and first export) follows admission.
       connectBaselineTelemetry(captureAdmitted);
+      // The composer's attachment intake counter (outcome, probed format, declared type) follows admission too.
+      connectAttachmentIntakeTelemetry(captureAdmitted);
       setAdmittedGeneration(generation);
       if (!isReplayEnabled) {
         return;
@@ -205,6 +212,7 @@ function PostHogLifecycle({
       setAnalyticsLinkSource(undefined);
       disconnectRemoteFlags();
       disconnectBaselineTelemetry();
+      disconnectAttachmentIntakeTelemetry();
       setConsoleClient(undefined);
     };
     // `options` and `isReplayEnabled` are fixed per host, so only `isActive` re-runs this.

@@ -6,10 +6,15 @@ import { startTransition, StrictMode } from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { observeLongAnimationFrames } from '@taucad/viewer/lib/renderer-telemetry';
 import { startErrorReporting } from '#lib/error-reporting.js';
+import { readRouteId, routePathInstrumentation } from '#lib/sentry-context.lib.js';
+import { routeClassOfRouteId } from '#lib/route-classes.js';
 import { reactRootErrorHooks } from '#lib/react-root-errors.js';
+import { projectRouteId, registerEagerRouteModules } from '#lib/eager-route-modules.js';
+import * as projectRouteModule from '#routes/w.$workspace.$project/route.js';
 import { installStaleBuildNavigation } from '#lib/stale-build-navigation.js';
 import { installStaleBuildRecovery, recoverFromSdkLoadFailure } from '#lib/stale-build-recovery.js';
 import { installProjectOpenLoadTiming } from '@taucad/ui-core/lib/project-open-load-timing';
+import { setProjectOpenRouteClassReader } from '@taucad/ui-core/lib/project-open-performance';
 import { inspect } from '#machines/inspector.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
 import { heldAppRuntime, holdAppRuntime } from '#runtime/app-runtime-holder.js';
@@ -24,6 +29,12 @@ observeLongAnimationFrames();
 
 // Local measurement only: inert unless a loopback harness injected its configuration before this ran.
 installProjectOpenLoadTiming();
+
+// RR7: each `tau.load` measure names the route class the page shows, so the loading gate splits timings by class.
+setProjectOpenRouteClassReader(() => {
+  const routeId = readRouteId();
+  return routeId === undefined ? undefined : routeClassOfRouteId(routeId)?.id;
+});
 
 // A failed SDK load may be a chunk a deploy stopped serving: the recovery may reload into the live build.
 void startErrorReporting(recoverFromSdkLoadFailure);
@@ -48,12 +59,17 @@ if (heldAppRuntime() === undefined) {
   );
 }
 
+/* F11 (A15b2): the project route's module is in the entry graph, so a click on a project commits without waiting
+ * for it. Before hydration, because `HydratedRouter` reads the module cache when it creates its routes. */
+registerEagerRouteModules({ [projectRouteId]: projectRouteModule });
+
 startTransition(() => {
   hydrateRoot(
     document,
     <StrictMode>
       <AppRuntimeProvider>
-        <HydratedRouter />
+        {/* RR7: React Router hands each route's path to the Sentry context, for `route.pattern`. */}
+        <HydratedRouter instrumentations={[routePathInstrumentation]} />
       </AppRuntimeProvider>
     </StrictMode>,
     // SB4: caught, uncaught and recoverable errors are each reported once with their component stack; a chunk a

@@ -3,7 +3,14 @@
  *
  * @module
  */
-import { UIMessageStreamError } from 'ai';
+/**
+ * Whether the AI SDK's stream reader refused a chunk. Matched by the SDK's stable error name, so this module never
+ * loads `ai`, a heavy module the critical path defers.
+ */
+const isStreamDecodeError = (
+  error: unknown,
+): error is Error & { readonly chunkId?: string; readonly chunkType?: string } =>
+  error instanceof Error && error.name === 'AI_UIMessageStreamError';
 
 /** A failure's string `code`, as Tau's channel and host errors carry it. */
 const presentationErrorCode = (error: unknown): string | undefined => {
@@ -38,7 +45,7 @@ export const presentationErrorFacts = (
   chunkId?: string;
   chunkType?: string;
 }> => {
-  const decode = UIMessageStreamError.isInstance(error);
+  const decode = isStreamDecodeError(error);
   const code = presentationErrorCode(error);
   const cause = error instanceof Error ? error.cause : undefined;
   return {
@@ -82,7 +89,7 @@ const transientPresentationCodes: ReadonlySet<string> = new Set([
  * @public
  */
 export const isTransientPresentationFailure = (error: unknown): boolean => {
-  if (UIMessageStreamError.isInstance(error)) {
+  if (isStreamDecodeError(error)) {
     return false;
   }
   const code = presentationErrorCode(error);

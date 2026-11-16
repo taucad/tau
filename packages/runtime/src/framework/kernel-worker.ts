@@ -6490,7 +6490,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * Fidelity is looked up from `@taucad/types` rather than hard-coded so kernels
    * remain the source of truth for their declared formats and the fidelity table
-   * stays a single, data-driven location.
+   * stays a single, data-driven location. A direct route takes its format's
+   * fidelity; a transcoded route is `'brep'` only when both edge formats are, since
+   * exactness cannot increase along a route. Transcoder edges declare no fidelity.
    *
    * @returns The computed capabilities manifest
    */
@@ -6587,7 +6589,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             kernelId: cap.kernelId,
             sourceFormat: edge.from,
             transcoderId: transcoder.id,
-            fidelity: edge.fidelity,
+            fidelity:
+              lookupExportFidelity(edge.from) === 'brep' && lookupExportFidelity(edge.to) === 'brep' ? 'brep' : 'mesh',
             exportOptions: { schema, defaults },
             ...(content ? { content } : {}),
           });

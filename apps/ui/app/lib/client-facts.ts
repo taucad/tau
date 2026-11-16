@@ -24,20 +24,12 @@ const recordVersion = 1;
 /** The app theme names, as `#hooks/use-theme` defines them; `system` follows the operating system. */
 const themeNames = ['light', 'dark', 'black', 'high-contrast'] as const;
 
-/** A count past this is not a list shape any page reserves. */
-const maxProjectCount = 100_000;
-
-/** The project count `<html>` carries is capped at the smallest page: no page reserves more cards before it lists. */
-const projectCountAttributeCap = 20;
-
 /** The facts, all optional: an absent fact is unknown and renders as the neutral default. */
 const clientFactsSchema = z.object({
   /** The theme choice; absent until the person, or the one-time cookie migration, settles it. */
   theme: z.enum([...themeNames, 'system']).optional(),
   /** Whether the desktop sidebar was open when last left. */
   sidebarOpen: z.boolean().optional(),
-  /** How many live projects the last listing held (R5). */
-  projectCount: z.number().int().min(0).max(maxProjectCount).optional(),
   /** The pointer-cursors preference. */
   pointerCursors: z.boolean().optional(),
   /** The settled values of the layout-affecting flags (H2), by registry name. */
@@ -103,11 +95,6 @@ export const applyClientFacts = (facts: ClientFacts, root: HTMLElement, prefersL
   } else {
     delete root.dataset['pointerCursors'];
   }
-  if (facts.projectCount === undefined) {
-    delete root.dataset['projectCount'];
-  } else {
-    root.dataset['projectCount'] = String(Math.min(facts.projectCount, projectCountAttributeCap));
-  }
 };
 
 const prefersLightMediaQuery = '(prefers-color-scheme: light)';
@@ -152,13 +139,7 @@ export const forgetClientFacts = (): void => {
 export const subscribeClientFacts = (listener: () => void): (() => void) => changes.subscribe(listener);
 
 /** Cookies the server read for presentation before the record; expired once by {@link retireLegacyFactCookies}. */
-const legacyFactCookies = [
-  'tau-shell-op-sidebar',
-  'tau-project-count',
-  'tau-layout-flags',
-  'tau-chat-model',
-  'tau-chat-effort',
-] as const;
+const legacyFactCookies = ['tau-shell-op-sidebar', 'tau-layout-flags', 'tau-chat-model', 'tau-chat-effort'] as const;
 
 /** Expire the presentation cookies the record replaced, so they stop riding every request. */
 export const retireLegacyFactCookies = (): void => {
@@ -241,5 +222,4 @@ if(a==="black"||a==="high-contrast")d.classList.add("dark");
 d.classList.add(a);
 if(f.sidebarOpen===false)d.setAttribute("data-sidebar-closed","");
 if(f.pointerCursors===true)d.setAttribute("data-pointer-cursors","true");
-if(typeof f.projectCount==="number")d.setAttribute("data-project-count",String(Math.min(f.projectCount,${projectCountAttributeCap})));
 }catch(e){}})();`;

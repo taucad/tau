@@ -31,6 +31,9 @@ vi.mock('@taucad/billing/hooks/billing-session', () => ({
     userId: 'user-a',
   }),
 }));
+vi.mock('#components/auth/settings/account/email-deliverability-banner.js', () => ({
+  EmailDeliverabilityBanner: () => undefined,
+}));
 vi.mock('#components/billing/topup-modal.js', () => ({
   TopupModal: () => <div>Top-up modal</div>,
 }));
@@ -129,7 +132,9 @@ describe('BillingSettings', () => {
     );
     expect(screen.getByRole('button', { name: 'Add credits' })).toBeEnabled();
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(query.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['billing', 'credits'] });
+    expect(query.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['billing', 'credits'],
+    });
   });
 
   it('keeps Add credits while the balance is loading', () => {
@@ -144,7 +149,10 @@ describe('BillingSettings', () => {
   });
 
   it('names no plan until entitlements resolve', () => {
-    useEntitlements.mockReturnValue({ ...entitlement('free'), isResolved: false });
+    useEntitlements.mockReturnValue({
+      ...entitlement('free'),
+      isResolved: false,
+    });
     renderSettings();
     const loading = screen.getByText('Loading plan…').closest('[role=status]');
     expect(loading?.querySelectorAll('[data-slot=skeleton]')).toHaveLength(2);
@@ -154,12 +162,20 @@ describe('BillingSettings', () => {
 
   it('shows the renewal date from the paid-through deadline, and the access end once cancelled', () => {
     const paidThrough = new Date('2026-10-23T04:21:27Z');
-    const date = paidThrough.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+    const date = paidThrough.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
     useEntitlements.mockReturnValue({ ...entitlement('pro'), paidThrough });
     const { unmount } = renderSettings();
     expect(screen.getByText(`$20/month · Renews ${date}`)).toBeInTheDocument();
     unmount();
-    useEntitlements.mockReturnValue({ ...entitlement('pro'), paidThrough, cancelAtPeriodEnd: true });
+    useEntitlements.mockReturnValue({
+      ...entitlement('pro'),
+      paidThrough,
+      cancelAtPeriodEnd: true,
+    });
     renderSettings();
     expect(screen.getByText(`$20/month · Ends ${date}`)).toBeInTheDocument();
     expect(screen.getByText('Canceled')).toBeInTheDocument();
@@ -179,14 +195,23 @@ describe('BillingSettings', () => {
   });
 
   it('offers no Cancel plan once the plan already ends at the period end', () => {
-    useEntitlements.mockReturnValue({ ...entitlement('pro'), cancelAtPeriodEnd: true });
+    useEntitlements.mockReturnValue({
+      ...entitlement('pro'),
+      cancelAtPeriodEnd: true,
+    });
     renderSettings();
     expect(screen.queryByText('Cancel plan controls')).not.toBeInTheDocument();
   });
 
   it('says a failed payment in plain words and offers the portal from the notice', async () => {
-    createPortalAction.mockResolvedValue({ state: 'redirect_required', ownerId: 'user-a' });
-    useEntitlements.mockReturnValue({ ...entitlement('pro'), status: 'past_due' });
+    createPortalAction.mockResolvedValue({
+      state: 'redirect_required',
+      ownerId: 'user-a',
+    });
+    useEntitlements.mockReturnValue({
+      ...entitlement('pro'),
+      status: 'past_due',
+    });
     renderSettings();
     expect(screen.getByRole('alert')).toHaveTextContent(
       'We couldn’t charge your card. Update your payment method within 7 days to keep Pro. Your credits aren’t affected.',
@@ -199,7 +224,10 @@ describe('BillingSettings', () => {
   });
 
   it('shows the saved card through the shared payment method component', () => {
-    useEntitlements.mockReturnValue({ ...entitlement('pro'), paymentMethod: { brand: 'visa', last4: '8252' } });
+    useEntitlements.mockReturnValue({
+      ...entitlement('pro'),
+      paymentMethod: { brand: 'visa', last4: '8252' },
+    });
     renderSettings();
     expect(screen.getByText('Payment method')).toBeInTheDocument();
     expect(screen.getByText('Visa •••• 8252')).toBeInTheDocument();

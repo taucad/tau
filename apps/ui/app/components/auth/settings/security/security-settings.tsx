@@ -8,6 +8,7 @@ import { ActiveSessions } from '#components/auth/settings/security/active-sessio
 import { ChangePassword } from '#components/auth/settings/security/change-password.js';
 import { LinkedAccounts } from '#components/auth/settings/security/linked-accounts.js';
 import { GithubPermissions } from '#components/auth/settings/security/github-permissions.js';
+import { EmailDeliverabilityBanner } from '#components/auth/settings/account/email-deliverability-banner.js';
 
 export type SecuritySettingsProps = {
   className?: string;
@@ -28,6 +29,7 @@ export function SecuritySettings({ className }: SecuritySettingsProps): React.JS
 
   return (
     <div className={cn('flex w-full flex-col gap-6 md:gap-8', className)}>
+      <EmailDeliverabilityBanner />
       {emailAndPassword.enabled && (
         <SettingsItem settingId='password'>
           <ChangePassword />

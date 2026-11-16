@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Box } from 'lucide-react';
 import { Loader } from '@taucad/ui/components/loader';
 import { Button } from '@taucad/ui/components/button';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { cn } from '@taucad/ui/utils/cn';
 import { useCloudProjectPreview } from '#hooks/use-cloud-project-preview.js';
 
@@ -38,7 +39,7 @@ export function CloudProjectPreview({
   const [isRetrying, setIsRetrying] = useState(false);
   const hasImage = preview.url !== undefined && failedUrl !== preview.url;
   const isRetryBusy = isRetrying || preview.isLoading;
-  /* P-g: the media box stays plain until the read settles; the icon says it settled with no image (or failed). */
+  /* The media box is a skeleton until the read settles; the icon says it settled with no image (or failed). */
   return (
     <div
       ref={target}
@@ -64,7 +65,14 @@ export function CloudProjectPreview({
           }
           className={isCompact ? 'size-4' : 'size-8'}
         />
-      ) : null}
+      ) : (
+        <Skeleton
+          className='size-full rounded-none'
+          role='status'
+          aria-busy='true'
+          aria-label='Loading saved preview'
+        />
+      )}
 
       {!isCompact && preview.isFailed && !preview.canRetry ? (
         <p className='absolute right-2 bottom-2 left-2 text-center text-xs'>

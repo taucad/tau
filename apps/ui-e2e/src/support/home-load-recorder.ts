@@ -1400,29 +1400,6 @@ export const readWorkerReads = async (): Promise<WorkerReadLog> =>
   target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.log);
 
 /**
- * A15f2: wait until `selector`'s node is gone or not visible, up to 5 s, so a record kept next takes in the frame its
- * indicator went in. One that never goes is left to the row: its span reads as unended.
- *
- * @param selector - The indicator's selector.
- */
-export const untilHidden = async (selector: string): Promise<void> => {
-  try {
-    await target.waitFor(
-      (query) =>
-        document.querySelector(query)?.checkVisibility({ opacityProperty: true, visibilityProperty: true }) !== true,
-      selector,
-      { timeout: 5000 },
-    );
-  } catch {
-    /* Never hidden: the span stays open and the row reports it. */
-  }
-};
-
-/** When each `longTask` started on the page (`WorkerReadDelay.longTask`), in milliseconds from navigation start. */
-export const readLongTasks = async (): Promise<readonly number[]> =>
-  target.evaluate(() => (globalThis as WorkerReadGlobal).__TAU_WORKER_READS__.longTasks);
-
-/**
  * The held replies the page has received so far.
  *
  * @returns Each delivery, with its request's send time.

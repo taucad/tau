@@ -50,7 +50,7 @@ concurrency:
 
 jobs:
   # One affected computation for the lanes that need a project list or a flag: the
-  # service, browser, formal, GeoSpec, native-host and viewer-parity lanes,
+  # service, browser, formal, GeoSpec, native-host, viewer-parity and end-to-end ratchet lanes,
   # the PR-only reports, and
   # `staging.yml` (the `ci-plan` artifact). The seven `affected-lane` jobs do not wait
   # for it: they run their own `nx affected` and read the queue verdict themselves.
@@ -90,6 +90,8 @@ jobs:
       desktop-projects: ${{ steps.plan.outputs.desktop-projects }}
       shell: ${{ steps.plan.outputs.shell }}
       shell-projects: ${{ steps.plan.outputs.shell-projects }}
+      e2e-queue: ${{ steps.plan.outputs.e2e-queue }}
+      e2e-queue-suites: ${{ steps.plan.outputs.e2e-queue-suites }}
       reused: ${{ steps.queue.outputs.run-id }}
       affected-base: ${{ steps.queue.outputs.affected-base }}
     steps:
@@ -154,6 +156,9 @@ jobs:
           # project that depends on it affected in the ordinary lanes (shell split blueprint rows 15, 17).
           # Formal nightly lane (`formal-nightly.yml`, CI throughput review Q-4): a project with a `formal:nightly`
           # target is affected; the deep formal tiers run per project in the merge queue only, seeded by the commit.
+          # End-to-end ratchet (`e2e-queue`, operator ruling 2026-11-15): a project with a `test:e2e:queue` target
+          # is affected. That target's `dependsOn` lists the project's end-to-end suites that passed two consecutive
+          # e2e-nightly runs; `e2e-queue-suites` names one row per suite, and e2e-nightly.yml leaves them out.
           # `pr` is a lane's pull-request rule; without it a pull request runs the lane as the queue does.
           # "queue": the lane runs in the merge queue only. "touched": a pull request runs the lane only
           # for the selected projects that own a file of its own diff (Nx's file-to-project map: the
@@ -174,7 +179,8 @@ jobs:
              "native-darwin": {"targets": ["test:native-darwin"], "pr": "queue"},
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
              "desktop": {"tags": ["ci:desktop"]},
-             "shell": {"tags": ["ci:shell"], "pr": "queue"}}
+             "shell": {"tags": ["ci:shell"], "pr": "queue"},
+             "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "queue"}}
           SHELL_LANE_PATHS: >-
             [".github/workflows/shell-conformance.yml",
              "apps/desktop/scripts/hosted-linux-bwrap-fixture.mts",
@@ -282,6 +288,19 @@ jobs:
           desktop_projects=$(jq -c '.desktop' <<< "$lanes")
           shell=$(flag shell)
           shell_projects=$(jq -c '.shell' <<< "$lanes")
+          e2e_queue=$(flag e2e-queue)
+          # One row per ratcheted suite of the selected projects: each entry of a project's `test:e2e:queue`
+          # `dependsOn` is a target of that project, run unsharded (an `e2e-chat-logs` merge of shards is the
+          # nightly's alone), so anything else fails the plan rather than drop a suite.
+          e2e_queue_suites=$(jq -c --slurpfile graph "$RUNNER_TEMP/graph.json" '
+            $graph[0].graph.nodes as $nodes
+            | [."e2e-queue"[] as $project | $nodes[$project].data.targets as $targets
+                | $targets["test:e2e:queue"].dependsOn // [] | .[]
+                | if type != "string" or ($targets[.] == null) then
+                    error("\($project):test:e2e:queue depends on \(tojson), which is not a target of \($project)")
+                  elif ($targets[.].metadata.shards // 1) > 1 then
+                    error("\($project):\(.) declares shards; the e2e-queue lane runs a suite as one job")
+                  else {project: $project, target: ., label: "\($project) \(.)", slug: ("\($project)-\(.)" | gsub(":"; "-"))} end]' <<< "$lanes")
           # `api-image` keeps the PR-only Docker smoke test on the PRs that affect the API image.
           api_image=$(flag api-image)
           {
@@ -307,6 +326,8 @@ jobs:
             echo "desktop-projects=$desktop_projects"
             echo "shell=$shell"
             echo "shell-projects=$shell_projects"
+            echo "e2e-queue=$e2e_queue"
+            echo "e2e-queue-suites=$e2e_queue_suites"
           } >> "$GITHUB_OUTPUT"
           # `staging.yml` reads which service lanes `nx affected` selected (`api`, `billing-e2e`,
           # keyed by their job), before the reuse and pull-request rules above, and the merge-queue
@@ -774,9 +795,114 @@ jobs:
       projects: ${{ needs.plan.outputs.formal-nightly-projects }}
       seed: ${{ github.sha }}
 
+  # The end-to-end ratchet (operator ruling 2026-11-15): every end-to-end suite that passed two consecutive
+  # e2e-nightly runs leaves the nightly for good and runs here, in the merge queue (and on a push to `main` the
+  # queue did not prove), whenever its project is affected. A project lists its ratcheted suites in its
+  # `test:e2e:queue` target's `dependsOn`; the plan turns them into one row per suite and e2e-nightly.yml skips
+  # them, so a later ratchet is a one-line `project.json` edit. A pull request leaves the lane to the queue.
+  # Each row is the nightly's job for that suite: one suite per runner (one after another they outlast a job,
+  # run 37221169741), the same browsers, Pandoc, sandbox, software Vulkan and xvfb, and the same chat log
+  # validation for a suite that opens a chat. The slowest first-batch suite took 10.4 min as a whole nightly job
+  # (run 43752242587, `ui-e2e test:e2e:daemon-host`), so the bounds below sit at half the nightly's 120/150.
+  # The required check waits for every row.
+  e2e-queue:
+    name: Browser end-to-end (${{ matrix.suite.label }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.e2e-queue == 'true' }}
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.e2e-queue-suites) }}
+    env:
+      # The suites that open no chat, so capture no chat log for the empty-capture rule to find: e2e-nightly.yml's list.
+      SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew", "test:e2e:filesystem-scenarios"]'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # The ui-e2e matrix also has `firefox` and `webkit-smoke` instances, and
+      # `test:e2e:non-isolated` runs PicoVoxel on Chromium and Firefox.
+      - name: Install browsers for Vitest Browser
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+
+      # `scripts:test:e2e` converts HTML references with Pandoc 3.1.4 or newer, and
+      # its expected Markdown follows current Pandoc; Ubuntu's package is 3.1.3.
+      - name: Install Pandoc for reference conversion
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
+          echo "91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372  $RUNNER_TEMP/pandoc.deb" | sha256sum --check --quiet
+          sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
+
+      # Sandboxed native kernel workers.
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
+
+      # Hosts that render under plain Node (the CLI and the daemon) need a Vulkan adapter, and the
+      # runner has no GPU: lavapipe, Mesa's Vulkan CPU driver, as in e2e-nightly.yml.
+      - name: Install a software Vulkan driver for native rendering
+        run: |
+          sudo apt-get install -y mesa-vulkan-drivers
+          echo 'VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json' >> "$GITHUB_ENV"
+
+      # The development billing values a suite that boots the API reads, as in e2e-nightly.yml.
+      - name: Prepare API env file
+        run: cp apps/api/.env.example apps/api/.env
+
+      # `--parallel=1`: the suites' ui:build, ui:build:serve and ui:build:desktop prerequisites each
+      # peak near 10 GB. Streamed, because Nx holds a task's output until it ends and a timed-out
+      # step loses it.
+      - name: Run the end-to-end suite
+        timeout-minutes: 60
+        env:
+          TAU_E2E_WEBGPU_PROFILE: software
+          PROJECT: ${{ matrix.suite.project }}
+          TARGET: ${{ matrix.suite.target }}
+        run: xvfb-run --auto-servernum pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream
+
+      # Field trace validation, as in e2e-nightly.yml: every events.jsonl the suite captured at teardown
+      # is validated against ChatLog.tla, including after a failed suite.
+      - name: Setup formal toolchains
+        if: ${{ !cancelled() && !contains(fromJSON(env.SUITES_WITHOUT_CHAT), matrix.suite.target) }}
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc
+
+      - name: Validate captured chat logs
+        if: ${{ !cancelled() && !contains(fromJSON(env.SUITES_WITHOUT_CHAT), matrix.suite.target) }}
+        env:
+          PROJECT: ${{ matrix.suite.project }}
+        run: pnpm nx run-many -t formal:logs --projects "$PROJECT"
+
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
+      - name: Upload Vitest Browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-queue-diagnostics-${{ matrix.suite.slug }}
+          path: |
+            out/test-results/vitest-browser
+            out/test-results/filesystem-scenarios
+            out/test-results/chat-logs
+            out/reports/formal
+          if-no-files-found: ignore
+          retention-days: 7
+
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (browser, GeoSpec example contracts, CLI
-  # end-to-end, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
+  # end-to-end, the end-to-end ratchet, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
   # rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected fails it. It waits for every
   # lane, so a merge-queue run whose gate passed proves every lane it selected, which is the one
   # proof `queue-verdict` reuses on the push (Brain ci-audit 2026-11-12, F1). API tests are a
@@ -800,6 +926,7 @@ jobs:
         billing-e2e,
         shell,
         formal-nightly,
+        e2e-queue,
       ]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -830,6 +957,8 @@ jobs:
           SHELL_RESULT: ${{ needs.shell.result }}
           FORMAL_NIGHTLY_REQUIRED: ${{ needs.plan.outputs.formal-nightly }}
           FORMAL_NIGHTLY_RESULT: ${{ needs.formal-nightly.result }}
+          E2E_QUEUE_REQUIRED: ${{ needs.plan.outputs.e2e-queue }}
+          E2E_QUEUE_RESULT: ${{ needs.e2e-queue.result }}
           EVENT: ${{ github.event_name }}
           REUSED: ${{ needs.plan.outputs.reused }}
           DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -855,6 +984,7 @@ jobs:
           if [ "$BILLING_REQUIRED" = true ]; then test "$BILLING_RESULT" = success; fi
           if [ "$SHELL_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$SHELL_RESULT" = success; fi
           if [ "$FORMAL_NIGHTLY_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$FORMAL_NIGHTLY_RESULT" = success; fi
+          if [ "$E2E_QUEUE_REQUIRED" = true ]; then test "$E2E_QUEUE_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal:tla` or `formal:lean` target. A known counterexample is an

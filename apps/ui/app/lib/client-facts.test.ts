@@ -35,7 +35,6 @@ const rootState = (): Record<string, string | undefined> => ({
   class: [...root.classList].sort().join(' '),
   sidebarClosed: root.dataset['sidebarClosed'],
   pointerCursors: root.dataset['pointerCursors'],
-  projectCount: root.dataset['projectCount'],
 });
 
 const setPrefersLight = (matches: boolean): void => {
@@ -68,9 +67,6 @@ const matrix: ReadonlyArray<readonly [string, ClientFacts, boolean]> = [
   ['sidebar closed', { sidebarOpen: false }, true],
   ['sidebar open', { sidebarOpen: true }, true],
   ['pointer cursors', { pointerCursors: true }, true],
-  ['zero projects', { projectCount: 0 }, true],
-  ['three projects', { projectCount: 3 }, true],
-  ['many projects, capped at the smallest page', { projectCount: 250 }, true],
 ];
 
 describe('client facts head script', () => {
@@ -92,14 +88,6 @@ describe('client facts head script', () => {
     runHeadScript();
 
     expect([...root.classList]).toStrictEqual(['dark', 'black']);
-  });
-
-  it('caps the remembered project count at the smallest page', () => {
-    localStorage.setItem(clientFactsStorageKey, JSON.stringify({ v: 1, projectCount: 250 }));
-
-    runHeadScript();
-
-    expect(root.dataset['projectCount']).toBe('20');
   });
 
   it('ignores a record of another version and leaves the system default', () => {
@@ -148,13 +136,13 @@ describe('client facts head script', () => {
 describe('client facts record', () => {
   it('writes one owner fact, keeps the others, applies them and announces the change', () => {
     writeClientFacts({ theme: 'dark', sidebarOpen: false });
-    writeClientFacts({ projectCount: 4 });
+    writeClientFacts({ pointerCursors: true });
 
-    expect(readClientFacts()).toStrictEqual({ theme: 'dark', sidebarOpen: false, projectCount: 4 });
-    expect(rootState()).toMatchObject({ class: 'dark', sidebarClosed: '', projectCount: '4' });
+    expect(readClientFacts()).toStrictEqual({ theme: 'dark', sidebarOpen: false, pointerCursors: true });
+    expect(rootState()).toMatchObject({ class: 'dark', sidebarClosed: '', pointerCursors: 'true' });
 
     writeClientFacts({ sidebarOpen: undefined });
-    expect(readClientFacts()).toStrictEqual({ theme: 'dark', projectCount: 4 });
+    expect(readClientFacts()).toStrictEqual({ theme: 'dark', pointerCursors: true });
     expect(root.dataset['sidebarClosed']).toBeUndefined();
   });
 
@@ -171,7 +159,7 @@ describe('client facts record', () => {
   it('expires the presentation cookies the server used to read', () => {
     for (const [name, value] of [
       ['tau-shell-op-sidebar', '0'],
-      ['tau-project-count', '3'],
+      ['tau-chat-model', '"x"'],
       ['tau-layout-flags', 'onboarding.1'],
       ['tau-cookie-consent', '{}'],
     ] as const) {

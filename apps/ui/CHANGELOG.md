@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.12.0 (2026-11-16)
+
+### Features
+
+- feat(ui): Restore generic loading skeletons and drop the project listing snapshot (#2307) (1c77d2d28)
+- feat(ui): Take the close cut a reload left owed on the next open (A7d) (#2272) (5e6ffc1ea)
+- feat(agent-observability): Label tool facts and report resumed runs (LW17, LU14) (#2205) (afdc792de)
+- feat(ui): Let the open wait for the first file check (A14) (#2246) (fa28ea576)
+- feat(ui): Render the app shell at one tree position on every route (A11) (#2244) (00b69eedb)
+- feat(ui): Confirm a password reset on sign-in and say a password change signs out other devices (#2267) (25fd262fb)
+
+### Fixes
+
+- fix(ui): Name the undeliverable address on Account, Security and Billing; count only stored Resend events in alerts (#2302) (174c11ff0)
+- fix(ui): Select staging API and downloads hosts in the marketing policy on taucad.dev (#2278) (65c29d135)
+- fix(host): Refresh Grok's model list from its \_x.ai/models/update push (#2277) (541ff9fb5)
+- fix(viewer): Stop clipping at 0° FOV, even out the grid and fix the hover highlight (#2003) (5b09a758a)
+- fix(revisions): Answer a warm reopen from a comparison record instead of re-reading the checkout (#2270) (067bb7a80)
+
+### Other changes
+
+- test(files-ui): Give the jsdom suite the app's no-op ResizeObserver (#2309) (893c5d096)
+- refactor(ui): Remove the Auto kernel transcript row (#2308) (eedcfc0d7)
+- refactor(runtime)!: Derive transcoded route fidelity from edge formats (#2301) (8447753cd)
+- ci(root): Run nightly-green e2e suites in the merge queue when affected (#2299) (084b1ad9c)
+- refactor(ui): Cut the files-ui library from the app (UI wave D) (#2298) (ca2b80fb8)
+
 ## 0.11.0 (2026-11-15)
 
 ### Features

@@ -182,7 +182,12 @@ describe('useFreshContent', () => {
     settle: (current: boolean) => void;
   }> => {
     const answers: Array<(current: boolean) => void> = [];
-    const reread = vi.fn(async () => new Promise<boolean>((resolve) => answers.push(resolve)));
+    const reread = vi.fn(
+      async () =>
+        new Promise<boolean>((resolve) => {
+          answers.push(resolve);
+        }),
+    );
     manager.set({ rereadOutcome: reread } as unknown as FileContentService);
     return {
       reread,

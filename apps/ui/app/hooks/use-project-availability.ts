@@ -238,16 +238,19 @@ export function usePathLanded(path: string | undefined): boolean {
     landingWatchers += 1;
     return `pane-${String(landingWatchers)}`;
   });
-  const landed = useRevisionStatus()?.landedPaths;
+  const status = useRevisionStatus();
+  const landed = status?.landedPaths;
+  /* A client that reconnects to a new revision host drops its status first: the watch is said again to the new one. */
+  const connected = status !== undefined;
   useEffect(() => {
-    if (client === undefined || path === undefined) {
+    if (client === undefined || path === undefined || !connected) {
       return undefined;
     }
     client.send({ command: 'watchLanding', watcher, paths: [path] });
     return () => {
       client.send({ command: 'watchLanding', watcher, paths: [] });
     };
-  }, [client, path, watcher]);
+  }, [client, connected, path, watcher]);
   return path !== undefined && landed !== undefined && pendingPathSet(landed).has(path);
 }
 

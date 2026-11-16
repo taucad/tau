@@ -1337,7 +1337,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
   });
 
   /* STO-25, I7: a failed tree write's tree is not the tree, so nothing it landed stays named. */
-  it('should stop naming what a failed tree write landed', async () => {
+  it('should stop naming what a failed tree write landed, and name none of its rollback', async () => {
     let failNext = false;
     const fixture = harness(['alpha'], (port) => port, {
       observeFileEvents: true,
@@ -1408,9 +1408,23 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(closureLanded).toBeGreaterThan(-1);
     expect(frames[closureLanded]?.landed).toEqual(['main.scad']);
     expect(frames[closureLanded + 1]).toEqual({ landed: [], applying: true });
-    /* The rollback writes the checkout whole again, and is named as it lands its own bytes. */
-    expect(frames.at(-1)?.landed).toEqual(['lib/a.scad', 'main.scad']);
+    /* Its rollback puts the prior tree back: not the tree being written, so none of its landings is named, during it
+       or after the failed write's release (I7). */
+    expect(frames.slice(closureLanded + 1).every(({ landed }) => landed.length === 0)).toBe(true);
     expect(await project.readFile('lib/a.scad', 'utf8')).toBe('b();');
+
+    /* The next tree write speaks for itself again. */
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      async () => {
+        expect(await project.readFile('lib/a.scad', 'utf8')).toBe('a();');
+        expect(alpha.frames.findLast((frame) => frame.type === 'status')?.status.landedPaths).toEqual([
+          'lib/a.scad',
+          'main.scad',
+        ]);
+      },
+      { timeout: 10_000 },
+    );
   });
 
   /* D10, I7: an aborted restore's tree is never read as written, and its rollback, which writes the checkout whole again, is. */

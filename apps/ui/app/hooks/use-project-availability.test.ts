@@ -523,6 +523,18 @@ describe('a file pane’s own landing', () => {
     expect(renderHook(() => useFilePaneAvailability('lib/gear.ts', false)).result.current).toBe('ready');
     expect(send).not.toHaveBeenCalled();
   });
+  it('says its watch again to a host the client reconnects to', () => {
+    const { send } = pendingOpen('entryReady');
+    const { rerender } = renderHook(() => useFilePaneAvailability('lib/gear.ts', false));
+    expect(send).toHaveBeenCalledTimes(1);
+    /* The client closes its connection: its status is gone until the new host's first. */
+    vi.mocked(useRevisionStatus).mockReturnValue(undefined);
+    rerender();
+    pendingOpen('entryReady').send.mockImplementation(send);
+    rerender();
+    const watches = send.mock.calls.filter(([command]) => (command as { paths: string[] }).paths.length > 0);
+    expect(watches).toHaveLength(2);
+  });
   it('reads a path the host has not named as not landed (I7)', () => {
     pendingOpen('entryReady', ['README.md']);
     expect(renderHook(() => usePathLanded('lib/gear.ts')).result.current).toBe(false);

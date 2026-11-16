@@ -63,16 +63,20 @@ export function useFreshContent(path: string | undefined, open: boolean, owedOnM
     if (!open || !owed || path === undefined || contentService === undefined) {
       return undefined;
     }
-    let live = true;
+    const run = { live: true };
     // async-iife: bootstrap -- the pane opens when a read begun now is the service's answer, or stays closed.
     void (async (): Promise<void> => {
       try {
         /* A later read begun meanwhile is also fresh: ask again until one settles as the answer. */
-        // oxlint-disable-next-line no-await-in-loop -- each read waits for the one before to be superseded or held.
-        while (live && !(await contentService.rereadOutcome(path))) {
-          /* Superseded: the newer read's answer is the one to hold. */
+        let answered = false;
+        while (!answered) {
+          if (!run.live) {
+            return;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- each read waits for the one before to be superseded or held.
+          answered = await contentService.rereadOutcome(path);
         }
-        if (live) {
+        if (run.live) {
           setOwed(false);
         }
       } catch (error) {
@@ -81,7 +85,7 @@ export function useFreshContent(path: string | undefined, open: boolean, owedOnM
       }
     })();
     return () => {
-      live = false;
+      run.live = false;
     };
   }, [contentService, open, owed, path]);
   return open && (path === undefined || contentService === undefined || !owed);

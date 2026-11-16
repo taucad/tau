@@ -42,6 +42,8 @@ export const holdTreeRefreshesWhileApplying = (
     const applying = status?.applyingRoots?.some((candidate) => trimRoot(candidate) === root) === true;
     if (applying && release === undefined) {
       release = input.tree.pauseRefreshes();
+      /* A reading taken before this hold is no edge for it: its first entryReady re-reads through it. */
+      wasEntryReady = false;
     } else if (!applying && release !== undefined) {
       const held = release;
       release = undefined;

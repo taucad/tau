@@ -480,6 +480,12 @@ export type SyncProjectRecordsActorInput = Readonly<{
   priorEvidenceHead?: string;
   /** When this pull read the remote's refs, on this device's clock: the chats it projects record it (`pullRecordAfter`). */
   pulledAt?: number | undefined;
+  /**
+   * The records may run while the apply writes the checkout (SP2h): a fast-forward whose `tau.json` asks for chats as
+   * the checkout's does. `syncChats` is then the fetch's reading of the applied manifest, since the checkout's may be
+   * mid-write; without it the records wait for the apply and read the manifest it landed.
+   */
+  besideApply?: true;
 }>;
 
 /** Independent completion of optional records after authored integration. @public */

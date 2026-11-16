@@ -3351,27 +3351,46 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     path.startsWith('.tau/offloaded-tool-results/');
 
   /** A brand-new device learns the preference from the fetched project manifest. */
-  const fetchedProjectSyncsLargeExports = async (remote: string, branch: string): Promise<boolean> => {
+  /**
+   * Both `tau.json` toggles as one revision records them, read by that manifest's oid alone (R5): an empty checkout is
+   * exactly the cold open, where reading the whole tree read every blob and looked up every large object.
+   *
+   * @param revision - The revision.
+   * @returns Its toggles, with {@link projectSyncPreferences}' defaults for an unreadable manifest; `undefined` when
+   *   the revision holds none.
+   */
+  const revisionSyncPreferences = async (
+    revision: RevisionId,
+  ): Promise<Readonly<{ syncChats: boolean; syncLargeExports: boolean }> | undefined> => {
+    const tree = await port.readTree(revision, { largeObjects: 'local', paths: ['tau.json'] });
+    const manifest = tree?.get('tau.json');
+    if (manifest === undefined) {
+      return undefined;
+    }
+    try {
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a parsed manifest is `unknown` until read.
+      const record = JSON.parse(new TextDecoder().decode(manifest)) as Readonly<{
+        syncChats?: unknown;
+        syncLargeExports?: unknown;
+      }>;
+      return { syncChats: record.syncChats !== false, syncLargeExports: record.syncLargeExports === true };
+    } catch {
+      return { syncChats: true, syncLargeExports: false };
+    }
+  };
+
+  const fetchedProjectSyncsLargeExports = async (
+    remote: string,
+    branch: string,
+    preferencesOf: typeof revisionSyncPreferences,
+  ): Promise<boolean> => {
     const records = await recordsFileSystem();
     if (await records.exists('tau.json')) {
       return false;
     }
     const head = await port.readRef(remoteTrackingRef(remote, `refs/heads/${branch}`));
-    /* R5: the manifest alone. An empty checkout is exactly the cold open, where
-     * reading the whole tree read every blob and looked up every large object. */
-    const tree =
-      head === undefined ? undefined : await port.readTree(head, { largeObjects: 'local', paths: ['tau.json'] });
-    const manifest = tree?.get('tau.json');
-    if (manifest === undefined) {
-      return false;
-    }
-    try {
-      return (
-        (JSON.parse(new TextDecoder().decode(manifest)) as { syncLargeExports?: unknown }).syncLargeExports === true
-      );
-    } catch {
-      return false;
-    }
+    const preferences = head === undefined ? undefined : await preferencesOf(revisionId(head));
+    return preferences?.syncLargeExports === true;
   };
 
   /*
@@ -6942,7 +6961,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           });
         }
         signal.throwIfAborted();
-        if (!syncLargeExports && (await fetchedProjectSyncsLargeExports(input.remote, input.branch))) {
+        /* One read of a fetched manifest per pull, whichever question asks it first. */
+        const fetchedPreferences = new Map<string, ReturnType<typeof revisionSyncPreferences>>();
+        const fetchedPreferencesOf = async (revision: RevisionId): ReturnType<typeof revisionSyncPreferences> => {
+          let read = fetchedPreferences.get(revision);
+          if (read === undefined) {
+            read = revisionSyncPreferences(revision);
+            fetchedPreferences.set(revision, read);
+          }
+          return read;
+        };
+        if (
+          !syncLargeExports &&
+          (await fetchedProjectSyncsLargeExports(input.remote, input.branch, fetchedPreferencesOf))
+        ) {
           syncLargeExports = true;
         }
 
@@ -7170,6 +7202,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const recordReferences = advertised.filter(
           (ref) => ref.name.startsWith(`${chatRefPrefix}/`) || (syncLargeExports && ref.name === evidenceRefName),
         );
+        /*
+         * Records write only unversioned paths, disjoint from the apply's, so a fast-forward lets them run while it
+         * writes (SP2h) — when the manifest it writes asks for chats as the checkout's does. A change of mind waits for
+         * the apply, and the manifest it lands decides, as before.
+         */
+        const applied =
+          integration === 'fastForward' && remoteHead !== undefined
+            ? await fetchedPreferencesOf(remoteHead)
+            : undefined;
+        const besideApply = integration === 'fastForward' && (applied?.syncChats ?? true) === syncChats;
         const pending = await readPendingQueue();
         return {
           leases,
@@ -7187,6 +7229,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             syncChats,
             syncLargeExports,
             pulledAt,
+            ...(besideApply ? { besideApply } : {}),
             priorEvidenceHead: pending.entries.some(
               (entry) => entry.operation === 'projection' && entry.ref === evidenceRefName,
             )
@@ -7203,7 +7246,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
       projectRecords: fromAuthorityPromise<SyncProjectRecordsActorOutput, SyncProjectRecordsActorInput>(
         timedEffect('records.project', async ({ input, signal }) => {
-          const { syncChats } = await projectSyncPreferences();
+          const preferences = input.besideApply === true ? input : await projectSyncPreferences();
+          const { syncChats } = preferences;
           const fetchReferences = input.fetchRefs.filter((ref) => syncChats || !ref.startsWith(`${chatRefPrefix}/`));
           const fetched =
             fetchReferences.length > 0

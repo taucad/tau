@@ -643,7 +643,11 @@ it.each(['live', 'linked'])(
               ]
             : [{ name: 'refs/heads/main', head }],
         fetch: async () => ({ refs: [{ name: 'refs/remotes/tau/main', head }] }),
-        readTree: async (id) => {
+        readTree: async (id, options) => {
+          /* The apply's read; the fetch's manifest reading (SP2h) names its one path. */
+          if (options?.paths?.join(',') === 'tau.json') {
+            return context.port.readTree(id, options);
+          }
           if (id === head) {
             reading = true;
             await apply.promise;
@@ -4495,6 +4499,84 @@ describe('independent sync record failures', () => {
     expect(requested).toEqual([authored, ['refs/tau/chats/c1']]);
     /* Another device's operation log never comes down. */
     expect(requested.flat()).not.toContain('refs/tau/ops/device-b');
+  }, 30_000);
+
+  /* SP2h: chats project while the apply writes only when the manifest it writes agrees with the one on disk. */
+  it.each([
+    { remoteManifest: '{"syncChats":true}\n', beside: true },
+    { remoteManifest: '{"syncChats":false}\n', beside: false },
+  ])(
+    'lets records run beside a fast-forward when its manifest agrees: $remoteManifest',
+    async ({ remoteManifest, beside }) => {
+      const context = await fixture({ 'tau.json': '{"syncChats":true}\n' });
+      await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const receipt = await context.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          ['tau.json', remoteManifest],
+          ['main.ts', 'base\n'],
+        ]),
+        provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
+        summary: { generated: 'Main' },
+      });
+      const head = revisionId(receipt.commitId);
+      await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+      const actors = createRevisionActors({
+        identity: testIdentity,
+        port: {
+          ...context.port,
+          listRemoteRefs: async () => [
+            { name: 'refs/heads/main', head },
+            { name: 'refs/tau/chats/c1', head },
+          ],
+          fetch: async () => ({ refs: [] }),
+        },
+        projectId: 'project-1',
+        filesystem: () => context.filesystem,
+      });
+
+      const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+        remote: 'tau',
+        branch: 'main',
+        deadlineMilliseconds: 10_000,
+      });
+
+      expect(fetched.integration).toBe('fastForward');
+      expect(fetched.recordProjection?.besideApply).toBe(beside ? true : undefined);
+    },
+    30_000,
+  );
+
+  /* SP2h: beside the apply, the checkout's `tau.json` may be mid-write; the fetch's reading of the applied one decides. */
+  it('projects records beside the apply on the fetch’s chat preference, not the checkout’s', async () => {
+    const context = await fixture({ 'tau.json': '{"syncChats":true}\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const requested: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: {
+        ...context.port,
+        fetch: async (input) => {
+          requested.push(input.refs);
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+      deviceId: () => 'device-b',
+    });
+
+    const result = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, {
+      remote: 'tau',
+      fetchRefs: ['refs/tau/chats/c1'],
+      refs: [{ name: 'refs/remotes/tau/tau/chats/c1', head: revisionId('a'.repeat(40)) }],
+      syncChats: false,
+      syncLargeExports: false,
+      besideApply: true,
+    });
+
+    expect(requested).toEqual([]);
+    expect(result).toEqual({ records: [], chats: 'disabled' });
   }, 30_000);
 
   /* R6: `validate`'s listing is the connect-time fetch's advertisement, for the same destination only. */

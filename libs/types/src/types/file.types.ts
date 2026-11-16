@@ -115,6 +115,8 @@ export type FileStat =
        * before it is on disk, and nothing may be renamed, moved or made inside it until it is.
        */
       readonly pending?: true;
+      /** Not on disk yet: a tree write has still to make it. A consumer that reads what it lists leaves it out. */
+      readonly arriving?: true;
     }
   | ({
       readonly type: 'file';
@@ -128,6 +130,11 @@ export type FileStat =
        * bytes. `size` is the object's and a read of it waits for them; absent on a raw stat, which is the pointer's.
        */
       readonly pending?: true;
+      /**
+       * Present, beside `pending`, on a listed entry a tree write has yet to land (D10): not on disk yet, so a read of
+       * it finds nothing. A consumer that reads what it lists (an agent) leaves it out.
+       */
+      readonly arriving?: true;
     } & StatContentMetadata);
 
 /**

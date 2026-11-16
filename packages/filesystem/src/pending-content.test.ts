@@ -800,7 +800,9 @@ describe('expected entries (D10)', () => {
     expect(top['models']).not.toHaveProperty('pending');
     /* A folder nothing has landed in yet lists what will arrive in it. */
     const lib = byName(await view.readdirWithStats!('lib'));
-    expect(lib['gear.scad']).toMatchObject({ type: 'file', size: 300, pending: true });
+    /* Marked arriving too: a consumer that reads what it lists (an agent) leaves such a row out. */
+    expect(lib['gear.scad']).toMatchObject({ type: 'file', size: 300, pending: true, arriving: true });
+    expect(top['tau.json']).not.toHaveProperty('arriving');
     expect(lib['gear.scad']).not.toHaveProperty('contentKind');
     expect(lib['deep']).toMatchObject({ type: 'dir' });
     const models = byName(await view.readdirWithStats!('models'));

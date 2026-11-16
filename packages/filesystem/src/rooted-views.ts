@@ -639,8 +639,8 @@ export class RootedViews {
             if (!names.has(entry.path)) {
               answered.push(
                 entry.type === 'dir'
-                  ? { name: entry.path, type: 'dir', size: 0, mtimeMs: 0, pending: true }
-                  : { name: entry.path, type: 'file', size: entry.size, mtimeMs: 0, pending: true },
+                  ? { name: entry.path, type: 'dir', size: 0, mtimeMs: 0, pending: true, arriving: true }
+                  : { name: entry.path, type: 'file', size: entry.size, mtimeMs: 0, pending: true, arriving: true },
               );
             }
           }
@@ -1084,7 +1084,15 @@ export class RootedViews {
       for (const entry of arriving) {
         if (entry.type === 'file' && admitted.has(entry.path) && !paths.has(entry.path)) {
           const name = entry.path.slice(entry.path.lastIndexOf('/') + 1);
-          answered.push({ path: entry.path, name, type: 'file', size: entry.size, mtimeMs: 0, pending: true });
+          answered.push({
+            path: entry.path,
+            name,
+            type: 'file',
+            size: entry.size,
+            mtimeMs: 0,
+            pending: true,
+            arriving: true,
+          });
         }
       }
       return answered;

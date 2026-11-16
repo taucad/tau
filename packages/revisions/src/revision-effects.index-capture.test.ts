@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
@@ -62,6 +62,8 @@ const fixture = async (
     ignoreRules?: 'listing' | 'bare' | 'port' | 'failing';
     /* The checkout as the revision layer opens it in a host: raw, its pointers as they are. */
     raw?: boolean;
+    /* Every declaration to the index fails, as one whose index cannot open. */
+    failingDeclarations?: boolean;
   }>,
 ) => {
   const backend = options?.backend ?? 'node';
@@ -111,10 +113,16 @@ const fixture = async (
     Object.assign(Object.create(rooted) as RevisionFileSystem, {
       awaitDeclaration: () => {
         declarations.push('await');
-        rooted.awaitDeclaration?.();
+      },
+      releaseDeclaration: () => {
+        declarations.push('release');
+        rooted.releaseDeclaration?.();
       },
       declarePending: (async (declared, paths) => {
         declarations.push('declare');
+        if (options?.failingDeclarations === true) {
+          throw new Error('the index could not open');
+        }
         return rooted.declarePending?.(declared, paths);
       }) satisfies NonNullable<RevisionFileSystem['declarePending']>,
       readFile: (async (path: string, ...rest: readonly unknown[]) => {
@@ -899,12 +907,26 @@ describe("a cut under the checkout's own Git ignore rules (S10)", () => {
 
 /* The revision layer is the placeholders' only writer and reads the attributes that make a pointer one (D9). */
 describe("a capture declares the checkout's placeholders to its index (D9)", () => {
-  /* Until that word every other view holds a file the size of a pointer, so a reload never shows one as a small file. */
-  it('should say it will declare the checkout as it starts, before its first capture declares it', async () => {
+  /*
+   * Mounting the checkout is the word that it will be declared: every other view holds a file the size of a pointer
+   * until the first capture's declaration, or until that capture lets go of the checkout without one.
+   */
+  it('should end the hold by its first capture’s declaration, letting go of nothing else', async () => {
     const at = await fixture(files(3), { backend: 'memory', raw: true });
     await at.fillChecked;
-    expect(at.declarations[0]).toBe('await');
-    expect(at.declarations).toContain('declare');
+    expect(at.declarations[0]).toBe('declare');
+    expect(at.declarations).not.toContain('release');
+  });
+
+  it('should let go of the checkout when its first capture cannot declare it, so nothing waits on a word', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const at = await fixture(files(3), { backend: 'memory', raw: true, failingDeclarations: true });
+    await at.fillChecked;
+    expect(at.declarations.slice(0, 2)).toStrictEqual(['declare', 'release']);
+    expect(warn).toHaveBeenCalledWith(
+      '[revisions] the checkout index could not learn its placeholders',
+      expect.any(Error),
+    );
   });
 
   it('should mark each pointer the attributes track, and no other, and follow the attributes when they change', async () => {

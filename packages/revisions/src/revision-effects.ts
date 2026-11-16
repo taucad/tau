@@ -1915,67 +1915,78 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
   /* Checkouts whose placeholders this session has declared at least once (D9). */
   const declaredCheckouts = new Set<string>();
+  type CaptureCheckoutOptions = Readonly<{
+    modeBasis?: ImmutableRevisionTree | undefined;
+    bypassMemo: boolean;
+    changed?: Readonly<{ paths: readonly string[] | undefined }>;
+    signal?: AbortSignal | undefined;
+    leavesRecords?: boolean | undefined;
+  }>;
   const captureCheckout = async (
     place: Checkout,
-    captureOptions: Readonly<{
-      modeBasis?: ImmutableRevisionTree | undefined;
-      bypassMemo: boolean;
-      changed?: Readonly<{ paths: readonly string[] | undefined }>;
-      signal?: AbortSignal | undefined;
-      leavesRecords?: boolean | undefined;
-    }>,
+    captureOptions: CaptureCheckoutOptions,
   ): Promise<ImmutableRevisionTree> =>
     useFileSystem(place, async (rooted) => {
-      captureOptions.signal?.throwIfAborted();
       /*
-       * D9: this layer owns the checkout's placeholders, and this capture's end is its word. Until the first one,
-       * every other view holds a file the size of a pointer, so a reload whose index forgot its marks never shows a
-       * placeholder as a small file (I7). Said once, and never after the word.
-       */
-      if (!declaredCheckouts.has(place.id)) {
-        rooted.awaitDeclaration?.();
-      }
-      await sweepTemporarySiblings(place, rooted);
-      /* The project directory, where an open writes placeholders; a pull resumes any other checkout's, and any
-       * checkout a failed tree write owes a check is checked again here (D10). */
-      checkFill(place);
-      const { modeBasis, bypassMemo, changed, signal, leavesRecords } = captureOptions;
-      const memos = memosOf(place.id);
-      const ignoreRoot = place.kind === 'live' ? undefined : place.root;
-      const ignores: CaptureIgnores | undefined =
-        port.ignoredPaths === undefined
-          ? undefined
-          : {
-              context: await port.ignoreContext?.(ignoreRoot),
-              list: async (paths) => port.ignoredPaths?.(ignoreRoot, paths),
-              head: async () => {
-                const head = await headOf(place);
-                const tree = head === undefined ? undefined : await headBasis(place, memos);
-                return head === undefined || tree === undefined ? undefined : { revisionId: head, tree };
-              },
-            };
-      const tree = await captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
-        memos,
-        bypassMemo,
-        signal,
-        leavesRecords,
-        ...(changed === undefined ? {} : { changed }),
-        ...(ignores === undefined ? {} : { ignores }),
-      });
-      /*
-       * D9: the placeholders' only writer says which they are, from the attributes it reads, every time it looks:
-       * after its own writes (an apply verifies by capturing), on open, at a pull and at each cut, which also
-       * catches a checkout edited from outside. Every other view answers a path by this mark alone.
+       * D9: this layer owns the checkout's placeholders, and making its view of the checkout said it will declare
+       * them: every other view holds a file the size of a pointer until it does (I7). A capture that ends without
+       * the first declaration, failed or stopped, lets go, so nothing waits on a word that will not come.
        */
       try {
-        await rooted.declarePending?.(declaredPlaceholders(tree));
-        declaredCheckouts.add(place.id);
-      } catch (error) {
-        /* An index that cannot open answers no mark at all: the capture stands, and the next one declares again. */
-        console.warn('[revisions] the checkout index could not learn its placeholders', error);
+        return await captureDeclared(place, rooted, captureOptions);
+      } finally {
+        if (!declaredCheckouts.has(place.id)) {
+          rooted.releaseDeclaration?.();
+        }
       }
-      return tree;
     });
+  const captureDeclared = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    captureOptions: CaptureCheckoutOptions,
+  ): Promise<ImmutableRevisionTree> => {
+    captureOptions.signal?.throwIfAborted();
+    await sweepTemporarySiblings(place, rooted);
+    /* The project directory, where an open writes placeholders; a pull resumes any other checkout's, and any
+     * checkout a failed tree write owes a check is checked again here (D10). */
+    checkFill(place);
+    const { modeBasis, bypassMemo, changed, signal, leavesRecords } = captureOptions;
+    const memos = memosOf(place.id);
+    const ignoreRoot = place.kind === 'live' ? undefined : place.root;
+    const ignores: CaptureIgnores | undefined =
+      port.ignoredPaths === undefined
+        ? undefined
+        : {
+            context: await port.ignoreContext?.(ignoreRoot),
+            list: async (paths) => port.ignoredPaths?.(ignoreRoot, paths),
+            head: async () => {
+              const head = await headOf(place);
+              const tree = head === undefined ? undefined : await headBasis(place, memos);
+              return head === undefined || tree === undefined ? undefined : { revisionId: head, tree };
+            },
+          };
+    const tree = await captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
+      memos,
+      bypassMemo,
+      signal,
+      leavesRecords,
+      ...(changed === undefined ? {} : { changed }),
+      ...(ignores === undefined ? {} : { ignores }),
+    });
+    /*
+     * D9: the placeholders' only writer says which they are, from the attributes it reads, every time it looks:
+     * after its own writes (an apply verifies by capturing), on open, at a pull and at each cut, which also
+     * catches a checkout edited from outside. Every other view answers a path by this mark alone.
+     */
+    try {
+      await rooted.declarePending?.(declaredPlaceholders(tree));
+      declaredCheckouts.add(place.id);
+    } catch (error) {
+      /* An index that cannot open answers no mark at all: the capture stands, and the next one declares again. */
+      console.warn('[revisions] the checkout index could not learn its placeholders', error);
+    }
+    return tree;
+  };
   /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */
   const checkoutTreeId = async (checkoutId: string, tree: ImmutableRevisionTree): Promise<string> =>
     memosOf(checkoutId).treeIds.treeId(await recordedTree(tree, await recordingParentOf(checkoutId)), await formatOf());

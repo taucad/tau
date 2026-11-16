@@ -560,7 +560,10 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     expect(
       (parts as DirectoryStatRow[]).filter((row) => landed.has(row.name)).every((row) => !('pending' in row)),
     ).toBe(true);
-    expect((parts as DirectoryStatRow[]).filter((row) => 'pending' in row)).toHaveLength(1980);
+    const arriving = (parts as DirectoryStatRow[]).filter((row) => 'pending' in row);
+    expect(arriving).toHaveLength(1980);
+    /* Each at the size the tree gives it, with no content facts. */
+    expect(arriving.every((row) => row.type === 'file' && row.size === 140 && !('contentKind' in row))).toBe(true);
     expect(await view.readFile('.gitignore')).toStrictEqual(ignore);
     /* No first-view answer waited for the capture's declaration. */
     expect(declare).not.toHaveBeenCalled();

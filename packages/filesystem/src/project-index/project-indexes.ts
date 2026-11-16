@@ -572,26 +572,16 @@ export class ProjectIndexes {
   }
 
   /**
-   * Make one file a pending entry in every index that holds it (see
-   * {@link ProjectIndex.markPending}). The generation is the covering index's, taken by
-   * {@link ProjectIndexes.generationAt}: each index counts its own, so every other one compares only the size.
+   * Make one file a pending entry in every index that holds it at the pointer's size (see
+   * {@link ProjectIndex.markPending}): a copy of a marked placeholder is one too.
    *
    * @param absolutePath - Absolute file path.
    * @param object - The large object its pointer names.
-   * @param observed - The size the pointer was read at, and {@link ProjectIndexes.generationAt} before the read.
+   * @param observed - The size the pointer was written at.
    */
-  public markPending(
-    absolutePath: string,
-    object: PendingObject,
-    observed?: Readonly<{ size: number; generation?: number | undefined }>,
-  ): void {
-    const covering = this._covering(absolutePath)?.index;
+  public markPending(absolutePath: string, object: PendingObject, observed?: Readonly<{ size: number }>): void {
     this._apply(absolutePath, (index, relative) => {
-      index.markPending(
-        relative,
-        object,
-        observed === undefined || index === covering ? observed : { size: observed.size },
-      );
+      index.markPending(relative, object, observed);
     });
   }
 
@@ -604,18 +594,6 @@ export class ProjectIndexes {
     this._apply(absolutePath, (index, relative) => {
       index.declarePending(new Map(), { paths: [relative] });
     });
-  }
-
-  /**
-   * The generation of one entry in the warm index that covers it, taken before a read so a mark made from that read
-   * can tell whether a write landed since.
-   *
-   * @param absolutePath - Absolute file path.
-   * @returns The generation, or `undefined` when no warm index holds the entry.
-   */
-  public generationAt(absolutePath: string): number | undefined {
-    const covering = this._covering(absolutePath);
-    return covering?.index.entry(covering.relative)?.generation;
   }
 
   /**
@@ -1072,6 +1050,7 @@ export class ProjectIndexes {
       /* Evicted while opening: answer this caller, keep nothing. */
       return index;
     }
+    this._inheritMarks(root, index);
     if (index.declared) {
       /* The rows held against the provider: the stored marks are the root's word, so nothing waits for it again. */
       this._release(root);
@@ -1318,16 +1297,43 @@ export class ProjectIndexes {
     }, this._options.persistDelayMilliseconds ?? 2000);
   }
 
-  /** The first warm index whose root contains `absolutePath` with no mount boundary between. */
+  /*
+   * The shallowest complete index whose root contains `absolutePath` with no mount boundary between: one choice
+   * whatever order the roots opened in. Every index holding a path holds its mark alike (see `_inheritMarks`).
+   */
   private _covering(absolutePath: string): { index: ProjectIndex; relative: string } | undefined {
     const normalized = normalizePath(absolutePath);
+    let covering: { index: ProjectIndex; relative: string; depth: number } | undefined;
     for (const [root, state] of this._states) {
       const relative = this._inside(root, normalized);
-      if (relative !== undefined && state.index.isComplete) {
-        return { index: state.index, relative };
+      const depth = root === '/' ? 0 : root.split('/').length;
+      if (relative !== undefined && state.index.isComplete && (covering === undefined || depth < covering.depth)) {
+        covering = { index: state.index, relative, depth };
       }
     }
-    return undefined;
+    return covering;
+  }
+
+  /*
+   * Give an index that just completed the marks the other complete indexes hold for its paths, each at the size this
+   * one holds: a declaration made before it opened reaches it too, so every index answers a path alike.
+   */
+  private _inheritMarks(root: string, index: ProjectIndex): void {
+    for (const [other, state] of this._states) {
+      if (other === root || !state.index.isComplete) {
+        continue;
+      }
+      if (this._inside(other, root) === undefined && this._inside(root, other) === undefined) {
+        continue;
+      }
+      for (const [path, object] of Object.entries(state.index.pendingSnapshot())) {
+        const relative = this._inside(root, other === '/' ? `/${path}` : `${other}/${path}`);
+        const held = relative === undefined || relative === '' ? undefined : state.index.entry(path);
+        if (held !== undefined && index.pendingFor(relative!) === undefined) {
+          index.markPending(relative!, object, { size: held.size });
+        }
+      }
+    }
   }
 
   private _apply(absolutePath: string, update: (index: ProjectIndex, relative: string) => void): void {

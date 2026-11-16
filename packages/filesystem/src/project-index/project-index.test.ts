@@ -436,19 +436,15 @@ describe('ProjectIndex pending entries (D9)', () => {
     expect(index.pendingFor('other.step')).toBeUndefined();
   });
 
-  it('should not mark a pointer read pending when a write landed after the read began (I7)', () => {
+  it('should mark a file pending only at the size of its pointer (I7)', () => {
     const index = observed([file('part.step', 131, 1000)]);
-    const before = index.entry('part.step')!.generation;
-    /* The fill writes the object while the pointer's read is in flight. */
+    /* The fill writes the object before the copy's mark: a size that is not the pointer's is not the pointer. */
     index.recordFile('part.step', { size: object.size });
-    index.markPending('part.step', object, { size: 131, generation: before });
-    expect(index.pendingFor('part.step')).toBeUndefined();
-    /* A size that is not the read's is not the pointer either. */
     index.markPending('part.step', object, { size: 131 });
     expect(index.pendingFor('part.step')).toBeUndefined();
-    /* The read's own observation still marks. */
+    /* The pointer at its own size marks. */
     index.recordFile('part.step', { size: 131 });
-    index.markPending('part.step', object, { size: 131, generation: index.entry('part.step')!.generation });
+    index.markPending('part.step', object, { size: 131 });
     expect(index.pendingFor('part.step')).toStrictEqual(object);
   });
 
@@ -1655,14 +1651,10 @@ describe('ProjectIndexes declared placeholders (D9)', () => {
     expect(indexes.get('/p/sub')?.pendingFor('x.step')).toBeUndefined();
   });
 
-  /* Each index counts its own generations: the one a read took is the covering index's, never another's. */
-  it('should keep a mark a read makes in every index, comparing another index by size alone', async () => {
+  /* A mark is one rule in every index: a copy marks each at the size it holds, and a found non-placeholder ends it. */
+  it("should keep a copy's mark in every index by its size, and end it in every index", async () => {
     const { provider } = await durableRoot();
     await provider.mkdir('project/sub', { recursive: true });
-    for (let file = 0; file < 20; file += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- setup, in order.
-      await provider.writeFile(`project/f${String(file)}.txt`, 'text');
-    }
     await provider.writeFile('project/sub/x.step', 'p'.repeat(131));
     const indexes = new ProjectIndexes({
       resolve: (root) => ({ provider, path: root === '/p' ? 'project' : 'project/sub' }),
@@ -1670,15 +1662,46 @@ describe('ProjectIndexes declared placeholders (D9)', () => {
     });
     await indexes.ready('/p/sub');
     await indexes.ready('/p');
-    const generation = indexes.generationAt('/p/sub/x.step');
-    expect(indexes.get('/p')!.entry('sub/x.step')!.generation).toBeGreaterThan(generation!);
     const object = { oid: 'e'.repeat(64), size: 9 };
-    indexes.markPending('/p/sub/x.step', object, { size: 131, generation });
+    indexes.markPending('/p/sub/x.step', object, { size: 132 });
+    expect(indexes.pendingAt('/p/sub/x.step')).toBeUndefined();
+    indexes.markPending('/p/sub/x.step', object, { size: 131 });
     expect(indexes.get('/p/sub')?.pendingFor('x.step')).toStrictEqual(object);
     expect(indexes.get('/p')?.pendingFor('sub/x.step')).toStrictEqual(object);
-    /* And a read that finds it no placeholder ends it in both. */
     indexes.endPending('/p/sub/x.step');
     expect(indexes.get('/p/sub')?.pendingFor('x.step')).toBeUndefined();
     expect(indexes.get('/p')?.pendingFor('sub/x.step')).toBeUndefined();
+  });
+
+  /* Whichever index answers, it answers the same: one that opens after a declaration receives the marks. */
+  it('should give an index that opens after a declaration the marks every warm index holds', async () => {
+    const { provider } = await durableRoot();
+    await provider.mkdir('project/sub', { recursive: true });
+    await provider.writeFile('project/sub/x.step', 'p'.repeat(131));
+    await provider.writeFile('project/y.step', 'p'.repeat(130));
+    const indexes = new ProjectIndexes({
+      resolve: (root) => ({ provider, path: root === '/p' ? 'project' : 'project/sub' }),
+      persistDelayMilliseconds: 60_000,
+    });
+    const object = { oid: 'f'.repeat(64), size: 9 };
+    await indexes.declarePending(
+      '/p',
+      new Map([
+        ['sub/x.step', { object, pointerSize: 131 }],
+        ['y.step', { object, pointerSize: 130 }],
+      ]),
+    );
+    await indexes.ready('/p/sub');
+    expect(indexes.get('/p/sub')?.pendingFor('x.step')).toStrictEqual(object);
+    expect(indexes.pendingAt('/p/sub/x.step', 131)).toStrictEqual(object);
+    /* And the other way: an outer index opening after an inner one's declaration. */
+    const inner = new ProjectIndexes({
+      resolve: (root) => ({ provider, path: root === '/p' ? 'project' : 'project/sub' }),
+      persistDelayMilliseconds: 60_000,
+    });
+    await inner.declarePending('/p/sub', new Map([['x.step', { object, pointerSize: 131 }]]));
+    await inner.ready('/p');
+    expect(inner.get('/p')?.pendingFor('sub/x.step')).toStrictEqual(object);
+    expect(inner.get('/p')?.pendingFor('y.step')).toBeUndefined();
   });
 });

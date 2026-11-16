@@ -913,20 +913,15 @@ export class ProjectIndex {
    *
    * @param path - Root-relative file path.
    * @param object - The large object its pointer names.
-   * @param observed - The size the pointer was read at, and the entry's generation before the read: a write
-   *   that landed since (another size, or a later generation) is not the pointer, and is left as it is.
+   * @param observed - The size the pointer was written at: a file of another size is not the pointer, and is left
+   *   as it is.
    */
-  public markPending(
-    path: string,
-    object: PendingObject,
-    observed?: Readonly<{ size: number; generation?: number | undefined }>,
-  ): void {
+  public markPending(path: string, object: PendingObject, observed?: Readonly<{ size: number }>): void {
     const node = this._resolve(segmentsOf(path));
     if (
       node?.kind !== 'file' ||
       (node.pending?.oid === object.oid && node.pending.size === object.size) ||
-      (observed !== undefined &&
-        (node.size !== observed.size || (observed.generation !== undefined && node.generation > observed.generation)))
+      (observed !== undefined && node.size !== observed.size)
     ) {
       return;
     }

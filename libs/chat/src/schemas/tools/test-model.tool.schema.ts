@@ -546,6 +546,13 @@ export const testModelOutputSchema = z.object({
   omittedSourceRevisions: z.number().int().nonnegative().optional(),
   omittedTests: z.number().int().nonnegative().optional(),
   omittedLineage: z.number().int().nonnegative().optional(),
+  manifestRefusal: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Present when the model this run loaded was not recorded as the project main entry because tau.json is not a valid manifest; names each issue to fix.',
+    ),
 });
 /**
  * Inferred aggregate output from `test_model` / GeoSpec evaluation runs.

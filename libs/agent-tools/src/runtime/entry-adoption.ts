@@ -1,5 +1,6 @@
 import type { RpcGeoSpecClient, RpcInvocationContext, RpcRuntimeClient } from '@taucad/chat/rpc';
 import { testModelLoadedModels } from '@taucad/chat/schemas/tools/test-model-summary';
+import { describeProjectManifestIssue, parseProjectManifestBytes } from '@taucad/types';
 
 /*
  * Adoption for an entry-less project (automatic kernel selection blueprint D3). While the project's main entry does
@@ -7,6 +8,9 @@ import { testModelLoadedModels } from '@taucad/chat/schemas/tools/test-model-sum
  * load rendered, becomes main: the host that serves the tool writes it into `tau.json`. A kernel whose project needs
  * package files gets them before the first evaluation of a file it binds. Every host composes its CAD clients through
  * this one wrapper, so a windowed turn, a daemon-placed turn and an ACP turn adopt alike.
+ *
+ * A degraded `tau.json` is never written implicitly (project manifest policy, Rule 15): the host's write guard refuses
+ * the adoption, and the result the agent reads says so with the manifest's exact issues, so the agent can fix it.
  */
 
 /** The slice of a project's files adoption reads and writes, rooted at the project. @public */
@@ -61,6 +65,14 @@ const readManifest = async (fileSystem: EntryAdoptionFileSystem): Promise<Manife
 
 const withoutLeadingSlash = (path: string): string => path.replace(/^\/+/u, '');
 
+/** The sentence the agent reads when `content` is no valid manifest, so recording `entryPath` was refused. */
+const refusalOf = (entryPath: string, content: string): string | undefined => {
+  const parsed = parseProjectManifestBytes(new TextEncoder().encode(content));
+  return parsed.success
+    ? undefined
+    : `The main entry was not recorded: tau.json is not a valid project manifest (${describeProjectManifestIssue(parsed.issue).join('; ')}); fix it and set assets.main.entryPath to ${JSON.stringify(entryPath)}.`;
+};
+
 /**
  * Wrap a host's CAD clients so an entry-less project adopts its first model (blueprint D3).
  *
@@ -80,8 +92,8 @@ export const withEntryAdoption = <
 ): Clients => {
   const { fileSystem, packageFiles, onAdopted } = options;
   /* One adoption at a time, so two evaluations finishing together never both write main. */
-  let queue: Promise<void> = Promise.resolve();
-  const serially = async (work: () => Promise<void>): Promise<void> => {
+  let queue: Promise<unknown> = Promise.resolve();
+  const serially = async <T>(work: () => Promise<T>): Promise<T> => {
     const previous = queue;
     const next = (async () => {
       try {
@@ -89,7 +101,7 @@ export const withEntryAdoption = <
       } catch {
         // An earlier adoption's failure never blocks the next one.
       }
-      await work();
+      return work();
     })();
     queue = next;
     return next;
@@ -107,18 +119,29 @@ export const withEntryAdoption = <
     }
   };
 
-  const adopt = async (candidate: string): Promise<void> =>
+  /* Resolves to the refusal sentence when the manifest refused main, otherwise to undefined. */
+  const adopt = async (candidate: string): Promise<string | undefined> =>
     serially(async () => {
       const manifest = await entryless();
       if (manifest === undefined) {
-        return;
+        return undefined;
       }
       const entryPath = withoutLeadingSlash(candidate);
       const assets = isObject(manifest.json['assets']) ? manifest.json['assets'] : {};
       const main = isObject(assets['main']) ? assets['main'] : {};
       const next = { ...manifest.json, assets: { ...assets, main: { ...main, entryPath } } };
-      await fileSystem.writeFile(manifestPath, `${JSON.stringify(next, undefined, 2)}\n`);
+      const content = `${JSON.stringify(next, undefined, 2)}\n`;
+      try {
+        await fileSystem.writeFile(manifestPath, content);
+      } catch (error) {
+        const refusal = refusalOf(entryPath, content);
+        if (refusal === undefined) {
+          throw error;
+        }
+        return refusal;
+      }
       onAdopted?.(entryPath);
+      return undefined;
     });
 
   /* Kernels' package files, settled once per target so a run of evaluations checks each once. */
@@ -148,11 +171,12 @@ export const withEntryAdoption = <
     );
   };
 
-  const quietly = async (work: () => Promise<void>): Promise<void> => {
+  const quietly = async <T>(work: () => Promise<T>): Promise<T | undefined> => {
     try {
-      await work();
+      return await work();
     } catch (error) {
       console.warn('[entry-adoption] skipped', error);
+      return undefined;
     }
   };
 
@@ -160,10 +184,19 @@ export const withEntryAdoption = <
     async evaluateModel(input, context) {
       await quietly(async () => provision(input.targetFile, context));
       const result = await clients.kernelClient.evaluateModel(input, context);
-      if (result.success && result.status === 'ready') {
-        await quietly(async () => adopt(input.targetFile));
+      if (!result.success || result.status !== 'ready') {
+        return result;
       }
-      return result;
+      const refusal = await quietly(async () => adopt(input.targetFile));
+      return refusal === undefined
+        ? result
+        : {
+            ...result,
+            kernelIssues: [
+              ...(result.kernelIssues ?? []),
+              { code: 'INVALID_RECORD', severity: 'warning', message: refusal },
+            ],
+          };
     },
   };
 
@@ -174,10 +207,11 @@ export const withEntryAdoption = <
           async runTests(args, context) {
             const result = await clients.geospec!.runTests(args, context);
             const [loaded] = result.success ? testModelLoadedModels(result) : [];
-            if (loaded !== undefined) {
-              await quietly(async () => adopt(loaded));
+            if (!result.success || loaded === undefined) {
+              return result;
             }
-            return result;
+            const refusal = await quietly(async () => adopt(loaded));
+            return refusal === undefined ? result : { ...result, manifestRefusal: refusal };
           },
         };
 

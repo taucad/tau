@@ -17,8 +17,6 @@ export {
 } from '#wire/admission.schema.js';
 export type { AgentChannelAdmissionConfig, AgentChannelModel } from '#wire/admission.schema.js';
 export { agentWireLimits } from '#wire/limits.js';
-export { attachmentMedia, isAttachmentMediaType, sniffAttachmentMediaType } from '#wire/attachment-media.js';
-export type { AttachmentMediaType } from '#wire/attachment-media.js';
 export {
   attachmentExtensionOf,
   attachmentExtensions,

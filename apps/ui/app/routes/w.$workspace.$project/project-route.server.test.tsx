@@ -16,6 +16,7 @@ import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { ProjectManagerProvider } from '#hooks/use-project-manager.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { ProjectRouteProviders, ProjectSessionsHost } from '#routes/w.$workspace.$project/project-route.js';
+import { WorkspaceFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { createAppRuntime, selectRuntimeQueryClient } from '#runtime/app-runtime.js';
 
@@ -86,13 +87,16 @@ const renderProjectUrl = (shell: React.ReactNode): string => {
 };
 
 /* A11 (D24, U3's server half): the shell is outside the worker gate, so the server renders it with the route's
- * `resolving` content (the workspace's placeholder) in its outlet. */
+ * `resolving` content (the workspace's placeholder) in its outlet. A15b2: the shell hosts the workspace frame (`Page`)
+ * and the route draws none of its own, so the server HTML holds exactly one. */
 it('should render the app shell and the resolving content in the server HTML of a project URL', () => {
   const html = renderProjectUrl(
     <nav data-testid='app-shell'>
-      <ProjectRouteProviders>
-        <p>outlet</p>
-      </ProjectRouteProviders>
+      <WorkspaceFrame>
+        <ProjectRouteProviders>
+          <p>outlet</p>
+        </ProjectRouteProviders>
+      </WorkspaceFrame>
     </nav>,
   );
   /* No DOM on the server: the shell's own markup, from its opening tag to its close. */
@@ -100,6 +104,8 @@ it('should render the app shell and the resolving content in the server HTML of 
   expect(shell, 'U3: the server HTML lacks the app shell').toBeDefined();
   expect(shell).toContain('data-slot="workspace-frame"');
   expect(shell).toContain('data-slot="workspace-lane"');
+  expect(shell?.match(/data-slot="workspace-frame"/gu)).toHaveLength(1);
+  expect(shell).toContain('data-testid="workspace-opening"');
   expect(seen.projectHook).toBe(0);
 });
 

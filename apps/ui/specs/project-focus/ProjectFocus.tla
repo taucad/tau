@@ -135,6 +135,9 @@
 \* A15b: the route content renders inside the persistent workspace frame (`workspace-frame.tsx`), and the gate's
 \* worker wait draws only a busy marker over it. Focus, the route state and the mounted live set are unchanged, so
 \* no action or verdict changes.
+\* A15b2: the shell (`page.tsx`) hosts the workspace frame for the app's route, so the route content renders inside it
+\* from the shell and the route wraps only its detached form. Focus, the route state and the mounted live set are
+\* unchanged, so no action or verdict changes.
 \* RR1 (React Router 7.18.5): the route sink reads the replay's navigation state with the public `useNavigation`.
 \* It still reads the router's live state through `UNSAFE_DataRouterContext` when a command arrives, because the
 \* rendered state lags a navigation React renders in a transition and the I2 deferral needs the live one. Its tests

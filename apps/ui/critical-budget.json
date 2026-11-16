@@ -1,0 +1,57 @@
+{
+  "$comment": "Guard G3 (scripts/check-critical-budget.mts): each route class's interactive tier on the web client build, per build variant. Growth past the tolerance fails, and so does landing under the budget by more than the ratchet margin until it is lowered (--write). Raising a budget names its reason in the commit.",
+  "tolerance": {
+    "bytes": 0.01,
+    "requests": 2
+  },
+  "ratchetMargin": {
+    "bytes": 0.05,
+    "requests": 5
+  },
+  "variants": {
+    "self-host": {
+      "project": {
+        "brotliBytes": 3007364,
+        "requests": 389,
+        "largestChunkBrotliBytes": 227468,
+        "knownHeavy": {
+          "ai": "PL1: entry.client -> runtime/app-runtime -> services/chat-session-store",
+          "editor": "PL5: the code viewer of the workbench dock",
+          "react-three": "PL5: the printer viewer of the workbench dock",
+          "three": "PL5 (project: part thumbnails, printer viewer); PL1 (Home: the composer reaches runtime/project-runtime and its view records)"
+        }
+      },
+      "home": {
+        "brotliBytes": 1621918,
+        "requests": 284,
+        "largestChunkBrotliBytes": 156859,
+        "knownHeavy": {
+          "ai": "PL1: entry.client -> runtime/app-runtime -> services/chat-session-store",
+          "three": "PL5 (project: part thumbnails, printer viewer); PL1 (Home: the composer reaches runtime/project-runtime and its view records)"
+        }
+      }
+    },
+    "cloud": {
+      "project": {
+        "brotliBytes": 3032814,
+        "requests": 404,
+        "largestChunkBrotliBytes": 228514,
+        "knownHeavy": {
+          "ai": "PL1: entry.client -> runtime/app-runtime -> services/chat-session-store",
+          "editor": "PL5: the code viewer of the workbench dock",
+          "react-three": "PL5: the printer viewer of the workbench dock",
+          "three": "PL5 (project: part thumbnails, printer viewer); PL1 (Home: the composer reaches runtime/project-runtime and its view records)"
+        }
+      },
+      "home": {
+        "brotliBytes": 1644120,
+        "requests": 298,
+        "largestChunkBrotliBytes": 156508,
+        "knownHeavy": {
+          "ai": "PL1: entry.client -> runtime/app-runtime -> services/chat-session-store",
+          "three": "PL5 (project: part thumbnails, printer viewer); PL1 (Home: the composer reaches runtime/project-runtime and its view records)"
+        }
+      }
+    }
+  }
+}

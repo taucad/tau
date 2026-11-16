@@ -19,7 +19,7 @@ const prerenderConcurrency = 4;
 
 /**
  * `getStaticPaths()` is not used: most routes here (`/projects`,
- * `/files`, `/usage`, `/settings_`, `/health/*`, `/action/set-theme`,
+ * `/files`, `/usage`, `/settings_`, `/health/*`, `/action/migrate-theme`,
  * `/api/*`, `/_index`) are auth-gated, runtime-only, or proxy endpoints that
  * would fail prerender. Each safelisted path below is one that genuinely has
  * no per-request work.

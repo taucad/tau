@@ -1062,13 +1062,13 @@ const findSidebarStandIns = (html: Document): string[] =>
     .filter((node) => node.closest('[data-slot="sidebar"]') === null && !node.classList.contains('fixed'))
     .map((node) => `${node.tagName.toLowerCase()}.${node.className.split(' ').slice(0, 6).join('.')}`);
 
-knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a project draws no sidebar stand-in', {
+knownDefect('F4 (A11, A15b, P2): the server HTML for a project draws no sidebar stand-in', {
   artifact: 'f4-wide',
   expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
     const { path } = await seedProjects('wide');
-    await target.addCookies([{ domain: 'localhost', name: 'tau-shell-op-sidebar', path: '/', value: '0' }]);
+    /* P2: the sidebar state is a client fact the server never reads, so this HTML is every visitor's. */
     const server = await target.evaluate(async (url) => {
       const response = await fetch(url, { credentials: 'same-origin' });
       const text = await response.text();
@@ -1082,7 +1082,7 @@ knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a proj
     return standIns;
   },
   assert: (standIns) => {
-    expectMeasured(standIns, 'F4: the server HTML, with tau-shell-op-sidebar=0, draws a sidebar stand-in', []);
+    expectMeasured(standIns, 'F4: the server HTML draws a sidebar stand-in', []);
   },
 });
 
@@ -1287,46 +1287,145 @@ knownDefect(
 /** The viewer stage's parts F8 reads. */
 const viewerRegions = {
   preparing: '[aria-label="Preparing model"]',
+  stage: '[data-slot="viewer-stage"]',
   canvas: '[data-slot="viewer-canvas-region"] canvas',
   pill: '[data-slot="viewer-stage"] [data-slot="wait-indicator-body"]',
 } as const;
 
 /** The first file check: the revision status that reports the tree filled, delivered 3 s late. */
-const filledStatus: WorkerReadDelay = { method: 'revisionStatus', path: '^"filled"$', milliseconds: readDelay };
+const filledStatus: WorkerReadDelay = {
+  method: 'revisionStatus',
+  path: '^"filled"$',
+  milliseconds: readDelay,
+};
+
+/**
+ * Which backend the stage's last canvas draws on, and whether the page could have started WebGPU at all (an adapter
+ * answers). The canvas has its context by now, so asking for WebGL hands back the context it has, or nothing on WebGPU.
+ */
+const readCanvasBackend = async (): Promise<{
+  readonly backend: string;
+  readonly hasWebGpuAdapter: boolean;
+}> =>
+  target.evaluate(async (selector) => {
+    const canvases = [...document.querySelectorAll(selector)];
+    const canvas = canvases.at(-1);
+    const backend =
+      canvas instanceof HTMLCanvasElement
+        ? canvas.getContext('webgl2') === null && canvas.getContext('webgl') === null
+          ? 'webgpu'
+          : 'webgl'
+        : 'none';
+    const { gpu } = navigator as Navigator & {
+      readonly gpu?: { requestAdapter: () => Promise<unknown> };
+    };
+    const adapter = gpu === undefined ? undefined : await gpu.requestAdapter().catch(() => undefined);
+    return {
+      backend,
+      hasWebGpuAdapter: adapter !== undefined && adapter !== null,
+    };
+  }, viewerRegions.canvas);
+
+/** Make WebGPU unavailable to every document of this target, as on a browser without it: no adapter answers. */
+function withoutWebGpu(): void {
+  Object.defineProperty(Navigator.prototype, 'gpu', {
+    configurable: true,
+    get: () => undefined,
+  });
+}
+
+type ViewerStageLoad = Readonly<{
+  record: ProjectLoadRecord;
+  backend: Awaited<ReturnType<typeof readCanvasBackend>>;
+}>;
+
+/** F8's forced load: the first check held 3 s past a reload, then the stage read once its canvas shows. */
+const measureViewerStage = async (artifact: string): Promise<ViewerStageLoad> => {
+  await seedProjects('wide', { regions: viewerRegions });
+  await armWorkerReadDelay([filledStatus]);
+  await target.reload();
+  await settleProject();
+  await target.delay(readDelay);
+  await target.expectVisible(selectors.getByCss(viewerRegions.canvas), 60_000);
+  const backend = await readCanvasBackend();
+  const record = await keepRecord(artifact, { backend });
+  await requireReadDelayed('F8', filledStatus);
+  return { record, backend };
+};
+
+/**
+ * F8's assertion. The stage is created once and never removed. One canvas is created, except where the renderer starts
+ * on WebGPU and remounts once on WebGL because the adapter's renderer fails to start (`ThreeProvider`'s fallback, a
+ * viewer-owned remount ruled outside A15e by programme control on 2026-11-15T23:47Z): then two, the last on WebGL.
+ * `strict` is the variant with WebGPU unavailable, where that fallback cannot happen, so exactly one canvas counts.
+ */
+const assertViewerStage = ({ record, backend }: ViewerStageLoad, strict: boolean): void => {
+  const preparing = regionsOf(record, 'preparing').filter((entry) => entry.present);
+  const stages = record.regionMounts['stage'] ?? [];
+  const stageRemovals = record.regionRemovals['stage'] ?? [];
+  const canvases = record.regionMounts['canvas'] ?? [];
+  const firstCanvas = regionsOf(record, 'canvas').find((entry) => entry.present);
+  const pill = shownSpans(regionsOf(record, 'pill'));
+  const isRendererFallback = !strict && backend.hasWebGpuAdapter && backend.backend === 'webgl';
+  expectMeasured(
+    {
+      preparing: preparing.slice(0, 3).map((entry) => describeEntry(entry)),
+      stages: stages.length,
+      stageRemovals: stageRemovals.length,
+      canvases: canvases.length,
+      defaultSize: firstCanvas?.width === 300 && firstCanvas.height === 150,
+      pillShown: pill.length > 0,
+      pillEarly: pill.filter((span) => span.from < 1000).map((span) => span.from),
+    },
+    `F8: the viewer stage during the held file check (canvases created in ${describeFrames(canvases) || 'no frame'}, last on ${backend.backend}; a WebGPU adapter ${backend.hasWebGpuAdapter ? 'answers' : 'does not answer'})`,
+    {
+      preparing: [],
+      stages: 1,
+      stageRemovals: 0,
+      canvases: isRendererFallback ? 2 : 1,
+      defaultSize: false,
+      pillShown: true,
+      pillEarly: [],
+    },
+  );
+};
 
 knownDefect(
-  'F8 (A14, A15e): with the first file check 3 s late, no "Preparing model" block shows, one canvas is created at a real size, and the pill shows from 1,000 ms',
+  'F8 (A14, A15e): with the first file check 3 s late, no "Preparing model" block shows, the stage mounts once with one canvas per renderer backend at a real size, and the pill shows from 1,000 ms',
   {
     artifact: 'f8-wide',
-    expectedFailure: true,
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => measureViewerStage('f8-wide'),
+    assert: (load) => {
+      assertViewerStage(load, false);
+    },
+  },
+);
+
+knownDefect(
+  'F8 strict (A15e): with WebGPU unavailable and the first file check 3 s late, exactly one canvas is created, on WebGL, and the stage mounts once',
+  {
+    artifact: 'f8-wide-no-webgpu',
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
-      await seedProjects('wide', { regions: viewerRegions });
-      await armWorkerReadDelay([filledStatus]);
-      await target.reload();
-      await settleProject();
-      await target.delay(readDelay);
-      await target.expectVisible(selectors.getByCss(viewerRegions.canvas), 60_000);
-      const record = await keepRecord('f8-wide');
-      await requireReadDelayed('F8', filledStatus);
-      return record;
+      /* A fresh target, so the stub reaches no other row: the next row opens its own again below. */
+      await target.commands.uiOpenTarget();
+      try {
+        await target.addInitScript(withoutWebGpu);
+        const load = await measureViewerStage('f8-wide-no-webgpu');
+        if (load.backend.hasWebGpuAdapter) {
+          throw new Error('F8 strict: a WebGPU adapter still answered, so the variant did not run without WebGPU');
+        }
+        return load;
+      } finally {
+        await target.commands.uiOpenTarget();
+      }
     },
-    assert: (record) => {
-      const preparing = regionsOf(record, 'preparing').filter((entry) => entry.present);
-      const canvases = record.regionMounts['canvas'] ?? [];
-      const firstCanvas = regionsOf(record, 'canvas').find((entry) => entry.present);
-      const pill = shownSpans(regionsOf(record, 'pill'));
-      expectMeasured(
-        {
-          preparing: preparing.slice(0, 3).map((entry) => describeEntry(entry)),
-          canvases: canvases.length,
-          defaultSize: firstCanvas?.width === 300 && firstCanvas.height === 150,
-          pillShown: pill.length > 0,
-          pillEarly: pill.filter((span) => span.from < 1000).map((span) => span.from),
-        },
-        `F8: the viewer stage during the held file check (canvases created in ${describeFrames(canvases) || 'no frame'})`,
-        { preparing: [], canvases: 1, defaultSize: false, pillShown: true, pillEarly: [] },
-      );
+    assert: (load) => {
+      expect(load.backend.backend, 'F8 strict: the last canvas draws on WebGL').toBe('webgl');
+      assertViewerStage(load, true);
     },
   },
 );

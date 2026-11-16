@@ -8,20 +8,19 @@
  * flagged surface on; PostHog values arrive only after hydration.
  *
  * A flag that decides first-paint geometry (`affectsLayout`) is read with
- * `useLayoutFlag` instead: the server and the hydrating render take its value
- * from the `layout-flags` cookie the request carried, which this module keeps
- * equal to the flag's settled value on the client (`#flags/layout-flags`).
+ * `useLayoutFlag` instead: the server and the hydrating render know it as
+ * unknown, and the client reads its settled value, else the value this device
+ * last settled, which this module keeps in the client facts (`#flags/layout-flags`).
  */
 
-import { useCallback, useContext, useSyncExternalStore } from 'react';
-import { UNSAFE_DataRouterStateContext as DataRouterStateContext } from 'react-router';
+import { useCallback, useSyncExternalStore } from 'react';
 import { Topic } from '@taucad/events';
 import type { FeatureFlagName, FeatureFlags, FlagDefinition, LayoutFlagName } from '#flags/flag.constants.js';
 import { featureFlagDefaults, flagRegistry, layoutFlagNames } from '#flags/flag.constants.js';
 import { getAllFlags, setFlagOverrides, resetFlagCache } from '#flags/feature-flags.js';
 import { readRemoteFlagStatus, subscribeRemoteFlags } from '#flags/remote-flags.js';
 import type { LayoutFlagValues } from '#flags/layout-flags.js';
-import { writeLayoutFlagsCookie } from '#flags/layout-flags.js';
+import { readRememberedLayoutFlags, rememberLayoutFlags } from '#flags/layout-flags.js';
 
 type FlagStore = {
   subscribe(listener: () => void): () => void;
@@ -70,13 +69,13 @@ export function readSettledLayoutFlags(): LayoutFlagValues {
 }
 
 const mirrorLayoutFlags = (): void => {
-  writeLayoutFlagsCookie(readSettledLayoutFlags());
+  rememberLayoutFlags(readSettledLayoutFlags());
 };
 
 // One module-lifetime listener: PostHog evaluations refresh the shared snapshot before subscribers read it.
 subscribeRemoteFlags(refreshSnapshot);
 
-/* In a document, every settled layout flag, and every later change, rides the next request (H2). */
+/* In a document, every settled layout flag, and every later change, is remembered for the next page view (H2). */
 if (typeof document !== 'undefined') {
   mirrorLayoutFlags();
   flagTopic.subscribe(mirrorLayoutFlags);
@@ -116,37 +115,18 @@ export function useSetFeatureFlag(): (flag: FeatureFlagName, value: boolean) => 
   }, []);
 }
 
-/** What the root loader hands a layout flag: the values the request's `layout-flags` cookie carried. */
-type LayoutFlagsLoaderData = {
-  readonly layoutFlags?: LayoutFlagValues;
-};
+const readUnknownLayoutFlag = (): undefined => undefined;
 
 /**
  * Read a layout-affecting flag (`affectsLayout` in the registry) so that the server and the client agree on it.
  *
- * The server and the hydrating render read the value the request's `layout-flags` cookie carried, through the root
- * loader's data. After hydration the client reads the settled value, else that same cookie value. With no cookie for
- * the flag, or no root loader (the desktop and SPA builds), the value is unknown until it settles.
+ * The server and the hydrating render know it as unknown, so the document is the same for every visitor. After
+ * hydration the client reads the settled value, else the value this device last settled.
  *
  * @param flag - The layout flag.
  * @returns The value, or `undefined` while it is unknown.
  */
 export function useLayoutFlag(flag: LayoutFlagName): boolean | undefined {
-  const rootData = useContext(DataRouterStateContext)?.loaderData['root'] as LayoutFlagsLoaderData | undefined;
-  const remembered = rootData?.layoutFlags?.[flag];
-  const getSnapshot = useCallback(() => readSettledLayoutFlags()[flag] ?? remembered, [flag, remembered]);
-  const getServerSnapshot = useCallback(() => remembered, [remembered]);
-  return useSyncExternalStore(flagStore.subscribe, getSnapshot, getServerSnapshot);
-}
-
-/**
- * Whether this document's layout flags came from a server render: the root loader read the request's `layout-flags`
- * cookie, so the server HTML already decided or held each flagged surface and the client must agree with it. The
- * desktop and SPA builds have no root loader, so nothing on screen depends on a server decision there.
- *
- * @returns Whether the root loader supplied `layoutFlags`.
- */
-export function useHasLayoutFlagsSnapshot(): boolean {
-  const rootData = useContext(DataRouterStateContext)?.loaderData['root'] as LayoutFlagsLoaderData | undefined;
-  return rootData?.layoutFlags !== undefined;
+  const getSnapshot = useCallback(() => readSettledLayoutFlags()[flag] ?? readRememberedLayoutFlags()[flag], [flag]);
+  return useSyncExternalStore(flagStore.subscribe, getSnapshot, readUnknownLayoutFlag);
 }

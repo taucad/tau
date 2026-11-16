@@ -415,7 +415,8 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
         await target
           .waitFor(() => document.querySelector('[data-project-workspace]') !== null, undefined, { timeout: 30_000 })
           .catch(() => undefined);
-        offline = await readOffline().catch(() => ({ url: '', frame: false, workspace: false, alerts: [] }));
+        /* Not caught: a failed read is a harness fault, which must fail the row, not stand as the defect. */
+        offline = await readOffline();
         await target.writeArtifact(
           'cloud-load-gate/f14-offline-reload.json',
           `${JSON.stringify({ route, reloadError, offline }, null, 2)}\n`,

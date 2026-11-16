@@ -649,6 +649,16 @@ describe('Page workspace frame ahead of the route', () => {
     state.workspaceFrame = { drawn: true, pending: true, pathname: '/w/home/gearbox' };
     rerender(<Page />);
     expect(screen.getByText('Page content')).toBe(content);
+    const frame = container.querySelector('[data-slot=workspace-frame]');
+    const lanes = container.querySelector('[data-slot=workspace-frame-lanes]');
+
+    /* The route commits: the same frame and lanes, no longer pending. */
+    state.workspaceFrame = { drawn: true, pending: false, pathname: '/w/home/gearbox' };
+    rerender(<Page />);
+    expect(container.querySelector('[data-slot=workspace-frame]')).toBe(frame);
+    expect(container.querySelector('[data-slot=workspace-frame-lanes]')).toBe(lanes);
+    expect(frame).not.toHaveAttribute('data-workspace-pending');
+    expect(screen.getByText('Page content')).toBe(content);
 
     state.workspaceFrame = { drawn: false, pending: false, pathname: '/' };
     rerender(<Page />);

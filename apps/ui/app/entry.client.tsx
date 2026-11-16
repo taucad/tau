@@ -9,7 +9,8 @@ import { startErrorReporting } from '#lib/error-reporting.js';
 import { readRouteId, routePathInstrumentation } from '#lib/sentry-context.lib.js';
 import { routeClassOfRouteId } from '#lib/route-classes.js';
 import { reactRootErrorHooks } from '#lib/react-root-errors.js';
-import { registerEagerRouteModules } from '#lib/eager-route-modules.js';
+import { projectRouteId, registerEagerRouteModules } from '#lib/eager-route-modules.js';
+import * as projectRouteModule from '#routes/w.$workspace.$project/route.js';
 import { installStaleBuildNavigation } from '#lib/stale-build-navigation.js';
 import { installStaleBuildRecovery, recoverFromSdkLoadFailure } from '#lib/stale-build-recovery.js';
 import { installProjectOpenLoadTiming } from '@taucad/ui-core/lib/project-open-load-timing';
@@ -60,7 +61,7 @@ if (heldAppRuntime() === undefined) {
 
 /* F11 (A15b2): the project route's module is in the entry graph, so a click on a project commits without waiting
  * for it. Before hydration, because `HydratedRouter` reads the module cache when it creates its routes. */
-registerEagerRouteModules();
+registerEagerRouteModules({ [projectRouteId]: projectRouteModule });
 
 startTransition(() => {
   hydrateRoot(

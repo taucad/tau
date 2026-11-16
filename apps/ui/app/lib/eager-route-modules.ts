@@ -15,25 +15,26 @@
  *
  * React Router reads `window.__reactRouterRouteModules` once, when `HydratedRouter` creates its routes, and the
  * document's own script assigns it just before it imports the entry. A document that rendered the project route
- * already lists it, and is left as it is.
+ * already lists it, and is left as it is. The entry imports the route module and passes it in: `lib/` imports no
+ * route (workspace project policy).
  */
-import * as projectRouteModule from '#routes/w.$workspace.$project/route.js';
 
 /** The project route's id in React Router's manifest. */
 export const projectRouteId = 'routes/w.$workspace.$project';
-
-/** The route modules the entry graph carries, by route id. */
-export const eagerRouteModules: Readonly<Record<string, unknown>> = { [projectRouteId]: projectRouteModule };
 
 type RouteModulesHost = { __reactRouterRouteModules?: Record<string, unknown> };
 
 /**
  * Add the entry graph's route modules to React Router's module cache. Call it before hydration.
  *
+ * @param eagerRouteModules - The route modules the entry graph carries, by route id.
  * @param host - The window whose router hydrates; `globalThis` by default.
  * @returns The route ids it added; none when the document set no module cache (no `HydratedRouter` will run).
  */
-export function registerEagerRouteModules(host: RouteModulesHost = globalThis as RouteModulesHost): readonly string[] {
+export function registerEagerRouteModules(
+  eagerRouteModules: Readonly<Record<string, unknown>>,
+  host: RouteModulesHost = globalThis as RouteModulesHost,
+): readonly string[] {
   const modules = host.__reactRouterRouteModules;
   if (modules === undefined) {
     return [];

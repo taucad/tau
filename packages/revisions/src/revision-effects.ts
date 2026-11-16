@@ -2435,7 +2435,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * placeholder only where they track it (D9, the one rule a declaration
    * uses). Without an index it captures the checkout, as before.
    */
-  const placeholdersOf = async (place: Checkout): Promise<ReturnType<typeof largeObjectPlaceholders>> =>
+  const placeholdersOf = async (
+    place: Checkout,
+    generation: number,
+  ): Promise<ReturnType<typeof largeObjectPlaceholders>> =>
     useFileSystem(place, async (rooted) => {
       const { compareIndex, statTree } = rooted;
       if (compareIndex === undefined || statTree === undefined) {
@@ -2444,10 +2447,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           await attributesReading(),
         );
       }
-      /* What it finds is every placeholder the checkout holds, by a capture's own rule: it declares them (D9). */
+      /*
+       * What it finds is every placeholder the checkout holds, by a capture's own rule: it declares them (D9). Only
+       * for the tree it read: a tree write that began meanwhile owns the next word, which its own capture gives, so
+       * this look never declares over it, here or in the index (`basis`; D10, I7).
+       */
+      const basis = rooted.declarationBasis?.();
       try {
         const found = await indexedPlaceholders(place, rooted, { compareIndex, statTree });
         try {
+          if (generationOf(place.id) !== generation || runningTreeWrites.has(place.id)) {
+            return found;
+          }
           await rooted.declarePending?.(
             new Map(
               [...found].map(
@@ -2455,6 +2466,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                   [path, { object: { oid, size }, pointerSize: pointer.byteLength }] as const,
               ),
             ),
+            undefined,
+            basis === undefined ? undefined : { basis },
           );
           declaredCheckouts.add(place.id);
         } catch (error) {
@@ -2818,7 +2831,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       void (async (): Promise<void> => {
         try {
           const head = await headOf(place);
-          const placeholders = await placeholdersOf(place);
+          const placeholders = await placeholdersOf(place, generation);
           if (fillsStopped || generationOf(place.id) !== generation) {
             return;
           }
@@ -2983,7 +2996,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             return;
           }
           const placeholders =
-            tree === undefined ? await placeholdersOf(place) : largeObjectPlaceholders(tree, await attributesReading());
+            tree === undefined
+              ? await placeholdersOf(place, writes ?? 0)
+              : largeObjectPlaceholders(tree, await attributesReading());
           if (treeWrites.get(place.id) !== writes) {
             return;
           }
@@ -3051,7 +3066,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const generation = generationOf(place.id);
       /* Captured before the generation is answered: a capture that fails leaves the next check owed. */
-      const placeholders = await placeholdersOf(place);
+      const placeholders = await placeholdersOf(place, generation);
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- a close during the capture stops fills.
       if (fillsStopped || generationOf(place.id) !== generation) {
         return;

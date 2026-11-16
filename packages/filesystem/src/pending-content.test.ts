@@ -723,6 +723,7 @@ describe('expected entries (D10)', () => {
  * and its read answer the old placeholder alike, never the old pointer's text (I7).
  */
 describe('a tree write over pending entries (D9, D10, I7)', () => {
+  const placeholder = { object: { oid, size: part.byteLength }, pointerSize: pointer.byteLength };
   const newPart = encoder.encode('the new solid part\n');
   const pointerOf = (to: string, size: number): Uint8Array<ArrayBuffer> =>
     encoder.encode(`version https://git-lfs.github.com/spec/v1\noid sha256:${to}\nsize ${String(size)}\n`);
@@ -752,6 +753,39 @@ describe('a tree write over pending entries (D9, D10, I7)', () => {
       raw.endExpectation!();
     },
   );
+
+  /*
+   * A declaration found before a tree write's entries were known speaks for the older tree: it never ends the newer
+   * tree's marks nor stamps the root declared over them (D9, D10, I7).
+   */
+  it('should leave a tree write’s marks to it when a declaration found before it arrives after it', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    service.setPendingObjectSource(objects);
+    const basis = raw.declarationBasis!();
+    const next = pointerOf('d'.repeat(64), newPart.byteLength);
+    await raw.writeFile('models/new.step', next);
+    await raw.expectEntries!([
+      { path: 'models/part.step', size: pointer.byteLength, pending: { oid, size: part.byteLength }, arriving: false },
+      {
+        path: 'models/new.step',
+        size: next.byteLength,
+        pending: { oid: 'd'.repeat(64), size: newPart.byteLength },
+        arriving: false,
+      },
+    ]);
+    /* What the older look found: only the old placeholder. */
+    await raw.declarePending!(new Map([['models/part.step', placeholder]]), undefined, { basis });
+    expect(await view.stat('models/new.step')).toMatchObject({ size: newPart.byteLength, pending: true });
+    expect(await view.readFile('models/new.step')).toStrictEqual(newPart);
+    raw.endExpectation!();
+    /* A declaration on the current basis speaks. */
+    await raw.declarePending!(new Map([['models/part.step', placeholder]]), undefined, {
+      basis: raw.declarationBasis!(),
+    });
+    expect(await view.stat('models/new.step')).toMatchObject({ size: next.byteLength });
+    expect(await view.stat('models/new.step')).not.toHaveProperty('pending');
+  });
 
   it('should forget a failed tree write’s entries, so its paths answer as they are on disk', async () => {
     service.setPendingObjectSource(objects);

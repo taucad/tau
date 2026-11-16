@@ -194,6 +194,8 @@ export class ProjectIndexes {
   private readonly _declaration = new Map<string, 'declared' | 'unknown'>();
   /** Per root a tree write is landing, every path it named and the object each placeholder stands for (D10). */
   private readonly _expected = new Map<string, Map<string, ExpectedAnswer>>();
+  /** Per root, how many tree writes have announced their entries ({@link declarationBasis}). */
+  private readonly _expectations = new Map<string, number>();
   /** Per cold root, the marks known before its index compares (see `StoredMarks`). */
   private readonly _stored = new Map<string, StoredMarks>();
   /** Indexes whose first observation is a scan, which finds every row new rather than changed. */
@@ -833,15 +835,21 @@ export class ProjectIndexes {
    * @param root - Absolute root the declaration is about.
    * @param declared - The placeholders, by root-relative path.
    * @param paths - The root-relative paths it speaks for; omitted, every path under the root.
+   * @param options - `basis`: the {@link declarationBasis} the declaration was found on; a whole declaration a tree
+   *   write's expectation has overtaken since speaks for an older tree, and changes nothing.
    */
   public async declarePending(
     root: string,
     declared: ReadonlyMap<string, DeclaredPlaceholder>,
     paths?: readonly string[],
+    options?: Readonly<{ basis?: number }>,
   ): Promise<void> {
     const key = normalizePath(root);
+    const overtaken = (): boolean => options?.basis !== undefined && this.declarationBasis(key) !== options.basis;
     try {
-      await this._declare(key, declared, paths);
+      if (!(await this._declare(key, declared, paths, overtaken))) {
+        return;
+      }
       if (paths === undefined) {
         for (const known of this._declaration.keys()) {
           if (relativeTo(key, known) !== undefined) {
@@ -863,12 +871,30 @@ export class ProjectIndexes {
     }
   }
 
+  /**
+   * How many tree writes have announced their entries under a root: a declaration found on one basis speaks only
+   * while no write has announced a newer tree since (D10).
+   *
+   * @param root - Absolute root.
+   * @returns The root's count of announced tree writes.
+   */
+  public declarationBasis(root: string): number {
+    return this._expectations.get(normalizePath(root)) ?? 0;
+  }
+
   private async _declare(
     key: string,
     declared: ReadonlyMap<string, DeclaredPlaceholder>,
     paths: readonly string[] | undefined,
-  ): Promise<void> {
+    overtaken: () => boolean,
+  ): Promise<boolean> {
+    if (overtaken()) {
+      return false;
+    }
     await this.ready(key);
+    if (overtaken()) {
+      return false;
+    }
     const absolute = (path: string): string => (key === '/' ? `/${path}` : `${key}/${path}`);
     for (const [indexRoot, state] of this._states) {
       /* Where the root lies in this index: its prefix when the index holds it, `''` when the index lies inside it. */
@@ -894,6 +920,7 @@ export class ProjectIndexes {
         this._schedulePersist(indexRoot);
       }
     }
+    return true;
   }
 
   /**
@@ -904,6 +931,8 @@ export class ProjectIndexes {
    * @param entries - Every entry of the tree, root-relative.
    */
   public async expect(root: string, entries: readonly ExpectedEntry[]): Promise<void> {
+    /* A declaration found before this write announced its tree speaks for the older one (D10). */
+    this._expectations.set(normalizePath(root), this.declarationBasis(root) + 1);
     /* Known now, before the index opens or a byte lands: every path the tree names answers as the tree says (D9). */
     this._expected.set(
       normalizePath(root),

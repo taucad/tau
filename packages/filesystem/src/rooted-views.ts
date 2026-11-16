@@ -231,9 +231,20 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
      * Declare which files under this root are placeholders (D9), as the revision layer, their only writer, knows them:
      * each declared file still at its pointer's size is pending on its object, and every other pending entry the
      * declaration speaks for stops being one. `paths` names the files it speaks for; omitted, it speaks for the whole
-     * root. Optional: only the authority's own view keeps an index.
+     * root. `basis` is the {@link declarationBasis} it was found on: a whole declaration a tree write's expectation
+     * has overtaken since speaks for an older tree, and changes nothing. Optional: only the authority's own view
+     * keeps an index.
      */
-    declarePending?(declared: ReadonlyMap<string, DeclaredPlaceholder>, paths?: readonly string[]): Promise<void>;
+    declarePending?(
+      declared: ReadonlyMap<string, DeclaredPlaceholder>,
+      paths?: readonly string[],
+      options?: Readonly<{ basis?: number }>,
+    ): Promise<void>;
+    /**
+     * Where this root's announced tree writes stand (D10): taken before a look at the checkout and passed with what it
+     * declares, so a declaration a newer tree write has overtaken does not speak for it.
+     */
+    declarationBasis?(): number;
     /**
      * Let go of this root before its first whole declaration (D9): the revision layer's first capture of it ended
      * without one. Every other view, held since the revision layer's view of the root was made so a placeholder is
@@ -1290,6 +1301,7 @@ export class RootedViews {
       declarePending: async (
         declared: ReadonlyMap<string, DeclaredPlaceholder>,
         paths?: readonly string[],
+        declareOptions?: Readonly<{ basis?: number }>,
       ): Promise<void> => {
         assertCurrent();
         const local = (path: string): string => resolveLocal(path).localPath;
@@ -1297,8 +1309,10 @@ export class RootedViews {
           root,
           new Map([...declared].map(([path, placeholder]) => [local(path), placeholder])),
           paths?.map((path) => local(path)),
+          declareOptions,
         );
       },
+      declarationBasis: (): number => this._projectIndexes.declarationBasis(root),
       releaseDeclaration: (): void => {
         assertCurrent();
         /* Only the revision layer's own view may let go of its root. */

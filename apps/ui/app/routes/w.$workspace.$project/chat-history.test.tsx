@@ -12,19 +12,8 @@ import type {
 import type { CadChatSubmitInput } from '#chat-clients/use-cad-chat-client.js';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
-import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
-import type { EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
 import { WaitClockProvider } from '@taucad/ui/hooks/use-wait-clock';
 import type { WaitClock } from '@taucad/ui/hooks/use-wait-clock';
-
-/* A frame's handover, constant so the provider's value is not built in render. */
-const servedHandover = {
-  pending: undefined,
-  release: vi.fn(),
-  claim: (_projectId: string) => () => undefined,
-  taken: vi.fn(),
-  decline: vi.fn(),
-} satisfies EarlyInputHandover;
 
 // `useKernel` must NOT be called from chat-history anymore — guard with a
 // throwing mock so any regression is caught loudly.
@@ -62,7 +51,10 @@ const publishChatState = (state: MockChatState): void => {
 };
 let locationState: { readonly focusChatComposer?: boolean } | undefined;
 let archiveOpen = false;
-vi.mock('react-router', () => ({ useLocation: () => ({ state: locationState }) }));
+vi.mock('react-router', () => ({
+  useLocation: () => ({ state: locationState }),
+  useParams: () => ({ workspace: 'home', project: 'one' }),
+}));
 vi.mock('#hooks/use-search-parameter.js', () => ({ useSearchParameter: () => [archiveOpen, vi.fn()] }));
 vi.mock('#routes/w.$workspace.$project/archived-chats.js', () => ({
   ArchivedChats: () => <section aria-label='Archived chats' />,
@@ -149,6 +141,7 @@ vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
 const capturedTextarea: {
   onSubmit?: ChatTextareaProperties['onSubmit'];
   className?: string;
+  handOff?: ChatTextareaProperties['handOff'];
   focus: ReturnType<typeof vi.fn<() => void>>;
 } = {
   focus: vi.fn<() => void>(),
@@ -159,8 +152,10 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
     readonly onSubmit?: ChatTextareaProperties['onSubmit'];
     readonly className?: string;
     readonly enableMobileCollapse?: boolean;
+    readonly handOff?: ChatTextareaProperties['handOff'];
   }): React.JSX.Element => {
     capturedTextarea.onSubmit = properties.onSubmit;
+    capturedTextarea.handOff = properties.handOff;
     capturedTextarea.className = properties.className;
     useImperativeHandle(properties.ref, () => ({ focus: capturedTextarea.focus }), []);
     return <div data-testid='chat-textarea' data-collapsible={properties.enableMobileCollapse === true} />;
@@ -346,22 +341,6 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     archiveOpen = false;
   });
 
-  /* A15d review round 5: a lane with no composer (the archive, a closed lane) declines the frame's served input. */
-  it.each([
-    { name: 'the archive', archive: true, isExpanded: true },
-    { name: 'a closed lane', archive: false, isExpanded: false },
-  ])('declines the served composer for $name', ({ archive, isExpanded }) => {
-    archiveOpen = archive;
-    servedHandover.decline.mockClear();
-    render(
-      <EarlyInputHandoverContext.Provider value={servedHandover}>
-        <ChatHistory isExpanded={isExpanded} />
-      </EarlyInputHandoverContext.Provider>,
-    );
-    expect(servedHandover.decline).toHaveBeenCalledOnce();
-    archiveOpen = false;
-  });
-
   it('replaces the transcript and composer with the archive without reading transcript projections', () => {
     archiveOpen = true;
     const view = render(<ChatHistory />);
@@ -407,6 +386,13 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(headers[0]).toHaveClass('gap-1');
     expect(headers[0]?.querySelector('[data-testid=chat-title-bar]')).not.toBeNull();
     expect(container.querySelector('.sticky')).toBeNull();
+  });
+
+  /* PL6: the composer adopts only the native input its own project's placeholder served. */
+  it("should adopt the composer hand-off scoped to the route's project", () => {
+    render(<ChatHistory />);
+
+    expect(capturedTextarea.handOff).toEqual({ surface: 'project-composer', scope: 'home/one' });
   });
 
   it('leaves the surface styling with ChatTextarea and caps the composer width', () => {

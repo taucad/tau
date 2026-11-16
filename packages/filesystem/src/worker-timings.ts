@@ -24,7 +24,7 @@
  * - `lfs.store`: one large object written into the store after its transfer.
  * - `fence.wait` / `fence.held`: a checkout fence, waited for and then held.
  * - `queue.wait` / `queue.held`: a mutation's resource-queue claims, waited for and then held.
- * - `fill.flush`: one large-object fill flush (capture, materialize, verify).
+ * - `fill.flush`: one large-object fill flush (read the paths it fills, write them, verify them).
  * - `capture.tree`: one checkout comparison capture.
  * - `apply.hold`: one tree apply, from its first write to its release.
  * - `records.project`: the opening pull's chat and evidence fetch and projection.

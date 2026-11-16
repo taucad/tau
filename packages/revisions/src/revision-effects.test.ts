@@ -5297,7 +5297,11 @@ it('keeps a placeholder a fill wrote during a real merge, writing only the merge
   /* The checkout on `main`, the part still its placeholder. */
   await filesystem.writeFile('c.txt', 'ours\n');
   await filesystem.mkdir('models', { recursive: true });
-  await filesystem.writeFile('models/part.step', lfsPointerFor(new TextEncoder().encode(part)).bytes);
+  const { pointer: partPointer, bytes: partPointerBytes } = lfsPointerFor(new TextEncoder().encode(part));
+  await filesystem.writeFile('models/part.step', partPointerBytes);
+  /* The fill the merge's capture starts never delivers: the object is not on the device and no remote serves it,
+   * so the only writer of the part is the hook below, and nothing races it. */
+  await filesystem.unlink(`.git/${lfsObjectPath(partPointer.oid)}`);
   /* The fill lands the part after the merge captured the checkout and before its write. */
   const onApplyingTree = vi.fn(
     (..._parameters: unknown[]) =>
@@ -6893,6 +6897,67 @@ describe('opening before large objects arrive', () => {
     expect(revisionTreeId(cleanLargeObjects(live).tree, 'sha1')).toBe(recorded?.treeId);
 
     release();
+    await vi.waitFor(() => {
+      expect(reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
+  }, 30_000);
+  /* Review of #2010: a flush reads the attributes a capture reads, so an ignored attributes file never decides a fill. */
+  it('fills a placeholder an ignored attributes file would untrack, as the capture and the look read it', async () => {
+    const reports: LargeObjectsReport[] = [];
+    const part = 'solid part\n';
+    const { pointer, bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode(part));
+    const arrived = Promise.withResolvers<void>();
+    const { port: real, filesystem } = await fixture();
+    await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await real.setHead('main');
+    const receipt = await real.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+        ['.gitignore', 'models/.gitattributes\n'],
+        ['main.scad', 'import("models/part.step");\n'],
+        ['models/part.step', part],
+      ]),
+      provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 10, 16) },
+      summary: { generated: 'Remote' },
+    });
+    const remote = revisionId(receipt.commitId);
+    await real.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+    const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
+    await filesystem.unlink(objectFile);
+    const deliver = async (onLargeObject?: (oid: string, content: Uint8Array<ArrayBuffer>) => void): Promise<void> => {
+      await arrived.promise;
+      await filesystem.writeFile(objectFile, part);
+      onLargeObject?.(pointer.oid, new TextEncoder().encode(part));
+    };
+    const port: RevisionPort = {
+      ...real,
+      readTree: async (id, options) => {
+        if (options?.largeObjects === 'local') {
+          return real.readTree(id, options);
+        }
+        await deliver(options?.onLargeObject);
+        return real.readTree(id);
+      },
+      fetchLargeObjects: async (_pointers, options) => {
+        await deliver(options?.onLargeObject);
+        return new Map([[pointer.oid, new TextEncoder().encode(part)]]);
+      },
+    };
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port,
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      onLargeObjects: (report) => reports.push(report),
+    });
+
+    await run(actors.sync.fastForward, { remote: 'tau', branch: 'main' });
+    expect(await filesystem.readFile('models/part.step')).toStrictEqual(pointerBytes);
+    /* A file the person keeps out of the project: Git reads no attributes from it, and neither does the fill. */
+    await filesystem.writeFile('models/.gitattributes', '*.step -filter\n');
+    arrived.resolve();
     await vi.waitFor(() => {
       expect(reports.at(-1)?.facet).toBeUndefined();
     });

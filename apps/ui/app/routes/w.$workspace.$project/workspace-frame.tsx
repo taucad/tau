@@ -1,8 +1,8 @@
 import { useLayoutEffect, useSyncExternalStore } from 'react';
 import { PanelLeft, Share2 } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
-import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
-import { useServedComposer } from '#routes/w.$workspace.$project/workspace-frame-composer.js';
+import { ProjectComposerHandOff, useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
+import { useHandOffAdopted } from '#components/hand-off/hand-off-store.js';
 import {
   defaultPhoneFrameHint,
   defaultWideFrameHint,
@@ -88,7 +88,6 @@ export function WorkspaceFrame({
   isDrawn = true,
   isPending = false,
   pathname,
-  navigationType,
 }: {
   readonly children?: React.ReactNode;
   readonly isDrawn?: boolean;
@@ -99,8 +98,6 @@ export function WorkspaceFrame({
    * pushed the URL. Without it, the document's URL, as the pre-paint script reads it (suites with no router).
    */
   readonly pathname?: string;
-  /** How the router reached the committed location: a replace keeps the served input's project (`useServedComposer`). */
-  readonly navigationType?: 'POP' | 'PUSH' | 'REPLACE';
 }): React.JSX.Element {
   const wide = useSyncExternalStore(subscribeToNothing, () => readDocumentFrameHint(pathname), noHintOnServer);
   const phone = useSyncExternalStore(
@@ -117,20 +114,13 @@ export function WorkspaceFrame({
       document.documentElement.setAttribute(frameTabAttribute, tab);
     }
   }, [isDrawn, tab]);
-  const served = useServedComposer(
-    isDrawn,
-    pathname,
-    /* While pending, the router's type is the committed page's, not the navigation to this project's. */
-    isPending ? undefined : navigationType,
-  );
 
   if (!isDrawn) {
     return (
       <div className='contents'>
         {/* The drawn frame's own nodes take this one slot, so the content keeps its position either way. */}
         {null}
-        <EarlyInputHandoverContext.Provider value={undefined}>{children}</EarlyInputHandoverContext.Provider>
-        {null}
+        {children}
       </div>
     );
   }
@@ -141,11 +131,14 @@ export function WorkspaceFrame({
       data-workspace-pending={isPending || undefined}
       className={cn(
         'size-full bg-background md:relative md:isolate',
-        /* A15b2: drawn ahead of the route, the frame's layers (the lanes, the phone frame) show alone; the page being
-         * left stays in place, unseen, until the route's commit replaces it. */
-        '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone])]:invisible',
+        /* A15b2: drawn ahead of the route, the frame's layers (the lanes, the phone frame, the destination's composer
+         * box) show alone; the page being left stays in place, unseen, until the route's commit replaces it. */
+        '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone]):not([data-slot=workspace-frame-composer])]:invisible',
         /* Literal for Tailwind: `workspaceLanesReadyAttribute`. */
         '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
+        /* Literal for Tailwind: the desktop workspace's `data-chat-lane`. The composer box stays past the lanes'
+         * layout until a composer adopts its input, but not over a chat lane the live layout has closed. */
+        '[&:has([data-chat-lane=hidden])>[data-slot=workspace-frame-composer]]:hidden',
         /* A failure that stands in the content region in the workspace's place (the file service's, the route
          * chunk's) shows alone, as it did before the frame: no lane or composer box under it. Not while pending: the
          * content is then the page being left, hidden, and an alert of its own is not the destination's. */
@@ -156,20 +149,41 @@ export function WorkspaceFrame({
         wide === undefined || phone === undefined ? undefined : (frameVariables(wide, phone) as React.CSSProperties)
       }
     >
-      <WorkspaceFrameLanes isComposerServed={served.field !== undefined} />
-      <EarlyInputHandoverContext.Provider value={served.handover}>{children}</EarlyInputHandoverContext.Provider>
-      {served.field}
+      {/* No hint yet (the server, the hydrating render) serves the input; the pre-paint script's variable hides a lane
+       * remembered closed, and the client then drops it. */}
+      <WorkspaceFrameLanes isChatServed={wide?.chatOpen !== false} pathname={pathname} />
+      {children}
     </div>
   );
 }
 
 /**
- * The frame's own nodes: the lanes layer, and the render-blocking marker after it. One element, so the content
- * after it keeps its slot whether or not the frame is drawn.
+ * The frame's own nodes: the lanes layer, the chat lane's composer box with the composer's native input (PL6), and the
+ * render-blocking marker after them. One element, so the content after it keeps its slot whether or not the frame is
+ * drawn.
  *
- * @returns The lanes and the marker.
+ * The lanes are decorative, under the content and hidden from assistive technology. The composer box is the one part
+ * that stands for something the person uses: the composer takes text from first paint, and the live composer adopts
+ * it when the workspace is revealed. It is its own layer above the content, at the chat lane's place and width and at
+ * the lane frame's composer box, and only the box takes pointer events, so the content under the rest of the layer
+ * gets its pointer as before. The box leaves when a composer adopts the input, in the same commit, not when the lanes
+ * are laid out: the chat lane may show a status instead of a composer for a while (chats loading, sync off, a failed
+ * load), and the text stays where it can be seen and edited until a composer can take it. Where none can, under a
+ * failure in the workspace's place or with the live chat lane closed, the box hides and the text waits in the store.
+ *
+ * @param props - Whether the chat lane serves the input (not when this project remembers the lane closed), and the
+ *   destination's pathname when the frame is drawn ahead of the route.
+ * @returns The lanes, the composer box and the marker.
  */
-function WorkspaceFrameLanes({ isComposerServed }: { readonly isComposerServed: boolean }): React.JSX.Element {
+function WorkspaceFrameLanes({
+  isChatServed,
+  pathname,
+}: {
+  readonly isChatServed: boolean;
+  readonly pathname?: string;
+}): React.JSX.Element {
+  const target = useProjectComposerHandOff(pathname);
+  const isAdopted = useHandOffAdopted(target);
   return (
     <>
       <div
@@ -182,7 +196,7 @@ function WorkspaceFrameLanes({ isComposerServed }: { readonly isComposerServed: 
           data-lane='chat'
           className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 border-r border-border @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'
         >
-          <ChatLaneFrame isComposerServed={isComposerServed} />
+          <ChatLaneFrame />
         </div>
         <div data-slot='workspace-lane' data-lane='viewer' className='h-full min-w-0 flex-1' />
         <div
@@ -191,6 +205,21 @@ function WorkspaceFrameLanes({ isComposerServed }: { readonly isComposerServed: 
           data-lane='workbench'
           className='[display:var(--frame-workbench-display,flex)] h-full w-(--frame-workbench-width,420px) shrink-0 border-l border-border @max-[1120px]:[display:var(--frame-workbench-compact-display,none)]'
         />
+      </div>
+      <div
+        data-slot='workspace-frame-composer'
+        className='@container pointer-events-none absolute inset-0 z-10 flex max-md:hidden'
+      >
+        {/* The chat lane's box, border included, so the composer box lands on the lane frame's own. */}
+        <div className='[display:var(--frame-chat-display,flex)] h-full w-(--frame-chat-width,320px) shrink-0 flex-col justify-end border-r border-transparent @max-[1120px]:[display:var(--frame-chat-compact-display,flex)]'>
+          {isChatServed && !isAdopted ? (
+            <div className='pointer-events-auto mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+              <div className='flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md has-[textarea:focus-visible]:focus-outline'>
+                <ProjectComposerHandOff target={target} />
+              </div>
+            </div>
+          ) : null}
+        </div>
       </div>
       <PhoneFrame />
       {/* Hoisted to the head by React. Until the parser reaches the marker after the lanes, Chromium holds rendering,
@@ -276,14 +305,7 @@ function PhoneFrame(): React.JSX.Element {
  * @param props - When the lane is waiting inside a live workspace, the label of its busy state.
  * @returns The chat lane frame.
  */
-export function ChatLaneFrame({
-  busyLabel,
-  isComposerServed = false,
-}: {
-  readonly busyLabel?: string;
-  /** The served composer stands over this box (`ServedComposer`), so the box itself draws nothing. */
-  readonly isComposerServed?: boolean;
-}): React.JSX.Element {
+export function ChatLaneFrame({ busyLabel }: { readonly busyLabel?: string }): React.JSX.Element {
   return (
     <div
       className='flex size-full flex-col bg-sidebar/50'
@@ -300,10 +322,7 @@ export function ChatLaneFrame({
       <div className='mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
         <div
           data-testid='chat-lane-frame-composer'
-          className={cn(
-            'flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md',
-            isComposerServed && 'invisible',
-          )}
+          className='flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md'
         />
       </div>
     </div>

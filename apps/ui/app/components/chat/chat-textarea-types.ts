@@ -24,7 +24,8 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useComposerExit } from '@taucad/chat-ui/components/use-composer-exit';
-import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
 import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-submit-button.js';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
@@ -174,6 +175,12 @@ export type ChatTextareaProperties = {
    * where this component owns it and so has to be loaded before anything can be typed.
    */
   readonly adoptedEarlyInput?: EarlyChatInput;
+  /**
+   * The hand-off surface whose native input this composer adopts on mount (progressive loading P4): the project's
+   * placeholder serves one, and its text, caret, focus and a queued send come here. Only an input served for the same
+   * scope (the project) is adopted. Ignored with either arrangement above.
+   */
+  readonly handOff?: HandOffTarget;
   readonly className?: string;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
@@ -471,8 +478,8 @@ export function useChatTextareaLogic({
   const isSubmitDisabledRef = useRef(isSubmitDisabled);
   const onSubmitRef = useRef(onSubmit);
   const resumeRef = useRef(canResume ? resume : undefined);
-  /* A layout effect, so a child's effect in the same commit (the composer's queued send, C10) submits with this
-   * render's values rather than the last commit's. */
+  /* A layout effect, so a child's effect that submits in the render that permits it (P4's queued submit) reads that
+   * render's state: passive effects run child first. */
   useLayoutEffect(() => {
     inputTextRef.current = inputText;
     attachmentsRef.current = attachments;

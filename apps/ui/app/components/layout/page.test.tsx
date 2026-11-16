@@ -39,6 +39,7 @@ vi.mock('react-router', () => ({
   ),
   Outlet: () => <div>Page content</div>,
   useLocation: () => ({ key: state.locationKey, pathname: state.pathname, hash: '' }),
+  useParams: () => ({}),
   NavigationType: { Pop: 'POP', Push: 'PUSH', Replace: 'REPLACE' },
   useNavigationType: () => state.navigationType,
 }));

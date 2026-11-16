@@ -1024,7 +1024,7 @@ overrides:
   oxfmt@0.39.0>tinypool: 2.1.2
   rehype-katex>katex: 0.18.2
   replicad: npm:@taulabs/replicad@1.1.0-taulabs.1
-  replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
+  replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.1
   sockjs@0.3.24>uuid: 11.1.1
   vitest: 4.1.11
 
@@ -1413,8 +1413,8 @@ importers:
         specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
         version: '@taulabs/replicad@1.1.0-taulabs.1'
       replicad-opencascadejs:
-        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
-        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
+        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.1
+        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.1'
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
@@ -5392,8 +5392,8 @@ importers:
         specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
         version: '@taulabs/replicad@1.1.0-taulabs.1'
       replicad-opencascadejs:
-        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
-        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
+        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.1
+        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.1'
       sharp:
         specifier: 'catalog:'
         version: 0.35.5(@types/node@26.6.5)
@@ -6784,8 +6784,8 @@ importers:
         specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
         version: '@taulabs/replicad@1.1.0-taulabs.1'
       replicad-opencascadejs:
-        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
-        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
+        specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.1
+        version: '@taulabs/replicad-opencascadejs@0.23.0-beta.1'
       source-map-js:
         specifier: 'catalog:'
         version: 1.2.2
@@ -15552,8 +15552,8 @@ packages:
     resolution: {integrity: sha512-jXQwh6NYfgpKh+eQMR/8hVYUuvbaH5zISD02T8o0atRQoV9w+4F8D7enfAYgejEJtbGJVr5J+/zzTzf7QJqgWw==}
     engines: {node: '>=20'}
 
-  '@taulabs/replicad-opencascadejs@0.23.0-beta.0':
-    resolution: {integrity: sha512-f1odv1vpJNAsgYFzxaoF12fOzbGHsYA0J0tio/GrqVYoc/Pt+hx0l1o25aEZv0JTx+01WJIhyvVYAmG6hE9ZKg==}
+  '@taulabs/replicad-opencascadejs@0.23.0-beta.1':
+    resolution: {integrity: sha512-56qAkO3DhbqTYgC9KvHoa9/rmxS3voBsysIVYgQ8C/9x1JQiQxSCuG6Ksh1Iq+frOAik6zGaYK5Lxd1lkgrWWA==}
 
   '@taulabs/replicad@1.1.0-taulabs.1':
     resolution: {integrity: sha512-lyCe6PKiZ1BIVQ0NZShUsJQxmfQc1jZyx15WXcGMivzCBWuZQwFqFw38DqaKBz8xRC2Ir8tECGjpeiTVLiSMCA==}
@@ -36374,7 +36374,7 @@ snapshots:
       '@taulabs/openrscad-engine-linux-x64-gnu': 0.11.0-beta.5
       '@taulabs/openrscad-engine-win32-x64-msvc': 0.11.0-beta.5
 
-  '@taulabs/replicad-opencascadejs@0.23.0-beta.0': {}
+  '@taulabs/replicad-opencascadejs@0.23.0-beta.1': {}
 
   '@taulabs/replicad@1.1.0-taulabs.1':
     dependencies:

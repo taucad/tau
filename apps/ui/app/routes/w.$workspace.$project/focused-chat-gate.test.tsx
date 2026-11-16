@@ -8,8 +8,6 @@ import {
   FocusedChatErrorPanel,
 } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
-import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
-import type { EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
 
 type StateValue = string | { [key: string]: StateValue };
 
@@ -57,12 +55,6 @@ const { mockEditorRefSend, mockState, syncNow, chatSync, availability } = vi.hoi
   availability: { whole: 'ready', chats: 'ready' },
 }));
 
-/* The placeholder's own reads are its suite's; here it only stands in the lane. */
-vi.mock('#routes/w.$workspace.$project/project-sync-placeholder.js', () => ({
-  ProjectSyncPlaceholder: ({ state }: { readonly state: string }) => (
-    <div data-testid='project-sync-placeholder'>{state}</div>
-  ),
-}));
 vi.mock('#hooks/use-project-availability.js', () => ({
   useProjectAvailability: (surface?: string) => (surface === 'chats' ? availability.chats : availability.whole),
   useModelAvailability: () => 'ready',
@@ -154,15 +146,6 @@ describe('FocusedChatErrorPanel', () => {
   });
 });
 
-/* A frame's handover, constant so the provider's value is not built in render. */
-const handover = {
-  pending: undefined,
-  release: vi.fn(),
-  claim: (_projectId: string) => () => undefined,
-  taken: vi.fn(),
-  decline: vi.fn(),
-} satisfies EarlyInputHandover;
-
 describe('ChatHistoryGate', () => {
   beforeEach(() => {
     chatSync.state = 'loading';
@@ -208,61 +191,6 @@ describe('ChatHistoryGate', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(syncNow).toHaveBeenCalledOnce();
     expect(screen.queryByText('Chat content')).not.toBeInTheDocument();
-  });
-
-  /* A15d review round 2: a lane that stays without a composer declines the served input; one still loading keeps it. */
-  it.each([
-    { state: 'disabled', declines: true },
-    { state: 'failed', declines: true },
-    { state: 'loading', declines: false },
-  ] as const)('declines the served composer while chats are $state: $declines', ({ state, declines }) => {
-    chatSync.state = state;
-    mockState.current = buildState({ value: { ready: { operation: 'idle' } } });
-    handover.decline.mockClear();
-    render(
-      <EarlyInputHandoverContext.Provider value={handover}>
-        <ChatHistoryGate>
-          <div>Chat content</div>
-        </ChatHistoryGate>
-      </EarlyInputHandoverContext.Provider>,
-    );
-    expect(handover.decline).toHaveBeenCalledTimes(declines ? 1 : 0);
-  });
-
-  it('declines the served composer beside the focused chat error panel', () => {
-    mockState.current = buildState({
-      value: { ready: { operation: 'focusedChatUnresolved' } },
-      focusedChatId: undefined,
-      focusedChatError: new Error('worker offline'),
-    });
-    handover.decline.mockClear();
-    render(
-      <EarlyInputHandoverContext.Provider value={handover}>
-        <ChatHistoryGate>
-          <div>Chat content</div>
-        </ChatHistoryGate>
-      </EarlyInputHandoverContext.Provider>,
-    );
-    expect(screen.getByTestId('focused-chat-error-panel')).toBeDefined();
-    expect(handover.decline).toHaveBeenCalledOnce();
-  });
-
-  it.each([
-    { state: 'failed', declines: true },
-    { state: 'account', declines: true },
-    { state: 'offline', declines: true },
-    { state: 'connecting', declines: false },
-  ] as const)("declines the served composer while the project's chats are $state: $declines", ({ state, declines }) => {
-    availability.chats = state;
-    handover.decline.mockClear();
-    render(
-      <EarlyInputHandoverContext.Provider value={handover}>
-        <ChatHistoryGate>
-          <div>Chat content</div>
-        </ChatHistoryGate>
-      </EarlyInputHandoverContext.Provider>,
-    );
-    expect(handover.decline).toHaveBeenCalledTimes(declines ? 1 : 0);
   });
 
   it('renders the error panel when ensure has rejected (focusedChatUnresolved + error)', () => {

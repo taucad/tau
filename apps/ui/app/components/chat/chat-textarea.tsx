@@ -1,14 +1,4 @@
-import {
-  memo,
-  useCallback,
-  useContext,
-  useEffect,
-  useImperativeHandle,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -16,8 +6,10 @@ import type { ChatTextareaProperties } from '#components/chat/chat-textarea-type
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
 import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
-import type { EarlyChatInput, EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
-import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import { useHandOffAdoption } from '#components/hand-off/hand-off-store.js';
+import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
+import type { HandOffSnapshot } from '#components/hand-off/hand-off.js';
 import { draftHintScopeOf, writeDraftHint } from '#lib/frame-hint-draft.js';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 import { ChatTextareaSkeleton } from '@taucad/chat-ui/components/chat-textarea-skeleton';
@@ -46,36 +38,12 @@ import { prewarmChatSdk } from '#services/chat-sdk-loader.js';
 import { latestAcpSessionData } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 
-/**
- * The project route's served composer (the workspace frame's) hands its input to the main composer once the lane is
- * revealed and this composer has claimed it; it is applied once, then the frame forgets it. The input stays this
- * composer's after that, so a queued send it carries is replayed once the draft holds its text (C10); a composer mounted
- * later starts without it.
- *
- * @param projectId - The project this composer belongs to; none off a project.
- * @param chatId - The chat this composer belongs to, where it has one.
- * @param isMain - Whether this is the main composer, the only one the frame hands its input to.
- * @returns The handed-over input, and the frame's handover.
- */
-const useFrameEarlyInput = (
-  projectId: string | undefined,
-  chatId: string | undefined,
-  isMain: boolean,
-): { handedOverInput: EarlyChatInput | undefined; earlyInputHandover: EarlyInputHandover | undefined } => {
-  const frameHandover = useContext(EarlyInputHandoverContext);
-  const earlyInputHandover = isMain && projectId !== undefined ? frameHandover : undefined;
-  const [takenInput, setTakenInput] = useState<EarlyChatInput>();
-  const pendingInput = earlyInputHandover?.pending;
-  if (pendingInput !== undefined && pendingInput !== takenInput) {
-    setTakenInput(pendingInput);
-  }
-  const claimEarlyInput = earlyInputHandover?.claim;
-  useLayoutEffect(
-    () => (projectId === undefined ? undefined : claimEarlyInput?.(projectId, chatId)),
-    [claimEarlyInput, projectId, chatId],
-  );
-  return { handedOverInput: pendingInput ?? takenInput, earlyInputHandover };
-};
+/** The surface to adopt: none when a host above already owns the native input (`adoptedEarlyInput`, `enableEarlyInput`). */
+const handOffTarget = (
+  target: HandOffTarget | undefined,
+  adoptedEarlyInput: EarlyChatInput | undefined,
+  enableEarlyInput: boolean,
+): HandOffTarget | undefined => (adoptedEarlyInput === undefined && !enableEarlyInput ? target : undefined);
 
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the
@@ -103,6 +71,7 @@ export const ChatTextarea = memo(function ({
   enableAutoFocus = true,
   enableEarlyInput = false,
   adoptedEarlyInput,
+  handOff: handOffTargetProperty,
   onEscapePressed,
   onBlur,
   className,
@@ -160,6 +129,44 @@ export const ChatTextarea = memo(function ({
   } = useChatComposer();
   const projectContext = useProject({ enableNoContext: true });
   const filesArriving = useTurnFilesArriving(projectContext?.projectId, composerExecution);
+
+  /* P4: a placeholder served a native input for this composer; its edit enters the draft before the editor renders
+   * it, so the draft's own text never overwrites what the person typed. A15d: a painted draft nobody edited is the
+   * hint's copy of this chat's draft. While the chat's record is not read yet and the draft holds nothing, it is the
+   * draft (`hydrateDraft`, which leaves an untouched draft open to the record, so the record still wins when it lands),
+   * so the text does not leave the box and come back. A record already read is the draft as it stands, empty or not
+   * (the hint may be older: sent on another device), and a draft of another chat is not this one's. */
+  const { session: composerSession } = useChatComposer();
+  /* Set in the adoption's own commit, so the editor reads it at its handover. */
+  const [isPaintedDraftTaken, setIsPaintedDraftTaken] = useState(false);
+  const isRecordLoading = useSelector(composerSession?.composerRecordRef, (state) =>
+    state ? state.matches({ lifecycle: 'loading' }) : false,
+  );
+  const handleHandOffAdopted = useCallback(
+    (snapshot: HandOffSnapshot): void => {
+      if (snapshot.edited) {
+        draftActorRef.send({ type: 'setDraftText', text: snapshot.text, adoptedEdit: true });
+        return;
+      }
+      const isPaintedDraftTakenNow =
+        snapshot.prefilled === true &&
+        (snapshot.prefilledChatId === undefined || snapshot.prefilledChatId === composerSession?.activeChatId) &&
+        /* Record-wins: only while the record is unread; `hydrateDraft` itself skips a touched draft. */
+        isRecordLoading;
+      if (isPaintedDraftTakenNow) {
+        setIsPaintedDraftTaken(true);
+        draftActorRef.send({ type: 'hydrateDraft', draft: buildDraftMessage(snapshot.text, []) });
+      }
+    },
+    [composerSession, draftActorRef, isRecordLoading],
+  );
+  /* Whether the adopted snapshot's painted draft became the draft, for the editor to keep it (read once, at its
+   * handover). */
+  const takePaintedDraft = useCallback((): boolean => isPaintedDraftTaken, [isPaintedDraftTaken]);
+  const handOff = useHandOffAdoption(
+    handOffTarget(handOffTargetProperty, adoptedEarlyInput, enableEarlyInput),
+    handleHandOffAdopted,
+  );
   const logic = useChatTextareaLogic({
     ref,
     onSubmit,
@@ -423,30 +430,6 @@ export const ChatTextarea = memo(function ({
       </>
     ) : undefined;
 
-  const { handedOverInput, earlyInputHandover } = useFrameEarlyInput(
-    projectContext?.projectId,
-    session?.activeChatId,
-    mode === 'main',
-  );
-  /* Whether this chat's composer record is still being read: until it is, an empty draft says nothing about it. */
-  const isRecordUnread = useSelector(
-    session?.composerRecordRef,
-    (state) => state?.matches({ lifecycle: 'loading' }) ?? false,
-  );
-  /* A painted draft nobody edited is the hint's copy of this chat's draft: while the record is not read yet and the
-   * draft holds nothing, it is the draft, as on Home, so the text does not leave the box and come back when the record
-   * lands. The record still wins: `hydrateDraft` leaves an untouched draft open to it. A record already read is the
-   * draft as it stands, empty or not (the hint may be older: sent on another device). */
-  const takeFrameInput = useCallback((): boolean => {
-    const isPaintedDraftTaken =
-      handedOverInput?.prefilled === true && !handedOverInput.edited && isRecordUnread && logic.inputText === '';
-    if (isPaintedDraftTaken) {
-      draftActorRef.send({ type: 'hydrateDraft', draft: buildDraftMessage(handedOverInput.text, []) });
-    }
-    earlyInputHandover?.taken();
-    return isPaintedDraftTaken;
-  }, [draftActorRef, earlyInputHandover, handedOverInput, isRecordUnread, logic.inputText]);
-
   const content = (earlyInput?: EarlyChatInput, onEarlyInputAdopted?: () => boolean): React.ReactNode => (
     <>
       {composerNotices}
@@ -511,14 +494,20 @@ export const ChatTextarea = memo(function ({
    * component owns the native input and has already handed its edit over, which is how a route can
    * accept text without this module in its bundle; `enableEarlyInput` means this component owns it,
    * which needs the module first; neither means there is no early input to carry. */
+  /* A fourth: a placeholder above served the native input (`handOff`) and this composer adopted it. Until the
+   * adoption attempt has run, or while a composition in it is open, the native input is still the thing to type in. */
   if (adoptedEarlyInput) {
     return <>{content(adoptedEarlyInput)}</>;
+  }
+  if (handOff.kind === 'done' && handOff.snapshot !== undefined) {
+    return <>{content(handOff.snapshot, takePaintedDraft)}</>;
+  }
+  if (handOff.kind === 'waiting') {
+    return skeleton;
   }
   return enableEarlyInput ? (
     <ChatEarlyInput className={className}>{content}</ChatEarlyInput>
   ) : (
-    <ClientOnly fallback={skeleton}>
-      {content(handedOverInput, earlyInputHandover === undefined ? undefined : takeFrameInput)}
-    </ClientOnly>
+    <ClientOnly fallback={skeleton}>{content()}</ClientOnly>
   );
 });

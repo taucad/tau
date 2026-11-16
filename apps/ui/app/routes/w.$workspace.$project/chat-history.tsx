@@ -1,5 +1,4 @@
 import { frameHintKey } from '#lib/frame-hint.js';
-import { DeclineServedComposer } from '#routes/w.$workspace.$project/workspace-frame-composer.js';
 import { chatComposerTrayClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -19,6 +18,7 @@ import {
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
 import { useTourAnchors } from '#components/tour/tour-anchors.js';
 import { ChatTodoList } from '#components/chat/chat-todo-list.js';
 import type { ChatTranscriptState } from '#services/chat-session-store.js';
@@ -259,8 +259,6 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
       <FloatingPanelContent className='min-h-0 overflow-hidden'>
         <ArchivedChats key={projectId} />
       </FloatingPanelContent>
-      {/* The archive holds no composer, nor does a closed lane: the served input over the lane goes. */}
-      <DeclineServedComposer />
     </FloatingPanel>
   ) : isExpanded ? (
     <ExpandedChatHistory
@@ -269,9 +267,7 @@ export const ChatHistory = memo(function ({ isExpanded = true, setIsExpanded, ..
       setIsExpanded={setIsExpanded}
       formattedKeyCombination={formattedKeyCombination}
     />
-  ) : (
-    <DeclineServedComposer />
-  );
+  ) : null;
 });
 
 const ExpandedChatHistory = memo(function ({
@@ -301,6 +297,7 @@ const ExpandedChatHistory = memo(function ({
   const isMobile = useIsMobile();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
+  const composerHandOff = useProjectComposerHandOff();
   /* The product tour points at the composer; the region is also the foot of the chat lane, where a tip about a
    * transcript row that has scrolled away is placed. */
   const composerAnchor = useTourAnchors('composer', 'chat-lane');
@@ -495,6 +492,8 @@ const ExpandedChatHistory = memo(function ({
                 enableMobileCollapse={isMobile}
                 mode='main'
                 enableAutoFocus={false}
+                /* The workspace frame served this composer's native input; adopt it at the reveal (PL6). */
+                handOff={composerHandOff}
                 onSubmit={onSubmit}
               />
             </div>

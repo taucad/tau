@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { HomeChatComposer, homeComposerEndId } from '#routes/_index/home-chat-composer.js';
-import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 
 const send = vi.hoisted(() => vi.fn());
 /* The draft owner's surface the early input reads: its sends, and an empty draft to select from. */
@@ -120,7 +120,9 @@ describe('Home chat composer', () => {
     expect(container.textContent).not.toContain('Rich composer');
     document.body.append(container);
     const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
-    Object.assign(input, { tauEarlyDraft: { edited: false, composing: false } });
+    Object.assign(input, {
+      tauHandOff: { edited: false, composing: false, submitQueued: false, acceptedAt: undefined },
+    });
     const onRecoverableError = vi.fn();
     const root = hydrateRoot(container, content, { onRecoverableError });
     try {
@@ -129,7 +131,9 @@ describe('Home chat composer', () => {
       });
       await act(async () => {
         input.value = 'A bracket for a 3 mm shaft';
-        Object.assign(input, { tauEarlyDraft: { edited: true, composing: false } });
+        Object.assign(input, {
+          tauHandOff: { edited: true, composing: false, submitQueued: false, acceptedAt: undefined },
+        });
         input.dispatchEvent(new InputEvent('input', { bubbles: true }));
       });
       expect(within(container).getByRole('textbox')).toBe(input);

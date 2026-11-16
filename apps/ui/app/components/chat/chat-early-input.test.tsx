@@ -3,7 +3,8 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
-import type { EarlyChatInput, EarlyChatInputBarState } from '#components/chat/chat-early-input-field.js';
+import type { EarlyChatInput, EarlyChatInputBarState } from '#components/chat/chat-early-input.js';
+import type { HandOffElement } from '#components/hand-off/hand-off.js';
 import { hasUsedPageSince } from '#components/onboarding/home-interaction.js';
 import { draftHintStorageKey, writeDraftHint } from '#lib/frame-hint-draft.js';
 import {
@@ -57,7 +58,7 @@ describe('Home early input', () => {
     document.body.append(container);
     const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
     input.value = text;
-    Object.assign(input, { tauEarlyDraft: { edited, composing: false } });
+    Object.assign(input, { tauHandOff: { edited, composing: false, submitQueued: false, acceptedAt: undefined } });
     input.setSelectionRange(1, text.length, 'backward');
     if (focused) {
       input.focus();
@@ -77,8 +78,8 @@ describe('Home early input', () => {
         start: Math.min(1, text.length),
         end: text.length,
         direction: 'backward',
-        queuedSend: false,
-        prefilled: false,
+        scrollTop: 0,
+        submitQueued: false,
       });
       expect(send.mock.calls).toEqual(edited ? [[{ type: 'setDraftText', text, adoptedEdit: true }]] : []);
       expect(onRecoverableError).not.toHaveBeenCalled();
@@ -104,9 +105,11 @@ describe('Home early input', () => {
     container.innerHTML = renderToString(content);
     document.body.append(container);
     const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
-    const state = { edited: true, composing: true };
-    Object.assign(input, { tauEarlyDraft: state });
+    const state = { edited: true, composing: true, submitQueued: false, acceptedAt: undefined };
+    Object.assign(input, { tauHandOff: state });
     input.value = 'に';
+    /* A composition is open only in the input that holds focus. */
+    input.focus();
     const root = hydrateRoot(container, content);
     try {
       await act(async () => {
@@ -143,7 +146,9 @@ describe('Home early input', () => {
     container.innerHTML = renderToString(content(false));
     document.body.append(container);
     const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
-    Object.assign(input, { tauEarlyDraft: { edited: false, composing: false } });
+    Object.assign(input, {
+      tauHandOff: { edited: false, composing: false, submitQueued: false, acceptedAt: undefined },
+    });
     const root = hydrateRoot(container, content(false));
     try {
       await act(async () => {
@@ -156,7 +161,9 @@ describe('Home early input', () => {
       expect(send).not.toHaveBeenCalled();
       await act(async () => {
         input.value = 'Typed before the composer arrived';
-        Object.assign(input, { tauEarlyDraft: { edited: true, composing: false } });
+        Object.assign(input, {
+          tauHandOff: { edited: true, composing: false, submitQueued: false, acceptedAt: undefined },
+        });
         input.dispatchEvent(new InputEvent('input', { bubbles: true }));
       });
       expect(input.value).toBe('Typed before the composer arrived');
@@ -260,12 +267,10 @@ describe('Home early input', () => {
       expect(script.parentElement?.lastElementChild).toBe(script);
       expect(script.parentElement).toContainElement(bar as HTMLElement);
       runEarlyScript(container);
-      const input = within(container).getByRole<HTMLTextAreaElement & { tauEarlyDraft?: { edited: boolean } }>(
-        'textbox',
-      );
-      expect(input.tauEarlyDraft).toEqual({ edited: false, composing: false, queued: false, prefill: '' });
+      const input = within(container).getByRole<HandOffElement>('textbox');
+      expect(input.tauHandOff).toEqual({ edited: false, composing: false, submitQueued: false, acceptedAt: undefined });
       input.dispatchEvent(new InputEvent('input', { bubbles: true }));
-      expect(input.tauEarlyDraft?.edited).toBe(true);
+      expect(input.tauHandOff?.edited).toBe(true);
     } finally {
       container.remove();
     }
@@ -313,9 +318,7 @@ describe('Home early input: queued send and stored draft (C10)', () => {
   });
 
   /** Serve the composer, run its script where it was served, and return the input and its box. */
-  const serve = (
-    content: React.JSX.Element,
-  ): { container: HTMLElement; input: HTMLTextAreaElement & { tauEarlyDraft?: Record<string, unknown> } } => {
+  const serve = (content: React.JSX.Element): { container: HTMLElement; input: HandOffElement } => {
     const container = document.createElement('div');
     container.innerHTML = renderToString(content);
     document.body.append(container);
@@ -371,7 +374,7 @@ describe('Home early input: queued send and stored draft (C10)', () => {
     expect(container.querySelector('[data-queued-send]')).not.toBeNull();
     const done = await hydrateAndAdopt(container, content);
     try {
-      expect(adopted()).toMatchObject({ text: 'Make a bracket.', edited: true, queuedSend: true });
+      expect(adopted()).toMatchObject({ text: 'Make a bracket.', edited: true, submitQueued: true });
       expect(send.mock.calls).toEqual([[{ type: 'setDraftText', text: 'Make a bracket.', adoptedEdit: true }]]);
     } finally {
       await done();
@@ -400,7 +403,7 @@ describe('Home early input: queued send and stored draft (C10)', () => {
     expect(container.querySelector('[data-queued-send]')).toBeNull();
     const done = await hydrateAndAdopt(container, content);
     try {
-      expect(adopted()?.queuedSend).toBe(false);
+      expect(adopted()?.submitQueued).toBe(false);
       expect(adopted()?.text.startsWith('Make a bracket.')).toBe(true);
     } finally {
       await done();
@@ -420,7 +423,7 @@ describe('Home early input: queued send and stored draft (C10)', () => {
       type(input, value);
       const event = press(input, init);
       expect(container.querySelector('[data-queued-send]')).toBeNull();
-      expect(input.tauEarlyDraft?.['queued']).toBe(false);
+      expect(input.tauHandOff?.submitQueued).toBe(false);
       /* Shift+Enter and a composition's Enter are the input's own; only an empty input's plain Enter is swallowed. */
       expect(event.defaultPrevented).toBe(value === '');
     } finally {
@@ -445,7 +448,7 @@ describe('Home early input: queued send and stored draft (C10)', () => {
       const event = press(input, { key: 'Enter' });
       expect(event.defaultPrevented).toBe(false);
       expect(container.querySelector('[data-queued-send]')).toBeNull();
-      expect(input.tauEarlyDraft?.['queued']).toBe(false);
+      expect(input.tauHandOff?.submitQueued).toBe(false);
     } finally {
       inRealm('window.matchMedia=window.__tauMatchMedia;delete window.__tauMatchMedia');
       container.remove();
@@ -472,11 +475,11 @@ describe('Home early input: queued send and stored draft (C10)', () => {
 
   /* The record wins where the two differ (review round 1, defect 7). */
   it.each([
-    { name: 'the same draft', record: 'A bracket for the shelf', queuedSend: true },
-    { name: 'another draft', record: 'A hinge for the door', queuedSend: false },
+    { name: 'the same draft', record: 'A bracket for the shelf', submitQueued: true },
+    { name: 'another draft', record: 'A hinge for the door', submitQueued: false },
   ])(
     'should not hydrate a draft the record already holds, $name, and keep Enter only on it',
-    async ({ record, queuedSend }) => {
+    async ({ record, submitQueued }) => {
       writeDraftHint({ kind: 'home' }, { text: 'A bracket for the shelf' });
       recordDraftText = record;
       const { content, adopted } = adopting();
@@ -484,7 +487,7 @@ describe('Home early input: queued send and stored draft (C10)', () => {
       press(input, { key: 'Enter' });
       const done = await hydrateAndAdopt(container, content);
       try {
-        expect(adopted()).toMatchObject({ prefilled: true, edited: false, queuedSend });
+        expect(adopted()).toMatchObject({ prefilled: true, edited: false, submitQueued });
         expect(send).not.toHaveBeenCalled();
       } finally {
         await done();
@@ -516,7 +519,8 @@ describe('Home early input: queued send and stored draft (C10)', () => {
     type(input, 'A hinge');
     const done = await hydrateAndAdopt(container, content);
     try {
-      expect(adopted()).toMatchObject({ text: 'A hinge', edited: true, prefilled: false });
+      expect(adopted()).toMatchObject({ text: 'A hinge', edited: true });
+      expect(adopted()?.prefilled).toBeUndefined();
       expect(send.mock.calls).toEqual([[{ type: 'setDraftText', text: 'A hinge', adoptedEdit: true }]]);
     } finally {
       await done();

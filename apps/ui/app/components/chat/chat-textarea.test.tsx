@@ -5,8 +5,9 @@ import { toast } from '@taucad/ui/components/sonner';
 import { captureCadImages } from '#services/headless-capture.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { readDraftHint } from '#lib/frame-hint-draft.js';
-import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
-import type { EarlyChatInput, EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
+import { HandOffSlot } from '#components/hand-off/hand-off-slot.js';
+import { resetHandOffStoreForTest } from '#components/hand-off/hand-off-store.js';
+import type { HandOffElement } from '#components/hand-off/hand-off.js';
 
 const mocks = vi.hoisted(() => {
   const cadRef = { getSnapshot: () => ({ context: { geometry: { format: 'gltf' } } }) };
@@ -124,7 +125,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
           },
     execution: { execution: { kind: 'native' } },
     runElsewhere: mocks.runElsewhere,
-    draftActorRef: { send: mocks.draftSend },
+    draftActorRef: { send: mocks.draftSend, getSnapshot: () => ({ context: { draftText: mocks.inputText } }) },
   }),
 }));
 vi.mock('#hooks/use-chat-session.js', () => ({ useChatSessionSnapshot: () => undefined }));
@@ -266,86 +267,44 @@ describe('ChatTextarea draft hint', () => {
   });
 });
 
-/* A15d review round 5: the main composer claims the frame's input for its project and keeps it once taken. */
-describe('ChatTextarea frame early input', () => {
-  const input: EarlyChatInput = {
-    text: 'abc',
-    edited: true,
-    focused: true,
-    focusUnclaimed: false,
-    start: 3,
-    end: 3,
-    direction: 'none',
-    queuedSend: true,
-    prefilled: false,
-  };
-  const handoverWith = (
-    pending: EarlyChatInput | undefined,
-    claim: EarlyInputHandover['claim'],
-  ): EarlyInputHandover => ({
-    pending,
-    release: vi.fn(),
-    claim,
-    taken: vi.fn(),
-    decline: vi.fn(),
+/* A15d on PL6's hand-off: a painted draft nobody edited is the draft only while the chat's record is unread and the
+ * draft holds nothing (`hydrateDraft`, so the record still wins), and only for its own chat. */
+describe('ChatTextarea painted draft hand-off', () => {
+  beforeEach(() => {
+    resetHandOffStoreForTest();
+    mocks.draftSend.mockClear();
   });
 
-  it('claims for its project, takes the pending input, and keeps it after the frame forgets it', () => {
-    const unclaim = vi.fn();
-    const claim = vi.fn((_projectId: string) => unclaim);
-    const pending = handoverWith(input, claim);
-    const view = render(
-      <EarlyInputHandoverContext.Provider value={pending}>
-        <ChatTextarea onSubmit={vi.fn()} />
-      </EarlyInputHandoverContext.Provider>,
-    );
-    expect(claim).toHaveBeenCalledWith('project', undefined);
-    expect(mocks.earlyInput).toBe(input);
-    const forgotten = handoverWith(undefined, claim);
-    view.rerender(
-      <EarlyInputHandoverContext.Provider value={forgotten}>
-        <ChatTextarea onSubmit={vi.fn()} />
-      </EarlyInputHandoverContext.Provider>,
-    );
-    expect(mocks.earlyInput).toBe(input);
-    view.unmount();
-    expect(unclaim).toHaveBeenCalled();
-  });
+  /** Serve the project's native input, painted with a stored draft as the served recorder paints one. */
+  const servePainted = (text: string, chatId?: string): void => {
+    render(<HandOffSlot surface='project-composer' scope='acme/bracket' label='Chat message' placeholder='Ask Tau' />);
+    const input = document.querySelector<HandOffElement>('textarea[aria-label="Chat message"]')!;
+    input.value = text;
+    Object.assign(input.tauHandOff!, { prefill: text, ...(chatId === undefined ? {} : { prefillChat: chatId }) });
+  };
 
   it.each([
-    { draftText: '', isRecordUnread: true, isHydrated: true },
+    { draftText: '', isRecordUnread: true, chatId: undefined, isHydrated: true },
+    { draftText: '', isRecordUnread: true, chatId: 'c1', isHydrated: true },
     /* The record is read already and holds a draft, which wins. */
-    { draftText: 'from the record', isRecordUnread: false, isHydrated: false },
-    /* Review round 9: the record is read already and holds no draft (sent on another device): the hint is older. */
-    { draftText: '', isRecordUnread: false, isHydrated: false },
+    { draftText: 'from the record', isRecordUnread: false, chatId: undefined, isHydrated: false },
+    /* The record is read already and holds no draft (sent on another device): the hint is older. */
+    { draftText: '', isRecordUnread: false, chatId: undefined, isHydrated: false },
+    /* Another chat's draft is not this chat's. */
+    { draftText: '', isRecordUnread: true, chatId: 'c2', isHydrated: false },
   ])(
-    'takes a painted draft nobody edited as the draft while the draft holds "$draftText" and the record is unread: $isRecordUnread (hydrated: $isHydrated)',
-    ({ draftText, isRecordUnread, isHydrated }) => {
+    'takes a painted draft nobody edited as the draft while the draft holds "$draftText", the record is unread: $isRecordUnread, for chat $chatId (hydrated: $isHydrated)',
+    ({ draftText, isRecordUnread, chatId, isHydrated }) => {
       mocks.inputText = draftText;
       mocks.isRecordUnread = isRecordUnread;
       mocks.activeChatId = 'c1';
-      mocks.draftSend.mockClear();
-      const painted: EarlyChatInput = {
-        ...input,
-        text: 'Fillet it',
-        edited: false,
-        queuedSend: false,
-        prefilled: true,
-      };
-      const pending = handoverWith(
-        painted,
-        vi.fn(() => vi.fn()),
-      );
-      render(
-        <EarlyInputHandoverContext.Provider value={pending}>
-          <ChatTextarea onSubmit={vi.fn()} />
-        </EarlyInputHandoverContext.Provider>,
-      );
+      servePainted('Fillet it', chatId);
+      render(<ChatTextarea onSubmit={vi.fn()} handOff={{ surface: 'project-composer', scope: 'acme/bracket' }} />);
+      expect(mocks.earlyInput).toMatchObject({ text: 'Fillet it', edited: false, prefilled: true });
       let isTaken: boolean | undefined;
       act(() => {
         isTaken = mocks.onEarlyInputAdopted?.();
       });
-      expect(pending.taken).toHaveBeenCalledOnce();
       /* The editor keeps the painted text only where the draft takes it. */
       expect(isTaken).toBe(isHydrated);
       if (isHydrated) {
@@ -362,6 +321,7 @@ describe('ChatTextarea frame early input', () => {
     },
   );
 });
+
 /* SP2h: the chats open while a Tau Cloud open still writes the files; a turn in this checkout waits for them. */
 describe('ChatTextarea while a Tau Cloud open writes the files', () => {
   beforeEach(() => {

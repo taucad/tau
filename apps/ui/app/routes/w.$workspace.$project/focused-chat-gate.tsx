@@ -1,4 +1,3 @@
-import { DeclineServedComposer } from '#routes/w.$workspace.$project/workspace-frame-composer.js';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useEffect, useState } from 'react';
@@ -144,15 +143,7 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
   );
 
   if (availability !== 'ready') {
-    return (
-      <>
-        <ProjectSyncPlaceholder state={availability} />
-        {/* Lasting states hold no composer until a person acts; a later composer starts without this input. */}
-        {availability === 'failed' || availability === 'account' || availability === 'offline' ? (
-          <DeclineServedComposer />
-        ) : null}
-      </>
-    );
+    return <ProjectSyncPlaceholder state={availability} />;
   }
   if (focusedChatId === undefined && !focusedChatError) {
     return (
@@ -180,17 +171,11 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
             Try again
           </Button>
         ) : null}
-        {chats === 'disabled' || chats === 'failed' ? <DeclineServedComposer /> : null}
       </div>
     );
   }
   if (isUnresolved && focusedChatError) {
-    return (
-      <>
-        <FocusedChatErrorPanel error={focusedChatError} />
-        <DeclineServedComposer />
-      </>
-    );
+    return <FocusedChatErrorPanel error={focusedChatError} />;
   }
 
   if (isEnsuring) {

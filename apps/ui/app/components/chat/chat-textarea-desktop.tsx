@@ -11,14 +11,14 @@ import {
   chatComposerShellClassName,
 } from '@taucad/chat-ui/components/chat-input-styles';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { queuedSendStatus } from '#components/chat/chat-early-input-field.js';
-import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
+import { queuedSendStatus } from '#components/hand-off/hand-off.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor, JSONContent } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
 import { DictationControl, DictationFeedback } from '#components/dictation/dictation-controls.js';
-import type { AcpSessionData } from '@taucad/chat';
+import type { AcpSessionData, CadAgentExecution } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
@@ -227,6 +227,23 @@ const plainTextDocument = (text: string): JSONContent => ({
 });
 
 /**
+ * Whether a send queued in the native input (P4) may go now: Send would send, and the chat has an agent to send with.
+ * A first visit has no Tau model until the catalog answers, and a send made then is refused. It also waits for
+ * dictation to end, since only Send stops a recording and sends its words.
+ *
+ * @returns Whether the queued send may go.
+ */
+const isQueuedSendPermitted = (
+  input: Omit<Parameters<typeof sendRefusalOf>[0], 'isEmpty'> & {
+    readonly execution: CadAgentExecution;
+    readonly dictationPhase: string;
+  },
+): boolean =>
+  input.dictationPhase === 'idle' &&
+  (input.execution.kind !== 'tau' || input.execution.model !== '') &&
+  sendRefusalOf({ ...input, isEmpty: false }) === undefined;
+
+/**
  * The chat composer, on every device (C11): the Tiptap rich text editor with
  * inline context chips via @-mentions, slash commands, drag-drop from dockview
  * tabs, and one bar of controls.
@@ -326,12 +343,23 @@ export const ChatTextareaDesktop = memo(function ({
 
   /* Texts the editor reported that no render has shown back yet; see the rehydration below. */
   const unconfirmedTextsRef = useRef<string[]>([]);
+  /* P4: Enter pressed in the native input before this existed is one send, made once the editor holds the adopted
+   * text and sending is permitted (below). Any edit cancels it, as one in the native input would. */
+  const queuedSubmitRef = useRef(earlyInput?.submitQueued === true);
+  /* A15d (C10, the operator's ruling of 2026-11-13T13:14Z, item 5): the queued send is visible until it is sent or
+   * cancelled — Send shows it pending and its status says so — and Escape cancels it, as an edit does. */
+  const [isQueuedSubmitShown, setIsQueuedSubmitShown] = useState(earlyInput?.submitQueued === true);
+  const cancelQueuedSubmit = useCallback((): void => {
+    queuedSubmitRef.current = false;
+    setIsQueuedSubmitShown(false);
+  }, []);
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
+      cancelQueuedSubmit();
       unconfirmedTextsRef.current.push(content.text);
       setDraftText(content.text);
     },
-    [setDraftText],
+    [cancelQueuedSubmit, setDraftText],
   );
 
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Tiptap initializes after the composer hooks.
@@ -349,11 +377,18 @@ export const ChatTextareaDesktop = memo(function ({
       .insertContent({ type: 'text', text: separator + text })
       .run();
   }, []);
-  const { draftActorRef } = useChatComposer();
+  const {
+    draftActorRef,
+    execution: { execution },
+  } = useChatComposer();
   const latestDraftOwner = useRef(draftActorRef);
   useLayoutEffect(() => {
+    /* Another chat's draft, in the same mounted composer: an Enter queued for the previous chat is not for this one. */
+    if (latestDraftOwner.current !== draftActorRef) {
+      cancelQueuedSubmit();
+    }
     latestDraftOwner.current = draftActorRef;
-  }, [draftActorRef]);
+  }, [cancelQueuedSubmit, draftActorRef]);
   const dictation = useDictation(insertTranscript, draftActorRef);
   /* The chips' structured references travel beside the text only when the draft has some. */
   const submitWithReferences = useCallback(
@@ -591,12 +626,52 @@ export const ChatTextareaDesktop = memo(function ({
       const from = position(earlyInput.start);
       const to = position(earlyInput.end);
       editor.commands.setTextSelection(earlyInput.direction === 'backward' ? { from: to, to: from } : { from, to });
+      /* The native input kept its caret in view; the editor shares its metrics, so keeping the caret in view keeps
+       * the person's place in a draft longer than the box (P4: scroll position). */
+      editor.commands.scrollIntoView();
     } else {
       editor.commands.setTextSelection(editor.state.doc.content.size);
     }
     // Tiptap's `focus` command waits a frame; the next key may already be on its way, so focus the view now.
     editor.view.focus();
   }, [editor, earlyInput, enableAutoFocus, onEarlyInputAdopted, inputText]);
+
+  /* The queued send (above): an edit in the native input after its Enter had already cancelled it (`submitQueued` is
+   * false then). It waits, still queued, while sending is not permitted, and carries the editor's text, since the
+   * draft this composer was rendered with can still be the previous one; it also waits for a model and dictation. */
+  const isQueuedSubmitPermitted = isQueuedSendPermitted({
+    dictationPhase: dictation.phase,
+    sendBlockReason,
+    isSubmitting,
+    isAttaching,
+    isSubmitDisabled,
+    execution,
+  });
+  useEffect(() => {
+    if (!editor || !queuedSubmitRef.current || !isQueuedSubmitPermitted) {
+      return;
+    }
+    queuedSubmitRef.current = false;
+    const content = extractContent(editor);
+    /* Shown as queued until the send it replays has gone: Send's own pending state follows it. */
+    const replay = async (): Promise<void> => {
+      try {
+        await submitWithReferences(content.text, cadReferencesOfChips(content.contextChips));
+      } finally {
+        setIsQueuedSubmitShown(false);
+      }
+    };
+    void replay();
+  }, [editor, isQueuedSubmitPermitted, submitWithReferences]);
+
+  const cancelQueuedSubmitOnEscape = useCallback(
+    (event: React.KeyboardEvent): void => {
+      if (event.key === 'Escape' && queuedSubmitRef.current) {
+        cancelQueuedSubmit();
+      }
+    },
+    [cancelQueuedSubmit],
+  );
 
   useEffect(() => {
     // With an early input, focus is the native input's to hand over (above), not the mount's.
@@ -659,13 +734,6 @@ export const ChatTextareaDesktop = memo(function ({
         isSubmitDisabled,
         isEmpty: !dictationActive && !canResume && inputText.trim().length === 0 && attachments.length === 0,
       });
-  const queuedSend = useQueuedSend({
-    earlyInput,
-    isEditorReady: editor !== null,
-    draftText: inputText,
-    sendRefusal,
-    submit: submitWithDictation,
-  });
   const dictationControl = useMemo(
     () =>
       dictation.available === true ? (
@@ -713,8 +781,8 @@ export const ChatTextareaDesktop = memo(function ({
           className,
         )}
         data-collapsed={isCollapsed ? '' : undefined}
-        data-queued-send={queuedSend.isQueued ? '' : undefined}
-        onKeyDownCapture={queuedSend.cancelOnKey}
+        data-queued-send={isQueuedSubmitShown ? '' : undefined}
+        onKeyDownCapture={cancelQueuedSubmitOnEscape}
         onFocus={handleTextareaFocus}
         onBlur={handleTextareaBlur}
         onDragOver={handleDragOver}
@@ -764,9 +832,9 @@ export const ChatTextareaDesktop = memo(function ({
 
         <DictationFeedback transcript={dictation.transcript} />
         {/* Present from mount for an input that queued a send, so the status is read when it changes. */}
-        {earlyInput?.queuedSend === true ? (
+        {earlyInput?.submitQueued === true ? (
           <span role='status' className='sr-only'>
-            {queuedSend.isQueued ? queuedSendStatus : ''}
+            {isQueuedSubmitShown ? queuedSendStatus : ''}
           </span>
         ) : null}
         <ChatTextareaBar
@@ -802,73 +870,6 @@ export const ChatTextareaDesktop = memo(function ({
 });
 
 ChatTextareaDesktop.displayName = 'ChatTextareaDesktop';
-
-/**
- * A queued send is the person's Enter, pressed before this composer was here (C10, H-f, F7): it is replayed once,
- * through the submit that Enter would have called, once the draft holds the text it was pressed on and nothing refuses
- * a send (Home's creation location can still be loading). Until then Send shows it as queued. An edit cancels it, as it
- * does before hydration: once the draft has held that text, any other text (typed, cut, pasted, dropped, composed or
- * dictated) is an edit. Escape cancels it too.
- */
-const useQueuedSend = ({
-  earlyInput,
-  isEditorReady,
-  draftText,
-  sendRefusal,
-  submit,
-}: {
-  readonly earlyInput: EarlyChatInput | undefined;
-  readonly isEditorReady: boolean;
-  readonly draftText: string;
-  readonly sendRefusal: string | undefined;
-  readonly submit: () => Promise<void>;
-}): {
-  readonly isQueued: boolean;
-  readonly cancelOnKey: (event: React.KeyboardEvent) => void;
-} => {
-  /* The early input whose queued send was sent or cancelled, and the one whose text the draft has held. */
-  const [settled, setSettled] = useState<EarlyChatInput>();
-  const [caughtUp, setCaughtUp] = useState<EarlyChatInput>();
-  const sentRef = useRef<EarlyChatInput | undefined>(undefined);
-  const submitRef = useRef(submit);
-  useLayoutEffect(() => {
-    submitRef.current = submit;
-  }, [submit]);
-  const isPending = earlyInput?.queuedSend === true && isEditorReady && settled !== earlyInput;
-  /* Trimmed: the editor's text of a handed-over edit can differ from the native input's in edge whitespace. */
-  const holdsText = draftText.trim() === earlyInput?.text.trim();
-  /* Information from earlier renders: whether the draft has held the text, and so whether other text is an edit. */
-  if (isPending && holdsText && caughtUp !== earlyInput) {
-    setCaughtUp(earlyInput);
-  }
-  if (isPending && !holdsText && caughtUp === earlyInput) {
-    setSettled(earlyInput);
-  }
-  const isQueued = isPending && !(caughtUp === earlyInput && !holdsText);
-  useEffect(() => {
-    if (!isQueued || !holdsText || sendRefusal !== undefined || sentRef.current === earlyInput) {
-      return;
-    }
-    sentRef.current = earlyInput;
-    const replayEnter = async (): Promise<void> => {
-      try {
-        await submitRef.current();
-      } finally {
-        setSettled(earlyInput);
-      }
-    };
-    void replayEnter();
-  }, [earlyInput, holdsText, isQueued, sendRefusal]);
-  const cancelOnKey = useCallback(
-    (event: React.KeyboardEvent): void => {
-      if (isQueued && event.key === 'Escape') {
-        setSettled(earlyInput);
-      }
-    },
-    [earlyInput, isQueued],
-  );
-  return { isQueued, cancelOnKey };
-};
 
 /**
  * A collapsible composer's own classes: the box's corners, and the editor's

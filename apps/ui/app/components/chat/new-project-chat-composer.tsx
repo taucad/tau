@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaHandle, ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
-import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { useChatComposer } from '#hooks/active-chat-provider.js';

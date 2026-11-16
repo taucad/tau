@@ -1,7 +1,6 @@
 {
   "components": {
     "files": [
-      "apps/ui/app/components/chat/chat-early-input-field.tsx",
       "apps/ui/app/hooks/chat-session-store.fixture.tsx",
       "apps/ui/app/hooks/use-file-manager.tsx",
       "apps/ui/app/hooks/use-project-manager.tsx",
@@ -20,7 +19,6 @@
       "apps/ui/app/routes/w.$workspace.$project/project-workspace-context.tsx",
       "apps/ui/app/routes/w.$workspace.$project/workbench-checkout-root.tsx",
       "apps/ui/app/routes/w.$workspace.$project/workbench-record-host.tsx",
-      "apps/ui/app/routes/w.$workspace.$project/workspace-frame-composer.tsx",
       "apps/ui/app/routes/w.$workspace.$project/workspace-frame.tsx",
       "apps/ui/app/runtime/app-runtime-provider.tsx",
       "apps/ui/app/runtime/app-runtime-spa-entry.server.tsx",

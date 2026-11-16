@@ -7,7 +7,6 @@
  * learns an effect and the wrapper never learns a state kind, so a future state
  * is a union member, a case in `describeProjectRouteNotice` and a test row.
  */
-import { DeclineServedComposer } from '#routes/w.$workspace.$project/workspace-frame-composer.js';
 import { useCallback, useContext } from 'react';
 import { useNavigate } from 'react-router';
 import {
@@ -372,8 +371,6 @@ export const ProjectRouteNotice = ({ state }: { readonly state: ProjectRouteStat
 
   return (
     <div data-slot='project-route-notice' className='flex h-full min-h-0 flex-col bg-background'>
-      {/* A notice holds no composer: the served input over the chat lane goes with it. */}
-      <DeclineServedComposer />
       <header
         className={cn(
           'flex h-9 shrink-0 items-center gap-1 border-b bg-sidebar pr-1 pl-2 text-sm font-medium text-muted-foreground',

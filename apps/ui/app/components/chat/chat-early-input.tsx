@@ -1,17 +1,55 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
+import { cn } from '@taucad/ui/utils/cn';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { buildDraftMessage } from '#hooks/draft.machine.js';
 import { markPageUsed } from '#components/onboarding/home-interaction.js';
-import { EarlyComposerField, readEarlyInput } from '#components/chat/chat-early-input-field.js';
-import type { EarlyChatInput, EarlyChatInputBarState, EarlyTextarea } from '#components/chat/chat-early-input-field.js';
+import {
+  captureHandOff,
+  draftHintAttribute,
+  handOffBoxAttribute,
+  handOffScript,
+  isHandOffComposing,
+  queuedSendStatusSlot,
+  recordInputAccepted,
+} from '#components/hand-off/hand-off.js';
+import type { HandOffElement, HandOffSnapshot } from '#components/hand-off/hand-off.js';
+import {
+  chatComposerEditorAreaClassName,
+  chatComposerEditorTextClassName,
+  chatComposerFrameClassName,
+  chatComposerMainEditorAreaClassName,
+  chatComposerPlaceholder,
+  chatComposerShellClassName,
+} from '@taucad/chat-ui/components/chat-input-styles';
+
+/** What the rich composer takes over from the native input: the hand-off contract's snapshot (P4). */
+export type EarlyChatInput = HandOffSnapshot;
+
+/*
+ * The hand-off recorder, served right after the whole box rather than beside the input: a browser may paint the
+ * half-parsed document when the parser reaches a script, and here that cut can only fall after the box and its bar,
+ * never between them. Enter queues a send for the adopter (A15d, H-f): the box shows it queued and says so, and an
+ * edit or Escape cancels it. The box also has the recorder paint Home's stored draft (the draft hint, H-e) into the
+ * input before first paint.
+ */
+const earlyInputScript = handOffScript('within-previous-sibling', { queueSubmit: true });
+
+/** The box's marks for the recorder: a hand-off box that paints the draft hint. */
+const earlyInputBox = { [handOffBoxAttribute]: '', [draftHintAttribute]: '' };
+
+/** What the bar under the native input is drawn from. */
+export type EarlyChatInputBarState = {
+  /** Whether the input holds nothing to send, as the rich composer's Send reads it. */
+  readonly isEmpty: boolean;
+};
 
 /**
  * Keep Home's native input alive until its edit can enter the existing draft owner.
  *
- * The input sits in the rich composer's own box — the same frame, editor inset, text metrics and focus outline — over
- * `bar`, so that when adoption swaps in the rich composer nothing on screen moves (R2, R11). Without a `bar` the bar's
- * height is reserved instead.
+ * The input sits in the rich composer's own box — the same frame, editor inset, text metrics and
+ * focus outline — over `bar`, so that when adoption swaps in the rich composer nothing on screen
+ * moves (R2, R11). Without a `bar` the bar's height is reserved instead.
  *
  * An edit is handed to the draft owner as an adopted edit. A stored draft the served page painted (and nothing typed)
  * hydrates the draft only while the draft is still empty, as the record's own load does, so the record still wins
@@ -38,7 +76,7 @@ export function ChatEarlyInput({
   readonly bar?: (state: EarlyChatInputBarState) => React.ReactNode;
   readonly children: (input: EarlyChatInput) => React.ReactNode;
 }): React.JSX.Element {
-  const inputRef = useRef<EarlyTextarea>(null);
+  const inputRef = useRef<HandOffElement>(null);
   const [adopted, setAdopted] = useState<EarlyChatInput>();
   const [isEmpty, setIsEmpty] = useState(true);
   const { draftActorRef } = useChatComposer();
@@ -58,6 +96,11 @@ export function ChatEarlyInput({
     setIsEmpty((inputRef.current?.value.trim() ?? '') === '');
   }, []);
 
+  /* The served script left the first-input mark; the bundle turns it into `tau.load.input.accepted`. */
+  useEffect(() => {
+    recordInputAccepted();
+  }, []);
+
   useEffect(() => {
     const input = inputRef.current;
     if (!input || !isHostReady) {
@@ -65,19 +108,19 @@ export function ChatEarlyInput({
     }
     let active = true;
     const adopt = (): void => {
-      if (!active || input.tauEarlyDraft?.composing) {
+      if (!active || isHandOffComposing(input)) {
         return;
       }
-      const snapshot = readEarlyInput(input);
+      const snapshot: EarlyChatInput = captureHandOff(input);
       if (snapshot.edited) {
         /* Keys typed before the bundle ran reached no listener: the edit is the only record that home was used. */
         markPageUsed();
         draftActorRef.send({ type: 'setDraftText', text: snapshot.text, adoptedEdit: true });
-      } else if (snapshot.prefilled && draftTextRef.current === undefined) {
+      } else if (snapshot.prefilled === true && draftTextRef.current === undefined) {
         draftActorRef.send({ type: 'hydrateDraft', draft: buildDraftMessage(snapshot.text, []) });
-      } else if (snapshot.prefilled && snapshot.queuedSend && draftTextRef.current !== snapshot.text) {
+      } else if (snapshot.prefilled === true && snapshot.submitQueued && draftTextRef.current !== snapshot.text) {
         /* The record holds another draft, which wins: the Enter was pressed on text the composer will not hold. */
-        setAdopted({ ...snapshot, queuedSend: false });
+        setAdopted({ ...snapshot, submitQueued: false });
         return;
       }
       setAdopted(snapshot);
@@ -98,14 +141,47 @@ export function ChatEarlyInput({
     return <>{children(adopted)}</>;
   }
   return (
-    <EarlyComposerField
-      inputRef={inputRef}
-      className={className}
-      enableAutoFocus={enableAutoFocus}
-      bar={bar?.({ isEmpty })}
-      onChange={(event) => {
-        setIsEmpty(event.currentTarget.value.trim() === '');
-      }}
-    />
+    <div className={chatComposerShellClassName} data-chat-composer='main'>
+      {/* The served recorder marks this box (a queued send, text) before React hydrates it. */}
+      <div
+        className={cn(chatComposerFrameClassName, 'rounded-2xl has-[textarea:focus-visible]:focus-outline', className)}
+        suppressHydrationWarning
+        {...earlyInputBox}
+      >
+        {/* Says a queued send aloud, as Send's pending state shows it; the served recorder writes it. */}
+        <span
+          data-slot={queuedSendStatusSlot}
+          role='status'
+          className='sr-only'
+          suppressHydrationWarning
+          // oxlint-disable-next-line react/no-danger -- Empty, so hydration leaves the text the served recorder wrote.
+          dangerouslySetInnerHTML={{ __html: '' }}
+        />
+        <div className={cn(chatComposerEditorAreaClassName, chatComposerMainEditorAreaClassName)}>
+          <textarea
+            ref={inputRef}
+            aria-label='Chat message'
+            placeholder={chatComposerPlaceholder}
+            rows={1}
+            /* Served as `autofocus`: the browser focuses it at its first rendering update, so the first
+             * paint already shows focus and the first keystroke lands without any bundle (R11). It does
+             * not move focus that is already elsewhere, and hydration does not move it either. */
+            autoFocus={enableAutoFocus}
+            className={cn(
+              chatComposerEditorTextClassName,
+              'block resize-none bg-transparent outline-none field-sizing-content placeholder:text-muted-foreground',
+            )}
+            onChange={(event) => {
+              setIsEmpty(event.currentTarget.value.trim() === '');
+            }}
+          />
+        </div>
+        {bar ? bar({ isEmpty }) : <div aria-hidden='true' className='h-7' />}
+      </div>
+      <script
+        // oxlint-disable-next-line react/no-danger -- Fixed source with no interpolated input; records native edits before hydration.
+        dangerouslySetInnerHTML={{ __html: earlyInputScript }}
+      />
+    </div>
   );
 }

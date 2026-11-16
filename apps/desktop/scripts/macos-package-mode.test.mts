@@ -14,8 +14,14 @@ import { readFileSync } from 'node:fs';
 
 import { FuseV1Options } from '@electron/fuses';
 
-// oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+/* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
+import {
+  macosBundleId,
+  macosPackageArchitecture,
+  macosPackageFuses,
+  parseMacosPackageMode,
+} from './macos-package-mode.mjs';
+/* oxlint-enable no-restricted-imports -- End operational script import exception. */
 // oxlint-disable-next-line no-restricted-imports -- Operational signing helper under test.
 import { selectLocalSigningIdentity } from './local-signing.mjs';
 
@@ -139,3 +145,11 @@ assert.deepEqual(parseMacosPackageMode(['--release', '--dmg']), {
   dmg: true,
   notarize: true,
 });
+
+/* A development package (unsigned or ad-hoc) must not share the release bundle id: an e2e build running beside an
+ * installed Tau Staging would otherwise be the same app to LaunchServices (`open -b`, Dock, the `tau:` handler). */
+assert.equal(macosBundleId({ release: true }, false), 'com.taucad.tau.desktop');
+assert.equal(macosBundleId({ release: false }, true), 'com.taucad.tau.desktop.local');
+assert.equal(macosBundleId({ release: false }, false), 'com.taucad.tau.desktop.e2e');
+assert.ok(packageSource.includes('appBundleId: macosBundleId({ release }, localIdentity !== undefined),'));
+console.log('✓ Only a release package carries the release bundle id; development packages get .e2e or .local');

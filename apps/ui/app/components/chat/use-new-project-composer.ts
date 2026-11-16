@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ComponentType } from 'react';
-import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 
 export type NewProjectComposerProperties = {
   readonly adoptedEarlyInput?: EarlyChatInput;

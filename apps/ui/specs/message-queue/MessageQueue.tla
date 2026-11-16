@@ -131,6 +131,13 @@
 \* it, and settles every queued send as failed when the load fails. Once loaded, a send runs synchronously as
 \* before. Delivery order, admission, persistence and the queue barrier are unchanged, so no action or verdict
 \* changes.
+\* PL6 (hand-off contract): the project composer adopts the native input the workspace placeholder served, moving
+\* its edit into the draft before the editor renders, and an Enter pressed there is one submit through the
+\* composer's existing Enter path once the editor holds the text. Submit, admission, delivery and the queue keep
+\* the same paths and guards. No action or verdict changes.
+\* PL6 review: the composer adopts only an input its own project's placeholder served, and the queued submit waits,
+\* still queued, until the composer's guards permit a send, then carries the editor's text through the same submit.
+\* The composer's guard refs update in a layout effect. No action or verdict changes.
 \* WP5 (composer image formats): the store and the composer draft provide the image step from the app's
 \* attachment image actor, and a queued image carries its declared type for the intake counter only; admission,
 \* delivery, persistence and the queue barrier are unchanged.
@@ -144,10 +151,10 @@
 \* account may not continue it (re-read on an account switch), and with the stop's reason on Stop or the turn
 \* host's unmount, which is checked again after the catalog wait. The composer disables
 \* send meanwhile. Admission still decides once, so delivery order, persistence and the queue barrier are unchanged.
-\* A15d (early input): the main composer claims the served project input and, while its record is unread, takes a
-\* painted draft through `hydrateDraft`; an Enter queued before hydration is replayed once through the composer's own
-\* submit, after the draft holds the handed-over text. A send still enters the queue only through that submit, so
-\* admission, delivery, persistence and the queue barrier are unchanged, and no action or verdict changes.
+\* A15d (early input, on PL6's hand-off): while the chat's record is unread (read through a selector, never a
+\* snapshot in the component), the composer takes a painted draft through `hydrateDraft`, which skips a touched draft; PL6's queued submit is shown until it is sent or cancelled, and Escape cancels it as an edit
+\* does. A send still enters the queue only through the composer's submit, so admission, delivery, persistence and the
+\* queue barrier are unchanged, and no action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

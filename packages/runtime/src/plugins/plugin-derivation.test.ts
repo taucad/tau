@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { deriveExportTargets, deriveImportExtensions } from '#plugins/plugin-derivation.js';
+import { deriveExportTargets, deriveImportExtensions, deriveTranscodeSources } from '#plugins/plugin-derivation.js';
 import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
@@ -45,7 +45,62 @@ const transcoder = defineTranscoder({
   },
 });
 
+const imageTranscoder = defineTranscoder({
+  id: 'fixture-image',
+  name: 'FixtureImage',
+  version: '1.0.0',
+  edges: [
+    { from: 'png', to: 'jpeg' },
+    { from: 'webp', to: 'jpeg' },
+    { from: 'png', to: 'webp' },
+  ],
+  async initialize() {
+    return {};
+  },
+  async transcode() {
+    return { success: true, data: [], issues: [] };
+  },
+});
+
+const extraImageTranscoder = defineTranscoder({
+  id: 'fixture-image-extra',
+  name: 'FixtureImageExtra',
+  version: '1.0.0',
+  edges: [
+    { from: 'heic', to: 'jpeg' },
+    { from: 'png', to: 'jpeg' },
+  ],
+  async initialize() {
+    return {};
+  },
+  async transcode() {
+    return { success: true, data: [], issues: [] };
+  },
+});
+
 describe('runtime capability derivation', () => {
+  it('derives the direct sources of one target in registration order without duplicates', () => {
+    const runtime = defineRuntime({
+      kernels: [kernel()],
+      transcoders: [transcoder(), imageTranscoder(), extraImageTranscoder()],
+    });
+    expect(deriveTranscodeSources(runtime, 'jpeg')).toEqual(['png', 'webp', 'heic']);
+    expect(deriveTranscodeSources(runtime, 'webp')).toEqual(['png']);
+    expect(deriveTranscodeSources(runtime, 'obj')).toEqual(['glb']);
+  });
+
+  it('derives no sources for a target without edges', () => {
+    const runtime = defineRuntime({ kernels: [kernel()], transcoders: [transcoder()] });
+    const transcoders: Parameters<typeof deriveTranscodeSources>[0]['transcoders'] = runtime.transcoders;
+    expect(deriveTranscodeSources({ transcoders }, 'jpeg')).toEqual([]);
+  });
+
+  it('rejects a target no registered transcoder produces at compile time', () => {
+    const runtime = defineRuntime({ kernels: [kernel()], transcoders: [transcoder()] });
+    // @ts-expect-error -- no registered edge targets jpeg.
+    expect(deriveTranscodeSources(runtime, 'jpeg')).toEqual([]);
+  });
+
   it('derives explicit imports and reachable single-hop exports', () => {
     const runtime = defineRuntime({ kernels: [kernel()], transcoders: [transcoder()] });
     expect(deriveImportExtensions(runtime)).toEqual(['step', 'stp']);

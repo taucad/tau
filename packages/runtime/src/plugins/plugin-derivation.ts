@@ -79,3 +79,35 @@ export function deriveExportTargets(runtime: StaticRuntimeDefinition): readonly 
   }
   return [...targets];
 }
+
+/**
+ * Derive the source formats that the registered transcoders convert directly to one target format.
+ *
+ * A host uses it to admit exactly the formats its runtime can convert, for example every image format with an
+ * edge to `jpeg`, instead of keeping a second list that drifts from the registered edges.
+ *
+ * @param runtime - Static runtime definition returned by `defineRuntime`.
+ * @param to - The target format.
+ * @returns Deduplicated `from` formats of every edge to `to`, in registration order. Empty when nothing converts
+ * to `to`.
+ * @public
+ */
+export function deriveTranscodeSources<
+  const Transcoders extends readonly AnyTranscoderPlugin[],
+  const To extends CollectTranscoderTargets<Transcoders>,
+>(runtime: { readonly transcoders: Transcoders }, to: To): readonly string[];
+/** @public */
+export function deriveTranscodeSources(
+  runtime: { readonly transcoders: readonly AnyTranscoderPlugin[] },
+  to: string,
+): readonly string[] {
+  const sources = new Set<string>();
+  for (const transcoder of runtime.transcoders) {
+    for (const edge of transcoder.edges ?? []) {
+      if (edge.to === to) {
+        sources.add(edge.from);
+      }
+    }
+  }
+  return [...sources];
+}

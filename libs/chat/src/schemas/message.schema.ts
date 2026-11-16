@@ -276,8 +276,8 @@ export const safeValidateUiMessages = async (messages: unknown): Promise<SafeVal
     return { success: false, error: staticToolError };
   }
 
-  const { isStaticToolUIPart: isStaticToolPart, safeValidateUIMessages } = await import('ai');
-  const result = await safeValidateUIMessages<MyUIMessage>({
+  const { isStaticToolUIPart: isStaticToolPart, safeValidateUIMessages: safeValidateUiMessages } = await import('ai');
+  const result = await safeValidateUiMessages<MyUIMessage>({
     messages: normalizeToolLifecycleParts(messages),
     metadataSchema: messageMetadataSchema.optional(),
     dataSchemas: dataPartSchema.shape,

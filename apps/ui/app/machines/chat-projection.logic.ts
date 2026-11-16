@@ -1476,7 +1476,7 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
         messagesByChunks.delete(view.chunks);
         throw error;
       }
-      const { createUIMessageStream, readUIMessageStream } = sdk;
+      const { createUIMessageStream: createUiMessageStream, readUIMessageStream: readUiMessageStream } = sdk;
       const [last] = chunksSince(view.chunks, view.chunks.length - 1);
       let eligible = false;
       if (last?.type === 'finish' && last.messageMetadata !== undefined && last.messageMetadata !== null) {
@@ -1492,7 +1492,7 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
       }
       if (eligible) {
         let message: MyUIMessage | undefined;
-        const completed = createUIMessageStream<MyUIMessage>({
+        const completed = createUiMessageStream<MyUIMessage>({
           // Eligible starts always provide their own ID; the generated fallback is never published.
           generateId: () => '',
           execute({ writer }) {
@@ -1538,7 +1538,7 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
         },
       });
       let message: MyUIMessage | undefined;
-      for await (const next of readUIMessageStream<MyUIMessage>({ stream, terminateOnError: true })) {
+      for await (const next of readUiMessageStream<MyUIMessage>({ stream, terminateOnError: true })) {
         message = next;
       }
       return message;

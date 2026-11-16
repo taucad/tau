@@ -17,10 +17,12 @@ export const chatSdk = {
     return createChatInstance;
   },
   /** The SDK's processor of a run's chunks into its message, with the run's own message ids. */
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- the AI SDK's own export name
   get createUIMessageStream(): typeof createUIMessageStream {
     return createUIMessageStream;
   },
   /** The SDK's processor of a run's chunks into message snapshots. */
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- the AI SDK's own export name
   get readUIMessageStream(): typeof readUIMessageStream {
     return readUIMessageStream;
   },

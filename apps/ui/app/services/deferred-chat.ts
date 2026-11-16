@@ -215,17 +215,20 @@ export class DeferredChat implements ChatView {
   };
 
   /** The SDK's messages subscription, held across the load; `messagesThrottle` is its wait in milliseconds. */
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- the SDK Chat member this stands in for
   public '~registerMessagesCallback': SdkChat['~registerMessagesCallback'] = (onChange, messagesThrottle) =>
     this.#register(
       { callbacks: this.#messagesCallbacks, onChange, registration: { off: undefined, messagesThrottle } },
       (chat) => chat['~registerMessagesCallback'](onChange, messagesThrottle),
     );
 
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- the SDK Chat member this stands in for
   public '~registerStatusCallback': SdkChat['~registerStatusCallback'] = (onChange) =>
     this.#register({ callbacks: this.#statusCallbacks, onChange, registration: { off: undefined } }, (chat) =>
       chat['~registerStatusCallback'](onChange),
     );
 
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- the SDK Chat member this stands in for
   public '~registerErrorCallback': SdkChat['~registerErrorCallback'] = (onChange) =>
     this.#register({ callbacks: this.#errorCallbacks, onChange, registration: { off: undefined } }, (chat) =>
       chat['~registerErrorCallback'](onChange),

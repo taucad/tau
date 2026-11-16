@@ -1717,6 +1717,9 @@ export const fileSystemLongCalls: Readonly<Record<string, number | undefined>> =
   facts: 1,
   changedSince: 1,
   pendingPaths: 1,
+  /* A read of a pending entry waits for its large object (D9) under the
+   * authority's own no-progress bound; its signature has no options slot. */
+  readFile: undefined,
   /* Its controls ride `ApplyOptions` and the changeset's own signal;
    * `prepareApplyCall` takes them out. */
   apply: undefined,

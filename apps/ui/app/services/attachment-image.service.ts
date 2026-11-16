@@ -11,11 +11,14 @@
  *
  * The host-specific half is `attachmentImageBackend`, replaced at module resolution in desktop builds.
  *
+ * The draft's image step (`attachment-image.actor.ts`) imports this module on the first image it converts, and the
+ * composer and the image step read the convertible formats from `attachment-transcode-sources-store.ts`, so neither
+ * puts it on Home's critical path.
+ *
  * @module
  */
 
 import { normalizeImageAttachment } from '@taucad/agent-host/wire';
-import { Topic } from '@taucad/events';
 import type {
   AttachmentTranscodeInput,
   AttachmentTranscodePort,
@@ -223,81 +226,24 @@ export const attachmentImageService = (): AttachmentImageService => {
   return shared;
 };
 
-const importTranscodeSources = async (): Promise<readonly string[]> => {
-  const { attachmentTranscodeSources } = await import('#runtime/attachment-transcode-sources.js');
-  return attachmentTranscodeSources;
-};
-
-let sources: Promise<readonly string[]> | undefined;
-const noSources: readonly string[] = [];
-let loadedSources = noSources;
-const sourcesLoaded = new Topic<readonly string[]>({ name: 'attachment-transcode-sources' });
-
-/**
- * The image formats the composer converts: the conversion runtime's edges to `jpeg`, as
- * `attachment-transcode-sources.ts` lists them. The list is loaded on first use, outside the entry's static import
- * graph; no worker starts. A failed load admits only stored types and is retried on the next call.
- *
- * @returns The convertible source formats.
- */
-export const loadAttachmentTranscodeSources = async (): Promise<readonly string[]> => {
-  sources ??= importTranscodeSources();
-  let loaded: readonly string[];
-  try {
-    loaded = await sources;
-  } catch {
-    sources = undefined;
-    return noSources;
-  }
-  if (loadedSources !== loaded) {
-    loadedSources = loaded;
-    sourcesLoaded.emit(loaded);
-  }
-  return loaded;
-};
-
-/**
- * Subscribe to the convertible formats, starting their load (`useSyncExternalStore`).
- *
- * @param listener - Called once the list has loaded.
- * @returns The unsubscribe.
- */
-export const subscribeAttachmentTranscodeSources = (listener: () => void): (() => void) => {
-  const unsubscribe = sourcesLoaded.subscribe(() => {
-    listener();
-  });
-  void loadAttachmentTranscodeSources();
-  return unsubscribe;
-};
-
-/**
- * The convertible formats loaded so far: empty until {@link loadAttachmentTranscodeSources} first settles.
- *
- * @returns The current list; the same array until it changes.
- */
-export const attachmentTranscodeSourcesSnapshot = (): readonly string[] => loadedSources;
-
-/** The server and pre-load snapshot: nothing converts until the list has loaded. */
-export const noAttachmentTranscodeSources = (): readonly string[] => noSources;
-
 /**
  * Apply the storage policy to one composer image: pass a canonical image through, convert any other image the
  * runtime has an edge for, or refuse it by name.
  *
  * @param bytes - The image as the person chose it.
- * @param dependencies - The transcode port and the convertible formats; the shared service and the derived list by
- * default.
+ * @param dependencies - The convertible formats (`loadAttachmentTranscodeSources` in the app), and the transcode port;
+ * the shared service by default.
  * @returns What to store, or why not.
  */
 export const normalizeComposerImage = async (
   bytes: Uint8Array<ArrayBuffer>,
   dependencies: {
     readonly transcode?: AttachmentTranscodePort;
-    readonly loadTranscodeSources?: () => Promise<readonly string[]>;
-  } = {},
+    readonly loadTranscodeSources: () => Promise<readonly string[]>;
+  },
 ): Promise<NormalizedImageAttachment> =>
   normalizeImageAttachment({
     bytes,
     transcode: dependencies.transcode ?? (async (input) => attachmentImageService().transcode(input)),
-    transcodeSources: await (dependencies.loadTranscodeSources ?? loadAttachmentTranscodeSources)(),
+    transcodeSources: await dependencies.loadTranscodeSources(),
   });

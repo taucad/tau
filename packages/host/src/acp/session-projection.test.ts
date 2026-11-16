@@ -108,9 +108,16 @@ it.each(['grok', 'codex', 'claude'])('should project every additional Tau MCP ca
       role: 'tool-input',
       toolName: name,
       content: input,
+      call: { nativeName: name },
       metadata: { tauInternal: { presentation: 'tau-mcp' } },
     });
-    expect(messages[1]).toMatchObject({ role: 'tool-output', toolName: name, content: output, isError: false });
+    expect(messages[1]).toMatchObject({
+      role: 'tool-output',
+      toolName: name,
+      call: { nativeName: name },
+      content: output,
+      isError: false,
+    });
   }
 });
 

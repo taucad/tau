@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { RouterContextProvider } from 'react-router';
 import { createElement } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -85,7 +86,12 @@ const sampleLoaderData: PublicationRouteLoaderData = {
 
 const loaderArgs = (partial: Pick<LoaderFunctionArgs, 'request' | 'params'>): LoaderFunctionArgs => {
   // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- LoaderFunctionArgs has internal fields we don't need in tests
-  return { context: {}, ...partial } as LoaderFunctionArgs;
+  return {
+    context: new RouterContextProvider(),
+    url: new URL(partial.request.url),
+    pattern: '/s/:slug',
+    ...partial,
+  } as LoaderFunctionArgs;
 };
 
 const expectThrowsPublicationLock = async (

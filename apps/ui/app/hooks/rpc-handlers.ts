@@ -190,9 +190,13 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
    * larger than the cap is ever read whole for its facts. */
   const factsOf = async (
     path: string,
-    known: StatContentMetadata & Readonly<{ size: number }>,
+    known: StatContentMetadata & Readonly<{ size: number; pending?: true }>,
   ): Promise<StatContentMetadata> => {
     if (known.contentKind === 'binary' || (known.contentKind === 'text' && known.lineCount !== undefined)) {
+      return fileMetadataFields(known);
+    }
+    /* A pending row's size is not its bytes' (D9): a read for its facts would fetch its object or refuse. */
+    if (known.pending === true) {
       return fileMetadataFields(known);
     }
     return known.size > lineCountByteCap
@@ -301,7 +305,10 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     async readdir(path: string, options?: RpcReaddirOptions): Promise<RpcDirectoryEntry[]> {
       const { treeService } = await fileManager.whenServicesReady();
       try {
-        const entries = await treeService.listDirectoryExact(path);
+        /* A row a tree write has yet to land is listed for the person as arriving; it is not on disk, so the agent
+           could not read it (I7). */
+        const listed = await treeService.listDirectoryExact(path);
+        const entries = listed.filter((entry) => entry.arriving !== true);
         return await mapConcurrent(entries, factsConcurrency, async (entry): Promise<RpcDirectoryEntry> => {
           const modifiedAt = entry.mtimeMs > 0 ? new Date(entry.mtimeMs).toISOString() : undefined;
           const common = {

@@ -20,7 +20,8 @@ import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
 import { createResizeImageActor } from '#hooks/attachment-image.actor.js';
 import { attachmentImageBackend } from '#services/attachment-image-backend.js';
 import type { AttachmentImageClient } from '#services/attachment-image.service.js';
-import { AttachmentImageService, loadAttachmentTranscodeSources } from '#services/attachment-image.service.js';
+import { AttachmentImageService } from '#services/attachment-image.service.js';
+import { loadAttachmentTranscodeSources } from '#services/attachment-transcode-sources-store.js';
 import { attachmentRefusalCopy } from '#utils/attachment-refusal.js';
 
 const fixtureUrls = import.meta.glob<string>('../../../../packages/plugins/image/src/raster/fixtures/*', {

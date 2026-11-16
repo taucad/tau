@@ -10,6 +10,9 @@
  * The result is an `imageResized` event whose `resized` data URL the machine decodes and hands to `storing`; a refusal
  * rejects with {@link AttachmentRefusedError}, which the machine emits as `imageResizeFailed`.
  *
+ * Both ownership sites are on Home's critical path, so the conversion service is imported on the first image that is
+ * not kept byte for byte, never by this module's static graph.
+ *
  * @module
  */
 
@@ -17,7 +20,7 @@ import { createAsyncLogic } from 'xstate';
 import type { AsyncActorLogic } from 'xstate';
 import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
 import type { AttachmentTranscodePort } from '@taucad/agent-host/wire';
-import { normalizeComposerImage } from '#services/attachment-image.service.js';
+import { loadAttachmentTranscodeSources } from '#services/attachment-transcode-sources-store.js';
 import { recordAttachmentIntake } from '#telemetry/attachment-intake-telemetry.js';
 import { AttachmentRefusedError } from '#utils/attachment-refusal.js';
 
@@ -59,7 +62,11 @@ export const createResizeImageActor = (
         throw new Error('The image is not a base64 data URL.');
       }
       const bytes = base64ToUint8Array(input.image.slice(header[0].length));
-      const outcome = await normalizeComposerImage(bytes, dependencies);
+      const { normalizeComposerImage } = await import('#services/attachment-image.service.js');
+      const outcome = await normalizeComposerImage(bytes, {
+        ...(dependencies.transcode === undefined ? {} : { transcode: dependencies.transcode }),
+        loadTranscodeSources: dependencies.loadTranscodeSources ?? loadAttachmentTranscodeSources,
+      });
       if (outcome.status === 'refused') {
         recordAttachmentIntake({
           outcome: 'refused',

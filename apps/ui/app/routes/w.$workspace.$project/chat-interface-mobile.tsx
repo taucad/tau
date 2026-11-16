@@ -17,7 +17,7 @@ import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockvi
 import type { ViewerFileActions } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
-import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
+import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -592,7 +592,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const sheetHeight = snapPointLength(activeSnapPoint);
 
   return (
-    <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton />}>
+    <ChatInterfaceSessionGate fallback={<WorkspaceOpening />}>
       <div
         className={cn(
           // --nav-height is the height of the navigation tabs

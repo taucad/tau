@@ -38,7 +38,7 @@
  *   on missing sessions to keep cross-chat dispatch safe.
  */
 
-import type { Chat as AiSdkChat } from '@ai-sdk/react';
+import type { ChatView } from '#services/deferred-chat.js';
 import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
@@ -67,7 +67,7 @@ import type {
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
-type ChatInstance = AiSdkChat<MyUIMessage>;
+type ChatInstance = ChatView;
 
 type SendMessageInput = Parameters<ChatInstance['sendMessage']>[0];
 

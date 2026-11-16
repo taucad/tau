@@ -27,14 +27,14 @@
     "apps/ui/app/chat-clients/chat-turn-host.tsx": "27bfdcc7984263686778a13b121f79cd281fa6ab39725a14e1e1ea0450c6b775",
     "apps/ui/app/chat-clients/use-cad-chat-client.ts": "99d8efe4866b3d8ebc23c988055b8d8ab0a1dc20f0a0bbb0951ab89530c9f9f7",
     "apps/ui/app/components/chat/chat-message-queue.tsx": "f8d1d4376c45e58a148138389b595e7d2f3d53d8d3ada3b108c3b4f11a32bfd0",
-    "apps/ui/app/components/chat/chat-textarea.tsx": "9e94ba7a0896e59eb3d4bad3aabe729a44b69d6127a2152cc90a2a116f98e5ed",
-    "apps/ui/app/hooks/use-chat.tsx": "ccec1495b2ad58143c6f437a47add2ee0090c028a2f225a01604a57d79ade2af",
+    "apps/ui/app/components/chat/chat-textarea.tsx": "c1ec64d4bbd87b852ebf64a29dffe32cc20853ff8e71e04c901132ae73034c11",
+    "apps/ui/app/hooks/use-chat.tsx": "f74277a6da72983da814962450e18d2815e987d3358ab8d67adb7d2e12cf833e",
     "apps/ui/app/machines/chat-message-queue.machine.ts": "ccc4dbfa9faa5903637829610d0c420e3fb3b12d80eb4c376c7b282a4b158f72",
     "apps/ui/app/machines/chat-session.machine.ts": "6591885571ef8134b175eaaa4a5662357276623613b2a3f9d7c18f13f638815c",
-    "apps/ui/app/services/chat-session-store.ts": "c447f8e54030d41e14908ee953e018b2931176b68be51068151b1e48ac8271bd"
+    "apps/ui/app/services/chat-session-store.ts": "f0264dc6ae88cec5d724a3fd2bc17058199230ebe358c34e11f338b3f45352ad"
   },
   "specs": {
-    "MessageQueue.tla": "021a28802a3101dee10a835b3f07b457b60a62c1d041a6ea245d659ca474587b",
+    "MessageQueue.tla": "e9a5c5eb1168ca8ad2e8baacfb96a1a55f5565dc4e61429931fdd57531a0995c",
     "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
   },
   "tables": {

@@ -39,7 +39,8 @@ import {
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { createApplyTreeEffects, sweepTemporarySiblings as sweepApplyLitter } from '#apply-tree.js';
 import type { MaterializeTarget } from '#apply-tree.js';
-import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
+import { createLargeObjectFill, declaredPlaceholders, largeObjectPlaceholders } from '#large-object-fill.js';
+import type { AttributesReading } from '#workspace-config.js';
 import { readEntryClosure } from '#open/entry-closure.js';
 import type { EntryClosure } from '#open/entry-closure.js';
 import { createContentReads } from '#open/content-reads.js';
@@ -111,7 +112,13 @@ import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput 
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
-import { cleanLargeObjects, largeObjectBasisOf, mayBeLfsPointerSize, withOwedAttributes } from '#lfs.js';
+import {
+  cleanLargeObjects,
+  largeObjectBasisOf,
+  mayBeLfsPointerSize,
+  readLfsPointer,
+  withOwedAttributes,
+} from '#lfs.js';
 import type { LargeObjectBasis } from '#lfs.js';
 import { digestHex } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
@@ -155,6 +162,7 @@ import {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  isAttributesPath,
   largeObjectThresholdBytes,
   tauRevisionPolicy,
 } from '#workspace-config.js';
@@ -196,6 +204,7 @@ import type {
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionGitOperation,
+  RevisionHead,
   RevisionLogEntry,
   RevisionPort,
   RevisionPushResult,
@@ -1670,6 +1679,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     })();
     return described;
   };
+  /* How the repository reads its attributes: every leg that decides a placeholder folds case as it does (D9). */
+  const attributesReading = async (): Promise<AttributesReading> => {
+    const descriptor = await describePort();
+    return { ignoreCase: descriptor.ignoreCase === true };
+  };
   const formatOf = async (): Promise<ObjectFormat> => {
     const descriptor = await describePort();
     return descriptor.objectFormat;
@@ -1726,6 +1740,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return held;
   };
 
+  /* The project directory as a checkout, at the head it names: the one place a port without checkouts has. */
+  const liveCheckout = (head: RevisionHead | undefined): Checkout =>
+    Object.freeze<Checkout>({
+      id: 'live',
+      projectId,
+      root: `/projects/${projectId}`,
+      kind: 'live',
+      branch: head?.branch,
+      baseRevisionId: head?.head,
+    });
+
   /*
    * Every place this project's files are.
    *
@@ -1745,17 +1770,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (port.listCheckouts !== undefined && descriptor.checkouts) {
       return port.listCheckouts();
     }
-    const head = await port.readHead();
-    return [
-      Object.freeze<Checkout>({
-        id: 'live',
-        projectId,
-        root: `/projects/${projectId}`,
-        kind: 'live',
-        branch: head?.branch,
-        baseRevisionId: head?.head,
-      }),
-    ];
+    return [liveCheckout(await port.readHead())];
   };
 
   const placeOf = async (checkoutId: string): Promise<Checkout> => {
@@ -2317,6 +2332,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return tree;
   };
 
+  /* Checkouts whose placeholders this session has declared at least once (D9). */
+  const declaredCheckouts = new Set<string>();
   type CheckoutCaptureOptions = Readonly<{
     modeBasis?: ImmutableRevisionTree | undefined;
     bypassMemo: boolean;
@@ -2329,8 +2346,26 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     captureOptions: CheckoutCaptureOptions,
   ): Promise<ImmutableRevisionTree> =>
     useFileSystem(place, async (rooted) => captureOpened(place, rooted, captureOptions));
-  /* One capture over a checkout the caller already holds open. */
+  /*
+   * One capture over a checkout the caller already holds open. D9: this layer owns the checkout's placeholders, and
+   * making its view of the checkout said it will declare them: every other view holds a file the size of a pointer
+   * until it does (I7). A capture that ends without the first declaration, failed or stopped, lets go, so nothing
+   * waits on a word that will not come.
+   */
   const captureOpened = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    captureOptions: CheckoutCaptureOptions,
+  ): Promise<ImmutableRevisionTree> => {
+    try {
+      return await captureDeclared(place, rooted, captureOptions);
+    } finally {
+      if (!declaredCheckouts.has(place.id)) {
+        rooted.releaseDeclaration?.();
+      }
+    }
+  };
+  const captureDeclared = async (
     place: Checkout,
     rooted: RevisionFileSystem,
     captureOptions: CheckoutCaptureOptions,
@@ -2355,7 +2390,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               return head === undefined || tree === undefined ? undefined : { revisionId: head, tree };
             },
           };
-    return captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
+    /* Taken before it looks: a tree write that announces a newer tree meanwhile owns the next word (D10, I7). */
+    const basis = rooted.declarationBasis?.();
+    const tree = await captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
       memos,
       bypassMemo,
       signal,
@@ -2363,6 +2400,23 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       ...(changed === undefined ? {} : { changed }),
       ...(ignores === undefined ? {} : { ignores }),
     });
+    /*
+     * D9: the placeholders' only writer says which they are, from the attributes it reads, every time it looks:
+     * after its own writes (an apply verifies by capturing), on open, at a pull and at each cut, which also
+     * catches a checkout edited from outside. Every other view answers a path by this mark alone.
+     */
+    try {
+      await rooted.declarePending?.(
+        declaredPlaceholders(tree, { reading: await attributesReading() }),
+        undefined,
+        basis === undefined ? undefined : { basis },
+      );
+      declaredCheckouts.add(place.id);
+    } catch (error) {
+      /* An index that cannot open answers no mark at all: the capture stands, and the next one declares again. */
+      console.warn('[revisions] the checkout index could not learn its placeholders', error);
+    }
+    return tree;
   };
   /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */
   const checkoutTreeId = async (checkoutId: string, tree: ImmutableRevisionTree): Promise<string> =>
@@ -2385,43 +2439,105 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * versioned file of a pointer's size is read, and the rest of the checkout is
    * never read to answer the fill. The D5 compare runs first, so a pointer
    * another program wrote is found. Ignored paths are left out, as a capture
-   * leaves them out. Without an index it captures the checkout, as before.
+   * leaves them out. Every attributes file is read too: a pointer is a
+   * placeholder only where they track it (D9, the one rule a declaration
+   * uses). Without an index it captures the checkout, as before.
    */
-  const placeholdersOf = async (place: Checkout): Promise<ReturnType<typeof largeObjectPlaceholders>> =>
+  const placeholdersOf = async (
+    place: Checkout,
+    generation: number,
+  ): Promise<ReturnType<typeof largeObjectPlaceholders>> =>
     useFileSystem(place, async (rooted) => {
       const { compareIndex, statTree } = rooted;
       if (compareIndex === undefined || statTree === undefined) {
-        return largeObjectPlaceholders(await captureOpened(place, rooted, { bypassMemo: false, leavesRecords: true }));
-      }
-      await compareIndex.call(rooted);
-      const stats = await statTree.call(rooted, '', { admits: versionedAdmits });
-      const candidates = stats.flatMap(({ path, size }) => (mayBeLfsPointerSize(size) ? [path] : []));
-      const read = await mapConcurrent(candidates, captureModeConcurrency, async (path) => {
-        try {
-          return [path, await rooted.readFile(path)] as const;
-        } catch (error) {
-          /* Gone since the listing: a capture skips it too. */
-          if (isMissingFile(error)) {
-            return undefined;
-          }
-          throw error;
-        }
-      });
-      const found = largeObjectPlaceholders(
-        new ImmutableRevisionTree(read.flatMap((entry) => (entry === undefined ? [] : [entry]))),
-      );
-      if (found.size > 0 && port.ignoredPaths !== undefined) {
-        const listing = new Set(
-          (await port.ignoredPaths(place.kind === 'live' ? undefined : place.root, [...found.keys()])) ?? [],
+        return largeObjectPlaceholders(
+          await captureOpened(place, rooted, { bypassMemo: false, leavesRecords: true }),
+          await attributesReading(),
         );
-        for (const path of found.keys()) {
-          if (coveredByIgnoreListing(listing, path)) {
-            found.delete(path);
+      }
+      /*
+       * What it finds is every placeholder the checkout holds, by a capture's own rule: it declares them (D9). Only
+       * for the tree it read: a tree write that began meanwhile owns the next word, which its own capture gives, so
+       * this look never declares over it, here or in the index (`basis`; D10, I7).
+       */
+      const basis = rooted.declarationBasis?.();
+      try {
+        const found = await indexedPlaceholders(place, rooted, { compareIndex, statTree });
+        try {
+          if (generationOf(place.id) !== generation || runningTreeWrites.has(place.id)) {
+            return found;
           }
+          await rooted.declarePending?.(
+            new Map(
+              [...found].map(
+                ([path, { oid, size, pointer }]) =>
+                  [path, { object: { oid, size }, pointerSize: pointer.byteLength }] as const,
+              ),
+            ),
+            undefined,
+            basis === undefined ? undefined : { basis },
+          );
+          declaredCheckouts.add(place.id);
+        } catch (error) {
+          /* An index that cannot open answers no mark at all: the fill stands, and the next look declares again. */
+          console.warn('[revisions] the checkout index could not learn its placeholders', error);
+        }
+        return found;
+      } finally {
+        if (!declaredCheckouts.has(place.id)) {
+          rooted.releaseDeclaration?.();
         }
       }
-      return found;
     });
+  const readVersioned = async (
+    rooted: RevisionFileSystem,
+    paths: readonly string[],
+  ): Promise<Array<readonly [string, Uint8Array<ArrayBuffer>]>> => {
+    const read = await mapConcurrent(paths, captureModeConcurrency, async (path) => {
+      try {
+        return [path, await rooted.readFile(path)] as const;
+      } catch (error) {
+        /* Gone since the listing: a capture skips it too. */
+        if (isMissingFile(error)) {
+          return undefined;
+        }
+        throw error;
+      }
+    });
+    return read.flatMap((entry) => (entry === undefined ? [] : [entry]));
+  };
+  const indexedPlaceholders = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    { compareIndex, statTree }: Required<Pick<RevisionFileSystem, 'compareIndex' | 'statTree'>>,
+  ): Promise<ReturnType<typeof largeObjectPlaceholders>> => {
+    await compareIndex.call(rooted);
+    const stats = await statTree.call(rooted, '', { admits: versionedAdmits });
+    const candidates = await readVersioned(
+      rooted,
+      stats.flatMap(({ path, size }) => (mayBeLfsPointerSize(size) ? [path] : [])),
+    );
+    const pointers = candidates.filter(([, content]) => readLfsPointer(content) !== undefined);
+    if (pointers.length === 0) {
+      return new Map();
+    }
+    /* A pointer is a placeholder only where the attributes files track it: they are read too, as a capture reads them. */
+    const attributes = await readVersioned(
+      rooted,
+      stats.flatMap(({ path }) => (isAttributesPath(path) ? [path] : [])),
+    );
+    let entries = [...pointers, ...attributes];
+    if (port.ignoredPaths !== undefined) {
+      const listing = new Set(
+        (await port.ignoredPaths(
+          place.kind === 'live' ? undefined : place.root,
+          entries.map(([path]) => path),
+        )) ?? [],
+      );
+      entries = entries.filter(([path]) => !coveredByIgnoreListing(listing, path));
+    }
+    return largeObjectPlaceholders(new ImmutableRevisionTree(entries), await attributesReading());
+  };
 
   /**
    * The live checkout, asked of a store that already exists, without waiting
@@ -2435,15 +2551,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const checkouts = await port.listCheckouts();
       return checkouts.find((candidate) => candidate.kind === 'live');
     }
-    const head = await port.readHead();
-    return Object.freeze<Checkout>({
-      id: 'live',
-      projectId,
-      root: `/projects/${projectId}`,
-      kind: 'live',
-      branch: head?.branch,
-      baseRevisionId: head?.head,
-    });
+    return liveCheckout(await port.readHead());
   };
 
   /**
@@ -2568,6 +2676,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     checkoutTreeId,
     temporarySibling,
     unlinkIfPresent,
+    attributesReading,
     prepareTarget: async (place, target, signal) => {
       const expected = target.get('tau.json');
       if (expected === undefined) {
@@ -2618,6 +2727,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }),
     },
     capture: captureForFill,
+    attributesReading,
     withCheckoutFence,
     materializeTree,
     /* A checkout over the host's store clones each object in place of writing its bytes (W11.3). */
@@ -2707,6 +2817,22 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     resumeTimers.add(timer);
     retryTimers.set(place.id, timer);
   };
+  /*
+   * D9: a look that failed before this session ever declared a checkout lets go of it, so no stat waits out the
+   * bound on a word that will not come; its reads still refuse an undeclared pointer (I7).
+   */
+  const releaseUndeclared = async (place: Checkout): Promise<void> => {
+    if (declaredCheckouts.has(place.id)) {
+      return;
+    }
+    try {
+      await useFileSystem(place, async (rooted) => {
+        rooted.releaseDeclaration?.();
+      });
+    } catch {
+      /* A checkout that cannot be opened holds nothing to let go of. */
+    }
+  };
   const checkFill = (place: Checkout): void => {
     if (fillsStopped || checkingFills.has(place.id) || answeredFills.get(place.id) === generationOf(place.id)) {
       return;
@@ -2719,8 +2845,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       // async-iife: bootstrap -- a background check; a fill's own failures are reported through `onLargeObjects`.
       void (async (): Promise<void> => {
         try {
+          /* The placeholders first: they declare the checkout, so a head that cannot be read holds nothing. */
+          const placeholders = await placeholdersOf(place, generation);
           const head = await headOf(place);
-          const placeholders = await placeholdersOf(place);
           if (fillsStopped || generationOf(place.id) !== generation) {
             return;
           }
@@ -2732,6 +2859,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             answeredFills.delete(place.id);
           }
           console.warn('[revisions] large-object placeholders could not be checked', error);
+          await releaseUndeclared(place);
           checkFillLater(place, generation);
         } finally {
           checkingFills.delete(place.id);
@@ -2787,6 +2915,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
     } catch (error) {
       console.warn('[revisions] checkouts could not be listed for their large objects', error);
+      /* The project directory is a checkout whatever the store answers: it is let go of, unless declared. */
+      await releaseUndeclared(liveCheckout(undefined));
     }
   })();
 
@@ -2884,7 +3014,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (fillsStopped) {
             return;
           }
-          const placeholders = tree === undefined ? await placeholdersOf(place) : largeObjectPlaceholders(tree);
+          const placeholders =
+            tree === undefined
+              ? await placeholdersOf(place, writes ?? 0)
+              : largeObjectPlaceholders(tree, await attributesReading());
           if (treeWrites.get(place.id) !== writes) {
             return;
           }
@@ -2923,6 +3056,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* D9: reads that resolve a placeholder to its object, and `materialize` for a consumer that needs the file. */
   const contentReads = createContentReads({
     useFileSystem,
+    attributesReading,
     readStoredObject: async (pointer) => port.readLargeObject?.(pointer),
     /* No reader's signal: the transfer may be the fill's too, and only a close stops it (I10, S4). */
     fetchObject: async (pointer, onProgress) => {
@@ -2951,7 +3085,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const generation = generationOf(place.id);
       /* Captured before the generation is answered: a capture that fails leaves the next check owed. */
-      const placeholders = await placeholdersOf(place);
+      const placeholders = await placeholdersOf(place, generation);
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- a close during the capture stops fills.
       if (fillsStopped || generationOf(place.id) !== generation) {
         return;
@@ -2994,6 +3128,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           capture: captureFresh,
           withCheckoutFence,
           materializeTree,
+          attributesReading,
           storeObject: async (pointer, content) => storeLargeObject.call(port, pointer, content),
           readStoredObject: async (pointer) => readLargeObject.call(port, pointer),
         });
@@ -7749,6 +7884,21 @@ export const releaseUnplacedTurns = (actor: ProjectRevisionsActor): readonly str
 };
 
 /**
+ * What a close cut over every checkout came to (A7e, 22:19Z).
+ *
+ * - `recorded`: a checkout minted a revision, and every other one had nothing to save.
+ * - `nothingToRecord`: every checkout answered that its tree was unchanged.
+ * - `refused`: a checkout could not be cut. There was no checkout, a turn held one (and minting there would credit
+ *   the turn's work to the close), or one answered `nothingToSave` because another holder's lease or a git
+ *   operation was in the way. The bytes are still on disk for the next cut.
+ *
+ * A cut that failed or lost its compare-and-swap still rejects.
+ *
+ * @public
+ */
+export type CheckoutCutsOutcome = 'recorded' | 'nothingToRecord' | 'refused';
+
+/**
  * Record every checkout no turn holds, and wait for each one's answer.
  *
  * The close ruling (D6, rule 7): closing or quitting saves every dirty
@@ -7770,15 +7920,15 @@ export const releaseUnplacedTurns = (actor: ProjectRevisionsActor): readonly str
  * @param timeoutMilliseconds - One bound for all the cuts. `hidden` defaults to {@link closeCutMilliseconds}, because
  *   a frozen page answers nothing; `close` has none (B8, B3: each cut is answered by its request id, and the quit
  *   itself is bounded by its owner, B9).
- * @returns Once every cut has answered. Rejects with the first refusal (a failed cut, a
- *   lost compare-and-swap) once all have answered, or at the bound.
+ * @returns Once every cut has answered, what they came to ({@link CheckoutCutsOutcome}). Rejects with the first
+ *   refusal (a failed cut, a lost compare-and-swap) once all have answered, or at the bound.
  * @public
  */
 export const awaitCheckoutCuts = async (
   actor: ProjectRevisionsActor,
   trigger: 'hidden' | 'close',
   timeoutMilliseconds: number | undefined = trigger === 'hidden' ? closeCutMilliseconds : undefined,
-): Promise<void> => {
+): Promise<CheckoutCutsOutcome> => {
   const { checkouts, checkoutRefs, turnFacts } = actor.getSnapshot().context;
   const turnCheckouts = Object.values(turnFacts)
     .filter((fact) => !fact.settled && fact.abandoned !== true)
@@ -7792,6 +7942,11 @@ export const awaitCheckoutCuts = async (
         !turnCheckouts.some((id) => id === undefined || id === checkout.id),
     )
     .map((checkout) => checkout.id);
+  /* A checkout skipped for a turn, or none to cut at all, leaves bytes no cut here records. */
+  const skipped =
+    ids.length === 0 || ids.length < checkouts.filter((checkout) => checkoutRefs[checkout.id] !== undefined).length;
+  /* What each checkout answered when it did not refuse: minted, unchanged, or held off. */
+  const outcomes = new Map<string, CheckoutCutsOutcome>();
   /* Each answer settles to its refusal, or `undefined` when the checkout recorded or had nothing to record.
    * Keyed by the request id each cut mints, which every answer echoes (RM-R1, RM-R2). */
   const requests = new Map(ids.map((id) => [`${trigger}:${id}:${randomUuid()}`, id]));
@@ -7805,9 +7960,18 @@ export const awaitCheckoutCuts = async (
   };
   const subscriptions = [
     actor.on('revisionMinted', (event) => {
+      if (event.requestId !== undefined && requests.has(event.requestId)) {
+        outcomes.set(event.requestId, 'recorded');
+      }
       answer(event);
     }),
     actor.on('nothingToSave', (event) => {
+      if (event.requestId !== undefined && requests.has(event.requestId)) {
+        outcomes.set(
+          event.requestId,
+          event.heldBy === undefined && event.waitFor === undefined ? 'nothingToRecord' : 'refused',
+        );
+      }
       answer(event);
     }),
     actor.on('cutFailed', (event) => {
@@ -7838,6 +8002,11 @@ export const awaitCheckoutCuts = async (
     if (refused !== undefined) {
       throw new Error(refused);
     }
+    const answered = new Set(outcomes.values());
+    if (skipped || answered.has('refused')) {
+      return 'refused';
+    }
+    return answered.has('recorded') ? 'recorded' : 'nothingToRecord';
   } finally {
     clearTimeout(bound);
     for (const subscription of subscriptions) {

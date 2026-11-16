@@ -11,46 +11,38 @@
   "variants": {
     "self-host": {
       "project": {
-        "brotliBytes": 3007364,
-        "requests": 389,
-        "largestChunkBrotliBytes": 227468,
+        "brotliBytes": 2941434,
+        "requests": 400,
+        "largestChunkBrotliBytes": 228591,
         "knownHeavy": {
-          "ai": "PL1: entry.client -> runtime/app-runtime -> services/chat-session-store",
           "editor": "PL5: the code viewer of the workbench dock",
           "react-three": "PL5: the printer viewer of the workbench dock",
-          "three": "PL5 (project: part thumbnails, printer viewer); PL1 (Home: the composer reaches runtime/project-runtime and its view records)"
+          "three": "PL5: part thumbnails and the printer viewer"
         }
       },
       "home": {
-        "brotliBytes": 1621918,
-        "requests": 284,
-        "largestChunkBrotliBytes": 156859,
-        "knownHeavy": {
-          "ai": "PL1: entry.client -> runtime/app-runtime -> services/chat-session-store",
-          "three": "PL5 (project: part thumbnails, printer viewer); PL1 (Home: the composer reaches runtime/project-runtime and its view records)"
-        }
+        "brotliBytes": 1253988,
+        "requests": 282,
+        "largestChunkBrotliBytes": 137775,
+        "knownHeavy": {}
       }
     },
     "cloud": {
       "project": {
-        "brotliBytes": 3032814,
-        "requests": 404,
-        "largestChunkBrotliBytes": 228514,
+        "brotliBytes": 2966650,
+        "requests": 415,
+        "largestChunkBrotliBytes": 229666,
         "knownHeavy": {
-          "ai": "PL1: entry.client -> runtime/app-runtime -> services/chat-session-store",
           "editor": "PL5: the code viewer of the workbench dock",
           "react-three": "PL5: the printer viewer of the workbench dock",
-          "three": "PL5 (project: part thumbnails, printer viewer); PL1 (Home: the composer reaches runtime/project-runtime and its view records)"
+          "three": "PL5: part thumbnails and the printer viewer"
         }
       },
       "home": {
-        "brotliBytes": 1644120,
-        "requests": 298,
-        "largestChunkBrotliBytes": 156508,
-        "knownHeavy": {
-          "ai": "PL1: entry.client -> runtime/app-runtime -> services/chat-session-store",
-          "three": "PL5 (project: part thumbnails, printer viewer); PL1 (Home: the composer reaches runtime/project-runtime and its view records)"
-        }
+        "brotliBytes": 1276255,
+        "requests": 296,
+        "largestChunkBrotliBytes": 137886,
+        "knownHeavy": {}
       }
     }
   }

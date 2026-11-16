@@ -132,10 +132,15 @@
 \* the route state and the mounted live set are unchanged, so no action or verdict changes. The route and
 \* live-session sources name the re-homing in their comments.
 \* Merged with A7c: the live sessions' focused block is gone, so its imports are too. No action or verdict changes.
+\* A15b: the route content renders inside the persistent workspace frame (`workspace-frame.tsx`), and the gate's
+\* worker wait draws only a busy marker over it. Focus, the route state and the mounted live set are unchanged, so
+\* no action or verdict changes.
 \* RR1 (React Router 7.18.5): the route sink reads the replay's navigation state with the public `useNavigation`.
 \* It still reads the router's live state through `UNSAFE_DataRouterContext` when a command arrives, because the
 \* rendered state lags a navigation React renders in a transition and the I2 deferral needs the live one. Its tests
 \* render under a data router. No action or verdict changes.
+\* PL1 (runtime entry cut): `SessionProjectProvider` moved to `hooks/project-provider.tsx` so Home's graph stops at
+\* the hook; the live sessions import it from there. Only an import path changes. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

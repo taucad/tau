@@ -22,7 +22,11 @@ import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import type { RevisionStatusProjection } from '@taucad/revisions';
+import type { CheckoutCutsOutcome } from '@taucad/revisions/revision-effects';
+import type { EditorTextScope } from '#lib/editor-document-session.js';
 import {
+  closeDebtLimit,
+  closeDebtMaxAgeMilliseconds,
   closeDebtStorageKeyPrefix,
   createSessionRevisionsLogic,
   sessionRevisionsCallback,
@@ -92,6 +96,7 @@ const createFakeClient = (
     holdSave: () => PromiseWithResolvers<void>;
     setStatus: (patch: Partial<RevisionStatusProjection>) => void;
     republish: () => void;
+    setSaveOutcome: (next: CheckoutCutsOutcome) => void;
     focused: boolean[];
   }> => {
   const listeners = createSignal();
@@ -106,6 +111,8 @@ const createFakeClient = (
   const focused: boolean[] = [];
   const userAnswer = Promise.withResolvers<void>();
   let saveGate: PromiseWithResolvers<void> | undefined;
+  /* What the next cuts come to (A7e); a cut that recorded unless a row says otherwise. */
+  let saveOutcome: CheckoutCutsOutcome = 'recorded';
   const client = {
     send: (command: { command: string }) => {
       log.push(`${name}:send:${command.command}:${JSON.stringify(command)}`);
@@ -124,9 +131,13 @@ const createFakeClient = (
     close: () => {
       log.push(`${name}:close`);
     },
-    saveRevision: async (trigger?: string) => {
+    saveRevision: async (trigger?: string): Promise<CheckoutCutsOutcome> => {
       log.push(`${name}:saveRevision:${trigger ?? 'save'}`);
       await saveGate?.promise;
+      return saveOutcome;
+    },
+    setSaveOutcome: (next: CheckoutCutsOutcome) => {
+      saveOutcome = next;
     },
     holdSave: () => {
       saveGate = Promise.withResolvers<void>();
@@ -225,6 +236,9 @@ const createFakePorts = (
   const recordingSignal = createSignal();
   let cloudOpen = false;
   const cloudOpenSignal = createSignal();
+  let owingText = false;
+  const editorTextSignal = createSignal();
+  const textScopes: Array<Readonly<{ projectId: string; scope: EditorTextScope | undefined }>> = [];
   const chatFacts: Array<Readonly<{ projectId: string; facts: ChatRevisionFacts }>> = [];
   const faults: unknown[] = [];
   const userSignal = createSignal();
@@ -261,6 +275,15 @@ const createFakePorts = (
     recording: { get: () => recording, subscribe: recordingSignal.subscribe },
     closeDebt: debts.port,
     cloudOpen: { get: () => cloudOpen, subscribe: cloudOpenSignal.subscribe },
+    editorText: {
+      setScope: (id, scope) => {
+        textScopes.push({ projectId: id, scope });
+        /* As the real store does: a published scope is a change. */
+        editorTextSignal.emit();
+      },
+      owing: () => owingText,
+      subscribe: editorTextSignal.subscribe,
+    },
     reportFault: (error) => {
       faults.push(error);
     },
@@ -297,6 +320,11 @@ const createFakePorts = (
       cloudOpen = next;
       cloudOpenSignal.emit();
     },
+    setOwingText: (next: boolean) => {
+      owingText = next;
+      editorTextSignal.emit();
+    },
+    textScopes,
     /** Another tab ends the open: the stored intent changes and this document hears nothing. */
     setCloudOpenElsewhere: (next: boolean) => {
       cloudOpen = next;
@@ -315,7 +343,8 @@ const createFakePorts = (
       saltSignal.size +
       focusSignal.size +
       recordingSignal.size +
-      cloudOpenSignal.size,
+      cloudOpenSignal.size +
+      editorTextSignal.size,
   };
 };
 
@@ -938,10 +967,10 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
      * word it got from before cannot stand. */
     expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: false, judged: false }]);
 
-    client.setStatus({ readiness: 'materialized' });
+    client.setStatus({ readiness: 'entryReady' });
     fileManager.set({ worker: workerA });
     await settle();
-    /* Published, but the fill has not answered for this tree: the model is checking its files, a repeat. */
+    /* Published, but this tree's authored files are still landing: the model is checking its files, a repeat. */
     expect(fileChecks(received)).toEqual([{ type: 'fileCheckChanged', settled: false, judged: false }]);
 
     client.setStatus({ readiness: 'filled' });
@@ -951,7 +980,7 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
     ]);
 
     /* A later check returns it to pending; a repeat says nothing. */
-    client.setStatus({ readiness: 'materialized' });
+    client.setStatus({ readiness: 'entryReady' });
     client.setStatus({ projectDirty: true });
     expect(fileChecks(received)).toEqual([
       { type: 'fileCheckChanged', settled: false, judged: false },
@@ -990,7 +1019,7 @@ describe('session revisions relay the facts and follow the checkout (A7b)', () =
 
     /* Another tab performs the open and clears the stored intent; this document hears no signal. */
     fake.setCloudOpenElsewhere(false);
-    client.setStatus({ readiness: 'materialized' });
+    client.setStatus({ readiness: 'entryReady' });
 
     expect(fileChecks(received).at(-1)).toEqual({ type: 'fileCheckChanged', settled: false, judged: false });
     session.stop();
@@ -1228,18 +1257,18 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
       user?: RevisionSessionUser;
       workspace?: string;
       /* Prepare the client before its open, e.g. hold or refuse its first cut. */
-      prepare?: (client: ReturnType<typeof createFakeClient>) => void;
+      prepare?: (client: ReturnType<typeof createFakeClient>, fake: ReturnType<typeof createFakePorts>) => void;
     }>,
   ) => {
     const guard = guardActors();
     const client = createFakeClient(name, options.log);
-    options.prepare?.(client);
-    client.userAnswer.resolve();
-    revisionClientTestApi.adopt(projectId, worker, client);
     const fake = createFakePorts({
       debts: options.debts,
       ...(options.user === undefined ? {} : { user: options.user }),
     });
+    options.prepare?.(client, fake);
+    client.userAnswer.resolve();
+    revisionClientTestApi.adopt(projectId, worker, client);
     const fileManager = createFileManager({ worker, rootDirectory: `/projects/${projectId}` });
     const session = createSession(fake.ports, fileManager.ref, {
       guard,
@@ -1425,6 +1454,21 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     next.session.stop();
   });
 
+  it('should send the person signed in after the open as the actor before asking for their owed cut', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
+    const next = await openDocument('b', workerB, { log, debts });
+    await settle();
+    expect(cuts(log).filter((line) => line.startsWith('b:'))).toEqual([]);
+    next.fake.setUser(ada);
+    await settle();
+    const actorSent = log.findIndex((line) => line.startsWith('b:send:setActor:') && line.includes('"usr_1"'));
+    expect(actorSent).toBeGreaterThanOrEqual(0);
+    expect(log.indexOf('b:saveRevision:close')).toBeGreaterThan(actorSent);
+    next.session.stop();
+  });
+
   it('should owe nothing once the close cut has answered, so the next open takes no cut', async () => {
     const log: ClientLog = [];
     const debts = createDebtStore();
@@ -1543,7 +1587,10 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     sessionRevisionsCloseDebt.write(adaKey, { token: 't1' });
     const stored = Object.keys(globalThis.localStorage).filter((key) => key.startsWith(closeDebtStorageKeyPrefix));
     expect(stored).toHaveLength(1);
-    expect(globalThis.localStorage.getItem(stored[0] ?? '')).toBe('{"token":"t1"}');
+    /* Only the token, and when it was written for the store's bounds (A7e). */
+    expect(
+      Object.keys(JSON.parse(globalThis.localStorage.getItem(stored[0] ?? '') ?? '{}') as Record<string, unknown>),
+    ).toEqual(['token', 'at']);
     expect(sessionRevisionsCloseDebt.read(adaKey)).toEqual({ token: 't1' });
     expect(sessionRevisionsCloseDebt.read({ ...adaKey, workspace: 'other' })).toBeUndefined();
     expect(sessionRevisionsCloseDebt.read({ ...adaKey, actorId: 'usr_2' })).toBeUndefined();
@@ -1553,5 +1600,84 @@ describe('session revisions take a close cut owed by an earlier document (A7d)',
     expect(sessionRevisionsCloseDebt.read(adaKey)).toBeUndefined();
     globalThis.localStorage.setItem(stored[0] ?? '', '{"token":1}');
     expect(sessionRevisionsCloseDebt.read(adaKey)).toBeUndefined();
+  });
+
+  it('A7e: should keep at most the close debt limit, dropping the oldest, and drop an expired debt on read', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000_000_000_000);
+      for (let index = 0; index <= closeDebtLimit; index += 1) {
+        vi.setSystemTime(1_000_000_000_000 + index);
+        sessionRevisionsCloseDebt.write({ ...adaKey, projectId: `p${String(index)}` }, { token: `t${String(index)}` });
+      }
+      const stored = Object.keys(globalThis.localStorage).filter((key) => key.startsWith(closeDebtStorageKeyPrefix));
+      expect(stored).toHaveLength(closeDebtLimit);
+      expect(sessionRevisionsCloseDebt.read({ ...adaKey, projectId: 'p0' })).toBeUndefined();
+      expect(sessionRevisionsCloseDebt.read({ ...adaKey, projectId: 'p1' })).toEqual({ token: 't1' });
+      vi.setSystemTime(1_000_000_000_000 + closeDebtLimit + closeDebtMaxAgeMilliseconds + 1);
+      expect(sessionRevisionsCloseDebt.read({ ...adaKey, projectId: 'p1' })).toBeUndefined();
+      expect(Object.keys(globalThis.localStorage)).not.toContain(stored.find((key) => key.includes('"p1"')));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('A7e: should publish whose editor text the project records, and withdraw it on stop', async () => {
+    const log: ClientLog = [];
+    const document = await openDocument('a', workerA, { log, debts: createDebtStore(), user: ada });
+    expect(document.fake.textScopes.at(-1)).toEqual({ projectId, scope: { workspace, actorId: 'usr_1' } });
+    document.session.stop();
+    expect(document.fake.textScopes.at(-1)).toEqual({ projectId, scope: undefined });
+  });
+
+  it('A7e: should take the owed cut only once owed editor text is replayed and no conflict record is in flight', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
+    log.length = 0;
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      user: ada,
+      prepare: (_client, fake) => {
+        fake.setOwingText(true);
+        fake.setRecording(true);
+      },
+    });
+    await settle();
+    expect(cuts(log)).toEqual([]);
+    next.fake.setOwingText(false);
+    await settle();
+    expect(cuts(log)).toEqual([]);
+    next.fake.setRecording(false);
+    await settle();
+    expect(cuts(log)).toEqual(['b:saveRevision:close']);
+    expect(debts.port.read(adaKey)).toBeUndefined();
+    next.session.stop();
+  });
+
+  it('A7e: should keep the close debt when the cut that would settle it was refused', async () => {
+    const log: ClientLog = [];
+    const debts = createDebtStore();
+    await reload(await openDocument('a', workerA, { log, debts, user: ada }));
+    const next = await openDocument('b', workerB, {
+      log,
+      debts,
+      user: ada,
+      prepare: (client) => {
+        client.setSaveOutcome('refused');
+      },
+    });
+    await settle();
+    expect(cuts(log)).toContain('b:saveRevision:close');
+    expect(debts.port.read(adaKey)).toBeDefined();
+    /* Its own hidden cut refused too: the debt stays for the next open. */
+    const [cut] = next.fake.cuts;
+    await cut?.('hidden');
+    expect(debts.port.read(adaKey)).toBeDefined();
+    next.client.setSaveOutcome('nothingToRecord');
+    await cut?.('hidden');
+    expect(debts.port.read(adaKey)).toBeUndefined();
+    next.session.stop();
   });
 });

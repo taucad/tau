@@ -12,8 +12,10 @@
  *   bytes, requests, largest chunk) against `critical-budget.json`, and reports every chunk of it holding a heavy
  *   module id ({@link HeavyModule.moduleIds}).
  *
- * The route-class registry (primitive P1, PL3) replaces {@link criticalRouteClasses} when it lands.
+ * The route classes and their roots come from the route-class registry (primitive P1, PL3).
  */
+// oxlint-disable-next-line no-restricted-imports -- Native Node scripts read the registry without bundler aliases.
+import { routeClasses } from '../app/lib/route-classes.ts';
 
 /** A module family that belongs to the deferred tier (T2) and never to a route's interactive tier (T1). */
 export type HeavyModule = {
@@ -127,31 +129,12 @@ export type CriticalRouteClass = {
   readonly roots: readonly string[];
 };
 
-/** Modules every route's document evaluates before the route module itself. */
-export const shellRoots = ['entry.client.tsx', 'root.tsx'] as const;
-
 /**
- * The guarded route classes: Home and the project route.
- *
- * The project route's open graph adds its deferred editor (`project-live-sessions`) and the viewport's chat
- * interface, which holds the transcript and the composer; Home's adds the rich composer
- * (`new-project-chat-composer`, which `useNewProjectComposer` requests at mount).
+ * The guarded route classes: every class of the route-class registry (primitive P1, `app/lib/route-classes.ts`) that
+ * names its interactive roots, today Home and the project route.
  */
-export const criticalRouteClasses: readonly CriticalRouteClass[] = [
-  {
-    id: 'project',
-    label: 'project route',
-    roots: [
-      ...shellRoots,
-      'routes/w.$workspace.$project/route.tsx',
-      'routes/w.$workspace.$project/project-live-sessions.tsx',
-      'routes/w.$workspace.$project/chat-interface-desktop.tsx',
-      'routes/w.$workspace.$project/chat-interface-mobile.tsx',
-    ],
-  },
-  {
-    id: 'home',
-    label: 'Home',
-    roots: [...shellRoots, 'routes/_index/route.tsx', 'components/chat/new-project-chat-composer.tsx'],
-  },
-];
+export const criticalRouteClasses: readonly CriticalRouteClass[] = routeClasses.flatMap((routeClass) =>
+  routeClass.interactive === undefined
+    ? []
+    : [{ id: routeClass.id, label: routeClass.label, roots: routeClass.interactive }],
+);

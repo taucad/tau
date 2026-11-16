@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- TAU_DEBUG mirrors the environment contract. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { mock } from 'vitest-mock-extended';
-import type { AppLoadContext } from 'react-router';
+import { RouterContextProvider } from 'react-router';
 
 const getEnvironment = vi.fn();
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' }, getEnvironment }));
@@ -17,7 +16,7 @@ const load = async (fixture: string): ReturnType<typeof loader> => {
     url: new URL(request.url),
     pattern: '/__e2e/project-creation-location',
     params: {},
-    context: mock<AppLoadContext>(),
+    context: new RouterContextProvider(),
   });
 };
 

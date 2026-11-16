@@ -409,7 +409,9 @@ export const createRelayedFileSystemProvider = (
         proxy.statTree(path, options?.signal === undefined ? undefined : { signal: options.signal }),
       );
       const { admits } = options ?? {};
-      return admits === undefined ? rows : rows.filter((row) => admittedRow(row.path, admits));
+      /* A row a tree write has yet to land is not on disk: the agent could not read it (I7). */
+      const landed = rows.filter((row) => row.arriving !== true);
+      return admits === undefined ? landed : landed.filter((row) => admittedRow(row.path, admits));
     },
     /* The caller's listed head metadata stays here: the authority's index holds its own. */
     facts: async (paths, options) =>
@@ -812,7 +814,7 @@ const composeProjectHost = async (
         },
       }),
       skillResolver,
-      /* The kernel reads the model's files itself, so it runs once every large object has landed. */
+      /* The kernel reads the model's files itself, so it runs once the large objects its closure reads have landed (T6). */
       ...guardLargeObjectKernel(
         /* An entry-less project adopts its first model as main and gains its kernel's package files (blueprint D3). */
         withEntryAdoption(

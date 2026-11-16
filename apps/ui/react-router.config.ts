@@ -43,7 +43,7 @@ export default {
    * reads the `url` argument.
    */
   // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
-  future: { unstable_optimizeDeps: true, v8_passThroughRequests: true },
+  future: { unstable_optimizeDeps: true, v8_passThroughRequests: true, v8_middleware: true },
   /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.
    *

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import { createLargeObjectFill, largeObjectPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
+import {
+  createLargeObjectFill,
+  declaredPlaceholders,
+  largeObjectPlaceholders,
+  UnstoredLargeObjectsError,
+} from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
 import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -20,6 +25,7 @@ const head = revisionId('a'.repeat(40));
 
 const parts = { 'models/a.step': 'solid a', 'models/b.step': 'solid bb' } as const;
 const pointerOf = (content: string): ReturnType<typeof lfsPointerFor> => lfsPointerFor(encoder.encode(content));
+const tracksStep = '*.step filter=lfs diff=lfs merge=lfs -text\n';
 
 /* A checkout as a map of files, a fence that runs in turn, and a port whose transfer the test drives. */
 const setup = (
@@ -28,9 +34,17 @@ const setup = (
     flushMilliseconds?: number;
     byOid?: boolean;
     retryMilliseconds?: number[];
+    /* The checkout's attributes, and whether its repository folds case (`core.ignoreCase`). */
+    attributes?: string;
+    ignoreCase?: boolean;
   }> = {},
 ) => {
-  const files = new Map<string, Uint8Array<ArrayBuffer>>([['main.scad', encoder.encode('import("models/a.step");')]]);
+  const files = new Map<string, Uint8Array<ArrayBuffer>>([
+    ['.gitattributes', encoder.encode(options.attributes ?? tracksStep)],
+    ['main.scad', encoder.encode('import("models/a.step");')],
+  ]);
+  /* A pointer the attributes do not track: a person's text, committed as it is. */
+  files.set('notes/pointer.txt', pointerOf('solid a').bytes);
   for (const [path, content] of Object.entries(parts)) {
     files.set(path, pointerOf(content).bytes);
   }
@@ -67,7 +81,9 @@ const setup = (
   let conflicts = 0;
   const fullTree = (): ImmutableRevisionTree =>
     new ImmutableRevisionTree([
+      ['.gitattributes', files.get('.gitattributes')!],
       ['main.scad', files.get('main.scad')!],
+      ['notes/pointer.txt', files.get('notes/pointer.txt')!],
       ...Object.entries(parts).map(([path, content]) => [path, encoder.encode(content)] as const),
     ]);
   let captures = 0;
@@ -106,6 +122,9 @@ const setup = (
     /* A failed fill retries on its own; a test that does not drive it waits longer than it runs. */
     retryMilliseconds: options.retryMilliseconds ?? [60_000],
     ...(options.flushBytes === undefined ? {} : { flushBytes: options.flushBytes }),
+    ...(options.ignoreCase === undefined
+      ? {}
+      : { attributesReading: async () => ({ ignoreCase: options.ignoreCase }) }),
   });
   const land = (path: keyof typeof parts): void => {
     onLargeObject?.(pointerOf(parts[path]).pointer.oid, encoder.encode(parts[path]));
@@ -150,12 +169,57 @@ const setup = (
 };
 
 describe('large-object fill', () => {
-  it('finds a pointer in a tree as a placeholder, and nothing else', () => {
+  /* One rule on every leg: a pointer is a placeholder exactly where the tree's attributes files track it, as git decides. */
+  it('finds a pointer the attributes track as a placeholder, nested files among them, and nothing else', () => {
     const tree = new ImmutableRevisionTree([
+      ['.gitattributes', encoder.encode(tracksStep)],
       ['main.scad', encoder.encode('cube(1);')],
       ['models/a.step', pointerOf('solid a').bytes],
+      ['notes/pointer.txt', pointerOf('solid a').bytes],
+      ['vendor/.gitattributes', encoder.encode('*.bin filter=lfs diff=lfs merge=lfs -text\n*.step -filter\n')],
+      ['vendor/blob.bin', pointerOf('blob').bytes],
+      ['vendor/plain.step', pointerOf('solid p').bytes],
+      ['other/blob.bin', pointerOf('blob').bytes],
     ]);
-    expect([...largeObjectPlaceholders(tree).keys()]).toStrictEqual(['models/a.step']);
+    expect([...largeObjectPlaceholders(tree).keys()].toSorted()).toStrictEqual(['models/a.step', 'vendor/blob.bin']);
+  });
+
+  /* A repository that folds case reads `*.STEP` as git does there: the fill and the declaration name the same files. */
+  it('folds case in the attributes where the repository does, on the fill and the declaration alike', async () => {
+    const tracksUpper = '*.STEP filter=lfs diff=lfs merge=lfs -text\n';
+    const tree = new ImmutableRevisionTree([
+      ['.gitattributes', encoder.encode(tracksUpper)],
+      ['models/a.step', pointerOf('solid a').bytes],
+    ]);
+    expect([...largeObjectPlaceholders(tree).keys()]).toStrictEqual([]);
+    expect([...largeObjectPlaceholders(tree, { ignoreCase: true }).keys()]).toStrictEqual(['models/a.step']);
+    expect([...declaredPlaceholders(tree, { reading: { ignoreCase: true } }).keys()]).toStrictEqual(['models/a.step']);
+    const harness = setup({ attributes: tracksUpper, ignoreCase: true });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    expect(harness.reports[0]?.facet?.paths).toStrictEqual(['models/a.step', 'models/b.step']);
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/a.step')).toBe('solid a');
+  });
+
+  it('leaves a pointer the attributes do not track to the person, never fetching or writing it', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    expect(harness.reports[0]?.facet?.paths).toStrictEqual(['models/a.step', 'models/b.step']);
+    harness.finish(harness.fullTree());
+    await done;
+    for (const call of harness.materializeTree.mock.calls) {
+      expect(
+        call[1].has('notes/pointer.txt') ? call[1].get('notes/pointer.txt') : pointerOf('solid a').bytes,
+      ).toStrictEqual(pointerOf('solid a').bytes);
+    }
+    expect(harness.files.get('notes/pointer.txt')).toStrictEqual(pointerOf('solid a').bytes);
   });
 
   /* D10: a host reads `filled` only from the fill's word, never from its silence. */
@@ -857,6 +921,7 @@ describe('a fill over the host store', () => {
     const pa = lfsPointerFor(a);
     const pb = lfsPointerFor(b);
     const files = new Map<string, Uint8Array<ArrayBuffer>>([
+      ['.gitattributes', encoder.encode(tracksStep)],
       ['a.step', pa.bytes],
       ['b.step', pb.bytes],
     ]);

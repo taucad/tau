@@ -26,6 +26,7 @@ import {
   describeTurnSettlement,
 } from '@taucad/revisions/revision-effects';
 import type {
+  CheckoutCutsOutcome,
   EditorConflictInput,
   EditorConflictOutcome,
   RevisionConflictRead,
@@ -553,7 +554,7 @@ export type WorkerProjectRevisions = Readonly<{
    * Resolves rather than rejects at the bound: after it the durable queue is
    * the guarantee and the next open retries (D28).
    */
-  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
+  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<CheckoutCutsOutcome>;
   /** Record an editor's overlapping edit as a conflicted revision, and wait for it (D14). */
   recordEditorConflict: (input: EditorConflictInput) => Promise<EditorConflictOutcome>;
   /** Both sides of one conflicted revision as text (rule 8). */
@@ -1463,13 +1464,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    *
    * @returns When the cut has settled.
    */
-  const awaitSave = async (): Promise<void> => {
+  const awaitSave = async (): Promise<CheckoutCutsOutcome> => {
     const trigger = 'save';
     const { checkoutId } = selectRevisionStatus(actor.getSnapshot());
     if (checkoutId === undefined) {
       throw new Error('The project checkout was not ready before close.');
     }
-    const cut = Promise.withResolvers<void>();
+    const cut = Promise.withResolvers<CheckoutCutsOutcome>();
     /* The answer names this request, so an idle mint or another tab's save never settles it (RM-R1); a save
      * absorbed by a later `hidden` or `close` is still answered under its own id (RM-R2, RV-W2b #4). */
     const requestId = `${trigger}:${randomUuid()}`;
@@ -1477,7 +1478,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     const subscriptions = [
       actor.on('revisionMinted', (event) => {
         if (matches(event)) {
-          cut.resolve();
+          cut.resolve('recorded');
         }
       }),
       /* Terminal: the checkout re-reads and rests dirty, so nothing else will
@@ -1489,7 +1490,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }),
       actor.on('nothingToSave', (event) => {
         if (matches(event)) {
-          cut.resolve();
+          cut.resolve(event.heldBy === undefined && event.waitFor === undefined ? 'nothingToRecord' : 'refused');
         }
       }),
       actor.on('cutFailed', (event) => {
@@ -1500,7 +1501,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     ];
     try {
       actor.send({ type: 'cut', requestId, trigger, checkoutId, leaseIds: [] });
-      await cut.promise;
+      return await cut.promise;
     } finally {
       for (const subscription of subscriptions) {
         subscription.unsubscribe();
@@ -1585,19 +1586,21 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
   };
 
-  const saveRevision = async (trigger: 'save' | 'hidden' | 'close' = 'save'): Promise<void> => {
+  const saveRevision = async (trigger: 'save' | 'hidden' | 'close' = 'save'): Promise<CheckoutCutsOutcome> => {
+    let outcome: CheckoutCutsOutcome = 'refused';
     try {
       /* `hidden` is the browser's close preparation (rule 9), so it records
        * what a close would: every checkout, live and linked (the close ruling). */
-      await (trigger === 'save' ? awaitSave() : awaitCheckoutCuts(actor, trigger));
+      outcome = await (trigger === 'save' ? awaitSave() : awaitCheckoutCuts(actor, trigger));
     } catch {
-      /* Reported already; whatever did not record is still on disk for the next cut. */
+      /* Reported already; whatever did not record is still on disk for the next cut, and the answer says so. */
     }
     try {
       await awaitSyncSettled(actor);
     } catch {
       /* The queue carries whatever did not reach the remote (D28). */
     }
+    return outcome;
   };
 
   /* The checkout a comparison reads, and its head's modes: of `paths` only when it compares those (S11). */
@@ -2162,7 +2165,7 @@ export type WorkerRevisionResult =
    * head, or none) and the toast channel (a failure). What the frame *is* is
    * permission for `pagehide` to run.
    */
-  | Readonly<{ kind: 'saved' }>
+  | Readonly<{ kind: 'saved'; outcome: CheckoutCutsOutcome }>
   /**
    * The root has taken a `sessionChanged` (audit R6). Every frame posted after
    * this one was projected after the change; frames before it may be from
@@ -2404,7 +2407,7 @@ const answerOf = (
      * for the close cut before `pagehide` offers a pack. An uncorrelated frame
      * takes the same path and its answer is simply dropped. */
     case 'saveRevision': {
-      return tree.saveRevision(request.trigger).then(() => ({ kind: 'saved' }) as const);
+      return tree.saveRevision(request.trigger).then((outcome) => ({ kind: 'saved', outcome }) as const);
     }
     case 'recordEditorConflict': {
       const { path, base, mine } = request;

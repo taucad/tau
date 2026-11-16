@@ -63,8 +63,14 @@ vi.mock('#components/code/code-editor-view.client.js', () => {
 vi.mock('#lib/editor-syntax.js', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
 
 const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>(), opened: [] as string[] }));
+vi.mock('#routes/w.$workspace.$project/project-sync-placeholder.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ProjectSyncPlaceholder: ({ state }: { readonly state: string }) => <div data-testid={`sync-placeholder-${state}`} />,
+}));
+/* What each surface shows; a surface not named here is ready. */
+const surfaceAvailability = vi.hoisted(() => ({ current: new Map<string | undefined, string>() }));
 vi.mock('#hooks/use-project-availability.js', () => ({
-  useProjectAvailability: () => 'ready',
+  useProjectAvailability: (surface?: string) => surfaceAvailability.current.get(surface) ?? 'ready',
   useModelAvailability: () => 'ready',
   useLargeObjectPending: (path: string | undefined) => path !== undefined && largeObjectState.pending.has(path),
   useOpenedLargeObjectPending(path: string | undefined) {
@@ -458,6 +464,7 @@ const {
 const actualWorkspace = await vi.importActual<typeof ProjectWorkspaceContext>(
   '#routes/w.$workspace.$project/project-workspace-context.js',
 );
+const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-provider.js');
 
 describe('hidden workbench operation panels', () => {
   it.each([
@@ -917,6 +924,47 @@ describe('FileEditor routing', () => {
     expect(screen.getByText(/file not found/i)).toBeInTheDocument();
     expect(screen.getAllByTestId('file-selector')).toHaveLength(2);
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
+  });
+
+  /* STO-25, I7: a pane opened before the open's apply has landed every file never calls an arriving file missing. */
+  it('should show a file still to land as preparing, not as not found, while the apply writes the rest', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'orphaned' });
+    try {
+      render(<FileEditor paneId='test-pane' filePath='lib/gear.scad' panelApi={mockPanelApi} />);
+
+      expect(screen.queryByText(/file not found/i)).not.toBeInTheDocument();
+      expect(screen.getByTestId('sync-placeholder-preparing')).toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+    }
+  });
+
+  /*
+   * A file outside the entry closure may still hold the previous revision's bytes while the open's apply writes it
+   * (D9: an unlanded path is what is on disk). Its pane waits for every authored file; the closure opens at once.
+   */
+  it('should keep a pane outside the entry closure waiting while the open applies, never showing its old bytes', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('old') });
+    try {
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('sync-placeholder-preparing')).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+    }
+  });
+
+  it('should open the entry closure’s own pane while the open applies the rest', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('x') });
+    try {
+      render(<FileEditor paneId='main-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('viewer')).toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+    }
   });
 
   it.each(['Select peer file', 'Select file to edit…'])(
@@ -2387,9 +2435,9 @@ describe('Workbench file reconciliation', () => {
         <Lifecycle>
           <MemoryRouter>
             <KeyboardProvider>
-              <actualWorkspace.ProjectWorkspaceProvider>
+              <ProjectWorkspaceProvider>
                 <MountedWorkbench />
-              </actualWorkspace.ProjectWorkspaceProvider>
+              </ProjectWorkspaceProvider>
             </KeyboardProvider>
           </MemoryRouter>
         </Lifecycle>,

@@ -30,7 +30,7 @@ import { mock } from 'vitest-mock-extended';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils.js';
 import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import type { WorkspaceEntry } from '#filesystem/handle-store.js';
 import type { AppRuntimeFiles } from '#runtime/app-runtime.js';
 
@@ -46,8 +46,8 @@ const workerTestState = vi.hoisted(() => {
   return { instances };
 });
 
-vi.mock('#machines/file-manager.worker.js?worker', () => ({
-  default: class MockWorker {
+vi.mock('#machines/file-manager-worker.js', () => {
+  class MockWorker {
     public terminate = vi.fn();
     public postMessage = vi.fn();
     public addEventListener = vi.fn((type: string, handler: (event: Event) => void) => {
@@ -68,8 +68,9 @@ vi.mock('#machines/file-manager.worker.js?worker', () => ({
       }
       return true;
     }
-  },
-}));
+  }
+  return { createFileManagerWorker: () => new MockWorker() };
+});
 
 const mockMount = vi.fn<(prefix: string, config: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();

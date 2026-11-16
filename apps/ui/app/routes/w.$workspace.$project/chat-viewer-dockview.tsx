@@ -40,6 +40,7 @@ import { getViewerTabIcon, ViewerDockviewTab } from '#components/panes/viewer-ta
 import { DockviewLeftActions, DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
 import { ProjectWorkspaceActions } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import { ViewerChatLaneToggle } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
+import { isModelFilesWait } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { selectCadEvaluation } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ActorRefFrom } from 'xstate';
@@ -786,7 +787,9 @@ export const ViewerDockview = memo(function ({
   const adapterLayout = useViewerLayoutPort(profile === 'editor' ? layoutController : undefined);
   const adapterFacts = useMemo(
     (): ViewerAdapterFacts => ({
-      admitsDemand: projectIsReady && availability === 'ready',
+      /* The view is admitted once the project is on this device, and through a check of its model files (A15e). */
+      admitsView: projectIsReady && (availability === 'ready' || isModelFilesWait(availability)),
+      admitsGeometry: projectIsReady && availability === 'ready',
       mainEntryPath,
       viewRecords,
       entriesRecord,

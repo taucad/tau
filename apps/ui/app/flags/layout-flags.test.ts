@@ -2,19 +2,11 @@
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { act, renderHook } from '@testing-library/react';
-import { createMemoryRouter, RouterProvider } from 'react-router';
-import * as Cookies from 'es-cookie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { flagRegistry, layoutFlagNames } from '#flags/flag.constants.js';
 import type { FlagDefinition } from '#flags/flag.constants.js';
-import {
-  encodeLayoutFlags,
-  layoutFlagsCookieName,
-  parseLayoutFlags,
-  readLayoutFlagsFromHeader,
-  resolveServerLayoutFlags,
-  writeLayoutFlagsCookie,
-} from '#flags/layout-flags.js';
+import { readRememberedLayoutFlags, rememberLayoutFlags } from '#flags/layout-flags.js';
+import { forgetClientFacts } from '#lib/client-facts.js';
 import type { RemoteFlagClient } from '#flags/remote-flags.js';
 import { connectRemoteFlags, disconnectRemoteFlags, readRemoteFlagStatus } from '#flags/remote-flags.js';
 import { readSettledLayoutFlags, useLayoutFlag } from '#flags/use-feature.js';
@@ -42,17 +34,18 @@ function createClient(): RemoteFlagClient & {
   };
 }
 
-const clearCookie = (): void => {
-  Cookies.remove(layoutFlagsCookieName, { path: '/' });
+const forget = (): void => {
+  localStorage.clear();
+  forgetClientFacts();
 };
 
 beforeEach(() => {
-  clearCookie();
+  forget();
 });
 
 afterEach(() => {
   disconnectRemoteFlags();
-  clearCookie();
+  forget();
 });
 
 describe('layout flag registry', () => {
@@ -61,64 +54,16 @@ describe('layout flag registry', () => {
     const definition: FlagDefinition = flagRegistry.onboarding;
     expect(definition.affectsLayout).toBe(true);
   });
-
-  it('names the cookie with the app prefix', () => {
-    expect(layoutFlagsCookieName).toBe('tau-layout-flags');
-  });
 });
 
-describe('layout-flags cookie value', () => {
-  it('round-trips settled values in a compact, cookie-safe form', () => {
-    expect(encodeLayoutFlags({ onboarding: true })).toBe('onboarding.1');
-    expect(encodeLayoutFlags({ onboarding: false })).toBe('onboarding.0');
-    expect(encodeLayoutFlags({})).toBe('');
-    expect(parseLayoutFlags('onboarding.1')).toStrictEqual({ onboarding: true });
-    expect(parseLayoutFlags('onboarding.0')).toStrictEqual({ onboarding: false });
-    expect(encodeLayoutFlags({ onboarding: true })).toMatch(/^[\w.]+$/u);
-  });
-
-  it.each([
-    ['absent', undefined],
-    ['empty', ''],
-    ['an unknown name', 'machines.1'],
-    ['a value other than 0 or 1', 'onboarding.true'],
-    ['a missing value', 'onboarding'],
-    ['JSON', '{"onboarding":true}'],
-    ['a prototype key', '__proto__.1'],
-    ['an oversized value', `onboarding.1_${'x'.repeat(600)}`],
-  ])('ignores %s', (_label, value) => {
-    expect(parseLayoutFlags(value)).toStrictEqual({});
-  });
-
-  it('keeps the known entries of a value that also holds unknown or malformed ones, first one winning', () => {
-    expect(parseLayoutFlags('machines.1_onboarding.1_bad_onboarding.0')).toStrictEqual({ onboarding: true });
-  });
-
-  it('reads the cookie from a request header', () => {
-    expect(readLayoutFlagsFromHeader(undefined)).toStrictEqual({});
-    expect(readLayoutFlagsFromHeader('other=1; tau-layout-flags=onboarding.1')).toStrictEqual({ onboarding: true });
-    expect(readLayoutFlagsFromHeader('tau-layout-flags=onboarding.x')).toStrictEqual({});
-  });
-
-  it('writes settled values and keeps the cookie value for a flag not given', () => {
-    writeLayoutFlagsCookie({ onboarding: true });
-    expect(Cookies.get(layoutFlagsCookieName)).toBe('onboarding.1');
-    writeLayoutFlagsCookie({});
-    expect(Cookies.get(layoutFlagsCookieName)).toBe('onboarding.1');
-    writeLayoutFlagsCookie({ onboarding: false });
-    expect(Cookies.get(layoutFlagsCookieName)).toBe('onboarding.0');
-  });
-});
-
-describe('the layout flags the server renders with', () => {
-  it('keeps a flag the cookie does not carry unknown while PostHog or a seeded state can answer', () => {
-    expect(resolveServerLayoutFlags({}, true)).toEqual({});
-    expect(resolveServerLayoutFlags({ onboarding: true }, true)).toEqual({ onboarding: true });
-  });
-
-  it('knows a PostHog-backed flag as its default when no answer can reach the page view, over a stale cookie', () => {
-    expect(resolveServerLayoutFlags({}, false)).toEqual({ onboarding: false });
-    expect(resolveServerLayoutFlags({ onboarding: true }, false)).toEqual({ onboarding: false });
+describe('remembered layout flags', () => {
+  it('remembers settled values in the client facts and keeps the value of a flag not given', () => {
+    rememberLayoutFlags({ onboarding: true });
+    expect(readRememberedLayoutFlags()).toStrictEqual({ onboarding: true });
+    rememberLayoutFlags({});
+    expect(readRememberedLayoutFlags()).toStrictEqual({ onboarding: true });
+    rememberLayoutFlags({ onboarding: false });
+    expect(readRememberedLayoutFlags()).toStrictEqual({ onboarding: false });
   });
 });
 
@@ -157,49 +102,37 @@ describe('settled remote flags', () => {
     expect(readRemoteFlagStatus()).toBe('absent');
   });
 
-  it('mirrors every settled change to the cookie, and nothing while pending', () => {
+  it('remembers every settled change, and nothing while pending', () => {
     const client = createClient();
     connectRemoteFlags(client);
-    expect(Cookies.get(layoutFlagsCookieName)).toBeUndefined();
+    expect(readRememberedLayoutFlags()).toStrictEqual({});
     client.answer({ onboarding: true });
-    expect(Cookies.get(layoutFlagsCookieName)).toBe('onboarding.1');
+    expect(readRememberedLayoutFlags()).toStrictEqual({ onboarding: true });
     client.answer({ onboarding: false });
-    expect(Cookies.get(layoutFlagsCookieName)).toBe('onboarding.0');
-    // A reconnect is pending again: the cookie keeps the last settled value.
+    expect(readRememberedLayoutFlags()).toStrictEqual({ onboarding: false });
+    // A reconnect is pending again: the record keeps the last settled value.
     connectRemoteFlags(createClient());
-    expect(Cookies.get(layoutFlagsCookieName)).toBe('onboarding.0');
+    expect(readRememberedLayoutFlags()).toStrictEqual({ onboarding: false });
   });
 });
 
 describe('useLayoutFlag', () => {
-  const renderWithRoot = (layoutFlags: Readonly<Record<string, boolean>> | undefined) => {
+  it('renders unknown on the server, whatever this device remembers or has settled', () => {
+    rememberLayoutFlags({ onboarding: true });
     const probe = (): React.JSX.Element => {
       const value = useLayoutFlag('onboarding');
       return createElement('span', undefined, value === undefined ? 'unknown' : String(value));
     };
-    return createMemoryRouter([{ id: 'root', path: '/', element: createElement(probe) }], {
-      initialEntries: ['/'],
-      hydrationData: { loaderData: { root: layoutFlags === undefined ? {} : { layoutFlags } } },
-    });
-  };
 
-  it('renders the cookie value on the server, whatever the client has settled', () => {
-    connectRemoteFlags(createClient());
-    disconnectRemoteFlags();
-    expect(renderToString(createElement(RouterProvider, { router: renderWithRoot({ onboarding: true }) }))).toBe(
-      '<span>true</span>',
-    );
-    expect(renderToString(createElement(RouterProvider, { router: renderWithRoot({}) }))).toBe('<span>unknown</span>');
-    expect(renderToString(createElement(RouterProvider, { router: renderWithRoot(undefined) }))).toBe(
-      '<span>unknown</span>',
-    );
+    expect(renderToString(createElement(probe))).toBe('<span>unknown</span>');
   });
 
-  it('reads the cookie value until the flag settles, then the settled value', () => {
+  it('reads the remembered value until the flag settles, then the settled value', () => {
+    rememberLayoutFlags({ onboarding: false });
     const client = createClient();
     connectRemoteFlags(client);
     const { result } = renderHook(() => useLayoutFlag('onboarding'));
-    expect(result.current).toBeUndefined();
+    expect(result.current).toBe(false);
     act(() => {
       client.answer({ onboarding: true });
     });

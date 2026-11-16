@@ -2,8 +2,7 @@ import { setup, types } from 'xstate';
 import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import { safeDispose } from '@taucad/utils/dispose';
-// oxlint-disable-next-line eslint-plugin-import/no-named-as-default -- web worker default import
-import ObjectStoreWorker from '#hooks/object-store.worker.js?worker';
+import { createObjectStoreWorker } from '#hooks/object-store-worker.js';
 import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
@@ -33,7 +32,7 @@ const initializeWorkerActor = fromSafeAsync<WorkerInitializedEvent, { context: P
 
     signal.throwIfAborted();
 
-    const worker = new ObjectStoreWorker();
+    const worker = createObjectStoreWorker();
     const wrappedWorker = wrap<ObjectStoreWorkerType>(worker);
 
     console.debug('[ProjectManager] initializeWorkerActor: success');

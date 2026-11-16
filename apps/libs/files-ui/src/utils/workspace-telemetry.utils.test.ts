@@ -1,16 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildWorkspaceTelemetry, workspaceEventName } from '#utils/workspace-telemetry.utils.js';
-import type { Analytics } from '#hooks/use-analytics.js';
+import { createWorkspaceTelemetry, workspaceEventName } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceAnalytics, WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+
+const buildWorkspaceTelemetry = (analytics: WorkspaceAnalytics): WorkspaceTelemetry =>
+  createWorkspaceTelemetry({ analytics, reportFailure: vi.fn() });
 
 const makeAnalyticsStub = () => {
   const capture = vi.fn();
   return {
-    analytics: { capture } as unknown as Analytics,
+    analytics: { capture } satisfies WorkspaceAnalytics,
     capture,
   };
 };
 
-describe('buildWorkspaceTelemetry', () => {
+describe('createWorkspaceTelemetry', () => {
   it('emits workspace.created with the workspace identity', () => {
     const { analytics, capture } = makeAnalyticsStub();
     const telemetry = buildWorkspaceTelemetry(analytics);
@@ -128,8 +131,7 @@ describe('buildWorkspaceTelemetry', () => {
   });
 
   it('does not throw when analytics lacks capture (noop stub)', () => {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- stubbing the PostHog `Analytics` surface as empty to exercise the noop-fallback branch
-    const noopAnalytics = {} as Analytics;
+    const noopAnalytics: WorkspaceAnalytics = {};
     const telemetry = buildWorkspaceTelemetry(noopAnalytics);
     expect(() => {
       telemetry.workspaceCreated({ workspaceId: 'wsp_x' });
@@ -144,5 +146,35 @@ describe('buildWorkspaceTelemetry', () => {
         p95: 2,
       });
     }).not.toThrow();
+  });
+
+  it('reports the error an open or unmount failure threw through the injected reporter', () => {
+    const reportFailure = vi.fn();
+    const telemetry = createWorkspaceTelemetry({ analytics: {}, reportFailure });
+    const openError = new Error('open');
+    const unmountError = new Error('unmount');
+
+    telemetry.workspaceOpenFailed({ workspaceId: 'wsp_abc', reason: 'permission', error: openError });
+    telemetry.workspaceUnmountFailed({
+      workspaceId: undefined,
+      prefix: '/p',
+      reason: 'dispose-failed',
+      error: unmountError,
+    });
+
+    expect(reportFailure.mock.calls).toStrictEqual([
+      [openError, { tags: { code: 'permission', subject: 'workspace', operation: 'open' } }],
+      [unmountError, { tags: { code: 'dispose-failed', subject: 'workspace', operation: 'unmount' } }],
+    ]);
+  });
+
+  it('reports nothing when a failure threw no error', () => {
+    const reportFailure = vi.fn();
+    createWorkspaceTelemetry({ analytics: {}, reportFailure }).workspaceOpenFailed({
+      workspaceId: undefined,
+      reason: 'missing',
+    });
+
+    expect(reportFailure).not.toHaveBeenCalled();
   });
 });

@@ -2,8 +2,7 @@ import * as Cookies from 'es-cookie';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
-import { readServerPreferences, store, useCookie } from '#hooks/use-cookie.js';
-import { ServerPreferencesProvider } from '#hooks/server-preferences.js';
+import { store, useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 
 const names = [
@@ -166,33 +165,18 @@ it('rereads every preference when another tab clears storage', () => {
   unsubscribe();
 });
 
-const mirroredModel = 'tau-chat-model';
+const formerlyMirroredModel = 'tau-chat-model';
 
-it('mirrors a server-visible preference into a request cookie of the same JSON, and removes both together', () => {
-  store.update(mirroredModel, 'anthropic-claude-haiku-5.5');
+it('keeps every preference out of request cookies, deleting a cookie mirrored before (P2)', () => {
+  Cookies.set(formerlyMirroredModel, '"old"');
+  globalThis.localStorage.setItem(formerlyMirroredModel, '"new"');
 
-  expect(globalThis.localStorage.getItem(mirroredModel)).toBe('"anthropic-claude-haiku-5.5"');
-  expect(Cookies.get(mirroredModel)).toBe('"anthropic-claude-haiku-5.5"');
+  expect(store.get(formerlyMirroredModel)).toBe('new');
+  expect(Cookies.get(formerlyMirroredModel)).toBeUndefined();
 
-  store.remove(mirroredModel);
-  expect(Cookies.get(mirroredModel)).toBeUndefined();
-});
-
-it('gives a server-visible preference stored before mirroring its cookie on first read', () => {
-  globalThis.localStorage.setItem(mirroredModel, '"anthropic-claude-opus-5.5"');
-
-  expect(store.get(mirroredModel)).toBe('anthropic-claude-opus-5.5');
-  expect(Cookies.get(mirroredModel)).toBe('"anthropic-claude-opus-5.5"');
-  store.remove(mirroredModel);
-});
-
-it('brings a stale server-visible cookie in step with local storage', () => {
-  Cookies.set(mirroredModel, '"old"');
-  globalThis.localStorage.setItem(mirroredModel, '"new"');
-
-  expect(store.get(mirroredModel)).toBe('new');
-  expect(Cookies.get(mirroredModel)).toBe('"new"');
-  store.remove(mirroredModel);
+  store.update(formerlyMirroredModel, 'anthropic-claude-haiku-5.5');
+  expect(Cookies.get(formerlyMirroredModel)).toBeUndefined();
+  store.remove(formerlyMirroredModel);
 });
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- a React component, rendered by name.
@@ -202,12 +186,11 @@ function Probe(): React.JSX.Element {
   return createElement('span', null, `${model ?? 'none'}|${kernel}`);
 }
 
-it('renders a server-visible preference from the request on the server, and others from their default', () => {
-  const preferences = readServerPreferences(
-    'tau-chat-model=%22anthropic-claude-haiku-5.5%22; tau-cad-kernel=%22replicad%22',
-  );
+it('renders every preference as its default on the server, whatever is stored', () => {
+  globalThis.localStorage.setItem(formerlyMirroredModel, '"anthropic-claude-haiku-5.5"');
 
-  const html = renderToString(createElement(ServerPreferencesProvider, { value: preferences }, createElement(Probe)));
+  const html = renderToString(createElement(Probe));
 
-  expect(html).toContain('anthropic-claude-haiku-5.5|openscad');
+  expect(html).toContain('none|openscad');
+  store.remove(formerlyMirroredModel);
 });

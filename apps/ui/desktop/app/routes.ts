@@ -34,8 +34,8 @@ const routes: RouteConfigEntry[] = await flatRoutes({
     '../../app/routes/auth.desktop/**',
     '../../app/routes/auth.cli/**',
 
-    // Server `action` — the desktop theme preference is local (`use-theme.tsx`).
-    '../../app/routes/action.set-theme.ts',
+    // Server `action`: the one-time theme cookie migration; desktop never had the cookie.
+    '../../app/routes/action.migrate-theme.ts',
 
     // Server proxies and resource routes: no server exists behind `app://tau`.
     '../../app/routes/api.ph.$/**',

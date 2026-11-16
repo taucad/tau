@@ -40,6 +40,8 @@ const setup = (
     ignoreCase?: boolean;
     /* Ordinary files beside the placeholders, which a flush never has to touch (#2010). */
     plainFiles?: number;
+    /* Files the checkout-wide look leaves out (as it leaves out an ignored file) while a path read still sees them. */
+    unlooked?: readonly string[];
   }> = {},
 ) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([
@@ -101,7 +103,11 @@ const setup = (
   const placeholders = async (): Promise<ReturnType<typeof largeObjectPlaceholders>> => {
     looks += 1;
     return largeObjectPlaceholders(
-      new ImmutableRevisionTree([...files].map(([path, content]) => [path, content] as const)),
+      new ImmutableRevisionTree(
+        [...files]
+          .filter(([path]) => !(options.unlooked ?? []).includes(path))
+          .map(([path, content]) => [path, content] as const),
+      ),
       options.ignoreCase === undefined ? {} : { ignoreCase: options.ignoreCase },
     );
   };
@@ -115,6 +121,8 @@ const setup = (
       }),
     );
   };
+  /* The checkout's fence, which another writer may hold; free by default. */
+  let fence: Promise<void> = Promise.resolve();
   /* A gate the test may close, so a materialization waits like a slow OPFS write; open by default. */
   let gate: Promise<void> = Promise.resolve();
   let writing = 0;
@@ -142,7 +150,10 @@ const setup = (
     placeholders,
     readPaths,
     declareFilled,
-    withCheckoutFence: async (_id, operation) => operation(),
+    withCheckoutFence: async (_id, operation) => {
+      await fence;
+      return operation();
+    },
     materializeTree,
     report: (report) => reports.push(report),
     flushMilliseconds: options.flushMilliseconds ?? 1,
@@ -191,6 +202,14 @@ const setup = (
       };
     },
     mostWriting: () => mostWriting,
+    holdFence: (): (() => void) => {
+      const held = Promise.withResolvers<void>();
+      fence = held.promise;
+      return () => {
+        fence = Promise.resolve();
+        held.resolve();
+      };
+    },
     /** How many flushes have read the checkout (only the paths each one fills). */
     captures: () => sweeps,
     /** How many times the fill looked for every placeholder the checkout holds. */
@@ -534,6 +553,67 @@ describe('large-object fill', () => {
     expect(harness.text('models/a.step')).toContain('version https://git-lfs.github.com/spec/v1');
     expect(harness.text('models/b.step')).toContain('version https://git-lfs.github.com/spec/v1');
     expect(harness.materializeTree).not.toHaveBeenCalled();
+    expect(harness.reports.at(-1)?.facet).toBeUndefined();
+  });
+
+  /* Review of #2010: the flush and the look must not disagree forever over a placeholder; one look per run-out. */
+  it('ends when a flush and the look disagree on a placeholder, rather than finding it again and again', async () => {
+    const harness = setup({ unlooked: ['models/.gitattributes'] });
+    harness.files.set('models/.gitattributes', encoder.encode('*.step -filter\n'));
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.land('models/a.step');
+    harness.land('models/b.step');
+    harness.finish(harness.fullTree());
+    await done;
+    await vi.waitFor(() => {
+      expect(harness.reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(harness.looks()).toBeLessThanOrEqual(3);
+    expect(harness.materializeTree).not.toHaveBeenCalled();
+  });
+
+  /* Review of #2010: a fill a tree write replaced while its flush waited on the fence writes nothing. */
+  it('writes nothing for a fill forgotten while its flush waited on the fence', async () => {
+    const harness = setup();
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    const release = harness.holdFence();
+    harness.land('models/a.step');
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    harness.fill.forget(place.id);
+    release();
+    await done;
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    expect(harness.captures()).toBe(0);
+    expect(harness.materializeTree).not.toHaveBeenCalled();
+  });
+
+  /* Review of #2010: a reader that names a copied placeholder's object has it written now, not at the closing look. */
+  it('writes a copied placeholder a reader waits on as soon as its object is here', async () => {
+    const harness = setup({ flushMilliseconds: 60_000 });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    harness.files.set('models/copy.step', harness.files.get('models/b.step')!);
+    const { oid, size } = pointerOf(parts['models/b.step']).pointer;
+    harness.land('models/b.step');
+    await expect(harness.fill.written(place.id, [{ path: 'models/copy.step', oid, size }])).resolves.toBe('written');
+    expect(harness.text('models/copy.step')).toBe('solid bb');
+    /* Its own placeholder `a` is still owed: no closing look has run. */
+    expect(harness.text('models/a.step')).not.toBe('solid a');
+    harness.land('models/a.step');
+    harness.finish(harness.fullTree());
+    await done;
     expect(harness.reports.at(-1)?.facet).toBeUndefined();
   });
 

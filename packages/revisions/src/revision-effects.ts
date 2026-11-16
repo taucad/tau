@@ -2724,10 +2724,21 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     },
     /* The fill's own look, and its closing one: the index's stats and the pointer-sized files, not a capture (D9). */
     placeholders: async (place) => placeholdersOf(place, generationOf(place.id)),
-    /* One flush reads the paths it fills and the attributes on their way, never the checkout (#2010). */
+    /*
+     * One flush reads the paths it fills and the attributes on their way, never the checkout (#2010), by the rule a
+     * capture and the look read them: a path the registry does not version, or one Git ignores, is absent, so an
+     * ignored attributes file never decides a fill the look would decide otherwise (D9).
+     */
     readPaths: async (place, paths) =>
       useFileSystem(place, async (rooted) => {
-        const read = await mapConcurrent(paths, captureModeConcurrency, async (path) => {
+        const versioned = paths.filter((path) => versionedAdmits(path));
+        const ignored =
+          port.ignoredPaths === undefined || versioned.length === 0
+            ? undefined
+            : await port.ignoredPaths(place.kind === 'live' ? undefined : place.root, versioned);
+        const listing = new Set(ignored ?? []);
+        const admitted = versioned.filter((path) => !coveredByIgnoreListing(listing, path));
+        const read = await mapConcurrent(admitted, captureModeConcurrency, async (path) => {
           const entry = await entryOf(rooted, path).catch((error: unknown) => {
             /* Gone, or a folder where a file was: no placeholder, as a capture would not list it. */
             if (isMissingFile(error) || (error as { code?: unknown } | undefined)?.code === 'EISDIR') {

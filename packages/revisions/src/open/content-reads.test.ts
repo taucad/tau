@@ -175,7 +175,12 @@ describe('materialize (D9)', () => {
       return 'written';
     });
     await reads.materialize(place, ['main.scad', 'models/part.step']);
-    expect(written).toHaveBeenCalledExactlyOnceWith('live', ['models/part.step'], { stall: 60_000 });
+    /* With the object each names, so the fill tracks a placeholder it has not seen at that path. */
+    expect(written).toHaveBeenCalledExactlyOnceWith(
+      'live',
+      [{ path: 'models/part.step', oid: pointer.oid, size: pointer.size }],
+      { stall: 60_000 },
+    );
   });
 
   it('starts a fill on a checkout with none running', async () => {
@@ -207,7 +212,9 @@ describe('materialize (D9)', () => {
     await expect(reads.materialize(place, ['models/part.step'], { stallMilliseconds: 5 })).rejects.toBeInstanceOf(
       PendingError,
     );
-    expect(written).toHaveBeenCalledWith('live', ['models/part.step'], { stall: 5 });
+    expect(written).toHaveBeenCalledWith('live', [{ path: 'models/part.step', oid: pointer.oid, size: pointer.size }], {
+      stall: 5,
+    });
   });
 
   it('stops on its signal', async () => {

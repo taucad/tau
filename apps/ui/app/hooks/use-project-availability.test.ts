@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
@@ -486,19 +486,42 @@ describe('a file pane’s own landing', () => {
   const pendingOpen = (
     readiness: ProjectReadiness,
     landedPaths?: readonly string[],
-  ): Readonly<{ send: ReturnType<typeof vi.fn> }> => {
+  ): Readonly<{
+    send: ReturnType<typeof vi.fn>;
+    publish: (next: RevisionStatusProjection | undefined) => void;
+  }> => {
     const send = vi.fn();
-    vi.mocked(useProject).mockReturnValue({ projectId: 'project-1' } as ReturnType<typeof useProject>);
-    vi.mocked(useTauCloudIntent).mockReturnValue('open');
-    vi.mocked(canOpenCloudProject).mockReturnValue(true);
-    vi.mocked(useRevisionStatus).mockReturnValue({
+    const listeners = new Set<() => void>();
+    let current: RevisionStatusProjection | undefined = {
       ...status({ state: 'pending', pullPhase: 'applying' }),
       remote: { kind: 'tau', phase: 'connected' },
       readiness,
       ...(landedPaths === undefined ? {} : { landedPaths }),
-    } as unknown as RevisionStatusProjection);
-    vi.mocked(useRevisionClient).mockReturnValue(mock<RevisionClient>({ send }));
-    return { send };
+    } as unknown as RevisionStatusProjection;
+    vi.mocked(useProject).mockReturnValue({ projectId: 'project-1' } as ReturnType<typeof useProject>);
+    vi.mocked(useTauCloudIntent).mockReturnValue('open');
+    vi.mocked(canOpenCloudProject).mockReturnValue(true);
+    vi.mocked(useRevisionStatus).mockReturnValue(current);
+    const client = mock<RevisionClient>({
+      send,
+      status: () => current,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    });
+    vi.mocked(useRevisionClient).mockReturnValue(client);
+    return {
+      send,
+      publish: (next) => {
+        current = next;
+        for (const listener of listeners) {
+          listener();
+        }
+      },
+    };
   };
 
   it('asks this tab’s host to watch the file while it waits, and stops when the pane goes', () => {
@@ -524,16 +547,30 @@ describe('a file pane’s own landing', () => {
     expect(send).not.toHaveBeenCalled();
   });
   it('says its watch again to a host the client reconnects to', () => {
-    const { send } = pendingOpen('entryReady');
-    const { rerender } = renderHook(() => useFilePaneAvailability('lib/gear.ts', false));
+    const { send, publish } = pendingOpen('entryReady');
+    const { result } = renderHook(() => usePathLanded('lib/gear.ts'));
     expect(send).toHaveBeenCalledTimes(1);
+    const connected = vi.mocked(useRevisionStatus)();
     /* The client closes its connection: its status is gone until the new host's first. */
-    vi.mocked(useRevisionStatus).mockReturnValue(undefined);
-    rerender();
-    pendingOpen('entryReady').send.mockImplementation(send);
-    rerender();
+    act(() => {
+      publish(undefined);
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    act(() => {
+      publish(connected);
+    });
     const watches = send.mock.calls.filter(([command]) => (command as { paths: string[] }).paths.length > 0);
     expect(watches).toHaveLength(2);
+    expect(result.current).toBe(false);
+  });
+  it('opens when the client publishes the file landed, with no render of its own', () => {
+    const { publish } = pendingOpen('entryReady');
+    const { result } = renderHook(() => usePathLanded('lib/gear.ts'));
+    expect(result.current).toBe(false);
+    act(() => {
+      publish({ ...vi.mocked(useRevisionStatus)(), landedPaths: ['lib/gear.ts'] } as RevisionStatusProjection);
+    });
+    expect(result.current).toBe(true);
   });
   it('reads a path the host has not named as not landed (I7)', () => {
     pendingOpen('entryReady', ['README.md']);

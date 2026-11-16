@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
 import { reachesReadiness } from '@taucad/revisions';
 import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
+import type { RevisionClient } from '#types/revision-client.types.js';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
 import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
@@ -225,6 +226,43 @@ export function useCloudOpenPending(): boolean {
 let landingWatchers = 0;
 
 /**
+ * One pane's landing watch, held by the revision client's own subscription rather than a React effect: it is said to
+ * the host while the client is connected, said again to a host the client reconnects to (whose status is absent until
+ * its first), and withdrawn when the last listener goes.
+ *
+ * @param watch - The project's revision client, the pane's watcher id and the checkout-relative path to watch.
+ * @param watch.client - The project's revision client.
+ * @param watch.watcher - The pane's watcher id.
+ * @param watch.path - The checkout-relative path to watch.
+ * @param onChange - Called on every status the client publishes.
+ * @returns Withdraws the watch and stops listening.
+ */
+function watchPathLanding(
+  { client, watcher, path }: Readonly<{ client: RevisionClient; watcher: string; path: string }>,
+  onChange: () => void,
+): () => void {
+  let said = false;
+  const say = (): void => {
+    const connected = client.status() !== undefined;
+    if (connected && !said) {
+      client.send({ command: 'watchLanding', watcher, paths: [path] });
+    }
+    said = connected;
+  };
+  say();
+  const stop = client.subscribe(() => {
+    say();
+    onChange();
+  });
+  return () => {
+    stop();
+    if (said) {
+      client.send({ command: 'watchLanding', watcher, paths: [] });
+    }
+  };
+}
+
+/**
  * Whether this tab's own Tau Cloud open has landed one path for good (STO-25): the revision host is asked to watch it
  * while a path is given, and its projection names it once the open's write has landed it (`landedPaths`). Absent is
  * unknown, never landed (I7).
@@ -238,20 +276,18 @@ export function usePathLanded(path: string | undefined): boolean {
     landingWatchers += 1;
     return `pane-${String(landingWatchers)}`;
   });
-  const status = useRevisionStatus();
-  const landed = status?.landedPaths;
-  /* A client that reconnects to a new revision host drops its status first: the watch is said again to the new one. */
-  const connected = status !== undefined;
-  useEffect(() => {
-    if (client === undefined || path === undefined || !connected) {
-      return undefined;
-    }
-    client.send({ command: 'watchLanding', watcher, paths: [path] });
-    return () => {
-      client.send({ command: 'watchLanding', watcher, paths: [] });
-    };
-  }, [client, connected, path, watcher]);
-  return path !== undefined && landed !== undefined && pendingPathSet(landed).has(path);
+  const watch = useCallback(
+    (onChange: () => void) =>
+      client === undefined || path === undefined
+        ? (): void => undefined
+        : watchPathLanding({ client, watcher, path }, onChange),
+    [client, path, watcher],
+  );
+  const landed = useCallback(() => {
+    const paths = client?.status()?.landedPaths;
+    return path !== undefined && paths !== undefined && pendingPathSet(paths).has(path);
+  }, [client, path]);
+  return useSyncExternalStore(watch, landed, () => false);
 }
 
 /**

@@ -83,7 +83,6 @@ export function useFreshContent(path: string | undefined, open: boolean, owedOnM
   const [owed, setOwed] = useState(() => !open || owedOnMount);
   const [readAfresh, setReadAfresh] = useState(() => !open || owedOnMount);
   const [failure, setFailure] = useState<Readonly<{ path: string; cause: unknown }>>();
-  const [attempt, setAttempt] = useState(0);
   if (!open && (!owed || !readAfresh || failure !== undefined)) {
     setOwed(true);
     setReadAfresh(true);
@@ -116,13 +115,13 @@ export function useFreshContent(path: string | undefined, open: boolean, owedOnM
     return () => {
       run.live = false;
     };
-  }, [attempt, contentService, failed, open, owed, path]);
+  }, [contentService, failed, open, owed, path]);
   const settled = useCallback(() => {
     setReadAfresh(false);
   }, []);
   const retry = useCallback(() => {
+    /* Clearing the failure is what reads again: the effect stands down only while the path has failed. */
     setFailure(undefined);
-    setAttempt((count) => count + 1);
   }, []);
   const state = open
     ? path === undefined || contentService === undefined

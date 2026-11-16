@@ -1,5 +1,5 @@
 import type { CadReference } from '@taucad/chat/references';
-import { useState, useRef, useEffect, useCallback, useImperativeHandle, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useImperativeHandle, useMemo, useSyncExternalStore } from 'react';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
@@ -9,7 +9,6 @@ import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
 import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { attachmentModelForExecution, attachmentSendBlockReason } from '#utils/chat.utils.js';
-import { attachmentKind, supportedAttachmentMediaTypes } from '@taucad/chat-ui/utils/attachment.utils';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import { homeComposerAttachmentDirectory, useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -20,7 +19,18 @@ import { useComposerExit } from '@taucad/chat-ui/components/use-composer-exit';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
+import type { AttachmentIntakeRefusal } from '@taucad/chat-ui/utils/attachment-intake';
 import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
+import {
+  attachmentTranscodeSourcesSnapshot,
+  loadAttachmentTranscodeSources,
+  noAttachmentTranscodeSources,
+  subscribeAttachmentTranscodeSources,
+} from '#services/attachment-transcode-sources-store.js';
+import { recordAttachmentIntake } from '#telemetry/attachment-intake-telemetry.js';
+import { osClass } from '#telemetry/platform-class.js';
+import { attachmentAccept } from '#utils/attachment-accept.js';
+import { attachmentRefusalCopy } from '#utils/attachment-refusal.js';
 
 /**
  * Payload the chat textarea hands to its host's `onSubmit` callback.
@@ -43,11 +53,17 @@ export type ChatTextareaSubmitPayload = {
   readonly references?: readonly CadReference[];
 };
 
-/** The toast for a file intake refuses, by its reason. */
-const intakeRefusal = {
-  unsupported: 'Only images and PDFs are supported',
-  'too-large': 'Files over 64 MB cannot be attached',
-} as const;
+/** Count a file intake refused and say so, naming its format and the next step. */
+const refuseIntake = (refusal: AttachmentIntakeRefusal, file: File): void => {
+  recordAttachmentIntake({
+    outcome: 'refused',
+    reason: refusal.reason,
+    ...(refusal.format === undefined ? {} : { format: refusal.format }),
+    declaredType: file.type,
+  });
+  const copy = attachmentRefusalCopy(refusal);
+  toast.error(copy.title, { description: copy.description });
+};
 
 /**
  * What an entry point may say about an attachment it adds. The selected model
@@ -307,12 +323,21 @@ export function useChatTextareaLogic({
   const imageInputSupported = modelSupportsInput(support, 'image');
   const pdfInputSupported = modelSupportsInput(support, 'pdf');
   const attachmentInputSupported = imageInputSupported || pdfInputSupported;
-  const attachmentAccept = useMemo(
+  /* The convertible formats load with the conversion runtime's definition, outside the entry; no worker starts. */
+  const transcodeSources = useSyncExternalStore(
+    subscribeAttachmentTranscodeSources,
+    attachmentTranscodeSourcesSnapshot,
+    noAttachmentTranscodeSources,
+  );
+  const pickerAccept = useMemo(
     () =>
-      supportedAttachmentMediaTypes
-        .filter((mediaType) => modelSupportsInput(support, attachmentKind(mediaType) === 'image' ? 'image' : 'pdf'))
-        .join(','),
-    [support],
+      attachmentAccept({
+        images: imageInputSupported,
+        documents: pdfInputSupported,
+        transcodeSources,
+        isIos: osClass() === 'ios',
+      }),
+    [imageInputSupported, pdfInputSupported, transcodeSources],
   );
   /* A project chat's draft lives beside its composer record, and an open edit's sent attachments stay in the
    * chat's own directory (F5); a pre-project composer names its own directory. */
@@ -413,16 +438,20 @@ export function useChatTextareaLogic({
   /** Read OS files in order and add the ones the store accepts; the rest get one toast each. */
   const addFiles = useCallback(
     async (files: Iterable<File>): Promise<void> => {
+      const transcodeSources = await loadAttachmentTranscodeSources();
       for (const file of files) {
         try {
           // Labelled from the bytes, never `file.type` (I1): an image as a data URL, a document as its bytes (S7).
           // oxlint-disable-next-line no-await-in-loop -- reading files sequentially keeps attachment order
-          const intake = await readAttachmentFile(file);
+          const intake = await readAttachmentFile(file, { transcodeSources });
           if (intake.outcome === 'refused') {
-            toast.error(intakeRefusal[intake.reason]);
+            refuseIntake(intake, file);
             continue;
           }
-          addAttachment(intake.source, file.name ? { filename: file.name } : undefined);
+          addAttachment(intake.source, {
+            ...(file.name ? { filename: file.name } : {}),
+            declaredType: file.type,
+          });
         } catch {
           toast.error(file.type.startsWith('image/') ? 'Failed to read image' : 'Failed to read file');
         }
@@ -670,13 +699,14 @@ export function useChatTextareaLogic({
 
       return handleClipboardImagePaste({
         event,
-        onImage: addAttachment,
+        onImage: (dataUrl, file) => {
+          addAttachment(dataUrl, { declaredType: file.type });
+        },
         onReadError: () => {
           toast.error('Failed to read image');
         },
-        onRefused: (reason) => {
-          toast.error(intakeRefusal[reason]);
-        },
+        onRefused: refuseIntake,
+        loadTranscodeSources: loadAttachmentTranscodeSources,
       });
     },
     [addAttachment, imageInputSupported, rejectUnsupportedImageInput],
@@ -850,7 +880,7 @@ export function useChatTextareaLogic({
     isAttaching,
     isSubmitDisabled: isSubmitDisabled || isAttaching,
     attachmentDirectory,
-    attachmentAccept,
+    attachmentAccept: pickerAccept,
     selectedToolChoice,
     status,
     canStop,

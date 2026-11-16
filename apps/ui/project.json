@@ -452,14 +452,15 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Real-browser source editor and chat lane acceptance on the affected CI browser lane."
+        "description": "Real-browser source editor, chat lane and composer image conversion acceptance (raster host parity over the web-worker transport) on the affected CI browser lane."
       },
       "options": {
         "cwd": "{projectRoot}",
         "parallel": false,
         "commands": [
           "../../node_modules/.bin/vitest run --config app/components/code/code-editor.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts'"
+          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts'",
+          "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts"
         ]
       }
     },

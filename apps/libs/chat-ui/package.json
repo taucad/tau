@@ -63,7 +63,6 @@
     "./db/chat-message-queue-store": "./src/db/chat-message-queue-store.ts",
     "./db/chat-placements": "./src/db/chat-placements.ts",
     "./db/composer-record-store": "./src/db/composer-record-store.ts",
-    "./hooks/resize-image.actor": "./src/hooks/resize-image.actor.ts",
     "./hooks/use-commit-name-agent-config": "./src/hooks/use-commit-name-agent-config.ts",
     "./hooks/use-project-name-agent-config": "./src/hooks/use-project-name-agent-config.ts",
     "./services/agent-host-event-projection": "./src/services/agent-host-event-projection.ts",
@@ -86,7 +85,6 @@
     "./utils/model-groups": "./src/utils/model-groups.ts",
     "./utils/new-chat-execution": "./src/utils/new-chat-execution.ts",
     "./utils/question-tool": "./src/utils/question-tool.ts",
-    "./utils/resize-image": "./src/utils/resize-image.ts",
     "./utils/shell-command-summary": "./src/utils/shell-command-summary.ts",
     "./package.json": "./package.json"
   },

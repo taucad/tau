@@ -426,7 +426,7 @@ async function main(): Promise<void> {
     ).values(),
   ];
   const libheifDirectory = await resolvePackageDirectory('libheif-js', join(rootDirectory, 'packages/plugins/heif'));
-  const libheifManifest = libheifDirectory && (await readManifest(libheifDirectory));
+  const libheifManifest = libheifDirectory === undefined ? undefined : await readManifest(libheifDirectory);
   if (!libheifDirectory || libheifManifest?.version !== libheifRelease.wrapper) {
     throw new Error(
       `libheif-js ${libheifManifest?.version ?? 'is not installed'}; the notices record the sources of ${libheifRelease.wrapper}. Update libheifRelease with the libheif and libde265 sources of the new release.`,
@@ -461,7 +461,7 @@ async function main(): Promise<void> {
     lgpl,
     occtException,
     engine: { version: engineManifest.version, occtRevision: parseOcctRevision(sourceRelink) },
-    libheif: { version: libheifManifest.version, ...libheifLicense },
+    libheif: { version: libheifRelease.wrapper, ...libheifLicense },
   });
   console.log(`App closure: ${String(closure.length)} packages, ${String(packages.length)} third-party listed`);
 

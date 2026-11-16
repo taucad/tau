@@ -132,7 +132,7 @@ try {
     /* The node-pty fork path runs `spawn-helper` from `app.asar.unpacked`. */
     'node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper',
     'node_modules/@gltf-transform/functions/node_modules/ndarray-pixels/node_modules/sharp/node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips.dylib',
-    /* libheif (LGPL-3.0) stays a separate, replaceable file beside the archive. */
+    /* The libheif WASM file (LGPL-3.0) stays a separate, replaceable file beside the archive. */
     'dist/main/chunks/libheif-Bq3x9_Zk.wasm',
   ];
   await Promise.all(

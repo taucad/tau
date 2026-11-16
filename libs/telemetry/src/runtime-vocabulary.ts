@@ -33,7 +33,7 @@ export const middlewareIds = [
 export const bundlerIds = ['esbuild', 'rolldown'] as const;
 
 /** Transcoder plugin ids (`TranscoderPlugin.id`). @public */
-export const transcoderIds = ['assimp', 'gltf', 'image', 'slicer', 'svg-image'] as const;
+export const transcoderIds = ['assimp', 'gltf', 'raster', 'render', 'slicer', 'svg'] as const;
 
 /** Job provider ids (`JobProviderIdentity.id`). @public */
 export const jobProviderIds = ['tau.calculix.container', 'tau.openfoam.container'] as const;
@@ -71,6 +71,8 @@ export const fileFormats = [
   'ac',
   'amf',
   'ase',
+  'avif',
+  'bmp',
   'brep',
   'bvh',
   'cob',
@@ -80,6 +82,7 @@ export const fileFormats = [
   'dxf',
   'fbx',
   'gcode.3mf',
+  'gif',
   'glb',
   'gltf',
   'ifc',
@@ -107,6 +110,7 @@ export const fileFormats = [
   'stl',
   'stp',
   'svg',
+  'tiff',
   'ts',
   'tsx',
   'txt',
@@ -120,6 +124,15 @@ export const fileFormats = [
 
 /** Distinct transcoder conversion edges as `from→to` pairs. @public */
 export const conversionEdges = [
+  'avif→jpeg',
+  'avif→png',
+  'avif→webp',
+  'bmp→jpeg',
+  'bmp→png',
+  'bmp→webp',
+  'gif→jpeg',
+  'gif→png',
+  'gif→webp',
   'glb→3mf',
   'glb→dae',
   'glb→fbx',
@@ -148,8 +161,20 @@ export const conversionEdges = [
   'gltf→usda',
   'gltf→usdc',
   'gltf→usdz',
+  'jpeg→jpeg',
+  'jpeg→png',
+  'jpeg→webp',
+  'png→jpeg',
+  'png→png',
+  'png→webp',
   'svg→png',
   'svg→webp',
+  'tiff→jpeg',
+  'tiff→png',
+  'tiff→webp',
+  'webp→jpeg',
+  'webp→png',
+  'webp→webp',
 ] as const;
 
 /** Standard machine action families (`standardMachineActions` keys). @public */
@@ -220,7 +245,6 @@ export const kernelIssueCodes = [
   'SOURCE_SNAPSHOT_CHANGED',
   'SOURCE_SNAPSHOT_INVALID',
   'SVG_DOCUMENT_INVALID',
-  // Retired (kernel budget program D9): no kernel emits it; older clients may still report it.
   'TESSELLATION_DOWNGRADED',
   'TRANSCODER_CAPABILITY_MISSING',
   'TRANSCODER_EXECUTION_FAILED',

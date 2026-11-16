@@ -223,11 +223,23 @@ export function coalesceChangeEvents(events: PathChangeEvent[]): PathChangeEvent
   const lastArrival = new Map<string, number>();
   const lastMoveAway = new Map<string, number>();
   for (const [index, event] of events.entries()) {
-    if (event.type === 'fileWritten') {
-      lastArrival.set(event.path, index);
-    } else if (event.type === 'fileRenamed') {
-      lastArrival.set(event.newPath, index);
-      lastMoveAway.set(event.oldPath, index);
+    switch (event.type) {
+      case 'fileWritten': {
+        lastArrival.set(event.path, index);
+        break;
+      }
+      case 'fileRenamed': {
+        lastArrival.set(event.newPath, index);
+        lastMoveAway.set(event.oldPath, index);
+        break;
+      }
+      case 'fileCopied': {
+        lastArrival.set(event.targetPath, index);
+        break;
+      }
+      default: {
+        break;
+      }
     }
   }
 

@@ -172,6 +172,13 @@ describe('coalesceChangeEvents (pure)', () => {
     expect(coalesceChangeEvents(events)).toEqual([written('/b'), written('/a')]);
   });
 
+  /* Review item 4: a copy onto a path is an arrival there, so a later delete of it is never folded into an earlier move. */
+  it('should keep the delete of a path a copy re-created after the path moved away', () => {
+    const copied: PathChangeEvent = { type: 'fileCopied', sourcePath: '/x', targetPath: '/a', backend: testBackend };
+    const events = [renamed('/a', '/b'), copied, deleted('/a')];
+    expect(coalesceChangeEvents(events)).toEqual([written('/b'), copied, deleted('/a')]);
+  });
+
   it('should carry the origin of a move it nets to an arrival', () => {
     const moved = renamed('/a', '/b');
     tagEventOrigin(moved, 'port-1');

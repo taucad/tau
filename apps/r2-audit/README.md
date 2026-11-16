@@ -36,15 +36,15 @@ These are fixed in tau-cloud `modules/cloudflare-r2-audit/main.tf`. Renaming one
 
 Each line is one JSON object on `console.log`. The Worker's OTLP logs export sends it to Grafana Cloud Loki as `service_name="tau-r2-audit-<env>"`. `infra/grafana/alerts/tau-storage-integrity.json` reads the lines with `{service_name="tau-r2-audit"} | json | event="…"`, and Tau Cloud binds that selector per environment. These field names are the contract with those rules.
 
-| `event`                              | Written when                                                 | Alert                              |
-| ------------------------------------ | ------------------------------------------------------------ | ---------------------------------- |
-| `r2_audit.heartbeat`                 | end of every pass (`pass` = `scheduled` or `queue`)          | `storage-audit-silent` (scheduled) |
-| `r2_audit.dependency_created`        | first create of a key                                        | none                               |
-| `r2_audit.dependency_overwritten`    | create of a recorded key                                     | `storage-dependency-overwritten`   |
-| `r2_audit.dependency_layout_breach`  | create of a key outside `blobs/sha256/<64 hex>`              | `storage-dependency-overwritten`   |
-| `r2_audit.dependency_deleted`        | any delete notification                                      | `storage-dependency-deleted`       |
-| `r2_audit.dependency_delete_attempt` | polled bulk delete on the dependency bucket                  | `storage-dependency-bulk-delete`   |
-| `r2_audit.unexpected_writer`         | polled write or delete outside the bucket's expected writers | `storage-unexpected-writer`        |
+| `event`                              | Written when                                                 | Alert                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `r2_audit.heartbeat`                 | end of every pass (`pass` = `scheduled` or `queue`)          | `storage-audit-silent`, `storage-audit-degraded`, `storage-audit-no-events` (scheduled) |
+| `r2_audit.dependency_created`        | first create of a key                                        | none                                                                                    |
+| `r2_audit.dependency_overwritten`    | create of a recorded key                                     | `storage-dependency-overwritten`                                                        |
+| `r2_audit.dependency_layout_breach`  | create of a key outside `blobs/sha256/<64 hex>`              | `storage-dependency-overwritten`                                                        |
+| `r2_audit.dependency_deleted`        | any delete notification                                      | `storage-dependency-deleted`                                                            |
+| `r2_audit.dependency_delete_attempt` | polled bulk delete on the dependency bucket                  | `storage-dependency-bulk-delete`                                                        |
+| `r2_audit.unexpected_writer`         | polled write or delete outside the bucket's expected writers | `storage-unexpected-writer`                                                             |
 
 Record lines carry these fields:
 

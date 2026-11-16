@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ImmutableRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
-import { cleanLargeObjects, largeObjectBasisOf, lfsPointerFor, readLfsPointer } from '#lfs.js';
+import { cleanLargeObjects, largeObjectBasisOf, lfsPointerFor, mayBeLfsPointerSize, readLfsPointer } from '#lfs.js';
 import { blobOid } from '#tree-id-memo.js';
 import { generatedGitattributesContent, generatedIgnoreContent } from '#workspace-config.js';
 
@@ -16,6 +16,20 @@ const decoder = new TextDecoder();
 const tauBlock = generatedGitattributesContent(undefined);
 const sameRecord = (left: ImmutableRevisionTree, right: ImmutableRevisionTree, path: string): boolean =>
   revisionTreeFiles(left).get(path)?.content === revisionTreeFiles(right).get(path)?.content;
+
+describe('mayBeLfsPointerSize', () => {
+  it('should admit exactly the 126 to 144 bytes a pointer readLfsPointer accepts can take', () => {
+    const smallest = lfsPointerFor(new Uint8Array(new ArrayBuffer(1))).bytes;
+    const largest = new TextEncoder().encode(
+      `version https://git-lfs.github.com/spec/v1\noid sha256:${'0'.repeat(64)}\nsize ${'9'.repeat(19)}\n`,
+    );
+
+    expect([smallest.byteLength, largest.byteLength]).toEqual([126, 144]);
+    expect(readLfsPointer(smallest)).toBeDefined();
+    expect(readLfsPointer(largest)).toBeDefined();
+    expect([125, 126, 144, 145].map((size) => mayBeLfsPointerSize(size))).toEqual([false, true, true, false]);
+  });
+});
 
 describe('cleanLargeObjects', () => {
   it('should hand the store the bytes the tree holds, not a second copy', () => {

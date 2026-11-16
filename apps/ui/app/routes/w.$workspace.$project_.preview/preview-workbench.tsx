@@ -46,6 +46,7 @@ export function OwnedPreviewProviders({
             key={`${projectId}:${selection.key}`}
             projectId={projectId}
             profile='shared'
+            isStandalone
             previewParameterService={previewParameterService}
             kernelOptionsFactory={selection.kernelOptionsFactory}
           >

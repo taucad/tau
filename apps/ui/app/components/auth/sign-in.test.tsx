@@ -6,7 +6,12 @@ import type * as BetterAuthReact from '@better-auth-ui/react';
 import type { PropsWithChildren } from 'react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SignIn, socialSignInErrorMessage } from '#components/auth/sign-in.js';
+import {
+  passwordResetNotice,
+  passwordResetSignInState,
+  SignIn,
+  socialSignInErrorMessage,
+} from '#components/auth/sign-in.js';
 
 const state = vi.hoisted(() => ({
   error: vi.fn(),
@@ -45,9 +50,9 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-const renderAt = (path: string): void => {
+const renderAt = (path: string, state?: unknown): void => {
   render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[state === undefined ? path : { pathname: path, state }]}>
       <SignIn />
     </MemoryRouter>,
   );
@@ -70,6 +75,18 @@ describe('SignIn', () => {
     expect(screen.getByRole('button', { name: /resend email in/i })).toBeDisabled();
     expect(state.error).not.toHaveBeenCalled();
     expect(state.sendVerification).not.toHaveBeenCalled();
+  });
+
+  it('confirms a password reset with a lasting status notice', () => {
+    renderAt('/auth/sign-in', passwordResetSignInState);
+
+    expect(screen.getByRole('status')).toHaveTextContent(passwordResetNotice);
+  });
+
+  it('shows no reset notice on a plain visit', () => {
+    renderAt('/auth/sign-in');
+
+    expect(screen.queryByText(passwordResetNotice)).not.toBeInTheDocument();
   });
 
   it('explains a social sign-in refused for an unverified password account', () => {

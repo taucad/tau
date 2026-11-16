@@ -23,8 +23,9 @@
  * camera. The controls are written for every change except the one this adapter's own `update` reported (the person's
  * gesture, which the controls already hold), unless that change also brought a new render frame or a new native camera.
  * A pose another sender reports with the source `input` (a restored or adopted view) is written like any other. For an
- * orthographic gesture the controls' own zoom is handed the presented zoom, since the rig presents the span through the
- * frustum and `camera-controls` forces its zoom on every update. Each
+ * orthographic gesture the controls are handed the presented zoom and camera-to-target distance, since the rig presents
+ * the span through the frustum, places the camera at the distance the camera derives per view, and `camera-controls`
+ * forces its own zoom and radius on every update. Each
  * write is stamped with the change's revision so the `update` it causes is an echo the camera ignores.
  *
  * Each frame, at `tickPriority` (after the canvas reports its surface and before the render), the adapter follows the
@@ -361,17 +362,26 @@ export const createControlsAdapter = ({
         } finally {
           echoRevision = undefined;
         }
-      } else if (nativeCamera instanceof OrthographicCamera && observedZoom !== nativeCamera.zoom) {
+      } else if (nativeCamera instanceof OrthographicCamera) {
         /*
-         * The rig presents an orthographic span through the frustum at zoom 1, but `camera-controls` keeps its own zoom
-         * and forces it on every update: hand it the presented zoom, or each update would shrink the span again.
+         * The rig presents an orthographic span through the frustum at zoom 1 and places the camera at a distance the
+         * camera derives per view (so the bounds stay in front of the clip planes it solved). `camera-controls` keeps its
+         * own zoom and radius and forces both on every update: hand it the presented zoom and distance, or each update
+         * would shrink the span again and move the camera off the planes. Read the distance before `update` rewrites the
+         * position; `dollyTo` sets only the radius, so a held pan or orbit continues.
          */
-        echoRevision = snapshot.revision;
-        try {
-          void controls.zoomTo(nativeCamera.zoom, false);
-          controls.update(0);
-        } finally {
-          echoRevision = undefined;
+        const distance = nativeCamera.position.distanceTo(
+          toThreeRenderPoint({ renderFrame: snapshot.renderFrame, pointMeters: snapshot.view.target }),
+        );
+        if (observedZoom !== nativeCamera.zoom || controls.distance !== distance) {
+          echoRevision = snapshot.revision;
+          try {
+            void controls.zoomTo(nativeCamera.zoom, false);
+            void controls.dollyTo(distance, false);
+            controls.update(0);
+          } finally {
+            echoRevision = undefined;
+          }
         }
       }
       for (const retarget of consumersRef.current) {

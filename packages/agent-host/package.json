@@ -92,6 +92,7 @@
   "devDependencies": {
     "@taucad/formal": "workspace:*",
     "@taucad/nx": "workspace:*",
+    "@taucad/utils": "workspace:*",
     "@taucad/xstate-testing": "workspace:*",
     "@vitest/browser-playwright": "catalog:",
     "vitest": "catalog:",

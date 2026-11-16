@@ -112,8 +112,8 @@ import { fileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels'
 import type { FileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
 import type { WorkspaceMutationErrorLike } from '@taucad/ui-core/filesystem/workspace-errors';
-import { OverwriteConfirmDialog } from '#components/filesystem/overwrite-confirm-dialog.js';
-import type { OverwriteConfirmResult } from '#components/filesystem/overwrite-confirm-dialog.js';
+import { OverwriteConfirmDialog } from '@taucad/files-ui/components/filesystem/overwrite-confirm-dialog';
+import type { OverwriteConfirmResult } from '@taucad/files-ui/components/filesystem/overwrite-confirm-dialog';
 import {
   createFileTreeMoveEdits,
   fileTreeRootId,

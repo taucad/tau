@@ -39,9 +39,9 @@ export default flatRoutes({
     // A daemon-served page signs in through the ordinary web flow.
     '../../app/routes/auth.desktop/**',
 
-    // Server `action` — a daemon-served page keeps its theme locally
-    // (`use-theme.tsx`), because there is no server to set the cookie.
-    '../../app/routes/action.set-theme.ts',
+    // Server `action`: the one-time theme cookie migration; a daemon-served
+    // page never had the cookie (its theme is a client fact).
+    '../../app/routes/action.migrate-theme.ts',
 
     // Server proxies and resource routes: the daemon serves static files and
     // an SPA fallback, and nothing else.

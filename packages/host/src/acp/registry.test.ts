@@ -389,6 +389,49 @@ describe('probeAcpAgentModels', () => {
     expect(probed.agents[0]?.models?.map((model) => model.id)).toEqual(['gpt-5.3-codex-spark', 'gpt-5.3-codex']);
   });
 
+  it('reads a model list the agent pushes after session/new, when its profile declares the wait', async () => {
+    /* Grok 1.0.52, started on a renewable sign-in, answers `session/new` with its built-in models and
+     * lists the rest only in `_x.ai/models/update` a moment later. */
+    const probed = await probeAcpAgentModels(
+      { agents: [{ ...fixtureAdapter('pushed-models'), modelListGrace: 1000 }], refused: [] },
+      { modelProbeTimeout: 20_000 },
+    );
+
+    expect(probed.agents[0]?.models).toHaveLength(4);
+    expect(probed.agents[0]?.models?.slice(2).map((model) => model.id)).toEqual(['pushed-model-a', 'pushed-model-b']);
+    expect(probed.agents[0]?.models?.[3]?.thoughtLevel?.currentValue).toBe('medium');
+  });
+
+  it('waits for a pushed model list only for an agent seen to push one', () => {
+    /* Every other agent's `session/new` answer is its whole list, so its probe must not get slower. */
+    expect(
+      acpAgentProfiles.filter((profile) => profile.modelListGrace !== undefined).map((profile) => profile.id),
+    ).toEqual(['grok']);
+  });
+
+  it('ends the wait for a pushed model list at its grace when no push comes', async () => {
+    const started = Date.now();
+    const probed = await probeAcpAgentModels(
+      { agents: [{ ...fixtureAdapter(), modelListGrace: 1000 }], refused: [] },
+      { modelProbeTimeout: 20_000 },
+    );
+
+    expect(probed.agents[0]?.models).toHaveLength(2);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it('never waits for a pushed model list past the probe’s own deadline', async () => {
+    const started = Date.now();
+    const probed = await probeAcpAgentModels(
+      { agents: [{ ...fixtureAdapter(), modelListGrace: 600_000 }], refused: [] },
+      { modelProbeTimeout: 3000 },
+    );
+
+    expect(probed.agents.map((agent) => agent.id)).toEqual(['codex']);
+    expect(probed.agents[0]?.models).toHaveLength(2);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
   it('keeps the agent when the probe never answers, on its own timeout', async () => {
     /* The whole point of a separate budget: a CLI answers `--version` in
      * milliseconds while its adapter hangs the handshake, and a logged-out or

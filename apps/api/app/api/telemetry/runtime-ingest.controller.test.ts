@@ -829,7 +829,8 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
     const provider = new sdkMetrics.MeterProvider({ readers: [exporter] });
     otelMetrics.setGlobalMeterProvider(provider);
     try {
-      const harness = await createApp({}, new RuntimeMetricsService() as unknown as RuntimeMetricsTarget);
+      const runtimeMetricsService = new RuntimeMetricsService();
+      const harness = await createApp({}, runtimeMetricsService as unknown as RuntimeMetricsTarget);
       const fixtures = [
         ...transcoderIds.map((plugin) => ({ plugin, capability: 'transcoder', operation: 'transcode' })),
         ...jobProviderIds.map((plugin) => ({ plugin, capability: 'job', operation: 'job' })),
@@ -845,6 +846,8 @@ describe('POST /v1/telemetry/ingest (T10)', () => {
         { user: 'user-1' },
       );
       expect(response.json()).toMatchObject({ recorded: fixtures.length, rejected: 0 });
+      // Each new series is exported at 0 first (R07 restart visibility); release the held increments to read them.
+      runtimeMetricsService.releaseHeld();
       const body = await new Promise<string>((resolve) => {
         const scrape = { statusCode: 0, setHeader: () => scrape, end: resolve };
         exporter.getMetricsRequestHandler({} as IncomingMessage, scrape as unknown as ServerResponse);

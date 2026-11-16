@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   acpAgentProfiles,
+  acpModelProbeTimeout,
   discoverAcpAgents,
   externalAgentDescriptors,
   probeAcpAgents,
@@ -193,6 +194,14 @@ describe.each(profiles)('the $label profile', ({ profile }) => {
     expect(profile.minimumCliVersion).toMatch(/^\d+\.\d+\.\d+$/u);
   });
 
+  it('should keep any wait for a pushed model list short and inside the model probe budget', () => {
+    if (profile.modelListGrace !== undefined) {
+      expect(profile.modelListGrace).toBeGreaterThan(0);
+      expect(profile.modelListGrace).toBeLessThanOrEqual(2000);
+      expect(profile.modelListGrace).toBeLessThan(acpModelProbeTimeout);
+    }
+  });
+
   it('should declare fallbacks for every supported platform in the allowed shape', () => {
     expect(Object.keys(profile.fallbackExecutables).toSorted()).toEqual([...supportedPlatforms].toSorted());
     for (const platform of supportedPlatforms) {
@@ -346,6 +355,20 @@ describe.each(profiles)('the $label profile', ({ profile }) => {
       ]);
       expect(discovery.refused[0]?.message).toMatch(/did not answer within 100 ms/u);
       expect(parsedDescriptors(discovery, profile, 'linux')[0]).not.toHaveProperty('fixCommand');
+    });
+
+    it('should refuse EXTERNAL_AGENT_UNAVAILABLE when the CLI ends cleanly on the timeout signal without a version', async () => {
+      const home = await temporaryHome();
+      /* A CLI that traps the timeout's SIGTERM and exits 0 resolves the run with empty stdout. */
+      await writeStub(inHome(home, firstHomeEntry(profile)), "trap 'exit 0' TERM\nsleep 5 & wait");
+
+      const { discovery } = await discoverIn(profile, home, { probeTimeout: 100 });
+
+      expect(discovery.agents).toEqual([]);
+      expect(discovery.refused).toEqual([
+        expect.objectContaining({ id: profile.id, code: 'EXTERNAL_AGENT_UNAVAILABLE' }),
+      ]);
+      expect(discovery.refused[0]?.message).toMatch(/did not answer within 100 ms/u);
     });
 
     it('should refuse EXTERNAL_AGENT_UNAVAILABLE when the CLI exits non-zero', async () => {

@@ -1,0 +1,98 @@
+import type { ExportResult, ExportRoute, RuntimeClient, RuntimeContentInput, RuntimeDocument } from '@taucad/runtime';
+import type { FileExtension } from '@taucad/types';
+import { fileExtensions, formatConfigurations } from '@taucad/types/constants';
+
+export type FormatEntry = {
+  format: FileExtension;
+  fidelity: ExportRoute['fidelity'];
+  direct: boolean;
+};
+
+export type AppRuntimeExportRoute = NonNullable<ReturnType<RuntimeClient['bestRouteFor']>>;
+
+/**
+ * Narrow a dynamic file extension and runtime-reported kernel id through the
+ * capabilities manifest before exporting from its committed document.
+ */
+export function bestRouteForActiveKernel(
+  client: RuntimeClient,
+  format: FileExtension,
+  activeKernelId?: string,
+): AppRuntimeExportRoute | undefined {
+  const candidate = client.capabilities?.routes.find(
+    (route) => route.targetFormat === format && (!activeKernelId || route.kernelId === activeKernelId),
+  );
+  return candidate ? client.bestRouteFor(candidate.targetFormat, { kernelId: candidate.kernelId }) : undefined;
+}
+
+/**
+ * Export options produced by runtime JSON Schema forms are runtime-validated
+ * against the selected route by the document. This is the app boundary for
+ * dynamic form values whose schema is discovered at runtime.
+ */
+export type RuntimeValidatedExportInput = {
+  readonly signal?: AbortSignal;
+  readonly content?: RuntimeContentInput;
+  readonly options?: Record<string, unknown>;
+};
+
+export async function exportDocumentWithValidatedInput(
+  document: RuntimeDocument,
+  route: AppRuntimeExportRoute,
+  input: RuntimeValidatedExportInput = {},
+): Promise<ExportResult> {
+  return document.export(route.targetFormat, input);
+}
+
+const isCatalogFormat = (value: string): value is FileExtension => fileExtensions.some((format) => format === value);
+
+/**
+ * Derive the list of available export formats for a given kernel from the
+ * runtime client's capabilities manifest.
+ *
+ * Each format is reduced to the "best" route (BREP > mesh, direct > transcoded)
+ * via `bestRouteFor`. Formats whose best route is on a different kernel are
+ * excluded so the list reflects only routes the active kernel can serve.
+ */
+export function deriveAvailableFormats(
+  client: RuntimeClient | undefined,
+  activeKernelId: string | undefined,
+): FormatEntry[] {
+  const manifest = client?.capabilities;
+  if (!client || !manifest || !activeKernelId) {
+    return [];
+  }
+
+  const targetFormats = new Set<FileExtension>();
+  for (const route of manifest.routes) {
+    if (isCatalogFormat(route.targetFormat)) {
+      targetFormats.add(route.targetFormat);
+    }
+  }
+
+  const formats: FormatEntry[] = [];
+  for (const format of targetFormats) {
+    const route = bestRouteForActiveKernel(client, format, activeKernelId);
+    if (!route || route.kernelId !== activeKernelId) {
+      continue;
+    }
+    formats.push({
+      format,
+      fidelity: route.fidelity,
+      direct: route.transcoderId === undefined,
+    });
+  }
+
+  return formats.sort((a, b) => a.format.localeCompare(b.format));
+}
+
+/**
+ * Lookup a format's display configuration (name + description) from
+ * the constants table. Returns `undefined` for unknown extensions.
+ */
+export function getFormatInfo(format: FileExtension): { name: string; description: string } | undefined {
+  if (format in formatConfigurations) {
+    return formatConfigurations[format];
+  }
+  return undefined;
+}

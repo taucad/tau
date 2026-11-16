@@ -312,6 +312,107 @@ describe('marketing staging links before JavaScript', () => {
   });
 });
 
+describe('marketing policy per environment', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const production =
+    "default-src 'self'; script-src 'self' 'nonce-abc'; connect-src 'self' https://api.tau.new https://downloads.tau.new; object-src 'none'";
+  const staging =
+    "default-src 'self'; script-src 'self' 'nonce-abc'; connect-src 'self' https://api.taucad.dev https://downloads.taucad.dev; object-src 'none'";
+  const linked = '<a class="text-link" href="https://downloads.tau.new/latest/Tau-linux-x64.tar.gz">Download</a>';
+  const plain = '<h1>Tau</h1>';
+
+  async function serve(url: string, body: string | undefined, method = 'GET'): Promise<Response> {
+    vi.stubGlobal('Netlify', { env: { get: () => origin } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(body ?? null, {
+            headers: {
+              'content-type': 'text/html; charset=utf-8',
+              etag: '"upstream"',
+              'content-security-policy': production,
+            },
+          }),
+      ),
+    );
+    return marketing(new Request(url, { method }), { next: vi.fn() });
+  }
+
+  it('should select staging hosts in the policy when the body needs no rewrite, keeping its bytes and validators', async () => {
+    const response = await serve('https://taucad.dev/', plain);
+    expect(response.headers.get('content-security-policy')).toBe(staging);
+    expect(response.headers.get('etag')).toBe('"upstream"');
+    expect(await response.text()).toBe(plain);
+  });
+
+  it('should select staging hosts in the policy when the body is rewritten', async () => {
+    const response = await serve('https://taucad.dev/download/', linked);
+    expect(response.headers.get('content-security-policy')).toBe(staging);
+    expect(await response.text()).toContain('https://downloads.taucad.dev/latest/Tau-linux-x64.tar.gz');
+  });
+
+  it('should select staging hosts in the policy behind the staging router', async () => {
+    vi.stubGlobal('Netlify', { env: { get: () => origin } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(plain, {
+            headers: {
+              'content-type': 'text/html',
+              'content-security-policy': production,
+            },
+          }),
+      ),
+    );
+    const response = await marketing(
+      new Request('https://staging--taucad-staging.netlify.app/', {
+        headers: { 'x-tau-public-host': 'taucad.dev' },
+      }),
+      { next: vi.fn() },
+    );
+    expect(response.headers.get('content-security-policy')).toBe(staging);
+  });
+
+  it('should select staging hosts in the policy of a HEAD response', async () => {
+    const response = await serve('https://taucad.dev/download/', undefined, 'HEAD');
+    expect(response.headers.get('content-security-policy')).toBe(staging);
+  });
+
+  it.each(['https://tau.new/', 'https://tau.new/download/', 'https://taucad.dev.example/'])(
+    'should leave the production policy untouched on %s',
+    async (url) => {
+      const response = await serve(url, url.endsWith('/download/') ? linked : plain);
+      expect(response.headers.get('content-security-policy')).toBe(production);
+      expect(response.headers.get('content-security-policy')).not.toContain('taucad.dev');
+    },
+  );
+
+  it('should not rewrite a host that only starts with a production host name', async () => {
+    vi.stubGlobal('Netlify', { env: { get: () => origin } });
+    const policy = "connect-src 'self' https://api.tau.new.example https://api.tau.new";
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(plain, {
+            headers: {
+              'content-type': 'text/html',
+              'content-security-policy': policy,
+            },
+          }),
+      ),
+    );
+    const response = await marketing(new Request('https://taucad.dev/'), {
+      next: vi.fn(),
+    });
+    expect(response.headers.get('content-security-policy')).toBe(
+      "connect-src 'self' https://api.tau.new.example https://api.taucad.dev",
+    );
+  });
+});
+
 describe('staging router public host', () => {
   afterEach(() => vi.unstubAllGlobals());
   const alias = 'https://staging--taucad-staging.netlify.app';

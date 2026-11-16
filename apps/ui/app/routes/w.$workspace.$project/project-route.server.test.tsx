@@ -15,7 +15,7 @@ import { ChatSessionStoreProvider } from '#hooks/chat-session-store-provider.js'
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { ProjectManagerProvider } from '#hooks/use-project-manager.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
-import { ProjectSessionsHost } from '#routes/w.$workspace.$project/project-route.js';
+import { ProjectRouteProviders, ProjectSessionsHost } from '#routes/w.$workspace.$project/project-route.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { createAppRuntime, selectRuntimeQueryClient } from '#runtime/app-runtime.js';
 
@@ -61,6 +61,45 @@ vi.mock('#lib/project-workspace-warmup.js', async (importOriginal) => {
       return actual.loadProjectWorkspace();
     },
   };
+});
+
+/** The server HTML of a project URL, with `shell` where the root layout puts the app shell. */
+const renderProjectUrl = (shell: React.ReactNode): string => {
+  const runtime = createAppRuntime({ environment: () => undefined });
+  return renderToString(
+    <QueryClientProvider client={selectRuntimeQueryClient(runtime)}>
+      <AppRuntimeProvider runtime={runtime}>
+        <ProjectManagerProvider>
+          <UnloadProvider>
+            <ChatSessionStoreProvider>
+              <SessionsProvider>
+                <MemoryRouter initialEntries={['/w/ws/alpha?chat=c1']}>
+                  <ProjectSessionsHost>{shell}</ProjectSessionsHost>
+                </MemoryRouter>
+              </SessionsProvider>
+            </ChatSessionStoreProvider>
+          </UnloadProvider>
+        </ProjectManagerProvider>
+      </AppRuntimeProvider>
+    </QueryClientProvider>,
+  );
+};
+
+/* A11 (D24, U3's server half): the shell is outside the worker gate, so the server renders it with the route's
+ * `resolving` content (the workspace's placeholder) in its outlet. */
+it('should render the app shell and the resolving content in the server HTML of a project URL', () => {
+  const html = renderProjectUrl(
+    <nav data-testid='app-shell'>
+      <ProjectRouteProviders>
+        <p>outlet</p>
+      </ProjectRouteProviders>
+    </nav>,
+  );
+  /* No DOM on the server: the shell's own markup, from its opening tag to its close. */
+  const shell = /<nav data-testid="app-shell">([\s\S]*)<\/nav>/u.exec(html)?.[1];
+  expect(shell, 'U3: the server HTML lacks the app shell').toBeDefined();
+  expect(shell).toContain('data-testid="workspace-skeleton"');
+  expect(seen.projectHook).toBe(0);
 });
 
 it('should derive resolving for a project URL on the server and call no project hook', () => {

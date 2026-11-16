@@ -127,6 +127,14 @@ export type AcpAgentProfile = {
    */
   readonly nativeToolName?: readonly string[] | undefined;
   /**
+   * Milliseconds the model probe waits after `session/new` for this agent to
+   * push its own model list, never past the probe's deadline.
+   *
+   * Absent for an agent whose `session/new` answer is its whole list, so its
+   * probe never waits. Set only for an agent seen to push a list later.
+   */
+  readonly modelListGrace?: number | undefined;
+  /**
    * Oldest CLI version this adapter is known to drive.
    *
    * The probe reads `--version` anyway; below this floor the CLI is refused
@@ -316,6 +324,10 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     cli: 'grok',
     /* Permission notifications are process-scoped: never share a leader with other chats. */
     args: ['--no-auto-update', 'agent', '--no-leader', 'stdio'],
+    /* Grok 1.0.52 pushes `_x.ai/models/update` 69-157 ms after `session/new`, and when it
+     * started on an expired but renewable sign-in only that push holds its full list
+     * (raw JSON-RPC on the operator's Mac, 2026-11-15). */
+    modelListGrace: 1000,
     configEnv: ['GROK_HOME'],
     /* Official @xai-official/grok release verified with an unauthenticated
      * initialize; includes per-session pluginDirs for Tau's system skills. */
@@ -656,6 +668,12 @@ export const probeAcpAgents = async (
         });
         const line = String(stdout).trim().split('\n')[0] ?? '';
         const installed = /\d+\.\d+\.\d+/u.exec(line)?.[0];
+        const elapsed = Math.round(performance.now() - started);
+        if (installed === undefined && elapsed >= budget) {
+          /* A CLI that traps the timeout's signal and exits 0 resolves with
+           * nothing printed; that is a probe that did not answer (rule 5). */
+          return probeFailure({ adapter, executable, error: { killed: true, signal: 'SIGTERM' }, budget, elapsed });
+        }
         if (installed === undefined) {
           /* A vendor changing its banner must not remove a working agent; the
            * profile's `versionSample` guards the parser instead (D13). */
@@ -742,6 +760,19 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
       void closeLate(opening);
       return adapter;
     }
+    /* An agent that pushes its model list after the open gets a short wait for it; the rest never wait. */
+    const modelListGrace = Math.min(adapter.modelListGrace ?? 0, deadline - Date.now());
+    if (modelListGrace > 0) {
+      let graceExpiry: NodeJS.Timeout | undefined;
+      await Promise.race([
+        session.modelListPushed,
+        new Promise<void>((resolve) => {
+          graceExpiry = setTimeout(resolve, modelListGrace);
+        }),
+      ]);
+      clearTimeout(graceExpiry);
+    }
+    /* Read after the wait: `configOptions` holds a pushed list. */
     const choice = modelChoice(session.configOptions);
     const thoughtOption = session.configOptions?.find(
       (option): option is Extract<SessionConfigOption, { type: 'select' }> =>

@@ -1216,8 +1216,13 @@ export type AcpSession = {
   readonly acpSessionId: string;
   /** What the agent advertised at `initialize`. */
   readonly agent: AcpAgentFacts;
-  /** Config options as the session last reported them, `config_option_update` included. */
+  /** Config options as the session last reported them, `config_option_update` and pushed model lists included. */
   readonly configOptions: readonly SessionConfigOption[] | undefined;
+  /**
+   * Resolves once the agent has pushed its own model list after the open (Grok's `_x.ai/models/update`),
+   * by which time {@link AcpSession.configOptions} holds it. Stays pending for an agent that never pushes one.
+   */
+  readonly modelListPushed: Promise<void>;
   /** The mode the agent last reported, when it pushed one. */
   readonly modeId: string | undefined;
   /** `true` when a requested session could be neither resumed nor loaded. */

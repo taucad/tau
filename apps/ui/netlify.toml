@@ -151,6 +151,8 @@ Document-Policy = "js-profiling"
 # `build/client/_headers` (scripts/write-content-security-policy-headers.mts),
 # and SSR documents send the same policy (app/lib/content-security-policy.server.ts);
 # Netlify custom headers do not apply to function responses.
+# Marketing pages (apps/www) send their own enforced policy, which names production
+# hosts; edge-functions/marketing.ts selects staging's for taucad.dev.
 # The site's TAU_FRONTEND_URL picks the policy:
 #   - https://tau.new (production; also served as taucad-prod-us.netlify.app):
 #     cdn.tau.new, files.tau.new, api.tau.new + wss, dependencies.tau.new and the

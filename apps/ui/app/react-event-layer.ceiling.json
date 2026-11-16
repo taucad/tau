@@ -75,7 +75,6 @@
   "apps/ui/app/routes/w.$workspace.$project/project-route-intent.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-route-notices.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/project-share-action.tsx": 1,
-  "apps/ui/app/routes/w.$workspace.$project/project-sync-placeholder.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/record-issues-action.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/revision-save-shortcut.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/use-chat-interface-state.ts": 1,

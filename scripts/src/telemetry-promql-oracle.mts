@@ -11,7 +11,7 @@
  *   of the step, as Prometheus 3 evaluates them.
  * - `rate` and `increase` with Prometheus' counter-reset correction and extrapolation (`extrapolatedRate` in
  *   `promql/functions.go`), `avg_over_time`, `absent_over_time`, `histogram_quantile` (classic buckets, with
- *   `bucketQuantile`'s monotonicity fix and `+Inf` handling), `vector`, `clamp_max` and `resets`.
+ *   `bucketQuantile`'s monotonicity fix and `+Inf` handling), `vector`, `clamp_max`, `resets` and `count_over_time`.
  * - `sum`, `max`, `min`, `avg`, `count` with a prefix `by (…)`, and `topk`.
  * - Arithmetic and filtering comparisons between scalars and vectors, one-to-one and `group_left` vector matching with
  *   `on`/`ignoring`, and the set operators `and`, `or` and `unless`, with Prometheus' precedence.
@@ -81,6 +81,7 @@ const functions = new Set([
   'rate',
   'increase',
   'avg_over_time',
+  'count_over_time',
   'absent_over_time',
   'histogram_quantile',
   'vector',
@@ -654,6 +655,9 @@ export class SeriesStore {
         return perSeries(
           (samples) => samples.filter(([, value], index) => index > 0 && value < samples[index - 1]![1]).length,
         );
+      }
+      case 'count_over_time': {
+        return perSeries((samples) => samples.length);
       }
       case 'avg_over_time': {
         return perSeries((samples) => samples.reduce((total, [, value]) => total + value, 0) / samples.length);

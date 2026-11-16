@@ -50,7 +50,7 @@ import type { BundledTypesMountEntry, BundledTypesRoot } from '#machines/bundled
 import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
 import { createLazyBundledTypesReads } from '#machines/bundled-types-lazy.js';
 import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
-import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
+import { listWorkspaceDirectories } from '@taucad/files-ui/machines/file-manager-sync-fs-adapter';
 import {
   createCheckoutRoutes,
   createPendingObjectSource,

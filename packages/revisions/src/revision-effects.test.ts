@@ -6549,6 +6549,13 @@ describe('opening before large objects arrive', () => {
         options?.onLargeObject?.(pointer.oid, new TextEncoder().encode(part));
         return real.readTree(id);
       },
+      /* The fill asks for its placeholders' objects by oid (Tau #2013): the same transfer. */
+      fetchLargeObjects: async (_pointers, options) => {
+        await arrived;
+        await filesystem.writeFile(objectFile, part);
+        options?.onLargeObject?.(pointer.oid, new TextEncoder().encode(part));
+        return new Map([[pointer.oid, new TextEncoder().encode(part)]]);
+      },
     };
     const actors = createRevisionActors({
       identity: testIdentity,
@@ -6768,6 +6775,21 @@ describe('opening before large objects arrive', () => {
         await filesystem.writeFile(objectFile, part);
         options?.onLargeObject?.(pointer.oid, new TextEncoder().encode(part));
         return real.readTree(id);
+      },
+      /* The fill asks for its placeholders' objects by oid (Tau #2013): the same transfer. */
+      fetchLargeObjects: async (_pointers, options) => {
+        if (options?.signal !== undefined) {
+          signals.push(options.signal);
+        }
+        const aborted = new Promise<never>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => {
+            reject(new Error('aborted'));
+          });
+        });
+        await Promise.race([gate.promise, aborted]);
+        await filesystem.writeFile(objectFile, part);
+        options?.onLargeObject?.(pointer.oid, new TextEncoder().encode(part));
+        return new Map([[pointer.oid, new TextEncoder().encode(part)]]);
       },
     };
     const actors = createRevisionActors({

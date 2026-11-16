@@ -1,5 +1,14 @@
 import { expect, it } from 'vitest';
-import { BoxGeometry, Group, Mesh, OrthographicCamera, PerspectiveCamera, PlaneGeometry, Vector4 } from 'three';
+import {
+  BoxGeometry,
+  Group,
+  Mesh,
+  OrthographicCamera,
+  PerspectiveCamera,
+  PlaneGeometry,
+  Vector4,
+  WebGPUCoordinateSystem,
+} from 'three';
 import { createEmphasisMaskCrop } from '#graphics/three/materials/model-emphasis-crop.js';
 import { createEmphasisCompositeRegion } from '#graphics/three/materials/model-emphasis-region.js';
 
@@ -70,4 +79,42 @@ it('should preserve a parented camera world transform when the renderer updates 
   }
   expect(cropped.matrixWorld.toArray()).toEqual(camera.matrixWorld.toArray());
   expect(cropped.matrixWorldInverse.toArray()).toEqual(camera.matrixWorldInverse.toArray());
+});
+
+// Finding 6 of docs/research/orthographic-controls-distance-clip-and-low-fov-grid-blueprint.md: the node renderer
+// recomputes a fresh crop camera's projection on first use, which dropped the crop for one frame.
+it.each([false, true])('should keep the crop through a projection recompute: perspective=%s', (perspective) => {
+  const camera = perspective
+    ? new PerspectiveCamera(40, 16 / 9, 0.1, 100)
+    : new OrthographicCamera(-4, 4, 2.25, -2.25, 0.1, 100);
+  const crop = createEmphasisMaskCrop();
+  const size = { width: 5120, height: 2880, pixelRatio: 2 };
+  const region = new Vector4(-0.5, -0.5, 0.5, 0.5);
+  const cropped = crop.update(camera, region, size) as PerspectiveCamera | OrthographicCamera;
+  const expected = cropped.projectionMatrix.clone();
+  expect(expected.equals(camera.projectionMatrix)).toBe(false);
+  cropped.updateProjectionMatrix();
+  expect(cropped.projectionMatrix.equals(expected)).toBe(true);
+
+  // `Renderer._renderScene` on a camera whose depth convention or coordinate system differs from the renderer's.
+  Object.assign(camera, { _reversedDepth: true });
+  camera.coordinateSystem = WebGPUCoordinateSystem;
+  camera.updateProjectionMatrix();
+  crop.update(camera, region, size);
+  Object.assign(cropped, { _reversedDepth: true });
+  cropped.coordinateSystem = WebGPUCoordinateSystem;
+  const reversed = cropped.projectionMatrix.clone();
+  cropped.updateProjectionMatrix();
+  expect(cropped.projectionMatrix.equals(reversed)).toBe(true);
+  expect(cropped.projectionMatrix.equals(camera.projectionMatrix)).toBe(false);
+
+  // A later source projection: the crop camera follows it, and a recompute keeps the new crop.
+  camera.near = 0.5;
+  camera.updateProjectionMatrix();
+  crop.update(camera, region, size);
+  const changed = cropped.projectionMatrix.clone();
+  expect(changed.equals(reversed)).toBe(false);
+  cropped.updateProjectionMatrix();
+  expect(cropped.projectionMatrix.equals(changed)).toBe(true);
+  expect(cropped.projectionMatrixInverse.equals(changed.clone().invert())).toBe(true);
 });

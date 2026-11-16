@@ -470,7 +470,6 @@ describe('KernelRuntimeWorker direct transcode', () => {
         {
           from: 'glb',
           to: 'webp',
-          fidelity: 'mesh',
           optionsSchema: z.object({ width: z.number() }),
         },
       ],
@@ -532,7 +531,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
     const definition: TranscoderDefinition = {
       name: 'Queued transcoder',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      edges: [{ from: 'glb', to: 'webp' }],
       initialize: vi.fn().mockResolvedValue({}),
       transcode,
     };
@@ -571,7 +570,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
     const definition: TranscoderDefinition = {
       name: 'FIFO transcoder',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      edges: [{ from: 'glb', to: 'webp' }],
       initialize: vi.fn().mockResolvedValue({}),
       transcode: vi.fn(async () => {
         started.resolve();
@@ -632,7 +631,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
     const definition: TranscoderDefinition = {
       name: 'Abortable transcoder',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      edges: [{ from: 'glb', to: 'webp' }],
       initialize: vi.fn().mockResolvedValue({}),
       transcode,
     };
@@ -681,7 +680,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
     const definition: TranscoderDefinition = {
       name: 'Boundary transcoder',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      edges: [{ from: 'glb', to: 'webp' }],
       initialize: vi.fn(async () => initialization.promise),
       transcode,
     };
@@ -730,7 +729,6 @@ describe('KernelRuntimeWorker direct transcode', () => {
         {
           from: 'glb',
           to: 'webp',
-          fidelity: 'mesh',
           optionsSchema: z.object({
             width: z.number().positive(),
             height: z.number().positive(),
@@ -766,7 +764,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
     const definition: TranscoderDefinition = {
       name: 'Throwing transcoder',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      edges: [{ from: 'glb', to: 'webp' }],
       initialize: vi.fn().mockResolvedValue({}),
       transcode: vi.fn().mockRejectedValue(new Error('encoder crashed')),
     };
@@ -804,7 +802,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
     const definition: TranscoderDefinition = {
       name: 'Retryable transcoder',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      edges: [{ from: 'glb', to: 'webp' }],
       initialize,
       transcode: vi.fn().mockResolvedValue({
         success: true,
@@ -841,7 +839,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
     const definition: TranscoderDefinition = {
       name: 'Invalid output transcoder',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }],
+      edges: [{ from: 'glb', to: 'webp' }],
       initialize: vi.fn().mockResolvedValue({}),
       transcode: vi.fn().mockResolvedValue({ success: true, data: [], issues: [] }),
     };
@@ -886,7 +884,6 @@ describe('KernelRuntimeWorker direct transcode', () => {
           {
             from: 'glb',
             to: 'webp',
-            fidelity: 'mesh',
             optionsSchema:
               id === 'first-edge' ? z.object({ first: z.literal(true) }) : z.object({ second: z.literal(true) }),
           },
@@ -946,8 +943,8 @@ describe('KernelRuntimeWorker direct transcode', () => {
           name: 'twice',
           version: '1.0.0',
           edges: [
-            { from: 'glb', to: 'webp', fidelity: 'mesh' },
-            { from: 'glb', to: 'webp', fidelity: 'mesh' },
+            { from: 'glb', to: 'webp' },
+            { from: 'glb', to: 'webp' },
           ] as const,
           async initialize() {
             return {};
@@ -970,7 +967,7 @@ describe('KernelRuntimeWorker direct transcode', () => {
       id: 'unadvertisable-edge',
       name: 'Unadvertisable edge',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh', optionsSchema: z.date() }] as const,
+      edges: [{ from: 'glb', to: 'webp', optionsSchema: z.date() }] as const,
       async initialize() {
         return {};
       },
@@ -1094,7 +1091,7 @@ describe('provider content projection', () => {
     const transcoderDefinition: TranscoderDefinition = {
       name: 'Content-empty transcoder',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'usdz', fidelity: 'mesh' }],
+      edges: [{ from: 'glb', to: 'usdz' }],
       initialize: vi.fn().mockResolvedValue({}),
       transcode: vi.fn(async (input: TranscodeInput) => {
         seen.transcoder.push(Object.hasOwn(input, 'content'));
@@ -1368,7 +1365,6 @@ describe('provider content projection', () => {
         {
           from: 'glb',
           to: 'webp',
-          fidelity: 'mesh',
           content: ['includeEdges'],
         },
       ],
@@ -2524,7 +2520,7 @@ describe('native-handle snapshot restoration', () => {
     const transcoderDefinition: TranscoderDefinition = {
       name: 'Mock Converter',
       version: '1.0.0',
-      edges: [{ from: 'glb', to: 'usdz', fidelity: 'mesh' }],
+      edges: [{ from: 'glb', to: 'usdz' }],
       initialize: vi.fn().mockResolvedValue({ id: 'mock-converter' }),
       transcode,
       onDispose: vi.fn().mockResolvedValue(undefined),
@@ -2614,7 +2610,6 @@ describe('native-handle snapshot restoration', () => {
         {
           from: 'glb',
           to: 'usdz',
-          fidelity: 'mesh',
           optionsSchema: z.object({ width: z.number() }),
         },
       ],

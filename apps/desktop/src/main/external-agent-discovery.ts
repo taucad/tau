@@ -13,7 +13,12 @@
  * discovery, so a shorter budget only turns a slow CLI into a refusal.
  */
 
-import { acpAgentProfiles, externalAgentDescriptors } from '@taucad/host';
+import {
+  acpAgentProfiles,
+  acpEnvironmentAllowlist,
+  acpEnvironmentPrefixAllowlist,
+  externalAgentDescriptors,
+} from '@taucad/host';
 import type { AcpAdapter, AcpAgentDiscovery, AcpAgentProfile } from '@taucad/host';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 
@@ -47,6 +52,38 @@ export type ExternalAgentDiscoveryOptions = {
   readonly log: DiagnosticsLog;
   /** Milliseconds clock. */
   readonly now: () => number;
+  /** Main's environment, whose account and agent variables each adapter is given; `process.env` by default. */
+  readonly environment?: NodeJS.ProcessEnv | undefined;
+};
+
+/**
+ * The adapter, given main's values for the names its allowlist forwards.
+ *
+ * The services utility that spawns adapters starts from a minimal environment
+ * with no `HOME` or `USER`, so an adapter spawned there would lose them. Claude
+ * Code finds its macOS keychain sign-in by `USER`, and a signed-in CLI answered
+ * "not logged in" on every turn while discovery, which runs in main, saw it
+ * signed in. Main's values travel on `spawnEnv`, which wins over the utility's
+ * own allowlisted environment, and the utility's environment stays minimal.
+ *
+ * @param adapter - A discovered adapter.
+ * @param environment - Main's environment.
+ * @returns The adapter, with the allowlisted names main holds added beneath its own `spawnEnv`.
+ */
+export const withMainAgentEnvironment = (adapter: AcpAdapter, environment: NodeJS.ProcessEnv): AcpAdapter => {
+  const names = new Set([...acpEnvironmentAllowlist, ...adapter.configEnv]);
+  const forwarded = Object.fromEntries(
+    Object.entries(environment).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined &&
+        /* The utility's own PATH is main's login-shell PATH already. */
+        entry[0] !== 'PATH' &&
+        (names.has(entry[0]) || acpEnvironmentPrefixAllowlist.some((prefix) => entry[0].startsWith(prefix))),
+    ),
+  );
+  return Object.keys(forwarded).length === 0
+    ? adapter
+    : { ...adapter, spawnEnv: { ...forwarded, ...adapter.spawnEnv } };
 };
 
 /** The descriptors this machine advertises, kept current across listings. */
@@ -104,6 +141,7 @@ const merge = (previous: AcpAgentDiscovery, next: AcpAgentDiscovery): AcpAgentDi
  */
 export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOptions): ExternalAgentDiscovery => {
   const { resolveFrom, discover, configure, log, now } = options;
+  const environment = options.environment ?? process.env;
   /** The last answer that succeeded; `undefined` until one has. */
   let current: AcpAgentDiscovery | undefined;
   let descriptors: readonly ExternalAgentDescriptor[] = [];
@@ -126,7 +164,7 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
       });
       current = previous ? merge(previous, answer) : answer;
       failed = false;
-      configure(current.agents);
+      configure(current.agents.map((adapter) => withMainAgentEnvironment(adapter, environment)));
       /* The one canonical descriptor (VSC1): the renderer draws its rows from
        * this, the utility gets the adapters themselves, and neither builds its
        * own idea of what an agent is called or which models it offers. */

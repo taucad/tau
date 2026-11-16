@@ -168,21 +168,26 @@ export default async function marketing(request: Request, context: EdgeContext):
 
 /**
  * Select staging downloads and docs and name staging's own agent page in the shared static HTML, so a visitor and an
- * agent reading the raw HTML both get staging's links before any client script runs.
+ * agent reading the raw HTML both get staging's links before any client script runs. The marketing build names only
+ * production API and downloads hosts in its policy, so staging's are selected here too, also when the body is unchanged.
  */
 async function stagingLinks(response: Response, requestUrl: URL): Promise<Response> {
   if (
     requestUrl.hostname !== 'taucad.dev' ||
-    response.body === null ||
     !response.headers.get('content-type')?.toLowerCase().startsWith('text/html')
   ) {
     return response;
   }
 
-  const html = await response.clone().text();
+  const policy = response.headers.get('content-security-policy');
+  const stagingPolicy = policy?.replaceAll(
+    /https:\/\/(api|downloads)\.tau\.new(?=[\s;]|$)/gu,
+    (_match: string, host: string) => `https://${host}.taucad.dev`,
+  );
+  const html = response.body === null ? undefined : await response.clone().text();
   // Match our emitted download and docs anchors and the hero's agent prompt; keep complete script blocks
   // byte-identical for CSP hashes.
-  const rewritten = html.replaceAll(
+  const rewritten = html?.replaceAll(
     /<script\b[^>]*>[\s\S]*?<\/script\s*>|(<a\b[^>]*\shref=")https:\/\/downloads\.tau\.new(\/latest\/[^"]*")|(<a\b[^>]*\shref=")https:\/\/docs\.tau\.new([/"])|(<code id="agent-prompt-text">Install the Tau plugin from )https:\/\/tau\.new(\/llms\.txt<\/code>)/giu,
     (match: string, ...groups: Array<string | undefined>) => {
       const [anchor, path, docsAnchor, docsRest, prompt, page] = groups;
@@ -195,10 +200,16 @@ async function stagingLinks(response: Response, requestUrl: URL): Promise<Respon
       return prompt === undefined ? match : `${prompt}https://taucad.dev${page}`;
     },
   );
-  if (rewritten === html) {
+  if (rewritten === html && stagingPolicy === policy) {
     return response;
   }
   const headers = new Headers(response.headers);
+  if (stagingPolicy !== undefined) {
+    headers.set('content-security-policy', stagingPolicy);
+  }
+  if (rewritten === html) {
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
   for (const name of ['content-length', 'content-encoding', 'etag', 'last-modified']) {
     headers.delete(name);
   }
@@ -212,11 +223,7 @@ function privateDocument(response: Response): Response {
   headers.set('cdn-cache-control', 'no-store');
   headers.set('netlify-cdn-cache-control', 'no-store');
   headers.delete('netlify-vary');
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 export const config = {

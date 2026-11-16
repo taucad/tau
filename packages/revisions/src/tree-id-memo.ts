@@ -9,6 +9,9 @@
  * copies of the bytes, as `git-tree-id.ts` used to, re-digested everything on
  * every cut. `revisionTreeId` is this over one module-level memo; a checkout's
  * gate and a store's writer each keep their own.
+ *
+ * A change here that can move a tree id bumps `compareRulesRevision`
+ * (`compare-record.ts`), so no earlier release's comparison record answers.
  */
 import type { ImmutableRevisionTree } from '#algorithms/index.js';
 import { revisionTreeFiles } from '#algorithms/revision-tree.js';

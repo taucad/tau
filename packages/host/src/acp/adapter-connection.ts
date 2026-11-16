@@ -13,6 +13,7 @@ import { grokPlanSchema, permissionOfGrokPlan, grokPlanResponseOf } from '#acp/g
 import { z } from 'zod';
 import { grokNotificationOf } from '#acp/grok-notifications.js';
 import { grokQuestionSchema } from '#acp/grok-questions.js';
+import { grokModelsSchema } from '#acp/grok-models.js';
 import { elicitationRequestSchema } from '#acp/elicitation-request.js';
 
 import { client } from '@agentclientprotocol/sdk';
@@ -138,6 +139,10 @@ export const createAdapterConnection = (
           }
         },
       )
+      /* Grok's model list, pushed after `session/new` in place of a `config_option_update`. */
+      .onNotification('_x.ai/models/update', grokModelsSchema, ({ params }) => {
+        send({ type: 'grokModels', models: params });
+      })
       .onRequest('session/request_permission', async ({ params }) => ask('session/request_permission', params))
       .onRequest('_x.ai/exit_plan_mode', grokPlanSchema, async ({ params }) => {
         if (input.adapter.id !== 'grok') {

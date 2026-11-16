@@ -837,7 +837,7 @@ const strictKernel = defineKernel({
 });
 const route = defineTranscoder({
   id: 'type-route', name: 'Type route', version: '1',
-  edges: [{ from: 'json', to: 'txt', fidelity: 'mesh', optionsSchema: z.object({ separator: z.string() }) }] as const,
+  edges: [{ from: 'json', to: 'txt', optionsSchema: z.object({ separator: z.string() }) }] as const,
   async initialize() { return {}; },
   async transcode(input) { return { success: true, data: input.files, issues: [] }; },
 });

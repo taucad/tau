@@ -7,6 +7,7 @@ import {
   cloudDefectRow,
   cloudLoadProbe,
   cloudStandInCommands,
+  cloudStandInPaths,
   cloudStandInOwner,
   cloudStandInProject,
   readCloudLoadRecord,
@@ -190,7 +191,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: `U1: keeps the sidebar wrapper on a project route while get-session is held ${String(held)} ms, the chunk undelayed`,
     },
     async (defect) => {
@@ -366,4 +367,27 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       });
     },
   );
+
+  /* K-e (A15e), report-only, ruled by programme control on 2026-11-15: the first open of a Tau Cloud project with its
+     download held. The viewer stage should stay mounted and show the status pill with the download's percent, never be
+     replaced. This tier cannot force it: its stand-ins answer only the session, the listing and the paired hosts. The
+     listing names `cloudStandInProject` as on the Tau remote, but nothing here serves its repository (see N2's
+     project-route note), so no clone or large-object download ever starts. The forced row needs a stand-in for the API's git proxy that serves a clone of `cloudStandInProject` with
+     at least one large object, and holds either the clone (`git-upload-pack`) or the large-object answer
+     (`info/lfs/objects/batch` or the object itself). That need joins the git-proxy stand-in item carried to A10's
+     handback. The stage's own half is pinned by `chat-viewer.test.tsx` (the download pill with its percent, the
+     failure overlay) and the frame row F8. This row records the gap and fails once a stand-in answers anything else,
+     so the lane that adds one turns it into the forced row. */
+  test('K-e report-only: the first open of a Tau Cloud project with its download held cannot be forced in this tier', async ({
+    annotate,
+  }) => {
+    await annotate(
+      'K-e report-only: needs a git-proxy stand-in serving the Tau-remote project with a large object, holding its clone or its large-object answer',
+      'notice',
+    );
+    expect(
+      Object.keys(cloudStandInPaths),
+      'K-e: a stand-in now answers more than the session, the listing and the paired hosts; turn this row into the forced K-e row',
+    ).toEqual(['session', 'projects', 'agents']);
+  });
 });

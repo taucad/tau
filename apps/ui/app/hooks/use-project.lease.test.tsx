@@ -42,6 +42,7 @@ const { AppRuntimeProvider } = await import('#runtime/app-runtime-provider.js');
 const { createAppRuntime, selectRuntimeQueryClient } = await import('#runtime/app-runtime.js');
 const { createFakeEnvironmentHost } = await import('#runtime/environment.fixture.js');
 const { leaseGraceMilliseconds } = await import('#runtime/leases.machine.js');
+const { standaloneProjectPortOf } = await import('#runtime/standalone-project-port.js');
 
 type ProjectContextValue = ReturnType<typeof useProject>;
 
@@ -91,6 +92,46 @@ const tree = (runtime: ReturnType<typeof createAppRuntime>, children: ReactNode)
 );
 
 describe('ProjectProvider over a leased project runtime (A6b)', () => {
+  it('publishes a standalone project to the runtime port, so the shell reads the preview without ancestry (A11)', async () => {
+    fileManager.current = createFileManagerFixture();
+    const clock = new StepClock();
+    const runtime = createRuntime(clock);
+    const port = standaloneProjectPortOf(runtime);
+    const view = render(
+      tree(
+        runtime,
+        <ProjectProvider isStandalone projectId={projectId} profile='shared'>
+          <span />
+        </ProjectProvider>,
+      ),
+    );
+    await act(flush);
+
+    const published = port.get();
+    expect(published?.projectId).toBe(projectId);
+    expect(published?.fileManagerRef).toBe((fileManager.current as { fileManagerRef: unknown }).fileManagerRef);
+    expect(published?.runtime?.runtime.actor.getSnapshot().status).toBe('active');
+
+    view.unmount();
+    expect(port.get()).toBeUndefined();
+  });
+
+  it('publishes nothing for a project the registry holds', async () => {
+    fileManager.current = createFileManagerFixture();
+    const runtime = createRuntime(new StepClock());
+    render(
+      tree(
+        runtime,
+        <ProjectProvider projectId={projectId} profile='shared'>
+          <span />
+        </ProjectProvider>,
+      ),
+    );
+    await act(flush);
+
+    expect(standaloneProjectPortOf(runtime).get()).toBeUndefined();
+  });
+
   it('B3: keeps the project actor running through an unmount until the lease grace passes, then stops it', async () => {
     fileManager.current = createFileManagerFixture();
     const clock = new StepClock();

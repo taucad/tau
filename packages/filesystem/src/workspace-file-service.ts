@@ -392,7 +392,7 @@ export class WorkspaceFileService {
    */
   public async stat(path: string): Promise<FileStat> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    return this._asMarked(path, await provider.stat(resolvedPath));
+    return this._asMarked(path, await provider.stat(resolvedPath), async () => provider.readFile(resolvedPath));
   }
 
   /**
@@ -403,11 +403,15 @@ export class WorkspaceFileService {
    */
   public async lstat(path: string): Promise<FileStat> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    return this._asMarked(path, await provider.lstat(resolvedPath));
+    return this._asMarked(path, await provider.lstat(resolvedPath), async () => provider.readFile(resolvedPath));
   }
 
   /* A row as a rooted view's stat answers it: settled as its mount's marks say, a pending entry as its object (D9). */
-  private async _asMarked(path: string, row: FileStat): Promise<FileStat> {
+  private async _asMarked(
+    path: string,
+    row: FileStat,
+    read: () => Promise<Uint8Array<ArrayBuffer>>,
+  ): Promise<FileStat> {
     if (row.type !== 'file') {
       return row;
     }
@@ -420,6 +424,7 @@ export class WorkspaceFileService {
         authorityPath: canonicalPath,
         size: row.size,
         mtimeMs: row.mtimeMs,
+        bytes: async () => read().catch(() => undefined),
       }),
     );
   }

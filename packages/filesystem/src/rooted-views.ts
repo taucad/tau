@@ -444,12 +444,18 @@ export class RootedViews {
           : row,
       );
     };
-    const settledStat = async <Row extends FileStat>(authorityPath: string, row: Row): Promise<Row> =>
+    const settledStat = async <Row extends FileStat>(at: ReturnType<typeof resolveLocal>, row: Row): Promise<Row> =>
       raw || row.type !== 'file'
         ? row
         : asMarkedRow(
             row,
-            await projectIndexes.settleMarks({ root, authorityPath, size: row.size, mtimeMs: row.mtimeMs }),
+            await projectIndexes.settleMarks({
+              root,
+              authorityPath: at.authorityPath,
+              size: row.size,
+              mtimeMs: row.mtimeMs,
+              bytes: async () => at.resolution.provider.readFile(at.resolution.path).catch(() => undefined),
+            }),
           );
     /* One file's bytes on disk, and what the path answers: through to its object when it is a placeholder. */
     const readAnswered = async (
@@ -614,8 +620,8 @@ export class RootedViews {
         }
       : undefined;
     const stat = async (path: string): Promise<FileStat> => {
-      const { authorityPath, resolution } = resolveLocal(path);
-      return settledStat(authorityPath, await resolution.provider.stat(resolution.path));
+      const at = resolveLocal(path);
+      return settledStat(at, await at.resolution.provider.stat(at.resolution.path));
     };
     const readdirEntries = captured.provider.readdirEntries
       ? async (path: string): Promise<DirectoryEntry[]> => {
@@ -1005,8 +1011,8 @@ export class RootedViews {
       },
     };
     const lstat = async (path: string): Promise<FileStat> => {
-      const { authorityPath, resolution } = resolveLocal(path);
-      return settledStat(authorityPath, await resolution.provider.lstat(resolution.path));
+      const at = resolveLocal(path);
+      return settledStat(at, await at.resolution.provider.lstat(at.resolution.path));
     };
     const search = async (query: string, options?: IndexSearchOptions): Promise<FileStatEntry[]> => {
       assertCurrent();

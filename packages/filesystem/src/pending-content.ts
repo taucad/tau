@@ -172,9 +172,16 @@ export const asMarkedRow = <Row extends Readonly<{ type: string; size: number }>
 
 /**
  * A file whose marks settle before it is answered: its root, its authority path, and its size and mtime on disk (the
- * mtime lets a stored mark answer before the root's index has compared). @internal
+ * mtime lets a stored mark answer before the root's index has compared), and a reader of its bytes, asked only when
+ * nothing answers a pointer-sized file, so one that is no pointer answers at once. @internal
  */
-export type SettledFile = Readonly<{ root: string; authorityPath: string; size: number; mtimeMs?: number | undefined }>;
+export type SettledFile = Readonly<{
+  root: string;
+  authorityPath: string;
+  size: number;
+  mtimeMs?: number | undefined;
+  bytes?: (() => Promise<Uint8Array<ArrayBuffer> | undefined>) | undefined;
+}>;
 
 /**
  * What a path's marks say of a file (D9): the object it stands for, `undefined` when it is no placeholder, or

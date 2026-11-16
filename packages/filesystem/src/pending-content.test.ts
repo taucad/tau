@@ -461,6 +461,27 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     unopened.dispose();
   });
 
+  /*
+   * Only a pointer can be a placeholder: a stat of a file the size of one that nothing answers reads its few bytes,
+   * and an ordinary small file answers as itself at once, in the view and in the service alike (I3's bounded trade).
+   */
+  it('should answer an ordinary file the size of a pointer at once while the root waits, reading only its bytes', async () => {
+    const cold = await createService(undefined, { declared: false });
+    const raw = cold.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = cold.createRootedFileSystem(route);
+    const small = encoder.encode('x'.repeat(130));
+    await raw.writeFile('notes/small.txt', small);
+    const viewStat = await Promise.race([view.stat('notes/small.txt'), waiting()]);
+    const serviceStat = await Promise.race([cold.stat(`${route}/notes/small.txt`), waiting()]);
+    expect(viewStat).toMatchObject({ size: 130 });
+    expect(viewStat).not.toHaveProperty('pending');
+    expect(serviceStat).toMatchObject({ size: 130 });
+    expect(serviceStat).not.toHaveProperty('pending');
+    /* A pointer still waits for the declaration. */
+    expect(await Promise.race([view.stat('models/part.step'), waiting()])).toBe('waiting');
+    cold.dispose();
+  });
+
   /* Opening the root is the revision layer's word that it will declare it: no capture has to start first. */
   it('should hold a stat of a file the size of a pointer from the moment the revision layer opens the root, and no listing', async () => {
     const cold = await createService(undefined, { declared: false });

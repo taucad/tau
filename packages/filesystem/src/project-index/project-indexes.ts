@@ -31,7 +31,7 @@ import type {
 } from '#project-index/project-index.js';
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
 import type { IndexSnapshot, IndexVector } from '#project-index/index-snapshot.js';
-import { mayBePointerSize, pendingStallMilliseconds, untilDeclared } from '#pending-content.js';
+import { mayBePointerSize, pendingObjectOf, pendingStallMilliseconds, untilDeclared } from '#pending-content.js';
 import type { MarkAnswer, PendingObject, SettledFile } from '#pending-content.js';
 import { importFactsMaximumBytes, importFactsPath, parseImportFacts, verifiedImportFacts } from '#importer/facts.js';
 
@@ -787,13 +787,20 @@ export class ProjectIndexes {
    * @throws The signal's reason when the caller stops waiting.
    */
   public async settleMarks(file: SettledFile, signal?: AbortSignal): Promise<MarkAnswer> {
-    const { root, authorityPath, size, mtimeMs } = file;
+    const { root, authorityPath, size, mtimeMs, bytes } = file;
     if (!mayBePointerSize(size)) {
       return this.pendingAt(authorityPath, size);
     }
     await this.storedMarks(root);
     let answer = this.markAt(authorityPath, { size, mtimeMs });
     const held = answer === 'unknown' ? this.declarationAt(authorityPath) : undefined;
+    if (held !== undefined && bytes !== undefined) {
+      /* I3's bounded trade: a few bytes of a file the size of a pointer decide; only a pointer can be a placeholder. */
+      const head = await bytes();
+      if (head !== undefined && pendingObjectOf(head) === undefined) {
+        return undefined;
+      }
+    }
     if (held !== undefined) {
       await untilDeclared(held, signal);
       answer = this.markAt(authorityPath, { size, mtimeMs });

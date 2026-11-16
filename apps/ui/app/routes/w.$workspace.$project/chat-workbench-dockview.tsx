@@ -1,5 +1,6 @@
 import { isFeatureEnabled } from '#flags/feature-flags.js';
 import { useOpenedLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
+import { kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { BrowserPane } from '#components/browser/browser-pane.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
@@ -1534,10 +1535,12 @@ export const FileEditor = memo(function ({
   let body: ReactNode;
   let resolvedViewer: ResolvedFileViewer | undefined;
   let viewerRequest: Omit<FileViewerRenderRequest, 'renderPane'> | undefined;
-  /* A first view (STO-25): a pane opens once the entry closure lands; "File not found" waits for every authored file,
-     since a file the open's apply has yet to land is arriving, not missing (I7). */
-  const availability = useProjectAvailability('editor');
+  /* A first view (STO-25): the entry closure's pane opens once the closure lands. Any other file may still hold the
+     previous revision's bytes, or be absent, until the open's apply lands it (D9: an unlanded path is what is on disk),
+     so its pane, and "File not found", wait for every authored file (I7). */
   const absence = useProjectAvailability('absence');
+  const closurePane = useProjectAvailability('editor');
+  const availability = kernelClosure(mainEntryPath).includes(filePath) ? closurePane : absence;
   /* One wait per pane, owned here and not by the placeholder, which is replaced when the text arrives: it runs until
      the file's text is on screen (the placeholder shows it as soon as it is read). A sync or a large object shows its
      own notice instead. */

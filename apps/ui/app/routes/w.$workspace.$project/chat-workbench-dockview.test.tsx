@@ -939,6 +939,33 @@ describe('FileEditor routing', () => {
     }
   });
 
+  /*
+   * A file outside the entry closure may still hold the previous revision's bytes while the open's apply writes it
+   * (D9: an unlanded path is what is on disk). Its pane waits for every authored file; the closure opens at once.
+   */
+  it('should keep a pane outside the entry closure waiting while the open applies, never showing its old bytes', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('old') });
+    try {
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('sync-placeholder-preparing')).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+    }
+  });
+
+  it('should open the entry closure’s own pane while the open applies the rest', () => {
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('x') });
+    try {
+      render(<FileEditor paneId='main-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('viewer')).toBeInTheDocument();
+    } finally {
+      surfaceAvailability.current = new Map();
+    }
+  });
+
   it.each(['Select peer file', 'Select file to edit…'])(
     'keeps the original pane identity until a picker selection is materialized (%s)',
     async (selector) => {

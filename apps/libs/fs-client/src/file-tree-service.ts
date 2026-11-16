@@ -1896,6 +1896,7 @@ export class FileTreeService {
           existing.size !== nextDirectory.size ||
           existing.mtimeMs !== nextDirectory.mtimeMs ||
           existing.isDirectoryResolved !== nextDirectory.isDirectoryResolved ||
+          existing.pending !== nextDirectory.pending ||
           !sameProvenance(existing.provenance, nextDirectory.provenance)
         ) {
           newTree.set(entryPath, nextDirectory);
@@ -1921,6 +1922,7 @@ export class FileTreeService {
       isLoaded,
       ...fileMetadataFields(entry),
       ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
+      ...(entry.pending === true ? { pending: true } : {}),
     };
   }
 
@@ -1938,6 +1940,7 @@ export class FileTreeService {
       isLoaded: existing?.type === 'dir' ? existing.isLoaded : false,
       isDirectoryResolved: existing?.type === 'dir' ? existing.isDirectoryResolved : false,
       ...(entry.provenance === undefined ? {} : { provenance: entry.provenance }),
+      ...(entry.pending === true ? { pending: true } : {}),
     };
   }
 
@@ -1946,6 +1949,7 @@ export class FileTreeService {
       current.size !== next.size ||
       current.mtimeMs !== next.mtimeMs ||
       current.contentKind !== next.contentKind ||
+      current.pending !== next.pending ||
       !sameProvenance(current.provenance, next.provenance) ||
       (current.contentKind === 'text' && next.contentKind === 'text' && current.lineCount !== next.lineCount)
     );

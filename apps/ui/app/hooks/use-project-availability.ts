@@ -21,19 +21,72 @@ export type ProjectAvailability =
   | 'failed'
   | 'account';
 
-/** Never equate an empty local checkout with an authoritative missing file. */
+/**
+ * A first view that opens on readiness rather than the whole apply (STO-25): the surface asking, and the readiness the
+ * project has published for the open.
+ */
+export type FirstView = Readonly<{ surface: ReadinessSurface; readiness: ProjectReadiness | undefined }>;
+
+/**
+ * Whether a first view may open while a Tau Cloud open is still owed.
+ *
+ * It opens at its surface's readiness (D10), and never before the entry closure has landed: by then the tree write has
+ * announced every entry, so a listing shows each one it has yet to land as arriving, never missing (I7), and the
+ * project's `tau.json` is readable.
+ *
+ * @param view - The surface and the open's readiness.
+ * @returns `true` once the surface may open.
+ */
+const firstViewOpens = (view: FirstView): boolean =>
+  readyFor(view.surface, view.readiness) && reachesReadiness(view.readiness, 'entryReady');
+
+/**
+ * Whether the open's pull failed, was abandoned, conflicted, or its remote needs reconnecting.
+ *
+ * @param status - The revision client's projection.
+ * @returns `true` when the open cannot go on by itself.
+ */
+const isFailedOpen = (status: Pick<RevisionStatusProjection, 'sync' | 'remote'> | undefined): boolean =>
+  status?.sync.state === 'failed' ||
+  status?.sync.state === 'queued' ||
+  status?.sync.state === 'conflicted' ||
+  status?.remote.phase === 'reconnectRequired' ||
+  status?.remote.phase === 'failed';
+
+/**
+ * Never equate an empty local checkout with an authoritative missing file.
+ *
+ * @param isPending - Whether a Tau Cloud open is still owed for the project.
+ * @param status - The revision client's projection.
+ * @param options - `canOpen` (default `true`), whether this account may open the project; and `firstView`, a surface
+ *   that opens on readiness and the open's readiness, without which the surface waits for the whole apply and the
+ *   manifest that follows it.
+ * @returns What the surface shows.
+ */
 export function projectAvailability(
   isPending: boolean,
   status: Pick<RevisionStatusProjection, 'sync' | 'remote'> | undefined,
-  canOpen = true,
+  options: Readonly<{ canOpen?: boolean; firstView?: FirstView | undefined }> = {},
 ): ProjectAvailability {
+  const { canOpen = true, firstView } = options;
   if (!isPending) {
     return 'ready';
   }
   if (!canOpen) {
     return 'account';
   }
-  if (status?.sync.hasAppliedRemote === true) {
+  const failed = isFailedOpen(status);
+  const applied = status?.sync.hasAppliedRemote === true;
+  /*
+   * A failed or abandoned apply left a partial tree whose readiness stays where it got to (I7): the failure speaks,
+   * and so does the retry that follows until its own write announces the next tree. Only a write running now, or one
+   * that landed, has a tree whose arriving rows the listing shows.
+   */
+  const writing = status?.sync.pullPhase === 'applying' && !failed;
+  if (firstView !== undefined && firstViewOpens(firstView) && (writing || applied)) {
+    return 'ready';
+  }
+  if (applied) {
     return 'preparing';
   }
   if (status?.sync.online === false) {
@@ -45,23 +98,26 @@ export function projectAvailability(
   if (status?.sync.pullPhase === 'fetching') {
     return 'downloading';
   }
-  if (
-    status?.sync.state === 'failed' ||
-    status?.sync.state === 'queued' ||
-    status?.sync.state === 'conflicted' ||
-    status?.remote.phase === 'reconnectRequired' ||
-    status?.remote.phase === 'failed'
-  ) {
-    return 'failed';
-  }
-  return 'connecting';
+  return failed ? 'failed' : 'connecting';
 }
 
-/** Shared readiness for every pane; no local timer or second synchronization store. */
-export function useProjectAvailability(): ProjectAvailability {
+/**
+ * Shared readiness for every pane; no local timer or second synchronization store.
+ *
+ * @param surface - A first view (the tree, the editor, a file viewer) opens on its readiness during a Tau Cloud open
+ *   (STO-25); a pane that names none waits for the whole apply.
+ * @returns What the pane shows.
+ */
+export function useProjectAvailability(surface?: ReadinessSurface): ProjectAvailability {
   const { projectId } = useProject();
   const intent = useTauCloudIntent(projectId);
-  return projectAvailability(intent === 'open', useRevisionStatus(), canOpenCloudProject(projectId));
+  const status = useRevisionStatus();
+  return projectAvailability(intent === 'open', status, {
+    canOpen: canOpenCloudProject(projectId),
+    /* This tab's own reading only: a followed one speaks for the opener's tree write, which this tab's listing does
+       not know, so its arriving rows would be missing here (I7). */
+    firstView: surface === undefined ? undefined : { surface, readiness: ownOpenReadiness(status) },
+  });
 }
 
 /**
@@ -240,11 +296,13 @@ export function useLargeObjects(): LargeObjectsFacet | undefined {
  * model render need every authored file. A render then waits only on the large
  * objects of its own closure ({@link modelAvailability}, T6).
  */
-export type ReadinessSurface = 'tree' | 'editor' | 'viewer' | 'search' | 'export' | 'lsp' | 'cut' | 'model';
+export type ReadinessSurface = 'tree' | 'absence' | 'editor' | 'viewer' | 'search' | 'export' | 'lsp' | 'cut' | 'model';
 
 /** {@link ReadinessSurface} to the readiness state it needs. */
 export const surfaceReadiness: Readonly<Record<ReadinessSurface, ProjectReadiness>> = {
   tree: 'treeReady',
+  /* A surface that says a file is missing, or the project has none, speaks for every authored file (I7). */
+  absence: 'materialized',
   editor: 'entryReady',
   viewer: 'entryReady',
   search: 'materialized',
@@ -280,10 +338,19 @@ export function pendingOpenReadiness(
   own: Pick<RevisionStatusProjection, 'readiness' | 'remote'> | undefined,
   followed: ProjectReadiness | undefined,
 ): ProjectReadiness {
-  if (own?.readiness !== undefined && own.remote.kind !== 'none') {
-    return own.readiness;
-  }
-  return followed ?? 'connected';
+  return ownOpenReadiness(own) ?? followed ?? 'connected';
+}
+
+/**
+ * This tab's own readiness during a Tau Cloud open: once its own root is connected, its reading; before, nothing.
+ *
+ * @param own - This tab's projection.
+ * @returns Its own readiness, or `undefined` while its root has not connected.
+ */
+export function ownOpenReadiness(
+  own: Pick<RevisionStatusProjection, 'readiness' | 'remote'> | undefined,
+): ProjectReadiness | undefined {
+  return own?.readiness !== undefined && own.remote.kind !== 'none' ? own.readiness : undefined;
 }
 
 /** The selected checkout's readiness, as its host settled it; `undefined` until published. */

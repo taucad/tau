@@ -682,6 +682,19 @@ describe('rpc-handlers', () => {
         expect(mockFm.readRawBytes).not.toHaveBeenCalled();
       });
 
+      /* I7: a row a tree write has yet to land is not on disk; the agent could not read it, so it is not listed. */
+      it('should leave out a row a tree write has yet to land, and a folder only such rows make', async () => {
+        vi.mocked(lastTreeService!.listDirectoryExact).mockResolvedValueOnce([
+          { name: 'main.ts', type: 'file', size: 5, mtimeMs: 100, contentKind: 'text', lineCount: 1 },
+          { name: 'gear.ts', type: 'file', size: 300, mtimeMs: 0, pending: true, arriving: true },
+          { name: 'lib', type: 'dir', size: 0, mtimeMs: 0, pending: true, arriving: true },
+        ]);
+
+        const entries = await fileSystem.readdir('src');
+
+        expect(entries.map(({ name }) => name)).toEqual(['main.ts']);
+      });
+
       it('should report a cached binary file as text after an external replacement', async () => {
         vi.mocked(lastTreeService!.listDirectory).mockResolvedValueOnce([
           { name: 'part.dat', path: 'src/part.dat', isFolder: false, size: 5, mtimeMs: 100, contentKind: 'binary' },

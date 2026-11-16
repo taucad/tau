@@ -707,12 +707,14 @@ const config = [
     /*
      * `headless-image-backend` reaches SVG rendering through `await import('@taucad/image/svg')`, so Nx
      * records a lazy edge to the image package and rejects every remaining static import of it. These
-     * four files sit outside the page graph that edge protects: each runtime definition reaches a bundle
-     * only through its own worker entry (`runtime.worker.ts`, `runtime-debug.worker.ts` and
-     * `image-runtime.worker.ts`), every other reader of those definitions imports them type-only, and the
-     * two converter suites ship nothing. Scoped to these files so the page keeps the lazy-load guarantee.
+     * five files sit outside the page graph that edge protects: each runtime definition reaches a bundle
+     * only through its own worker entry (`runtime.worker.ts`, `runtime-debug.worker.ts`,
+     * `image-runtime.worker.ts` and `attachment-image-runtime.worker.ts`) or a dynamic `import()` (the
+     * attachment image service reads its source list that way), every other reader of those definitions
+     * imports them type-only, and the two converter suites ship nothing. Scoped to these files so the page keeps the lazy-load guarantee.
      */
     files: [
+      'apps/ui/app/runtime/attachment-image-runtime.definition.ts',
       'apps/ui/app/runtime/image-runtime.definition.ts',
       'apps/ui/app/runtime/ui-runtime.definition.ts',
       'apps/ui/app/routes/w.$workspace.$project/chat-converter.test.tsx',

@@ -295,6 +295,7 @@ describe('attachment-media', () => {
     it.each([
       { name: 'bytes that are not an image', output: new TextEncoder().encode('garbage') },
       { name: 'an image still larger than 1568 px', output: jpegOf(3000, 2000) },
+      { name: 'an animated WebP', output: animatedWebp() },
     ])('should refuse a port result that is $name', async ({ output }) => {
       const outcome = await normalizeImageAttachment({
         bytes: imageBytes.gif,
@@ -341,9 +342,12 @@ describe('attachment-media', () => {
           )
             .split('\n')
             .filter(Boolean);
-        } catch {
-          // `git grep` exits 1 when nothing matches.
-          return [];
+        } catch (error) {
+          // `git grep` exits 1 when nothing matches; any other failure must fail the test, not pass it.
+          if ((error as { readonly status?: unknown }).status === 1) {
+            return [];
+          }
+          throw error;
         }
       });
 

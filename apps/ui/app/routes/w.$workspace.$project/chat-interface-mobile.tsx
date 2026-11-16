@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { DockviewApi } from 'dockview-react';
 import { XIcon } from 'lucide-react';
@@ -18,6 +18,7 @@ import type { ViewerFileActions } from '#routes/w.$workspace.$project/chat-viewe
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { frameHintKey, writePhoneFrameHint } from '#lib/frame-hint.js';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -483,8 +484,17 @@ function useChatCue(): MobileWorkbenchDestinationCue | undefined {
 }
 
 export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
-  const { activeTab, handleTabChange, drawerOpen, handleDrawerChange, snapPoints, activeSnapPoint, handleSnapChange } =
-    useChatInterfaceState();
+  const {
+    isEditorReady,
+    isLayoutRestored,
+    activeTab,
+    handleTabChange,
+    drawerOpen,
+    handleDrawerChange,
+    snapPoints,
+    activeSnapPoint,
+    handleSnapChange,
+  } = useChatInterfaceState();
   const chatCue = useChatCue();
   const [viewerApi, setViewerApi] = useState<DockviewApi>();
   const [viewerFileActions, setViewerFileActions] = useState<ViewerFileActions>();
@@ -588,18 +598,36 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
     [acknowledgeDecisions, drawerOpen, handleSnapChange],
   );
 
+  /* The frame hint mirrors the surface the editor machine holds, so the next load of this project draws its phone
+   * frame with that tab selected and the sheet where it opens (A15c). Only once the editor state has loaded: before
+   * that the surface is the default. */
+  useLayoutEffect(() => {
+    const hintKey = frameHintKey(globalThis.location.pathname);
+    if (isEditorReady && hintKey !== undefined) {
+      writePhoneFrameHint(hintKey, activeTab);
+    }
+  }, [isEditorReady, activeTab]);
+
   const isViewerTab = activeTab === 'viewer';
   const sheetHeight = snapPointLength(activeSnapPoint);
 
   return (
     <ChatInterfaceSessionGate fallback={<WorkspaceOpening />}>
+      {/* The route's busy state while the workspace is drawn but not shown, outside it so it is exposed: the phone
+       * frame is hidden from assistive technology, and the gates' marker is gone once the workspace mounts. */}
+      {isLayoutRestored ? null : <WorkspaceOpening />}
       <div
+        /* Until the stored layout is read the surface is the default, not this project's: the phone frame stands in for
+         * the workspace, which is drawn but not shown, and gives way to it in the commit the layout is restored
+         * (A15c, `PhoneFrame`). */
+        data-mobile-workspace={isLayoutRestored ? 'ready' : 'opening'}
         className={cn(
+          'data-[mobile-workspace=opening]:invisible',
           // --nav-height is the height of the navigation tabs
           'absolute inset-0 flex size-full flex-col overflow-hidden',
           mobileWorkbenchNavigationHeight,
           'md:hidden', // Hidden on desktop
-          // No entrance on load (U9, LI5): the workspace paints in its final state over the skeleton's place.
+          // No entrance on load (U9, LI5): the workspace paints in its final state over the phone frame's boxes.
         )}
       >
         {/* W2 (D2, EQ2 = H1): the project's top bar — sidebar, title with status line, Share. */}

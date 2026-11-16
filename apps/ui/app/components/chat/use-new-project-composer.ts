@@ -1,11 +1,55 @@
 import { useEffect, useState } from 'react';
 import type { ComponentType } from 'react';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import type { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
 
 export type NewProjectComposerProperties = {
   readonly adoptedEarlyInput?: EarlyChatInput;
   readonly enableAutoFocus?: boolean;
   readonly className?: string;
+};
+
+type NewProjectComposerModule = { readonly NewProjectChatComposer: typeof NewProjectChatComposer };
+
+/** This page's fetch of the composer's chunk, while it is in flight or once it is in. */
+let composerLoad: Promise<NewProjectComposerModule> | undefined;
+
+/** Import the composer's chunk; a failure clears the memo so the next call fetches again. */
+const importComposer = async (): Promise<NewProjectComposerModule> => {
+  try {
+    return await import('#components/chat/new-project-chat-composer.js');
+  } catch (error) {
+    composerLoad = undefined;
+    throw error;
+  }
+};
+
+/**
+ * Start fetching the new-project composer's chunk, once per page. Home calls it as its module evaluates, so the chunk
+ * downloads beside hydration instead of after the composer's host mounts (progressive loading PL5, "composer chunk
+ * preloaded"). A failed fetch is not kept, so the next call fetches again.
+ *
+ * @returns The composer's module.
+ */
+export const preloadNewProjectComposer = async (): Promise<NewProjectComposerModule> => {
+  composerLoad ??= importComposer();
+  return composerLoad;
+};
+
+/**
+ * Start fetching the composer's chunk without waiting for it. A failure is dropped here: the hook retries and reports
+ * it when the composer's host mounts.
+ */
+export const prefetchNewProjectComposer = (): void => {
+  const prefetch = async (): Promise<void> => {
+    try {
+      await preloadNewProjectComposer();
+    } catch {
+      // The hook owns the retry and the report.
+    }
+  };
+  // async-iife: bootstrap — a module-evaluation prefetch cannot await; its failure is the hook's to report.
+  void prefetch();
 };
 
 function reportComposerLoadFailure(error: unknown): void {
@@ -31,7 +75,7 @@ export function useNewProjectComposer(): ComponentType<NewProjectComposerPropert
   useEffect(() => {
     let live = true;
     const fetchComposer = async (): Promise<void> => {
-      const composerModule = await import('#components/chat/new-project-chat-composer.js');
+      const composerModule = await preloadNewProjectComposer();
       if (live) {
         setComposer(() => composerModule.NewProjectChatComposer);
       }

@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ErrorEvent } from '@sentry/react';
 import * as Sentry from '@sentry/react';
+import { GraphicsContextUnavailableError } from '@taucad/viewer/graphics/graphics-backend';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 import {
   beforeSendSentryEvent,
@@ -78,6 +79,18 @@ describe('beforeSendSentryEvent', () => {
     const sent = beforeSendSentryEvent(rejectionEvent(), { originalException: new TypeError('Failed to fetch') });
     expect(sent?.level).toBe('warning');
     expect(sent?.fingerprint).toStrictEqual(['transient-network-failure']);
+  });
+
+  it('groups a browser without a WebGL 2 context apart at warning level, however the error was rebuilt', () => {
+    const unavailable = new GraphicsContextUnavailableError({ cause: new TypeError('null context') });
+    for (const failure of [unavailable, new Error('3D rendering failed', { cause: unavailable })]) {
+      const sent = beforeSendSentryEvent(rejectionEvent(), { originalException: failure });
+      expect(sent?.level).toBe('warning');
+      expect(sent?.fingerprint).toStrictEqual(['graphics-context-unavailable']);
+      // What a fresh canvas gets at that moment tells a code fault from a browser without WebGL.
+      expect(sent?.contexts?.['tau.webgl']).toHaveProperty('probed', true);
+      expect(sent?.contexts?.['tau.webgl']).toHaveProperty('freshCanvasWebGl2');
+    }
   });
 
   it('scrubs and keeps any other event', () => {

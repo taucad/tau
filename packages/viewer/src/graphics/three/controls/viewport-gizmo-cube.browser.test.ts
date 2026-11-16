@@ -5,7 +5,6 @@ import {
   Color,
   NoToneMapping,
   PerspectiveCamera,
-  Raycaster,
   RenderTarget,
   Scene,
   Vector3,
@@ -14,11 +13,13 @@ import {
   WebGLRenderTarget,
 } from 'three';
 import { WebGLBackend, WebGPUBackend, WebGPURenderer } from 'three/webgpu';
-import { createViewportGizmoCubeAxes } from '#graphics/three/controls/viewport-gizmo-cube-axes.js';
 import { createSectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { ViewportGizmo } from 'three-viewport-gizmo';
 import { createRenderer } from '#graphics/three/renderer.js';
-import { applyViewportGizmoSurface } from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
+import {
+  resolveViewportGizmoStyleConfig,
+  viewportGizmoNodeMaterials,
+} from '#graphics/three/controls/viewport-gizmo-styles.js';
 import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
 
 const measureCoverage = (
@@ -121,13 +122,12 @@ it.each(['webgl', 'webgpu'] as const)(
     camera.up.set(0, 0, 1);
     const gizmo = new ViewportGizmo(camera, renderer, {
       type: 'rounded-cube',
-      up: 'z',
+      up: { x: 0, y: 0, z: 1 },
       size: 320,
       radius: viewportGizmoMetrics.radius,
       container: document.body,
       placement: 'top-left',
       offset: { top: 0, left: 0 },
-      background: { enabled: false },
     });
     const scene = new Scene();
     const copy = document.createElement('canvas');
@@ -149,18 +149,15 @@ it.each(['webgl', 'webgpu'] as const)(
           isHighContrast: false,
           accentColor: '#008c7d',
         });
-        applyViewportGizmoSurface(gizmo, style, backend);
-        gizmo.updateMatrixWorld(true);
-        const raycaster = new Raycaster();
-        for (const region of gizmo.children) {
-          const direction = region.position.clone().transformDirection(gizmo.matrixWorld);
-          raycaster.set(direction.clone().multiplyScalar(7), direction.negate());
-          expect(raycaster.intersectObjects(gizmo.children, false)[0]?.object, 'face, edge and corner picking').toBe(
-            region,
-          );
-        }
+        gizmo.set({
+          ...resolveViewportGizmoStyleConfig({ gizmoStyle: 'cube', colors: style, radius: viewportGizmoMetrics.radius })
+            .options,
+          // The surface alone: the triad's letters sit outside the silhouette.
+          triad: { enabled: false },
+        });
+        // Picking is the library's analytic hit test now (its own tests); this checks the surface only.
         // oxlint-disable-next-line eslint/no-await-in-loop -- A theme creates a new set of label textures and materials.
-        await renderer.compileAsync(gizmo, camera);
+        await gizmo.compile();
         for (let yaw = 0; yaw < 360; yaw += 30) {
           camera.position.set(7 * Math.sin((yaw * Math.PI) / 180), -7 * Math.cos((yaw * Math.PI) / 180), 3);
           camera.lookAt(new Vector3());
@@ -175,7 +172,7 @@ it.each(['webgl', 'webgpu'] as const)(
             }
             target?.viewport.set(0, 0, 384, 384);
             renderer.render(scene, camera);
-            gizmo.cameraUpdate();
+            gizmo.update();
             target?.viewport.set(0, 0, 320, 320);
             gizmo.render();
             if (target && !(renderer instanceof WebGLRenderer)) {
@@ -234,11 +231,10 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
     const scene = new Scene();
     const gizmo = new ViewportGizmo(camera, renderer, {
       type: 'rounded-cube',
-      up: 'z',
+      up: { x: 0, y: 0, z: 1 },
       size: 96,
       container: document.body,
       placement: 'top-right',
-      background: { enabled: false },
     });
     const style = readViewportGizmoStyle({
       container: document.body,
@@ -247,13 +243,11 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
       accentColor: '#008c7d',
     });
     picker.setStyle(style);
-    applyViewportGizmoSurface(gizmo, style, execution === 'webgl' ? 'webgl' : 'webgpu');
-    gizmo.scale.multiplyScalar(0.7);
-    gizmo.add(
-      createViewportGizmoCubeAxes({
-        renderingBackend: execution === 'webgl' ? 'webgl' : 'webgpu',
-      }),
-    );
+    gizmo.set({
+      ...resolveViewportGizmoStyleConfig({ gizmoStyle: 'cube', colors: style, radius: viewportGizmoMetrics.radius })
+        .options,
+      onMaterial: execution === 'webgl' ? undefined : viewportGizmoNodeMaterials(new Set()),
+    });
     const viewport = new Vector4();
     const draw = async (side: number, x = 1, z = 1): Promise<Uint8Array<ArrayBuffer>> => {
       await new Promise<void>((resolve) => {
@@ -276,7 +270,7 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
       renderer.setViewport(0, 0, 2560, 1440);
       renderer.autoClear = true;
       renderer.render(scene, camera);
-      gizmo.cameraUpdate();
+      gizmo.update();
       target.viewport.set(0, 0, 5120, 2880);
       picker.render({
         renderer,

@@ -73,6 +73,7 @@
     "./types/chat-sidebar.types": "./src/types/chat-sidebar.types.ts",
     "./utils/assistant-message-activity": "./src/utils/assistant-message-activity.ts",
     "./utils/at-reference.utils": "./src/utils/at-reference.utils.ts",
+    "./utils/attachment-intake": "./src/utils/attachment-intake.ts",
     "./utils/attachment.test-utils": "./src/utils/attachment.test-utils.ts",
     "./utils/attachment.utils": "./src/utils/attachment.utils.ts",
     "./utils/chat-activity-cue": "./src/utils/chat-activity-cue.ts",

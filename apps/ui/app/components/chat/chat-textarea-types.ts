@@ -9,11 +9,7 @@ import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
 import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { attachmentModelForExecution, attachmentSendBlockReason } from '#utils/chat.utils.js';
-import {
-  attachmentKind,
-  isSupportedAttachmentMediaType,
-  supportedAttachmentMediaTypes,
-} from '@taucad/chat-ui/utils/attachment.utils';
+import { attachmentKind, supportedAttachmentMediaTypes } from '@taucad/chat-ui/utils/attachment.utils';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import { homeComposerAttachmentDirectory, useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -22,11 +18,8 @@ import { toast } from '@taucad/ui/components/sonner';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useComposerExit } from '@taucad/chat-ui/components/use-composer-exit';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
-import {
-  getClipboardImageFiles,
-  handleClipboardImagePaste,
-  readFileAsDataUrl,
-} from '@taucad/chat-ui/components/chat-paste-handler';
+import { getClipboardImageFiles, handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
+import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
 import type { ClipboardPasteEvent } from '@taucad/chat-ui/components/chat-paste-handler';
 
 /**
@@ -50,11 +43,11 @@ export type ChatTextareaSubmitPayload = {
   readonly references?: readonly CadReference[];
 };
 
-/** A dropped or picked file as the draft takes it: an image as a data URL, a document as its bytes (S7). */
-const readAttachmentSource = async (file: File): Promise<DraftAttachmentSource> =>
-  file.type.startsWith('image/')
-    ? readFileAsDataUrl(file)
-    : { bytes: new Uint8Array(await file.arrayBuffer()), mediaType: file.type };
+/** The toast for a file intake refuses, by its reason. */
+const intakeRefusal = {
+  unsupported: 'Only images and PDFs are supported',
+  'too-large': 'Files over 64 MB cannot be attached',
+} as const;
 
 /**
  * What an entry point may say about an attachment it adds. The selected model
@@ -410,15 +403,15 @@ export function useChatTextareaLogic({
   const addFiles = useCallback(
     async (files: Iterable<File>): Promise<void> => {
       for (const file of files) {
-        if (!isSupportedAttachmentMediaType(file.type)) {
-          toast.error('Only images and PDFs are supported');
-          continue;
-        }
         try {
-          // A document goes in as bytes; only an image needs a data URL, for resizing (S7).
+          // Labelled from the bytes, never `file.type` (I1): an image as a data URL, a document as its bytes (S7).
           // oxlint-disable-next-line no-await-in-loop -- reading files sequentially keeps attachment order
-          const source = await readAttachmentSource(file);
-          addAttachment(source, file.name ? { filename: file.name } : undefined);
+          const intake = await readAttachmentFile(file);
+          if (intake.outcome === 'refused') {
+            toast.error(intakeRefusal[intake.reason]);
+            continue;
+          }
+          addAttachment(intake.source, file.name ? { filename: file.name } : undefined);
         } catch {
           toast.error(file.type.startsWith('image/') ? 'Failed to read image' : 'Failed to read file');
         }
@@ -669,6 +662,9 @@ export function useChatTextareaLogic({
         onImage: addAttachment,
         onReadError: () => {
           toast.error('Failed to read image');
+        },
+        onRefused: (reason) => {
+          toast.error(intakeRefusal[reason]);
         },
       });
     },

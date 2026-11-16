@@ -2,7 +2,16 @@ import { ObservabilityHarnessHydrationProbe } from '#lib/observability-harness-h
 import { onDesktopMachineNavigation } from '#filesystem/desktop-bridge.js';
 import { installLoopbackHandOff } from '#lib/agent-host-placement.js';
 import type { ComponentType, ReactNode } from 'react';
-import { Links, Meta, Scripts, ScrollRestoration, useNavigate, useRouteLoaderData, useLocation } from 'react-router';
+import {
+  Links,
+  Meta,
+  Scripts,
+  ScrollRestoration,
+  useMatches,
+  useNavigate,
+  useRouteLoaderData,
+  useLocation,
+} from 'react-router';
 import { HydrationBoundary, QueryClientProvider } from '@tanstack/react-query';
 import type { DehydratedState } from '@tanstack/react-query';
 import { Fragment, useEffect } from 'react';
@@ -37,6 +46,7 @@ import { CloudRootBoundary, useCloudPaymentActionReturn } from '#cloud/root-bill
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
 import { selectRuntimeIdleFileManagers, selectRuntimeQueryClient } from '#runtime/app-runtime.js';
 import { useAppRuntime, useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
+import { publishRoute } from '#lib/sentry-context.lib.js';
 
 /**
  * The root loader's data. It carries nothing about the visitor: per-visitor view facts reach the page through the
@@ -147,6 +157,15 @@ function LayoutDocument({
   useEffect(() => {
     setFaviconColor(color.serialized.hex);
   }, [setFaviconColor, color]);
+
+  /* RR7: the matched routes this page rendered, for the error `route` tags and the transaction names, through
+   * React Router's public matches instead of its private router global. Route ids hold no space. */
+  const routeIds = useMatches()
+    .map((match) => match.id)
+    .join(' ');
+  useEffect(() => {
+    publishRoute(routeIds.split(' '));
+  }, [routeIds]);
 
   return (
     <html

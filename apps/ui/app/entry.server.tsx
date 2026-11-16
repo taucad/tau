@@ -10,12 +10,21 @@ import { cdnCacheControlResponseHeader } from '@taucad/ui-core/constants/cache.c
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 import { skewProtectionCookie, skewProtectionToken } from '#lib/skew-protection.server.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '@taucad/ui-core/lib/module-preload-cap';
-import { claimSsrErrors, leafRouteId, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
+import {
+  claimSsrErrors,
+  leafRouteId,
+  queueSsrError,
+  reportSsrError,
+  routeErrorInstrumentation,
+} from '#lib/sentry.server.js';
 import { startDocumentTiming } from '#lib/server-timing.server.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 
 export const streamTimeout = 5000;
+
+/** RR7: the route a failed loader, action or middleware belongs to, for the SSR error report's route tags. */
+export const instrumentations = [routeErrorInstrumentation];
 
 /**
  * Server errors React Router saw in a loader, action or render (SB10). A request the client aborted is skipped, as

@@ -161,6 +161,9 @@ type RootState = {
  * kept across an eviction that left its mount as it was. Each answers a file only while the file is at the size and
  * mtime it was stored at.
  */
+/* What a tree write said of one path (D10), and whether its write had yet to land it when the index last knew. */
+type ExpectedAnswer = Readonly<{ size: number; pending?: PendingObject; arriving: boolean }>;
+
 type StoredMarks = Readonly<{
   rows: ReadonlyMap<string, Readonly<{ size: number; mtimeMs: number }>>;
   pending: Readonly<Record<string, PendingObject>>;
@@ -190,7 +193,7 @@ export class ProjectIndexes {
    */
   private readonly _declaration = new Map<string, 'declared' | 'unknown'>();
   /** Per root a tree write is landing, every path it named and the object each placeholder stands for (D10). */
-  private readonly _expected = new Map<string, Map<string, Readonly<{ size: number; pending?: PendingObject }>>>();
+  private readonly _expected = new Map<string, Map<string, ExpectedAnswer>>();
   /** Per cold root, the marks known before its index compares (see `StoredMarks`). */
   private readonly _stored = new Map<string, StoredMarks>();
   /** Indexes whose first observation is a scan, which finds every row new rather than changed. */
@@ -682,9 +685,16 @@ export class ProjectIndexes {
   public markAt(absolutePath: string, row: Readonly<{ size: number; mtimeMs?: number | undefined }>): MarkAnswer {
     const normalized = normalizePath(absolutePath);
     const expected = this._expectedAt(normalized);
-    if (expected !== undefined) {
+    if (expected !== undefined && !expected.arriving) {
       return expected.pending !== undefined && expected.size === row.size ? expected.pending : undefined;
     }
+    const answer = this._markedAt(normalized, row);
+    /* A path the write has yet to land is what is on disk: its mark there, or not known (I7). */
+    return answer === undefined && expected !== undefined ? 'unknown' : answer;
+  }
+
+  /* What the marks say of a file, the stored snapshot's first, then its covering index's. */
+  private _markedAt(normalized: string, row: Readonly<{ size: number; mtimeMs?: number | undefined }>): MarkAnswer {
     for (const [stored, marks] of this._stored) {
       const relative = relativeTo(stored, normalized);
       const kept = relative === undefined ? undefined : marks.rows.get(relative);
@@ -879,7 +889,10 @@ export class ProjectIndexes {
     this._expected.set(
       normalizePath(root),
       new Map(
-        entries.map(({ path, size, pending }) => [path, pending === undefined ? { size } : { size, pending }] as const),
+        entries.map(
+          ({ path, size, pending, arriving }) =>
+            [path, pending === undefined ? { size, arriving } : { size, pending, arriving }] as const,
+        ),
       ),
     );
     /* A cold root is opened first, so a cold open's write is known as it lands. */
@@ -903,9 +916,21 @@ export class ProjectIndexes {
    * End a root's expectation: its tree write is over.
    *
    * @param root - Absolute root.
+   * @param options - `failed` when the write did not land every path, so its entries no longer answer.
    */
-  public endExpectation(root: string): void {
-    this._states.get(normalizePath(root))?.index.endExpectation();
+  public endExpectation(root: string, options?: Readonly<{ failed?: boolean }>): void {
+    const key = normalizePath(root);
+    const expected = this._expected.get(key);
+    if (options?.failed === true) {
+      /* A failed write landed what it landed: every path is what is on disk, as the index observes it. */
+      this._expected.delete(key);
+    } else if (expected !== undefined) {
+      /* The write is over and landed every path: the tree's word stands until the declaration that follows. */
+      for (const [path, answer] of expected) {
+        expected.set(path, { ...answer, arriving: false });
+      }
+    }
+    this._states.get(key)?.index.endExpectation();
   }
 
   /**
@@ -1117,12 +1142,14 @@ export class ProjectIndexes {
   }
 
   /* What the tree write landing under a path's root said of it, if it named it. */
-  private _expectedAt(normalized: string): Readonly<{ size: number; pending?: PendingObject }> | undefined {
+  private _expectedAt(normalized: string): ExpectedAnswer | undefined {
     for (const [root, expected] of this._expected) {
       const relative = relativeTo(root, normalized);
       const answer = relative === undefined ? undefined : expected.get(relative);
       if (answer !== undefined) {
-        return answer;
+        /* Once the root's index knows the tree, it says what has landed; before, the write said what it would land. */
+        const index = this._states.get(root)?.index;
+        return index?.expecting === true ? { ...answer, arriving: index.arriving(relative!) } : answer;
       }
     }
     return undefined;

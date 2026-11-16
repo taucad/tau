@@ -248,8 +248,8 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
     pendingPaths?(paths: readonly string[]): Promise<readonly string[]>;
     /** Whether these paths of the expected tree have all landed; `undefined` while no tree is expected here. */
     entriesLanded?(paths: readonly string[]): boolean | undefined;
-    /** End this root's expectation: the tree write is over. */
-    endExpectation?(): void;
+    /** End this root's expectation: the tree write is over, and `failed` when it did not land every path. */
+    endExpectation?(options?: Readonly<{ failed?: boolean }>): void;
     /**
      * Lazy content facts (D4): from the index while they still describe the
      * bytes, otherwise measured from one read within `byteCap` and recorded.
@@ -1323,8 +1323,8 @@ export class RootedViews {
           root,
           paths.map((path) => resolveLocal(path).localPath),
         ),
-      endExpectation: (): void => {
-        this._projectIndexes.endExpectation(root);
+      endExpectation: (options?: Readonly<{ failed?: boolean }>): void => {
+        this._projectIndexes.endExpectation(root, options);
       },
       facts,
       compareIndex,

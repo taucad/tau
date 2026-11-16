@@ -681,3 +681,50 @@ describe('expected entries (D10)', () => {
     expect(raw.entriesLanded!(['tau.json'])).toBeUndefined();
   });
 });
+
+/*
+ * A tree write over a pending path (a pull): until the new tree lands a path, the path is what is on disk, so its stat
+ * and its read answer the old placeholder alike, never the old pointer's text (I7).
+ */
+describe('a tree write over pending entries (D9, D10, I7)', () => {
+  const newPart = encoder.encode('the new solid part\n');
+  const pointerOf = (to: string, size: number): Uint8Array<ArrayBuffer> =>
+    encoder.encode(`version https://git-lfs.github.com/spec/v1\noid sha256:${to}\nsize ${String(size)}\n`);
+  const objects = async (request: Readonly<{ object: Readonly<{ oid: string }> }>): Promise<Uint8Array<ArrayBuffer>> =>
+    request.object.oid === oid ? part : newPart;
+
+  it.each([
+    ['another size', 'd'.repeat(64), newPart.byteLength],
+    ['the same size', 'e'.repeat(64), part.byteLength],
+  ])(
+    'should answer a pending path the write has not landed as its old placeholder, its new pointer at %s',
+    async (_case, to, size) => {
+      service.setPendingObjectSource(objects);
+      const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+      const view = service.createRootedFileSystem(route);
+      const next = pointerOf(to, size);
+      await raw.expectEntries!([
+        { path: 'main.scad', size: 27, arriving: false },
+        { path: 'models/part.step', size: next.byteLength, pending: { oid: to, size }, arriving: true },
+      ]);
+      expect(await view.stat('models/part.step')).toMatchObject({ size: part.byteLength, pending: true });
+      expect(await view.readFile('models/part.step')).toStrictEqual(part);
+      /* Landed, the path is the new tree's. */
+      await raw.writeFile('models/part.step', next);
+      expect(await view.stat('models/part.step')).toMatchObject({ size, pending: true });
+      expect(await view.readFile('models/part.step')).toStrictEqual(newPart);
+      raw.endExpectation!();
+    },
+  );
+
+  it('should forget a failed tree write’s entries, so its paths answer as they are on disk', async () => {
+    service.setPendingObjectSource(objects);
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    /* The new tree says the path is a small text file; the write fails before it lands. */
+    await raw.expectEntries!([{ path: 'models/part.step', size: pointer.byteLength, arriving: true }]);
+    raw.endExpectation!({ failed: true });
+    expect(await view.stat('models/part.step')).toMatchObject({ size: part.byteLength, pending: true });
+    expect(await view.readFile('models/part.step')).toStrictEqual(part);
+  });
+});

@@ -753,7 +753,7 @@ export const createApplyTreeEffects = (
       } finally {
         workerTimings.record('apply.hold', heldAt);
         if (closure !== undefined) {
-          live.endExpectation?.();
+          live.endExpectation?.({ failed });
         }
         if (failed && applyOptions.held !== undefined && typeof release === 'function') {
           applyOptions.held.release = release;

@@ -1027,6 +1027,8 @@ describe('the entry closure of a tree write (D10)', () => {
       })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree' }),
     ).rejects.toThrow('host bracket failed');
     expect(endExpectation).toHaveBeenCalledTimes(1);
+    /* A failed write's entries no longer answer: what it did not land is what is on disk (I7). */
+    expect(endExpectation).toHaveBeenLastCalledWith({ failed: true });
 
     /* An aborted write releases its bracket as failed, so its tree is never read as written. */
     const outcomes: unknown[] = [];

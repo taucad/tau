@@ -34,6 +34,7 @@ export default defineConfig({
       '@taucad/image > @jsquash/webp/codec/enc/webp_enc.js',
       '@taucad/image > @jsquash/webp/meta.js',
       '@taucad/image > @resvg/resvg-wasm',
+      '@taucad/heif > libheif-js/libheif-wasm/libheif.js',
       'deepmerge',
       '@taucad/image > jpeg-js',
       'manifold-3d/manifold-gltf',

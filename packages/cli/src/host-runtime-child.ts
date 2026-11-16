@@ -160,7 +160,13 @@ const handleMessage = async (message: unknown): Promise<void> => {
     });
   }
   host = await serveHostRuntime({ runtime, authorizationToken: message.authorizationToken });
-  process.send?.({ type: 'ready', url: host.url.href, runtimeVersion: host.runtimeVersion });
+  process.send?.({
+    type: 'ready',
+    url: host.url.href,
+    runtimeVersion: host.runtimeVersion,
+    /* The formats this runtime converts to JPEG, so the host can store agent images it cannot keep as sent. */
+    transcodeSources: host.transcodeSources,
+  });
 };
 
 const enqueue = (message: unknown): void => {

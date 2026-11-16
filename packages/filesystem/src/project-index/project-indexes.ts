@@ -714,31 +714,6 @@ export class ProjectIndexes {
     return answer === undefined && expected !== undefined ? 'unknown' : answer;
   }
 
-  /* What the marks say of a file, the stored snapshot's first, then its covering index's. */
-  private _markedAt(normalized: string, row: Readonly<{ size: number; mtimeMs?: number | undefined }>): MarkAnswer {
-    for (const [stored, marks] of this._stored) {
-      const relative = relativeTo(stored, normalized);
-      const kept = relative === undefined ? undefined : marks.rows.get(relative);
-      if (kept !== undefined && kept.size === row.size && kept.mtimeMs === row.mtimeMs) {
-        const object = Object.hasOwn(marks.pending, relative!) ? marks.pending[relative!] : undefined;
-        return object ?? (marks.declared || !this._unknownAt(normalized) ? undefined : 'unknown');
-      }
-      if (relative !== undefined && marks.declared && mayBePointerSize(row.size)) {
-        /* A stamp vouches only for the rows it stored: a pointer-sized file written since is not known (I7). */
-        return 'unknown';
-      }
-    }
-    const covering = this._covering(normalized);
-    if (covering !== undefined) {
-      const entry = covering.index.entry(covering.relative);
-      if (entry?.pending !== undefined && entry.size === row.size) {
-        return entry.pending;
-      }
-      return this._unknownAt(normalized) ? 'unknown' : undefined;
-    }
-    return this._unknownAt(normalized) ? 'unknown' : undefined;
-  }
-
   /**
    * End the wait on one root and every root under it: the revision layer let go of it (its first capture ended
    * without a declaration). What waited answers from the marks it finds; the root stays as known as it was, so a
@@ -888,47 +863,6 @@ export class ProjectIndexes {
    */
   public declarationBasis(root: string): number {
     return this._expectations.get(normalizePath(root)) ?? 0;
-  }
-
-  private async _declare(
-    key: string,
-    declared: ReadonlyMap<string, DeclaredPlaceholder>,
-    scope: Readonly<{ paths: readonly string[] | undefined; overtaken: () => boolean }>,
-  ): Promise<boolean> {
-    const { paths, overtaken } = scope;
-    if (overtaken()) {
-      return false;
-    }
-    await this.ready(key);
-    if (overtaken()) {
-      return false;
-    }
-    const absolute = (path: string): string => (key === '/' ? `/${path}` : `${key}/${path}`);
-    for (const [indexRoot, state] of this._states) {
-      /* Where the root lies in this index: its prefix when the index holds it, `''` when the index lies inside it. */
-      const prefix = this._inside(indexRoot, key) ?? (this._inside(key, indexRoot) === undefined ? undefined : '');
-      if (prefix === undefined || !state.index.isComplete) {
-        continue;
-      }
-      const inIndex = (path: string): string | undefined => {
-        const relative = this._inside(indexRoot, absolute(path));
-        return relative === undefined || relative === '' ? undefined : relative;
-      };
-      const translated = new Map(
-        [...declared].flatMap(([path, placeholder]) => {
-          const relative = inIndex(path);
-          return relative === undefined ? [] : [[relative, placeholder] as const];
-        }),
-      );
-      const changed = state.index.declarePending(
-        translated,
-        paths === undefined ? { under: prefix } : { paths: paths.flatMap((path) => inIndex(path) ?? []) },
-      );
-      if (changed) {
-        this._schedulePersist(indexRoot);
-      }
-    }
-    return true;
   }
 
   /**
@@ -1124,6 +1058,90 @@ export class ProjectIndexes {
     }
   }
 
+  /** Drop every index: disposal, or a reset fact that may have moved the whole tree. */
+  public clear(): void {
+    this._readFacts.clear();
+    this._importFactsPending.clear();
+    this._importSeeded.clear();
+    for (const state of this._states.values()) {
+      clearTimeout(state.persistTimer);
+    }
+    this._states.clear();
+    /* Nothing will declare a root now: what waited answers from the marks it finds. */
+    this.releaseDeclaration('/');
+    this._settled.clear();
+    this._declaration.clear();
+    this._expected.clear();
+    this._stored.clear();
+    this._peeking.clear();
+  }
+
+  /* What the marks say of a file, the stored snapshot's first, then its covering index's. */
+  private _markedAt(normalized: string, row: Readonly<{ size: number; mtimeMs?: number | undefined }>): MarkAnswer {
+    for (const [stored, marks] of this._stored) {
+      const relative = relativeTo(stored, normalized);
+      const kept = relative === undefined ? undefined : marks.rows.get(relative);
+      if (kept !== undefined && kept.size === row.size && kept.mtimeMs === row.mtimeMs) {
+        const object = Object.hasOwn(marks.pending, relative!) ? marks.pending[relative!] : undefined;
+        return object ?? (marks.declared || !this._unknownAt(normalized) ? undefined : 'unknown');
+      }
+      if (relative !== undefined && marks.declared && mayBePointerSize(row.size)) {
+        /* A stamp vouches only for the rows it stored: a pointer-sized file written since is not known (I7). */
+        return 'unknown';
+      }
+    }
+    const covering = this._covering(normalized);
+    if (covering !== undefined) {
+      const entry = covering.index.entry(covering.relative);
+      if (entry?.pending !== undefined && entry.size === row.size) {
+        return entry.pending;
+      }
+      return this._unknownAt(normalized) ? 'unknown' : undefined;
+    }
+    return this._unknownAt(normalized) ? 'unknown' : undefined;
+  }
+
+  private async _declare(
+    key: string,
+    declared: ReadonlyMap<string, DeclaredPlaceholder>,
+    scope: Readonly<{ paths: readonly string[] | undefined; overtaken: () => boolean }>,
+  ): Promise<boolean> {
+    const { paths, overtaken } = scope;
+    if (overtaken()) {
+      return false;
+    }
+    await this.ready(key);
+    if (overtaken()) {
+      return false;
+    }
+    const absolute = (path: string): string => (key === '/' ? `/${path}` : `${key}/${path}`);
+    for (const [indexRoot, state] of this._states) {
+      /* Where the root lies in this index: its prefix when the index holds it, `''` when the index lies inside it. */
+      const prefix = this._inside(indexRoot, key) ?? (this._inside(key, indexRoot) === undefined ? undefined : '');
+      if (prefix === undefined || !state.index.isComplete) {
+        continue;
+      }
+      const inIndex = (path: string): string | undefined => {
+        const relative = this._inside(indexRoot, absolute(path));
+        return relative === undefined || relative === '' ? undefined : relative;
+      };
+      const translated = new Map(
+        [...declared].flatMap(([path, placeholder]) => {
+          const relative = inIndex(path);
+          return relative === undefined ? [] : [[relative, placeholder] as const];
+        }),
+      );
+      const changed = state.index.declarePending(
+        translated,
+        paths === undefined ? { under: prefix } : { paths: paths.flatMap((path) => inIndex(path) ?? []) },
+      );
+      if (changed) {
+        this._schedulePersist(indexRoot);
+      }
+    }
+    return true;
+  }
+
   /*
    * A carried root's index reopened: each carried mark holds where its file is still at the size and mtime it was
    * carried at, and any pointer-sized file the marks no longer account for makes the root unknown again.
@@ -1171,24 +1189,6 @@ export class ProjectIndexes {
     }
     this._stored.set(root, { rows, pending: state.index.pendingSnapshot(), declared: true, carried: true });
     return true;
-  }
-
-  /** Drop every index: disposal, or a reset fact that may have moved the whole tree. */
-  public clear(): void {
-    this._readFacts.clear();
-    this._importFactsPending.clear();
-    this._importSeeded.clear();
-    for (const state of this._states.values()) {
-      clearTimeout(state.persistTimer);
-    }
-    this._states.clear();
-    /* Nothing will declare a root now: what waited answers from the marks it finds. */
-    this.releaseDeclaration('/');
-    this._settled.clear();
-    this._declaration.clear();
-    this._expected.clear();
-    this._stored.clear();
-    this._peeking.clear();
   }
 
   /* Whether a path lies under a revision root not yet declared. */

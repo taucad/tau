@@ -406,29 +406,6 @@ export class WorkspaceFileService {
     return this._asMarked(path, await provider.lstat(resolvedPath), async () => provider.readFile(resolvedPath));
   }
 
-  /* A row as a rooted view's stat answers it: settled as its mount's marks say, a pending entry as its object (D9). */
-  private async _asMarked(
-    path: string,
-    row: FileStat,
-    read: () => Promise<Uint8Array<ArrayBuffer>>,
-  ): Promise<FileStat> {
-    if (row.type !== 'file') {
-      return row;
-    }
-    const canonicalPath = resolveAuthorityPath(path);
-    const root = this._mountTable.resolve(canonicalPath).entry?.prefix ?? canonicalPath;
-    return asMarkedRow(
-      row,
-      await this._projectIndexes.settleMarks({
-        root,
-        authorityPath: canonicalPath,
-        size: row.size,
-        mtimeMs: row.mtimeMs,
-        bytes: async () => read().catch(() => undefined),
-      }),
-    );
-  }
-
   /**
    * Check whether a file or directory exists.
    *
@@ -1346,6 +1323,29 @@ export class WorkspaceFileService {
     this._watchRegistry.dispose();
     this._registry.disposeAll();
     this._eventBus.dispose();
+  }
+
+  /* A row as a rooted view's stat answers it: settled as its mount's marks say, a pending entry as its object (D9). */
+  private async _asMarked(
+    path: string,
+    row: FileStat,
+    read: () => Promise<Uint8Array<ArrayBuffer>>,
+  ): Promise<FileStat> {
+    if (row.type !== 'file') {
+      return row;
+    }
+    const canonicalPath = resolveAuthorityPath(path);
+    const root = this._mountTable.resolve(canonicalPath).entry?.prefix ?? canonicalPath;
+    return asMarkedRow(
+      row,
+      await this._projectIndexes.settleMarks({
+        root,
+        authorityPath: canonicalPath,
+        size: row.size,
+        mtimeMs: row.mtimeMs,
+        bytes: async () => read().catch(() => undefined),
+      }),
+    );
   }
 
   /**

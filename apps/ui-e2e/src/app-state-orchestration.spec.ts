@@ -61,17 +61,20 @@ const routeOf = async (name: string): Promise<RegExp> => {
 };
 
 /**
- * A project's tree, read again when a file goes between the listing and its read. The app writes a file through a
- * sibling it moves into place (a save, or A7e's replay on the next open), so a walk that lists the sibling can find it
- * gone: that is a read of a tree mid-write, never an answer about the tree.
+ * A project's tree, read again when a file goes or is replaced between the listing and its read. The app writes a file
+ * through a sibling it moves into place (a save, or A7e's replay on the next open), so a walk can find a listed sibling
+ * gone (`NotFoundError`) or a file replaced after its handle was taken (`NotReadableError`): that is a read of a tree
+ * mid-write, never an answer about the tree.
  */
+const midWrite = /NotFoundError|NotReadableError/u;
+
 const readSettledTree = async (config: StoredProjectConfig): Promise<Readonly<Record<string, string>>> => {
   for (let attempt = 1; ; attempt += 1) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- each attempt reads after the last one failed.
       return await readProjectTree(config);
     } catch (error) {
-      if (attempt >= 8 || !String(error).includes('NotFoundError')) {
+      if (attempt >= 8 || !midWrite.test(String(error))) {
         throw error;
       }
     }

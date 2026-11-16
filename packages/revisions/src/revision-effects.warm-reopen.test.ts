@@ -158,8 +158,14 @@ const fixture = async (initial: Readonly<Record<string, string>>, options: Reado
       }) as typeof store.writeFile,
     });
     let statTrees = 0;
+    /* How many times the revision layer let go of the root without declaring it (D9). */
+    let releases = 0;
     const counted = Object.assign(Object.create(rooted) as RevisionFileSystem, {
       privateStore,
+      releaseDeclaration: () => {
+        releases += 1;
+        rooted.releaseDeclaration?.();
+      },
       statTree: (async (...arguments_: Parameters<NonNullable<RevisionFileSystem['statTree']>>) => {
         statTrees += 1;
         return rooted.statTree!(...arguments_);
@@ -226,6 +232,7 @@ const fixture = async (initial: Readonly<Record<string, string>>, options: Reado
       hooks,
       reports,
       statTrees: () => statTrees,
+      releases: () => releases,
       close,
     };
   };
@@ -732,6 +739,50 @@ describe('the fill check of a warm reopen (Tau #2013)', () => {
       'assets/part.stl',
       'assets/new.stl',
     ]);
+  });
+
+  /* The fill check judges by a capture's own rule: an attributes file deeper down counts, an ignored one does not. */
+  it('should declare by nested attributes files and never by an ignored one', async () => {
+    const pointer = pointerOf('a'.repeat(64), 123_456);
+    const { session } = await fixture({
+      ...files(5),
+      'vendor/.gitattributes': '*.bin filter=lfs diff=lfs merge=lfs -text\n',
+      'vendor/blob.bin': pointer,
+      'extra/.gitattributes': '*.dat filter=lfs diff=lfs merge=lfs -text\n',
+      'extra/blob.dat': pointer,
+    });
+    const first = await session();
+    await first.rooted.writeFile('.gitignore', 'extra/.gitattributes\n');
+    await mint(first);
+    await first.close();
+
+    const second = await session();
+    await second.fillChecked;
+
+    expect(await second.rooted.pendingPaths!(['vendor/blob.bin', 'extra/blob.dat'])).toStrictEqual(['vendor/blob.bin']);
+  });
+
+  /* A look that fails before it declares lets go of the root, so no stat waits out the bound (D9; I7 by the reads). */
+  it('should let go of the checkout when the fill check’s look fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const pointer = pointerOf('a'.repeat(64), 123_456);
+    const { session } = await fixture({ ...files(10), 'assets/part.stl': pointer });
+    const first = await session();
+    await mint(first);
+    await first.close();
+
+    const second = await session();
+    let failed = false;
+    second.hooks.afterRead = async (path) => {
+      if (path === '.gitattributes' && !failed) {
+        failed = true;
+        throw new Error('the attributes could not be read');
+      }
+    };
+    await expect.poll(() => second.releases(), { timeout: 5000 }).toBeGreaterThan(0);
+
+    expect(failed).toBe(true);
+    expect(warn).toHaveBeenCalledWith('[revisions] large-object placeholders could not be checked', expect.any(Error));
   });
 
   it('should still find a placeholder a pointer-sized file holds', async () => {

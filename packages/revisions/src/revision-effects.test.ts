@@ -684,7 +684,8 @@ it.each(['live', 'linked'])(
         actor
           .getSnapshot()
           .children.sync?.getSnapshot()
-          .matches({ opening: kind === 'linked' ? 'fetching' : 'fastForwarding' }),
+          /* The live checkout's records run beside its fast-forward (SP2h). */
+          .matches({ opening: kind === 'linked' ? 'fetching' : { besideApply: { authored: 'fastForwarding' } } }),
       ).toBe(true);
       actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 2, refs: [] } });
       actor.send({ type: 'sync', event: { type: 'recordsChanged' } });

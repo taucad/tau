@@ -1077,6 +1077,27 @@ const failedRecords = (context: SyncMachineContext, error: unknown): readonly Sy
     reason: error instanceof Error ? error.message : 'Optional records could not be restored.',
   }));
 
+/* The record projection's input, its empty stand-in when the fetch named none. */
+const recordsInputOf = (context: SyncMachineContext): SyncProjectRecordsActorInput =>
+  context.recordProjection ?? { remote: '', fetchRefs: [], refs: [], syncChats: false, syncLargeExports: false };
+
+/* What the record projection settled, whichever state ran it. */
+const recordsSettled = (context: SyncMachineContext, output: SyncProjectRecordsActorOutput): SyncContextPatch => ({
+  ...rememberRecords(context, output.records),
+  chats: output.chats,
+});
+
+/*
+ * Whether the open has only its optional records left: the authored apply has landed, so the deadline fails the
+ * records alone and the person keeps the files (SP2h runs them beside a fast-forward).
+ */
+const onlyRecordsLeft = (value: unknown): boolean => {
+  const childOf = (state: unknown, key: string): unknown =>
+    typeof state === 'object' && state !== null ? Object.getOwnPropertyDescriptor(state, key)?.value : undefined;
+  const opening = childOf(value, 'opening');
+  return opening === 'projectingRecords' || childOf(childOf(opening, 'besideApply'), 'authored') === 'applied';
+};
+
 const rememberFetch = (
   context: SyncMachineContext,
   enq: SyncEnqueue,
@@ -1687,7 +1708,7 @@ const syncMachineDefinition = setup({
         pullRenderWindow: { context: { withinPullWindow: false } },
         pullDeadline: ({ context, value }, enq) => {
           reportPullAttempt(context, enq, 'retry');
-          if (typeof value !== 'string' && value['opening'] === 'projectingRecords') {
+          if (onlyRecordsLeft(value)) {
             return {
               target: 'recording',
               context: rememberRecords(
@@ -1721,7 +1742,10 @@ const syncMachineDefinition = setup({
               const remembered = rememberFetch(context, enq, event.output);
               switch (event.output.integration) {
                 case 'fastForward': {
-                  return { target: 'fastForwarding', context: remembered };
+                  return {
+                    target: event.output.recordProjection?.besideApply === true ? 'besideApply' : 'fastForwarding',
+                    context: remembered,
+                  };
                 }
                 case 'diverged': {
                   return { target: 'merging', context: remembered };
@@ -1812,23 +1836,64 @@ const syncMachineDefinition = setup({
         projectingRecords: {
           invoke: {
             src: 'projectRecords',
-            input: ({ context }) =>
-              context.recordProjection ?? {
-                remote: context.remote ?? '',
-                fetchRefs: [],
-                refs: [],
-                syncChats: false,
-                syncLargeExports: false,
-              },
-            onDone: ({ context, event }) => ({
-              target: 'done',
-              context: { ...rememberRecords(context, event.output.records), chats: event.output.chats },
-            }),
+            input: ({ context }) => recordsInputOf(context),
+            onDone: ({ context, event }) => ({ target: 'done', context: recordsSettled(context, event.output) }),
             onError: ({ context, event }) => ({
               target: 'done',
               context: rememberRecords(context, failedRecords(context, event.error)),
             }),
           },
+        },
+        /*
+         * A fast-forward whose records write only unversioned paths, disjoint from its own (SP2h): the chats land while
+         * the files are written, so a chat opens on its records and never waits for the whole download. The remote is
+         * applied only once the authored region lands; a failed or held apply ends both, as it always did.
+         */
+        besideApply: {
+          type: 'parallel',
+          states: {
+            authored: {
+              initial: 'fastForwarding',
+              states: {
+                fastForwarding: {
+                  invoke: {
+                    src: 'fastForward',
+                    input: ({ context }) => ({ remote: context.remote ?? '', branch: context.branch }),
+                    onDone: ({ context, event }, enq) => {
+                      if (event.output !== undefined && 'hold' in event.output) {
+                        return heldAt(event.output);
+                      }
+                      reportFastForward(context, enq, event.output);
+                      return { target: 'applied' };
+                    },
+                    onError: ({ event }) => pullFailed(event.error),
+                  },
+                },
+                applied: { type: 'final', entry: () => ({ context: { hasAppliedRemote: true } }) },
+              },
+            },
+            records: {
+              initial: 'projecting',
+              states: {
+                projecting: {
+                  invoke: {
+                    src: 'projectRecords',
+                    input: ({ context }) => recordsInputOf(context),
+                    onDone: ({ context, event }) => ({
+                      target: 'projected',
+                      context: recordsSettled(context, event.output),
+                    }),
+                    onError: ({ context, event }) => ({
+                      target: 'projected',
+                      context: rememberRecords(context, failedRecords(context, event.error)),
+                    }),
+                  },
+                },
+                projected: { type: 'final' },
+              },
+            },
+          },
+          onDone: { target: 'done' },
         },
         done: { type: 'final' },
       },
@@ -2805,9 +2870,12 @@ export const selectSyncFacet = (
      * reaches the person through `error`. */
     pullPhase: snapshot.matches({ opening: 'fetching' })
       ? 'fetching'
-      : snapshot.matches({ opening: 'fastForwarding' }) || snapshot.matches({ opening: 'merging' })
+      : snapshot.matches({ opening: 'fastForwarding' }) ||
+          snapshot.matches({ opening: 'merging' }) ||
+          snapshot.matches({ opening: { besideApply: { authored: 'fastForwarding' } } })
         ? 'applying'
-        : snapshot.matches({ opening: 'projectingRecords' })
+        : snapshot.matches({ opening: 'projectingRecords' }) ||
+            snapshot.matches({ opening: { besideApply: { authored: 'applied' } } })
           ? 'records'
           : 'idle',
     hasAppliedRemote: snapshot.context.hasAppliedRemote,

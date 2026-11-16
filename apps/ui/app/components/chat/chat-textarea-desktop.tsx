@@ -208,13 +208,18 @@ const sendRefusalOf = (input: {
 
 /**
  * Whether a send queued in the native input (P4) may go now: Send would send, and the chat has an agent to send with.
- * A first visit has no Tau model until the catalog answers, and a send made then is refused.
+ * A first visit has no Tau model until the catalog answers, and a send made then is refused. It also waits for
+ * dictation to end, since only Send stops a recording and sends its words.
  *
  * @returns Whether the queued send may go.
  */
 const isQueuedSendPermitted = (
-  input: Omit<Parameters<typeof sendRefusalOf>[0], 'isEmpty'> & { readonly execution: CadAgentExecution },
+  input: Omit<Parameters<typeof sendRefusalOf>[0], 'isEmpty'> & {
+    readonly execution: CadAgentExecution;
+    readonly dictationPhase: string;
+  },
 ): boolean =>
+  input.dictationPhase === 'idle' &&
   (input.execution.kind !== 'tau' || input.execution.model !== '') &&
   sendRefusalOf({ ...input, isEmpty: false }) === undefined;
 
@@ -350,6 +355,10 @@ export const ChatTextareaDesktop = memo(function ({
   } = useChatComposer();
   const latestDraftOwner = useRef(draftActorRef);
   useLayoutEffect(() => {
+    /* Another chat's draft, in the same mounted composer: an Enter queued for the previous chat is not for this one. */
+    if (latestDraftOwner.current !== draftActorRef) {
+      queuedSubmitRef.current = false;
+    }
     latestDraftOwner.current = draftActorRef;
   }, [draftActorRef]);
   const dictation = useDictation(insertTranscript, draftActorRef);
@@ -569,8 +578,9 @@ export const ChatTextareaDesktop = memo(function ({
 
   /* The queued send (above): an edit in the native input after its Enter had already cancelled it (`submitQueued` is
    * false then). It waits, still queued, while sending is not permitted, and carries the editor's text, since the
-   * draft this composer was rendered with can still be the previous one; it also waits for a model to send with. */
+   * draft this composer was rendered with can still be the previous one; it also waits for a model and dictation. */
   const isQueuedSubmitPermitted = isQueuedSendPermitted({
+    dictationPhase: dictation.phase,
     sendBlockReason,
     isSubmitting,
     isAttaching,

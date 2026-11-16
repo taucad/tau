@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { Editor } from '@tiptap/core';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { captureDictation } from '#components/dictation/dictation-capture.js';
@@ -33,6 +33,8 @@ const execution: { current: ChatComposerContextValue['execution']['execution'] }
   current: { kind: 'tau', model: 'm' },
 };
 const setActiveExecution = vi.fn();
+/* The chat whose draft the composer edits; the composer stays mounted when the person moves to another chat. */
+const draftOwner: { current: unknown } = { current: undefined };
 const placements: { current: readonly AgentHostPlacementTarget[] } = { current: [] };
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
@@ -45,6 +47,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
       setActivePreference: vi.fn(),
     },
     execution: { execution: execution.current, setActiveExecution },
+    draftActorRef: draftOwner.current,
     contextUsage: undefined,
   }),
 }));
@@ -622,6 +625,59 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         editor!.commands.undo();
       });
       expect(editor!.getText()).toBe('Make a bracket.');
+
+      view.rerenderWith(codexSession, undefined, false);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    /* The composer stays mounted when the person moves to another chat: the Enter was for the chat it was pressed in. */
+    it('should drop the queued send when the composer moves to another chat', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      draftOwner.current = { chat: 'one' };
+      onTestFinished(() => {
+        draftOwner.current = undefined;
+      });
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        isSubmitDisabled: true,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      draftOwner.current = { chat: 'two' };
+      view.rerenderWith(codexSession, 'The other chat draft.', true);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      view.rerenderWith(codexSession, 'The other chat draft.', false);
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    /* Send while dictating stops the recording first and sends its words; the queued send cannot, so it waits. */
+    it('should keep the send queued while dictation is running', async () => {
+      dictationDependencies.available = true;
+      dictationDependencies.capture.mockResolvedValue({
+        finish: async () => new Blob([], { type: 'audio/wav' }),
+        cancel: noop,
+      });
+      const submit = vi.fn(async (_text?: string) => undefined);
+      const view = renderComposer('Make a bracket.', codexSession, {
+        handleSubmit: submit,
+        isSubmitDisabled: true,
+        earlyInput: queued('Make a bracket.'),
+      });
+      await userEvent.click(await screen.findByRole('button', { name: 'Dictate' }));
+      await screen.findByRole('button', { name: 'Stop dictation' });
 
       view.rerenderWith(codexSession, undefined, false);
       await act(async () => {

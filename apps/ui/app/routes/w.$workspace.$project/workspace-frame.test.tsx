@@ -286,8 +286,8 @@ describe('WorkspaceFrame served composer', () => {
     try {
       expect(handover?.pending).toBeUndefined();
       act(() => {
-        handover?.claim();
-        handover?.release();
+        handover?.claim('p1');
+        handover?.release('p1');
       });
       expect(handover?.pending).toMatchObject({
         text: 'abc',
@@ -300,7 +300,7 @@ describe('WorkspaceFrame served composer', () => {
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
       expect(within(container).getByTestId('chat-lane-frame-composer')).not.toHaveClass('invisible');
       act(() => {
-        handover?.release();
+        handover?.release('p1');
         handover?.taken();
       });
       expect(handover?.pending).toBeUndefined();
@@ -313,8 +313,8 @@ describe('WorkspaceFrame served composer', () => {
     const { container, done } = await serveAndHydrate('/w/home/one');
     try {
       act(() => {
-        handover?.claim();
-        handover?.release();
+        handover?.claim('p1');
+        handover?.release('p1');
       });
       expect(handover?.pending).toBeUndefined();
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
@@ -336,8 +336,8 @@ describe('WorkspaceFrame served composer', () => {
     try {
       expect(state?.composing).toBe(true);
       act(() => {
-        handover?.claim();
-        handover?.release();
+        handover?.claim('p1');
+        handover?.release('p1');
       });
       expect(handover?.pending).toBeUndefined();
       /* The input stays on screen through the composition, so it keeps focus and its text. */
@@ -364,7 +364,7 @@ describe('WorkspaceFrame served composer', () => {
     });
     try {
       act(() => {
-        handover?.release();
+        handover?.release('p1');
       });
       expect(handover?.pending).toBeUndefined();
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).not.toBeNull();
@@ -372,7 +372,7 @@ describe('WorkspaceFrame served composer', () => {
       served!.dispatchEvent(new InputEvent('input', { bubbles: true }));
       let unclaim: (() => void) | undefined;
       act(() => {
-        unclaim = handover?.claim();
+        unclaim = handover?.claim('p1');
       });
       expect(handover?.pending).toMatchObject({ text: 'abc', edited: true, focused: true });
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
@@ -390,12 +390,12 @@ describe('WorkspaceFrame served composer', () => {
     });
     try {
       act(() => {
-        handover?.release();
+        handover?.release('p1');
         handover?.decline();
       });
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
       act(() => {
-        handover?.claim();
+        handover?.claim('p1');
       });
       expect(handover?.pending).toBeUndefined();
     } finally {
@@ -415,22 +415,22 @@ describe('WorkspaceFrame served composer', () => {
   });
 
   /* Review round 3: the frame persists across a navigation to another project, which must not take this input. */
-  it('ends the served input on a navigation to another project', async () => {
-    const { container, rerender, done } = await serveAndHydrate('/w/home/one', (input) => {
+  it('ends the served input when another project claims it, and keeps it through a URL correction', async () => {
+    const { container, done } = await serveAndHydrate('/w/home/one', (input) => {
       input.value = 'make it blue';
       input.dispatchEvent(new InputEvent('input', { bubbles: true }));
     });
     try {
       act(() => {
-        handover?.release();
+        handover?.release('p1');
       });
+      /* The route corrects the URL to the same project's canonical slugs: the input stays. */
+      globalThis.history.replaceState(null, '', '/w/home/one-renamed');
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).not.toBeNull();
-      globalThis.history.replaceState(null, '', '/w/home/two');
-      rerender(true);
-      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
       act(() => {
-        handover?.claim();
+        handover?.claim('p2');
       });
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
       expect(handover?.pending).toBeUndefined();
     } finally {
       await done();
@@ -448,8 +448,8 @@ describe('WorkspaceFrame served composer', () => {
     try {
       expect(status).toHaveTextContent('Send queued');
       act(() => {
-        handover?.claim();
-        handover?.release();
+        handover?.claim('p1');
+        handover?.release('p1');
       });
       expect(handover?.pending).toMatchObject({ text: 'Fillet it', prefilled: true, edited: false, queuedSend: false });
     } finally {

@@ -19,11 +19,6 @@ import {
   readEarlyInput,
 } from '#components/chat/chat-early-input-field.js';
 import type { EarlyChatInput, EarlyInputHandover, EarlyTextarea } from '#components/chat/chat-early-input-field.js';
-import { frameHintKey } from '#lib/frame-hint.js';
-
-/** The document's path, read when the frame renders (a navigation renders it); the server has none. */
-const readPath = (): string => globalThis.location.pathname;
-const noPathOnServer = (): undefined => undefined;
 
 /** Nothing to subscribe to: only the hydration pass reads the server snapshot. */
 const subscribeToNothing = (): (() => void) => {
@@ -55,23 +50,17 @@ type ServedComposerState = 'served' | EarlyChatInput | 'gone';
 export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; handover: EarlyInputHandover } {
   const isOnClient = useSyncExternalStore(subscribeToNothing, isClientRender, isServerRender);
   const [state, setState] = useState<ServedComposerState>(() => (isOnClient ? 'gone' : 'served'));
-  /* A navigation ends the served input, off the project route or to another project: the frame persists across both,
-   * but only the project the document was served for owns what was typed into it. */
-  const path = useSyncExternalStore(subscribeToNothing, readPath, noPathOnServer);
-  const [servedPath, setServedPath] = useState<string>();
-  if (state !== 'gone' && path !== undefined) {
-    if (servedPath === undefined) {
-      setServedPath(path);
-    } else if (!isDrawn || frameHintKey(path) !== frameHintKey(servedPath)) {
-      setState('gone');
-    }
-  } else if (!isDrawn && state !== 'gone') {
+  /* A navigation off the project route ends the served input: a frame drawn again later was not served with it. */
+  if (!isDrawn && state !== 'gone') {
     setState('gone');
   }
   const inputRef = useRef<EarlyTextarea>(null);
-  /* The two conditions of the handover, read by whichever call comes second. */
+  /* The two conditions of the handover, read by whichever call comes second, and the project they came from: the frame
+   * persists across a navigation to another project, which must not take this input (the URL alone cannot say, as
+   * the route corrects it to the canonical slugs of the same project). */
   const isRevealedRef = useRef(false);
   const claimsRef = useRef(0);
+  const projectRef = useRef<string | undefined>(undefined);
   const isServed = state === 'served';
   const [isEmpty, setIsEmpty] = useState(true);
   /* Text typed, or a draft painted, before hydration is already in the input; Send reads it once React is here. */
@@ -97,13 +86,28 @@ export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; h
       }
       setState(input === null ? 'gone' : releasedState(input));
     };
+    /* Whether a call comes from the project the input was served for, the first project to call. */
+    const isServedProject = (projectId: string): boolean => {
+      projectRef.current ??= projectId;
+      if (projectRef.current === projectId) {
+        return true;
+      }
+      setState((current) => (current === 'served' ? 'gone' : current));
+      return false;
+    };
     return {
       pending: typeof state === 'object' ? state : undefined,
-      release: () => {
+      release: (projectId) => {
+        if (!isServedProject(projectId)) {
+          return;
+        }
         isRevealedRef.current = true;
         handOver();
       },
-      claim: () => {
+      claim: (projectId) => {
+        if (!isServedProject(projectId)) {
+          return () => undefined;
+        }
         claimsRef.current += 1;
         handOver();
         return () => {

@@ -4,6 +4,7 @@ import type { ContextSuggestionItem } from '@taucad/chat-ui/components/tiptap/su
 import { toast } from '@taucad/ui/components/sonner';
 import { captureCadImages } from '#services/headless-capture.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { readDraftHint } from '#lib/frame-hint-draft.js';
 
 const mocks = vi.hoisted(() => {
   const cadRef = { getSnapshot: () => ({ context: { geometry: { format: 'gltf' } } }) };
@@ -23,6 +24,8 @@ const mocks = vi.hoisted(() => {
     notice: 'Section cutaways narrower than 180° are not shown in captures.',
     logicOptions: undefined as { readonly isSubmitDisabled?: boolean } | undefined,
     runElsewhere: undefined as { readonly runId: string } | undefined,
+    inputText: '',
+    activeChatId: undefined as string | undefined,
   };
 });
 
@@ -44,6 +47,7 @@ vi.mock('#components/chat/chat-textarea-types.js', () => ({
   useChatTextareaLogic: (options: { readonly isSubmitDisabled?: boolean }) => {
     mocks.logicOptions = options;
     return {
+      inputText: mocks.inputText,
       imageInputSupported: true,
       handleAddImage: mocks.handleAddImage,
       rejectUnsupportedImageInput: vi.fn(),
@@ -69,6 +73,7 @@ vi.mock('@taucad/ui/components/client-only', () => ({
 }));
 vi.mock('@taucad/chat-ui/components/chat-textarea-skeleton', () => ({ ChatTextareaSkeleton: () => null }));
 vi.mock('#components/chat/chat-approval-banner.js', () => ({ ChatApprovalBanner: () => null }));
+vi.mock('#components/chat/chat-placement-notice.js', () => ({ ChatPlacementNotice: () => null }));
 vi.mock('@taucad/chat-ui/components/tiptap/context-suggestion.utils', () => ({
   takeScreenshotGroup: 'Take Screenshot',
 }));
@@ -94,7 +99,7 @@ vi.mock('#hooks/use-chat.js', () => ({
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
-    session: undefined,
+    session: mocks.activeChatId === undefined ? undefined : { activeChatId: mocks.activeChatId },
     execution: { execution: { kind: 'native' } },
     runElsewhere: mocks.runElsewhere,
   }),
@@ -209,5 +214,31 @@ describe('ChatTextarea while another device runs the chat', () => {
     render(<ChatTextarea onSubmit={vi.fn()} />);
 
     expect(mocks.logicOptions?.isSubmitDisabled).toBe(false);
+  });
+});
+
+/* A15d review round 4: the project composer mirrors its draft under the project's URL key, with its chat. */
+describe('ChatTextarea draft hint', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    globalThis.history.replaceState(null, '', '/w/acme/bracket');
+    mocks.activeChatId = 'chat-1';
+  });
+
+  it('writes the main draft under the URL key with its chat, removes it when the draft empties', () => {
+    mocks.inputText = 'Fillet the edges';
+    const view = render(<ChatTextarea onSubmit={vi.fn()} />);
+    expect(readDraftHint({ kind: 'project', key: 'acme/bracket' })).toMatchObject({
+      text: 'Fillet the edges',
+      chatId: 'chat-1',
+    });
+
+    mocks.inputText = '';
+    view.rerender(<ChatTextarea onSubmit={vi.fn()} />);
+    expect(readDraftHint({ kind: 'project', key: 'acme/bracket' })).toBeUndefined();
+    view.unmount();
+    globalThis.history.replaceState(null, '', '/');
+    mocks.inputText = '';
+    mocks.activeChatId = undefined;
   });
 });

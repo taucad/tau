@@ -53,7 +53,7 @@ const topLeftTabBarInset = [
 ].join(' ');
 
 export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
-  const { editorRef } = useProject();
+  const { editorRef, projectId } = useProject();
   const { open: sidebarOpen } = useSidebar();
   const { setChatOpen, setWorkbenchOpen } = useProjectWorkspace();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -131,7 +131,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     }
     /* The served composer's text, caret, focus and queued send go to the rich composer in this commit, the first in
      * which its editor can take focus (A15d, F7). */
-    earlyInputHandover?.release();
+    earlyInputHandover?.release(projectId);
     const state = globalThis.history.state as { usr?: { focusChatComposer?: unknown } } | undefined;
     if (state?.usr?.focusChatComposer !== true) {
       return;

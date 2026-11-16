@@ -48,21 +48,26 @@ import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.
  * composer's after that, so a queued send it carries is replayed once the draft holds its text (C10); a composer mounted
  * later starts without it.
  *
+ * @param projectId - The project this composer belongs to; none off a project.
  * @param isMain - Whether this is the main composer, the only one the frame hands its input to.
  * @returns The handed-over input, and the frame's handover.
  */
 const useFrameEarlyInput = (
+  projectId: string | undefined,
   isMain: boolean,
 ): { handedOverInput: EarlyChatInput | undefined; earlyInputHandover: EarlyInputHandover | undefined } => {
   const frameHandover = useContext(EarlyInputHandoverContext);
-  const earlyInputHandover = isMain ? frameHandover : undefined;
+  const earlyInputHandover = isMain && projectId !== undefined ? frameHandover : undefined;
   const [takenInput, setTakenInput] = useState<EarlyChatInput>();
   const pendingInput = earlyInputHandover?.pending;
   if (pendingInput !== undefined && pendingInput !== takenInput) {
     setTakenInput(pendingInput);
   }
   const claimEarlyInput = earlyInputHandover?.claim;
-  useLayoutEffect(() => claimEarlyInput?.(), [claimEarlyInput]);
+  useLayoutEffect(
+    () => (projectId === undefined ? undefined : claimEarlyInput?.(projectId)),
+    [claimEarlyInput, projectId],
+  );
   return { handedOverInput: pendingInput ?? takenInput, earlyInputHandover };
 };
 
@@ -396,7 +401,7 @@ export const ChatTextarea = memo(function ({
       </>
     ) : undefined;
 
-  const { handedOverInput, earlyInputHandover } = useFrameEarlyInput(mode === 'main');
+  const { handedOverInput, earlyInputHandover } = useFrameEarlyInput(projectContext?.projectId, mode === 'main');
 
   const content = (earlyInput?: EarlyChatInput, onEarlyInputAdopted?: () => void): React.ReactNode => (
     <>

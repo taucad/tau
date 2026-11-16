@@ -155,7 +155,7 @@ describe('FocusedChatErrorPanel', () => {
 const handover = {
   pending: undefined,
   release: vi.fn(),
-  claim: () => () => undefined,
+  claim: (_projectId: string) => () => undefined,
   taken: vi.fn(),
   decline: vi.fn(),
 } satisfies EarlyInputHandover;

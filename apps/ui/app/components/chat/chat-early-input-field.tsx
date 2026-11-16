@@ -177,13 +177,14 @@ export type EarlyInputHandover = Readonly<{
   /** What the served input held when it was handed over, until a composer has taken it; `undefined` otherwise. */
   pending: EarlyChatInput | undefined;
   /** The lane is revealed, so a composer in it can take focus. Called in the commit that reveals the lane. */
-  release: () => void;
+  release: (projectId: string) => void;
   /**
-   * A composer is mounted to take the input. The input is handed over once the lane is revealed too.
+   * A composer is mounted to take the input. The input is handed over once the lane is revealed too. A call from
+   * another project than the first to call ends the input instead.
    *
    * @returns The release of the claim, on unmount.
    */
-  claim: () => () => void;
+  claim: (projectId: string) => () => void;
   /** The composer has taken `pending`: it is not applied again, by this composer or a later one. */
   taken: () => void;
   /** The lane will hold no composer: the served input is removed, with whatever it holds. */

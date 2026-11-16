@@ -151,7 +151,7 @@ export function WorkspaceFrame({
     >
       {/* No hint yet (the server, the hydrating render) serves the input; the pre-paint script's variable hides a lane
        * remembered closed, and the client then drops it. */}
-      <WorkspaceFrameLanes isChatServed={wide?.chatOpen !== false} />
+      <WorkspaceFrameLanes isChatServed={wide?.chatOpen !== false} pathname={pathname} />
       {children}
     </div>
   );
@@ -171,11 +171,19 @@ export function WorkspaceFrame({
  * load), and the text stays where it can be seen and edited until a composer can take it. Where none can, under a
  * failure in the workspace's place or with the live chat lane closed, the box hides and the text waits in the store.
  *
- * @param props - Whether the chat lane serves the input: not when this project remembers the lane closed.
+ * @param props - Whether the chat lane serves the input (not when this project remembers the lane closed), and the
+ *   destination's pathname when the frame is drawn ahead of the route.
  * @returns The lanes, the composer box and the marker.
  */
-function WorkspaceFrameLanes({ isChatServed }: { readonly isChatServed: boolean }): React.JSX.Element {
-  const isAdopted = useHandOffAdopted(useProjectComposerHandOff());
+function WorkspaceFrameLanes({
+  isChatServed,
+  pathname,
+}: {
+  readonly isChatServed: boolean;
+  readonly pathname?: string;
+}): React.JSX.Element {
+  const target = useProjectComposerHandOff(pathname);
+  const isAdopted = useHandOffAdopted(target);
   return (
     <>
       <div
@@ -207,7 +215,7 @@ function WorkspaceFrameLanes({ isChatServed }: { readonly isChatServed: boolean 
           {isChatServed && !isAdopted ? (
             <div className='pointer-events-auto mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
               <div className='flex min-h-20.5 w-full flex-col rounded-2xl border bg-background shadow-md has-[textarea:focus-visible]:focus-outline'>
-                <ProjectComposerHandOff />
+                <ProjectComposerHandOff target={target} />
               </div>
             </div>
           ) : null}

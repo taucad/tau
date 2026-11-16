@@ -14,10 +14,16 @@ import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
  * The project composer's hand-off, scoped to the project in the route: the placeholder serves it and the live
  * composer adopts it, and a client navigation to another project before adoption starts over with an empty input.
  *
+ * @param pathname - The frame's destination pathname when it is drawn ahead of the route.
  * @returns The surface and the project's scope.
  */
-export function useProjectComposerHandOff(): HandOffTarget {
-  const { workspace = '', project = '' } = useParams();
+export function useProjectComposerHandOff(pathname?: string): HandOffTarget {
+  const parameters = useParams();
+  /* Drawn ahead of the route (A15b2), the frame names its destination by pathname: the route's params are still the
+   * page being left's. */
+  const fromPath = pathname === undefined ? undefined : /^\/w\/([^/]+)\/([^/]+)/u.exec(pathname);
+  const workspace = fromPath ? decodeURIComponent(fromPath[1]!) : (parameters['workspace'] ?? '');
+  const project = fromPath ? decodeURIComponent(fromPath[2]!) : (parameters['project'] ?? '');
   return useMemo(() => ({ surface: 'project-composer', scope: `${workspace}/${project}` }), [workspace, project]);
 }
 
@@ -31,10 +37,11 @@ export function useProjectComposerHandOff(): HandOffTarget {
  * text, caret, focus and a queued send in the commit that reveals the workspace (`ChatTextarea`'s `handOff`, gated by
  * `handOffRevealContext`).
  *
+ * @param props - The hand-off target the frame serves.
  * @returns The input and the bar's reserved height.
  */
-export function ProjectComposerHandOff(): React.JSX.Element {
-  const { surface, scope } = useProjectComposerHandOff();
+export function ProjectComposerHandOff({ target }: { readonly target: HandOffTarget }): React.JSX.Element {
+  const { surface, scope } = target;
   return (
     <>
       <HandOffSlot

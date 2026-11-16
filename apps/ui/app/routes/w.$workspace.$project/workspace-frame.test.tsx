@@ -288,6 +288,30 @@ describe('WorkspaceFrame', () => {
     expect(frame.style.getPropertyValue('--frame-workbench-display')).toBe('none');
   });
 
+  /* PL6 on A15b2: drawn ahead of the route, the composer box serves the destination's input, not the route's (still
+   * the page being left's), so the destination's composer is the one that adopts it. */
+  it("serves the destination's composer input while the route is still the page being left's", () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    render(
+      <MemoryRouter initialEntries={['/w/home/one']}>
+        <Routes>
+          <Route
+            path='/w/:workspace/:project'
+            element={
+              <WorkspaceFrame isPending pathname='/w/home/two'>
+                <p>home</p>
+              </WorkspaceFrame>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('textbox', { name: 'Chat message' })).toBeInTheDocument();
+    expect(handOffStore.holds({ surface: 'project-composer', scope: 'home/two' })).toBe(true);
+    expect(handOffStore.holds({ surface: 'project-composer', scope: 'home/one' })).toBe(false);
+  });
+
   // ── A15c: the phone frame (blueprint P-h; C6) ──
 
   /*

@@ -1616,6 +1616,11 @@ export class FileContentService {
       return;
     }
     this.refreshGuard.begin(relativePath);
+    if (!this.shouldRefreshWorkerPath(relativePath)) {
+      /* Nothing here holds or waits on the path, so there is nothing to tell:
+       * a later read finds it gone itself (STO-25 SP2g). */
+      return;
+    }
     this.cache.delete(relativePath);
     this.setOrphaned(relativePath, true);
     this.publishOutcome(relativePath, { kind: 'orphaned' });
@@ -1634,9 +1639,9 @@ export class FileContentService {
         // oxlint-disable-next-line promise/prefer-await-to-then -- fire-and-forget refresh
         void this.refreshOutcomeInPlace(oldPath).catch(() => undefined);
       } else {
+        /* A path nothing holds mints no orphaned outcome: a revision write moves
+         * every replaced file aside, and the page heard each as gone (I7). */
         this.refreshGuard.begin(oldPath);
-        this.setOrphaned(oldPath, true);
-        this.publishOutcome(oldPath, { kind: 'orphaned' });
       }
     }
     if (newPath !== undefined && !this.hasAuthorityObservation(newPath)) {

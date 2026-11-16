@@ -468,7 +468,9 @@ describe('billable model request contract', () => {
     /* Gemini 4 Hydrogen offers an extra-high level; the boundary admits it and nothing past it. */
     const withLevel = (thinking_level: string) => ({
       ...gemini,
-      extra_body: { google: { ...gemini.extra_body.google, thinking_config: { include_thoughts: true, thinking_level } } },
+      extra_body: {
+        google: { ...gemini.extra_body.google, thinking_config: { include_thoughts: true, thinking_level } },
+      },
     });
     expect(safeParseBillableModelRequest(withLevel('XHIGH'), 'openai-completions').success).toBe(true);
     expect(safeParseBillableModelRequest(withLevel('MAX'), 'openai-completions').success).toBe(false);
@@ -525,6 +527,17 @@ describe('billable model request contract', () => {
 
     expect(safeParseBillableModelRequest(anthropic, 'anthropic').success).toBe(true);
     expect(safeParseBillableModelRequest(responses, 'openai-responses').success).toBe(true);
+    /* GPT-6.1 Terra's highest level is `max`, in the transcript and on the request alike. */
+    expect(
+      safeParseBillableModelRequest(
+        {
+          ...responses,
+          input: [responses.input[0], { type: 'configuration_update', reasoning: { effort: 'max' } }],
+          reasoning: { effort: 'max', summary: 'auto' },
+        },
+        'openai-responses',
+      ).success,
+    ).toBe(true);
     for (const message of [
       { role: 'system', content: [], output_config: { effort: 'extreme' } },
       { role: 'system', content: [], output_config: {} },

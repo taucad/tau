@@ -1534,7 +1534,10 @@ export const FileEditor = memo(function ({
   let body: ReactNode;
   let resolvedViewer: ResolvedFileViewer | undefined;
   let viewerRequest: Omit<FileViewerRenderRequest, 'renderPane'> | undefined;
-  const availability = useProjectAvailability();
+  /* A first view (STO-25): a pane opens once the entry closure lands; "File not found" waits for every authored file,
+     since a file the open's apply has yet to land is arriving, not missing (I7). */
+  const availability = useProjectAvailability('editor');
+  const absence = useProjectAvailability('absence');
   /* One wait per pane, owned here and not by the placeholder, which is replaced when the text arrives: it runs until
      the file's text is on screen (the placeholder shows it as soon as it is read). A sync or a large object shows its
      own notice instead. */
@@ -1567,8 +1570,8 @@ export const FileEditor = memo(function ({
       break;
     }
     case 'orphaned': {
-      if (availability !== 'ready') {
-        body = <ProjectSyncPlaceholder state={availability} />;
+      if (absence !== 'ready') {
+        body = <ProjectSyncPlaceholder state={absence} />;
         break;
       }
       body = (

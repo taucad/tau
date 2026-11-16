@@ -61,10 +61,51 @@ describe('first-open availability', () => {
   it('offers recovery for deadline, offline and account mismatch without claiming a missing file', () => {
     expect(projectAvailability(true, status({ state: 'queued', reason: 'unknown' }))).toBe('failed');
     expect(projectAvailability(true, status({ online: false }))).toBe('offline');
-    expect(projectAvailability(true, status(), false)).toBe('account');
+    expect(projectAvailability(true, status(), { canOpen: false })).toBe('account');
   });
   it('keeps cached files available during background checks and failures', () => {
     expect(projectAvailability(false, status({ state: 'queued' }))).toBe('ready');
+  });
+  /* STO-25: a first view waits for the entry closure, not for the whole apply. */
+  it('opens the tree and the editor once the entry closure lands, while the apply still writes the rest', () => {
+    const applying = status({ state: 'pending', pullPhase: 'applying' });
+    expect(projectAvailability(true, applying, { firstView: { surface: 'tree', readiness: 'entryReady' } })).toBe(
+      'ready',
+    );
+    expect(projectAvailability(true, applying, { firstView: { surface: 'editor', readiness: 'entryReady' } })).toBe(
+      'ready',
+    );
+    expect(projectAvailability(true, applying, { firstView: { surface: 'viewer', readiness: 'materialized' } })).toBe(
+      'ready',
+    );
+    /* A surface that names none (chats, agents) still waits for the whole apply. */
+    expect(projectAvailability(true, applying)).toBe('preparing');
+  });
+  it('keeps the tree waiting until the write has announced its entries, so a listing never misses one (I7)', () => {
+    const applying = status({ state: 'pending', pullPhase: 'applying' });
+    expect(projectAvailability(true, applying, { firstView: { surface: 'tree', readiness: 'treeReady' } })).toBe(
+      'preparing',
+    );
+    expect(projectAvailability(true, applying, { firstView: { surface: 'tree', readiness: undefined } })).toBe(
+      'preparing',
+    );
+    expect(projectAvailability(true, status(), { firstView: { surface: 'tree', readiness: 'connected' } })).toBe(
+      'connecting',
+    );
+  });
+  it('never claims an empty project before every authored file has landed (I7)', () => {
+    const applying = status({ state: 'pending', pullPhase: 'applying' });
+    expect(projectAvailability(true, applying, { firstView: { surface: 'absence', readiness: 'entryReady' } })).toBe(
+      'preparing',
+    );
+    expect(projectAvailability(true, applying, { firstView: { surface: 'absence', readiness: 'materialized' } })).toBe(
+      'ready',
+    );
+  });
+  it('never opens a first view for an account that cannot open the project', () => {
+    expect(
+      projectAvailability(true, status(), { canOpen: false, firstView: { surface: 'tree', readiness: 'filled' } }),
+    ).toBe('account');
   });
 });
 

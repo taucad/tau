@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router';
 import { render, screen } from '@testing-library/react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { FileEntry } from '@taucad/types';
-import type { SyncFacet } from '@taucad/revisions';
+import type { ProjectReadiness, SyncFacet } from '@taucad/revisions';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 
 const pending = vi.hoisted(() => ({ current: false }));
@@ -22,6 +22,7 @@ const sync = vi.hoisted(() => {
   };
   return { current: initial };
 });
+const readiness = vi.hoisted(() => ({ current: undefined as ProjectReadiness | undefined }));
 
 const actorStub = vi.hoisted(() => {
   const snapshot = {
@@ -72,7 +73,7 @@ vi.mock('#lib/tau-cloud-intent.js', async (importOriginal) => ({
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionCommands: () => ({ connectRemote: vi.fn(), syncNow: vi.fn() }),
   useRevisionClient: () => undefined,
-  useRevisionStatus: () => ({ sync: sync.current, remote: { phase: 'connected' } }),
+  useRevisionStatus: () => ({ sync: sync.current, remote: { phase: 'connected' }, readiness: readiness.current }),
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
@@ -133,6 +134,7 @@ beforeEach(() => {
   tree.current = new Map<string, FileEntry>();
   sync.current = facet('backedUp');
   pending.current = false;
+  readiness.current = undefined;
 });
 
 describe('the Files tree while the open pull is running', () => {
@@ -163,6 +165,47 @@ describe('the Files tree while the open pull is running', () => {
     renderTree();
 
     expect(screen.getByRole('region', { name: 'Downloading project files' })).toBeInTheDocument();
+    expect(screen.queryByText('No files available')).not.toBeInTheDocument();
+  });
+
+  /* STO-25: the tree opens once the entry closure lands, not when the whole apply ends. */
+  it('should list the tree once the entry closure lands, showing a file still to land as arriving (I7)', () => {
+    pending.current = true;
+    sync.current = { ...facet('pending'), pullPhase: 'applying' };
+    readiness.current = 'entryReady';
+    const arriving: [string, FileEntry] = [
+      'gear.scad',
+      { path: 'gear.scad', name: 'gear.scad', type: 'file', size: 300, mtimeMs: 0, isLoaded: false, pending: true },
+    ];
+    tree.current = new Map<string, FileEntry>([arrived, arriving]);
+
+    renderTree();
+
+    expect(screen.getByRole('treeitem', { name: /bracket\.scad/u })).toBeInTheDocument();
+    const row = screen.getByRole('treeitem', { name: /gear\.scad/u });
+    expect(row.querySelector('[data-arriving]')).not.toBeNull();
+    expect(row).toHaveTextContent('Arriving');
+    expect(screen.queryByRole('region', { name: 'Preparing project files' })).not.toBeInTheDocument();
+  });
+
+  it('should keep the tree waiting until the write has announced its entries', () => {
+    pending.current = true;
+    sync.current = { ...facet('pending'), pullPhase: 'applying' };
+    readiness.current = 'treeReady';
+    tree.current = new Map<string, FileEntry>([arrived]);
+
+    renderTree();
+
+    expect(screen.queryByRole('treeitem', { name: /bracket\.scad/u })).not.toBeInTheDocument();
+  });
+
+  it('should never say the project has no files while the apply has files still to land (I7)', () => {
+    pending.current = true;
+    sync.current = { ...facet('pending'), pullPhase: 'applying' };
+    readiness.current = 'entryReady';
+
+    renderTree();
+
     expect(screen.queryByText('No files available')).not.toBeInTheDocument();
   });
 

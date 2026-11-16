@@ -21,17 +21,49 @@ export type ProjectAvailability =
   | 'failed'
   | 'account';
 
-/** Never equate an empty local checkout with an authoritative missing file. */
+/**
+ * A first view that opens on readiness rather than the whole apply (STO-25): the surface asking, and the readiness the
+ * project has published for the open.
+ */
+export type FirstView = Readonly<{ surface: ReadinessSurface; readiness: ProjectReadiness | undefined }>;
+
+/**
+ * Whether a first view may open while a Tau Cloud open is still owed.
+ *
+ * It opens at its surface's readiness (D10), and never before the entry closure has landed: by then the tree write has
+ * announced every entry, so a listing shows each one it has yet to land as arriving, never missing (I7), and the
+ * project's `tau.json` is readable.
+ *
+ * @param view - The surface and the open's readiness.
+ * @returns `true` once the surface may open.
+ */
+const firstViewOpens = (view: FirstView): boolean =>
+  readyFor(view.surface, view.readiness) && reachesReadiness(view.readiness, 'entryReady');
+
+/**
+ * Never equate an empty local checkout with an authoritative missing file.
+ *
+ * @param isPending - Whether a Tau Cloud open is still owed for the project.
+ * @param status - The revision client's projection.
+ * @param options - `canOpen` (default `true`), whether this account may open the project; and `firstView`, a surface
+ *   that opens on readiness and the open's readiness, without which the surface waits for the whole apply and the
+ *   manifest that follows it.
+ * @returns What the surface shows.
+ */
 export function projectAvailability(
   isPending: boolean,
   status: Pick<RevisionStatusProjection, 'sync' | 'remote'> | undefined,
-  canOpen = true,
+  options: Readonly<{ canOpen?: boolean; firstView?: FirstView | undefined }> = {},
 ): ProjectAvailability {
+  const { canOpen = true, firstView } = options;
   if (!isPending) {
     return 'ready';
   }
   if (!canOpen) {
     return 'account';
+  }
+  if (firstView !== undefined && firstViewOpens(firstView)) {
+    return 'ready';
   }
   if (status?.sync.hasAppliedRemote === true) {
     return 'preparing';
@@ -57,11 +89,21 @@ export function projectAvailability(
   return 'connecting';
 }
 
-/** Shared readiness for every pane; no local timer or second synchronization store. */
-export function useProjectAvailability(): ProjectAvailability {
+/**
+ * Shared readiness for every pane; no local timer or second synchronization store.
+ *
+ * @param surface - A first view (the tree, the editor, a file viewer) opens on its readiness during a Tau Cloud open
+ *   (STO-25); a pane that names none waits for the whole apply.
+ * @returns What the pane shows.
+ */
+export function useProjectAvailability(surface?: ReadinessSurface): ProjectAvailability {
   const { projectId } = useProject();
   const intent = useTauCloudIntent(projectId);
-  return projectAvailability(intent === 'open', useRevisionStatus(), canOpenCloudProject(projectId));
+  const readiness = useProjectReadiness();
+  return projectAvailability(intent === 'open', useRevisionStatus(), {
+    canOpen: canOpenCloudProject(projectId),
+    firstView: surface === undefined ? undefined : { surface, readiness },
+  });
 }
 
 /**
@@ -240,11 +282,13 @@ export function useLargeObjects(): LargeObjectsFacet | undefined {
  * model render need every authored file. A render then waits only on the large
  * objects of its own closure ({@link modelAvailability}, T6).
  */
-export type ReadinessSurface = 'tree' | 'editor' | 'viewer' | 'search' | 'export' | 'lsp' | 'cut' | 'model';
+export type ReadinessSurface = 'tree' | 'absence' | 'editor' | 'viewer' | 'search' | 'export' | 'lsp' | 'cut' | 'model';
 
 /** {@link ReadinessSurface} to the readiness state it needs. */
 export const surfaceReadiness: Readonly<Record<ReadinessSurface, ProjectReadiness>> = {
   tree: 'treeReady',
+  /* A surface that says a file is missing, or the project has none, speaks for every authored file (I7). */
+  absence: 'materialized',
   editor: 'entryReady',
   viewer: 'entryReady',
   search: 'materialized',

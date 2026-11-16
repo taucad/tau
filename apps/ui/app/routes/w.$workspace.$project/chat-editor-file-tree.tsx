@@ -156,6 +156,8 @@ type RowPresentation = FileProvenanceLabel & {
   readonly provenance: FileProvenance | undefined;
   readonly isSubtreeRoot: boolean;
   readonly subtreeRootLevel?: number;
+  /** A file a tree write has yet to land (STO-25, I7): shown arriving, never missing and never as stale text. */
+  readonly isArriving?: boolean;
 };
 
 /** The shared read-only refusal copy, read once so the call site is not a pseudo-constructor. */
@@ -187,6 +189,8 @@ const sameProvenance = (previous?: FileProvenance, next?: FileProvenance): boole
     previous?.identity === next?.identity &&
     previous?.overrides === next?.overrides);
 
+const isPendingFile = (entry: FileEntry): boolean => entry.type === 'file' && entry.pending === true;
+
 /**
  * Whether two tree snapshots draw the same rows.
  *
@@ -203,6 +207,7 @@ function sameTreeRows(previous: ReadonlyMap<string, FileEntry>, next: ReadonlyMa
       before !== entry &&
       (before?.name !== entry.name ||
         before.type !== entry.type ||
+        isPendingFile(before) !== isPendingFile(entry) ||
         !sameProvenance(before.provenance, entry.provenance))
     ) {
       return false;
@@ -220,8 +225,9 @@ function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<
 
   const presentation = new Map<string, RowPresentation>();
   for (const [path, label] of labels) {
+    const arriving = isPendingFile(fileTreeMap.get(path)!) ? { isArriving: true } : {};
     if (!label.readOnly) {
-      presentation.set(path, { ...label, isSubtreeRoot: true });
+      presentation.set(path, { ...label, isSubtreeRoot: true, ...arriving });
       continue;
     }
 
@@ -238,6 +244,7 @@ function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<
       ...label,
       isSubtreeRoot: subtreeRoot === path,
       subtreeRootLevel: subtreeRoot.split('/').length - 1,
+      ...arriving,
     });
   }
 
@@ -2187,7 +2194,8 @@ export const ChatEditorFileTree = memo(function ({
  */
 /** An empty project offers one clear action, a touch path that does not depend on dropping files (PN-FIL-3, I2). */
 function FileTreeEmptyState({ onUpload }: { readonly onUpload: (() => void) | undefined }): React.JSX.Element {
-  const availability = useProjectAvailability();
+  /* "No files" speaks for every authored file: while an open's apply still writes them, it waits (I7). */
+  const availability = useProjectAvailability('absence');
   if (availability !== 'ready') {
     return <ProjectSyncPlaceholder state={availability} />;
   }
@@ -2578,10 +2586,14 @@ function TreeItem({
               {presentation.badge}
             </Badge>
           ) : null}
-          {isAwaitingLargeObject ? (
-            <span data-large-object-pending className='flex shrink-0 items-center'>
+          {isAwaitingLargeObject || presentation.isArriving === true ? (
+            <span
+              data-large-object-pending={isAwaitingLargeObject ? '' : undefined}
+              data-arriving={presentation.isArriving === true ? '' : undefined}
+              className='flex shrink-0 items-center'
+            >
               <Loader className='size-3 text-muted-foreground motion-reduce:animate-none' />
-              <span className='sr-only'>Downloading</span>
+              <span className='sr-only'>{isAwaitingLargeObject ? 'Downloading' : 'Arriving'}</span>
             </span>
           ) : null}
           {presentation.isSubtreeRoot && presentation.glyph === 'lock' ? (

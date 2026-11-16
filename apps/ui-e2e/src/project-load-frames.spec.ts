@@ -78,6 +78,8 @@ const projectNames = { a: 'Project Navigation A', b: 'Project Navigation B' } as
 const usage = { inputTokens: 12, outputTokens: 6 };
 const finalReply = 'The task list is up to date.';
 const composer = selectors.getByCss('[aria-label="Ask Tau to build anything..."]');
+/** The destination composer's native input that the frame's composer box serves (PL6). */
+const servedComposerInput = '[data-slot="workspace-frame-composer"] textarea[aria-label="Chat message"]';
 const traySummary = selectors.getByRole('button', { name: /^Tasks: 0 of 2 done/u });
 
 const cookieValue = (value: unknown): string => encodeURIComponent(JSON.stringify(value));
@@ -495,6 +497,77 @@ test(
 
     expect(before.violations, 'the frame before the reveal').toEqual([]);
     expect(after.violations, 'the frame after the reveal').toEqual([]);
+  },
+);
+
+/*
+ * PL6 on A15b2's pending frame: a click on a project row from Home draws the destination's frame ahead of the route
+ * while the page being left is hidden. The frame's composer box is exempt from that hiding, so the destination's native
+ * input is on screen and takes typing during the wait, and the live composer adopts the text when the panes are revealed.
+ */
+test(
+  'should take typing in the destination composer while a click from Home waits for the workspace',
+  { timeout: loadBudget },
+  async () => {
+    await seedProjects('wide');
+    await target.navigate('/');
+    await target.expectVisible(composer, 60_000);
+    await target.delay(settleWindow);
+    await holdRequestsUntilReleased(workspaceChunk);
+    /* The pending window is the router's transition, tens of milliseconds: each animation frame of it is sampled in the
+     * page, where the served input must be on screen and focusable. */
+    await target.evaluate((selector) => {
+      const record = globalThis as typeof globalThis & {
+        __pendingComposer?: Array<{ visible: boolean; focused: boolean }>;
+      };
+      record.__pendingComposer = [];
+      const sample = (): void => {
+        if (document.querySelector('[data-workspace-pending]') !== null) {
+          const input = document.querySelector<HTMLTextAreaElement>(selector);
+          input?.focus();
+          record.__pendingComposer!.push({
+            visible: input?.checkVisibility({ visibilityProperty: true }) ?? false,
+            focused: input !== null && document.activeElement === input,
+          });
+        }
+        if (record.__pendingComposer!.length < 600) {
+          requestAnimationFrame(sample);
+        }
+      };
+      requestAnimationFrame(sample);
+    }, servedComposerInput);
+    const row = selectors.getByRole('link', { name: projectNames.a }).first();
+    await target.expectVisible(row, 60_000);
+    await target.click(row);
+    const served = selectors.getByCss(servedComposerInput);
+    await target.expectVisible(served, 60_000);
+    const pendingFrames = await target.evaluate(
+      () =>
+        (globalThis as typeof globalThis & { __pendingComposer?: Array<{ visible: boolean; focused: boolean }> })
+          .__pendingComposer ?? [],
+    );
+    precondition(pendingFrames.length > 0, 'PL6: no frame was drawn pending after the click from Home');
+    /* The workspace chunk is still held, so the served input is the one the pending frames showed. */
+    await target.type(served, 'Hold the bracket');
+    const typed = await target.evaluate((selector) => {
+      const input = document.querySelector<HTMLTextAreaElement>(selector);
+      return { visible: input?.checkVisibility({ visibilityProperty: true }) ?? false, value: input?.value ?? '' };
+    }, servedComposerInput);
+    await releaseHeldRequests();
+    await settleProject();
+    await target.expectVisible(selectors.getByCss(richComposer), 60_000);
+    const adopted = await target.textContent(selectors.getByCss(richComposer));
+    await target.writeArtifact(
+      'project-load-frames/pending-composer-typing-wide.json',
+      `${JSON.stringify({ pendingFrames, typed, adopted }, null, 2)}\n`,
+    );
+
+    expect(
+      pendingFrames.filter((frame) => !frame.visible || !frame.focused),
+      `the served input in the ${pendingFrames.length} pending frames`,
+    ).toEqual([]);
+    expect(typed, 'the served input before the reveal').toEqual({ visible: true, value: 'Hold the bracket' });
+    expect(adopted, 'the live composer after the reveal').toContain('Hold the bracket');
   },
 );
 

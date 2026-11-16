@@ -724,8 +724,8 @@ test('A0.1 row 5b (I6 / S26 / D26, A7d): the close revision holding the edit is 
   annotate,
 }) => {
   /* The at-once reload 5a measures: the edit is in the editor's state and owed, so the unload's producer stage writes
-   * it before the document goes, and the close cut has the edit's bytes to take. Row 5d is the path where the edit
-   * itself is lost (its save still in flight), which is lane A7e's, not this row's. */
+   * it before the document goes, and the close cut has the edit's bytes to take. Row 5d is the path where the edit's
+   * save is still in flight at the reload, which A7e's replay keeps. */
   const { marker } = await editViewArrangeAndReload(true);
   /* The edit's bytes are on disk: the producer stage wrote the editor's document before the cut. */
   const configs = await configsByName();
@@ -892,13 +892,14 @@ test('A0.1 row 5c (S26 / D17, A7d): an edit made just before an immediate reload
 });
 
 /*
- * Expected failure (S26, D17, D26; programme control, 2026-11-15T20:40Z). The arrangement and the view setting go first,
- * then the edit, Escape and a reload by the harness: the lane record still owes its write, so `beforeunload` runs the
- * producer stage, which starts the editor's save beside the record writes, and the document goes before that save
- * answers. The edit is lost from disk and from the editor: 7 of 10 runs on f9a1bd11 (before A7c's `beforeunload`
- * stage) and 10 of 10 on 648a28ce. A follow-up the programme names owns the fix and flips this row.
+ * S26, D17, I6 (A7e; programme control, 2026-11-15T21:08Z). The arrangement and the view setting go first, then the
+ * edit, Escape and a reload by the harness: the lane record still owes its write, so `beforeunload` runs the producer
+ * stage, which starts the editor's save beside the record writes, and the document goes before that save answers. The
+ * edit used to be lost from disk and from the editor (7 of 10 runs on f9a1bd11, 10 of 10 on 648a28ce). Now `pagehide`
+ * records the unconfirmed text, the next open replays it through the checked save against its base, and the owed close
+ * cut waits for the replay, so History's newest close revision holds the edit.
  */
-test.fails('A0.1 row 5d (S26 / D17, expected failure): an edit whose save is in flight when the document goes is lost', async ({
+test('A0.1 row 5d (S26 / D17 / I6, A7e): an edit whose save is in flight when the document goes is kept', async ({
   annotate,
 }) => {
   const { marker } = await editViewArrangeAndReload(false);
@@ -915,17 +916,13 @@ test.fails('A0.1 row 5d (S26 / D17, expected failure): an edit whose save is in 
     (current) => current.includes(marker),
     15_000,
   );
-  /* Read, not asserted: inside `test.fails` a failing wait here would pass the row, so a reload or an editor that
-   * never comes back reads as an empty text and fails only the row's own assertion. */
-  const source = await openSource().catch(() => undefined);
-  const shownText =
-    source === undefined
-      ? ''
-      : await readWithin(
-          async () => (await target.textContent(source).catch(() => '')) ?? '',
-          (current) => current.includes('makeBaseBox(18') && current.includes(marker),
-          60_000,
-        );
+  const source = await openSource();
+  await target.expectContainingText(source, 'makeBaseBox(18', 60_000);
+  const shownText = await readWithin(
+    async () => (await target.textContent(source)) ?? '',
+    (current) => current.includes(marker),
+    15_000,
+  );
   const reading = { editStored: storedText.includes(marker), editKept: shownText.includes(marker) };
   await annotate(`S26 edit with a save in flight at reload: ${JSON.stringify(reading)}`);
   await target.writeArtifact(`a01-row5d-report-${String(Date.now())}.json`, JSON.stringify(reading));
@@ -933,6 +930,30 @@ test.fails('A0.1 row 5d (S26 / D17, expected failure): an edit whose save is in 
     editStored: true,
     editKept: true,
   });
+
+  /* I6: the owed close cut waited for the replay, so the newest close revision changed the edited file. */
+  await target.click(revisionChip());
+  const panel = selectors.getByCss(visibleRevisionsPanel);
+  const trailerOf = () => panel.getByRole('definition').filter({ hasText: 'Tau-Trigger:' });
+  await target.expectVisible(historyRow(0), 60_000);
+  const newestTrailer = async (): Promise<string> => {
+    const newest = historyRow(0);
+    if (!(await target.isVisible(newest))) {
+      return '';
+    }
+    const expanded = await target.getAttribute(newest, 'aria-expanded').catch(() => undefined);
+    if (expanded === undefined) {
+      return '';
+    }
+    if (expanded !== 'true') {
+      await target.click(newest).catch(() => undefined);
+    }
+    return (await target.isVisible(trailerOf())) ? ((await target.textContent(trailerOf()).catch(() => '')) ?? '') : '';
+  };
+  const trailer = await readWithin(newestTrailer, (text) => /Tau-Trigger: close\b/u.test(text), 30_000);
+  await annotate(`I6 newest History trailer: ${trailer || '(none)'}`);
+  expect(trailer, 'I6: the newest History entry is the close cut').toMatch(/Tau-Trigger: close\b/u);
+  await target.expectContainingText(panel.getByRole('list', { name: 'Changed files' }), entryPaths.a, 30_000);
 });
 
 /*

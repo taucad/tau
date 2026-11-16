@@ -654,7 +654,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await vi.waitFor(
       () => {
         expect(alpha.frames.filter((frame) => frame.type === 'error' && frame.id === 1)).toEqual([]);
-        expect(alpha.frames).toContainEqual({ type: 'result', id: 1, result: { kind: 'saved' } });
+        expect(alpha.frames).toContainEqual({ type: 'result', id: 1, result: { kind: 'saved', outcome: 'recorded' } });
         expect(root.status().headRevisionId).toBeDefined();
       },
       { timeout: 10_000 },
@@ -828,7 +828,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 90)).toEqual({
       type: 'result',
       id: 90,
-      result: { kind: 'saved' },
+      result: { kind: 'saved', outcome: 'recorded' },
     });
     expect(root.status().headRevisionId).toBeDefined();
 
@@ -1437,7 +1437,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     fixture.announce('alpha', ['main.scad']);
     alpha.send({ command: 'saveRevision', id: 3, trigger: 'save' });
 
-    expect(await answered(3)).toEqual({ type: 'result', id: 3, result: { kind: 'saved' } });
+    /* The cut lost its compare-and-swap: the answer says the bytes stayed unrecorded (A7e). */
+    expect(await answered(3)).toEqual({ type: 'result', id: 3, result: { kind: 'saved', outcome: 'refused' } });
     expect(alpha.frames).toContainEqual({
       type: 'toast',
       toast: {
@@ -1719,7 +1720,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
         await settle(4);
         answer = alpha.frames.find((frame) => 'id' in frame && frame.id === 78);
       }
-      expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved' } });
+      expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved', outcome: 'recorded' } });
       const after = await root.log();
       expect(after.length).toBeGreaterThan(before);
     } finally {
@@ -1755,8 +1756,29 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       }
     }
 
-    expect(answer).toEqual({ type: 'result', id: 77, result: { kind: 'saved' } });
+    expect(answer).toEqual({ type: 'result', id: 77, result: { kind: 'saved', outcome: 'recorded' } });
     expect(rowsWhenAnswered).toBeGreaterThan(before);
+  });
+
+  /* A7e (22:19Z): a close over trees that are all unchanged says so, apart from one that recorded or was refused. */
+  it('should answer a close cut over unchanged trees as nothing to record', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    await settle(20);
+    alpha.send({ command: 'saveRevision', id: 79, trigger: 'close' });
+    await vi.waitFor(() => {
+      expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 79)).toBeDefined();
+    });
+    alpha.send({ command: 'saveRevision', id: 80, trigger: 'close' });
+    let answer: WorkerRevisionResponse | undefined;
+    for (let attempt = 0; attempt < 60 && answer === undefined; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+      await settle(4);
+      answer = alpha.frames.find((frame) => 'id' in frame && frame.id === 80);
+    }
+    expect(answer).toEqual({ type: 'result', id: 80, result: { kind: 'saved', outcome: 'nothingToRecord' } });
   });
 
   /* A save whose compare-and-swap lost is settled, not left to the deadline: the next open mints the same bytes. */
@@ -1796,7 +1818,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     }
 
     expect(conflictNext).toBe(false);
-    expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved' } });
+    expect(answer).toEqual({ type: 'result', id: 78, result: { kind: 'saved', outcome: 'refused' } });
   });
 
   it('should mint one strictly increasing generation per content-change event (F9, F4)', async () => {

@@ -75,6 +75,7 @@ import type {
 } from '#types/runtime-source-snapshot.types.js';
 import { abortReason as abortReasonEnum } from '#types/runtime-wire.types.js';
 import type {
+  ImplementationAssetLoader,
   TranscodeResult,
   TranscoderDefinition,
   TranscoderEdge,
@@ -414,6 +415,57 @@ export type KernelWorkerOptions = {
   readonly transcoders?: readonly TranscoderPluginEntry[];
 };
 
+/**
+ * Check implementation asset declarations without fetching them: ids are unique and digests are SHA-256 hex.
+ *
+ * @param pluginId - Stable plugin identifier used in diagnostics.
+ * @param assets - Declared assets and their expected SHA-256 digests.
+ * @throws {Error} When an id repeats or a digest is malformed.
+ */
+const validateImplementationAssetDeclarations = (
+  pluginId: string,
+  assets: readonly RuntimeImplementationAsset[],
+): void => {
+  const ids = new Set<string>();
+  for (const asset of assets) {
+    if (ids.has(asset.id)) {
+      throw new Error(`Duplicate implementation asset id for ${pluginId}: ${asset.id}`);
+    }
+    ids.add(asset.id);
+    if (!/^[0-9a-f]{64}$/u.test(asset.sha256)) {
+      throw new Error(`Invalid SHA-256 digest for ${pluginId}:${asset.id}`);
+    }
+  }
+};
+
+/**
+ * Fetch one implementation asset and check it against its declared digest.
+ *
+ * @param pluginId - Stable plugin identifier used in diagnostics.
+ * @param asset - The declared asset.
+ * @returns The verified bytes.
+ * @throws {Error} When the fetch fails or the digest does not match.
+ */
+const fetchVerifiedImplementationAsset = async (
+  pluginId: string,
+  asset: RuntimeImplementationAsset,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = new Uint8Array(await loadWasmBinary(asset.url));
+  } catch (error) {
+    throw new Error(
+      `Failed to load implementation asset ${pluginId}:${asset.id}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  const actual = await sha256Bytes(bytes);
+  if (actual !== asset.sha256) {
+    throw new Error(`Implementation asset digest mismatch for ${pluginId}:${asset.id}`);
+  }
+  return bytes;
+};
+
 type LoadedTranscoder = {
   id: string;
   definition: TranscoderDefinition;
@@ -745,6 +797,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Maps asset URL to its SHA-256 content hash.
    */
   private readonly assetHashCache = new Map<string, string>();
+
+  /**
+   * Verified bytes of implementation assets loaded on use, kept for the worker's life.
+   * Maps `<url>\0<sha256>` to the pending or settled load.
+   */
+  private readonly implementationAssetBytes = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
 
   private readonly fileHashCache = new Map<string, string>();
   private readonly fileContentCache = new Map<string, Uint8Array<ArrayBuffer> | string>();
@@ -2664,6 +2722,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.watchUnsubscribe?.();
     this.watchUnsubscribe = undefined;
     this.assetHashCache.clear();
+    this.implementationAssetBytes.clear();
     this.parameterResultCache = undefined;
     this.commonDependencyCache.clear();
     this.middlewareDependencyCache.clear();
@@ -4678,39 +4737,56 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     pluginId: string,
     assets: readonly RuntimeImplementationAsset[],
   ): Promise<void> {
-    const ids = new Set<string>();
-    for (const asset of assets) {
-      if (ids.has(asset.id)) {
-        throw new Error(`Duplicate implementation asset id for ${pluginId}: ${asset.id}`);
-      }
-      ids.add(asset.id);
-      if (!/^[0-9a-f]{64}$/u.test(asset.sha256)) {
-        throw new Error(`Invalid SHA-256 digest for ${pluginId}:${asset.id}`);
-      }
-    }
+    validateImplementationAssetDeclarations(pluginId, assets);
 
     for (const asset of assets) {
       const cached = this.assetHashCache.get(asset.url);
       if (cached === asset.sha256) {
         continue;
       }
-      let bytes: ArrayBuffer;
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- verification errors must identify the exact declared asset
-        bytes = await loadWasmBinary(asset.url);
-      } catch (error) {
-        throw new Error(
-          `Failed to load implementation asset ${pluginId}:${asset.id}: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error },
-        );
-      }
       // oxlint-disable-next-line no-await-in-loop -- verification errors must identify the exact declared asset
-      const actual = await sha256Bytes(new Uint8Array(bytes));
-      if (actual !== asset.sha256) {
-        throw new Error(`Implementation asset digest mismatch for ${pluginId}:${asset.id}`);
-      }
-      this.assetHashCache.set(asset.url, actual);
+      await fetchVerifiedImplementationAsset(pluginId, asset);
+      this.assetHashCache.set(asset.url, asset.sha256);
     }
+  }
+
+  /**
+   * Create the loader a transcoder uses to fetch its declared assets on first use.
+   *
+   * @param pluginId - Stable plugin identifier used in diagnostics.
+   * @param assets - Declared assets and their expected SHA-256 digests.
+   * @returns A loader that fetches, verifies and keeps each asset's bytes for the worker's life.
+   */
+  private createImplementationAssetLoader(
+    pluginId: string,
+    assets: readonly RuntimeImplementationAsset[],
+  ): ImplementationAssetLoader {
+    const byId = new Map(assets.map((asset) => [asset.id, asset]));
+    return {
+      load: async (id) => {
+        const asset = byId.get(id);
+        if (asset === undefined) {
+          throw new Error(`Unknown implementation asset ${pluginId}:${id}`);
+        }
+        const key = `${asset.url}\0${asset.sha256}`;
+        const pending = this.implementationAssetBytes.get(key);
+        if (pending !== undefined) {
+          return pending;
+        }
+        const load = fetchVerifiedImplementationAsset(pluginId, asset);
+        this.implementationAssetBytes.set(key, load);
+        try {
+          const bytes = await load;
+          this.assetHashCache.set(asset.url, asset.sha256);
+          return bytes;
+        } catch (error) {
+          if (this.implementationAssetBytes.get(key) === load) {
+            this.implementationAssetBytes.delete(key);
+          }
+          throw error;
+        }
+      },
+    };
   }
 
   /**
@@ -6425,10 +6501,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return transcoder.context;
     }
     transcoder.initialization ??= (async () => {
-      await this.verifyImplementationAssets(transcoder.id, transcoder.implementationAssets);
+      if (transcoder.definition.implementationAssetLoading === 'on-use') {
+        validateImplementationAssetDeclarations(transcoder.id, transcoder.implementationAssets);
+      } else {
+        await this.verifyImplementationAssets(transcoder.id, transcoder.implementationAssets);
+      }
       const context = await transcoder.definition.initialize(transcoder.options, {
         logger: this.logger,
         tracer: this.tracer,
+        implementationAssets: this.createImplementationAssetLoader(transcoder.id, transcoder.implementationAssets),
       });
       transcoder.context = context;
       transcoder.initialized = true;

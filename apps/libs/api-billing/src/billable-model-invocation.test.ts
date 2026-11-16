@@ -19,7 +19,7 @@ import type { InputCountCapability } from '#billable-model-input-count.js';
 import { CreditLedgerService } from '#credit-ledger.service.js';
 import type { BillingPolicyService } from '#billing-policy.service.js';
 import type { DatabaseService } from '@taucad/api-database';
-import type { TerminalEvidence, TerminalReceipt } from '#credit-ledger.types.js';
+import type { QualifiedAdmissionInput, TerminalEvidence, TerminalReceipt } from '#credit-ledger.types.js';
 import type { MetricsService } from '@taucad/api-observability/metrics';
 import { ShutdownService } from '@taucad/api-lifecycle/shutdown';
 
@@ -2040,5 +2040,137 @@ describe('BillableModelInvocationService', () => {
         'error.type': errorType,
       });
     });
+  });
+});
+
+describe('BillableModelInvocationService Together admission', () => {
+  /* A real ledger whose first database read is the account binding: reaching it means admission validation passed. */
+  const validatingLedger = new CreditLedgerService(
+    {
+      database: {
+        transaction: async () => {
+          throw new Error('database reached');
+        },
+      },
+    } as unknown as Pick<DatabaseService, 'database'>,
+    {} as BillingPolicyService,
+  );
+  const togetherIntent = (): BillableInvocationIntent => ({
+    ...intent(),
+    attempt: { version: 1, key: 'attempt-together-text' },
+    providerWire: 'openai-completions',
+    body: {
+      model: 'together-kimi-k3.1-pro',
+      messages: [{ role: 'user', content: 'Say hi.' }],
+      stream: true,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact OpenAI Completions wire key.
+      max_tokens: 64,
+    },
+  });
+  const togetherStream = () =>
+    new Response(
+      [
+        'data: {"id":"together-request","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"}}]}\n\n',
+        'data: {"id":"together-request","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6,"prompt_tokens_details":{"cached_tokens":0}}}\n\n',
+        'data: [DONE]\n\n',
+      ].join(''),
+      { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    );
+  const harness = (admitOperation: (input: QualifiedAdmissionInput) => Promise<unknown>) => {
+    const fetchOnce = vi.fn<typeof fetch>(async () => togetherStream());
+    const resolver = new CodeOwnedBillableModelQualificationResolver({
+      adapters: createBillableModelProviderAdapters(
+        { get: (key) => (key === 'TOGETHER_API_KEY' ? 'together-key' : undefined) },
+        fetchOnce,
+      ),
+      executionTimeout: 30_000,
+    });
+    const row = {
+      id: 'operation',
+      accountId: 'account',
+      environment: 'development',
+      activity: 'agent',
+      requestDigest: '',
+      customerState: 'pending',
+      dueAt: new Date(Date.now() + 30_000),
+    };
+    const ledger = {
+      getOperationForAttempt: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockImplementation(async () => row),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(admitOperation),
+      markDispatchIntent: vi.fn(async () => true),
+      markDispatchAccepted: vi.fn(async () => true),
+      getDispatchTimeRemaining: vi.fn(async () => 30_000),
+      recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
+      recordCancellation: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n, supplierCostPicoUsd: 0n })),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      resolver,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      {
+        ...genAiMetrics(),
+        billingFundedOperationTerminals: { add: vi.fn() },
+        billingProviderAccountRefusals: { add: vi.fn() },
+        billingSupplierCostPicoUsd: { add: vi.fn() },
+      } as unknown as MetricsService,
+    );
+    const qualified = resolver.resolve(togetherIntent());
+    row.requestDigest = (
+      service as unknown as {
+        requestDigest(value: BillableInvocationIntent, pins: QualifiedBillableInvocation): string;
+      }
+    ).requestDigest(togetherIntent(), qualified);
+    return { fetchOnce, ledger, service };
+  };
+
+  it('should admit and stream a text-only Together request with its namespaced supplier model id', async () => {
+    const { fetchOnce, ledger, service } = harness(async (input) => {
+      // The real ledger's validation over the real qualification: it must reach the database, not refuse.
+      await expect(validatingLedger.admitOperation(input)).rejects.toThrow('database reached');
+      return { status: 'admitted', operationId: 'operation', generation: 0n };
+    });
+
+    const result = await service.invoke(togetherIntent());
+    if (result.state !== 'streaming') {
+      throw new Error('Together invocation did not stream');
+    }
+
+    expect(result.response.status).toBe(200);
+    expect(await result.response.text()).toContain('"content":"hi"');
+    await result.completion;
+    expect(ledger.admitOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modelId: 'moonshotai/Kimi-K3.1-Pro',
+        providerId: 'together',
+        sku: 'model:together-kimi-k3.1-pro',
+      }),
+    );
+    expect(fetchOnce.mock.lastCall?.[1]?.body).toContain('"model":"moonshotai/Kimi-K3.1-Pro"');
+    expect(ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0]).toMatchObject({
+      evidence: { kind: 'final_usage' },
+    });
+    expect(ledger.terminalizeOperation).toHaveBeenCalledOnce();
+  });
+
+  it('should answer an admission validation refusal as a typed 400 before dispatch', async () => {
+    const { fetchOnce, service } = harness(async (input) =>
+      validatingLedger.admitOperation({ ...input, modelId: 'moonshotai/Kimi K3' }),
+    );
+
+    const refusal = await service.invoke(togetherIntent()).then(
+      () => expect.fail('invocation should refuse'),
+      (error: unknown) => error,
+    );
+
+    expect(refusal).toBeInstanceOf(LlmGatewayError);
+    expect((refusal as LlmGatewayError).getStatus()).toBe(400);
+    expect(gatewayErrorType(refusal)).toBe('INVALID_REQUEST');
+    expect(fetchOnce).not.toHaveBeenCalled();
   });
 });

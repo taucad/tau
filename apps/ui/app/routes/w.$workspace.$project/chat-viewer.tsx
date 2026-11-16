@@ -1,5 +1,11 @@
 import { useModelAvailability } from '#hooks/use-project-availability.js';
-import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import {
+  ModelFilesStageStatus,
+  ProjectSyncPlaceholder,
+  isModelFilesWait,
+  modelFilesFailure,
+} from '#routes/w.$workspace.$project/project-sync-placeholder.js';
+import type { ModelFilesWait } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { interactiveViewContent } from '#lib/interactive-view-content.js';
 import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
 import { useSelector } from '@xstate/react';
@@ -52,6 +58,7 @@ import {
 import { useViewerPartMenu } from '@taucad/workbench-panes/component-menu/use-viewer-part-menu';
 import type { ViewerPartMenuDecorator } from '@taucad/workbench-panes/component-menu/use-viewer-part-menu';
 import { ViewerStage } from '@taucad/workbench-panes/shell/viewer-stage';
+import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-stage';
 import { ExactMeasurementProvider } from '@taucad/viewer/graphics/three/react/exact-measurement';
 import type { ExactOccurrenceDistanceRequest } from '@taucad/viewer/graphics/three/react/exact-measurement';
 import { measureExactOccurrenceDistance } from '#workers/measurement-exact.client.js';
@@ -267,6 +274,12 @@ type ChatViewerProps = {
   readonly profile?: 'editor' | 'shared';
 };
 
+/** What the viewer content shows besides the props it is given: the wait for the model's files, if any (A15e). */
+type ChatViewerContentProps = ChatViewerProps & {
+  /** The model's files are still being checked or downloaded, or their download failed; `undefined` once they are here. */
+  readonly filesWait?: ModelFilesWait;
+};
+
 function MissingViewerFile({
   entryPath,
   onSelect,
@@ -295,12 +308,98 @@ function MissingViewerFile({
   );
 }
 
+type ViewerEntryAbsence = 'unbound' | 'directory' | 'missing' | undefined;
+
+/**
+ * The view's absence once its files are known.
+ *
+ * @param facts - The view's entry, main, whether the view waited for the files, and what is known about the entry.
+ * @returns The absence, or `undefined` when the entry renders.
+ */
+function settledAbsence({
+  entryPath,
+  mainEntryPath,
+  hasWaited,
+  isDirectory,
+  isMissing,
+}: Readonly<{
+  entryPath: string | undefined;
+  mainEntryPath: string | undefined;
+  hasWaited: boolean;
+  isDirectory: boolean;
+  isMissing: boolean;
+}>): ViewerEntryAbsence {
+  if (entryPath) {
+    return isDirectory ? 'directory' : isMissing ? 'missing' : undefined;
+  }
+  /* A view that waited for the files with no entry, while main is known, is about to be bound to main: the adapter binds
+     it in the settle commit's layout effect, so the stage stays rather than drawing "No file selected" for one commit. */
+  return mainEntryPath && hasWaited ? undefined : 'unbound';
+}
+
+/**
+ * Why the view has no entry to render (none is bound, it names a directory, or the file is not there), and the main it
+ * is moving to. While the model's files are checked or downloaded an absence is not known afresh: the one known when
+ * they last settled for this entry stays, and otherwise the stage and its last render stay (A15e; UI Policy § 5: no
+ * empty state before the content is known to be empty). A main that changed during the check is followed from the
+ * commit the files settle in, so the view's old file never reads missing on the way (P-j). Both are kept with React's
+ * "information from previous renders" pattern; no effect or timer runs.
+ *
+ * @param facts - The view's entry, the project's main and what is known about the entry.
+ * @returns The absence, `undefined` when the entry renders; the path the stage renders (`''` for an unbound view that
+ *   keeps its stage through a file check); and the main to follow, if the view follows a changed one.
+ */
+function useViewerEntryAbsence({
+  entryPath,
+  mainEntryPath,
+  isDirectory,
+  isMissing,
+  isFilesWait,
+}: Readonly<{
+  entryPath: string | undefined;
+  mainEntryPath: string | undefined;
+  isDirectory: boolean;
+  isMissing: boolean;
+  isFilesWait: boolean;
+}>): Readonly<{ absence: ViewerEntryAbsence; renderedPath: string; followTarget: string | undefined }> {
+  const [followedMain, setFollowedMain] = useState(mainEntryPath);
+  const [settled, setSettled] = useState<Readonly<{ entryPath: string | undefined; absence: ViewerEntryAbsence }>>();
+  const renderedPath = entryPath ?? '';
+  const [hasWaited, setHasWaited] = useState(isFilesWait);
+  if (isFilesWait && !hasWaited) {
+    setHasWaited(true);
+  }
+  const followTarget =
+    !isFilesWait && mainEntryPath && mainEntryPath !== followedMain && entryPath === followedMain
+      ? mainEntryPath
+      : undefined;
+  if (!isFilesWait && followTarget === undefined && mainEntryPath !== followedMain) {
+    setFollowedMain(mainEntryPath);
+  }
+  if (followTarget !== undefined) {
+    return { absence: undefined, renderedPath, followTarget };
+  }
+  if (isFilesWait) {
+    return {
+      absence: settled !== undefined && settled.entryPath === entryPath ? settled.absence : undefined,
+      renderedPath,
+      followTarget,
+    };
+  }
+  const absence = settledAbsence({ entryPath, mainEntryPath, hasWaited, isDirectory, isMissing });
+  if (settled === undefined || settled.entryPath !== entryPath || settled.absence !== absence) {
+    setSettled({ entryPath, absence });
+  }
+  return { absence, renderedPath, followTarget };
+}
+
 const ChatViewerContent = memo(function ({
   viewId,
   entryPath,
   panelApi,
   profile = 'editor',
-}: ChatViewerProps): React.JSX.Element {
+  filesWait,
+}: ChatViewerContentProps): React.JSX.Element {
   const { projectRef, viewGraphics, viewRecords, entriesRecord, geometryUnits, mainEntryPath, setViewEntryPath } =
     useProject();
   const viewCommands = useWorkbenchViewCommands();
@@ -363,14 +462,24 @@ const ChatViewerContent = memo(function ({
   // 'orphaned' outcome via the discriminated FileContentResult contract.
   const fileContent = useFileContent(entryPath);
   const isMissing = fileContent.kind === 'orphaned' && !isDirectory;
+  /* While the model's files are checked or downloaded, an entry the tree has not landed yet is not known to be absent:
+     the stage and its last render stay, and the empty states wait for the files (A15e; UI Policy § 5). */
+  const isFilesWait = filesWait !== undefined;
+  const { absence, renderedPath, followTarget } = useViewerEntryAbsence({
+    entryPath,
+    mainEntryPath,
+    isDirectory,
+    isMissing,
+    isFilesWait,
+  });
 
   useEffect(() => {
-    if (!graphicsActor || (entryPath && !isDirectory && !isMissing)) {
+    if (!graphicsActor || absence === undefined) {
       return;
     }
     // Graphics reports the unit it stops presenting, and the project releases its manifest with the last view.
     graphicsActor.send({ type: 'clearArtifact' });
-  }, [entryPath, graphicsActor, isDirectory, isMissing]);
+  }, [graphicsActor, absence]);
 
   // The project view record is the camera seed for this pane.
   const viewRecord = viewRecords.get(viewId);
@@ -390,8 +499,9 @@ const ChatViewerContent = memo(function ({
   // Handle file selection in the viewport FileSelector
   const handleFileSelect = useCallback(
     (path: string) => {
-      // Ensure geometry unit exists for the selected file
-      if (!geometryUnits.has(path)) {
+      // Ensure geometry unit exists for the selected file; during a file check the viewer adapter creates it once the
+      // files settle (A15e; P-j).
+      if (!isFilesWait && !geometryUnits.has(path)) {
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath: path,
@@ -445,19 +555,24 @@ const ChatViewerContent = memo(function ({
       viewCommands,
       viewRecord,
       profile,
+      isFilesWait,
     ],
   );
 
   // A cloud project opens with a placeholder main file. Follow the real main
-  // when its synced manifest arrives, but keep viewers on other chosen files.
-  const previousMainEntryPath = useRef(mainEntryPath);
+  // when its synced manifest arrives, but keep viewers on other chosen files. A main that changes during a file check
+  // is followed once the files settle, so the view record is not written in the middle of the tree write (A15e; P-j).
+  const followedTarget = useRef<string | undefined>(undefined);
   useEffect(() => {
-    const previous = previousMainEntryPath.current;
-    previousMainEntryPath.current = mainEntryPath;
-    if (entryPath === previous && mainEntryPath && mainEntryPath !== previous) {
-      handleFileSelect(mainEntryPath);
+    if (followTarget === undefined) {
+      followedTarget.current = undefined;
+      return;
     }
-  }, [entryPath, handleFileSelect, mainEntryPath]);
+    if (followedTarget.current !== followTarget) {
+      followedTarget.current = followTarget;
+      handleFileSelect(followTarget);
+    }
+  }, [followTarget, handleFileSelect]);
 
   // If no graphics actor yet, render a placeholder
   if (!graphicsActor) {
@@ -469,7 +584,7 @@ const ChatViewerContent = memo(function ({
   }
 
   // If no file selected, render empty state with file selector
-  if (!entryPath) {
+  if (absence === 'unbound') {
     return (
       <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
         {/* An entry-less project (blueprint D3): the first model the agent writes becomes main. */}
@@ -495,7 +610,7 @@ const ChatViewerContent = memo(function ({
   }
 
   // If the entry path is a directory, show a friendly screen with a file selector
-  if (isDirectory) {
+  if (absence === 'directory') {
     return (
       <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
         <FolderOpen className='size-12 stroke-1' />
@@ -516,20 +631,78 @@ const ChatViewerContent = memo(function ({
   }
 
   // If the entry path doesn't exist in the file tree, show a friendly "not found" screen
-  if (isMissing) {
-    return <MissingViewerFile entryPath={entryPath} onSelect={handleFileSelect} />;
+  if (absence === 'missing') {
+    return <MissingViewerFile entryPath={renderedPath} onSelect={handleFileSelect} />;
   }
 
   return (
     <CadProvider cadRef={cadActor}>
       <ExactMeasurementProvider measure={measureExact}>
         <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
-          <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
+          <ViewerContent viewId={viewId} entryPath={renderedPath} profile={profile} filesWait={filesWait} />
         </GraphicsProvider>
       </ExactMeasurementProvider>
     </CadProvider>
   );
 });
+
+/**
+ * The view whose record the per-view controls write: the editor's, once the view is bound to an entry. An unbound view
+ * kept on the stage through a file check (`''`) has no record to write yet, so its controls change the live owner only.
+ *
+ * @param profile - The viewer's profile.
+ * @param viewId - The view.
+ * @param entryPath - The view's entry, `''` when it has none.
+ * @returns The target, or `undefined` for none.
+ */
+const viewFieldTarget = (
+  profile: 'editor' | 'shared',
+  viewId: string,
+  entryPath: string,
+): Readonly<{ viewId: string; entryPath: string }> | undefined =>
+  profile === 'editor' && entryPath !== '' ? { viewId, entryPath } : undefined;
+
+/** A check or download of the model's files is running: the stage is busy, and its pill shows (A15e). */
+const isFilesRunning = (filesWait: ModelFilesWait | undefined): boolean =>
+  filesWait === 'filesChecking' || filesWait === 'files';
+
+/**
+ * The stage's failure overlay: a failed download of the model's files, with Try again, or a shared view's build
+ * failure.
+ *
+ * @param filesWait - The wait for the model's files, if any.
+ * @param overlayFailureMessage - A shared view's build failure, if any.
+ * @returns The stage's status, or `undefined` when nothing failed.
+ */
+function stageStatus(
+  filesWait: ModelFilesWait | undefined,
+  overlayFailureMessage: string | undefined,
+): ViewerStageStatus | undefined {
+  if (filesWait === 'filesFailed') {
+    return modelFilesFailure;
+  }
+  return overlayFailureMessage ? { kind: 'failed', message: overlayFailureMessage } : undefined;
+}
+
+/**
+ * The build status, and from the stage's first wait for the model's files the files' pill in the same cell (A15e). The
+ * pill mounts with that first wait and stays, so a shown pill keeps its minimum after the wait ends; the build status
+ * stays mounted and gives way only while the pill shows (a later check over the last render).
+ */
+function StageWaitStatus({ filesWait }: { readonly filesWait: ModelFilesWait | undefined }): React.JSX.Element {
+  const [hasWaitedForFiles, setHasWaitedForFiles] = useState(filesWait !== undefined);
+  if (filesWait !== undefined && !hasWaitedForFiles) {
+    setHasWaitedForFiles(true);
+  }
+  if (!hasWaitedForFiles) {
+    return <ChatViewerStatus />;
+  }
+  return (
+    <ModelFilesStageStatus wait={filesWait}>
+      <ChatViewerStatus />
+    </ModelFilesStageStatus>
+  );
+}
 
 /** Announces absent geometry without hiding the interactive empty scene. */
 function GeometryStatus({ isEmpty = false }: { readonly isEmpty?: boolean }): React.JSX.Element {
@@ -554,15 +727,17 @@ const ViewerContent = memo(function ({
   viewId,
   entryPath,
   profile,
+  filesWait,
 }: {
   readonly viewId: string;
   readonly entryPath: string;
   readonly profile: 'editor' | 'shared';
+  readonly filesWait: ModelFilesWait | undefined;
 }): React.JSX.Element {
   const { projectRef, entriesRecord, viewRecords } = useProject();
   const viewCommands = useWorkbenchViewCommands();
   // The editor's per-view controls write the view record; a shared session keeps changing the live owner only.
-  const viewFields = useViewerViewFieldCommands(profile === 'editor' ? { viewId, entryPath } : undefined);
+  const viewFields = useViewerViewFieldCommands(viewFieldTarget(profile, viewId, entryPath));
   const cadRef = useCad();
   // Lines this pane shows; the unit's default view computes edges only while some pane shows them.
   const enableLines = useGraphicsSelector((state) => state.context.enableLines);
@@ -647,8 +822,11 @@ const ViewerContent = memo(function ({
   // The geometry unit can be closed via the parameters panel context menu.
   // When that happens cadRef goes undefined, geometry clears, but the panel
   // stays open. Surface a "Reopen renderer" overlay so the user can re-spawn
-  // the cad actor without having to re-add the panel.
-  const isGeometryUnitClosed = !cadRef;
+  // the cad actor without having to re-add the panel. While the model's files
+  // are checked or downloaded the unit is not created yet (A15e): the overlay
+  // waits, and the canvas stays mounted either way.
+  // A view still to be bound (`''`) has no unit to reopen.
+  const isGeometryUnitClosed = !cadRef && filesWait === undefined && entryPath !== '';
   const handleReopenRenderer = useCallback(() => {
     projectRef.send({
       type: 'createGeometryUnit',
@@ -845,10 +1023,11 @@ const ViewerContent = memo(function ({
       partMenu={partMenu}
       decoratePartMenu={decoratePartMenu}
       isModelShown={!isGeometryUnitClosed && Boolean(artifact && presentedArtifact)}
-      status={overlayFailureMessage ? { kind: 'failed', message: overlayFailureMessage } : undefined}
+      status={stageStatus(filesWait, overlayFailureMessage)}
+      isWaiting={isFilesRunning(filesWait)}
       statusExtra={
         <>
-          <ChatViewerStatus />
+          <StageWaitStatus filesWait={filesWait} />
           {unavailable && profile !== 'editor' ? (
             <div role='alert' className='rounded-md border border-border bg-background/95 p-3 text-sm shadow-sm'>
               <p>{unavailable}</p>
@@ -890,32 +1069,32 @@ const ViewerContent = memo(function ({
           selectedKernelView: next.id,
         }));
       }}
-      renderCanvas={({ eventSource, gizmoContainer, onComponentSecondaryPointerCandidate }) =>
-        isGeometryUnitClosed ? null : (
-          <CadViewer
-            enableZoom
-            enablePan
-            secondaryMouseButtonMode='camera-pan'
-            enableGizmo={enableGizmo}
-            enableGrid={enableGrid}
-            enableAxes={enableAxes}
-            enableSurfaces={enableSurfaces}
-            enableLines={enableLines}
-            enableMatcap={enableMatcap}
-            upDirection={upDirection}
-            artifact={artifact ? presentedArtifact : undefined}
-            artifactHash={presentedArtifactKey}
-            sourceFile={presentedSourceFile}
-            // Keep R3F on default offsetX/Y compute; eventPrefix='client'
-            // is window-relative and mis-rays docked panels.
-            eventSource={eventSource}
-            gizmoContainer={gizmoContainer}
-            onModelComponentSecondaryPointerCandidate={onComponentSecondaryPointerCandidate}
-            cameraInput={cameraInput}
-            gizmoStyle={gizmoStyle}
-          />
-        )
-      }
+      /* The canvas stays while the unit is closed or not created yet, so a unit that follows the files (an entry other
+         than main gets its unit only once they settle) draws into the same canvas (A15e; C11). */
+      renderCanvas={({ eventSource, gizmoContainer, onComponentSecondaryPointerCandidate }) => (
+        <CadViewer
+          enableZoom
+          enablePan
+          secondaryMouseButtonMode='camera-pan'
+          enableGizmo={enableGizmo}
+          enableGrid={enableGrid}
+          enableAxes={enableAxes}
+          enableSurfaces={enableSurfaces}
+          enableLines={enableLines}
+          enableMatcap={enableMatcap}
+          upDirection={upDirection}
+          artifact={artifact ? presentedArtifact : undefined}
+          artifactHash={presentedArtifactKey}
+          sourceFile={presentedSourceFile}
+          // Keep R3F on default offsetX/Y compute; eventPrefix='client'
+          // is window-relative and mis-rays docked panels.
+          eventSource={eventSource}
+          gizmoContainer={gizmoContainer}
+          onModelComponentSecondaryPointerCandidate={onComponentSecondaryPointerCandidate}
+          cameraInput={cameraInput}
+          gizmoStyle={gizmoStyle}
+        />
+      )}
       /* Bottom controls: the bar is centred on the last line and grows upward as tools start. In the editor it starts
          with the view menus and the build status, and the issues list unfolds above its controls. Capability-gated mobile AR shares the controls row. In a pane narrower than the bar, the
          bar starts at the left edge, keeping the grid readout and Section in view. */
@@ -980,12 +1159,21 @@ const ViewerContent = memo(function ({
   );
 });
 
-/** Keep file absence and rendering errors hidden until the authored checkout is acknowledged. */
+/**
+ * Keep file absence and rendering errors hidden until the authored checkout is acknowledged. A wait for the model's own
+ * files is shown on the viewer's stage, which stays mounted through it with its canvas (A15e; P-j, U13, U20): one
+ * element type at one position, so a check before, between or after renders never replaces the stage, and the stage
+ * shows no "File not found" or empty state until the files are known. A project that is not on this device yet still
+ * shows its own placeholder.
+ */
 export const ChatViewer = memo(function (props: ChatViewerProps): React.JSX.Element {
   const availability = useModelAvailability();
-  return props.profile !== 'shared' && availability !== 'ready' ? (
-    <ProjectSyncPlaceholder state={availability} />
+  if (props.profile === 'shared' || availability === 'ready') {
+    return <ChatViewerContent {...props} />;
+  }
+  return isModelFilesWait(availability) ? (
+    <ChatViewerContent {...props} filesWait={availability} />
   ) : (
-    <ChatViewerContent {...props} />
+    <ProjectSyncPlaceholder state={availability} />
   );
 });

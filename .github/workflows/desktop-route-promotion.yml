@@ -104,8 +104,13 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # Renewal runs unattended in `desktop-installer-renewal-<channel>`. A production promotion is the step that publishes
+    # to users, so it alone runs in the release-manager reviewed `desktop-promotion-production` (approvals audit R2);
+    # staging promotes in `desktop-installers-staging`. desktop-publication-authority.mts admits the same subjects.
     environment:
-      name: ${{ (github.event_name == 'schedule' || inputs.operation == 'renew-routes') && 'desktop-installer-renewal' || 'desktop-installers' }}-${{ matrix.channel }}
+      name: >-
+        ${{ (github.event_name == 'schedule' || inputs.operation == 'renew-routes') && format('desktop-installer-renewal-{0}', matrix.channel)
+        || (matrix.channel == 'production' && 'desktop-promotion-production' || 'desktop-installers-staging') }}
       deployment: false
     permissions:
       contents: read

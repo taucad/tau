@@ -485,7 +485,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
             typecheck) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
-            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget --graph="$graph" > /dev/null ;;
+            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-server-output --graph="$graph" > /dev/null ;;
             pkgcheck-*) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
             test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
@@ -541,6 +541,12 @@ jobs:
       # guard G3): each route class's interactive tier in the client build `ui:build` just made,
       # with no build of its own. Its source guards (G1 lint, G2 graph test) run in the lint and
       # test lanes.
+      #
+      # `size` selects `ui:size`, the SSR bundle budget on `ui:build`'s server output, and
+      # `check-server-output` selects `ui:check-server-output` and `docs:check-server-output`
+      # (React Router 8 migration RR0, RD8): no server output of the web, desktop, `tau serve`
+      # or docs build holds a .wasm file, a worker bundle or a client asset. The ui check adds
+      # `ui:build:serve` to the lane; its other builds are already here.
       - name: Run the lane's tasks
         if: steps.queue.outputs.run-id == ''
         env:
@@ -550,7 +556,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --parallel=1 ;;
             typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
-            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget --parallel=1 ;;
+            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-server-output --parallel=1 ;;
             pkgcheck-*)
               # The three package-check shards deal the affected projects with a package
               # check by measured uncached `pkgcheck` seconds, with the test shards' dealer

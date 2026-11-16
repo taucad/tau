@@ -241,10 +241,15 @@ describe('ci.yml affected-only lanes', () => {
     const steps = ci.jobs['affected-lane']?.steps ?? [];
     const run = steps.find((step) => step.name === "Run the lane's tasks")?.run ?? '';
     const build = /^\s*build\) (.*) ;;$/mu.exec(run)?.[1] ?? '';
-    expect(build).toBe('pnpm nx affected -t build size check-desktop-payload check-critical-budget --parallel=1');
+    expect(build).toBe(
+      'pnpm nx affected -t build size check-desktop-payload check-critical-budget check-server-output --parallel=1',
+    );
     expect(nxTargets(build)).toContainEqual({ target: 'check-desktop-payload', affected: true });
     // The critical-path budget (PL0) runs beside it in the same lane, so a ui change is held to its budget.
     expect(nxTargets(build)).toContainEqual({ target: 'check-critical-budget', affected: true });
+    // The SSR bundle budget (`ui:size`) and the server-output check (RR0) run there too.
+    expect(nxTargets(build)).toContainEqual({ target: 'size', affected: true });
+    expect(nxTargets(build)).toContainEqual({ target: 'check-server-output', affected: true });
     // The target belongs to `ui`, so `nx affected` selects it exactly when `ui` is affected, and it brings
     // the renderer and desktop main/preload builds it reads.
     const ui = JSON.parse(read('apps/ui/project.json')) as {
@@ -254,6 +259,14 @@ describe('ci.yml affected-only lanes', () => {
       'build:desktop',
       { projects: ['desktop'], target: 'build' },
     ]);
+    // `size` and `check-server-output` exist on ui, so the lane's names select them, and each reads the builds it
+    // checks; the docs site checks its own build.
+    expect(ui.targets['size']?.dependsOn).toEqual(['build']);
+    expect(ui.targets['check-server-output']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
+    const docs = JSON.parse(read('apps/docs/project.json')) as {
+      targets: Record<string, { readonly dependsOn?: readonly unknown[] }>;
+    };
+    expect(docs.targets['check-server-output']?.dependsOn).toEqual(['build']);
   });
 
   it('should run no CI on a draft pull request and pass the required gate', () => {

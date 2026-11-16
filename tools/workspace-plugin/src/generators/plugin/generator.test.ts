@@ -244,6 +244,7 @@ describe('plugin generator', () => {
       'src/image.transcoder.test.ts',
       'src/image.vite-build.test.ts',
       'src/label.ts',
+      'src/raster.ts',
       'src/nanoraster-camera.test.ts',
       'src/nanoraster-camera.ts',
       'src/svg-backend-failure.test.ts',
@@ -263,7 +264,13 @@ describe('plugin generator', () => {
             )
           : [entry],
       )
-      .filter((path) => statSync(join(referenceRoot, path)).isFile() && !packageSpecific.has(path))
+      .filter(
+        (path) =>
+          statSync(join(referenceRoot, path)).isFile() &&
+          !packageSpecific.has(path) &&
+          // The raster transcoder's own sources, codecs and fixtures (#2316).
+          !path.startsWith('src/raster/'),
+      )
       .sort();
 
     expect(emitted).toEqual(reference);

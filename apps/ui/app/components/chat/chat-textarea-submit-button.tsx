@@ -51,6 +51,11 @@ const ChatStreamingStopButton = memo(function ({
 
 type ChatTextareaSubmitButtonProperties = {
   readonly status: string;
+  /**
+   * A run that cannot stream still holds the chat: paused on an approval, or stopping until its host settles it. Stop
+   * is offered then too, so a run paused on an approval can always be stopped.
+   */
+  readonly canStop?: boolean;
   readonly canResume?: boolean;
   readonly isSubmitting: boolean;
   /** Dictation is under way: a running turn offers Send (queue the dictated follow-up) beside the dictation's own stop. */
@@ -73,6 +78,7 @@ type ChatTextareaSubmitButtonProperties = {
  */
 export const ChatTextareaSubmitButton = memo(function ({
   status,
+  canStop = false,
   canResume = false,
   isSubmitting,
   isDictating = false,
@@ -82,7 +88,7 @@ export const ChatTextareaSubmitButton = memo(function ({
   onSubmit,
   onCancel,
 }: ChatTextareaSubmitButtonProperties): React.JSX.Element {
-  if (!isDictating && ['streaming', 'submitted'].includes(status)) {
+  if (!isDictating && (canStop || ['streaming', 'submitted'].includes(status))) {
     return (
       <ChatStreamingStopButton formattedCancelKeyCombination={formattedCancelKeyCombination} onCancel={onCancel} />
     );

@@ -366,6 +366,7 @@ export const ChatTextarea = memo(function ({
         attachmentAccept={logic.attachmentAccept}
         attachmentInputSupported={logic.attachmentInputSupported}
         status={logic.status}
+        canStop={logic.canStop}
         formattedCancelKeyCombination={logic.formattedCancelKeyCombination}
         // Context data for Tiptap
         treeService={treeService}

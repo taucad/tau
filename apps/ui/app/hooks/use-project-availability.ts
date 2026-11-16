@@ -77,8 +77,13 @@ export function projectAvailability(
   }
   const failed = isFailedOpen(status);
   const applied = status?.sync.hasAppliedRemote === true;
-  /* A failed or abandoned apply left a partial tree whose readiness stays where it got to (I7): the failure speaks. */
-  if (firstView !== undefined && firstViewOpens(firstView) && (!failed || applied)) {
+  /*
+   * A failed or abandoned apply left a partial tree whose readiness stays where it got to (I7): the failure speaks,
+   * and so does the retry that follows until its own write announces the next tree. Only a write running now, or one
+   * that landed, has a tree whose arriving rows the listing shows.
+   */
+  const writing = status?.sync.pullPhase === 'applying' && !failed;
+  if (firstView !== undefined && firstViewOpens(firstView) && (writing || applied)) {
     return 'ready';
   }
   if (applied) {

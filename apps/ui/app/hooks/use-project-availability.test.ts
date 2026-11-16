@@ -120,6 +120,21 @@ describe('first-open availability', () => {
       );
     }
   });
+  /*
+   * A failed write's tree keeps the readiness it reached (it never steps back within one tree), but its end took its
+   * arriving rows away. A retry fetching before the next write announces its tree must not reopen that partial tree.
+   */
+  it('keeps a first view closed across a failed write and the retry that fetches before the next write', () => {
+    const firstView = { surface: 'tree', readiness: 'entryReady' } as const;
+    const retrying = status({ state: 'pending', pullPhase: 'fetching' });
+    expect(projectAvailability(true, status({ state: 'queued', reason: 'unknown' }), { firstView })).toBe('failed');
+    expect(projectAvailability(true, retrying, { firstView })).toBe('downloading');
+    expect(projectAvailability(true, status({ state: 'pending', pullPhase: 'idle' }), { firstView })).toBe(
+      'connecting',
+    );
+    /* The next write announces its tree: its own reading opens the view again. */
+    expect(projectAvailability(true, status({ state: 'pending', pullPhase: 'applying' }), { firstView })).toBe('ready');
+  });
   it('never opens a first view for an account that cannot open the project', () => {
     expect(
       projectAvailability(true, status(), { canOpen: false, firstView: { surface: 'tree', readiness: 'filled' } }),

@@ -306,7 +306,9 @@ const visibleRelativeToRoot = (
  *
  * A move with one end outside the root — or hidden from it — is not a move to
  * that port: it is a disappearance or an arrival, exactly as a rooted view's own
- * watch reports it (`WorkspaceFileService.createRootedFileSystem`).
+ * watch reports it (`WorkspaceFileService.createRootedFileSystem`). A
+ * directory summary, removal or move at or above the root is the port's
+ * whole-root reset, `directoryChanged` at `''`.
  */
 const scopeEventToRoot = (
   event: PathChangeEvent,
@@ -315,6 +317,14 @@ const scopeEventToRoot = (
 ): PathChangeEvent | undefined => {
   if (event.type === 'backendChanged') {
     return event;
+  }
+  /* A summary, removal or move of an ancestor changed all the port can see: its whole-root reset (I5). */
+  const above = (path: string): boolean => path !== root && (path === '/' || root.startsWith(`${path}/`));
+  if (
+    ((event.type === 'directoryChanged' || event.type === 'directoryDeleted') && above(event.path)) ||
+    (event.type === 'directoryRenamed' && (above(event.oldPath) || above(event.newPath)))
+  ) {
+    return { type: 'directoryChanged', path: '', backend: event.backend };
   }
   if ('path' in event) {
     const path = visibleRelativeToRoot(root, event.path, hidden);

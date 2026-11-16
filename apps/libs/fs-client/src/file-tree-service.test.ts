@@ -2236,6 +2236,78 @@ describe('refresh pause during a revision apply', () => {
     }
   });
 
+  /*
+   * STO-25: the tree's first view opens at `entryReady`, mid-apply. Its listings must show every entry the write will
+   * land, landed or arriving (I7), so the hold lets one re-read of every listed directory through then, and keeps
+   * folding what follows into the re-reads at its release.
+   */
+  it('should re-read every listed directory once through a hold when asked, and keep holding what follows', async () => {
+    vi.useFakeTimers();
+    const { tree, proxy, emitFileChanged, disposeChannel } = resolvedTree();
+    try {
+      vi.mocked(proxy.readDirectory).mockClear();
+      const release = tree.pauseRefreshes();
+      emitStagedSwap(emitFileChanged, 'src/a.ts');
+
+      tree.refreshListedThroughHold();
+      expect(proxy.readDirectory).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(
+        vi
+          .mocked(proxy.readDirectory)
+          .mock.calls.map(([path]) => path)
+          .toSorted(),
+      ).toEqual(['/projects/abc', '/projects/abc/src']);
+      expect(tree.refreshesPaused).toBe(true);
+
+      emitStagedSwap(emitFileChanged, 'src/b.ts');
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(proxy.readDirectory).toHaveBeenCalledTimes(2);
+
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(proxy.readDirectory).toHaveBeenCalledTimes(3);
+      expect(proxy.readDirectory).toHaveBeenLastCalledWith('/projects/abc/src');
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should re-read a leased open directory through a hold when asked', async () => {
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('a.ts')]);
+    const { tree, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+      watchReady: () => ({
+        ready: Promise.resolve(),
+        closed: Promise.withResolvers<void>().promise,
+        unsubscribe: vi.fn(),
+      }),
+    });
+    const lease = tree.observeDirectory('').acquire();
+    try {
+      await vi.waitFor(() => {
+        expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready' });
+      });
+      const release = tree.pauseRefreshes();
+      readDirectory.mockResolvedValue([textNode('a.ts'), { ...textNode('README.md'), pending: true }]);
+
+      tree.refreshListedThroughHold();
+      await vi.waitFor(() => {
+        expect(lease.getSnapshot().value).toMatchObject({
+          kind: 'ready',
+          entries: [{ name: 'a.ts' }, { name: 'README.md' }],
+        });
+      });
+      expect(readDirectory).toHaveBeenCalledTimes(2);
+      release();
+    } finally {
+      lease.release();
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
   it('should not re-read anything on release when nothing changed while paused', async () => {
     vi.useFakeTimers();
     const { tree, proxy, disposeChannel } = resolvedTree();

@@ -376,6 +376,8 @@ export class FileTreeService {
   /* Outstanding {@link FileTreeService.pauseRefreshes} holds. While any is
    * held, re-reads collect in `pendingRefreshPaths` and nothing lists. */
   private refreshPauses = 0;
+  /* Leased directories {@link FileTreeService.refreshListedThroughHold} let one re-read through a hold for. */
+  private readonly readsThroughHold = new Set<string>();
   /* Set by dispose: a hold released afterwards must not list through a closed proxy. */
   private disposed = false;
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -692,7 +694,8 @@ export class FileTreeService {
       },
       read: async ({ signal, isCurrent }) => {
         try {
-          if (fresh && this.refreshPauses > 0 && this.isDirectoryResolvedKey(key)) {
+          const throughHold = this.readsThroughHold.delete(key);
+          if (fresh && this.refreshPauses > 0 && this.isDirectoryResolvedKey(key) && !throughHold) {
             /* An optimistic patch while a hold is taken re-renders from the
              * tree; the listing itself waits for the hold's release. */
             this.pendingRefreshPaths.add(key);
@@ -875,6 +878,22 @@ export class FileTreeService {
     };
   }
 
+  /**
+   * Re-read every directory the tree has listed, once, now, even while a hold
+   * is taken; the hold stays and folds whatever changes after into the
+   * re-reads at its release. A tree first shown while a revision apply is
+   * still writing (`entryReady`, STO-25) lists every entry that apply will
+   * land, landed or arriving, rather than what its root held before the apply
+   * (I7). Bounded by what the tree has listed, as a scoped reset is. Like a
+   * release, the call may come from a store subscriber inside a commit, so the
+   * re-reads start from a later task.
+   */
+  public refreshListedThroughHold(): void {
+    setTimeout(() => {
+      this.readListedThroughHold();
+    }, 0);
+  }
+
   /** Whether a {@link FileTreeService.pauseRefreshes} hold is outstanding. */
   public get refreshesPaused(): boolean {
     return this.refreshPauses > 0;
@@ -1037,6 +1056,7 @@ export class FileTreeService {
       this.refreshTimer = undefined;
     }
     this.pendingRefreshPaths.clear();
+    this.readsThroughHold.clear();
     // The new root has not reported native observation yet: poll it promptly.
     this.nativelyObserved = false;
     this.reschedulePoll?.();
@@ -1084,6 +1104,7 @@ export class FileTreeService {
   public dispose(): void {
     this.disposed = true;
     this.pendingRefreshPaths.clear();
+    this.readsThroughHold.clear();
     for (const pending of this.pendingSearches.values()) {
       clearTimeout(pending.timer);
       for (const waiter of pending.waiters) {
@@ -1617,6 +1638,26 @@ export class FileTreeService {
 
   private scheduleRefreshForParent(path: string): void {
     this.scheduleRefresh(this.paths.parentOf(path));
+  }
+
+  /* The re-reads {@link FileTreeService.refreshListedThroughHold} lets through, from their later task. */
+  private readListedThroughHold(): void {
+    if (this.disposed) {
+      return;
+    }
+    for (const key of ['', ...this._tree.descendantKeys('')]) {
+      if (!this.isDirectoryResolvedKey(key)) {
+        continue;
+      }
+      this.pendingRefreshPaths.delete(key);
+      const observation = this.listingObservations.get(key)?.deref();
+      if (observation && observation.activeLeaseCount > 0) {
+        this.readsThroughHold.add(key);
+        observation.refresh();
+      } else {
+        void this.executeRefresh(key);
+      }
+    }
   }
 
   private async executeRefresh(path: string): Promise<void> {

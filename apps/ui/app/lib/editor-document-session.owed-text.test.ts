@@ -476,6 +476,7 @@ describe('EditorDocumentSession owed text (A7e)', () => {
         projectId: 'p-bom',
         textDebts: editorTextDebts,
       });
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one file at a time, each in its own session.
       await session.acquire('main.ts');
       session.recordOwedText();
       expect(editorTextDebts.list({ scope: ada, projectId: 'p-bom' })).toEqual([]);

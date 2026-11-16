@@ -131,3 +131,19 @@ export const prefetchModelCatalog = async (
   const catalog = await getServerModelCatalog(reportState);
   return catalog === undefined ? undefined : dehydrateModelCatalog(catalog);
 };
+
+/**
+ * The root loader's query state when the build prerenders a static shell (`route-classes.ts`, PL3): the same catalog,
+ * stamped as fetched at time 0 instead of at the build's clock, so the shell's bytes depend on the deploy and the
+ * catalog only (shell invariant 2, deterministic bytes). The composer's model label paints from it as on a function
+ * document; the browser, finding it older than {@link catalogFreshness}, refreshes it in the background on mount.
+ *
+ * @param reportState - Told how this read found the cache.
+ * @returns The dehydrated state, or `undefined` when the catalog is unavailable.
+ */
+export const prefetchShellModelCatalog = async (
+  reportState?: ModelCatalogStateReporter,
+): Promise<DehydratedState | undefined> => {
+  const catalog = await getServerModelCatalog(reportState);
+  return catalog === undefined ? undefined : dehydrateModelCatalog({ ...catalog, fetchedAt: 0 });
+};

@@ -115,6 +115,11 @@ export const createDeferredChild = <M, T>(
       fail(error);
       return;
     }
+    /* The owner's callback may have disposed the child: a disposed child stays so and replays nothing. */
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- `onLoaded` can dispose the child, which narrowing cannot see.
+    if (current !== attempt || phase !== 'loading') {
+      return;
+    }
     phase = 'loaded';
     /* Replayed in the order sent; an event a replayed one sends joins the end and runs in turn. */
     while (queue.length > 0) {

@@ -196,7 +196,7 @@ const googleReasoningConfigSchema = z
         thinking_config: z
           .object({
             include_thoughts: z.literal(true),
-            thinking_level: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+            thinking_level: z.enum(['LOW', 'MEDIUM', 'HIGH', 'XHIGH']),
           })
           .strict(),
         thought_tag_marker: z.literal('think'),

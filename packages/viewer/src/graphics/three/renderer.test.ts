@@ -48,7 +48,8 @@ vi.mock('three/webgpu', async (importOriginal) => {
     public readonly setTransparentSort = vi.fn();
     public readonly setOpaqueSort = vi.fn();
     public readonly setRenderObjectFunction = vi.fn();
-    public backend: object = new actual.WebGPUBackend();
+    public backend: ThreeWebGpuModule.WebGPUBackend | { readonly isWebGLBackend: true; readonly gl: unknown } =
+      new actual.WebGPUBackend();
     public readonly dispose = vi.fn();
     public get coordinateSystem() {
       return hoisted.nativeBackend ? actual.WebGPUCoordinateSystem : actual.WebGLCoordinateSystem;

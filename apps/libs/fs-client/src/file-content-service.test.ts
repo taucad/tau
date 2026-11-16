@@ -1266,6 +1266,44 @@ describe('FileContentService', () => {
       expect(outcome.kind).toBe('error');
     });
 
+    /* Bookkeeping for settled reads lives only as long as the outcome, or a reread still waiting on it. */
+    it('should forget a settled read when its outcome is pruned, and drop idle settle topics', async () => {
+      vi.useFakeTimers();
+      const harness = createHarness({ cacheOptions: { maxEntries: 1, maxTotalBytes: 1024, maxSingleFileBytes: 1024 } });
+      const bookkeeping = harness.service as unknown as {
+        settledReads: Map<string, number>;
+        settleTopics: Map<string, { size: number }>;
+      };
+      try {
+        vi.mocked(harness.proxy.readFile).mockResolvedValueOnce(text('a'));
+        await harness.service.rereadOutcome('a.ts');
+        expect(bookkeeping.settledReads.has('a.ts')).toBe(true);
+
+        /* A reread superseded by an invalidation that never reads waits, then reads again itself. */
+        const first = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+        vi.mocked(harness.proxy.readFile).mockReturnValueOnce(first.promise);
+        const reread = harness.service.rereadOutcome('b.ts');
+        harness.service.observeContent('b.ts').invalidate();
+        vi.mocked(harness.proxy.readFile).mockResolvedValueOnce(text('b'));
+        first.resolve(text('stale'));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(bookkeeping.settleTopics.get('b.ts')?.size).toBe(1);
+        await vi.advanceTimersByTimeAsync(1000);
+        await reread;
+
+        expect(bookkeeping.settleTopics.size).toBe(0);
+        expect(harness.service.peekOutcome('a.ts').kind).toBe('loading');
+        expect([...bookkeeping.settledReads.keys()]).toEqual(['b.ts']);
+
+        harness.service.dispose();
+        expect(bookkeeping.settledReads.size).toBe(0);
+        expect(bookkeeping.settleTopics.size).toBe(0);
+      } finally {
+        vi.useRealTimers();
+        harness.disposeChannel();
+      }
+    });
+
     it('should hold a missing file as orphaned once read afresh', async () => {
       vi.mocked(proxy.readFile).mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
 

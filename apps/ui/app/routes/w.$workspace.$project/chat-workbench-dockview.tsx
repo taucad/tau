@@ -1434,6 +1434,15 @@ export const FileEditor = memo(function ({
     virtualDeclaration === undefined && availability === 'ready' ? filePath : undefined,
     { retainValue: !fresh.readAfresh },
   );
+  /* The open itself showed only the fresh read (I7); once the pane's own observation is ready, last good bytes
+   * outlive a later transient failure as for any other pane. */
+  const { readAfresh, settled: freshSettled, state: freshState } = fresh;
+  const observedReady = fileContent.observation.status === 'ready';
+  useEffect(() => {
+    if (readAfresh && freshState === 'open' && observedReady) {
+      freshSettled();
+    }
+  }, [freshSettled, freshState, observedReady, readAfresh]);
   // A declaration held in memory has nothing to observe on disk, so it is always current.
   const result = useMemo(
     (): FileContentSelection =>

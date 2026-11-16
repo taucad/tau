@@ -292,6 +292,29 @@ describe('useFreshContent', () => {
     expect(result.current.state).toBe('open');
   });
 
+  /* After the open, the pane retains last good bytes again; it owes the guarantee anew each time it waits. */
+  it('reads afresh until settled, and again after it next waits', async () => {
+    const { reread, settle } = rereading();
+    const { result, rerender } = renderHook(({ open }) => useFreshContent('lib/gear.ts', open, false), {
+      initialProps: { open: false },
+    });
+    rerender({ open: true });
+    await waitFor(() => {
+      expect(reread).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      settle(text);
+    });
+    expect(result.current).toMatchObject({ state: 'open', readAfresh: true });
+    act(() => {
+      result.current.settled();
+    });
+    expect(result.current).toMatchObject({ state: 'open', readAfresh: false });
+
+    rerender({ open: false });
+    expect(result.current).toMatchObject({ state: 'waiting', readAfresh: true });
+  });
+
   /* Re-review item 1: an I/O error on the fresh read never opens the pane. */
   it('fails with the cause when the fresh read answers an error, and reads again on retry', async () => {
     const { reread, settle } = rereading();

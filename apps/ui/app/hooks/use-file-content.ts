@@ -53,8 +53,13 @@ export type FreshContent = Readonly<{
   state: 'open' | 'waiting' | 'failed';
   /** Why the fresh read failed. */
   cause?: unknown;
-  /** Whether the pane read afresh: it then never shows a value retained from before. */
+  /**
+   * Whether the pane read afresh and has not yet seen its own observation ready: until then it never shows a value
+   * retained from before it opened.
+   */
   readAfresh: boolean;
+  /** The pane's own observation reached ready after it opened: it may retain its last good bytes again. */
+  settled: () => void;
   /** Read afresh again after a failure. */
   retry: () => void;
 }>;
@@ -112,6 +117,9 @@ export function useFreshContent(path: string | undefined, open: boolean, owedOnM
       run.live = false;
     };
   }, [attempt, contentService, failed, open, owed, path]);
+  const settled = useCallback(() => {
+    setReadAfresh(false);
+  }, []);
   const retry = useCallback(() => {
     setFailure(undefined);
     setAttempt((count) => count + 1);
@@ -126,7 +134,7 @@ export function useFreshContent(path: string | undefined, open: boolean, owedOnM
           : 'open'
     : 'waiting';
   return useMemo(
-    () => ({ state, readAfresh, retry, ...(failed ? { cause: failure.cause } : {}) }),
-    [failed, failure, readAfresh, retry, state],
+    () => ({ state, readAfresh, retry, settled, ...(failed ? { cause: failure.cause } : {}) }),
+    [failed, failure, readAfresh, retry, settled, state],
   );
 }

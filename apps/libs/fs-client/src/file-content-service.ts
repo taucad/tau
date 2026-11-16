@@ -312,7 +312,7 @@ export class FileContentService {
   private readonly orphanedPaths = new Set<string>();
   /** The latest generation whose read settled as each path's answer, and who waits for the next. */
   private readonly settledReads = new Map<string, number>();
-  private readonly settleWaiters = new Map<string, Set<() => void>>();
+  private readonly settleTopics = new Map<string, Topic<number>>();
   /** Paths a consumer keeps state for without a view, by how many times each is retained. */
   private readonly retainedPaths = new Map<string, number>();
   private readonly editorSaves = new Map<string, EditorSaveState>();
@@ -606,42 +606,6 @@ export class FileContentService {
       }
     }
     return this.outcomes.get(path) ?? loadingOutcome;
-  }
-
-  /* Whether a read of `path` at or after `since` settles within the patience. */
-  private async settledSince(path: string, since: number): Promise<boolean> {
-    if ((this.settledReads.get(path) ?? 0) >= since) {
-      return true;
-    }
-    const { promise, resolve } = Promise.withResolvers<boolean>();
-    const waiters = this.settleWaiters.get(path) ?? new Set<() => void>();
-    const settled = (): void => {
-      if ((this.settledReads.get(path) ?? 0) >= since) {
-        finish(true);
-      }
-    };
-    const timer = setTimeout(() => {
-      finish(false);
-    }, supersededReadPatienceMilliseconds);
-    const finish = (answer: boolean): void => {
-      clearTimeout(timer);
-      waiters.delete(settled);
-      resolve(answer);
-    };
-    waiters.add(settled);
-    this.settleWaiters.set(path, waiters);
-    return promise;
-  }
-
-  /* A read settled as the path's answer: those waiting on a generation at or below it are answered. */
-  private noteSettled(path: string, generation: number): void {
-    if ((this.settledReads.get(path) ?? 0) >= generation) {
-      return;
-    }
-    this.settledReads.set(path, generation);
-    for (const waiter of this.settleWaiters.get(path) ?? []) {
-      waiter();
-    }
   }
 
   /**
@@ -1368,6 +1332,11 @@ export class FileContentService {
     this.orphanedPaths.clear();
     this.#orphanTopic.dispose();
     this.outcomes.clear();
+    this.settledReads.clear();
+    for (const topic of this.settleTopics.values()) {
+      topic.dispose();
+    }
+    this.settleTopics.clear();
     this.#outcomeTopic.dispose();
     this.refreshGuard.reset();
   }
@@ -1943,6 +1912,51 @@ export class FileContentService {
     }
   }
 
+  /* Whether a read of `path` at or after `since` settles within the patience. */
+  private async settledSince(path: string, since: number): Promise<boolean> {
+    if ((this.settledReads.get(path) ?? 0) >= since) {
+      return true;
+    }
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    const topic = this.settleTopics.get(path) ?? new Topic<number>({ name: 'FileContentService.settled' });
+    this.settleTopics.set(path, topic);
+    const finish = (answer: boolean): void => {
+      clearTimeout(timer);
+      unsubscribe();
+      if (topic.size === 0 && this.settleTopics.get(path) === topic) {
+        this.settleTopics.delete(path);
+        topic.dispose();
+      }
+      resolve(answer);
+    };
+    const timer = setTimeout(() => {
+      finish(false);
+    }, supersededReadPatienceMilliseconds);
+    const unsubscribe = topic.subscribe({
+      handler: () => {
+        finish(true);
+      },
+      interestedIn: (generation) => generation >= since,
+    });
+    return promise;
+  }
+
+  /* The path's outcome is gone: forget which read settled it, unless a reread still waits on one. */
+  private forgetSettled(path: string): void {
+    if (!this.settleTopics.has(path)) {
+      this.settledReads.delete(path);
+    }
+  }
+
+  /* A read settled as the path's answer: those waiting on a generation at or below it are answered. */
+  private noteSettled(path: string, generation: number): void {
+    if ((this.settledReads.get(path) ?? 0) >= generation) {
+      return;
+    }
+    this.settledReads.set(path, generation);
+    this.settleTopics.get(path)?.emit(generation);
+  }
+
   private async computeOutcome(path: string, generation: number, options?: ResolveOptions): Promise<FileContentResult> {
     const outcome = await this.computeOutcomeOnce(path, generation, options);
     if (this.refreshGuard.isCurrent(path, generation)) {
@@ -2087,6 +2101,7 @@ export class FileContentService {
       ) {
         this.outcomes.delete(path);
         this.orphanedPaths.delete(path);
+        this.forgetSettled(path);
         bytes -= resultBytes;
       }
     }
@@ -2149,6 +2164,7 @@ export class FileContentService {
       const cached = this.cache.peek(path);
       this.outcomes.delete(path);
       this.orphanedPaths.delete(path);
+      this.forgetSettled(path);
       shed += retainedBytesOf(result);
       if (cached !== undefined) {
         this.cache.delete(path);

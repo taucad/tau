@@ -232,7 +232,10 @@ const mockUseFileContent =
 const freshState = vi.hoisted(() => ({
   held: new Set<string>(),
   failed: new Map<string, unknown>(),
+  readAfresh: new Set<string>(),
+  retainValue: undefined as boolean | undefined,
   retry: (() => undefined) as () => void,
+  settled: (() => undefined) as (path: string | undefined) => void,
 }));
 vi.mock('#hooks/use-file-content.js', () => ({
   useFreshContent: (path: string | undefined, open: boolean) => ({
@@ -244,12 +247,16 @@ vi.mock('#hooks/use-file-content.js', () => ({
           : 'open'
       : 'waiting',
     cause: path === undefined ? undefined : freshState.failed.get(path),
-    readAfresh: false,
+    readAfresh: path !== undefined && freshState.readAfresh.has(path),
     retry: () => {
       freshState.retry();
     },
+    settled: () => {
+      freshState.settled(path);
+    },
   }),
-  useFileContent: (path: string | undefined) => {
+  useFileContent: (path: string | undefined, options?: Readonly<{ retainValue?: boolean }>) => {
+    freshState.retainValue = options?.retainValue;
     const result = mockUseFileContent(path);
     return {
       ...result,
@@ -1064,6 +1071,29 @@ describe('FileEditor routing', () => {
     } finally {
       freshState.failed.clear();
       freshState.retry = () => undefined;
+    }
+  });
+
+  /* A pane that read afresh retains nothing from before it opened, until its own observation is ready. */
+  it('should settle a fresh pane once its own observation is ready, not before', () => {
+    const settled = vi.fn();
+    freshState.settled = settled;
+    freshState.readAfresh.add('lib/gear.ts');
+    const content = new TextEncoder().encode('landed');
+    mockUseFileContent.mockReturnValue({ kind: 'text', content, observation: { status: 'pending' } });
+    try {
+      const pending = render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(mockUseFileContent).toHaveBeenLastCalledWith('lib/gear.ts');
+      expect(freshState.retainValue).toBe(false);
+      expect(settled).not.toHaveBeenCalled();
+      pending.unmount();
+
+      mockUseFileContent.mockReturnValue({ kind: 'text', content, observation: { status: 'ready' } });
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(settled).toHaveBeenCalledExactlyOnceWith('lib/gear.ts');
+    } finally {
+      freshState.readAfresh.clear();
+      freshState.settled = () => undefined;
     }
   });
 

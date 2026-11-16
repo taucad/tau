@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import { createLargeObjectFill, largeObjectPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
+import {
+  createLargeObjectFill,
+  declaredPlaceholders,
+  largeObjectPlaceholders,
+  UnstoredLargeObjectsError,
+} from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
 import type { LargeObjectsReport } from '#project-revisions.types.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -29,10 +34,13 @@ const setup = (
     flushMilliseconds?: number;
     byOid?: boolean;
     retryMilliseconds?: number[];
+    /* The checkout's attributes, and whether its repository folds case (`core.ignoreCase`). */
+    attributes?: string;
+    ignoreCase?: boolean;
   }> = {},
 ) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([
-    ['.gitattributes', encoder.encode(tracksStep)],
+    ['.gitattributes', encoder.encode(options.attributes ?? tracksStep)],
     ['main.scad', encoder.encode('import("models/a.step");')],
   ]);
   /* A pointer the attributes do not track: a person's text, committed as it is. */
@@ -114,6 +122,9 @@ const setup = (
     /* A failed fill retries on its own; a test that does not drive it waits longer than it runs. */
     retryMilliseconds: options.retryMilliseconds ?? [60_000],
     ...(options.flushBytes === undefined ? {} : { flushBytes: options.flushBytes }),
+    ...(options.ignoreCase === undefined
+      ? {}
+      : { attributesReading: async () => ({ ignoreCase: options.ignoreCase }) }),
   });
   const land = (path: keyof typeof parts): void => {
     onLargeObject?.(pointerOf(parts[path]).pointer.oid, encoder.encode(parts[path]));
@@ -171,6 +182,27 @@ describe('large-object fill', () => {
       ['other/blob.bin', pointerOf('blob').bytes],
     ]);
     expect([...largeObjectPlaceholders(tree).keys()].toSorted()).toStrictEqual(['models/a.step', 'vendor/blob.bin']);
+  });
+
+  /* A repository that folds case reads `*.STEP` as git does there: the fill and the declaration name the same files. */
+  it('folds case in the attributes where the repository does, on the fill and the declaration alike', async () => {
+    const tracksUpper = '*.STEP filter=lfs diff=lfs merge=lfs -text\n';
+    const tree = new ImmutableRevisionTree([
+      ['.gitattributes', encoder.encode(tracksUpper)],
+      ['models/a.step', pointerOf('solid a').bytes],
+    ]);
+    expect([...largeObjectPlaceholders(tree).keys()]).toStrictEqual([]);
+    expect([...largeObjectPlaceholders(tree, { ignoreCase: true }).keys()]).toStrictEqual(['models/a.step']);
+    expect([...declaredPlaceholders(tree, { reading: { ignoreCase: true } }).keys()]).toStrictEqual(['models/a.step']);
+    const harness = setup({ attributes: tracksUpper, ignoreCase: true });
+    const done = harness.fill.fill(place, head);
+    await vi.waitFor(() => {
+      expect(harness.readTree).toHaveBeenCalled();
+    });
+    expect(harness.reports[0]?.facet?.paths).toStrictEqual(['models/a.step', 'models/b.step']);
+    harness.finish(harness.fullTree());
+    await done;
+    expect(harness.text('models/a.step')).toBe('solid a');
   });
 
   it('leaves a pointer the attributes do not track to the person, never fetching or writing it', async () => {

@@ -40,6 +40,7 @@ import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/ind
 import { createApplyTreeEffects, sweepTemporarySiblings as sweepApplyLitter } from '#apply-tree.js';
 import type { MaterializeTarget } from '#apply-tree.js';
 import { createLargeObjectFill, declaredPlaceholders, largeObjectPlaceholders } from '#large-object-fill.js';
+import type { AttributesReading } from '#workspace-config.js';
 import { readEntryClosure } from '#open/entry-closure.js';
 import type { EntryClosure } from '#open/entry-closure.js';
 import { createContentReads } from '#open/content-reads.js';
@@ -1283,6 +1284,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     })();
     return described;
   };
+  /* How the repository reads its attributes: every leg that decides a placeholder folds case as it does (D9). */
+  const attributesReading = async (): Promise<AttributesReading> => {
+    const descriptor = await describePort();
+    return { ignoreCase: descriptor.ignoreCase === true };
+  };
   const formatOf = async (): Promise<ObjectFormat> => {
     const descriptor = await describePort();
     return descriptor.objectFormat;
@@ -1979,7 +1985,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
      * catches a checkout edited from outside. Every other view answers a path by this mark alone.
      */
     try {
-      await rooted.declarePending?.(declaredPlaceholders(tree));
+      await rooted.declarePending?.(declaredPlaceholders(tree, { reading: await attributesReading() }));
       declaredCheckouts.add(place.id);
     } catch (error) {
       /* An index that cannot open answers no mark at all: the capture stands, and the next one declares again. */
@@ -2148,6 +2154,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     checkoutTreeId,
     temporarySibling,
     unlinkIfPresent,
+    attributesReading,
     prepareTarget: async (place, target, signal) => {
       const expected = target.get('tau.json');
       if (expected === undefined) {
@@ -2198,6 +2205,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }),
     },
     capture: captureForFill,
+    attributesReading,
     withCheckoutFence,
     materializeTree,
     /* A checkout over the host's store clones each object in place of writing its bytes (W11.3). */
@@ -2300,7 +2308,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       void (async (): Promise<void> => {
         try {
           const head = await headOf(place);
-          const placeholders = largeObjectPlaceholders(await captureForFill(place));
+          const placeholders = largeObjectPlaceholders(await captureForFill(place), await attributesReading());
           if (fillsStopped || generationOf(place.id) !== generation) {
             return;
           }
@@ -2464,7 +2472,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (fillsStopped) {
             return;
           }
-          const placeholders = largeObjectPlaceholders(tree ?? (await captureForFill(place)));
+          const placeholders = largeObjectPlaceholders(
+            tree ?? (await captureForFill(place)),
+            await attributesReading(),
+          );
           if (treeWrites.get(place.id) !== writes) {
             return;
           }
@@ -2503,6 +2514,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* D9: reads that resolve a placeholder to its object, and `materialize` for a consumer that needs the file. */
   const contentReads = createContentReads({
     useFileSystem,
+    attributesReading,
     readStoredObject: async (pointer) => port.readLargeObject?.(pointer),
     /* No reader's signal: the transfer may be the fill's too, and only a close stops it (I10, S4). */
     fetchObject: async (pointer, onProgress) => {
@@ -2531,7 +2543,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const generation = generationOf(place.id);
       /* Captured before the generation is answered: a capture that fails leaves the next check owed. */
-      const placeholders = largeObjectPlaceholders(await captureForFill(place));
+      const placeholders = largeObjectPlaceholders(await captureForFill(place), await attributesReading());
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- a close during the capture stops fills.
       if (fillsStopped || generationOf(place.id) !== generation) {
         return;
@@ -2574,6 +2586,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           capture: captureFresh,
           withCheckoutFence,
           materializeTree,
+          attributesReading,
           storeObject: async (pointer, content) => storeLargeObject.call(port, pointer, content),
           readStoredObject: async (pointer) => readLargeObject.call(port, pointer),
         });

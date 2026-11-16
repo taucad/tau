@@ -24,6 +24,7 @@ import { equalBytes } from '#object-hash.js';
 import type { LargeObjectsFacet, LargeObjectsReport } from '#project-revisions.types.js';
 import { RevisionPortError } from '#revision-port.js';
 import { attributesOf, placeholderPathMatcher } from '#workspace-config.js';
+import type { AttributesReading } from '#workspace-config.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 
 /** One placeholder: the pointer bytes on disk and the object they name. */
@@ -121,11 +122,15 @@ export type FillWait = Readonly<{ signal?: AbortSignal; stall?: number }>;
  * person's text: never fetched, never written over.
  *
  * @param tree - A tree read with `largeObjects: 'local'`, or a capture.
+ * @param reading - How the repository reads its attributes (`core.ignoreCase`).
  * @returns The placeholders by path.
  */
-export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string, Placeholder> => {
+export const largeObjectPlaceholders = (
+  tree: ImmutableRevisionTree,
+  reading?: AttributesReading,
+): Map<string, Placeholder> => {
   const entries = tree.entries();
-  const tracked = placeholderPathMatcher(attributesOf(entries));
+  const tracked = placeholderPathMatcher(attributesOf(entries), reading);
   return new Map(
     entries.flatMap(({ path, content }) => {
       const pointer = readLfsPointer(content);
@@ -141,16 +146,19 @@ export const largeObjectPlaceholders = (tree: ImmutableRevisionTree): Map<string
  * {@link largeObjectPlaceholders}, the rule its fill and read-through use.
  *
  * @param tree - The checkout's tree: a capture, or the tree a write lands.
- * @param except - Paths whose pointer lands as its object (a write's sourced paths).
+ * @param options - Paths whose pointer lands as its object (a write's sourced paths), and how the repository reads
+ *   its attributes.
  * @returns The declared placeholders by path, with the size of the pointer each one is.
  */
 export const declaredPlaceholders = (
   tree: ImmutableRevisionTree,
-  except?: ReadonlyMap<string, unknown>,
+  options?: Readonly<{ except?: ReadonlyMap<string, unknown> | undefined; reading?: AttributesReading | undefined }>,
 ): Map<string, DeclaredPlaceholder> =>
   new Map(
-    [...largeObjectPlaceholders(tree)].flatMap(([path, { oid, size, pointer }]) =>
-      except?.has(path) === true ? [] : [[path, { object: { oid, size }, pointerSize: pointer.byteLength }] as const],
+    [...largeObjectPlaceholders(tree, options?.reading)].flatMap(([path, { oid, size, pointer }]) =>
+      options?.except?.has(path) === true
+        ? []
+        : [[path, { object: { oid, size }, pointerSize: pointer.byteLength }] as const],
     ),
   );
 
@@ -186,6 +194,8 @@ export const createLargeObjectFill = (
     reportMilliseconds?: number;
     /** The most bytes one flush writes; see {@link defaultFlushBytes}. */
     flushBytes?: number;
+    /** How the repository reads its attributes (`core.ignoreCase`), so the fill names what the declaration does. */
+    attributesReading?: () => Promise<AttributesReading>;
     /** The waits before a failed fill tries again; see {@link defaultRetryMilliseconds}. */
     retryMilliseconds?: readonly number[];
   }>,
@@ -213,6 +223,7 @@ export const createLargeObjectFill = (
   const reportMilliseconds = dependencies.reportMilliseconds ?? defaultReportMilliseconds;
   const flushBytes = dependencies.flushBytes ?? defaultFlushBytes;
   const retryMilliseconds = dependencies.retryMilliseconds ?? defaultRetryMilliseconds;
+  const attributesReading = dependencies.attributesReading ?? (async (): Promise<AttributesReading> => ({}));
   /* One fill per checkout; a newer one replaces it, and the older one's callbacks go quiet. */
   const fills = new Map<string, Fill>();
   /* Checkouts this fill has given its word on, so a host never reads silence as "nothing to fill" (D10 `filled`). */
@@ -392,7 +403,7 @@ export const createLargeObjectFill = (
   const sweep = async (fill: Fill): Promise<boolean> => {
     const before = await capture(fill.place);
     /* Only a pointer the attributes track is a placeholder: a person's pointer text is never filled (D9). */
-    const tracked = placeholderPathMatcher(attributesOf(before.entries()));
+    const tracked = placeholderPathMatcher(attributesOf(before.entries()), await attributesReading());
     const filled: string[] = [];
     const gone: string[] = [];
     let written = 0;
@@ -762,7 +773,7 @@ export const createLargeObjectFill = (
     head: RevisionId | undefined,
     placeholders?: ReadonlyMap<string, Placeholder>,
   ): Promise<void> => {
-    const pending = new Map(placeholders ?? largeObjectPlaceholders(await capture(place)));
+    const pending = new Map(placeholders ?? largeObjectPlaceholders(await capture(place), await attributesReading()));
     const previous = fills.get(place.id);
     if (previous !== undefined) {
       fills.delete(place.id);

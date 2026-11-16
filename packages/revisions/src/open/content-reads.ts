@@ -13,6 +13,7 @@ import type { FillWait, LargeObjectLook } from '#large-object-fill.js';
 import type { Checkout } from '#revision-port.js';
 import type { RevisionFileSystem } from '#revision-effects.types.js';
 import { generatedGitattributesPath, placeholderPathMatcher } from '#workspace-config.js';
+import type { AttributesReading } from '#workspace-config.js';
 
 /** Why a path's object could not be read as bytes. @public */
 export type PendingReason = 'filling' | 'offline' | 'not-fetched';
@@ -87,6 +88,8 @@ export type ContentReadsDependencies = Readonly<{
   ) => Promise<Result>;
   /** An object from this device's store alone; `undefined` when it is not there. */
   readStoredObject: (pointer: Readonly<{ oid: string; size: number }>) => Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /** How the repository reads its attributes (`core.ignoreCase`), as the declaration and the fill read them. */
+  attributesReading?: () => Promise<AttributesReading>;
   fill: Readonly<{
     look: (checkoutId: string, oid: string) => LargeObjectLook | undefined;
     arrival: (checkoutId: string, oid: string, signal?: AbortSignal) => Promise<Uint8Array<ArrayBuffer> | undefined>;
@@ -142,6 +145,7 @@ export type ContentReads = Readonly<{
 /* The reads one root serves; see the module comment. */
 export const createContentReads = (dependencies: ContentReadsDependencies): ContentReads => {
   const { useFileSystem, readStoredObject, fill, startFill } = dependencies;
+  const attributesReading = dependencies.attributesReading ?? (async (): Promise<AttributesReading> => ({}));
 
   const readRaw = async (place: Checkout, path: string): Promise<ReadOutcome> => {
     try {
@@ -179,7 +183,7 @@ export const createContentReads = (dependencies: ContentReadsDependencies): Cont
         return outcome.outcome === 'bytes' ? [[file, new TextDecoder().decode(outcome.data)] as const] : [];
       }),
     );
-    return placeholderPathMatcher(attributes)(path) ? pointer : undefined;
+    return placeholderPathMatcher(attributes, await attributesReading())(path) ? pointer : undefined;
   };
 
   const reasonOf = (look: LargeObjectLook | undefined): PendingReason => {

@@ -485,11 +485,15 @@ export const attributesOf = (
  * a pointer under a name no attributes track is a person's text on every leg.
  *
  * @param attributes - Every attributes file of the tree, or each one on the path asked about.
+ * @param reading - How the repository reads them: `ignoreCase` where it folds case, so every leg folds alike.
  * @returns Whether a project-relative path's pointer is a placeholder.
  * @internal
  */
-export const placeholderPathMatcher = (attributes: RepositoryAttributes): ((path: string) => boolean) => {
-  const matches = repositoryLargeObjectMatcher(attributes);
+export const placeholderPathMatcher = (
+  attributes: RepositoryAttributes,
+  reading: AttributesReading = {},
+): ((path: string) => boolean) => {
+  const matches = repositoryLargeObjectMatcher(attributes, reading);
   return (path) => !isAttributesPath(path) && matches(path);
 };
 

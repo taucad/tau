@@ -20,6 +20,7 @@
  * never read again.
  */
 import { attributesOf, placeholderPathMatcher } from '#workspace-config.js';
+import type { AttributesReading } from '#workspace-config.js';
 import type { ImmutableRevisionTree } from '#algorithms/index.js';
 import { adoptRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
 import type { RevisionTreeFile } from '#algorithms/revision-tree.js';
@@ -42,6 +43,8 @@ export type LargeObjectAdoptionDependencies = Readonly<{
   storeObject: (pointer: LfsPointer, content: Uint8Array<ArrayBuffer>) => Promise<void>;
   /** One object from the store alone. */
   readStoredObject: (pointer: LfsPointer) => Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /** How the repository reads its attributes (`core.ignoreCase`), as the declaration and the fill read them. */
+  attributesReading?: () => Promise<AttributesReading>;
 }>;
 
 /** What one adoption did. @public */
@@ -77,6 +80,7 @@ export const createLargeObjectAdoption = (
       /* The rule the fill, the declaration and the read-through use: every attributes file on the path. */
       const tracked = placeholderPathMatcher(
         attributesOf([...files].map(([path, { content }]) => ({ path, content }))),
+        await (dependencies.attributesReading?.() ?? {}),
       );
       const candidates = [...files]
         .filter(([path, { content }]) => tracked(path) && readLfsPointer(content) === undefined)

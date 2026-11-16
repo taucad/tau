@@ -64,6 +64,8 @@ const fixture = async (
     raw?: boolean;
     /* Every declaration to the index fails, as one whose index cannot open. */
     failingDeclarations?: boolean;
+    /* The repository folds case (`core.ignoreCase`), as a native host's on a case-insensitive disk. */
+    ignoreCase?: boolean;
   }>,
 ) => {
   const backend = options?.backend ?? 'node';
@@ -174,7 +176,7 @@ const fixture = async (
       return base.ignoredPaths?.(root);
     },
   };
-  const port: RevisionPort =
+  const ruled: RevisionPort =
     options?.ignoreRules === 'port'
       ? base
       : options?.ignoreRules === 'failing'
@@ -192,6 +194,10 @@ const fixture = async (
                     ),
               ignoreContext: async () => JSON.stringify(ignored),
             };
+  const port: RevisionPort =
+    options?.ignoreCase === true
+      ? { ...ruled, describe: async () => ({ ...(await ruled.describe()), ignoreCase: true }) }
+      : ruled;
   /* Memory stamps its files now and cannot be told otherwise: the captures read a clock a minute on,
    * so only what a test writes after a capture is racy at the next. */
   const clock =
@@ -947,5 +953,22 @@ describe("a capture declares the checkout's placeholders to its index (D9)", () 
     await at.rooted.writeFile(generatedGitattributesPath, '');
     await cut(at.actors);
     expect(await at.rooted.pendingPaths!(['models/part.step', 'vendor/blob.bin'])).toStrictEqual(['vendor/blob.bin']);
+  });
+
+  /* The declaration reads the attributes as the repository does, so it names exactly what the fill fills. */
+  it('should mark a pointer the attributes track only by folding case where the repository folds it', async () => {
+    const { bytes: pointer } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
+    const text = new TextDecoder().decode(pointer);
+    const tree = {
+      ...files(3),
+      'vendor/.gitattributes': '*.BIN filter=lfs diff=lfs merge=lfs -text\n',
+      'vendor/blob.bin': text,
+    };
+    const folding = await fixture(tree, { backend: 'memory', raw: true, ignoreCase: true });
+    await cut(folding.actors);
+    expect(await folding.rooted.pendingPaths!(['vendor/blob.bin'])).toStrictEqual(['vendor/blob.bin']);
+    const exact = await fixture(tree, { backend: 'memory', raw: true });
+    await cut(exact.actors);
+    expect(await exact.rooted.pendingPaths!(['vendor/blob.bin'])).toStrictEqual([]);
   });
 });

@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-11-15'
+updated: '2026-11-16'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -527,7 +527,7 @@ Runtime package exports must not include legacy preset or concrete-capability ba
 
 ```text
 @taucad/assimp        → named plugin export plus assimpKernel and assimpTranscoder
-@taucad/image         → named plugin export plus imageTranscoder
+@taucad/image         → named plugin export plus renderTranscoder, svgTranscoder and rasterTranscoder; `/raster` exports encodeRasterImage
 @taucad/middleware    → named plugin export plus individual middleware factories
 @taucad/opencascade   → browser/WASM-safe OpenCascade plugin toolkit
 @taucad/build123d     → Node-hosted Build123d kernel on python-kernel-core; `/native` deployment

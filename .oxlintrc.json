@@ -494,7 +494,7 @@
               "UNSAFE_RouteContext",
               "UNSAFE_ViewTransitionContext"
             ],
-            "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The one exception is the live router read in project-route-intent.tsx (RD9 amendment)."
+            "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The exceptions are the live router reads in project-route-intent.tsx (RD9 amendment) and use-workspace-frame-state.ts (A15b2, F11)."
           },
           {
             "name": "@nx/vite/plugins/nx-tsconfig-paths.plugin",
@@ -1448,7 +1448,7 @@
                   "UNSAFE_RouteContext",
                   "UNSAFE_ViewTransitionContext"
                 ],
-                "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The one exception is the live router read in project-route-intent.tsx (RD9 amendment)."
+                "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The exceptions are the live router reads in project-route-intent.tsx (RD9 amendment) and use-workspace-frame-state.ts (A15b2, F11)."
               }
             ],
             "patterns": [
@@ -1499,7 +1499,7 @@
                   "UNSAFE_RouteContext",
                   "UNSAFE_ViewTransitionContext"
                 ],
-                "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The one exception is the live router read in project-route-intent.tsx (RD9 amendment)."
+                "message": "React Router's private contexts change shape in minor releases (8.4 split the state context). Use the public hooks (useNavigation, useLocation, useRouteLoaderData). The exceptions are the live router reads in project-route-intent.tsx (RD9 amendment) and use-workspace-frame-state.ts (A15b2, F11)."
               }
             ],
             "patterns": [

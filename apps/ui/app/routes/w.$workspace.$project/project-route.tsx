@@ -158,7 +158,8 @@ export function ProjectRouteProviders({
 }): React.ReactNode {
   const appHosted = useContext(ProjectSessionsHostContext);
   if (appHosted) {
-    return <ProjectRouteContent isProjectRoute>{children}</ProjectRouteContent>;
+    /* A15b2: under the app host the shell draws the frame around this (`Page`), so it is in place before the route. */
+    return <ProjectRouteGateContent isProjectRoute>{children}</ProjectRouteGateContent>;
   }
   return (
     <DetachedProjectRoute
@@ -212,10 +213,10 @@ function DetachedProjectRoute({
 }
 
 /**
- * A project route's content region: the persistent workspace frame (A15b), with the content over it once this
- * document's file-manager worker exists, or the file service's failure notice in its place. The shell around it is
- * already there (D24), so the frame draws the content region only; this is also what the server renders for a project
- * URL, beside the shell. Any other route's content is never held, and keeps its tree position whichever route comes
+ * A project route's content region with no app host (a suite that mounts the route alone): the persistent workspace
+ * frame (A15b), with the content over it once this document's file-manager worker exists, or the file service's
+ * failure notice in its place. Under the app host the shell draws the frame instead (`Page`, A15b2) and the route
+ * renders only the gate. Any other route's content is never held, and keeps its tree position whichever route comes
  * next.
  *
  * @param props - The route's content, and whether the route is a project's.
@@ -228,7 +229,23 @@ function ProjectRouteContent({
   readonly children?: React.ReactNode;
   readonly isProjectRoute: boolean;
 }): React.ReactNode {
-  const gate = (
+  /* One host element whatever the route, so a visit off a project route keeps the content's tree position. */
+  return (
+    <WorkspaceFrame isDrawn={isProjectRoute}>
+      <ProjectRouteGateContent isProjectRoute={isProjectRoute}>{children}</ProjectRouteGateContent>
+    </WorkspaceFrame>
+  );
+}
+
+/** The content region's gate on the file-manager worker, inside whichever frame draws the region. */
+function ProjectRouteGateContent({
+  children,
+  isProjectRoute,
+}: {
+  readonly children?: React.ReactNode;
+  readonly isProjectRoute: boolean;
+}): React.ReactNode {
+  return (
     <SharedWorkerGate
       shouldReportFailure={isProjectRoute}
       placeholder={isProjectRoute ? <WorkspaceOpening /> : children}
@@ -236,8 +253,6 @@ function ProjectRouteContent({
       {children}
     </SharedWorkerGate>
   );
-  /* One host element whatever the route, so a visit off a project route keeps the content's tree position. */
-  return <WorkspaceFrame isDrawn={isProjectRoute}>{gate}</WorkspaceFrame>;
 }
 
 /** The latest `onFocusedChatResolved`, read when focus shows a chat. */

@@ -205,6 +205,9 @@ const createTree = (log: ClientLog, name = 'tree') => ({
       log.push(`${name}:resume`);
     };
   },
+  refreshListedThroughHold: () => {
+    log.push(`${name}:read-through`);
+  },
 });
 
 /** Owed close cuts kept across documents, as `localStorage` keeps them: one store two sessions can share (A7d). */

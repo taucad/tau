@@ -642,8 +642,9 @@ export function useChatTextareaLogic({
       // `draftMachine`; the only failure class we still own here is the
       // file-read step itself.
       // A mixed drop is judged per file there too, so a PDF still lands when the model reads no images (S13).
+      // Copied before the first await: the browser may empty the drop's live `FileList` once the handler yields.
       if (dataTransfer.files.length > 0) {
-        await addFiles(dataTransfer.files);
+        await addFiles([...dataTransfer.files]);
       }
     },
     [addFiles, onViewerScreenshotDrop, onAddContextChips],

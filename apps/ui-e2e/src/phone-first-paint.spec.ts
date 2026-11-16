@@ -146,7 +146,13 @@ test('a phone never mounts or requests the desktop workbench on SSR, hydration o
   }, projectUrl);
   expect(serverHtml).toContain('data-slot="workspace-frame"');
   expect(serverHtml).toContain('data-testid="workspace-opening"');
-  expect(serverHtml).not.toContain('data-project-workspace');
+  /* No element carries the attribute. The frame's own class names the selector (`[data-project-workspace]_*`), so a
+     substring check would match the frame, not a workspace (programme control, 2026-11-16T14:02Z). */
+  const serverWorkspaces = await target.evaluate(
+    (html) => new DOMParser().parseFromString(html, 'text/html').querySelectorAll('[data-project-workspace]').length,
+    serverHtml,
+  );
+  expect(serverWorkspaces, 'the served HTML renders a project workspace element').toBe(0);
 
   /* Phone, SSR + hydration. */
   await target.setViewport({ width: 390, height: 844 });

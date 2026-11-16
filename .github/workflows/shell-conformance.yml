@@ -187,7 +187,9 @@ jobs:
       contains(fromJSON(needs.select.outputs.projects), 'desktop-services-host') ||
       contains(fromJSON(needs.select.outputs.projects), 'desktop-terminal'))
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    # MAC-X gets more room: on `macos-26-intel` the qualification target alone takes 22–25 minutes (S02–S04
+    # run three times each), so a full MAC-X row ran 35–45 minutes and was cut off at 45 while still green.
+    timeout-minutes: ${{ matrix.row == 'MAC-X' && 60 || 45 }}
     # Writes the remote cache only in `main`'s merge queue, the one producer of a verdict a later queue run reuses (CF-1
     # design note, section 3). Every other call has no environment and so no write token.
     environment: ${{ (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/') && needs.select.outputs.tier == 'semantics') && 'nx-cache-write' || null }}

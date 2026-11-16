@@ -2270,6 +2270,70 @@ describe('FileContentService', () => {
       }
     });
 
+    /*
+     * STO-25 SP2g: a tree write that replaces 2,000 files the page never read
+     * moved each aside, published its staged copy and dropped the backup, and
+     * each step minted an orphaned outcome for a path nothing held — 6,000
+     * outcome and orphan events on the page's thread, every replaced file
+     * reading as gone until its staged copy landed (I7).
+     */
+    it('should publish nothing for a file it neither holds nor watches when a revision write replaces it', async () => {
+      const outcomes = vi.fn();
+      const orphans = vi.fn();
+      service.onDidChangeOutcome(outcomes);
+      service.onDidChangeOrphaned(orphans);
+
+      emitFileChanged({
+        type: 'changeSet',
+        entries: [
+          { type: 'fileWritten', path: 'parts/.p.scad.tau-staged.1.tmp', backend: 'indexeddb' },
+          {
+            type: 'fileRenamed',
+            oldPath: 'parts/p.scad',
+            newPath: 'parts/.p.scad.tau-backup.1.tmp',
+            backend: 'indexeddb',
+          },
+          {
+            type: 'fileRenamed',
+            oldPath: 'parts/.p.scad.tau-staged.1.tmp',
+            newPath: 'parts/p.scad',
+            backend: 'indexeddb',
+          },
+          { type: 'fileDeleted', path: 'parts/.p.scad.tau-backup.1.tmp', backend: 'indexeddb' },
+          { type: 'fileDeleted', path: 'parts/gone.scad', backend: 'indexeddb' },
+        ],
+      });
+
+      expect(outcomes).not.toHaveBeenCalled();
+      expect(orphans).not.toHaveBeenCalled();
+      expect(service.isOrphaned('parts/p.scad')).toBe(false);
+      expect(proxy.readFile).not.toHaveBeenCalled();
+    });
+
+    it('should tell a retained path’s removal, and forget it once released', () => {
+      const orphans = vi.fn();
+      service.onDidChangeOrphaned(orphans);
+      const release = service.retain('kept.ts');
+
+      emitFileChanged({ type: 'fileDeleted', path: 'kept.ts', backend: 'indexeddb' });
+      expect(orphans).toHaveBeenCalledWith({ path: 'kept.ts', orphaned: true });
+      expect(service.peekOutcome('kept.ts')).toEqual({ kind: 'orphaned' });
+
+      release();
+      release();
+      orphans.mockClear();
+      emitFileChanged({ type: 'fileDeleted', path: 'other.ts', backend: 'indexeddb' });
+      expect(orphans).not.toHaveBeenCalled();
+    });
+
+    it('should still answer a file it never held as orphaned once it is gone', async () => {
+      emitFileChanged({ type: 'fileDeleted', path: 'gone.ts', backend: 'indexeddb' });
+      vi.mocked(proxy.readFile).mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+      const outcome = await service.resolve('gone.ts');
+      expect(outcome.kind).toBe('orphaned');
+    });
+
     it('should refresh every cached entry under a directoryChanged prefix without dropping main.ts', async () => {
       const populate = async (path: string): Promise<void> => {
         vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([1]));

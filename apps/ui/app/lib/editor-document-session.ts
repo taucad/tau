@@ -321,12 +321,51 @@ export type EditorDocumentSessionConfig = Readonly<{
   textDebts?: EditorTextDebtPort;
 }>;
 
+/**
+ * The session's documents, each workspace path retained on the content service
+ * while it has one (STO-25 SP2g review F2): a background document no view
+ * holds would otherwise be a path the service may forget, so its file's
+ * removal or an external write would never reach it (I5, I7). A virtual
+ * declaration has no file and is not retained.
+ *
+ * @param contentService - The content authority to retain paths on.
+ * @returns A map that retains each path it holds.
+ */
+const retainedDocuments = (contentService: FileContentService): Map<string, EditorDocument> => {
+  const releases = new Map<string, () => void>();
+  const release = (path: string): void => {
+    releases.get(path)?.();
+    releases.delete(path);
+  };
+  return new (class extends Map<string, EditorDocument> {
+    public override set(path: string, document: EditorDocument): this {
+      if (!releases.has(path) && !isVirtualDeclarationPath(path)) {
+        releases.set(path, contentService.retain(path));
+      }
+      return super.set(path, document);
+    }
+
+    public override delete(path: string): boolean {
+      release(path);
+      return super.delete(path);
+    }
+
+    public override clear(): void {
+      for (const path of releases.keys()) {
+        release(path);
+      }
+      super.clear();
+    }
+  })();
+};
+
 /** Project-scoped bridge between versioned documents and the filesystem content authority. */
 export class EditorDocumentSession {
   public readonly diagnostics = new EditorDiagnostics();
   readonly #contentService: FileContentService;
   readonly #recordEditorConflict: EditorDocumentSessionConfig['recordEditorConflict'];
-  readonly #documents = new Map<string, EditorDocument>();
+  /* Every workspace document is retained on the content service, so it is told when its file changes or goes. */
+  readonly #documents: Map<string, EditorDocument>;
   readonly #holds = new Map<string, number>();
   readonly #background = new Map<string, number>();
   readonly #bases = new Map<string, Uint8Array<ArrayBuffer>>();
@@ -354,6 +393,7 @@ export class EditorDocumentSession {
 
   public constructor(config: EditorDocumentSessionConfig) {
     this.#contentService = config.contentService;
+    this.#documents = retainedDocuments(config.contentService);
     this.#projectId = config.projectId;
     this.#recordEditorConflict = config.recordEditorConflict;
     this.#textDebts = config.textDebts;

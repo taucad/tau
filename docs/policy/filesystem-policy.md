@@ -3,7 +3,7 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-11-09'
+updated: '2026-11-16'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -334,6 +334,7 @@ Coalescing requirements:
 - Delete followed by write collapses to change.
 - A typed ancestor-directory delete or rename resets exact descendant watches instead of guessing child facts.
 - Rename preserves both old/new path invalidation semantics.
+- A file moved away from a path the same window writes or moves onto again is told as its arrival at the target, and a write to a path the window then moves away, with nothing after, is told by the move: a revision write's replacement (stage, move aside, publish, drop the backup) crosses as the publish and the backup's removal, and the replaced path never reads as gone. Such a move arrives as a write of its target, never a rename, so a consumer must not rely on following it as one (a watcher of the target reads it afresh; a holder of the source keeps it, because the source is present again). A copy onto a path counts as an arrival in the same way.
 - Coalescing must clone a survivor before changing hidden origin metadata; subscriptions never mutate one shared event.
 
 ### Rule 22: Kernel path is direct and low-latency
@@ -366,7 +367,7 @@ The steady state is one multi-path subscription, not one stream per dependency. 
 Watcher streams are not lossless under all conditions. Define explicit overflow behavior:
 
 - emit internal `WatchEvent { type: 'reset' }` to watch subscribers
-- map worker-to-client overflow or refresh failure to the existing transport-wide `ChangeEvent { type: 'backendChanged' }`; do not add another wire variant
+- map a worker-to-client coalescing window that overflows to one existing `ChangeEvent { type: 'directoryChanged' }` per directory a discarded fact touched (a file's parent; a directory and its parent), so each rooted port resets only its own part of the loss (a discarded directory removal or move is kept as itself unless the same window fills its path again, when the directory's re-list stands for it so no open file reads as gone, and one above a port's root reaches that port as `directoryChanged` at `''`, its whole-root reset; a summary of a directory above the root says only that its listing changed and never reaches the port; within one delivery a summary that a later summary of the same or an ancestor directory covers is dropped); a discarded `backendChanged`, and a refresh failure, stay the transport-wide `backendChanged`; do not add another wire variant
 - kernel subscribers clear dependency-related caches and request a fresh dependency pass on next render
 - tree subscribers trigger targeted parent/subtree resync (not blind full tree unless required)
 

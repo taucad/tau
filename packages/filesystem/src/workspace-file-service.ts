@@ -412,11 +412,16 @@ export class WorkspaceFileService {
       return row;
     }
     const canonicalPath = resolveAuthorityPath(path);
-    const root = this._mountTable.resolve(canonicalPath).entry?.prefix;
-    if (root !== undefined && this._projectIndexes.pendingAt(canonicalPath, row.size) === undefined) {
-      await this._projectIndexes.settleMarks({ root, authorityPath: canonicalPath, size: row.size });
-    }
-    return asMarkedRow(row, this._projectIndexes.pendingAt(canonicalPath, row.size));
+    const root = this._mountTable.resolve(canonicalPath).entry?.prefix ?? canonicalPath;
+    return asMarkedRow(
+      row,
+      await this._projectIndexes.settleMarks({
+        root,
+        authorityPath: canonicalPath,
+        size: row.size,
+        mtimeMs: row.mtimeMs,
+      }),
+    );
   }
 
   /**
@@ -1361,6 +1366,14 @@ export class WorkspaceFileService {
       root: root ?? canonicalPath,
       path: local,
       bytes,
+      mtimeMs: async () => {
+        try {
+          const head = await resolved.provider.stat(resolved.path);
+          return head.mtimeMs;
+        } catch {
+          return undefined;
+        }
+      },
       signal: options?.signal,
       stallMilliseconds: this._pendingStallMilliseconds,
     });

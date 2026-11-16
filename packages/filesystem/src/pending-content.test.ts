@@ -8,11 +8,13 @@ import { MountTable } from '#mount-table.js';
 import { tauPathPolicy } from '#path-registry.js';
 import { PendingContentError, pendingObjectOf } from '#pending-content.js';
 import { ProjectIndex } from '#project-index/project-index.js';
+import { ProjectIndexes } from '#project-index/project-indexes.js';
 import type { PendingObjectSource } from '#pending-content.js';
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
-import type { FileSystemProvider } from '#types.js';
+import type { DirectoryStatRow, FileSystemProvider } from '#types.js';
+import type { FileStatEntry } from '@taucad/types';
 
 /*
  * Pending entries (D9, W4 slice a): a checkout path whose bytes are a large
@@ -39,11 +41,17 @@ let memory: FileSystemProvider;
 /* A project whose `models/part.step` is a placeholder the revision layer declared, unless `declared` is false. */
 const createService = async (
   pendingStallMilliseconds?: number,
-  options?: Readonly<{ declared?: boolean }>,
+  options?: Readonly<{ declared?: boolean; providerRegistry?: ProviderRegistry; durable?: boolean; reload?: boolean }>,
 ): Promise<WorkspaceFileService> => {
-  const providerRegistry = new ProviderRegistry();
+  const providerRegistry = options?.providerRegistry ?? new ProviderRegistry();
   const scope = { backend: 'memory', storageRootKey: 'memory:pending-content' } as const;
   const provider = await providerRegistry.getProvider(scope);
+  if (options?.durable === true && !provider.capabilities.persistent) {
+    /* A durable provider whose mtime keys facts: the root keeps a snapshot of its index, marks and all. */
+    Object.defineProperty(provider, 'capabilities', {
+      value: { ...provider.capabilities, persistent: true, trustworthyMtime: true },
+    });
+  }
   memory = provider;
   const mountTable = new MountTable();
   mountTable.mount('/', provider, { class: 'authored', ...scope });
@@ -55,6 +63,10 @@ const createService = async (
     ...(pendingStallMilliseconds === undefined ? {} : { pendingStallMilliseconds }),
   });
   await created.configureProjectRoots({ projects: [{ projectId, ...scope, providerBasePath: 'gear' }], roots: [] });
+  if (options?.reload === true) {
+    /* A reload: the project is on the provider already. */
+    return created;
+  }
   await created.writeFile(`${route}/main.scad`, 'import("models/part.step");');
   await created.writeFile(`${route}/models/part.step`, pointer);
   if (options?.declared !== false) {
@@ -392,37 +404,123 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     unopened.dispose();
   });
 
-  /* Mounting the root is the revision layer's word that it will declare it: no capture has to start first. */
-  it('should hold a file the size of a pointer from the moment the revision layer mounts the root, until it declares it', async () => {
+  /* Opening the root is the revision layer's word that it will declare it: no capture has to start first. */
+  it('should hold a stat of a file the size of a pointer from the moment the revision layer opens the root, and no listing', async () => {
     const cold = await createService(undefined, { declared: false });
     const raw = cold.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = cold.createRootedFileSystem(route);
     expect(await view.stat('main.scad')).toMatchObject({ size: 27 });
     const statting = view.stat('models/part.step');
-    const listing = view.statTree!('models');
-    const listingRows = view.readdirWithStats!('models');
     const serviceStat = cold.stat(`${route}/models/part.step`);
     cold.setPendingObjectSource(async () => part);
     const reading = view.readFile('models/part.step');
-    for (const held of [statting, listing, listingRows, serviceStat, reading]) {
+    for (const held of [statting, serviceStat, reading]) {
       // oxlint-disable-next-line no-await-in-loop -- each is raced in turn against the same short wait.
       expect(await Promise.race([held, waiting()])).toBe('waiting');
     }
+    /* A listing waits for no row: the one nothing answers yet is pending at its own size, and the others are as they are. */
+    const asHeld = { size: pointer.byteLength, pending: true };
+    const tree = await Promise.race([view.statTree!('models'), waiting()]);
+    expect(tree).not.toBe('waiting');
+    const rows = await Promise.race([view.readdirWithStats!(''), waiting()]);
+    expect(rows).not.toBe('waiting');
+    expect((tree as FileStatEntry[]).find((row) => row.path === 'part.step')).toMatchObject(asHeld);
+    expect((rows as DirectoryStatRow[]).find((row) => row.name === 'main.scad')).toMatchObject({ size: 27 });
+    expect((rows as DirectoryStatRow[]).find((row) => row.name === 'main.scad')).not.toHaveProperty('pending');
     /* The raw view, the revision layer's own, is never held. */
     expect(await raw.stat('models/part.step')).toMatchObject({ size: pointer.byteLength });
     await raw.declarePending!(new Map([['models/part.step', placeholder]]));
     expect(await statting).toMatchObject({ size: part.byteLength, pending: true });
-    const [tree, rows] = await Promise.all([listing, listingRows]);
-    expect(tree.find((row) => row.path === 'part.step')).toMatchObject({ size: part.byteLength });
-    expect(rows.find((row) => row.name === 'part.step')).toMatchObject({ size: part.byteLength });
     expect(await serviceStat).toMatchObject({ size: part.byteLength, pending: true });
     expect(await reading).toStrictEqual(part);
+    const declaredTree = await view.statTree!('models');
+    expect(declaredTree.find((row) => row.path === 'part.step')).toMatchObject({ size: part.byteLength });
     /* Declared once, the marks alone answer, and a later view of the revision layer's holds nothing again. */
     cold.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     await raw.writeFile('notes/pointer.txt', pointer);
     expect(await view.stat('notes/pointer.txt')).toMatchObject({ size: pointer.byteLength });
     cold.dispose();
   });
+
+  /*
+   * STO-25: a cold open's first view must not wait for the capture that follows the tree write. The tree write's
+   * expectation already says what every path it names is, so those paths answer at once, a small text file the size
+   * of a pointer among them.
+   */
+  it('should answer a cold open’s first listing from the tree write’s expectation, never waiting for its capture', async () => {
+    const cold = await createService(undefined, { declared: false });
+    const raw = cold.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = cold.createRootedFileSystem(route);
+    const declare = vi.spyOn(ProjectIndexes.prototype, 'declarePending');
+    const ignore = encoder.encode(`${'# build output\n'.repeat(8)}dist/\nbin\n`);
+    expect(ignore.byteLength).toBe(130);
+    const entries = [
+      { path: '.gitignore', size: ignore.byteLength, arriving: true },
+      { path: 'main.scad', size: 27, arriving: false },
+      { path: 'models/part.step', size: pointer.byteLength, pending: { oid, size: part.byteLength }, arriving: false },
+      ...Array.from({ length: 2000 }, (_, at) => ({ path: `parts/p${String(at)}.scad`, size: 140, arriving: true })),
+    ];
+    await raw.expectEntries!(entries);
+    await raw.writeFile('.gitignore', ignore);
+    for (let at = 0; at < 20; at += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- a few of the tree's files, landed in order.
+      await raw.writeFile(`parts/p${String(at)}.scad`, encoder.encode('c'.repeat(140)));
+    }
+    const started = performance.now();
+    const listing = await Promise.race([view.readdirWithStats!(''), waiting()]);
+    const parts = await Promise.race([view.readdirWithStats!('parts'), waiting()]);
+    const ignoreStat = await Promise.race([view.stat('.gitignore'), waiting()]);
+    const partStat = await Promise.race([view.stat('models/part.step'), waiting()]);
+    const elapsed = performance.now() - started;
+    expect(listing).not.toBe('waiting');
+    expect(parts).not.toBe('waiting');
+    expect(ignoreStat).toMatchObject({ size: 130 });
+    expect(ignoreStat).not.toHaveProperty('pending');
+    expect(partStat).toMatchObject({ size: part.byteLength, pending: true });
+    expect((parts as DirectoryStatRow[]).every((row) => !('pending' in row))).toBe(true);
+    expect(await view.readFile('.gitignore')).toStrictEqual(ignore);
+    /* No first-view answer waited for the capture's declaration. */
+    expect(declare).not.toHaveBeenCalled();
+    expect(elapsed).toBeLessThan(500);
+    cold.dispose();
+  });
+
+  /* A warm open: each file still as stored answers by its stored mark, before the root's index compares. */
+  it('should answer a warm open’s first listing and stats from the stored marks, without waiting for the compare', async () => {
+    const providerRegistry = new ProviderRegistry();
+    const before = await createService(undefined, { providerRegistry, durable: true });
+    const provider = memory;
+    await expect
+      .poll(
+        async () =>
+          provider.readFile('gear/.tau/index/snapshot.json').then(
+            (bytes) => bytes.byteLength,
+            () => 0,
+          ),
+        {
+          timeout: 10_000,
+        },
+      )
+      .toBeGreaterThan(0);
+    const reloaded = await createService(undefined, { providerRegistry, durable: true, reload: true });
+    reloaded.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const ready = vi.spyOn(ProjectIndexes.prototype, 'ready');
+    const view = reloaded.createRootedFileSystem(route);
+    const rows = await Promise.race([view.readdirWithStats!('models'), waiting()]);
+    expect(rows).not.toBe('waiting');
+    expect((rows as DirectoryStatRow[]).find((row) => row.name === 'part.step')).toMatchObject({
+      size: part.byteLength,
+      pending: true,
+    });
+    expect(await Promise.race([view.stat('models/part.step'), waiting()])).toMatchObject({
+      size: part.byteLength,
+      pending: true,
+    });
+    expect(await Promise.race([view.stat('main.scad'), waiting()])).toMatchObject({ size: 27 });
+    expect(ready).not.toHaveBeenCalled();
+    reloaded.dispose();
+    before.dispose();
+  }, 20_000);
 
   it('should end the hold once, at the bound, and answer every row from the marks, never refusing a listing', async () => {
     const bound = 150;
@@ -488,7 +586,7 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
 
     const disposed = await createService(undefined, { declared: false });
     disposed.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
-    const held = disposed.createRootedFileSystem(route).statTree!('models');
+    const held = disposed.createRootedFileSystem(route).stat('models/part.step');
     expect(await Promise.race([held, waiting()])).toBe('waiting');
     disposed.dispose();
     await expect(held).resolves.toBeDefined();
@@ -499,10 +597,12 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     aborting.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = aborting.createRootedFileSystem(route);
     const controller = new AbortController();
-    const listing = view.statTree!('models', { signal: controller.signal });
-    expect(await Promise.race([listing, waiting()])).toBe('waiting');
+    aborting.setPendingObjectSource(async () => part);
+    const reading = aborting.readFile(`${route}/models/part.step`, { signal: controller.signal });
+    expect(await Promise.race([reading, waiting()])).toBe('waiting');
     controller.abort(new Error('stopped'));
-    await expect(listing).rejects.toThrow('stopped');
+    await expect(reading).rejects.toThrow('stopped');
+    expect(view).toBeDefined();
     aborting.dispose();
   });
 });

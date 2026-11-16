@@ -30,9 +30,9 @@ import type {
   ObservedRow,
 } from '#project-index/project-index.js';
 import { projectIndexDirectory, readIndexSnapshot, writeIndexSnapshot } from '#project-index/index-snapshot.js';
-import type { IndexVector } from '#project-index/index-snapshot.js';
+import type { IndexSnapshot, IndexVector } from '#project-index/index-snapshot.js';
 import { mayBePointerSize, pendingStallMilliseconds, untilDeclared } from '#pending-content.js';
-import type { PendingObject, SettledFile } from '#pending-content.js';
+import type { MarkAnswer, PendingObject, SettledFile } from '#pending-content.js';
 import { importFactsMaximumBytes, importFactsPath, parseImportFacts, verifiedImportFacts } from '#importer/facts.js';
 
 /** Reserved root paths no index ever holds (I9): its own snapshot, and import staging. @public */
@@ -154,6 +154,16 @@ type RootState = {
   persistTimer?: ReturnType<typeof setTimeout>;
 };
 
+/*
+ * Marks known for a root whose index has not compared yet (D9): its stored snapshot's. Each answers a file only while
+ * the file is at the size and mtime it was stored at.
+ */
+type StoredMarks = Readonly<{
+  rows: ReadonlyMap<string, Readonly<{ size: number; mtimeMs: number }>>;
+  pending: Readonly<Record<string, PendingObject>>;
+  declared: boolean;
+}>;
+
 /**
  * The set of Project Indexes, one per root.
  *
@@ -174,6 +184,14 @@ export class ProjectIndexes {
    * answered by its marks alone.
    */
   private readonly _declaration = new Map<string, 'declared' | 'unknown'>();
+  /** Per root a tree write is landing, every path it named and the object each placeholder stands for (D10). */
+  private readonly _expected = new Map<string, Map<string, Readonly<{ size: number; pending?: PendingObject }>>>();
+  /** Per cold root, the marks known before its index compares (see `StoredMarks`). */
+  private readonly _stored = new Map<string, StoredMarks>();
+  /** Indexes whose first observation is a scan, which finds every row new rather than changed. */
+  private readonly _scanning = new WeakSet<ProjectIndex>();
+  /** Per root, the one read of its stored snapshot a cold answer and its open share. */
+  private readonly _peeking = new Map<string, Promise<IndexSnapshot | undefined>>();
   private readonly _opening = new Map<string, Promise<ProjectIndex>>();
   private readonly _options: ProjectIndexesOptions;
   /** Notices from sibling tabs, joined into every root's vector. */
@@ -648,20 +666,37 @@ export class ProjectIndexes {
   }
 
   /**
-   * Whether the marks are the whole answer for one path (D9): it lies under no revision root, or under one the
-   * revision layer has declared since anything could have changed its placeholders.
+   * What a file's marks say now, waiting for nothing (D9): an expected tree's answer for a path it named; a complete
+   * index's mark; a stored mark while the file is at the size and mtime it was stored at; and otherwise, under a
+   * revision root not yet declared, `'unknown'`.
    *
-   * @param absolutePath - Absolute path.
-   * @returns `false` while the path's revision root is unknown.
+   * @param absolutePath - Absolute file path.
+   * @param row - The file's size, and its mtime when a stat gave one.
+   * @returns The object it stands for, `undefined` when it is no placeholder, or `'unknown'`.
    */
-  public declaredAt(absolutePath: string): boolean {
+  public markAt(absolutePath: string, row: Readonly<{ size: number; mtimeMs?: number | undefined }>): MarkAnswer {
     const normalized = normalizePath(absolutePath);
-    for (const [root, state] of this._declaration) {
-      if (state === 'unknown' && relativeTo(root, normalized) !== undefined) {
-        return false;
+    const expected = this._expectedAt(normalized);
+    if (expected !== undefined) {
+      return expected.pending !== undefined && expected.size === row.size ? expected.pending : undefined;
+    }
+    for (const [stored, marks] of this._stored) {
+      const relative = relativeTo(stored, normalized);
+      const kept = relative === undefined ? undefined : marks.rows.get(relative);
+      if (kept !== undefined && kept.size === row.size && kept.mtimeMs === row.mtimeMs) {
+        const object = Object.hasOwn(marks.pending, relative!) ? marks.pending[relative!] : undefined;
+        return object ?? (marks.declared || !this._unknownAt(normalized) ? undefined : 'unknown');
       }
     }
-    return true;
+    const covering = this._covering(normalized);
+    if (covering !== undefined) {
+      const entry = covering.index.entry(covering.relative);
+      if (entry?.pending !== undefined && entry.size === row.size) {
+        return entry.pending;
+      }
+      return this._unknownAt(normalized) ? 'unknown' : undefined;
+    }
+    return this._unknownAt(normalized) ? 'unknown' : undefined;
   }
 
   /**
@@ -701,30 +736,53 @@ export class ProjectIndexes {
   }
 
   /**
-   * Settle what a file the size of a pointer answers before a non-raw view answers it (D9, I7): a durable root's
-   * index is opened first, so a reload's marks are known before any row is, and a file no mark names under a held
-   * root waits for the revision layer's word. Any other file answers at once.
+   * What a file the size of a pointer answers (D9, I7), waiting only for itself: a durable root's stored snapshot is
+   * read first (one read, never the whole compare), so a reload's marks answer a file still as stored; and a file
+   * nothing answers under a held root waits for the revision layer's word, once per root and at most the bound.
    *
-   * @param file - The absolute root the view or mount answers for, the absolute file path, and the file's size as the
-   *   provider stats it.
+   * @param file - The absolute root the view or mount answers for, the absolute file path, and the file's size and
+   *   mtime as the provider stats it.
    * @param signal - The caller's cancellation.
+   * @returns What its marks say (see {@link ProjectIndexes.markAt}).
    * @throws The signal's reason when the caller stops waiting.
    */
-  public async settleMarks(file: SettledFile, signal?: AbortSignal): Promise<void> {
-    const { root, authorityPath: absolutePath, size } = file;
+  public async settleMarks(file: SettledFile, signal?: AbortSignal): Promise<MarkAnswer> {
+    const { root, authorityPath, size, mtimeMs } = file;
     if (!mayBePointerSize(size)) {
+      return this.pendingAt(authorityPath, size);
+    }
+    await this.storedMarks(root);
+    let answer = this.markAt(authorityPath, { size, mtimeMs });
+    const held = answer === 'unknown' ? this.declarationAt(authorityPath) : undefined;
+    if (held !== undefined) {
+      await untilDeclared(held, signal);
+      answer = this.markAt(authorityPath, { size, mtimeMs });
+    }
+    return answer;
+  }
+
+  /**
+   * Read a cold durable root's stored marks once, so its files answer before its index compares (see
+   * {@link ProjectIndexes.markAt}). Nothing for a root whose index is open or that keeps no snapshot.
+   *
+   * @param root - Absolute root.
+   */
+  public async storedMarks(root: string): Promise<void> {
+    const key = normalizePath(root);
+    if (this._states.get(key)?.index.isComplete === true || this._stored.has(key) || !this._keepsSnapshot(key)) {
       return;
     }
-    if (this._keepsSnapshot(root)) {
-      try {
-        await this.ready(root);
-      } catch {
-        /* No index opens: the marks are what the warm indexes hold. */
-      }
-    }
-    const held = this.declarationAt(absolutePath);
-    if (held !== undefined && this.pendingAt(absolutePath, size) === undefined) {
-      await untilDeclared(held, signal);
+    const snapshot = await this._peek(key).catch(() => undefined);
+    if (snapshot !== undefined && !snapshot.rescan && this._states.get(key)?.index.isComplete !== true) {
+      this._stored.set(key, {
+        rows: new Map(
+          snapshot.entries.flatMap(([path, kind, size, mtimeMs]) =>
+            kind === 'f' ? [[path, { size, mtimeMs }] as const] : [],
+          ),
+        ),
+        pending: snapshot.pending ?? {},
+        declared: snapshot.declared === true,
+      });
     }
   }
 
@@ -749,6 +807,12 @@ export class ProjectIndexes {
         for (const known of this._declaration.keys()) {
           if (relativeTo(key, known) !== undefined) {
             this._declaration.set(known, 'declared');
+          }
+        }
+        /* The marks now say what the expected tree did. */
+        for (const expected of this._expected.keys()) {
+          if (relativeTo(key, expected) !== undefined) {
+            this._expected.delete(expected);
           }
         }
       }
@@ -801,6 +865,13 @@ export class ProjectIndexes {
    * @param entries - Every entry of the tree, root-relative.
    */
   public async expect(root: string, entries: readonly ExpectedEntry[]): Promise<void> {
+    /* Known now, before the index opens or a byte lands: every path the tree names answers as the tree says (D9). */
+    this._expected.set(
+      normalizePath(root),
+      new Map(
+        entries.map(({ path, size, pending }) => [path, pending === undefined ? { size } : { size, pending }] as const),
+      ),
+    );
     /* A cold root is opened first, so a cold open's write is known as it lands. */
     const index = await this.ready(root);
     index.expect(entries);
@@ -925,6 +996,17 @@ export class ProjectIndexes {
         this._states.delete(root);
       }
     }
+    for (const root of this._stored.keys()) {
+      if (relativeTo(changed, root) !== undefined) {
+        this._stored.delete(root);
+        this._peeking.delete(root);
+      }
+    }
+    for (const root of this._expected.keys()) {
+      if (relativeTo(changed, root) !== undefined) {
+        this._expected.delete(root);
+      }
+    }
     /*
      * A root that moved is no longer what the revision layer declared: what waited answers now, a root still mounted
      * is unknown again and held again when it is configured, and an unmounted one is no revision root.
@@ -960,6 +1042,45 @@ export class ProjectIndexes {
     this.releaseDeclaration('/');
     this._settled.clear();
     this._declaration.clear();
+    this._expected.clear();
+    this._stored.clear();
+    this._peeking.clear();
+  }
+
+  /* Whether a path lies under a revision root not yet declared. */
+  private _unknownAt(normalized: string): boolean {
+    for (const [root, state] of this._declaration) {
+      if (state === 'unknown' && relativeTo(root, normalized) !== undefined) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /* What the tree write landing under a path's root said of it, if it named it. */
+  private _expectedAt(normalized: string): Readonly<{ size: number; pending?: PendingObject }> | undefined {
+    for (const [root, expected] of this._expected) {
+      const relative = relativeTo(root, normalized);
+      const answer = relative === undefined ? undefined : expected.get(relative);
+      if (answer !== undefined) {
+        return answer;
+      }
+    }
+    return undefined;
+  }
+
+  /* One read of a root's stored snapshot, shared by a cold answer and the open that follows. */
+  private async _peek(root: string): Promise<IndexSnapshot | undefined> {
+    let peeking = this._peeking.get(root);
+    if (peeking === undefined) {
+      const resolution = this._resolve(root);
+      peeking =
+        resolution.persist === undefined
+          ? Promise.resolve(undefined)
+          : readIndexSnapshot(resolution.provider, resolution.path);
+      this._peeking.set(root, peeking);
+    }
+    return peeking;
   }
 
   /*
@@ -974,6 +1095,12 @@ export class ProjectIndexes {
         continue;
       }
       const absolute = normalizePath(root === '/' ? `/${path}` : `${root}/${path}`);
+      for (const [expectedRoot, expected] of this._expected) {
+        const relative = relativeTo(expectedRoot, absolute);
+        if (relative !== undefined) {
+          expected.delete(relative);
+        }
+      }
       for (const [known, state] of this._declaration) {
         if (state === 'declared' && relativeTo(known, absolute) !== undefined) {
           this._declaration.set(known, 'unknown');
@@ -1096,8 +1223,8 @@ export class ProjectIndexes {
   private async _open(root: string): Promise<ProjectIndex> {
     this._readFacts.delete(root);
     const resolution = this._resolve(root);
-    const snapshot =
-      resolution.persist === undefined ? undefined : await readIndexSnapshot(resolution.provider, resolution.path);
+    const snapshot = resolution.persist === undefined ? undefined : await this._peek(root);
+    this._peeking.delete(root);
     const usable = snapshot !== undefined && !snapshot.rescan;
     const index = usable
       ? ProjectIndex.fromSnapshot(snapshot.entries, snapshot.vector.generation, {
@@ -1113,10 +1240,22 @@ export class ProjectIndexes {
      * scan below observes the provider after all of them. Adopting the vector
      * lets this tab's next snapshot replace the rescan mark instead of meeting
      * it as incomparable forever. */
-    const state: RootState = { index, seen: { ...snapshot?.vector.seqByTab }, needsCompare: false };
+    const state: RootState = {
+      index,
+      seen: { ...snapshot?.vector.seqByTab },
+      needsCompare: false,
+    };
     this._states.set(root, state);
     workerTimings.count(usable ? 'index.load' : 'index.scan', 1);
-    await this._observe(root, index, '');
+    /* A scan finds every row new: only a compare against stored rows says what changed. */
+    if (!usable) {
+      this._scanning.add(index);
+    }
+    try {
+      await this._observe(root, index, '');
+    } finally {
+      this._scanning.delete(index);
+    }
     if (index.stalePaths.length > 0) {
       /* A rename whose source the scan had not reached yet. */
       await this._refreshStale(root, index);
@@ -1126,6 +1265,7 @@ export class ProjectIndexes {
       return index;
     }
     this._inheritMarks(root, index);
+    this._stored.delete(root);
     if (index.declared) {
       /* No pointer-sized row changed against the provider: the stored marks are the root's word, so nothing waits. */
       this._declaration.set(root, 'declared');
@@ -1244,7 +1384,9 @@ export class ProjectIndexes {
     }
     workerTimings.count('index.compare', 1);
     const result = index.completeObservation(start, prefix, rows);
-    this._noteObserved(root, index, result.mismatched);
+    if (!this._scanning.has(index)) {
+      this._noteObserved(root, index, result.mismatched);
+    }
     const state = this._states.get(root);
     if (state !== undefined && prefix === '') {
       state.lastCompare = result;

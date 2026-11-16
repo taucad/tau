@@ -411,39 +411,35 @@ export class RootedViews {
     /* The object a file of this size stands for: marked, and still the size of the pointer the index holds. */
     const markedAt = (authorityPath: string, size: number): PendingObject | undefined =>
       raw ? undefined : projectIndexes.pendingAt(authorityPath, size);
-    /* A row as the path's mark says: a pending entry is its object's size, `pending`, and none of the pointer's facts. */
-    const statOf = <Row extends FileStat>(authorityPath: string, row: Row): Row =>
-      asMarkedRow(row, row.type === 'file' ? markedAt(authorityPath, row.size) : undefined);
     /*
-     * A file the size of a pointer that no mark names answers only once its marks are known (D9, I7): a durable root's
-     * index is open, so a reload's marks are, and a root the revision layer mounted has had its first word or its
-     * bound. `rows` are tried lazily, and the root settles once for all of them. Never refuses a row: past the bound,
-     * the marks answer. Answers whether anything settled, so a listing answers again from what the marks say now.
+     * What each row of a listing answers, waiting for nothing (D9, I7): a durable root's stored marks are read first
+     * (one read), and a row nothing answers yet is reported `pending` at its own size, so one such row never holds the
+     * others. Only a stat of a file waits, and only for itself.
      */
-    const settled = async (
-      rows: Iterable<Readonly<{ size: number; type: string; at: () => string }>>,
-      signal?: AbortSignal,
-    ): Promise<boolean> => {
+    const listed = async <Row extends Readonly<{ type: string; size: number; mtimeMs?: number }>>(
+      rows: readonly Row[],
+      at: (row: Row) => string,
+    ): Promise<Row[]> => {
       if (raw) {
-        return false;
+        return [...rows];
       }
-      let waited = false;
-      for (const row of rows) {
-        if (row.type === 'file' && mayBePointerSize(row.size)) {
-          const authorityPath = row.at();
-          if (markedAt(authorityPath, row.size) === undefined) {
-            // oxlint-disable-next-line no-await-in-loop -- once the root has settled, each row answers at once.
-            await projectIndexes.settleMarks({ root, authorityPath, size: row.size }, signal);
-            waited = true;
-          }
-        }
+      if (rows.some((row) => row.type === 'file' && mayBePointerSize(row.size))) {
+        await projectIndexes.storedMarks(root);
       }
-      return waited;
+      /* Only a pointer-sized row the index has not answered as its object can be anything but what it is. */
+      return rows.map((row) =>
+        row.type === 'file' && mayBePointerSize(row.size) && !('pending' in row)
+          ? asMarkedRow(row, projectIndexes.markAt(at(row), row))
+          : row,
+      );
     };
-    const settledStat = async <Row extends FileStat>(authorityPath: string, row: Row): Promise<Row> => {
-      await settled([{ size: row.size, type: row.type, at: () => authorityPath }]);
-      return statOf(authorityPath, row);
-    };
+    const settledStat = async <Row extends FileStat>(authorityPath: string, row: Row): Promise<Row> =>
+      raw || row.type !== 'file'
+        ? row
+        : asMarkedRow(
+            row,
+            await projectIndexes.settleMarks({ root, authorityPath, size: row.size, mtimeMs: row.mtimeMs }),
+          );
     /* One file's bytes on disk, and what the path answers: through to its object when it is a placeholder. */
     const readAnswered = async (
       at: ReturnType<typeof resolveLocal>,
@@ -458,6 +454,14 @@ export class RootedViews {
         root,
         path: at.localPath,
         bytes,
+        mtimeMs: async () => {
+          try {
+            const head = await at.resolution.provider.stat(at.resolution.path);
+            return head.mtimeMs;
+          } catch {
+            return undefined;
+          }
+        },
         signal,
         stallMilliseconds,
       });
@@ -595,8 +599,7 @@ export class RootedViews {
           const { authorityPath, resolution } = resolveLocal(path);
           const rows = await resolution.provider.readdirWithStats!(resolution.path);
           const parent = authorityPath === '/' ? '' : authorityPath;
-          await settled(rows.map((row) => ({ size: row.size, type: row.type, at: () => `${parent}/${row.name}` })));
-          return raw ? rows : rows.map((row) => statOf(`${parent}/${row.name}`, row));
+          return listed(rows, (row) => `${parent}/${row.name}`);
         }
       : undefined;
     const stat = async (path: string): Promise<FileStat> => {
@@ -999,13 +1002,10 @@ export class RootedViews {
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      const answer = (): FileStatEntry[] => index.search(query, { ...options, asObjects: !raw });
-      const rows = answer();
-      const held = await settled(
-        rows.map((row) => ({ ...row, at: () => resolveLocal(row.path).authorityPath })),
-        options?.signal,
+      return listed(
+        index.search(query, { ...options, asObjects: !raw }),
+        (row) => resolveLocal(row.path).authorityPath,
       );
-      return held ? answer() : rows;
     };
     const statTree = async (
       path: string,
@@ -1015,13 +1015,10 @@ export class RootedViews {
       const index = await this._projectIndexes.ready(root);
       assertCurrent();
       options?.signal?.throwIfAborted();
-      const answer = (): FileStatEntry[] => index.statTree(localPath, { ...options, asObjects: !raw });
-      const rows = answer();
-      const held = await settled(
-        rows.map((row) => ({ ...row, at: () => resolveLocal(joinRelativePath(localPath, row.path)).authorityPath })),
-        options?.signal,
+      return listed(
+        index.statTree(localPath, { ...options, asObjects: !raw }),
+        (row) => resolveLocal(joinRelativePath(localPath, row.path)).authorityPath,
       );
-      return held ? answer() : rows;
     };
     const facts = async (
       paths: readonly string[],
@@ -1059,25 +1056,22 @@ export class RootedViews {
       if (raw) {
         return index.changes(since, options);
       }
-      const unheld = index.changes(since, options);
-      const held = await settled(
-        unheld.entries.map((entry) => ({
-          size: entry.size,
-          type: entry.kind,
-          at: () => resolveLocal(entry.path).authorityPath,
-        })),
-        options?.signal,
-      );
-      const changes = held ? index.changes(since, options) : unheld;
-      /* A pending entry as its object, as a stat answers it, the pointer's own facts dropped. */
+      const changes = index.changes(since, options);
+      /* A pending entry as its object, as a stat answers it, the pointer's own facts dropped; and so are the facts of an
+       * entry nothing answers yet, which may be a placeholder (I7). */
       return {
         ...changes,
         entries: changes.entries.map((entry) => {
-          if (entry.pending === undefined) {
+          const unknown =
+            entry.pending === undefined &&
+            entry.kind === 'file' &&
+            mayBePointerSize(entry.size) &&
+            projectIndexes.markAt(resolveLocal(entry.path).authorityPath, entry) === 'unknown';
+          if (entry.pending === undefined && !unknown) {
             return entry;
           }
           const { facts: _facts, factsAt: _factsAt, ...rest } = entry;
-          return { ...rest, size: entry.pending.size };
+          return entry.pending === undefined ? rest : { ...rest, size: entry.pending.size };
         }),
       };
     };

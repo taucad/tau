@@ -149,7 +149,7 @@ export const pendingObjectOf = (bytes: Uint8Array<ArrayBuffer>): PendingObject |
 
 /**
  * A stat row as its path's mark says (D9): a pending entry is its object's size, `pending`, and none of the pointer's
- * content facts. Any other row is returned as it is.
+ * content facts; a row nothing has answered yet is `pending` at its own size. Any other row is returned as it is.
  *
  * @param row - The provider's row.
  * @param object - The object the path's mark names, if any.
@@ -158,28 +158,38 @@ export const pendingObjectOf = (bytes: Uint8Array<ArrayBuffer>): PendingObject |
  */
 export const asMarkedRow = <Row extends Readonly<{ type: string; size: number }>>(
   row: Row,
-  object: PendingObject | undefined,
+  object: MarkAnswer,
 ): Row => {
   if (object === undefined || row.type !== 'file') {
     return row;
   }
-  const copy: Record<string, unknown> = { ...row, size: object.size, pending: true };
+  /* A row nothing has answered yet may be a placeholder: pending, at the size it holds, and none of its facts (I7). */
+  const copy: Record<string, unknown> = { ...row, size: object === 'unknown' ? row.size : object.size, pending: true };
   delete copy['contentKind'];
   delete copy['lineCount'];
   return copy as Row;
 };
 
-/** A file whose marks settle before it is answered: its root, its authority path and its size on disk. @internal */
-export type SettledFile = Readonly<{ root: string; authorityPath: string; size: number }>;
+/**
+ * A file whose marks settle before it is answered: its root, its authority path, and its size and mtime on disk (the
+ * mtime lets a stored mark answer before the root's index has compared). @internal
+ */
+export type SettledFile = Readonly<{ root: string; authorityPath: string; size: number; mtimeMs?: number | undefined }>;
+
+/**
+ * What a path's marks say of a file (D9): the object it stands for, `undefined` when it is no placeholder, or
+ * `'unknown'` while nothing says yet (its revision root is not declared, and no expected tree or stored mark names it).
+ *
+ * @internal
+ */
+export type MarkAnswer = PendingObject | 'unknown' | undefined;
 
 /** The index's marks, as a read answers by them (see {@link readAsMarked}). @internal */
 export type PendingMarks = Readonly<{
   pendingAt: (authorityPath: string, size?: number) => PendingObject | undefined;
   endPending: (authorityPath: string) => void;
-  /** Settle a file the size of a pointer: its root's index open, and its root's hold over (see {@link untilDeclared}). */
-  settleMarks: (file: SettledFile, signal?: AbortSignal) => Promise<void>;
-  /** Whether the path's marks are the whole answer: its revision root, if any, is declared. */
-  declaredAt: (authorityPath: string) => boolean;
+  /** What a file answers, waiting only for itself while its root is held (see {@link untilDeclared}). */
+  settleMarks: (file: SettledFile, signal?: AbortSignal) => Promise<MarkAnswer>;
 }>;
 
 /**
@@ -207,21 +217,27 @@ export const readAsMarked = async (
     root: string;
     path: string;
     bytes: Uint8Array<ArrayBuffer>;
+    /** The file's mtime on disk, asked only of bytes that are a pointer, so a stored mark can answer. */
+    mtimeMs?: (() => Promise<number | undefined>) | undefined;
     signal?: AbortSignal | undefined;
     stallMilliseconds?: number | undefined;
   }>,
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  const { bytes, signal, stallMilliseconds, ...at } = read;
+  const { bytes, mtimeMs, signal, stallMilliseconds, ...at } = read;
   const object = pendingObjectOf(bytes);
-  if (object !== undefined) {
-    await marks.settleMarks({ root: at.root, authorityPath: at.authorityPath, size: bytes.byteLength }, signal);
+  const answer =
+    object === undefined
+      ? marks.pendingAt(at.authorityPath, bytes.byteLength)
+      : await marks.settleMarks(
+          { root: at.root, authorityPath: at.authorityPath, size: bytes.byteLength, mtimeMs: await mtimeMs?.() },
+          signal,
+        );
+  if (answer === 'unknown') {
+    /* Its root's placeholders are not declared yet: a pointer may be one, so it is never answered as text (I7). */
+    throw new PendingContentError(at.path, object!);
   }
-  const marked = marks.pendingAt(at.authorityPath, bytes.byteLength);
+  const marked = answer;
   if (marked === undefined) {
-    if (object !== undefined && !marks.declaredAt(at.authorityPath)) {
-      /* Its root's placeholders are not declared yet: a pointer may be one, so it is never answered as text (I7). */
-      throw new PendingContentError(at.path, object);
-    }
     return bytes;
   }
   if (object?.oid !== marked.oid || object.size !== marked.size) {

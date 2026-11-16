@@ -619,9 +619,8 @@ export class RootedViews {
     const arrivingIn = (authorityPath: string, recursive?: boolean): ReturnType<ProjectIndexes['arrivingIn']> =>
       raw ? [] : projectIndexes.arrivingIn(authorityPath, { recursive });
     /*
-     * Arriving rows not on disk come and go without a disk event of their own: as a write announces them and as it
-     * ends, each directory holding the outermost of them raises `directoryChanged`, so every watch at or under it
-     * lists again (I7).
+     * Arriving rows not on disk vanish without a disk event of their own: as a write ends, each directory holding the
+     * outermost of them raises `directoryChanged`, so every watch at or under it lists again (I7).
      */
     const relistArriving = (arriving: ReturnType<ProjectIndexes['arrivingIn']>): void => {
       const rows = new Set(arriving.map((entry) => entry.path));
@@ -1416,12 +1415,6 @@ export class RootedViews {
           root,
           entries.map((entry) => ({ ...entry, path: resolveLocal(entry.path).localPath })),
         );
-        /*
-         * A listing taken before the announcement holds none of the rows it adds, and nothing on disk changes where
-         * only arriving rows go: each directory holding the outermost of them is told to re-list, so a tree listed
-         * early shows every entry the write will land, never missing (STO-25, I7).
-         */
-        relistArriving(projectIndexes.arrivingIn(root, { recursive: true, absent: true }));
       },
       pendingPaths: async (paths: readonly string[]): Promise<readonly string[]> => {
         assertCurrent();

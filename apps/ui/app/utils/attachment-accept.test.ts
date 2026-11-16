@@ -20,14 +20,18 @@ describe('attachmentAccept', () => {
   });
 
   it('should leave HEIC out on iOS WebKit, where the picker hands over a JPEG instead', () => {
-    const withHeic = [...raster, 'heic'];
+    const withHeic = [...raster, 'heic', 'heif'];
+    const accept = (isIos: boolean) =>
+      attachmentAccept({ images: true, documents: false, transcodeSources: withHeic, isIos }).split(',');
 
-    expect(attachmentAccept({ images: true, documents: false, transcodeSources: withHeic, isIos: false })).toContain(
-      'image/heic,.heic,.heif',
-    );
-    expect(attachmentAccept({ images: true, documents: false, transcodeSources: withHeic, isIos: true })).not.toContain(
-      'heic',
-    );
+    expect(accept(false)).toEqual(expect.arrayContaining(['image/heic', 'image/heif', '.heic', '.heif']));
+    expect(accept(true).filter((entry) => /hei[cf]/u.test(entry))).toEqual([]);
+  });
+
+  it('should offer image/heif only where the runtime converts HEIF', () => {
+    expect(
+      attachmentAccept({ images: true, documents: false, transcodeSources: [...raster, 'heic'], isIos: false }),
+    ).not.toContain('image/heif');
   });
 
   it('should ignore a source that is not an image format', () => {

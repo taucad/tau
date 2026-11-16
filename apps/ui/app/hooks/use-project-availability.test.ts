@@ -13,14 +13,20 @@ import {
   surfaceReadiness,
   useLargeObjectPending,
   useOpenedLargeObjectPending,
+  useProjectAvailability,
 } from '#hooks/use-project-availability.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
+import { useProject } from '#hooks/use-project.js';
+import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
+import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn(), useRevisionClient: vi.fn() }));
 vi.mock('#hooks/use-cloud-projects.js', () => ({ useTauCloudIntent: vi.fn() }));
 vi.mock('#lib/tau-cloud-intent.js', () => ({ canOpenCloudProject: vi.fn() }));
+vi.mock('@taucad/ui-core/lib/cloud-open-lock', () => ({ followCloudOpen: vi.fn(() => () => undefined) }));
 
 const status = (changes: Partial<RevisionStatusProjection['sync']> = {}): RevisionStatusProjection =>
   mock<RevisionStatusProjection>({
@@ -61,10 +67,78 @@ describe('first-open availability', () => {
   it('offers recovery for deadline, offline and account mismatch without claiming a missing file', () => {
     expect(projectAvailability(true, status({ state: 'queued', reason: 'unknown' }))).toBe('failed');
     expect(projectAvailability(true, status({ online: false }))).toBe('offline');
-    expect(projectAvailability(true, status(), false)).toBe('account');
+    expect(projectAvailability(true, status(), { canOpen: false })).toBe('account');
   });
   it('keeps cached files available during background checks and failures', () => {
     expect(projectAvailability(false, status({ state: 'queued' }))).toBe('ready');
+  });
+  /* STO-25: a first view waits for the entry closure, not for the whole apply. */
+  it('opens the tree and the editor once the entry closure lands, while the apply still writes the rest', () => {
+    const applying = status({ state: 'pending', pullPhase: 'applying' });
+    expect(projectAvailability(true, applying, { firstView: { surface: 'tree', readiness: 'entryReady' } })).toBe(
+      'ready',
+    );
+    expect(projectAvailability(true, applying, { firstView: { surface: 'editor', readiness: 'entryReady' } })).toBe(
+      'ready',
+    );
+    expect(projectAvailability(true, applying, { firstView: { surface: 'viewer', readiness: 'materialized' } })).toBe(
+      'ready',
+    );
+    /* A surface that names none (chats, agents) still waits for the whole apply. */
+    expect(projectAvailability(true, applying)).toBe('preparing');
+  });
+  it('keeps the tree waiting until the write has announced its entries, so a listing never misses one (I7)', () => {
+    const applying = status({ state: 'pending', pullPhase: 'applying' });
+    expect(projectAvailability(true, applying, { firstView: { surface: 'tree', readiness: 'treeReady' } })).toBe(
+      'preparing',
+    );
+    expect(projectAvailability(true, applying, { firstView: { surface: 'tree', readiness: undefined } })).toBe(
+      'preparing',
+    );
+    expect(projectAvailability(true, status(), { firstView: { surface: 'tree', readiness: 'connected' } })).toBe(
+      'connecting',
+    );
+  });
+  it('never claims an empty project before every authored file has landed (I7)', () => {
+    const applying = status({ state: 'pending', pullPhase: 'applying' });
+    expect(projectAvailability(true, applying, { firstView: { surface: 'absence', readiness: 'entryReady' } })).toBe(
+      'preparing',
+    );
+    expect(projectAvailability(true, applying, { firstView: { surface: 'absence', readiness: 'materialized' } })).toBe(
+      'ready',
+    );
+  });
+  /* I7: a failed or abandoned apply left a partial tree; it must never read as the project. */
+  it('lets a failed open win over a first view whose entry closure had landed', () => {
+    for (const failed of [
+      status({ state: 'failed' }),
+      status({ state: 'queued', reason: 'offline' }),
+      status({ state: 'conflicted' }),
+    ]) {
+      expect(projectAvailability(true, failed, { firstView: { surface: 'tree', readiness: 'entryReady' } })).toBe(
+        'failed',
+      );
+    }
+  });
+  /*
+   * A failed write's tree keeps the readiness it reached (it never steps back within one tree), but its end took its
+   * arriving rows away. A retry fetching before the next write announces its tree must not reopen that partial tree.
+   */
+  it('keeps a first view closed across a failed write and the retry that fetches before the next write', () => {
+    const firstView = { surface: 'tree', readiness: 'entryReady' } as const;
+    const retrying = status({ state: 'pending', pullPhase: 'fetching' });
+    expect(projectAvailability(true, status({ state: 'queued', reason: 'unknown' }), { firstView })).toBe('failed');
+    expect(projectAvailability(true, retrying, { firstView })).toBe('downloading');
+    expect(projectAvailability(true, status({ state: 'pending', pullPhase: 'idle' }), { firstView })).toBe(
+      'connecting',
+    );
+    /* The next write announces its tree: its own reading opens the view again. */
+    expect(projectAvailability(true, status({ state: 'pending', pullPhase: 'applying' }), { firstView })).toBe('ready');
+  });
+  it('never opens a first view for an account that cannot open the project', () => {
+    expect(
+      projectAvailability(true, status(), { canOpen: false, firstView: { surface: 'tree', readiness: 'filled' } }),
+    ).toBe('account');
   });
 });
 
@@ -246,5 +320,35 @@ describe('readiness while a cold open is owed', () => {
   it('takes its own reading once its root is connected', () => {
     expect(pendingOpenReadiness({ readiness: 'materialized', remote: tau }, 'treeReady')).toBe('materialized');
     expect(pendingOpenReadiness({ readiness: undefined, remote: tau }, 'treeReady')).toBe('treeReady');
+  });
+});
+
+/*
+ * Another tab's open: its broadcast readiness speaks for the opener's tree write, whose expected entries live in the
+ * opener's worker. This tab's listing knows none of them, so its first view waits for its own reading (I7).
+ */
+describe('a first view in a tab that follows another tab’s open', () => {
+  it('opens on its own readiness only, never on the opener’s broadcast', () => {
+    vi.mocked(useProject).mockReturnValue({ projectId: 'project-1' } as ReturnType<typeof useProject>);
+    vi.mocked(useTauCloudIntent).mockReturnValue('open');
+    vi.mocked(canOpenCloudProject).mockReturnValue(true);
+    vi.mocked(followCloudOpen).mockImplementation((_projectId, listener) => {
+      listener('entryReady');
+      return () => undefined;
+    });
+    const applying = {
+      ...status({ state: 'pending', pullPhase: 'applying' }),
+      remote: { kind: 'none', phase: 'none' },
+      readiness: undefined,
+    } as unknown as RevisionStatusProjection;
+    vi.mocked(useRevisionStatus).mockReturnValue(applying);
+    expect(renderHook(() => useProjectAvailability('tree')).result.current).toBe('preparing');
+
+    vi.mocked(useRevisionStatus).mockReturnValue({
+      ...applying,
+      remote: { kind: 'tau', phase: 'connected' },
+      readiness: 'entryReady',
+    } as unknown as RevisionStatusProjection);
+    expect(renderHook(() => useProjectAvailability('tree')).result.current).toBe('ready');
   });
 });

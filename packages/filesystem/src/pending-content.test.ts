@@ -14,6 +14,7 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import type { DirectoryStatRow, FileSystemProvider } from '#types.js';
+import type { ChangeSet } from '#change-event-bus.js';
 import type { FileStatEntry } from '@taucad/types';
 
 /*
@@ -555,7 +556,15 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
     expect(ignoreStat).toMatchObject({ size: 130 });
     expect(ignoreStat).not.toHaveProperty('pending');
     expect(partStat).toMatchObject({ size: part.byteLength, pending: true });
-    expect((parts as DirectoryStatRow[]).every((row) => !('pending' in row))).toBe(true);
+    /* The landed files are themselves; the rest of the tree is listed as arriving (I7), not missing. */
+    const landed = new Set(Array.from({ length: 20 }, (_, at) => `p${String(at)}.scad`));
+    expect(
+      (parts as DirectoryStatRow[]).filter((row) => landed.has(row.name)).every((row) => !('pending' in row)),
+    ).toBe(true);
+    const arriving = (parts as DirectoryStatRow[]).filter((row) => 'pending' in row);
+    expect(arriving).toHaveLength(1980);
+    /* Each at the size the tree gives it, with no content facts. */
+    expect(arriving.every((row) => row.type === 'file' && row.size === 140 && !('contentKind' in row))).toBe(true);
     expect(await view.readFile('.gitignore')).toStrictEqual(ignore);
     /* No first-view answer waited for the capture's declaration. */
     expect(declare).not.toHaveBeenCalled();
@@ -713,6 +722,90 @@ describe('a root awaiting its first declaration (D9, I7)', () => {
 });
 
 describe('expected entries (D10)', () => {
+  /*
+   * Only a row a listing showed that is not on disk has nothing to replace it. A placeholder whose pointer landed is
+   * on disk, though it waits for its object: ending the write tells no one to re-list for it, and a failed write's
+   * reset reaches no further than the folders of the rows it never landed.
+   */
+  it('should scope the end of a write to the folders of rows it never put on disk', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    const next = encoder.encode(
+      `version https://git-lfs.github.com/spec/v1\noid sha256:${'d'.repeat(64)}\nsize ${String(part.byteLength)}\n`,
+    );
+    const entries = [
+      { path: 'main.scad', size: 27, arriving: false },
+      {
+        path: 'assets/new.step',
+        size: next.byteLength,
+        pending: { oid: 'd'.repeat(64), size: part.byteLength },
+        arriving: true,
+      },
+      { path: 'lib/deep/axle.scad', size: 40, arriving: true },
+    ];
+    const watching = (): Readonly<{ sets: ChangeSet[]; stop: () => void }> => {
+      const sets: ChangeSet[] = [];
+      const stop = view.watchChangeSets!({ paths: [''], recursive: true }, (set) => {
+        sets.push(set);
+      });
+      return { sets, stop };
+    };
+    const settle = async (): Promise<void> =>
+      new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+
+    /* Every arriving row landed, the placeholder as its pointer: nothing to re-list. */
+    await raw.expectEntries!(entries);
+    await raw.writeFile('assets/new.step', next);
+    await raw.writeFile('lib/deep/axle.scad', encoder.encode('a'.repeat(40)));
+    await settle();
+    const landed = watching();
+    raw.endExpectation!();
+    await settle();
+    landed.stop();
+    expect(landed.sets).toStrictEqual([]);
+
+    /* A failed write: only the folder of the row it never put on disk re-lists, never the root. */
+    await raw.expectEntries!([...entries, { path: 'lib/more/bolt.scad', size: 10, arriving: true }]);
+    await settle();
+    const failed = watching();
+    raw.endExpectation!({ failed: true });
+    await settle();
+    failed.stop();
+    expect(failed.sets.map((set) => set.reset?.prefix)).toStrictEqual(['lib']);
+  });
+
+  /*
+   * An ended write leaves its arriving rows nothing to replace them: a folder only they made never raises an event of
+   * its own. So the end tells every watch under them to re-list, failed or not, and the rows vanish (I7).
+   */
+  it.each([
+    ['failed', { failed: true }],
+    ['landed', undefined],
+  ] as const)(
+    'should tell every watch under a %s write’s arriving rows to re-list when it ends',
+    async (_case, options) => {
+      const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+      const view = service.createRootedFileSystem(route);
+      await raw.expectEntries!([
+        { path: 'main.scad', size: 27, arriving: false },
+        { path: 'lib/deep/axle.scad', size: 40, arriving: true },
+      ]);
+      const seen: string[] = [];
+      const stop = view.watch({ paths: ['lib/deep'], recursive: false }, (event) => {
+        seen.push(event.type);
+      });
+      raw.endExpectation!(options);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      stop();
+      expect(seen.length).toBeGreaterThan(0);
+      await expect(view.readdirWithStats!('lib')).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
   it('should know a tree write’s entries in a cold root’s index and answer when they have landed', async () => {
     const source = vi.fn<PendingObjectSource>(async () => part);
     service.setPendingObjectSource(source);
@@ -736,6 +829,55 @@ describe('expected entries (D10)', () => {
     expect(await view.pendingPaths!(['models/part.step'])).toStrictEqual([]);
     raw.endExpectation!();
     expect(raw.entriesLanded!(['tau.json'])).toBeUndefined();
+  });
+
+  /*
+   * STO-25: a first view opens once the entry closure lands, before the rest of the tree has. A listing then shows
+   * every entry the write announced: one it has yet to land is a pending row at the size the tree gives it, never
+   * missing and never an empty folder (I7), and a folder only arriving entries make lists them before it exists.
+   */
+  it('should list a tree write’s entries it has yet to land as pending rows, never as missing (I7)', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.expectEntries!([
+      { path: 'tau.json', size: 2, arriving: true },
+      { path: 'main.scad', size: 27, arriving: false },
+      { path: 'lib/gear.scad', size: 300, arriving: true },
+      { path: 'lib/deep/axle.scad', size: 40, arriving: true },
+      { path: 'models/part.step', size: pointer.byteLength, pending: { oid, size: part.byteLength }, arriving: false },
+      { path: 'models/new.step', size: pointer.byteLength, pending: { oid, size: part.byteLength }, arriving: true },
+    ]);
+    await raw.writeFile('tau.json', '{}');
+    const byName = (rows: readonly DirectoryStatRow[]): Record<string, DirectoryStatRow> =>
+      Object.fromEntries(rows.map((row) => [row.name, row]));
+    const top = byName(await view.readdirWithStats!(''));
+    expect(Object.keys(top).toSorted()).toStrictEqual(['lib', 'main.scad', 'models', 'tau.json']);
+    expect(top['tau.json']).not.toHaveProperty('pending');
+    /* A folder only arriving entries make is pending too: nothing may be renamed, moved or made inside it yet. */
+    expect(top['lib']).toMatchObject({ type: 'dir', pending: true });
+    expect(top['models']).not.toHaveProperty('pending');
+    /* A folder nothing has landed in yet lists what will arrive in it. */
+    const lib = byName(await view.readdirWithStats!('lib'));
+    /* Marked arriving too: a consumer that reads what it lists (an agent) leaves such a row out. */
+    expect(lib['gear.scad']).toMatchObject({ type: 'file', size: 300, pending: true, arriving: true });
+    expect(top['tau.json']).not.toHaveProperty('arriving');
+    expect(lib['gear.scad']).not.toHaveProperty('contentKind');
+    expect(lib['deep']).toMatchObject({ type: 'dir' });
+    const models = byName(await view.readdirWithStats!('models'));
+    /* A placeholder still to land is its object's size, as a landed one is. */
+    expect(models['new.step']).toMatchObject({ size: part.byteLength, pending: true });
+    expect(models['part.step']).toMatchObject({ size: part.byteLength, pending: true });
+    const tree = await view.statTree!('');
+    expect(tree.find((row) => row.path === 'lib/deep/axle.scad')).toMatchObject({ size: 40, pending: true });
+    /* The raw view, the revision layer's own, sees only what is on disk. */
+    const onDisk = await raw.readdirWithStats!('');
+    expect(onDisk.map((row) => row.name).toSorted()).toStrictEqual(['main.scad', 'models', 'tau.json']);
+    /* Landed, a row is the file on disk; once the write ends, nothing is listed that it did not land. */
+    await raw.writeFile('lib/gear.scad', encoder.encode('g'.repeat(300)));
+    expect(byName(await view.readdirWithStats!('lib'))['gear.scad']).not.toHaveProperty('pending');
+    raw.endExpectation!({ failed: true });
+    expect(Object.keys(byName(await view.readdirWithStats!('lib')))).toStrictEqual(['gear.scad']);
+    await expect(view.readdirWithStats!('lib/deep')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });
 

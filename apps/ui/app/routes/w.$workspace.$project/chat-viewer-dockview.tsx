@@ -40,6 +40,7 @@ import { getViewerTabIcon, ViewerDockviewTab } from '#components/panes/viewer-ta
 import { DockviewLeftActions, DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
 import { ProjectWorkspaceActions } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import { ViewerChatLaneToggle } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
+import { isModelFilesWait } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { selectCadEvaluation } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ActorRefFrom } from 'xstate';
@@ -148,11 +149,7 @@ export function replaceViewerNewTabWithFile({
     component: 'viewer',
     title: path.split('/').pop() ?? path,
     params: { viewId, entryPath: path },
-    position: {
-      direction: 'within',
-      referenceGroup: group,
-      ...(index === -1 ? {} : { index }),
-    },
+    position: { direction: 'within', referenceGroup: group, ...(index === -1 ? {} : { index }) },
   });
   onViewCreated(viewId, path);
   placeholder.api.close();
@@ -226,9 +223,7 @@ export function handleViewerDrop<Source>({
 /**
  * Empty state shown when all viewer panels have been closed.
  */
-export type ViewerSelectableFile = Pick<FileEntry, 'name' | 'path'> & {
-  readonly size?: number;
-};
+export type ViewerSelectableFile = Pick<FileEntry, 'name' | 'path'> & { readonly size?: number };
 
 export const viewerExcludedSourceSuffixes = ['.geospec.ts', '.geospec.js'] as const;
 
@@ -399,12 +394,7 @@ function ViewerEmptyState({
       };
 
       if (placeholderId) {
-        replaceViewerNewTabWithFile({
-          api: containerApi,
-          placeholderId,
-          path,
-          onViewCreated,
-        });
+        replaceViewerNewTabWithFile({ api: containerApi, placeholderId, path, onViewCreated });
         return;
       }
 
@@ -435,9 +425,7 @@ function ViewerEmptyState({
 /** Whether the layout record's first read has settled; without a project layout there is nothing to wait for. */
 function useLayoutReadSettled(): boolean {
   // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
-  const layoutController = useProjectWorkspace({
-    enableNoContext: true,
-  })?.layoutController;
+  const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
   return useSyncExternalStore(
     useCallback(
       (listener: () => void) => layoutController?.subscribe(listener) ?? (() => undefined),
@@ -594,13 +582,7 @@ export function ViewerProjectionCommandItems({
               icon: <Box />,
               action: () => {
                 setLocalInstanceChoice(viewId, undefined);
-                chooseProjection({
-                  viewCommands,
-                  viewId,
-                  entryPath,
-                  evaluation,
-                  nextId: view.id,
-                });
+                chooseProjection({ viewCommands, viewId, entryPath, evaluation, nextId: view.id });
               },
             },
           ])
@@ -697,23 +679,13 @@ function useViewerHandover(
   api: DockviewApi | undefined,
   facts: ViewerAdapterFacts,
   { profile, projectId, project, layout }: Omit<ViewerAdapterPorts, 'facts'>,
-):
-  | Readonly<{
-      api: DockviewApi;
-      ports: ViewerAdapterPorts;
-      facts: ViewerAdapterFactsPort;
-    }>
-  | undefined {
+): Readonly<{ api: DockviewApi; ports: ViewerAdapterPorts; facts: ViewerAdapterFactsPort }> | undefined {
   const handover = useMemo(() => {
     if (api === undefined) {
       return undefined;
     }
     const port = createViewerAdapterFactsPort(facts);
-    return {
-      api,
-      ports: { profile, projectId, project, layout, facts: port },
-      facts: port,
-    };
+    return { api, ports: { profile, projectId, project, layout, facts: port }, facts: port };
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- New facts feed the port; only a new handover makes one.
   }, [api, layout, profile, project, projectId]);
   useLayoutEffect(() => {
@@ -803,13 +775,7 @@ export const ViewerDockview = memo(function ({
       if (profile !== 'editor') {
         return;
       }
-      void recordNewView({
-        projectId,
-        viewId,
-        entryPath,
-        source,
-        edit: viewCommands.edit,
-      });
+      void recordNewView({ projectId, viewId, entryPath, source, edit: viewCommands.edit });
     },
     [profile, projectId, viewCommands],
   );
@@ -821,7 +787,8 @@ export const ViewerDockview = memo(function ({
   const adapterLayout = useViewerLayoutPort(profile === 'editor' ? layoutController : undefined);
   const adapterFacts = useMemo(
     (): ViewerAdapterFacts => ({
-      admitsView: projectIsReady,
+      /* The view is admitted once the project is on this device, and through a check of its model files (A15e). */
+      admitsView: projectIsReady && (availability === 'ready' || isModelFilesWait(availability)),
       admitsGeometry: projectIsReady && availability === 'ready',
       mainEntryPath,
       viewRecords,

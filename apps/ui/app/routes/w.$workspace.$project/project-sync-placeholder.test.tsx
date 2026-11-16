@@ -15,10 +15,7 @@ const mocks = vi.hoisted(() => ({
   slow: false,
 }));
 
-vi.mock('react-router', () => ({
-  useLocation: () => ({ pathname: '/w/x/p', search: '' }),
-  Link: () => null,
-}));
+vi.mock('react-router', () => ({ useLocation: () => ({ pathname: '/w/x/p', search: '' }), Link: () => null }));
 vi.mock('#hooks/use-project-availability.js', () => ({
   useLargeObjects: () => mocks.facet,
   useProjectAvailability: () => 'ready',
@@ -71,10 +68,7 @@ describe('model files placeholder', () => {
   });
 
   it('offers a retry in the viewer when the download failed', async () => {
-    mocks.facet = facet({
-      phase: 'failed',
-      error: 'The remote did not answer in time.',
-    });
+    mocks.facet = facet({ phase: 'failed', error: 'The remote did not answer in time.' });
     render(<ProjectSyncPlaceholder state='filesFailed' />);
     expect(screen.getByRole('region', { name: 'Couldn’t download model files' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
@@ -118,10 +112,7 @@ describe('project files placeholder', () => {
 
   /* A refused connect-time push is not a download that did not finish. */
   it('says a refused open could not be backed up, and offers History', () => {
-    mocks.status = status({
-      reason: 'rejected',
-      error: 'The remote refused refs/heads/main.',
-    });
+    mocks.status = status({ reason: 'rejected', error: 'The remote refused refs/heads/main.' });
     render(<ProjectSyncPlaceholder state='failed' />);
     expect(screen.getByRole('region', { name: 'Couldn’t back up this project' })).toBeInTheDocument();
     expect(screen.queryByText('Couldn’t download this project')).not.toBeInTheDocument();
@@ -135,10 +126,7 @@ describe('project files placeholder', () => {
   });
 
   it('keeps the download copy for a failure that names no class', () => {
-    mocks.status = status({
-      reason: 'unknown',
-      error: 'The download stopped.',
-    });
+    mocks.status = status({ reason: 'unknown', error: 'The download stopped.' });
     render(<ProjectSyncPlaceholder state='failed' />);
     expect(screen.getByRole('region', { name: 'Couldn’t download this project' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();

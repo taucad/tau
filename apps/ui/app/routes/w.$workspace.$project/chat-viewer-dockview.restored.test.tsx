@@ -413,6 +413,19 @@ describe('restored viewer layout admission', () => {
     expect(fixture.projectSend).toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
   });
 
+  /* A15e (D4): a file check admits the view, so the stage and its canvas stay; a project-level wait admits nothing. */
+  it('binds the view through a check of the model files and not before the project is here', () => {
+    fixture.availability = 'connecting';
+    const view = render(<ViewerDockview profile='editor' />);
+    expect(fixture.setViewEntryPath).not.toHaveBeenCalled();
+    view.unmount();
+
+    fixture.availability = 'filesChecking';
+    render(<ViewerDockview profile='editor' />);
+    expect(fixture.setViewEntryPath).toHaveBeenCalledWith('main-view', fixture.mainEntryPath);
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'createGeometryUnit' }));
+  });
+
   it('admits hidden editor view settings without geometry or canvas demand', () => {
     render(<ViewerDockview profile='editor' />);
     expect(screen.queryByTestId('content:other.ts')).not.toBeInTheDocument();

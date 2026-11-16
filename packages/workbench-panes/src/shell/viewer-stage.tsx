@@ -169,7 +169,10 @@ function StageFailure({
       )}
     >
       <div className='flex items-start gap-2 text-left'>
-        <AlertTriangle aria-hidden className='size-5 shrink-0 text-feature' strokeWidth={1.5} />
+        {/* The icon sits in a box one line of the first text tall, so it is centred on that line (UI Policy § 5). */}
+        <span className='flex h-lh shrink-0 items-center text-sm'>
+          <AlertTriangle aria-hidden className='size-4 text-feature' strokeWidth={1.5} />
+        </span>
         <div className='flex flex-col gap-1'>
           {failure.summary === undefined ? null : <p className='text-sm font-medium'>{failure.summary}</p>}
           <p className={failure.summary === undefined ? 'text-sm' : 'text-xs text-muted-foreground'}>

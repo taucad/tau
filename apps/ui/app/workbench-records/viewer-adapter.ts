@@ -68,10 +68,7 @@ export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): strin
   const existing = api.panels.flatMap((panel) =>
     isViewerPanelParameters(panel.params) ? [{ id: panel.id, title: panel.title, params: panel.params }] : [],
   );
-  const dimensions = {
-    width: Math.max(1, api.width),
-    height: Math.max(1, api.height),
-  };
+  const dimensions = { width: Math.max(1, api.width), height: Math.max(1, api.height) };
   const projection = toDockview('viewer', node, { dimensions });
   // Dockview reuses panel instances but replaces their metadata from the serialized projection.
   for (const prior of existing) {
@@ -80,11 +77,7 @@ export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): strin
     }
     const panel = projection.panels[prior.id];
     if (panel) {
-      projection.panels[prior.id] = {
-        ...panel,
-        title: prior.title,
-        params: prior.params,
-      };
+      projection.panels[prior.id] = { ...panel, title: prior.title, params: prior.params };
     }
   }
   if (node.kind === 'group' && landInSeededGroup(api, projection)) {
@@ -109,10 +102,7 @@ function landInSeededGroup(api: DockviewApi, projection: SerializedDockview): bo
   if (seed === undefined || others.length > 0 || leaf?.type !== 'leaf' || siblings.length > 0) {
     return false;
   }
-  const { views, activeView } = leaf.data as {
-    readonly views: readonly string[];
-    readonly activeView?: string;
-  };
+  const { views, activeView } = leaf.data as { readonly views: readonly string[]; readonly activeView?: string };
   const active = activeView !== undefined && views.includes(activeView) ? activeView : views[0];
   // Dockview makes the first panel of an empty group active whatever `inactive` says, so the active view goes first
   // and the rest take their places beside it without being shown.
@@ -128,11 +118,7 @@ function landInSeededGroup(api: DockviewApi, projection: SerializedDockview): bo
       ...(panel.tabComponent === undefined ? {} : { tabComponent: panel.tabComponent }),
       title: panel.title,
       params: panel.params,
-      position: {
-        referenceGroup: seed,
-        direction: 'within',
-        index: views.indexOf(id),
-      },
+      position: { referenceGroup: seed, direction: 'within', index: views.indexOf(id) },
       inactive: id !== active,
     });
   }
@@ -290,10 +276,7 @@ export type ViewerAdapterPorts = Readonly<{
 }>;
 
 /** What the adapter is spawned with. The `DockviewApi` lives only here and in the closure built from it (D4). */
-export type ViewerAdapterInput = Readonly<{
-  api: DockviewApi;
-  ports: ViewerAdapterPorts;
-}>;
+export type ViewerAdapterInput = Readonly<{ api: DockviewApi; ports: ViewerAdapterPorts }>;
 
 /** The viewer Dockview hands its adapter to a host: the project's layout, or the editor on a page without one. */
 export type ViewerDockReady = Readonly<{
@@ -306,11 +289,7 @@ export type ViewerDockReady = Readonly<{
 }>;
 
 /** The viewer Dockview that made `dockId` is gone (its ref cleanup): its adapter stops. */
-export type ViewerDockReleased = Readonly<{
-  type: 'dockReleased';
-  adapter: 'viewer';
-  dockId: string;
-}>;
+export type ViewerDockReleased = Readonly<{ type: 'dockReleased'; adapter: 'viewer'; dockId: string }>;
 
 /**
  * The adapter's one event: `attach`, which the dock sends once its host's `dockReady` step has returned (A8c's
@@ -327,9 +306,7 @@ export type ViewerAdapterEvent = Readonly<{ type: 'attach' }>;
  * @returns The adapter, to send `attach` to.
  */
 export const selectViewerDockAdapter = (
-  host: Readonly<{
-    getSnapshot: () => { children: Readonly<Record<string, unknown>> };
-  }>,
+  host: Readonly<{ getSnapshot: () => { children: Readonly<Record<string, unknown>> } }>,
   dockId: string,
 ): Readonly<{ send: (event: ViewerAdapterEvent) => void }> | undefined =>
   host.getSnapshot().children[dockAdapterId('viewer', dockId)] as
@@ -488,11 +465,7 @@ export const createViewerAdapterLogic = (): CallbackActorLogic<ViewerAdapterEven
           ? graphicsSettingsForView(settings, resolvedViewFields(settings, readViewLevels(projectId, viewId)))
           : defaultGraphicsSettings;
         admittedGraphics.add(viewId);
-        project.send({
-          type: 'createViewGraphics',
-          viewId,
-          settings: validatedSettings,
-        });
+        project.send({ type: 'createViewGraphics', viewId, settings: validatedSettings });
       }
       if (!visible) {
         releaseDemand(viewId);

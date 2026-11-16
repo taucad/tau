@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fc from 'fast-check';
-import { EventCoalescer, coalesceChangeEvents } from '#event-coalescer.js';
+import { EventCoalescer, coalesceChangeEvents, overflowLossSignals } from '#event-coalescer.js';
 import { getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
 import type { PathChangeEvent } from '#types.js';
 
@@ -462,5 +462,34 @@ describe('EventCoalescer (timed)', () => {
 
       coalescer.dispose();
     });
+  });
+});
+
+/* STO-25 SP2g: an overflowed window becomes a reset of every directory it touched, never a silent drop (I5, I7). */
+describe('overflowLossSignals', () => {
+  it('should reset every directory a discarded fact left unknown, and nothing a copy only read', () => {
+    expect(
+      overflowLossSignals([
+        written('/p/a/one.scad'),
+        written('/p/a/two.scad'),
+        renamed('/p/a/two.scad', '/p/b/two.scad'),
+        { type: 'fileCopied', sourcePath: '/p/src/three.scad', targetPath: '/p/c/three.scad', backend: testBackend },
+        { type: 'directoryDeleted', path: '/p/gone', backend: testBackend },
+        { type: 'directoryRenamed', oldPath: '/p/d', newPath: '/q/d', backend: testBackend },
+      ]).map((event) => ('path' in event ? event.path : event.type)),
+    ).toEqual(['/p/a', '/p/b', '/p/c', '/p', '/p/gone', '/p/d', '/q', '/q/d']);
+  });
+
+  it('should keep a discarded backendChanged as its backend’s whole signal, and scope every other backend', () => {
+    expect(
+      overflowLossSignals([
+        written('/a/one.txt'),
+        { type: 'backendChanged', backend: testBackend },
+        { type: 'fileDeleted', path: '/b/two.txt', backend: 'opfs' },
+      ]),
+    ).toEqual([
+      { type: 'backendChanged', backend: testBackend },
+      { type: 'directoryChanged', path: '/b', backend: 'opfs' },
+    ]);
   });
 });

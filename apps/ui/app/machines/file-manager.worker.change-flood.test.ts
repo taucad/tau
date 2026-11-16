@@ -386,6 +386,9 @@ describe('a tree write across the worker boundary (STO-25 SP2g)', () => {
         ),
       );
       expect(delta.busFacts).toBeGreaterThanOrEqual(count);
+      /* Past the window's bound the loss is scoped to the folders written, never a backend swap (Rule 24). */
+      expect(delta.backendChanged).toBe(0);
+      expect(fixture.read).not.toContain('main.scad');
     },
     60_000,
   );

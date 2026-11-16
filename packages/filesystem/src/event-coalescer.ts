@@ -21,6 +21,7 @@
 import { commonAncestor, sharedOrigin, touchedDirectoriesOf } from '#change-event-bus.js';
 import type { ChangeSet, ChangeSetEntry, ChangeSetReset, ChangeSetSegment } from '#change-event-bus.js';
 import { copyEventAuthorities, getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
+import { parentDirectory } from '@taucad/utils/path';
 import type { PathChangeEvent } from '#types.js';
 
 /**
@@ -266,6 +267,52 @@ function getEventPath(event: PathChangeEvent): string | undefined {
     }
   }
 }
+
+/** The paths a fact names that its change leaves unknown: never a copy's untouched source. */
+type NamedPaths = Partial<Record<'path' | 'oldPath' | 'newPath' | 'targetPath', string>>;
+
+/**
+ * What a coalescing window that overflowed is replaced with: a
+ * `directoryChanged` for each directory a discarded fact touched — a file's
+ * parent, a directory itself beside its parent — which every consumer reads as
+ * a reset of that subtree, and a `backendChanged` only for a backend that
+ * really changed. Nothing is silently dropped (I5) and nothing a discarded fact
+ * named still reads as it was (I7), but a large write into one folder no longer
+ * resets every root on the bus. A directory is named itself so a fact at a
+ * rooted connection's own root still resets that root once scoped.
+ *
+ * @param discarded - The facts the window discarded, in order.
+ * @returns The loss signals, in the order their directories first appeared.
+ * @public
+ */
+export const overflowLossSignals = (discarded: readonly PathChangeEvent[]): PathChangeEvent[] => {
+  const signals = new Map<string, PathChangeEvent>();
+  for (const event of discarded) {
+    if (event.type === 'backendChanged') {
+      signals.set(event.backend, event);
+    }
+  }
+  for (const event of discarded) {
+    if (signals.has(event.backend)) {
+      continue;
+    }
+    const { path, oldPath, newPath, targetPath } = event as NamedPaths;
+    for (const named of [path, oldPath, newPath, targetPath]) {
+      if (named === undefined) {
+        continue;
+      }
+      for (const directory of event.type.startsWith('directory')
+        ? [parentDirectory(named), named]
+        : [parentDirectory(named)]) {
+        const key = `${event.backend}\0${directory}`;
+        if (!signals.has(key)) {
+          signals.set(key, { type: 'directoryChanged', path: directory, backend: event.backend });
+        }
+      }
+    }
+  }
+  return [...signals.values()];
+};
 
 /**
  * Schedules one callback and returns its cancel; the default is the next animation frame.

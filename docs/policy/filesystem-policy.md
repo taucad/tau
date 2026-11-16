@@ -3,7 +3,7 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-11-09'
+updated: '2026-11-16'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -366,7 +366,7 @@ The steady state is one multi-path subscription, not one stream per dependency. 
 Watcher streams are not lossless under all conditions. Define explicit overflow behavior:
 
 - emit internal `WatchEvent { type: 'reset' }` to watch subscribers
-- map worker-to-client overflow or refresh failure to the existing transport-wide `ChangeEvent { type: 'backendChanged' }`; do not add another wire variant
+- map a worker-to-client coalescing window that overflows to one existing `ChangeEvent { type: 'directoryChanged' }` per directory a discarded fact touched (a file's parent; a directory and its parent), so each rooted port resets only its own part of the loss; a discarded `backendChanged`, and a refresh failure, stay the transport-wide `backendChanged`; do not add another wire variant
 - kernel subscribers clear dependency-related caches and request a fresh dependency pass on next render
 - tree subscribers trigger targeted parent/subtree resync (not blind full tree unless required)
 

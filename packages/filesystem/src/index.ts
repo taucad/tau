@@ -150,6 +150,7 @@ export type {
 export {
   EventCoalescer,
   coalesceChangeEvents,
+  overflowLossSignals,
   ChangeSetCoalescer,
   mergeChangeSets,
   nextFrame,

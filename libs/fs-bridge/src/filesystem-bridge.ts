@@ -7,6 +7,7 @@ import {
   isDigestPrecondition,
   isEventGloballyVisible,
   isWorkspaceMutationError,
+  overflowLossSignals,
   policyAtRoot,
   RootedFileSystemError,
 } from '@taucad/filesystem';
@@ -1282,13 +1283,7 @@ function exposeFileSystemHandlers(
       deliverToHandles,
       options.uiCoalescingWindow ?? defaultUiCoalescingWindow,
       (discarded) => {
-        const affectedBackends = new Set(discarded.map((event) => event.backend));
-        deliverToHandles(
-          [...affectedBackends].map((backend) => ({
-            type: 'backendChanged',
-            backend,
-          })),
-        );
+        deliverToHandles(overflowLossSignals(discarded));
       },
     );
   }

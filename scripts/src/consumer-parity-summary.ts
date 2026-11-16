@@ -5,7 +5,8 @@
  * It runs no suite. Each oracle is a job in a workflow that already runs it, and this script reads that job's latest
  * conclusion through the GitHub REST API: in this run for the nightly's own jobs (falling back to the latest nightly
  * on `main` when this run skipped them), on `main` for the push and candidate workflows, and the
- * latest run on any ref for the path-filtered pull-request workflows, marked stale but still deciding after seven days
+ * latest run on any ref for the path-filtered pull-request workflows and the affected-only merge-queue rows, marked
+ * stale but still deciding after seven days
  * (ruling X62). An oracle may name one step of a job that runs several. A consumer whose oracle runs in no workflow is
  * a failing row, not an omission.
  *
@@ -180,10 +181,13 @@ export const consumers: readonly Consumer[] = [
     oracles: [
       {
         kind: 'job',
-        workflow: nightly,
+        /* Ratcheted out of the nightly into the merge queue (`test:e2e:queue`): ci.yml's `e2e-queue` row, which runs only
+        when `agent-plugin` is affected, so the latest merge-queue run that ran it. */
+        workflow: 'ci.yml',
         job: 'Browser end-to-end (agent-plugin test:e2e)',
         match: 'exact',
-        scope: 'this-run',
+        scope: 'any',
+        event: 'merge_group',
         proves: '`agent-plugin:test:e2e`, the viewer page against a real `tau mcp`',
       },
       {

@@ -19,6 +19,7 @@ import { basename, join } from 'node:path';
 
 import type { ExternalAgentLogEvent, JsonObject, JsonValue } from '@taucad/agent-host';
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
+import { sniffAttachmentMediaType } from '@taucad/agent-host/wire';
 import { isRecord } from '@taucad/utils/schema';
 
 /** The media a `file-ref` path can name, by the extension its path carries. */
@@ -30,6 +31,16 @@ const attachmentExtensions: Readonly<Record<string, string>> = {
   'application/pdf': 'pdf',
   'application/json': 'json',
 };
+
+/**
+ * The media type to store bytes under: what the bytes are, or the declared type when no probe recognises them.
+ *
+ * @param bytes - The decoded payload.
+ * @param declared - The media type the agent declared.
+ * @returns The stored media type.
+ */
+const labelOf = (bytes: Uint8Array<ArrayBuffer>, declared: string): string =>
+  sniffAttachmentMediaType(bytes) ?? declared;
 
 /**
  * Persist one attachment for a chat and return both the transcript and local paths.
@@ -53,13 +64,15 @@ export const saveChatAttachment = async (input: {
   if (!/^[\w-]+$/u.test(input.chatId)) {
     throw new Error('Chat attachment has an invalid chat id.');
   }
-  const extension = attachmentExtensions[input.mimeType];
-  if (extension === undefined) {
-    throw new Error(`Chat attachment media type ${input.mimeType} is unsupported.`);
-  }
   const bytes = Buffer.from(input.data, 'base64');
   if (bytes.length === 0 || bytes.toString('base64') !== input.data) {
     throw new Error('Chat attachment contains invalid base64 bytes.');
+  }
+  // The file is named for what the bytes are, not what the agent declared (I1).
+  const mimeType = labelOf(bytes, input.mimeType);
+  const extension = attachmentExtensions[mimeType];
+  if (extension === undefined) {
+    throw new Error(`Chat attachment media type ${mimeType} is unsupported.`);
   }
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const path = `attachments/${sha256}.${extension}`;
@@ -131,20 +144,23 @@ export const createAcpMediaStore = (
 
   const store = async (media: NonNullable<ReturnType<typeof inlineMediaOf>>): Promise<JsonValue | undefined> => {
     const known = stored.get(media.data);
-    const extension = attachmentExtensions[media.mimeType];
-    if (known !== undefined || extension === undefined || media.mimeType === 'application/json') {
+    if (known !== undefined) {
       return known;
     }
     const bytes = Buffer.from(media.data, 'base64');
     if (bytes.length === 0 || bytes.toString('base64') !== media.data) {
       return undefined;
     }
-    const saved = await saveChatAttachment({ workspaceRoot, chatId, data: media.data, mimeType: media.mimeType });
+    const mimeType = labelOf(bytes, media.mimeType);
+    if (attachmentExtensions[mimeType] === undefined || mimeType === 'application/json') {
+      return undefined;
+    }
+    const saved = await saveChatAttachment({ workspaceRoot, chatId, data: media.data, mimeType });
     const filename = filenameOf(media.uri);
     const reference = {
       type: 'file-ref',
       path: saved.path,
-      mimeType: media.mimeType,
+      mimeType,
       byteLength: saved.byteLength,
       ...(filename === undefined ? {} : { filename }),
     };

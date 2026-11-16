@@ -38,21 +38,18 @@ const edges = [
   {
     from: 'glb',
     to: 'png',
-    fidelity: 'mesh',
     optionsSchema: imageEdgeSchemas.png,
     content: ['includeEdges'],
   },
   {
     from: 'glb',
     to: 'webp',
-    fidelity: 'mesh',
     optionsSchema: imageEdgeSchemas.webp,
     content: ['includeEdges'],
   },
   {
     from: 'glb',
     to: 'jpeg',
-    fidelity: 'mesh',
     optionsSchema: imageEdgeSchemas.jpeg,
     content: ['includeEdges'],
   },

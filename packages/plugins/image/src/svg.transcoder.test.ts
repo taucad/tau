@@ -144,8 +144,8 @@ describe('SVG image transcoder', () => {
   it('declares strict svg image edges and returns a typed runtime failure', async () => {
     const definition = await resolveRuntimePluginDefinition('transcoder', svgTranscoder());
     expect(definition.edges).toEqual([
-      expect.objectContaining({ from: 'svg', to: 'png', fidelity: 'mesh', optionsSchema: svgPngOptionsSchema }),
-      expect.objectContaining({ from: 'svg', to: 'webp', fidelity: 'mesh', optionsSchema: svgWebpOptionsSchema }),
+      expect.objectContaining({ from: 'svg', to: 'png', optionsSchema: svgPngOptionsSchema }),
+      expect.objectContaining({ from: 'svg', to: 'webp', optionsSchema: svgWebpOptionsSchema }),
     ]);
 
     const invalid: ExportFile = {

@@ -605,7 +605,6 @@ describe('kernel-worker wrapExport middleware', () => {
         {
           from: 'glb',
           to: 'webp',
-          fidelity: 'mesh',
           optionsSchema: imageEdgeSchemas.webp,
         },
       ] as const,
@@ -707,7 +706,7 @@ describe('kernel-worker wrapExport middleware', () => {
         id: 'test-image',
         name: 'TestImage',
         version,
-        edges: [{ from: 'glb', to: 'webp', fidelity: 'mesh' }] as const,
+        edges: [{ from: 'glb', to: 'webp' }] as const,
         async initialize() {
           return {};
         },

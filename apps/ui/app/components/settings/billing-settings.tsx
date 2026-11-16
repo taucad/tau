@@ -31,6 +31,7 @@ import { AutoReloadSettings } from '#components/billing/auto-reload-settings.js'
 import { CancelPlanSettings } from '#components/billing/cancel-plan-settings.js';
 import { useBillingBinding } from '#components/billing/use-billing-binding.js';
 import { Button } from '@taucad/ui/components/button';
+import { EmailDeliverabilityBanner } from '#components/auth/settings/account/email-deliverability-banner.js';
 
 const proPlan = tauPlanCatalog.find((entry) => entry.id === 'pro');
 const proMonthlyPriceLabel = formatMonthlyPrice(proPlan?.priceLabel ?? '');
@@ -38,7 +39,11 @@ const enterpriseEmail = 'enterprise@tau.new';
 /** One message for every way the subscription page can fail to open: the customer's next step is the same. */
 const portalNotOpenedMessage = 'Couldn’t open the subscription page. Try again.';
 const usedBeforePurchased = 'Monthly credits are used before purchased credits.';
-const tierName = { free: 'Free', pro: 'Pro', enterprise: 'Enterprise' } as const;
+const tierName = {
+  free: 'Free',
+  pro: 'Pro',
+  enterprise: 'Enterprise',
+} as const;
 
 /** A balance as a heading: `1,200 credits`, or `Less than 1 credit` for a remainder too small to show. */
 const formatBalance = (atoms: bigint): string =>
@@ -149,6 +154,7 @@ export function BillingSettings(): React.JSX.Element {
 
   return (
     <div className='flex flex-col gap-8 pb-4'>
+      <EmailDeliverabilityBanner />
       {isPastDue ? (
         <BillingNotice tone='warning' role='alert' action={portalButton('Update payment method')}>
           We couldn’t charge your card. Update your payment method within 7 days to keep {planName ?? 'your plan'}. Your
@@ -314,7 +320,9 @@ export function BillingSettings(): React.JSX.Element {
                   <Button
                     variant='outline'
                     onClick={() => {
-                      void queryClient.invalidateQueries({ queryKey: ['billing', 'credits'] });
+                      void queryClient.invalidateQueries({
+                        queryKey: ['billing', 'credits'],
+                      });
                     }}
                   >
                     Try again

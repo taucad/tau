@@ -162,6 +162,7 @@ import {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  isAttributesPath,
   largeObjectThresholdBytes,
   tauRevisionPolicy,
 } from '#workspace-config.js';
@@ -2443,36 +2444,80 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           await attributesReading(),
         );
       }
-      await compareIndex.call(rooted);
-      const stats = await statTree.call(rooted, '', { admits: versionedAdmits });
-      const candidates = stats.flatMap(({ path, size }) => (mayBeLfsPointerSize(size) ? [path] : []));
-      const read = await mapConcurrent(candidates, captureModeConcurrency, async (path) => {
+      /* What it finds is every placeholder the checkout holds, by a capture's own rule: it declares them (D9). */
+      try {
+        const found = await indexedPlaceholders(place, rooted, { compareIndex, statTree });
         try {
-          return [path, await rooted.readFile(path)] as const;
+          await rooted.declarePending?.(
+            new Map(
+              [...found].map(
+                ([path, { oid, size, pointer }]) =>
+                  [path, { object: { oid, size }, pointerSize: pointer.byteLength }] as const,
+              ),
+            ),
+          );
+          declaredCheckouts.add(place.id);
         } catch (error) {
-          /* Gone since the listing: a capture skips it too. */
-          if (isMissingFile(error)) {
-            return undefined;
-          }
-          throw error;
+          /* An index that cannot open answers no mark at all: the fill stands, and the next look declares again. */
+          console.warn('[revisions] the checkout index could not learn its placeholders', error);
         }
-      });
-      const found = largeObjectPlaceholders(
-        new ImmutableRevisionTree(read.flatMap((entry) => (entry === undefined ? [] : [entry]))),
-        await attributesReading(),
-      );
-      if (found.size > 0 && port.ignoredPaths !== undefined) {
-        const listing = new Set(
-          (await port.ignoredPaths(place.kind === 'live' ? undefined : place.root, [...found.keys()])) ?? [],
-        );
-        for (const path of found.keys()) {
-          if (coveredByIgnoreListing(listing, path)) {
-            found.delete(path);
-          }
+        return found;
+      } finally {
+        if (!declaredCheckouts.has(place.id)) {
+          rooted.releaseDeclaration?.();
         }
       }
-      return found;
     });
+  const readVersioned = async (
+    rooted: RevisionFileSystem,
+    paths: readonly string[],
+  ): Promise<Array<readonly [string, Uint8Array<ArrayBuffer>]>> => {
+    const read = await mapConcurrent(paths, captureModeConcurrency, async (path) => {
+      try {
+        return [path, await rooted.readFile(path)] as const;
+      } catch (error) {
+        /* Gone since the listing: a capture skips it too. */
+        if (isMissingFile(error)) {
+          return undefined;
+        }
+        throw error;
+      }
+    });
+    return read.flatMap((entry) => (entry === undefined ? [] : [entry]));
+  };
+  const indexedPlaceholders = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    { compareIndex, statTree }: Required<Pick<RevisionFileSystem, 'compareIndex' | 'statTree'>>,
+  ): Promise<ReturnType<typeof largeObjectPlaceholders>> => {
+    await compareIndex.call(rooted);
+    const stats = await statTree.call(rooted, '', { admits: versionedAdmits });
+    const pointers = (
+      await readVersioned(
+        rooted,
+        stats.flatMap(({ path, size }) => (mayBeLfsPointerSize(size) ? [path] : [])),
+      )
+    ).filter(([, content]) => readLfsPointer(content) !== undefined);
+    if (pointers.length === 0) {
+      return new Map();
+    }
+    /* A pointer is a placeholder only where the attributes files track it: they are read too, as a capture reads them. */
+    const attributes = await readVersioned(
+      rooted,
+      stats.flatMap(({ path }) => (isAttributesPath(path) ? [path] : [])),
+    );
+    let entries = [...pointers, ...attributes];
+    if (port.ignoredPaths !== undefined) {
+      const listing = new Set(
+        (await port.ignoredPaths(
+          place.kind === 'live' ? undefined : place.root,
+          entries.map(([path]) => path),
+        )) ?? [],
+      );
+      entries = entries.filter(([path]) => !coveredByIgnoreListing(listing, path));
+    }
+    return largeObjectPlaceholders(new ImmutableRevisionTree(entries), await attributesReading());
+  };
 
   /**
    * The live checkout, asked of a store that already exists, without waiting

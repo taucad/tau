@@ -666,8 +666,30 @@ describe('the fill check of a warm reopen (Tau #2013)', () => {
     const second = await session();
     await second.fillChecked;
 
-    expect(second.reads).toEqual(['assets/part.stl']);
+    /* A pointer is found, so the attributes that say whether it is a placeholder are read too (D9). */
+    expect(second.reads).toEqual(['assets/part.stl', '.gitattributes']);
     expect(second.reports.map(({ facet }) => facet)).toEqual([undefined]);
+  });
+
+  /* A reopen the record answers walks nothing, so its fill check is what says which pointers are placeholders (D9). */
+  it('should declare the placeholders a record-answered reopen finds, by the attributes, walking nothing', async () => {
+    const pointer = pointerOf('a'.repeat(64), 123_456);
+    const { session } = await fixture({ ...files(10), 'assets/part.stl': pointer, 'notes/pointer.txt': pointer });
+    const first = await session();
+    await mint(first);
+    const treeId = await compare(first.actors);
+    await first.close();
+
+    const second = await session();
+    expect(await compare(second.actors)).toBe(treeId);
+    await second.fillChecked;
+
+    expect(
+      second.reads.filter((path) => !['assets/part.stl', 'notes/pointer.txt', '.gitattributes'].includes(path)),
+    ).toEqual([]);
+    expect(await second.rooted.pendingPaths!(['assets/part.stl', 'notes/pointer.txt'])).toStrictEqual([
+      'assets/part.stl',
+    ]);
   });
 
   it('should still find a placeholder a pointer-sized file holds', async () => {
@@ -680,6 +702,7 @@ describe('the fill check of a warm reopen (Tau #2013)', () => {
     const second = await session();
     await second.fillChecked;
 
-    expect(second.reads).toEqual(['assets/part.stl']);
+    /* A pointer is found, so the attributes that say whether it is a placeholder are read too (D9). */
+    expect(second.reads).toEqual(['assets/part.stl', '.gitattributes']);
   });
 });

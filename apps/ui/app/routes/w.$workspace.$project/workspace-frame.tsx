@@ -27,6 +27,9 @@ const readDocumentFrameHint = (): WideFrameHint => {
  */
 export const workspaceLanesReadyAttribute = 'data-workspace-lanes';
 
+/** The marker after the frame's lanes that first paint waits for (`rel=expect`), as Home's composer does. */
+export const workspaceFrameEndId = 'workspace-frame-end';
+
 /**
  * The persistent workspace frame (loading states UX blueprint, P-c, § Editor workspace frame, wide): the lanes' own
  * borders and backgrounds at this project's remembered widths and open state, created once and never removed while
@@ -100,6 +103,12 @@ export function WorkspaceFrame({
           className='[display:var(--frame-workbench-display,flex)] h-full w-(--frame-workbench-width,420px) shrink-0 border-l border-border @max-[1120px]:[display:var(--frame-workbench-compact-display,none)]'
         />
       </div>
+      {/* Hoisted to the head by React. Until the parser reaches the marker after the lanes, Chromium holds rendering,
+       * so a project load's first paint is never a document cut above the frame: no lanes, or the shell alone (the
+       * blank first paint A11 reported, and F15's lane-less first frame). The held region ends at the lanes, not the
+       * page, so the gated content still streams in after first paint. A browser without `rel=expect` ignores it. */}
+      <link rel='expect' href={`#${workspaceFrameEndId}`} blocking='render' />
+      <span id={workspaceFrameEndId} hidden />
       {children}
     </div>
   );

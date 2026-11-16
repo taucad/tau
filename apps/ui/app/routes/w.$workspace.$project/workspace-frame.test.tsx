@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeWideFrameHint } from '#lib/frame-hint.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
-import { WorkspaceFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
 
 /*
  * The persisted `workbenchOpen` lives in the project's own layout record and is read only once the session is live.
@@ -140,6 +140,16 @@ describe('WorkspaceFrame', () => {
 
     expect(html).toContain('data-slot="workspace-frame"');
     expect(html).not.toMatch(/style="[^"]*--frame-/u);
+  });
+
+  /* 20-run sample 4 of F15: a first frame painted before the parser reached the lanes drew none. */
+  it('holds first paint on the server until the parser has reached the end of the lanes', () => {
+    const html = renderToString(frameAt('/w/home/one'));
+
+    expect(html).toContain(`<link rel="expect" href="#${workspaceFrameEndId}" blocking="render"/>`);
+    const marker = html.indexOf(`id="${workspaceFrameEndId}"`);
+    expect(marker).toBeGreaterThan(html.lastIndexOf('data-slot="workspace-lane"'));
+    expect(marker).toBeLessThan(html.indexOf('<p>content</p>'));
   });
 
   it('draws only frame: no skeleton, no animation, and the content over its lanes', () => {

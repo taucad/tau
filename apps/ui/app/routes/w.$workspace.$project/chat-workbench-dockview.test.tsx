@@ -90,6 +90,7 @@ vi.mock('#hooks/use-project-availability.js', async (importOriginal) => {
         absence: availabilityOf('absence'),
         landed: landedState.paths.has(path),
       }),
+    useCloudOpenPending: () => false,
     useModelAvailability: () => 'ready',
     useLargeObjectPending: (path: string | undefined) => path !== undefined && largeObjectState.pending.has(path),
     useOpenedLargeObjectPending(path: string | undefined) {
@@ -227,7 +228,11 @@ const mockUseFileContent =
     ) => FileContentResult & { observation?: { status: string; error?: string }; retry?: () => void }
   >();
 
+/* Paths whose fresh read after opening has not settled yet (STO-25, I7). */
+const freshState = vi.hoisted(() => ({ held: new Set<string>() }));
 vi.mock('#hooks/use-file-content.js', () => ({
+  useFreshContent: (path: string | undefined, open: boolean) =>
+    open && (path === undefined || !freshState.held.has(path)),
   useFileContent: (path: string | undefined) => {
     const result = mockUseFileContent(path);
     return {
@@ -993,6 +998,37 @@ describe('FileEditor routing', () => {
     } finally {
       surfaceAvailability.current = new Map();
       landedState.paths.clear();
+    }
+  });
+
+  /* STO-25, I7: a landed file's pane shows only a read begun after it opened, never what was cached before. */
+  it('should never render bytes read before the pane opened, nor read anything while it waits', () => {
+    mockUseFileContent.mockClear();
+    surfaceAvailability.current = new Map([['absence', 'preparing']]);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('old') });
+    try {
+      const waiting = render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByRole('group', { name: 'Waiting for gear.ts' })).toBeInTheDocument();
+      expect(mockUseFileContent).not.toHaveBeenCalledWith('lib/gear.ts');
+      waiting.unmount();
+
+      /* Landed, but the fresh read has not settled: still waiting, still nothing read for the pane. */
+      landedState.paths.add('lib/gear.ts');
+      freshState.held.add('lib/gear.ts');
+      const landed = render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByRole('group', { name: 'Waiting for gear.ts' })).toBeInTheDocument();
+      expect(screen.queryByTestId('viewer')).not.toBeInTheDocument();
+      expect(mockUseFileContent).not.toHaveBeenCalledWith('lib/gear.ts');
+      landed.unmount();
+
+      freshState.held.clear();
+      render(<FileEditor paneId='other-pane' filePath='lib/gear.ts' panelApi={mockPanelApi} />);
+      expect(screen.getByTestId('viewer')).toBeInTheDocument();
+      expect(mockUseFileContent).toHaveBeenCalledWith('lib/gear.ts');
+    } finally {
+      surfaceAvailability.current = new Map();
+      landedState.paths.clear();
+      freshState.held.clear();
     }
   });
 

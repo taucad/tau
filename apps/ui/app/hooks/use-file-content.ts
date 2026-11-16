@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
 import type { ObservationSnapshot } from '@taucad/fs-client/observation-service';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -38,4 +38,51 @@ export function useFileContent(path: string | undefined): FileContentSelection {
     service?.refresh();
   }, [service]);
   return useMemo(() => ({ ...result, observation, retry }), [result, observation, retry]);
+}
+
+/**
+ * Whether a pane that has just opened may show what the content service holds for its file (STO-25, I7).
+ *
+ * A pane that waited (on its file's landing, or on a Tau Cloud open) never shows bytes read before it opened: the
+ * service may hold them from another reader, and the change that replaced them reaches the page late (the bridge
+ * coalesces it). Each time the pane opens after waiting, and when it mounts while an open is owed, the file is read
+ * afresh, and the pane stays closed until a read begun after that settles as the service's answer.
+ *
+ * @param path - The pane's workspace-relative path; `undefined` (a declaration held in memory) owes no read.
+ * @param open - Whether the pane's own gate is open.
+ * @param owedOnMount - Whether a read is owed even though the pane mounts open: a Tau Cloud open is still owed.
+ * @returns `true` once the pane may show its content.
+ */
+export function useFreshContent(path: string | undefined, open: boolean, owedOnMount: boolean): boolean {
+  const { contentService } = useFileManager();
+  const [owed, setOwed] = useState(() => !open || owedOnMount);
+  if (!open && !owed) {
+    setOwed(true);
+  }
+  useEffect(() => {
+    if (!open || !owed || path === undefined || contentService === undefined) {
+      return undefined;
+    }
+    let live = true;
+    // async-iife: bootstrap -- the pane opens when a read begun now is the service's answer, or stays closed.
+    void (async (): Promise<void> => {
+      try {
+        /* A later read begun meanwhile is also fresh: ask again until one settles as the answer. */
+        // oxlint-disable-next-line no-await-in-loop -- each read waits for the one before to be superseded or held.
+        while (live && !(await contentService.rereadOutcome(path))) {
+          /* Superseded: the newer read's answer is the one to hold. */
+        }
+        if (live) {
+          setOwed(false);
+        }
+      } catch (error) {
+        /* Never shown on an earlier read (I7): the pane stays closed and says so. */
+        console.warn('[file content] a fresh read could not settle', path, error);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [contentService, open, owed, path]);
+  return open && (path === undefined || contentService === undefined || !owed);
 }

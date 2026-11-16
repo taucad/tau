@@ -7,7 +7,7 @@ import { withAuthorityDigest } from '@taucad/ui-core/lib/composed-view-client.fi
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
-import { useFileContent } from '#hooks/use-file-content.js';
+import { useFileContent, useFreshContent } from '#hooks/use-file-content.js';
 
 const manager = vi.hoisted(() => {
   let service: FileContentService | undefined;
@@ -172,5 +172,119 @@ describe('useFileContent shared observation', () => {
     });
     expect(hook.result.current).toMatchObject({ kind: 'text', observation: { status: 'closed' } });
     hook.unmount();
+  });
+});
+
+/* STO-25, I7: a pane that waited shows only what a read begun after it opened answered. */
+describe('useFreshContent', () => {
+  const rereading = (): Readonly<{
+    reread: ReturnType<typeof vi.fn>;
+    settle: (current: boolean) => void;
+  }> => {
+    const answers: Array<(current: boolean) => void> = [];
+    const reread = vi.fn(async () => new Promise<boolean>((resolve) => answers.push(resolve)));
+    manager.set({ rereadOutcome: reread } as unknown as FileContentService);
+    return {
+      reread,
+      settle: (current) => {
+        answers.shift()?.(current);
+      },
+    };
+  };
+
+  it('stays closed after its gate opens until a read begun then settles as the answer', async () => {
+    const { reread, settle } = rereading();
+    const { result, rerender } = renderHook(({ open }) => useFreshContent('lib/gear.ts', open, false), {
+      initialProps: { open: false },
+    });
+    expect(result.current).toBe(false);
+    expect(reread).not.toHaveBeenCalled();
+
+    rerender({ open: true });
+    expect(result.current).toBe(false);
+    await waitFor(() => {
+      expect(reread).toHaveBeenCalledExactlyOnceWith('lib/gear.ts');
+    });
+    await act(async () => {
+      settle(true);
+    });
+    expect(result.current).toBe(true);
+  });
+
+  it('asks again while a later read has begun since, and opens on its answer', async () => {
+    const { reread, settle } = rereading();
+    const { result, rerender } = renderHook(({ open }) => useFreshContent('lib/gear.ts', open, false), {
+      initialProps: { open: false },
+    });
+    rerender({ open: true });
+    await waitFor(() => {
+      expect(reread).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      settle(false);
+    });
+    expect(result.current).toBe(false);
+    await waitFor(() => {
+      expect(reread).toHaveBeenCalledTimes(2);
+    });
+    await act(async () => {
+      settle(true);
+    });
+    expect(result.current).toBe(true);
+  });
+
+  it('owes a read again each time it closes and opens', async () => {
+    const { reread, settle } = rereading();
+    const { result, rerender } = renderHook(({ open }) => useFreshContent('lib/gear.ts', open, false), {
+      initialProps: { open: false },
+    });
+    rerender({ open: true });
+    await waitFor(() => {
+      expect(reread).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      settle(true);
+    });
+    rerender({ open: false });
+    rerender({ open: true });
+    expect(result.current).toBe(false);
+    await waitFor(() => {
+      expect(reread).toHaveBeenCalledTimes(2);
+    });
+    await act(async () => {
+      settle(true);
+    });
+    expect(result.current).toBe(true);
+  });
+
+  it('opens at once when it never waited and no open is owed, and reads first when one is', async () => {
+    const { reread, settle } = rereading();
+    expect(renderHook(() => useFreshContent('lib/gear.ts', true, false)).result.current).toBe(true);
+    expect(reread).not.toHaveBeenCalled();
+
+    const { result } = renderHook(() => useFreshContent('tau.json', true, true));
+    expect(result.current).toBe(false);
+    await waitFor(() => {
+      expect(reread).toHaveBeenCalledExactlyOnceWith('tau.json');
+    });
+    await act(async () => {
+      settle(true);
+    });
+    expect(result.current).toBe(true);
+  });
+
+  it('stays closed when the fresh read cannot settle, never falling back to an earlier one', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    manager.set({
+      rereadOutcome: vi.fn(async () => {
+        throw new Error('the worker went away');
+      }),
+    } as unknown as FileContentService);
+    const { result } = renderHook(() => useFreshContent('lib/gear.ts', true, true));
+    await waitFor(() => {
+      expect(warn).toHaveBeenCalled();
+    });
+    expect(result.current).toBe(false);
+    warn.mockRestore();
   });
 });

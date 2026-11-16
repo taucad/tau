@@ -1199,6 +1199,50 @@ describe('FileContentService', () => {
     });
   });
 
+  /* STO-25, I7: a page told out of band that a file's bytes landed reads it afresh and never shows the earlier read. */
+  describe('rereadOutcome', () => {
+    it('should replace an outcome read before with one read now', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new TextEncoder().encode('old'));
+      await service.resolve('lib/gear.ts');
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new TextEncoder().encode('new'));
+
+      expect(await service.rereadOutcome('lib/gear.ts')).toBe(true);
+      expectTextContent(service.peekOutcome('lib/gear.ts'), new TextEncoder().encode('new'));
+    });
+
+    it('should keep a read begun earlier from publishing over it', async () => {
+      const stale = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+      vi.mocked(proxy.readFile).mockReturnValueOnce(stale.promise);
+      /* A direct read, begun before the landing was known. */
+      const earlier = service.resolve('lib/gear.ts', { forceText: true });
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new TextEncoder().encode('new'));
+
+      expect(await service.rereadOutcome('lib/gear.ts')).toBe(true);
+      stale.resolve(new TextEncoder().encode('old'));
+      await earlier;
+      expectTextContent(service.peekOutcome('lib/gear.ts'), new TextEncoder().encode('new'));
+    });
+
+    it('should say when a later read has begun since, so its answer is awaited', async () => {
+      const first = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+      vi.mocked(proxy.readFile).mockReturnValueOnce(first.promise);
+      const reread = service.rereadOutcome('lib/gear.ts');
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(new TextEncoder().encode('newer'));
+      expect(await service.rereadOutcome('lib/gear.ts')).toBe(true);
+      first.resolve(new TextEncoder().encode('new'));
+
+      expect(await reread).toBe(false);
+      expectTextContent(service.peekOutcome('lib/gear.ts'), new TextEncoder().encode('newer'));
+    });
+
+    it('should hold a missing file as orphaned once read afresh', async () => {
+      vi.mocked(proxy.readFile).mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
+
+      expect(await service.rereadOutcome('lib/gone.ts')).toBe(true);
+      expect(service.peekOutcome('lib/gone.ts')).toEqual({ kind: 'orphaned' });
+    });
+  });
+
   describe('discriminated resolve outcomes', () => {
     it('should produce binary outcome when content sniffs as binary', async () => {
       const binaryBytes = new Uint8Array(5 * 1024 * 1024);

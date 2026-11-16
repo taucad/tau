@@ -210,6 +210,17 @@ export function useFilePaneAvailability(path: string, inClosure: boolean): FileP
   return filePaneAvailability({ inClosure, firstView, absence, landed });
 }
 
+/**
+ * Whether a Tau Cloud open is still owed for the focused project: what a pane read before it opened may be bytes the
+ * open has since replaced (I7).
+ *
+ * @returns `true` while the open is owed.
+ */
+export function useCloudOpenPending(): boolean {
+  const { projectId } = useProject();
+  return useTauCloudIntent(projectId) === 'open';
+}
+
 /* One watcher id per pane, unique in this tab whatever React root it renders in. */
 let landingWatchers = 0;
 

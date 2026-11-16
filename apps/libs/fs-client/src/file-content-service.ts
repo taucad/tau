@@ -578,6 +578,23 @@ export class FileContentService {
   }
 
   /**
+   * Read a path afresh now, and say whether what this service holds for it is that read's answer.
+   *
+   * A read begun earlier can no longer publish (its generation is superseded), so once this resolves `true` the held
+   * outcome comes from a read begun after this call: a caller that learned out of band that the bytes changed (a tree
+   * write landed them, STO-25) never shows what was read before (I7). `false` means a later read has begun since, and
+   * its answer is the one to wait for; asking again settles on it.
+   *
+   * @param path - Workspace-relative path.
+   * @returns `true` once the held outcome is this read's.
+   */
+  public async rereadOutcome(path: string): Promise<boolean> {
+    const generation = this.refreshGuard.begin(path);
+    await this.computeOutcome(path, generation);
+    return this.refreshGuard.isCurrent(path, generation);
+  }
+
+  /**
    * Sync snapshot of the most recent outcome for a path.
    * Returns `{ kind: 'loading' }` when no outcome has been computed yet.
    * Compatible with `useSyncExternalStore`.

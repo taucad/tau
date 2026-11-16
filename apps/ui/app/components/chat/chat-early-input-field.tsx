@@ -48,6 +48,9 @@ export type EarlyTextarea = HTMLTextAreaElement & { tauEarlyDraft?: EarlyInputSt
 /** The attribute the served composer carries while a send is queued; the send button shows its pending state. */
 export const queuedSendAttribute = 'data-queued-send';
 
+/** What a queued send's status says, before and after adoption. */
+export const queuedSendStatus = 'Send queued. Press Escape to cancel.';
+
 // This fixed script runs right after the server-rendered composer, before the application bundle. DOM-local state
 // records type-then-delete, an IME still in progress and a queued send. It also paints the stored draft (the draft
 // hint) into an input nothing has been typed into, so the first painted frame holds it. It sits after the whole box
@@ -60,7 +63,7 @@ export const earlyInputScript =
   `(()=>{const box=document.currentScript.previousElementSibling;const input=box.querySelector('textarea');` +
   `const state=input.tauEarlyDraft={edited:false,composing:false,queued:false,prefill:''};` +
   `if(input.value===''){const t=(${draftHintReaderSource})(location);if(t!==''){input.value=t;state.prefill=t}}` +
-  `const q=(v)=>{state.queued=v;if(v){box.setAttribute(${JSON.stringify(queuedSendAttribute)},'')}else{box.removeAttribute(${JSON.stringify(queuedSendAttribute)})}};` +
+  `const st=box.querySelector('[data-slot=queued-send-status]');const q=(v)=>{state.queued=v;if(st)st.textContent=v?${JSON.stringify(queuedSendStatus)}:'';if(v){box.setAttribute(${JSON.stringify(queuedSendAttribute)},'')}else{box.removeAttribute(${JSON.stringify(queuedSendAttribute)})}};` +
   `input.addEventListener('input',()=>{state.edited=true;if(state.queued)q(false)});` +
   `input.addEventListener('keydown',(e)=>{if(e.key==='Escape'){if(state.queued)q(false);return}` +
   `if(e.key!=='Enter'||e.shiftKey||e.altKey||e.ctrlKey||e.metaKey||e.isComposing||state.composing)return;` +
@@ -125,6 +128,15 @@ export function EarlyComposerField({
         className={cn(chatComposerFrameClassName, 'rounded-2xl has-[textarea:focus-visible]:focus-outline', className)}
         suppressHydrationWarning
       >
+        {/* Says a queued send aloud, as Send's pending state shows it; the served script writes it. */}
+        <span
+          data-slot='queued-send-status'
+          role='status'
+          className='sr-only'
+          suppressHydrationWarning
+          // oxlint-disable-next-line react/no-danger -- Empty, so hydration leaves the text the served script wrote.
+          dangerouslySetInnerHTML={{ __html: '' }}
+        />
         <div className={cn(chatComposerEditorAreaClassName, chatComposerMainEditorAreaClassName)}>
           <textarea
             ref={inputRef}
@@ -171,6 +183,8 @@ export type EarlyInputHandover = Readonly<{
   claim: () => () => void;
   /** The composer has taken `pending`: it is not applied again, by this composer or a later one. */
   taken: () => void;
+  /** The lane will hold no composer: the served input is removed, with whatever it holds. */
+  decline: () => void;
 }>;
 
 /** The frame's handover, for the composer below it; absent off the project route. */

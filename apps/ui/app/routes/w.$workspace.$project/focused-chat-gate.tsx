@@ -1,3 +1,4 @@
+import { DeclineServedComposer } from '#routes/w.$workspace.$project/workspace-frame-composer.js';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { useCallback, useEffect, useState } from 'react';
@@ -170,11 +171,17 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
             Try again
           </Button>
         ) : null}
+        {chats === 'disabled' || chats === 'failed' ? <DeclineServedComposer /> : null}
       </div>
     );
   }
   if (isUnresolved && focusedChatError) {
-    return <FocusedChatErrorPanel error={focusedChatError} />;
+    return (
+      <>
+        <FocusedChatErrorPanel error={focusedChatError} />
+        <DeclineServedComposer />
+      </>
+    );
   }
 
   if (isEnsuring) {

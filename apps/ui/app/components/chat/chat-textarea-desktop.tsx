@@ -11,6 +11,7 @@ import {
   chatComposerShellClassName,
 } from '@taucad/chat-ui/components/chat-input-styles';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { queuedSendStatus } from '#components/chat/chat-early-input-field.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input-field.js';
 import type { Editor, JSONContent } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
@@ -558,7 +559,8 @@ export const ChatTextareaDesktop = memo(function ({
       // Focus is already elsewhere: there is nothing left to hand over.
       return;
     }
-    if (earlyInput.edited) {
+    /* A painted draft carries its caret and selection too, while the editor holds that text (P-a). */
+    if (earlyInput.edited || (earlyInput.prefilled && extractContent(editor).text === earlyInput.text)) {
       const position = (offset: number): number => offset + 1 + earlyInput.text.slice(0, offset).split('\n').length - 1;
       const from = position(earlyInput.start);
       const to = position(earlyInput.end);
@@ -735,6 +737,12 @@ export const ChatTextareaDesktop = memo(function ({
         ) : null}
 
         <DictationFeedback transcript={dictation.transcript} />
+        {/* Present from mount for an input that queued a send, so the status is read when it changes. */}
+        {earlyInput?.queuedSend === true ? (
+          <span role='status' className='sr-only'>
+            {queuedSend.isQueued ? queuedSendStatus : ''}
+          </span>
+        ) : null}
         <ChatTextareaBar
           dictationControl={dictationControl}
           skillsRecovery={skillsRecovery}

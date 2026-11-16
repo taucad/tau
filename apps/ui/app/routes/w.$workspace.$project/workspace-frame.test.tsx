@@ -5,6 +5,7 @@ import { renderToString } from 'react-dom/server';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeWideFrameHint } from '#lib/frame-hint.js';
+import { writeDraftHint } from '#lib/frame-hint-draft.js';
 import type { WideFrameHint } from '#lib/frame-hint.js';
 import { WorkspaceFrame, workspaceFrameEndId } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
@@ -195,13 +196,13 @@ describe('WorkspaceFrame served composer', () => {
     handover = useContext(EarlyInputHandoverContext);
     return <p>content</p>;
   };
-  const served = (url: string): React.JSX.Element => (
+  const served = (url: string, isDrawn = true): React.JSX.Element => (
     <MemoryRouter initialEntries={[url]}>
       <Routes>
         <Route
           path='/w/:workspace/:project'
           element={
-            <WorkspaceFrame>
+            <WorkspaceFrame isDrawn={isDrawn}>
               <Consumer />
             </WorkspaceFrame>
           }
@@ -214,7 +215,7 @@ describe('WorkspaceFrame served composer', () => {
   const serveAndHydrate = async (
     url: string,
     beforeHydration?: (input: HTMLTextAreaElement, container: HTMLElement) => void,
-  ): Promise<{ container: HTMLElement; done: () => Promise<void> }> => {
+  ): Promise<{ container: HTMLElement; rerender: (isDrawn: boolean) => void; done: () => Promise<void> }> => {
     globalThis.history.replaceState(null, '', url);
     const container = document.createElement('div');
     container.innerHTML = renderToString(served(url));
@@ -232,6 +233,11 @@ describe('WorkspaceFrame served composer', () => {
     expect(onRecoverableError).not.toHaveBeenCalled();
     return {
       container,
+      rerender: (isDrawn) => {
+        act(() => {
+          root.render(served(url, isDrawn));
+        });
+      },
       done: async () => {
         await act(async () => {
           root.unmount();
@@ -261,7 +267,8 @@ describe('WorkspaceFrame served composer', () => {
       const exposed = [...frame.querySelectorAll<HTMLElement>('button, textarea, input, [role], [tabindex]')].filter(
         (element) => element.closest('[aria-hidden=true], [inert]') === null && element.textContent !== 'content',
       );
-      expect(exposed).toEqual([input]);
+      /* With the queued send's status, which says nothing until Enter queues one. */
+      expect(exposed).toEqual([frame.querySelector('[data-slot=queued-send-status]'), input]);
       /* The lane's own composer box stays in place under the served one, drawing nothing. */
       expect(within(frame).getByTestId('chat-lane-frame-composer')).toHaveClass('invisible');
     } finally {
@@ -370,6 +377,58 @@ describe('WorkspaceFrame served composer', () => {
       expect(handover?.pending).toMatchObject({ text: 'abc', edited: true, focused: true });
       expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
       unclaim?.();
+    } finally {
+      await done();
+    }
+  });
+
+  /* Round 2: a chat lane that stays without a composer, and a navigation away, both end the served input. */
+  it('removes the served input when the lane declines it', async () => {
+    const { container, done } = await serveAndHydrate('/w/home/one', (input) => {
+      input.value = 'abc';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    try {
+      act(() => {
+        handover?.release();
+        handover?.decline();
+      });
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
+      act(() => {
+        handover?.claim();
+      });
+      expect(handover?.pending).toBeUndefined();
+    } finally {
+      await done();
+    }
+  });
+
+  it('draws no served input again after the frame stops being drawn', async () => {
+    const { container, rerender, done } = await serveAndHydrate('/w/home/one');
+    try {
+      rerender(false);
+      rerender(true);
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
+    } finally {
+      await done();
+    }
+  });
+
+  it('drops an Enter on a painted draft nobody edited, and says a queued send aloud', async () => {
+    writeDraftHint({ kind: 'project', key: 'home/one' }, { text: 'Fillet it' });
+    let status: Element | undefined;
+    const { done } = await serveAndHydrate('/w/home/one', (input, container) => {
+      input.focus();
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      status = container.querySelector('[data-slot=queued-send-status]') ?? undefined;
+    });
+    try {
+      expect(status).toHaveTextContent('Send queued');
+      act(() => {
+        handover?.claim();
+        handover?.release();
+      });
+      expect(handover?.pending).toMatchObject({ text: 'Fillet it', prefilled: true, edited: false, queuedSend: false });
     } finally {
       await done();
     }

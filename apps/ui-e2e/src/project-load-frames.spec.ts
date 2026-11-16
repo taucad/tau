@@ -1369,6 +1369,76 @@ knownDefect(
   },
 );
 
+/** The composer bar's controls, as rects in page order: the add trigger, each collapsible group's controls, Send. */
+const measureComposerBarControls = async (barSelector: string): Promise<readonly string[]> =>
+  target.evaluate((selector) => {
+    const bar = document.querySelector(selector);
+    if (!bar) {
+      return [];
+    }
+    const controls = bar.querySelectorAll(
+      ':scope > [data-slot=composer-left] > :not(input):not([data-slot=composer-collapsible]), :scope [data-slot=composer-collapsible] > *, :scope > [data-slot=composer-right] > :not([data-slot=composer-collapsible])',
+    );
+    return [...controls]
+      .map((control) => control.getBoundingClientRect())
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map(
+        (rect) => `${Math.round(rect.x)},${Math.round(rect.y)} ${Math.round(rect.width)}x${Math.round(rect.height)}`,
+      );
+  }, barSelector);
+
+knownDefect(
+  'F7b (A15d): the project composer bar controls keep their rects across adoption, the served bar reserving each control at its resting box',
+  {
+    artifact: 'f7b-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => {
+      const { path } = await seedProjects('wide');
+      await target.navigate('/');
+      await target.expectVisible(composer, 60_000);
+      await holdRequestsUntilReleased(entryChunk);
+      const early = await openBeforeHydration({
+        path,
+        input: anyComposerInput,
+        hydrated: richComposer,
+        text: '',
+        wait: 1500,
+        settle: 0,
+      });
+      const before = await measureComposerBarControls(
+        '[data-slot="workspace-frame-composer"] [data-slot="composer-bar"]',
+      );
+      await releaseHeldRequests();
+      await settleProject();
+      const after = await measureComposerBarControls('[data-chat-composer="main"] [data-slot="composer-bar"]');
+      await keepRecord('f7b-wide', { early: { ...early, before: undefined, after: undefined }, before, after });
+      return { early, before, after };
+    },
+    assert: ({ early, before, after }) => {
+      precondition(early.found && !early.hydratedBeforeAct, 'F7b: the served page had no composer before hydration');
+      /* Add and Send keep their whole rect. The mode and model controls keep their slot, the edge the bar lays them
+       * out from (mode's left, model's right beside Send) and their height; their widths follow their labels, which
+       * the frame cannot know (label parity is A10's, programme control 13:30Z). */
+      const parse = (rect: string | undefined): readonly number[] => (rect ?? '').split(/[ ,x]/u).map(Number);
+      const slot = (rects: readonly string[]): readonly string[] =>
+        rects.map((rect, index) => {
+          const [x = 0, y = 0, width = 0, height = 0] = parse(rect);
+          return index === 1
+            ? `left ${x}, y ${y}, h ${height}`
+            : index === 2
+              ? `right ${x + width}, y ${y}, h ${height}`
+              : rect;
+        });
+      expectMeasured(
+        { controls: before.length, slots: slot(before) },
+        'F7b: the served bar does not reserve the rich bar controls in their boxes',
+        { controls: after.length, slots: slot(after) },
+      );
+    },
+  },
+);
+
 /** The viewer stage's parts F8 reads. */
 const viewerRegions = {
   preparing: '[aria-label="Preparing model"]',

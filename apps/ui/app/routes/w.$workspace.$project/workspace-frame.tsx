@@ -62,7 +62,7 @@ export function WorkspaceFrame({
 }): React.JSX.Element {
   /* The document's URL, as the pre-paint script reads it: the frame also renders in suites with no router. */
   const wide = useSyncExternalStore(subscribeToNothing, readDocumentFrameHint, noHintOnServer);
-  const served = useServedComposer();
+  const served = useServedComposer(isDrawn);
 
   if (!isDrawn) {
     return (

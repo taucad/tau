@@ -1,11 +1,23 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Plus } from 'lucide-react';
+import { Button } from '@taucad/ui/components/button';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import { cn } from '@taucad/ui/utils/cn';
 import {
+  chatComposerAddTriggerClassName,
   chatComposerBarClassName,
   chatComposerBarLeftClassName,
   chatComposerBarRightClassName,
+  chatComposerCollapsibleControlsClassName,
+  chatComposerGhostPillClassName,
+  chatComposerModelTriggerClassName,
 } from '@taucad/chat-ui/components/chat-input-styles';
 import { ServedSendButton } from '#components/chat/chat-textarea-submit-button.js';
-import { EarlyComposerField, readEarlyInput } from '#components/chat/chat-early-input-field.js';
+import {
+  EarlyComposerField,
+  EarlyInputHandoverContext,
+  readEarlyInput,
+} from '#components/chat/chat-early-input-field.js';
 import type { EarlyChatInput, EarlyInputHandover, EarlyTextarea } from '#components/chat/chat-early-input-field.js';
 
 /** Nothing to subscribe to: only the hydration pass reads the server snapshot. */
@@ -35,9 +47,13 @@ type ServedComposerState = 'served' | EarlyChatInput | 'gone';
  *
  * @returns The served field to draw over the content, and the handover the composer reads.
  */
-export function useServedComposer(): { field: React.ReactNode; handover: EarlyInputHandover } {
+export function useServedComposer(isDrawn: boolean): { field: React.ReactNode; handover: EarlyInputHandover } {
   const isOnClient = useSyncExternalStore(subscribeToNothing, isClientRender, isServerRender);
   const [state, setState] = useState<ServedComposerState>(() => (isOnClient ? 'gone' : 'served'));
+  /* A navigation off the project route ends the served input: a frame drawn again later was not served with it. */
+  if (!isDrawn && state !== 'gone') {
+    setState('gone');
+  }
   const inputRef = useRef<EarlyTextarea>(null);
   /* The two conditions of the handover, read by whichever call comes second. */
   const isRevealedRef = useRef(false);
@@ -83,6 +99,9 @@ export function useServedComposer(): { field: React.ReactNode; handover: EarlyIn
       taken: () => {
         setState('gone');
       },
+      decline: () => {
+        setState((current) => (current === 'served' ? 'gone' : current));
+      },
     };
   }, [isServed, state]);
   return {
@@ -107,9 +126,26 @@ export function useServedComposer(): { field: React.ReactNode; handover: EarlyIn
  * @returns The snapshot, or `'gone'`.
  */
 const releasedState = (input: EarlyTextarea): ServedComposerState => {
-  const snapshot = readEarlyInput(input);
+  const read = readEarlyInput(input);
+  /* An Enter on a painted draft nobody edited is dropped here: the chat's record, which wins, may not hold that text,
+   * and it is not read yet (Home checks it, as its record is loaded before adoption). */
+  const snapshot = read.queuedSend && !read.edited ? { ...read, queuedSend: false } : read;
   return snapshot.edited || snapshot.queuedSend || snapshot.focused ? snapshot : 'gone';
 };
+
+/**
+ * A chat lane that stays without a composer (chat sync off, chats failed to load, a focused chat that cannot open)
+ * declines the served input, so it is not left on screen taking text nothing will adopt.
+ *
+ * @returns Nothing.
+ */
+export function DeclineServedComposer(): undefined {
+  const decline = useContext(EarlyInputHandoverContext)?.decline;
+  useLayoutEffect(() => {
+    decline?.();
+  }, [decline]);
+  return undefined;
+}
 
 /**
  * The served composer, over the chat lane's composer box: the chat lane's width and open state come from the same
@@ -146,8 +182,11 @@ function ServedComposer({
 }
 
 /**
- * The served composer's bar: Send at its resting place, inert, so a send queued by Enter shows its pending state from
- * first paint. The other controls (mode, model, attachments) arrive with the rich composer.
+ * The served composer's bar (programme control's ruling, 2026-11-16T13:30Z): each control the rich bar draws at rest
+ * has its final box here, so adoption moves nothing. The add trigger and Send are drawn as themselves, inert. The mode
+ * and model controls follow the chat's agent and model, which the frame cannot read before the route chunk, so they
+ * are skeleton shapes in their slots: the mode at its icon face, the model at its pending face, as Home's static bar
+ * draws a model whose name is not known yet. Their widths then follow their labels (label parity is A10's).
  *
  * @param props - Whether the input holds nothing to send.
  * @returns The bar.
@@ -155,8 +194,36 @@ function ServedComposer({
 function ServedComposerBar({ isEmpty }: { readonly isEmpty: boolean }): React.JSX.Element {
   return (
     <div inert data-slot='composer-bar' className={chatComposerBarClassName}>
-      <div data-slot='composer-left' className={chatComposerBarLeftClassName} />
+      <div data-slot='composer-left' className={chatComposerBarLeftClassName}>
+        <Button variant='ghost' size='sm' aria-label='Add' className={chatComposerAddTriggerClassName}>
+          <Plus className='size-4' aria-hidden='true' />
+        </Button>
+        <div
+          data-slot='composer-collapsible'
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
+        >
+          <span
+            data-slot='mode-placeholder'
+            aria-hidden='true'
+            className={cn(chatComposerGhostPillClassName, 'flex w-7 items-center justify-center px-0')}
+          >
+            <Skeleton className='size-4 rounded-full' />
+          </span>
+        </div>
+      </div>
       <div data-slot='composer-right' className={chatComposerBarRightClassName}>
+        <div
+          data-slot='composer-collapsible'
+          className={cn(chatComposerCollapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
+        >
+          <span
+            data-slot='agent-trigger-placeholder'
+            aria-hidden='true'
+            className={cn(chatComposerModelTriggerClassName, 'flex items-center')}
+          >
+            <Skeleton className='h-3 w-20 shrink-0 rounded-sm' />
+          </span>
+        </div>
         <ServedSendButton isEmpty={isEmpty} />
       </div>
     </div>

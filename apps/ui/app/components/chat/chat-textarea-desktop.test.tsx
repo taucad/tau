@@ -471,6 +471,34 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     },
   );
 
+  /* Review round 2: a painted draft's selection is carried, as an edit's is (P-a). */
+  it("should carry a painted draft's selection into the editor", async () => {
+    const createRange = document.createRange.bind(document);
+    vi.spyOn(document, 'createRange').mockImplementation(() =>
+      Object.assign(createRange(), {
+        getClientRects: () => [],
+        getBoundingClientRect: () => new DOMRect(),
+      }),
+    );
+    renderComposer('Make a gear', codexSession, {
+      earlyInput: {
+        text: 'Make a gear',
+        edited: false,
+        focused: true,
+        focusUnclaimed: false,
+        start: 0,
+        end: 11,
+        direction: 'none',
+        queuedSend: false,
+        prefilled: true,
+      },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toHaveFocus();
+      expect(globalThis.getSelection()?.toString()).toBe('Make a gear');
+    });
+  });
+
   /* R11: Home's native input held focus, with the composer's outline, until this replaced it. The editor
    * takes focus in the same commit, so no frame paints the box unfocused and no key typed during the
    * handover lands on the page. */

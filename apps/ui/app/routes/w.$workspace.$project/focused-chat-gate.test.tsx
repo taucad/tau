@@ -7,6 +7,8 @@ import {
   FocusedChatErrorPanel,
 } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+import { EarlyInputHandoverContext } from '#components/chat/chat-early-input-field.js';
+import type { EarlyInputHandover } from '#components/chat/chat-early-input-field.js';
 
 type StateValue = string | { [key: string]: StateValue };
 
@@ -142,6 +144,15 @@ describe('FocusedChatErrorPanel', () => {
   });
 });
 
+/* A frame's handover, constant so the provider's value is not built in render. */
+const handover = {
+  pending: undefined,
+  release: vi.fn(),
+  claim: () => () => undefined,
+  taken: vi.fn(),
+  decline: vi.fn(),
+} satisfies EarlyInputHandover;
+
 describe('ChatHistoryGate', () => {
   beforeEach(() => {
     chatSync.state = 'loading';
@@ -161,6 +172,25 @@ describe('ChatHistoryGate', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(syncNow).toHaveBeenCalledOnce();
     expect(screen.queryByText('Chat content')).not.toBeInTheDocument();
+  });
+
+  /* A15d review round 2: a lane that stays without a composer declines the served input; one still loading keeps it. */
+  it.each([
+    { state: 'disabled', declines: true },
+    { state: 'failed', declines: true },
+    { state: 'loading', declines: false },
+  ] as const)('declines the served composer while chats are $state: $declines', ({ state, declines }) => {
+    chatSync.state = state;
+    mockState.current = buildState({ value: { ready: { operation: 'idle' } } });
+    handover.decline.mockClear();
+    render(
+      <EarlyInputHandoverContext.Provider value={handover}>
+        <ChatHistoryGate>
+          <div>Chat content</div>
+        </ChatHistoryGate>
+      </EarlyInputHandoverContext.Provider>,
+    );
+    expect(handover.decline).toHaveBeenCalledTimes(declines ? 1 : 0);
   });
 
   it('renders the error panel when ensure has rejected (focusedChatUnresolved + error)', () => {

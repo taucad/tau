@@ -7,7 +7,8 @@
  * message write in one ordered queue that replays on load (`runtime/deferred-child.ts`). The messages written before
  * any event was queued become the loaded chat's first messages. A failed load turns the facade to status `error`
  * with the load's failure as its error, the way an SDK request failure reads; each queued request is rejected with
- * it, and `clearError` lets the next request load again.
+ * it. The next request loads again, as an SDK chat's next request starts afresh after a failed one, and `clearError`
+ * returns the facade to `ready` without one.
  */
 import type { Chat } from '@ai-sdk/react';
 import type { MyUIMessage } from '@taucad/chat';
@@ -105,6 +106,8 @@ export class DeferredChat implements ChatView {
       },
       onFault: (error) => {
         this.#queuedWrite = undefined;
+        /* The queue is gone: the messages written last are what a later load starts from. */
+        this.#base = this.#messages;
         this.#loadError = asError(error);
         this.#notify(this.#statusCallbacks);
         this.#notify(this.#errorCallbacks);
@@ -169,16 +172,19 @@ export class DeferredChat implements ChatView {
   }
 
   public sendMessage: SdkChat['sendMessage'] = async (...args) => {
+    this.#reopen();
     this.#endWrite();
     return this.#child.send(async (chat) => chat.sendMessage(...args));
   };
 
   public regenerate: SdkChat['regenerate'] = async (...args) => {
+    this.#reopen();
     this.#endWrite();
     return this.#child.send(async (chat) => chat.regenerate(...args));
   };
 
   public resumeStream: SdkChat['resumeStream'] = async (...args) => {
+    this.#reopen();
     this.#endWrite();
     return this.#child.send(async (chat) => chat.resumeStream(...args));
   };
@@ -199,11 +205,7 @@ export class DeferredChat implements ChatView {
       chat.clearError();
       return;
     }
-    if (this.#child.phase() === 'failed') {
-      this.#child.retry();
-      this.#loadError = undefined;
-      this.#notify(this.#statusCallbacks);
-      this.#notify(this.#errorCallbacks);
+    if (this.#reopen()) {
       return;
     }
     if (this.#child.pending() > 0) {
@@ -238,6 +240,18 @@ export class DeferredChat implements ChatView {
   public dispose(): void {
     this.#child.dispose();
     this.#queuedWrite = undefined;
+  }
+
+  /* A failed load cleared, so the next request loads again: an SDK chat's next request also starts afresh. */
+  #reopen(): boolean {
+    if (this.#child.phase() !== 'failed') {
+      return false;
+    }
+    this.#child.retry();
+    this.#loadError = undefined;
+    this.#notify(this.#statusCallbacks);
+    this.#notify(this.#errorCallbacks);
+    return true;
   }
 
   /* A queued event after a write ends the write's run of coalescing. */

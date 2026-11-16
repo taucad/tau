@@ -5,6 +5,7 @@ import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
 import { getClientEnvironment } from '#environment.config.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isOfflineShellPath } from '#lib/static-paths.js';
+import { isStaticShellPath } from '#lib/route-classes.js';
 import { OfflineShell } from '#offline/offline-shell.js';
 import { webManifestLinks } from '#lib/web-manifest.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
@@ -13,7 +14,7 @@ import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 import type { Handle } from '#types/matches.types.js';
-import { prefetchModelCatalog } from '#lib/model-catalog.server.js';
+import { prefetchModelCatalog, prefetchShellModelCatalog } from '#lib/model-catalog.server.js';
 import { timeModelCatalogRead } from '#lib/server-timing.server.js';
 import type { Route } from './+types/root.js';
 
@@ -59,9 +60,12 @@ export async function loader({ url, context }: Route.LoaderArgs) {
   throwRedirectIfSubdomain(url, 'www');
   /* P2: nothing here reads the visitor. Theme, sidebar, project count, flags, preferences and consent are client facts
    * (`#lib/client-facts`), applied before first paint by the head script, so the document is the same for everyone. */
-  /* R3: the model catalog is in the first paint. The offline shell is a neutral prerendered document. */
+  /* R3: the model catalog is in the first paint. The offline shell is a neutral prerendered document; a static shell
+   * (PL3) carries the build's catalog, stamped so its bytes do not depend on the build's clock. */
   /* LB0a: how the catalog cache was found and how long it was waited on go out in the document's `Server-Timing`. */
-  const queries = isOfflineShellPath(url.pathname) ? undefined : timeModelCatalogRead(context, prefetchModelCatalog);
+  const queries = isOfflineShellPath(url.pathname)
+    ? undefined
+    : timeModelCatalogRead(context, isStaticShellPath(url.pathname) ? prefetchShellModelCatalog : prefetchModelCatalog);
   return {
     env: await getClientEnvironment(),
     queries: await queries,

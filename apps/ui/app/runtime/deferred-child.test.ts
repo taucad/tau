@@ -186,5 +186,21 @@ describe('createDeferredChild', () => {
       expect(child.phase()).toBe('disposed');
       expect(child.current()).toBeUndefined();
     });
+
+    it('should stay disposed and replay nothing when the owner disposes it as it loads', async () => {
+      const { child, load, onLoaded } = deferredChild();
+      const ran = vi.fn();
+      onLoaded.mockImplementation(() => {
+        child.dispose();
+      });
+
+      const queued = child.send(ran);
+      child.load();
+      load.resolve('module');
+
+      await expect(queued).resolves.toBeUndefined();
+      expect(ran).not.toHaveBeenCalled();
+      expect(child.phase()).toBe('disposed');
+    });
   });
 });

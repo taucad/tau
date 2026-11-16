@@ -151,6 +151,24 @@ const stringField = (value: unknown, key: string): string | undefined => {
 };
 
 /**
+ * The models one `test_model` result loaded, in load order: its lineage's complete loads, else, when a compact result
+ * dropped the lineage (over 128 KB), each kept source revision's entry provided the run's lineage was complete. The
+ * grader then reads what every result keeps, not what only a small one does.
+ */
+const testModelLoads = (content: JsonValue): readonly string[] => {
+  if (!isRecord(content) || content['lineage'] !== undefined) {
+    return testModelLoadedModels(content);
+  }
+  const revisions = content['lineageStatus'] === 'complete' ? content['sourceRevisions'] : undefined;
+  return Array.isArray(revisions)
+    ? revisions.flatMap((revision) => {
+        const entry = stringField(revision, 'entry')?.replace(/^\.?\/+/u, '');
+        return entry === undefined || entry === '' ? [] : [entry];
+      })
+    : [];
+};
+
+/**
  * The entry a turn wrote: the last file its own `evaluate_model` rendered, else the first model its own `test_model`
  * loaded, else the manifest's main.
  *
@@ -172,7 +190,7 @@ export const findL2Entry = async (
    * complete `test_model` load rendered, as it adopts an `evaluate_model` target (blueprint D3). */
   const loaded = input.cadCalls
     .filter(({ invocation, result }) => invocation.toolName === toolName.testModel && !result.isError)
-    .flatMap(({ result }) => testModelLoadedModels(result.content))
+    .flatMap(({ result }) => testModelLoads(result.content))
     .find((path) => path !== l2OraclePath);
   if (loaded !== undefined) {
     return loaded;

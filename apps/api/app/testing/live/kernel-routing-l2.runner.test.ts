@@ -1,10 +1,10 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
-import { runL2Task } from '#testing/live/kernel-routing-l2.js';
-import type { L2Agent } from '#testing/live/kernel-routing-l2.js';
+import { createL2Project, findL2Entry, runL2Task } from '#testing/live/kernel-routing-l2.js';
+import type { L2Agent, L2CadCall } from '#testing/live/kernel-routing-l2.js';
 import { l2Tasks, renderL2Oracle } from '#testing/live/kernel-routing-l2.tasks.js';
 import type { L2ModelFile } from '#testing/live/kernel-routing-l2.tasks.js';
 
@@ -69,5 +69,65 @@ describe('the L2 runner on tau mcp', () => {
       },
     });
     expect(verdict).toMatchObject({ passed: true, entryPath: model.path, kernel: model.kernel });
+  });
+});
+
+describe('findL2Entry', () => {
+  /* A compact `test_model` result, as the registry returns one over 128 KB: no `lineage`, the run's `lineageStatus` and
+   * each loaded model's source revision kept. */
+  const compactTestModel = (lineageStatus: 'complete' | 'unavailable'): L2CadCall => ({
+    invocation: {
+      toolCallId: 'compact-test-model',
+      toolName: toolName.testModel,
+      input: { files: ['parts/check.geospec.ts'] },
+      signal: new AbortController().signal,
+    },
+    result: {
+      content: {
+        success: true,
+        passed: 4,
+        total: 4,
+        runStatus: lineageStatus === 'complete' ? 'passed' : 'inconclusive',
+        lineageStatus,
+        failures: [],
+        passes: [],
+        sourceRevisions: [
+          { entry: 'parts/spacer.scad', files: { 'parts/spacer.scad': `sha256:${'a'.repeat(64)}` } },
+          { entry: 'parts/washer.scad', files: { 'parts/washer.scad': `sha256:${'b'.repeat(64)}` } },
+        ],
+        omittedFailures: 0,
+        omittedPasses: 4,
+        omittedSourceRevisions: 0,
+        omittedTests: 0,
+        omittedLineage: 1,
+        fullResult: {
+          path: '.tau/records/compact-test-model/result.json',
+          mimeType: 'application/json',
+          byteLength: 200_000,
+          sha256: 'c'.repeat(64),
+        },
+      },
+      isError: false,
+    },
+  });
+
+  it('should take the first model a compact test_model result loaded when its lineage was dropped', async () => {
+    const projectRoot = await createL2Project({ id: 'compact-entry' });
+    try {
+      await expect(findL2Entry({ projectRoot, cadCalls: [compactTestModel('complete')] })).resolves.toBe(
+        'parts/spacer.scad',
+      );
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('should not take a compact result as adoption evidence when its lineage was not complete', async () => {
+    const projectRoot = await createL2Project({ id: 'compact-entry-unavailable' });
+    try {
+      await expect(findL2Entry({ projectRoot, cadCalls: [compactTestModel('unavailable')] })).resolves.toBeUndefined();
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -1003,6 +1003,7 @@ describe("a capture declares the checkout's placeholders to its index (D9)", () 
     const { materializeTree } = createApplyTreeEffects({
       useFileSystem: async (_place, operation) => operation(live),
       capture,
+      onApplyingTree: undefined,
       policy: tauRevisionPolicy.policy,
       withCheckoutFence: async (_checkoutId, operation) => operation(),
       checkoutTreeId: async (_checkoutId, tree) => revisionTreeId(tree, 'sha1'),

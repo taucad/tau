@@ -1462,10 +1462,7 @@
     },
     {
       // Current file/telemetry inversion. -- W4
-      "files": [
-        "apps/ui/app/utils/workspace-telemetry.utils.test.ts",
-        "apps/ui/app/utils/workspace-telemetry.utils.ts"
-      ],
+      "files": ["apps/ui/app/utils/workspace-telemetry.utils.ts"],
       "rules": { "no-restricted-imports": "off" }
     },
     {

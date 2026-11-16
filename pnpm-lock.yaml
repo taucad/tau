@@ -3598,6 +3598,9 @@ importers:
 
   apps/libs/files-ui:
     dependencies:
+      '@taucad/fs-client':
+        specifier: workspace:*
+        version: link:../fs-client
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
@@ -3619,6 +3622,9 @@ importers:
       lucide-react:
         specifier: 'catalog:'
         version: 0.552.0(react@19.3.1)
+      radix-ui:
+        specifier: 'catalog:'
+        version: 1.8.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     devDependencies:
       '@taucad/runtime':
         specifier: workspace:*

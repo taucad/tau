@@ -19,14 +19,16 @@ import type { ContentFacts, FileSystemProvider } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
-import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import { createApplyTreeEffects } from '#apply-tree.js';
+import { revisionTreeId } from '#git-tree-id.js';
 import { lfsPointerFor } from '#lfs.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { recordedBy, testIdentity } from '#test/identity.js';
-import { generatedGitattributesContent, generatedGitattributesPath } from '#workspace-config.js';
+import { generatedGitattributesContent, generatedGitattributesPath, tauRevisionPolicy } from '#workspace-config.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
 
@@ -975,6 +977,53 @@ describe("a capture declares the checkout's placeholders to its index (D9)", () 
     await at.rooted.writeFile(generatedGitattributesPath, '');
     await cut(at.actors);
     expect(await at.rooted.pendingPaths!(['models/part.step', 'vendor/blob.bin'])).toStrictEqual(['vendor/blob.bin']);
+  });
+
+  /* #2010's flush verifies by the paths it wrote and captures nothing: its own writes end the marks they replace (D9). */
+  it('should unmark what a fill flush filled by its paths and keep the marks of the pointers it left', async () => {
+    const encoder = new TextEncoder();
+    const object = encoder.encode('solid part a\n');
+    const { bytes: pointerA } = lfsPointerFor(object);
+    const { bytes: pointerB } = lfsPointerFor(encoder.encode('solid part b\n'));
+    const decoder = new TextDecoder();
+    const at = await fixture(
+      { ...files(3), 'models/a.step': decoder.decode(pointerA), 'models/b.step': decoder.decode(pointerB) },
+      { backend: 'memory', raw: true },
+    );
+    await cut(at.actors);
+    expect(await at.rooted.pendingPaths!(['models/a.step', 'models/b.step'])).toStrictEqual([
+      'models/a.step',
+      'models/b.step',
+    ]);
+    const live = at.rooted;
+    const capture = vi.fn(async () =>
+      captureRevisionTree(live, { exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned }),
+    );
+    let temporary = 0;
+    const { materializeTree } = createApplyTreeEffects({
+      useFileSystem: async (_place, operation) => operation(live),
+      capture,
+      policy: tauRevisionPolicy.policy,
+      withCheckoutFence: async (_checkoutId, operation) => operation(),
+      checkoutTreeId: async (_checkoutId, tree) => revisionTreeId(tree, 'sha1'),
+      temporarySibling: (path, role) => {
+        temporary += 1;
+        return `${path}.tau-${role}.${String(temporary)}.tmp`;
+      },
+      unlinkIfPresent: async (rooted, path) => {
+        await rooted.unlink(path).catch(() => undefined);
+      },
+    });
+
+    await materializeTree(
+      { id: 'live', projectId: 'project-1', root: '/', kind: 'live', branch: 'main', baseRevisionId: undefined },
+      new ImmutableRevisionTree([['models/a.step', object]]),
+      { before: new ImmutableRevisionTree([['models/a.step', pointerA]]), purpose: 'fill' },
+    );
+
+    expect(capture).not.toHaveBeenCalled();
+    expect(await live.readFile('models/a.step')).toStrictEqual(object);
+    expect(await at.rooted.pendingPaths!(['models/a.step', 'models/b.step'])).toStrictEqual(['models/b.step']);
   });
 
   /* The declaration reads the attributes as the repository does, so it names exactly what the fill fills. */

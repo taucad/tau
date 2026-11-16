@@ -58,8 +58,11 @@ export function EditorDocumentSessionProvider({ children }: { readonly children:
     };
     /* The page going cannot await the write: whatever it has not confirmed is recorded for the next open (A7e). */
     const flushAndRecord = (): void => {
-      next.flushSaves();
-      next.recordOwedText();
+      try {
+        next.flushSaves();
+      } finally {
+        next.recordOwedText();
+      }
     };
     const flushWhenHidden = (): void => {
       if (document.visibilityState === 'hidden') {

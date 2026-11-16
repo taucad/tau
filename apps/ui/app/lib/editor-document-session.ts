@@ -117,13 +117,13 @@ export type OwedEditorText = Readonly<{ token: string; path: string; base: strin
 export type EditorTextDebtPort = Readonly<{
   list: (place: EditorTextPlace) => readonly OwedEditorText[];
   write: (place: EditorTextPlace, record: OwedEditorText) => void;
-  clear: (place: EditorTextPlace, path: string, token?: string) => void;
+  clear: (place: EditorTextPlace, path: string, token: string) => void;
 }>;
 
 /** One project's owed text under one scope: the only records a session reads or clears. */
 export type EditorTextPlace = Readonly<{ scope: EditorTextScope; projectId: string }>;
 
-/** The `localStorage` key prefix of owed editor text; the workspace, project, person and path follow it. */
+/** The `localStorage` key prefix of owed editor text; the workspace, project, person, path and token follow it. */
 export const editorTextDebtStorageKeyPrefix = 'tau-editor-text-owed:';
 /** At most this many records are kept: a write past it drops the oldest (A7e, 22:19Z). */
 export const editorTextDebtLimit = 64;
@@ -136,8 +136,9 @@ const owedTextChanges = new Topic<void>({ name: 'EditorDocumentSession.owedText'
 
 const scopeHead = ({ scope, projectId }: EditorTextPlace): string =>
   `${editorTextDebtStorageKeyPrefix}${JSON.stringify([scope.workspace, projectId, scope.actorId]).slice(0, -1)},`;
-const owedTextKey = ({ scope, projectId }: EditorTextPlace, path: string): string =>
-  `${editorTextDebtStorageKeyPrefix}${JSON.stringify([scope.workspace, projectId, scope.actorId, path])}`;
+/* One key per record: a page never writes over text another page left owed for the same path. */
+const owedTextKey = ({ scope, projectId }: EditorTextPlace, path: string, token: string): string =>
+  `${editorTextDebtStorageKeyPrefix}${JSON.stringify([scope.workspace, projectId, scope.actorId, path, token])}`;
 
 const owedTextOf = (value: string | undefined): OwedEditorText | undefined => {
   if (value === undefined) {
@@ -214,7 +215,7 @@ export const editorTextDebts: EditorTextDebtPort = {
   },
   write: (place, record) => {
     try {
-      localStorage.setItem(owedTextKey(place, record.path), JSON.stringify(record));
+      localStorage.setItem(owedTextKey(place, record.path, record.token), JSON.stringify(record));
       boundOwedText(localStorage);
     } catch {
       /* Refused: the text stays where it was before A7e, on its way to disk or lost with the page. */
@@ -223,11 +224,7 @@ export const editorTextDebts: EditorTextDebtPort = {
   },
   clear: (place, path, token) => {
     try {
-      const key = owedTextKey(place, path);
-      if (token !== undefined && owedTextOf(localStorage.getItem(key) ?? undefined)?.token !== token) {
-        return;
-      }
-      localStorage.removeItem(key);
+      localStorage.removeItem(owedTextKey(place, path, token));
     } catch {
       /* The record stays; a later replay finds its text on disk and clears it. */
     }
@@ -774,7 +771,8 @@ export class EditorDocumentSession {
       return;
     }
     const place = { scope, projectId: this.#projectId };
-    for (const record of debts.list(place)) {
+    /* Oldest first: text a later page typed over it replays against what the earlier one landed. */
+    for (const record of [...debts.list(place)].sort((left, right) => left.at - right.at)) {
       if (
         this.#replayedTokens.has(record.token) ||
         [...this.#ownTokens.values()].includes(record.token) ||
@@ -903,7 +901,8 @@ export class EditorDocumentSession {
         release();
       }
     } catch {
-      /* Kept: the text is replayed by a later open. */
+      /* Kept: taken up again after a confirmed save of this session, or by a later open. */
+      this.#retryAfterSave.add(record.token);
     }
   }
 

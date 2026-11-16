@@ -42,13 +42,10 @@ function createDebts(): EditorTextDebtPort & { records: Map<string, OwedEditorTe
     list: (place) =>
       [...records.entries()].filter(([key]) => key.startsWith(prefix(place))).map(([, record]) => record),
     write: (place, record) => {
-      records.set(`${prefix(place)}${record.path}`, record);
+      records.set(`${prefix(place)}${record.path}:${record.token}`, record);
     },
     clear: (place, path, token) => {
-      const key = `${prefix(place)}${path}`;
-      if (token === undefined || records.get(key)?.token === token) {
-        records.delete(key);
-      }
+      records.delete(`${prefix(place)}${path}:${token}`);
     },
   };
 }
@@ -400,7 +397,7 @@ describe('EditorDocumentSession owed text (A7e)', () => {
     expect(pending).toBeInstanceOf(Promise);
   });
 
-  it('should stop owing for a replay that never settles once its session goes', async () => {
+  it('should let go of a replay that never settles once its session goes, keeping its record', async () => {
     const debts = createDebts();
     await closeWithUnsavedEdit('p-stuck', debts);
     const content = service('one\n');
@@ -430,5 +427,40 @@ describe('EditorDocumentSession owed text (A7e)', () => {
     expect(debts.list({ scope: ada, projectId: 'p-swap' })).toHaveLength(1);
     session.dispose();
     setEditorTextScope('p-swap', undefined);
+  });
+
+  it('should keep text two pages left owed for one path, replaying the later as a conflict over the earlier', async () => {
+    /* In the real store, a second page's text for the same path is a record of its own, not a write over the first. */
+    await closeWithUnsavedEdit('p-two', editorTextDebts);
+    await closeWithUnsavedEdit('p-two', editorTextDebts);
+    expect(editorTextDebts.list({ scope: ada, projectId: 'p-two' })).toHaveLength(2);
+    localStorage.clear();
+    /* Listed later-first, replayed earlier-first. */
+    const debts = createDebts();
+    const owed = { path: 'main.ts', base: stringToBase64('one\n') };
+    debts.write({ scope: ada, projectId: 'p-two' }, { ...owed, token: 'later', text: 'also\n', at: 2000 });
+    debts.write({ scope: ada, projectId: 'p-two' }, { ...owed, token: 'earlier', text: 'mine\n', at: 1000 });
+
+    const content = service('one\n');
+    const record = vi.fn(async (): Promise<EditorConflictOutcome> => recorded);
+    content.saveEditor.mockImplementation(async (_path, data) => {
+      content.resolve.mockResolvedValue({ kind: 'text', content: data });
+      content.peekOutcome.mockReturnValue({ kind: 'text', content: data });
+    });
+    setEditorTextScope('p-two', ada);
+    const session = new EditorDocumentSession({
+      contentService: content,
+      projectId: 'p-two',
+      textDebts: debts,
+      recordEditorConflict: record,
+    });
+    await vi.waitFor(() => {
+      expect(debts.list({ scope: ada, projectId: 'p-two' })).toEqual([]);
+    });
+    expect(content.saveEditor).toHaveBeenCalledTimes(1);
+    expect(content.saveEditor).toHaveBeenCalledWith('main.ts', bytes('mine\n'), bytes('one\n'));
+    expect(record).toHaveBeenCalledWith({ path: 'main.ts', base: 'one\n', mine: 'also\n' });
+    session.dispose();
+    setEditorTextScope('p-two', undefined);
   });
 });

@@ -215,13 +215,45 @@
         "{projectRoot}/scripts/critical-path.mts",
         "{projectRoot}/critical-budget.json",
         {
-          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,client/.vite/manifest.json,client/assets/**}"
+          "dependentTasksOutputFiles": "apps/ui/build/{client-module-ids.json,client/.vite/manifest.json,client/assets/**,client/**/*.html}"
         }
       ],
       "outputs": [],
       "options": {
         "cwd": ".",
         "command": "node apps/ui/scripts/check-critical-budget.mts"
+      }
+    },
+    "check-static-shells": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Static-shell gate (progressive loading PL3, shell invariants 1, 2, 5 and 6): for each static-shell class of app/lib/route-classes.ts, renders the shell through the web server build for two different visitors a day apart and requires the prerendered bytes, the function's own document for a real URL of the class, the build id /health/build answers, the function document's isolation, CSP, reporting and document policies on the static headers (netlify.toml and the _headers the build writes), and no rendered placeholder. Runs with the build's environment (TAU_API_URL, TAU_WEBSOCKET_URL, TAU_FRONTEND_URL, as ci.yml sets them workflow-wide). CI's build lane runs it whenever this app is affected."
+      },
+      "dependsOn": ["build"],
+      "inputs": [
+        "{projectRoot}/scripts/check-static-shells.mts",
+        "{projectRoot}/scripts/write-content-security-policy-headers.mts",
+        "{projectRoot}/app/lib/route-classes.ts",
+        "{projectRoot}/app/lib/content-security-policy.server.ts",
+        "{projectRoot}/netlify.toml",
+        {
+          "env": "TAU_API_URL"
+        },
+        {
+          "env": "TAU_WEBSOCKET_URL"
+        },
+        {
+          "env": "TAU_FRONTEND_URL"
+        },
+        {
+          "dependentTasksOutputFiles": "apps/ui/build/{server/**,client/**/*.html}"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-static-shells.mts"
       }
     },
     "size": {
@@ -420,14 +452,15 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Real-browser source editor and chat lane acceptance on the affected CI browser lane."
+        "description": "Real-browser source editor, chat lane and composer image conversion acceptance (raster host parity over the web-worker transport) on the affected CI browser lane."
       },
       "options": {
         "cwd": "{projectRoot}",
         "parallel": false,
         "commands": [
           "../../node_modules/.bin/vitest run --config app/components/code/code-editor.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts'"
+          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts'",
+          "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project chromium"
         ]
       }
     },
@@ -442,10 +475,11 @@
         "test:e2e:chat-print",
         "test:e2e:follow-latest-output",
         "test:e2e:terminal-renderer",
-        "test:e2e:history-lanes"
+        "test:e2e:history-lanes",
+        "test:e2e:attachment-image-engines"
       ],
       "metadata": {
-        "description": "Chromium suites for worker capabilities, the CAD viewer's real Dockview, SVG and GPU resize interactions, and History's lanes. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium. Each Vitest Browser config is its own task (dependsOn): Nx runs every task that does not depend on a failed one, so one failing config no longer hides the others' results, and the target still fails when any config fails. The suites declare parallelism false, so they still run one at a time as before."
+        "description": "Chromium suites for worker capabilities, composer image host parity (c) on Firefox and WebKit, the CAD viewer's real Dockview, SVG and GPU resize interactions, and History's lanes. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium. Each Vitest Browser config is its own task (dependsOn): Nx runs every task that does not depend on a failed one, so one failing config no longer hides the others' results, and the target still fails when any config fails. The suites declare parallelism false, so they still run one at a time as before."
       }
     },
     "test:e2e:chat-viewer": {
@@ -554,6 +588,17 @@
       "options": {
         "cwd": "{projectRoot}",
         "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/history-lanes.vitest.browser.config.ts'"
+      }
+    },
+    "test:e2e:attachment-image-engines": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "metadata": {
+        "description": "Composer image conversion host parity (c): the attachment-image suite, raster golden parity included, in Firefox and WebKit over the web-worker transport (attachment-image.vitest.browser.config.ts). One task of test:e2e, so it runs nightly in e2e-nightly.yml, never on the pull-request verify-browser lane."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project firefox --project webkit"
       }
     },
     "sourcemaps": {

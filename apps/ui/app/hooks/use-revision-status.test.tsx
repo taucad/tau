@@ -1075,8 +1075,9 @@ describe('the page client of the worker revision root', () => {
     messages.length = 0;
 
     let settled = false;
+    let outcome: string | undefined;
     const flush = (async () => {
-      await client.saveRevision('close');
+      outcome = await client.saveRevision('close');
       settled = true;
     })();
 
@@ -1088,10 +1089,12 @@ describe('the page client of the worker revision root', () => {
     ports[0]?.postMessage({
       type: 'result',
       id: frame.id,
-      result: { kind: 'saved' },
+      result: { kind: 'saved', outcome: 'recorded' },
     } satisfies WorkerRevisionResponse);
     await flush;
     expect(settled).toBe(true);
+    /* What the cut came to reaches the caller (A7e). */
+    expect(outcome).toBe('recorded');
   });
 
   /* Round 27: the page reads a foreign run by whether the host's placement can pull the chat; an older host says nothing. */

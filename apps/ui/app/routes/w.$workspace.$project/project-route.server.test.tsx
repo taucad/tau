@@ -98,7 +98,8 @@ it('should render the app shell and the resolving content in the server HTML of 
   /* No DOM on the server: the shell's own markup, from its opening tag to its close. */
   const shell = /<nav data-testid="app-shell">([\s\S]*)<\/nav>/u.exec(html)?.[1];
   expect(shell, 'U3: the server HTML lacks the app shell').toBeDefined();
-  expect(shell).toContain('data-testid="workspace-skeleton"');
+  expect(shell).toContain('data-slot="workspace-frame"');
+  expect(shell).toContain('data-slot="workspace-lane"');
   expect(seen.projectHook).toBe(0);
 });
 

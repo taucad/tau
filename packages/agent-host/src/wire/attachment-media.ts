@@ -212,7 +212,12 @@ const convert = async (
   }
   // The port's output is labelled and checked like any other bytes (I1).
   const converted = probeImage(output);
-  if (converted === undefined || !passThroughFormats.has(converted.format) || !fitsStored(converted, output.length)) {
+  if (
+    converted === undefined ||
+    !passThroughFormats.has(converted.format) ||
+    converted.animated ||
+    !fitsStored(converted, output.length)
+  ) {
     return refuse(
       'transcode-failed',
       `Converting the ${formatName(probe.format)} image did not produce a JPEG within ${attachmentImageLimits.maxEdge} px and ${attachmentImageLimits.maxBytes} bytes.`,

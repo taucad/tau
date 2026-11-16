@@ -409,7 +409,9 @@ export const createRelayedFileSystemProvider = (
         proxy.statTree(path, options?.signal === undefined ? undefined : { signal: options.signal }),
       );
       const { admits } = options ?? {};
-      return admits === undefined ? rows : rows.filter((row) => admittedRow(row.path, admits));
+      /* A row a tree write has yet to land is not on disk: the agent could not read it (I7). */
+      const landed = rows.filter((row) => row.arriving !== true);
+      return admits === undefined ? landed : landed.filter((row) => admittedRow(row.path, admits));
     },
     /* The caller's listed head metadata stays here: the authority's index holds its own. */
     facts: async (paths, options) =>

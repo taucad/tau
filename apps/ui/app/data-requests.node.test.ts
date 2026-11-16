@@ -25,7 +25,10 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('#lib/model-catalog.server.js', () => ({ prefetchModelCatalog: mocks.prefetchModelCatalog }));
+vi.mock('#lib/model-catalog.server.js', () => ({
+  prefetchModelCatalog: mocks.prefetchModelCatalog,
+  prefetchShellModelCatalog: mocks.prefetchModelCatalog,
+}));
 vi.mock('#lib/observability-harness-context.js', () => ({
   isObservabilityHarnessEnabled: () => mocks.harnessEnabled,
 }));

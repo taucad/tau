@@ -30,7 +30,6 @@
  * `setDependencies` swaps them at once.
  */
 
-import type { Chat } from '@ai-sdk/react';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
 import { ObservationService } from '@taucad/fs-client/observation-service';
@@ -75,11 +74,10 @@ import { attachmentReferenceOf } from '@taucad/chat-ui/utils/attachment.utils';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import { deferredRecordStore, referencedAttachments, removeRecord } from '#services/chat-session-store-composer.js';
 import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
-import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
+import { resizeImageActor } from '#hooks/attachment-image.actor.js';
 import { clearLedger } from '@taucad/chat-ui/services/rpc-ledger';
 import { parseErrorForPersistence } from '@taucad/chat-ui/utils/error.utils';
 import { buildEditedUserMessage } from '#utils/chat.utils.js';
-import { createChatInstance } from '@taucad/chat-ui/chat-clients/_internal/shared-chat-transport';
 import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
@@ -144,6 +142,10 @@ import {
   presentationErrorFacts,
   warnPresentation,
 } from '#services/chat-presentation-diagnostics.js';
+import { chatSdkSource } from '#services/chat-sdk-loader.js';
+import type { ChatSdkSource } from '#services/chat-sdk-loader.js';
+import { DeferredChat } from '#services/deferred-chat.js';
+import type { ChatView } from '#services/deferred-chat.js';
 
 /** Retries of a transiently failed watch or transcript before it is latched as failed, per run. */
 const presentationRetryLimit = 3;
@@ -278,7 +280,8 @@ const placeChat = (chat: ChatEntity, placement: TauAgentHostId | undefined): Cha
 
 export type ChatSession = {
   readonly chatId: string;
-  readonly chat: Chat<MyUIMessage>;
+  /** The chat's AI SDK `Chat`, which loads on demand behind an ordered event queue (PL1). */
+  readonly chat: ChatView;
   readonly persistenceActorRef: Actor<typeof chatPersistenceMachine>;
   readonly draftActorRef: Actor<typeof draftMachine>;
   /**
@@ -730,6 +733,11 @@ export type ChatSessionStoreOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
   Readonly<{
     chatSession?: typeof chatSessionMachine;
     /**
+     * Where each session's AI SDK `Chat` loads from (PL1): the app runtime composes the loader beside the session
+     * loaders (D5). The chat's one source by default.
+     */
+    chatSdk?: ChatSdkSource;
+    /**
      * The closures the store calls, given at construction (A2): the app runtime passes the project library's ports.
      * Without them the store's defaults throw until `setDependencies`.
      */
@@ -895,6 +903,7 @@ export class ChatSessionStore {
   readonly #projectRunKeys = new Map<string, string>();
   readonly #projectRunVersions = new Map<string, number>();
   readonly #chatSessionLogic: typeof chatSessionMachine;
+  readonly #chatSdk: ChatSdkSource;
   readonly #rootOptions: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
   /** The last revision facts each project reported, replayed to a chat root created after them. */
   readonly #revisionFacts = new Map<string, ChatRevisionFacts>();
@@ -996,7 +1005,16 @@ export class ChatSessionStore {
   };
 
   public constructor(options: ChatSessionStoreOptions = {}) {
-    const { chatSession, dependencies, files, focusedProject, projectSessions, ...rootOptions } = options;
+    const {
+      chatSession,
+      dependencies,
+      files,
+      focusedProject,
+      projectSessions,
+      chatSdk = chatSdkSource,
+      ...rootOptions
+    } = options;
+    this.#chatSdk = chatSdk;
     if (dependencies !== undefined) {
       this.#deps = { ...this.#deps, ...dependencies };
     }
@@ -4785,15 +4803,19 @@ export class ChatSessionStore {
     });
 
     const transport = new BrowserPlacementChatTransport<MyUIMessage>();
-    const chat = createChatInstance({
+    /* PL1: the SDK loads now (at once when an earlier chat loaded it), so the chat is the real one well before a host
+     * answers a send; until then it queues. */
+    const chat = new DeferredChat({
       chatId,
       transport,
+      sdk: this.#chatSdk,
       /* The SDK closes a view stream; only the projected host log ends a run. */
       onFinish: () => undefined,
       // SDK watch errors are presentation-local. The host log owns durable
       // run failure; a retired stream callback must not rewrite chat.error.
       onError: () => undefined,
     });
+    chat.load();
 
     // Wire the AI SDK Chat's snapshot callbacks into per-chatId subscriber
     // sets. `~registerMessagesCallback` etc. are public (the `~` prefix is
@@ -4977,6 +4999,7 @@ export class ChatSessionStore {
         unregisterMessages();
         unregisterStatus();
         unregisterError();
+        chat.dispose();
       },
     };
 

@@ -352,10 +352,14 @@ const main = async (): Promise<void> => {
   // cold-store check below, but its parent need not exist on a fresh host.
   await files.mkdir(dirname(profile), true);
   await files.mkdir(profile, false);
-  if (linuxConsumer && channel !== 'staging') {
-    throw new Error('Linux clean-host acceptance is staging only');
-  }
-  const store = channel === 'staging' ? join(profile, 'config/dependencies') : defaultDependencyStore();
+  // Production uses the per-user data root. The consumer runs with HOME set and no XDG_DATA_HOME or TAU_CONFIG_DIR, so
+  // its store is under its own home, not the runner's (D-H5).
+  const store =
+    channel === 'staging'
+      ? join(profile, 'config/dependencies')
+      : linuxConsumer
+        ? join(linuxConsumer.home, '.local/share/tau/dependencies')
+        : defaultDependencyStore();
   const coldEntries = await files.readdir(join(store, 'closures/sha256'));
   if (coldEntries.length > 0) {
     throw new Error('First-use qualification requires an initially cold dependency store');

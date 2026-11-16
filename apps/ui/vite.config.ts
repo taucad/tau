@@ -32,6 +32,8 @@ import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-pl
 import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config lives outside app aliases.
 import { createServerOutputAssets } from './server-output-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
+import { netlifyFunctionExcludedPaths } from './app/lib/route-classes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -159,6 +161,7 @@ const desktopSourceOverrides = new Map([
   ['#constants/ephemeral-kernel-options.js', '#constants/ephemeral-kernel-options.desktop.js'],
   ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
+  ['#services/attachment-image-backend.js', '#services/attachment-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
@@ -622,8 +625,12 @@ export default defineConfig(({ command, mode }) => {
           [
             createUiReactCompilerPlugin(),
             reactRouter(),
-            // Netlify plugin is only needed for Netlify builds
-            ...(isNetlify ? [netlifyReactRouter()] : []),
+            /*
+             * Netlify plugin is only needed for Netlify builds. Its function is registered at `/*` with
+             * `preferStatic`, and Netlify runs functions before redirects, so a static shell's URLs are excluded
+             * here for `netlify.toml`'s 200 rewrite to reach them (`app/lib/route-classes.ts`).
+             */
+            ...(isNetlify ? [netlifyReactRouter({ excludedPaths: netlifyFunctionExcludedPaths() })] : []),
           ]),
       tailwindcss(),
       // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284

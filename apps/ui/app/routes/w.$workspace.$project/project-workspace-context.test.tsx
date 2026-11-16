@@ -174,8 +174,8 @@ vi.mock('@taucad/ui/components/keyboard', async (importOriginal) => ({
   useKeybinding: keyboard.useKeybinding,
 }));
 
-const { ProjectWorkspaceProvider, resolveCompactAuxiliary, useFileReturn, useProjectWorkspace } =
-  await import('./project-workspace-context.js');
+const { resolveCompactAuxiliary, useFileReturn, useProjectWorkspace } = await import('./project-workspace-context.js');
+const { ProjectWorkspaceProvider } = await import('./project-workspace-provider.js');
 const keyboardActual = await vi.importActual<typeof KeyboardModule>('@taucad/ui/components/keyboard');
 type Workspace = NonNullable<ReturnType<typeof useProjectWorkspace>>;
 

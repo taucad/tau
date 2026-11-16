@@ -1,10 +1,17 @@
 import { describe, expect, test } from 'vitest';
+import { RouterContextProvider } from 'react-router';
 import { loader, renderLegalDocument, slugify } from '#app/legal.server.js';
 import { legalDocuments } from '#www/legal.js';
 
 const load = (document: string): ReturnType<typeof loader> => {
   const url = new URL(`https://tau.new/legal/${document}/`);
-  return loader({ params: { document }, request: new Request(url), url, pattern: '/legal/:document', context: {} });
+  return loader({
+    params: { document },
+    request: new Request(url),
+    url,
+    pattern: '/legal/:document',
+    context: new RouterContextProvider(),
+  });
 };
 
 describe('legal documents', () => {

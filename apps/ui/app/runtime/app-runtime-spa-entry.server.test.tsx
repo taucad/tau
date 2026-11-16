@@ -4,7 +4,7 @@
  * prerender of `index.html` answered 500 (`SessionsProvider must be used within <AppRuntimeProvider>`).
  */
 import { createStaticHandler } from 'react-router';
-import type { AppLoadContext, EntryContext } from 'react-router';
+import type { EntryContext } from 'react-router';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { describe, expect, it } from 'vitest';
 import handleRequest from '#runtime/app-runtime-spa-entry.server.js';
@@ -68,13 +68,7 @@ const spaContext = async (request: Request): Promise<EntryContext> => {
 describe('SPA prerender entry', () => {
   it('should prerender the document with an unstarted app runtime', async () => {
     const request = new Request('http://localhost/');
-    const response = await handleRequest(
-      request,
-      200,
-      new Headers(),
-      await spaContext(request),
-      mock<AppLoadContext>(),
-    );
+    const response = await handleRequest(request, 200, new Headers(), await spaContext(request), {});
     const body = await response.text();
 
     expect(response.status).toBe(200);
@@ -85,13 +79,7 @@ describe('SPA prerender entry', () => {
 
   it('should answer HEAD without rendering', async () => {
     const request = new Request('http://localhost/', { method: 'HEAD' });
-    const response = await handleRequest(
-      request,
-      204,
-      new Headers(),
-      await spaContext(request),
-      mock<AppLoadContext>(),
-    );
+    const response = await handleRequest(request, 204, new Headers(), await spaContext(request), {});
     expect(response.status).toBe(204);
     expect(await response.text()).toBe('');
   });

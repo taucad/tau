@@ -164,6 +164,7 @@ describe('WorkspaceFrame', () => {
     const input = document.querySelector('input[aria-label="Page input"]');
     view.rerender(content(false));
 
+    expect(document.querySelector('[data-slot=workspace-frame]')).toBeNull();
     expect(document.querySelector('input[aria-label="Page input"]')).toBe(input);
     view.rerender(content(true));
     expect(document.querySelector('input[aria-label="Page input"]')).toBe(input);

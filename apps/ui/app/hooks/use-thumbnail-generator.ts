@@ -8,8 +8,8 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { thumbnailMachine } from '#machines/thumbnail.machine.js';
 import type { ThumbnailResult } from '#machines/thumbnail.machine.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
+import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { isEmptyGlb } from '@taucad/viewer/utils/inspect-glb';
 
 /** Project-relative path for the generated thumbnail. */

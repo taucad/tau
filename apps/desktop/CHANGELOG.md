@@ -1,5 +1,83 @@
 # Changelog
 
+## 0.5.0 (2026-11-16)
+
+### Features
+
+- feat(heif): Add @taucad/heif so HEIC photos convert to JPEG in the composer, desktop and CLI (#2337) (b388a4315)
+- feat(api-llm-gateway): Add Gemini 4 Hydrogen and retire Gemini 3 (#2329) (297731779)
+- feat(ui): Convert composer images in a runtime worker and refuse by format (#2336) (66bd84d6e)
+- feat(host): Convert ACP agent images the chat cannot store as sent (#2335) (0b98b03c9)
+- feat(ui): Replay editor text a reload left unsaved, and keep a refused close cut owed (A7e) (#2317) (35858af88)
+- feat(agent-host): Decide what every host stores with one attachment storage policy (#2319) (52b874e3d)
+- feat(image)!: Add raster transcoder and rename transcoder ids to render, svg, raster (#2316) (ac237eec9)
+- feat(agent-observability): Label tool facts and report resumed runs (LW17, LU14) (#2205) (afdc792de)
+- feat(desktop): Try T4 fallback regions for hosted Linux qualification (#2264) (f8c567e2b)
+- feat(telemetry): Retire the legacy observability middleware and put every producer under the one consent rule (PR-7) (#2259) (8ba8f3552)
+- feat(api-email): Receive signed Resend delivery events (#2255) (665aeef9f)
+- feat(ui): Trim Settings → Viewer and size every settings control alike (#1983) (21c5bd82e)
+- feat(sandbox): Write the Linux Terminal's git store through a FUSE store guard (LP2, LP3, LP5, LP8) (#2187) (277277b3a)
+- feat(agent-observability): Let a tool fact carry its run's host, kernel and model labels (LW17) (#2199) (9e7a63ede)
+- feat(shell-service): one Terminal git store policy with remotes, branches and folded spellings (LP1, LP6) (#2124) (80c065da7)
+- feat(shell-service): let the macOS Terminal commit, branch, stash and merge (TG5) (#2061) (255e24e5a)
+- feat(revisions): keep the person's staging and wait out their Git operations (TG4, TG7b) (#2058) (fe7b4dfa8)
+- feat(api-git-core): back up commits you make with git (TG3) (#2053) (9b2f1aa2a)
+- feat(desktop): Report Git LFS and revision-engine failures, and guard the Linux payload (TG7c) (#2047) (8a1f7dcb3)
+
+### Fixes
+
+- fix(desktop): Give development macOS packages their own bundle id (#2363) (b9244f8d5)
+- fix(revisions): Flush a large-object fill by its own paths (SP4-fill) (#2357) (92041b491)
+- fix(replicad): Use replicad-opencascadejs 0.23.0-beta.1 so delete() frees memory (#2360) (78ac66df9)
+- fix(desktop): Key each platform lane's release manifest separately (#2359) (fbef3ab6a)
+- fix(ui): Show arriving files in a tree listed before its apply (SP4-tree) (#2355) (2cc515c6d)
+- fix(ui): Render the model once its own files are here, not every large object (#2263) (d08c7460e)
+- fix(desktop): Qualify a Linux production clean-host consumer against its own dependency store (#2342) (77631f170)
+- fix(host): Present Claude's Tau MCP calls under their Tau tool names (#2341) (9532cf317)
+- fix(desktop): Admit Mac and Linux production clean-host runs in the consumer scope gate (#2334) (daa6882c0)
+- fix(revisions): Retry LFS downloads on the held action and verify a fill flush by its written paths (#2326) (44a6024cb)
+- fix(ui): Keep an approval's opening in its stream and let a paused run be stopped (#2327) (6ef27a031)
+- fix(desktop): Wait up to 40 minutes for a GPU zone and try every L4 zone (#2320) (488a5efe7)
+- fix(agent-host): Label chat attachments from their bytes on every host (#2310) (0bd33827a)
+- fix(host): Refresh Grok's model list from its \_x.ai/models/update push (#2277) (541ff9fb5)
+- fix(revisions): Answer a warm reopen from a comparison record instead of re-reading the checkout (#2270) (067bb7a80)
+- fix(desktop): Give ACP adapters main's account variables so Claude Code stays signed in (#2269) (cbce73787)
+- fix(desktop): Pick the GPU host template by its subnetwork region (#2268) (ae82729d3)
+- fix(desktop): Match GPU host templates by region outside the gcloud filter (#2266) (54c9a7c42)
+- fix(host): Refuse an ACP CLI probe that times out but exits cleanly (#2265) (0f06774c7)
+- fix(host): Make every ACP agent work from desktop-app and CLI installs (#2262) (7caef4598)
+- fix(desktop): Admit production Linux hosted qualification and clean-host runs (#2256) (da76cfe27)
+- fix(revisions): Keep a rename when only another ref of the atomic push moved (#2188) (d91fe9505)
+- fix(sandbox): Close the store guard's follow-up review nits (#2216) (ed5fc1389)
+- fix(shell-service): never admit a shell call whose signal aborted before the gate (E09) (#2215) (8352062ed)
+- fix(picogk): Pin the .NET runtime archives by sha256 for locked prepare (#2208) (47c0292ce)
+- fix(revisions): Keep every address out of identity records (I3) (#2194) (a4e060aeb)
+- fix(cli): Back up `tau version` tags and send origin from disk hosts (#2191) (02b06cae3)
+- fix(agent-observability): Price Vertex thinking and label each run with its kernel (LA3, LU6) (#2152) (c4e265109)
+- fix(revisions): pin the engine's common dir, refuse planted commondir, warn on rebase exec (LP4, LP7) (#2148) (1abaf069d)
+- fix(revisions): Refuse a merge built on history an undo took back (#2111) (82fc8f4b5)
+- fix(revisions): Back up past a v<n> tag that is not a version (#2107) (2c5a458e0)
+- fix(agent-observability): Let a host claim the protection the API reads for the account (#2052) (475b2f403)
+
+### Performance
+
+- perf(ui): Open chats, Agents and a new chat before the whole download (SP2h) (#2354) (d1c44b336)
+- perf(filesystem): Net the change-event flood of a replacement and scope overflow resets (SP2g) (#2352) (23d2ecd9d)
+- perf(ui): Open the file tree and editor before the whole download (SP2f) (#2343) (9edf272da)
+- perf(ui): Cut the AI SDK and Home's three.js from the runtime entry (PL1) (#2332) (1f2bce237)
+- perf(revisions): Read cold-open pack ranges past the HTTP cache (#2261) (cfeb76969)
+- perf(ui): Load the RPC handler stack and semver on demand (LB4d) (#2237) (3d4520907)
+
+### Other changes
+
+- refactor(runtime)!: Derive transcoded route fidelity from edge formats (#2301) (8447753cd)
+- ci(root): Run nightly-green e2e suites in the merge queue when affected (#2299) (084b1ad9c)
+- test(sandbox): Give C05 a rebinding name the test owns instead of localtest.me (#2254) (3333a67d6)
+- chore(picogk): Pin the PicoGK browser host to manifest 93d4634b0a1b (#1791) (8d237f7db)
+- refactor(desktop-services-host): extract the desktop utility hosts into an app library (DS-2) (#2005) (ade95913f)
+- ci(formal): Run each TLA+ family in a parallel target of its own (#2092) (2cdaf1520)
+- test(host): probe the Linux store guard's launch shape on the shell rows (LP0) (#2108) (50a5e6308)
+
 ## 0.4.0 (2026-11-13)
 
 ### Features

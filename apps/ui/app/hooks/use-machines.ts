@@ -9,7 +9,7 @@ import type {
 } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { failureCodeOf } from '#components/print/machine-facts.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 
 /** What the Print pane and Settings read from this computer's machine directory. @public */
 export type MachineDirectoryView = Readonly<{

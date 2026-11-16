@@ -96,8 +96,7 @@ describe('publishable()', () => {
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    // `geospec` left for taucad/geospec (59 to 58), then `rhino` was removed (58 to 57),
-    // then `heif` was added (57 to 58).
+    // `geospec` left for taucad/geospec (59 to 58), then `rhino` was removed (58 to 57), then `heif` was added (57 to 58, #2337).
     expect(names).toHaveLength(58);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.

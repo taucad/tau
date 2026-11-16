@@ -50,7 +50,7 @@ const handleStore = vi.hoisted(() => ({
     roots: [{ backend: 'opfs' }],
   })),
 }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectRootConfigs: async () => handleStore.getProjectRootConfigs(),
   setCheckoutRootConfigs: (routes: unknown) => handleStore.setCheckoutRootConfigs(routes),
 }));

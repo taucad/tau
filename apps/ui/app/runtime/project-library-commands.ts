@@ -38,9 +38,9 @@ import {
   isNodeWorkspace,
   isNodeWorkspaceConnected,
   setProjectCreationLocation,
-} from '#filesystem/handle-store.js';
-import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
-import { directoryPicker } from '#constants/browser.constants.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import { isOrphanedProjectRoute } from '@taucad/files-ui/filesystem/orphaned-project-route';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
 import { createEntrylessProject, createInitialProject } from '#constants/project.constants.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
 import {

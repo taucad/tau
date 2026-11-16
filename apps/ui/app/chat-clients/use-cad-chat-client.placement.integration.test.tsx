@@ -177,7 +177,7 @@ vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   // the mock keeps it so a test can prove the dial reaches the ladder.
   createDaemonAgentHostTransport: (dial: () => Promise<unknown>) => ({ dial }),
 }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectFileSystemConfig: async () => ({
     projectId: 'proj_test',
     backend: 'indexeddb',

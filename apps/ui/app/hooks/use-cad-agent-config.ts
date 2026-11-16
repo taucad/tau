@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CadAgentConfigInput, TauAgentHostId, ToolSelection } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
@@ -11,7 +11,7 @@ import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 import { useContextPayload } from '#hooks/use-context-payload.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { isBrowserAgentHostProviderKind, probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import {
@@ -270,23 +270,33 @@ export const useBrowserAgentHostProjectAvailability = (providerKind: string): Br
  * dispatch, where a refusal is a typed `AgentHostPlacementError` on the chat
  * banner rather than a row that quietly greys out.
  *
- * @returns The discovered targets, and whether discovery is still running.
+ * A listing that is incomplete or holds a refused agent is listed again on the
+ * next look — window focus, or `refresh` from a surface that shows it — since
+ * the person fixes a refusal outside Tau and only a fresh listing carries the
+ * fix to a window already open. The host bounds what a re-listing costs.
+ *
+ * @returns The discovered targets, whether discovery is still running, and `refresh`.
  * @public
  */
 export const useAgentHostPlacements = (): {
   readonly targets: readonly AgentHostPlacementTarget[];
   readonly loading: boolean;
+  /** List again if the current listing is incomplete or holds a refused agent; otherwise nothing. */
+  readonly refresh: () => void;
 } => {
   const { projectId } = useProject({ enableNoContext: true }) ?? {};
   const [state, setState] = useState<{
     readonly targets: readonly AgentHostPlacementTarget[];
     readonly loading: boolean;
   }>({ targets: [], loading: true });
+  const rediscoverIfStaleRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     let active = true;
+    let listed: readonly AgentHostPlacementTarget[] = [];
     const discover = async (): Promise<void> => {
       const targets = await listAgentHostPlacements().catch(() => []);
+      listed = targets;
       for (const target of targets) {
         publishAvailability(
           availabilityKey(projectId, target.hostId),
@@ -313,25 +323,35 @@ export const useAgentHostPlacements = (): {
     };
     void discover();
     /* A listing that lost a source is missing rows, not reporting their
-     * absence — so the next time the window is looked at, ask again. */
-    const rediscoverIfIncomplete = (): void => {
-      if (hostPlacementsIncomplete()) {
+     * absence, and a refused agent may since have been fixed — so the next
+     * time the window is looked at, ask again. */
+    const rediscoverIfStale = (): void => {
+      if (
+        hostPlacementsIncomplete() ||
+        listed.some((target) => target.externalAgents?.some((agent) => agent.refusal !== undefined))
+      ) {
         void discover();
       }
     };
-    globalThis.addEventListener('focus', rediscoverIfIncomplete);
+    rediscoverIfStaleRef.current = rediscoverIfStale;
+    globalThis.addEventListener('focus', rediscoverIfStale);
     /* A daemon handed to this page (X54) is a new row: list again. */
     const stopListening = onLoopbackAgentHostsChanged(() => {
       void discover();
     });
     return () => {
       active = false;
-      globalThis.removeEventListener('focus', rediscoverIfIncomplete);
+      rediscoverIfStaleRef.current = () => undefined;
+      globalThis.removeEventListener('focus', rediscoverIfStale);
       stopListening();
     };
   }, [projectId]);
 
-  return state;
+  const refresh = useCallback(() => {
+    rediscoverIfStaleRef.current();
+  }, []);
+
+  return useMemo(() => ({ ...state, refresh }), [state, refresh]);
 };
 
 /**

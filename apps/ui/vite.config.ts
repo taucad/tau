@@ -12,7 +12,7 @@ import devtoolsJson from '@silvenon/vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
-import { defineConfig } from 'vite';
+import { defaultClientConditions, defaultServerConditions, defineConfig } from 'vite';
 import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
@@ -88,6 +88,37 @@ export const uiSsrOptions = {
   noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js'],
   external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
 } as const satisfies UserConfig['ssr'];
+
+/**
+ * The build-target seam (charter D2), shared with `desktop/` and `serve/vite.config.ts`.
+ *
+ * One argument sets both halves so they cannot disagree: the app reads the
+ * `import.meta.env.TAU_TARGET` define (`app/lib/build-target.ts`), and the
+ * libraries, which may not read `import.meta.env`, resolve
+ * `@taucad/ui-core/lib/build-target` by the `tau-desktop` package condition.
+ * The web target adds no condition (its conditions are Vite's defaults, which
+ * the web config keeps by not setting them), so its libraries resolve the
+ * `default` (web) variant. Top-level `resolve` also governs the worker bundles.
+ *
+ * @param target - The host this bundle is built for.
+ * @returns The define entry and the client and server resolve conditions.
+ */
+export const uiBuildTarget = (
+  target: 'web' | 'desktop',
+): {
+  define: Record<string, string>;
+  resolve: { conditions: string[] };
+  ssrResolve: { conditions: string[] };
+} => {
+  // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
+  const define = { 'import.meta.env.TAU_TARGET': JSON.stringify(target) };
+  const conditions = target === 'desktop' ? ['tau-desktop'] : [];
+  return {
+    define,
+    resolve: { conditions: [...defaultClientConditions, ...conditions] },
+    ssrResolve: { conditions: [...defaultServerConditions, ...conditions] },
+  };
+};
 
 /**
  * Dependency-optimizer policy, mirrored by `desktop/vite.config.ts`.
@@ -281,7 +312,9 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
       if (options.target !== 'desktop') {
         const forbidden = chunks
           .flatMap((chunk) => Object.keys(chunk.modules))
-          .find((moduleId) => /apps\/ui\/app\/.*\.desktop\.[jt]sx?(?:\?|$)/u.test(normalizeProvenancePath(moduleId)));
+          .find((moduleId) =>
+            /apps\/(?:ui\/app|libs\/[^/]+\/src)\/.*\.desktop\.[jt]sx?(?:\?|$)/u.test(normalizeProvenancePath(moduleId)),
+          );
         if (forbidden) {
           this.error(`Desktop-only implementation in web bundle: ${normalizeProvenancePath(forbidden)}`);
         }
@@ -555,8 +588,7 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
        * exercise both branches with `vi.stubEnv('TAU_TARGET', …)` — a `define`
        * is a literal substitution `stubEnv` cannot reach.
        */
-      // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
-      ...(isTest ? {} : { 'import.meta.env.TAU_TARGET': '"web"' }),
+      ...(isTest ? {} : uiBuildTarget('web').define),
       /*
        * Whether a non-prerelease Tau Desktop exists to download (Q56, DSK-7): every "Get Tau Desktop" offer stays
        * hidden until the release build sets `TAU_DESKTOP_RELEASED=true`. Undefined under `mode === 'test'`.

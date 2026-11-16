@@ -1,4 +1,4 @@
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { useProjects } from '#hooks/use-projects.js';
 
 /** What decides a desktop first run. */

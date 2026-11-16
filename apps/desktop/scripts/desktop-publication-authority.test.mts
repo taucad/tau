@@ -6,6 +6,7 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { resolve } from 'node:path';
 /* oxlint-disable no-restricted-imports -- Test the protected identity and channel gate admission boundary. */
 import {
+  desktopPublicationEnvironment,
   requireDesktopInstallerPublicationEnabled,
   verifyDesktopPublicationToken,
 } from './desktop-publication-authority.mjs';
@@ -76,6 +77,42 @@ verifyDesktopPublicationToken(token({ sub: 'repo:taucad/tau:environment:desktop-
 });
 assert.throws(() => {
   verifyDesktopPublicationToken(token(), jwks, { ...expected, operation: 'renew-routes', now });
+});
+
+// Approvals audit R2: a production promotion is admitted only from the reviewed promotion environment, never from
+// candidate signing (`desktop-installers-production`, unreviewed) or renewal; production renewal keeps its own subject.
+const production = { ...expected, channel: 'production', now } as const;
+const productionSubject = (environment: string): string => `repo:taucad/tau:environment:${environment}`;
+assert.equal(desktopPublicationEnvironment('promote-routes', 'production'), 'desktop-promotion-production');
+assert.equal(desktopPublicationEnvironment(undefined, 'production'), 'desktop-promotion-production');
+assert.equal(desktopPublicationEnvironment('promote-routes', 'staging'), 'desktop-installers-staging');
+assert.equal(desktopPublicationEnvironment('renew-routes', 'production'), 'desktop-installer-renewal-production');
+verifyDesktopPublicationToken(token({ sub: productionSubject('desktop-promotion-production') }), jwks, {
+  ...production,
+  operation: 'promote-routes',
+});
+for (const environment of [
+  'desktop-installers-production',
+  'desktop-installer-renewal-production',
+  'desktop-qualification-production',
+  'desktop-promotion-staging',
+]) {
+  assert.throws(() => {
+    verifyDesktopPublicationToken(token({ sub: productionSubject(environment) }), jwks, {
+      ...production,
+      operation: 'promote-routes',
+    });
+  });
+}
+verifyDesktopPublicationToken(token({ sub: productionSubject('desktop-installer-renewal-production') }), jwks, {
+  ...production,
+  operation: 'renew-routes',
+});
+assert.throws(() => {
+  verifyDesktopPublicationToken(token({ sub: productionSubject('desktop-promotion-production') }), jwks, {
+    ...production,
+    operation: 'renew-routes',
+  });
 });
 
 /* eslint-disable @typescript-eslint/naming-convention -- Process environment keys and GitHub repository variable names are exact external names. */

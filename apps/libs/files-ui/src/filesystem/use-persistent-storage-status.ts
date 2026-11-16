@@ -5,7 +5,7 @@ import {
   subscribePersistentStorageStatus,
 } from '#filesystem/handle-store.js';
 import type { PersistentStorageStatus } from '#filesystem/handle-store.js';
-import { isDesktopTarget } from '#lib/build-target.js';
+import { isDesktopTarget } from '@taucad/ui-core/lib/build-target';
 
 const statusOnServer = (): PersistentStorageStatus => 'unknown';
 
@@ -13,7 +13,7 @@ const statusOnServer = (): PersistentStorageStatus => 'unknown';
 export function usePersistentStorageStatus(): PersistentStorageStatus {
   const status = useSyncExternalStore(subscribePersistentStorageStatus, getPersistentStorageStatus, statusOnServer);
   useEffect(() => {
-    if (isDesktopTarget()) {
+    if (isDesktopTarget) {
       return;
     }
     const refresh = (): void => {

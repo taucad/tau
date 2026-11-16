@@ -10,6 +10,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
 
+/** The build target the modules under test resolve; each case sets it before loading them. */
+const buildTarget = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@taucad/ui-core/lib/build-target', () => ({
+  get isDesktopTarget() {
+    return buildTarget.desktop;
+  },
+}));
+
 const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
 const relayTag = 'tau:services-port';
 
@@ -58,7 +66,7 @@ const installShellGlobal = (
     };
   });
   const isQuitReady = (): boolean => quitHandler !== undefined;
-  vi.stubEnv('TAU_TARGET', 'desktop');
+  buildTarget.desktop = true;
   vi.stubGlobal('tau', {
     relayTag,
     requestServicesPort,
@@ -93,7 +101,7 @@ const loadBridge = async (): Promise<typeof DesktopBridgeModule> => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
+  buildTarget.desktop = false;
   vi.resetModules();
 });
 

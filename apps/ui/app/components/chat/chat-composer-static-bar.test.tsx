@@ -12,7 +12,9 @@ import { ghostPillClass, reasoningLevelNames } from '#components/chat/chat-agent
 const composer = vi.hoisted((): { value: Record<string, unknown> } => ({ value: {} }));
 vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => composer.value }));
 const picker = vi.hoisted(() => ({ available: true }));
-vi.mock('#constants/browser.constants.js', () => ({ directoryPicker: () => ({ available: picker.available }) }));
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
+  directoryPicker: () => ({ available: picker.available }),
+}));
 
 const haiku = {
   id: 'anthropic/claude-haiku',

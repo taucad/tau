@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { fileManagerWorkerName, homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
+import { fileManagerWorkerName, homeBackendFromWorkerName } from '@taucad/files-ui/machines/file-manager-worker-name';
 
 const workerSource = readFileSync(fileURLToPath(new URL('file-manager.worker.ts', import.meta.url)), 'utf8');
 

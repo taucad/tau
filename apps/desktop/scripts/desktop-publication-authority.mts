@@ -30,7 +30,23 @@ const claimsSchema = z.object({
   nbf: z.number(),
 });
 
-/** Admit only a signed main-branch job in the channel's protected installer environment. */
+/**
+ * The protected environment an installer publication runs in, as desktop-route-promotion.yml selects it. Renewal runs
+ * unattended in its own environment. A production promotion publishes to users, so only it runs in the release-manager
+ * reviewed `desktop-promotion-production` (approvals audit R2); candidate signing in `desktop-installers-production`
+ * can never publish.
+ */
+export const desktopPublicationEnvironment = (
+  operation: 'promote-routes' | 'renew-routes' | undefined,
+  channel: 'production' | 'staging',
+): string => {
+  if (operation === 'renew-routes') {
+    return `desktop-installer-renewal-${channel}`;
+  }
+  return channel === 'production' ? 'desktop-promotion-production' : 'desktop-installers-staging';
+};
+
+/** Admit only a signed main-branch job in the channel's protected publication environment. */
 export const verifyDesktopPublicationToken = (
   token: string,
   keySet: unknown,
@@ -69,7 +85,7 @@ export const verifyDesktopPublicationToken = (
   const seconds = (expected.now ?? Date.now()) / 1000;
   if (
     claims.sub !==
-      `repo:taucad/tau:environment:${expected.operation === 'renew-routes' ? 'desktop-installer-renewal' : 'desktop-installers'}-${expected.channel}` ||
+      `repo:taucad/tau:environment:${desktopPublicationEnvironment(expected.operation, expected.channel)}` ||
     claims.run_id !== expected.runId ||
     claims.workflow_sha !== expected.workflowSha ||
     claims.exp <= seconds ||

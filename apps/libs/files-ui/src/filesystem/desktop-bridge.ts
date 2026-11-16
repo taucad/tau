@@ -386,11 +386,14 @@ export type DesktopBridge = {
 /**
  * True on the Electron renderer build.
  *
- * Bound from `@taucad/ui-core/lib/build-target`, which the desktop build
- * resolves to its `tau-desktop` variant: a literal the bundler inlines, so every
- * desktop branch folds out of the web bundle.
+ * Re-exported, not rebound, from `@taucad/ui-core/lib/build-target`, which the
+ * desktop build resolves to its `tau-desktop` variant: importers then reach the
+ * literal itself, which the bundler inlines across chunks, so every desktop
+ * branch folds out of the web bundle. A `const` bound to the import is not a
+ * literal and survives as a runtime flag in the importing chunk.
  */
-export const isDesktopTarget: boolean = isDesktopBuildTarget;
+// oxlint-disable-next-line no-barrel-files/no-barrel-files -- the re-export is what lets importers' desktop branches fold.
+export { isDesktopTarget } from '@taucad/ui-core/lib/build-target';
 
 /**
  * Build the typed Bambu Studio surface over preload's plain calls.
@@ -420,7 +423,7 @@ let servicesRequests = 0;
  * @returns The desktop bridge when present.
  */
 export const desktopBridge = (): DesktopBridge | undefined => {
-  const shell = isDesktopTarget ? (globalThis as { tau?: DesktopShell }).tau : undefined;
+  const shell = isDesktopBuildTarget ? (globalThis as { tau?: DesktopShell }).tau : undefined;
   if (!shell) {
     return undefined;
   }

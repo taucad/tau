@@ -125,7 +125,8 @@ export function ChatInterfaceSessionGate({
  */
 export function ChatHistoryGate({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const { editorRef } = useProject();
-  const availability = useProjectAvailability();
+  /* Open on the chats' own records (SP2h), never on a partial history (I7): not on the whole apply. */
+  const availability = useProjectAvailability('chats');
   const chats = useRevisionStatus()?.sync.chats;
   const { syncNow } = useRevisionCommands();
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);

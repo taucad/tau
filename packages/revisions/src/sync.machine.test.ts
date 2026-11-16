@@ -309,6 +309,130 @@ describe('syncMachine', () => {
     }
   });
 
+  describe('records beside a fast-forward (SP2h)', () => {
+    const sequentialProjection = {
+      remote: 'tau',
+      fetchRefs: [chatRef],
+      refs: [{ name: 'refs/remotes/tau/tau/chats/c1', head: revisionId('chat-head') }],
+      syncChats: true,
+      syncLargeExports: false,
+    };
+    const besideProjection = { ...sequentialProjection, besideApply: true } as const;
+    const fetchBeside = async (harness: Harness): Promise<void> => {
+      await settleWhenRunning(harness.effects, 'fetch', {
+        output: {
+          leases: {},
+          integration: 'fastForward',
+          recordProjection: besideProjection,
+        } satisfies SyncFetchActorOutput,
+      });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('fastForward')).toBe(1);
+        expect(harness.effects.running('projectRecords')).toBe(1);
+      });
+    };
+
+    it('lands chats while the authored apply still writes, and applies the remote only when it lands', async () => {
+      const harness = start();
+      try {
+        await fetchBeside(harness);
+        expect(harness.effects.inputsFor('projectRecords').at(-1)).toStrictEqual(besideProjection);
+        expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+          pullPhase: 'applying',
+          hasAppliedRemote: false,
+          chats: 'loading',
+        });
+        harness.effects.settle('projectRecords', { output: { records: [], chats: 'ready' } });
+        await vi.waitFor(() => {
+          expect(selectSyncFacet(harness.actor.getSnapshot()).chats).toBe('ready');
+        });
+        /* The records landing says nothing of the files: the apply still writes. */
+        expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+          pullPhase: 'applying',
+          hasAppliedRemote: false,
+        });
+        harness.effects.settle('fastForward', { output: { checkoutId: 'live', revisionId: 'r1', treeId: 'tree1' } });
+        await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+        await vi.waitFor(() => {
+          expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+        });
+        expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+          pullPhase: 'idle',
+          hasAppliedRemote: true,
+          chats: 'ready',
+        });
+      } finally {
+        harness.stop();
+      }
+    });
+
+    it('reads as records once the apply lands first, and its deadline fails only the records', async () => {
+      const harness = start();
+      try {
+        await fetchBeside(harness);
+        harness.effects.settle('fastForward', { output: { checkoutId: 'live', revisionId: 'r1', treeId: 'tree1' } });
+        await vi.waitFor(() => {
+          expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+            pullPhase: 'records',
+            hasAppliedRemote: true,
+            chats: 'loading',
+          });
+        });
+        expect(harness.effects.running('projectRecords')).toBe(1);
+        harness.clock.advance(15 * 60_000);
+        await vi.waitFor(() => {
+          expect(harness.effects.running('writePending')).toBe(1);
+        });
+        expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({ hasAppliedRemote: true, chats: 'failed' });
+        expect(harness.effects.inputsFor('writePending').at(-1)).toMatchObject({
+          record: { entries: [expect.objectContaining({ ref: chatRef, operation: 'projection' })] },
+        });
+      } finally {
+        harness.stop();
+      }
+    });
+
+    it('fails the open when the apply fails, whatever the records did', async () => {
+      const harness = start();
+      try {
+        await fetchBeside(harness);
+        harness.effects.settle('projectRecords', { output: { records: [], chats: 'ready' } });
+        await vi.waitFor(() => {
+          expect(selectSyncFacet(harness.actor.getSnapshot()).chats).toBe('ready');
+        });
+        harness.effects.settle('fastForward', { error: new Error('The apply could not write main.ts.') });
+        await vi.waitFor(() => {
+          expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+        });
+        expect(selectSyncFacet(harness.actor.getSnapshot())).toMatchObject({
+          hasAppliedRemote: false,
+          chats: 'failed',
+        });
+      } finally {
+        harness.stop();
+      }
+    });
+
+    it('waits for the apply when the fetch does not let the records run beside it', async () => {
+      const harness = start();
+      try {
+        await settleWhenRunning(harness.effects, 'fetch', {
+          output: {
+            leases: {},
+            integration: 'fastForward',
+            recordProjection: sequentialProjection,
+          } satisfies SyncFetchActorOutput,
+        });
+        await vi.waitFor(() => {
+          expect(harness.effects.running('fastForward')).toBe(1);
+        });
+        expect(harness.effects.running('projectRecords')).toBe(0);
+      } finally {
+        harness.stop();
+      }
+    });
+  });
+
   it('acknowledges a valid empty remote and independently reports disabled chats', async () => {
     const harness = start();
     try {
@@ -2349,6 +2473,8 @@ describe('syncMachine', () => {
       pushInvoke,
       recordInvoke,
       offerInvoke,
+      besideFastForwardInvoke,
+      besideRecordsInvoke,
     ] = [
       'reading.queue',
       'reading.remote',
@@ -2358,6 +2484,8 @@ describe('syncMachine', () => {
       'pushing',
       'recording',
       'conflicted.offering',
+      'opening.besideApply.authored.fastForwarding',
+      'opening.besideApply.records.projecting',
     ].map((path) => invokeOf(path));
     const publicEvents: readonly SyncMachineEvent[] = [
       { type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1', branch: 'main' },
@@ -2414,6 +2542,28 @@ describe('syncMachine', () => {
           } satisfies SyncFetchActorOutput,
         },
         { type: 'xstate.done.actor.0.sync.opening.projectingRecords', output: { records: [], chats: 'ready' } },
+        {
+          type: `xstate.done.actor.${fetchInvoke}`,
+          output: {
+            leases: {},
+            integration: 'fastForward',
+            recordProjection: {
+              remote: 'tau',
+              fetchRefs: [],
+              refs: [],
+              syncChats: true,
+              syncLargeExports: false,
+              besideApply: true,
+            },
+          } satisfies SyncFetchActorOutput,
+        },
+        {
+          type: `xstate.done.actor.${besideFastForwardInvoke}`,
+          output: { checkoutId: 'live', revisionId: 'remote-head', treeId: 'remote-tree' },
+        },
+        { type: `xstate.error.actor.${besideFastForwardInvoke}`, error: new Error('apply failed') },
+        { type: `xstate.done.actor.${besideRecordsInvoke}`, output: { records: [], chats: 'ready' } },
+        { type: `xstate.error.actor.${besideRecordsInvoke}`, error: new Error('record failed') },
         { type: 'xstate.error.actor.0.sync.opening.projectingRecords', error: new Error('record failed') },
         { type: `xstate.error.actor.${fetchInvoke}`, error: new Error('offline') },
         {

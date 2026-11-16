@@ -3310,6 +3310,54 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   const evidenceRefName = 'refs/tau/evidence/exports';
+  /*
+   * The remote's evidence record this device has written to disk (SP2h review): one control record under `.git` per
+   * remote, holding its head or `""` for none. A projection's fetch moves the remote-tracking ref before it writes a
+   * file, and a projection can stop after that fetch (a failed apply beside it, a deadline, a close), so the tracking
+   * ref is no proof the exports landed. This record moves only once they have. A device with no record for a remote,
+   * as one an older build restored from, takes the tracking head it holds before the pull's records are fetched, once.
+   * Each remote's record is a whole file of its own, so two remotes written at once never read and rewrite each
+   * other's entry (SP2h final review), and a torn or corrupt one reads as absent for its remote alone.
+   */
+  /* `.` is escaped too, so one remote's `<record>.<uuid>.writing` siblings never begin with another's record name. */
+  const appliedEvidencePathOf = (remote: string): string =>
+    `.git/tau-applied-evidence-${encodeURIComponent(remote).replaceAll('.', '%2E')}.json`;
+  const wholeAppliedEvidence = jsonRecord(
+    (value) =>
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      typeof (value as { head?: unknown }).head === 'string',
+  );
+  const readAppliedEvidence = async (remote: string): Promise<string | undefined> => {
+    const text = await readControlRecord(controlPlaneFiles(await recordsFileSystem()), appliedEvidencePathOf(remote), {
+      accepts: wholeAppliedEvidence,
+    });
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `wholeAppliedEvidence` checked the shape.
+    return text !== undefined && wholeAppliedEvidence(text) ? (JSON.parse(text) as { head: string }).head : undefined;
+  };
+  const writeAppliedEvidence = async (remote: string, head: string): Promise<void> => {
+    await writeControlRecord(
+      controlPlaneFiles(await recordsFileSystem()),
+      appliedEvidencePathOf(remote),
+      `${JSON.stringify({ head })}\n`,
+    );
+  };
+  /*
+   * What this device has applied of a remote's evidence record before this pull: its applied entry, seeded once from
+   * the tracking head held before any record is fetched (an older build's trust, kept for migration only).
+   */
+  const appliedEvidenceBasis = async (
+    remote: string,
+    trackingHead: string | undefined,
+  ): Promise<string | undefined> => {
+    const applied = await readAppliedEvidence(remote);
+    if (applied !== undefined) {
+      return applied === '' ? undefined : applied;
+    }
+    await writeAppliedEvidence(remote, trackingHead ?? '');
+    return trackingHead;
+  };
   const candidateRefName = 'refs/tau/artifacts/geospec-candidates';
 
   /*
@@ -3384,27 +3432,46 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     path.startsWith('.tau/offloaded-tool-results/');
 
   /** A brand-new device learns the preference from the fetched project manifest. */
-  const fetchedProjectSyncsLargeExports = async (remote: string, branch: string): Promise<boolean> => {
+  /**
+   * Both `tau.json` toggles as one revision records them, read by that manifest's oid alone (R5): an empty checkout is
+   * exactly the cold open, where reading the whole tree read every blob and looked up every large object.
+   *
+   * @param revision - The revision.
+   * @returns Its toggles, with {@link projectSyncPreferences}' defaults for an unreadable manifest; `undefined` when
+   *   the revision holds none.
+   */
+  const revisionSyncPreferences = async (
+    revision: RevisionId,
+  ): Promise<Readonly<{ syncChats: boolean; syncLargeExports: boolean }> | undefined> => {
+    const tree = await port.readTree(revision, { largeObjects: 'local', paths: ['tau.json'] });
+    const manifest = tree?.get('tau.json');
+    if (manifest === undefined) {
+      return undefined;
+    }
+    try {
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a parsed manifest is `unknown` until read.
+      const record = JSON.parse(new TextDecoder().decode(manifest)) as Readonly<{
+        syncChats?: unknown;
+        syncLargeExports?: unknown;
+      }>;
+      return { syncChats: record.syncChats !== false, syncLargeExports: record.syncLargeExports === true };
+    } catch {
+      return { syncChats: true, syncLargeExports: false };
+    }
+  };
+
+  const fetchedProjectSyncsLargeExports = async (
+    remote: string,
+    branch: string,
+    preferencesOf: typeof revisionSyncPreferences,
+  ): Promise<boolean> => {
     const records = await recordsFileSystem();
     if (await records.exists('tau.json')) {
       return false;
     }
     const head = await port.readRef(remoteTrackingRef(remote, `refs/heads/${branch}`));
-    /* R5: the manifest alone. An empty checkout is exactly the cold open, where
-     * reading the whole tree read every blob and looked up every large object. */
-    const tree =
-      head === undefined ? undefined : await port.readTree(head, { largeObjects: 'local', paths: ['tau.json'] });
-    const manifest = tree?.get('tau.json');
-    if (manifest === undefined) {
-      return false;
-    }
-    try {
-      return (
-        (JSON.parse(new TextDecoder().decode(manifest)) as { syncLargeExports?: unknown }).syncLargeExports === true
-      );
-    } catch {
-      return false;
-    }
+    const preferences = head === undefined ? undefined : await preferencesOf(revisionId(head));
+    return preferences?.syncLargeExports === true;
   };
 
   /*
@@ -6975,7 +7042,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           });
         }
         signal.throwIfAborted();
-        if (!syncLargeExports && (await fetchedProjectSyncsLargeExports(input.remote, input.branch))) {
+        /* One read of a fetched manifest per pull, whichever question asks it first. */
+        const fetchedPreferences = new Map<string, ReturnType<typeof revisionSyncPreferences>>();
+        const fetchedPreferencesOf = async (revision: RevisionId): ReturnType<typeof revisionSyncPreferences> => {
+          let read = fetchedPreferences.get(revision);
+          if (read === undefined) {
+            read = revisionSyncPreferences(revision);
+            fetchedPreferences.set(revision, read);
+          }
+          return read;
+        };
+        if (
+          !syncLargeExports &&
+          (await fetchedProjectSyncsLargeExports(input.remote, input.branch, fetchedPreferencesOf))
+        ) {
           syncLargeExports = true;
         }
 
@@ -7203,6 +7283,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const recordReferences = advertised.filter(
           (ref) => ref.name.startsWith(`${chatRefPrefix}/`) || (syncLargeExports && ref.name === evidenceRefName),
         );
+        /*
+         * Records write only unversioned paths, disjoint from the apply's, so a fast-forward lets them run while it
+         * writes (SP2h) — when the manifest it writes asks for chats as the checkout's does. A change of mind waits for
+         * the apply, and the manifest it lands decides, as before.
+         */
+        const applied =
+          integration === 'fastForward' && remoteHead !== undefined
+            ? await fetchedPreferencesOf(remoteHead)
+            : undefined;
+        const besideApply = integration === 'fastForward' && (applied?.syncChats ?? true) === syncChats;
         const pending = await readPendingQueue();
         return {
           leases,
@@ -7220,13 +7310,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             syncChats,
             syncLargeExports,
             pulledAt,
+            ...(besideApply ? { besideApply } : {}),
             priorEvidenceHead: pending.entries.some(
               (entry) => entry.operation === 'projection' && entry.ref === evidenceRefName,
             )
               ? undefined
-              : (trackingBefore.find(
-                  (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
-                )?.head ?? (await heldEvidenceHead(advertised.find((ref) => ref.name === evidenceRefName)?.head))),
+              : ((await appliedEvidenceBasis(
+                  input.remote,
+                  trackingBefore.find(
+                    (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
+                  )?.head,
+                )) ?? (await heldEvidenceHead(advertised.find((ref) => ref.name === evidenceRefName)?.head))),
           },
           ...(advanced.length === 0 ? {} : { advanced }),
           ...(merged.length === 0 ? {} : { merged }),
@@ -7236,7 +7330,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
       projectRecords: fromAuthorityPromise<SyncProjectRecordsActorOutput, SyncProjectRecordsActorInput>(
         timedEffect('records.project', async ({ input, signal }) => {
-          const { syncChats } = await projectSyncPreferences();
+          const preferences = input.besideApply === true ? input : await projectSyncPreferences();
+          const { syncChats } = preferences;
           const fetchReferences = input.fetchRefs.filter((ref) => syncChats || !ref.startsWith(`${chatRefPrefix}/`));
           const fetched =
             fetchReferences.length > 0
@@ -7293,7 +7388,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                     reason: error instanceof Error ? error.message : 'This chat could not be restored.',
                   };
                 } finally {
-                  if (written.length > 0 && !signal.aborted) {
+                  /* A chat written before a stop is on disk: it is announced, since a later pull finds it current
+                   * and announces nothing (SP2h review). */
+                  if (written.length > 0) {
                     options.onChatsProjected?.(written);
                   }
                 }
@@ -7312,8 +7409,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * record that *changed* — and what it must never do for one that did
            * not, which is how a device that had already restored an export, and
            * then edited it, had its own file replaced by the same remote bytes on
-           * the very next pull. The remote-tracking ref this host held before the
-           * fetch is exactly "what I have already applied".
+           * the very next pull. What this device has already applied is its
+           * applied-evidence record, which moves only once the record is on disk,
+           * or a record its own evidence ref already holds; never the tracking
+           * ref, which a projection's fetch moves before it writes anything
+           * (SP2h review), but for an older build's device's first pull.
            */
           const { priorEvidenceHead } = input;
           const fetchedEvidenceHead = fetchedEvidence?.head;
@@ -7327,6 +7427,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             recordTasks.push(async (): Promise<SyncRefOutcome> => {
               try {
                 await projectEvidence([fetchedEvidence], signal);
+                await writeAppliedEvidence(input.remote, fetchedEvidence.head);
                 return { name: evidenceRefName, status: 'upToDate', head: fetchedEvidence.head };
               } catch (error) {
                 return {

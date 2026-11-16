@@ -87,6 +87,9 @@ describe('beforeSendSentryEvent', () => {
       const sent = beforeSendSentryEvent(rejectionEvent(), { originalException: failure });
       expect(sent?.level).toBe('warning');
       expect(sent?.fingerprint).toStrictEqual(['graphics-context-unavailable']);
+      // What a fresh canvas gets at that moment tells a code fault from a browser without WebGL.
+      expect(sent?.contexts?.['tau.webgl']).toHaveProperty('probed', true);
+      expect(sent?.contexts?.['tau.webgl']).toHaveProperty('freshCanvasWebGl2');
     }
   });
 

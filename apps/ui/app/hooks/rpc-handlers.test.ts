@@ -451,6 +451,24 @@ describe('rpc-handlers', () => {
       expect(mockFm.readFile).not.toHaveBeenCalled();
     });
 
+    /*
+     * A pending row's size is not its bytes' (D9): a placeholder's is the object's, and one its root has not declared
+     * yet is the pointer's own. Its facts are never measured from a read, which would fetch the object or refuse.
+     */
+    it('should stat a pending file by its size alone, reading none of it', async () => {
+      mockFm.stat.mockResolvedValueOnce({ type: 'file', size: 11, mtimeMs: 100, pending: true });
+
+      const stat = await fileSystem.stat('models/part.step');
+
+      expect(stat).toStrictEqual({
+        size: 11,
+        isDirectory: false,
+        createdAt: new Date(100).toISOString(),
+        modifiedAt: new Date(100).toISOString(),
+      });
+      expect(mockFm.readRawBytes).not.toHaveBeenCalled();
+    });
+
     /* Review L1: past the cap the stat carries no kind, so the text read itself refuses a binary by its head. */
     it('should refuse a text read of a binary past the line-count cap by its 512 B head', async () => {
       const bytes = new Uint8Array(5_000_000);
@@ -651,6 +669,17 @@ describe('rpc-handlers', () => {
           },
         ]);
         expect(lastTreeService!.listDirectory).not.toHaveBeenCalled();
+      });
+
+      it('should list a pending file by its size alone, reading none of it', async () => {
+        vi.mocked(lastTreeService!.listDirectoryExact).mockResolvedValueOnce([
+          { name: 'part.step', type: 'file', size: 130, mtimeMs: 100, pending: true },
+        ]);
+
+        await expect(fileSystem.readdir('models')).resolves.toEqual([
+          { name: 'part.step', type: 'file', size: 130, modifiedAt: new Date(100).toISOString() },
+        ]);
+        expect(mockFm.readRawBytes).not.toHaveBeenCalled();
       });
 
       it('should report a cached binary file as text after an external replacement', async () => {

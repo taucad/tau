@@ -825,7 +825,8 @@ const ViewerContent = memo(function ({
   // the cad actor without having to re-add the panel. While the model's files
   // are checked or downloaded the unit is not created yet (A15e): the overlay
   // waits, and the canvas stays mounted either way.
-  const isGeometryUnitClosed = !cadRef && filesWait === undefined;
+  // A view still to be bound (`''`) has no unit to reopen.
+  const isGeometryUnitClosed = !cadRef && filesWait === undefined && entryPath !== '';
   const handleReopenRenderer = useCallback(() => {
     projectRef.send({
       type: 'createGeometryUnit',

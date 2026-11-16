@@ -2121,6 +2121,8 @@ describe('ChatViewer stage through a wait for the model files (A15e; C11, U13, U
     expect(screen.queryByText('No file selected')).not.toBeInTheDocument();
     expect(screen.queryByText('No model yet')).not.toBeInTheDocument();
     expect(screen.getByTestId('chat-viewer-layout')).toBe(stage);
+    /* A view still to be bound has no unit to reopen. */
+    expect(screen.queryByRole('button', { name: /reopen renderer/i })).not.toBeInTheDocument();
   });
 
   it('U13 (A15e): should show no empty state for an unbound view while the files are checked', () => {

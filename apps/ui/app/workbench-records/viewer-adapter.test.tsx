@@ -631,6 +631,30 @@ describe('viewer adapter (A8d)', () => {
     expect(units).toEqual(['b.ts']);
   });
 
+  /* D21 round 4: an entry-less project's main (`''`) binds no entry during a check, so no view stands in as main's. */
+  it('should record no entry for an unrecorded view during a check of an entry-less project', async () => {
+    const api = mountDock();
+    const project = mountProject();
+    const setViewEntryPath = vi.fn();
+    const facts = createViewerAdapterFactsPort(baseFacts({ mainEntryPath: '', setViewEntryPath }));
+    await act(async () => {
+      api.addPanel({
+        id: 'front',
+        component: 'viewer',
+        title: 'front',
+        params: { viewId: 'front', entryPath: undefined },
+      });
+      startAdapter({
+        api,
+        ports: { profile: 'editor', projectId: 'p', project: project.project, layout: undefined, facts },
+      });
+    });
+    await act(async () => {
+      facts.set({ ...facts.get(), admitsView: true });
+    });
+    expect(setViewEntryPath).toHaveBeenLastCalledWith('front', null);
+  });
+
   it('should delete the record of a view an apply removes once, not again as a person removal', async () => {
     const harness = mountLayout('desktop');
     const api = mountDock();

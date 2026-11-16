@@ -179,7 +179,8 @@ function resolveViewerPanelEntry(
 ): string | undefined {
   const record = facts.viewRecords.get(panel.id);
   if (!facts.admitsGeometry && !record?.entryPath) {
-    return facts.mainEntryPath;
+    // An entry-less project's main is `''`: no entry, so no view stands in as main's.
+    return facts.mainEntryPath === '' ? undefined : facts.mainEntryPath;
   }
   return bindViewerPanelEntry(panel, { record, mainEntryPath: facts.mainEntryPath, persistMainEntry });
 }

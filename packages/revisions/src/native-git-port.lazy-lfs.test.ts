@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import { createLargeObjectFill } from '#large-object-fill.js';
+import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
 import type { RevisionId } from '#algorithms/index.js';
 import { lfsObjectPath, lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
@@ -293,7 +293,14 @@ process.exit(result.status ?? 1);
     ]);
     const fill = createLargeObjectFill({
       port: clone,
-      capture: async () => new ImmutableRevisionTree([...files]),
+      placeholders: async () => largeObjectPlaceholders(new ImmutableRevisionTree([...files])),
+      readPaths: async (_place, paths) =>
+        new Map(
+          paths.flatMap((path) => {
+            const content = files.get(path);
+            return content === undefined ? [] : [[path, { content, mode: '100644' }] as const];
+          }),
+        ),
       withCheckoutFence: async (_id, operation) => operation(),
       materializeTree: async (_place, target) => {
         for (const { path, content } of target.entries()) {
@@ -331,12 +338,27 @@ process.exit(result.status ?? 1);
       new Uint8Array(await readFile(join(linked.root, path)));
     const fill = createLargeObjectFill({
       port: clone,
-      capture: async () =>
-        new ImmutableRevisionTree([
-          [generatedGitattributesPath, await read(generatedGitattributesPath)],
-          ['large.bin', await read('large.bin')],
-          ['small.txt', await read('small.txt')],
-        ]),
+      placeholders: async () =>
+        largeObjectPlaceholders(
+          new ImmutableRevisionTree([
+            [generatedGitattributesPath, await read(generatedGitattributesPath)],
+            ['large.bin', await read('large.bin')],
+            ['small.txt', await read('small.txt')],
+          ]),
+        ),
+      readPaths: async (_place, paths) => {
+        const held = await Promise.all(
+          paths.map(async (path) => {
+            try {
+              return [path, { content: await read(path), mode: '100644' }] as const;
+            } catch {
+              /* Gone, as an absent attributes file is. */
+              return undefined;
+            }
+          }),
+        );
+        return new Map(held.filter((entry) => entry !== undefined));
+      },
       withCheckoutFence: async (_id, operation) => operation(),
       materializeTree: async (_place, target) => {
         for (const { path, content } of target.entries()) {

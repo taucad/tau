@@ -251,7 +251,10 @@ describe('plugin generator', () => {
       'src/svg.transcoder.ts',
       'src/svg.ts',
       'src/svg.vite-build.test.ts',
+      'src/raster.ts',
     ]);
+    // The raster transcoder (#2316) is the image package's own subtree, with codecs and binary fixtures.
+    const packageSpecificDirectories = ['src/raster/'];
     // Prune output and install directories before recursing: walking `node_modules` alone takes seconds.
     const unscaffolded = new Set(['dist', 'node_modules', 'out-tsc']);
     const reference = readdirSync(referenceRoot)
@@ -263,7 +266,12 @@ describe('plugin generator', () => {
             )
           : [entry],
       )
-      .filter((path) => statSync(join(referenceRoot, path)).isFile() && !packageSpecific.has(path))
+      .filter(
+        (path) =>
+          statSync(join(referenceRoot, path)).isFile() &&
+          !packageSpecific.has(path) &&
+          !packageSpecificDirectories.some((directory) => path.startsWith(directory)),
+      )
       .sort();
 
     expect(emitted).toEqual(reference);

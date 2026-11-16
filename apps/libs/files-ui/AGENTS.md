@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Tau UI app files feature: file and workspace-directory components, export formats and file-manager helpers that read no app state
+Tau UI app files feature: file and workspace-directory components, the file tree, export formats, workspace telemetry and file-manager helpers that read no app state
 
 - Nx project: `files-ui`
 - Project root: `apps/libs/files-ui`
@@ -45,7 +45,9 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 
 ## Project notes
 
-- Layer `feature`: never import `apps/ui` (`#components/*`, `#hooks/*`, `#lib/*`, `#routes/*`, `#environment.config`). A module moves here only when everything it imports, tests included, is already a package or an app-lib; `use-file-manager`, the file-manager machine and worker, `handle-store` and `desktop-bridge` stay in `apps/ui` until `lib/build-target` (`import.meta.env.TAU_TARGET`) and `#package.json` have a seam.
+- Layer `feature`: never import `apps/ui` (`#components/*`, `#hooks/*`, `#lib/*`, `#routes/*`, `#environment.config`). A module moves here only when everything it imports, tests included, is already a package or an app-lib.
+- App services arrive by injection, never by import: analytics and error reporting through `createWorkspaceTelemetry({ analytics, reportFailure })`, bound in `apps/ui/app/utils/workspace-telemetry.utils.ts` with `useWorkspaceTelemetry`. Build target, package version and environment values follow the same rule (React context, factory argument or worker init message).
+- Never read `import.meta.env`, `window.ENV` or the build-time globals in `apps/ui/vite-environment.d.ts`. `handle-store`, `desktop-bridge`, `project-creation-location.utils` and the file-manager worker branch on `isDesktopTarget` so the web build folds desktop branches away, and `handle-store` relies on it being a build-time constant (ruling C1). A runtime-injected flag would keep those branches and reopen the boot race, so they stay in `apps/ui` until a compile-time seam for libraries is ruled on.
 - Lib-internal imports use `#<path>.js`; `package.json` maps `#*` to `./src/*`, and TypeScript and Vite resolve `.js` to the `.ts`/`.tsx` source.
 - `filesystem/home-opfs-probe.ts` starts `home-opfs-probe.worker.ts` with `new Worker(new URL(...))`; `apps/ui/vite.config.ts` admits it through its `../libs/*/src/**/*.worker.ts` optimizer entry.
 - `apps/ui/vite.config.ts` applies the React Compiler to `src/**`, and `apps/ui/app/styles/global.css` scans it with `@source`, as when these files lived in `apps/ui/app`.

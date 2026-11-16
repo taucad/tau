@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { Tree, Folder, File } from '#components/magicui/file-tree.js';
-import type { TreeViewElement } from '#components/magicui/file-tree.js';
+import { Tree, Folder, File } from '@taucad/files-ui/components/magicui/file-tree';
+import type { TreeViewElement } from '@taucad/files-ui/components/magicui/file-tree';
 
 type FileInfo = {
   path: string;

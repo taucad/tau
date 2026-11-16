@@ -91,7 +91,7 @@ import type { LibraryRecords } from '#runtime/project-library-observations.js';
 import { ProjectCommands } from '#runtime/project-library-commands.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
 import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 
 /** What the library takes from the runtime's composition. @public */
 export type ProjectLibraryOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> &

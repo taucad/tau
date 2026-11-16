@@ -30,7 +30,7 @@ import { mock } from 'vitest-mock-extended';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils.js';
 import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import type { WorkspaceEntry } from '#filesystem/handle-store.js';
 import type { AppRuntimeFiles } from '#runtime/app-runtime.js';
 

@@ -24,7 +24,7 @@ import {
 import type { Workspace, WorkspaceBindingRepairResult } from '#filesystem/handle-store.js';
 import { deriveWorkspaceBindingRepairs, routeConfigFor } from '#runtime/project-library-storage.js';
 import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import type { Actor, SnapshotFrom } from 'xstate';
 
 /** A connected workspace folder: the row, how many projects it holds, and whether this connection minted it. @public */

@@ -1,7 +1,7 @@
 {
   "name": "@taucad/files-ui",
   "version": "0.1.0-beta.0",
-  "description": "Tau UI app files feature: file and workspace-directory components, export formats and file-manager helpers that read no app state",
+  "description": "Tau UI app files feature: file and workspace-directory components, the file tree, export formats, workspace telemetry and file-manager helpers that read no app state",
   "type": "module",
   "sideEffects": false,
   "private": true,
@@ -30,10 +30,12 @@
     "./components/files/open-render-button.ignore": "./src/components/files/open-render-button.ignore.ts",
     "./components/filesystem/overwrite-confirm-dialog": "./src/components/filesystem/overwrite-confirm-dialog.tsx",
     "./components/filesystem/workspace-directory-panel": "./src/components/filesystem/workspace-directory-panel.tsx",
+    "./components/magicui/file-tree": "./src/components/magicui/file-tree.tsx",
     "./filesystem/home-opfs-probe": "./src/filesystem/home-opfs-probe.ts",
     "./machines/file-manager-sync-fs-adapter": "./src/machines/file-manager-sync-fs-adapter.ts",
     "./machines/file-manager-worker-error": "./src/machines/file-manager-worker-error.ts",
     "./utils/export-formats.utils": "./src/utils/export-formats.utils.ts",
+    "./utils/workspace-telemetry.utils": "./src/utils/workspace-telemetry.utils.ts",
     "./package.json": "./package.json"
   },
   "imports": {
@@ -49,13 +51,15 @@
     "vitest-mock-extended": "catalog:"
   },
   "dependencies": {
+    "@taucad/fs-client": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
     "@taucad/ui-core": "workspace:*",
     "@taucad/ui-kit": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@taucad/workbench-panes": "workspace:*",
-    "lucide-react": "catalog:"
+    "lucide-react": "catalog:",
+    "radix-ui": "catalog:"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",

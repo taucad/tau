@@ -528,6 +528,7 @@ Runtime package exports must not include legacy preset or concrete-capability ba
 ```text
 @taucad/assimp        → named plugin export plus assimpKernel and assimpTranscoder
 @taucad/image         → named plugin export plus renderTranscoder, svgTranscoder and rasterTranscoder; `/raster` exports encodeRasterImage
+@taucad/heif          → opt-in heifTranscoder (HEIC/HEIF → JPEG, PNG, WebP) over the LGPL-3.0 libheif-js dependency; encodes through `@taucad/image/raster`
 @taucad/middleware    → named plugin export plus individual middleware factories
 @taucad/opencascade   → browser/WASM-safe OpenCascade plugin toolkit
 @taucad/build123d     → Node-hosted Build123d kernel on python-kernel-core; `/native` deployment

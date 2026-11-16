@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { toolName } from '@taucad/chat/constants';
@@ -53,7 +55,7 @@ describe('the L2 runner on tau mcp', () => {
     const model = { ...task!.reference, path: `parts/${task!.reference.path}` };
     const verdict = await runL2Task({
       task: task!,
-      agent: async ({ registry }) => {
+      agent: async ({ registry, projectRoot }) => {
         await call(registry, toolName.createFile, { targetFile: model.path, content: model.source });
         await call(registry, toolName.createFile, {
           targetFile: 'parts/check.geospec.ts',
@@ -61,6 +63,9 @@ describe('the L2 runner on tau mcp', () => {
         });
         const tested = await call(registry, toolName.testModel, { files: ['parts/check.geospec.ts'] });
         expect(tested.isError, JSON.stringify(tested.content)).toBe(false);
+        /* The host's own adoption, not only the grader's reading of the result: a compact result omits its lineage. */
+        const manifest: unknown = JSON.parse(await readFile(join(projectRoot, 'tau.json'), 'utf8'));
+        expect(manifest).toMatchObject({ assets: { main: { entryPath: model.path } } });
       },
     });
     expect(verdict).toMatchObject({ passed: true, entryPath: model.path, kernel: model.kernel });

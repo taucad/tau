@@ -1,11 +1,8 @@
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { PageContent } from '#components/layout/page-content.js';
-import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
-import { sidebarDefaultOpen, sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constants';
-import { useCookie } from '#hooks/use-cookie.js';
+import { sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constants';
 
 import { projectGridClassName } from '#components/project-grid-layout.js';
-import { cn } from '@taucad/ui/utils/cn';
 
 /**
  * What `/community` shows while the root file-manager mount starts, which is
@@ -13,24 +10,25 @@ import { cn } from '@taucad/ui/utils/cn';
  * row, kernel shelf and the first cards — so the gallery fills in instead of
  * appearing from a blank window (lane C P6).
  *
- * It renders above the app shell, so it owns the window and stands in for the sidebar at its resting width.
+ * It renders above the app shell, so it owns the window and stands in for the sidebar at its resting width. The
+ * markup is the same for every visitor; a sidebar stored closed drops the stand-in through the client-facts head
+ * script's `data-sidebar-closed` on `<html>` (`#lib/client-facts`), before first paint and after it alike.
  *
  * @returns The skeleton.
  */
 export function CommunityPageSkeleton(): React.JSX.Element {
-  /* The shell's own source for the sidebar's resting state, so a collapsed sidebar gets no stand-in. */
-  const [isSidebarOpen] = useCookie(cookieName.sidebarOp, sidebarDefaultOpen);
-
   return (
     <div role='status' aria-busy='true' aria-label='Opening examples' className='flex h-dvh w-full bg-background'>
-      {isSidebarOpen ? (
-        <div
-          className='hidden h-full shrink-0 border-r border-sidebar-border bg-sidebar md:block'
-          style={{ width: sidebarPreferredWidth }}
-        />
-      ) : null}
+      <div
+        data-slot='sidebar-stand-in'
+        className='hidden h-full shrink-0 border-r border-sidebar-border bg-sidebar md:block [:root[data-sidebar-closed]_&]:md:hidden'
+        style={{ width: sidebarPreferredWidth }}
+      />
       <div aria-hidden='true' className='min-w-0 flex-1 overflow-hidden'>
-        <div className={cn('h-12', isSidebarOpen ? 'md:hidden' : 'md:h-9')} />
+        <div
+          data-slot='titlebar-spacer'
+          className='h-12 md:hidden [:root[data-sidebar-closed]_&]:md:block [:root[data-sidebar-closed]_&]:md:h-9'
+        />
         <PageContent className='space-y-3'>
           <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-3'>
             <Skeleton className='h-9 w-44' />

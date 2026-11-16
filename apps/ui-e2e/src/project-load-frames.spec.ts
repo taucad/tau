@@ -642,7 +642,7 @@ knownDefect(
   'M1: on a 390 by 844 reload with the workspace chunk 3 s late, first contentful paint is within 100 ms of first paint',
   {
     artifact: 'm1-phone',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('phone');
@@ -1171,19 +1171,29 @@ knownDefect(
   },
 );
 
-/** The phone frame's four parts (blueprint P-h). */
+/**
+ * The phone frame's four parts (blueprint P-h), whatever draws them: the workspace frame's part in its box until the
+ * phone workspace has restored its layout (A15c), then the phone workspace's own. This is the rows' contract with the
+ * frame, as `workspaceLanes` is at wide size: each part of the phone frame carries `data-frame-part` inside
+ * `[data-slot="workspace-frame-phone"]`, and hands over on `[data-mobile-workspace="ready"]` (the viewer's box once the
+ * live stage is drawn as well). Each frame part's selector stops matching at its hand-over, so from then on only the
+ * live part is read, its box, its skeletons and its animations.
+ */
+const livePhoneSheet = '[role="dialog"]:has([aria-label="Drawer height"])';
+const phoneFramePart = (part: string, handedOver = '[data-mobile-workspace="ready"]'): string =>
+  `[data-slot="workspace-frame"]:not(:has(${handedOver})) [data-slot="workspace-frame-phone"] [data-frame-part="${part}"]`;
 const phoneFrameRegions = {
-  topBar: '[data-slot="mobile-project-top-bar"]',
-  viewer: '[data-slot="viewer-stage"]',
-  sheet: '[role="dialog"]:has([aria-label="Drawer height"])',
-  tabBar: 'nav[aria-label="Workbench"]',
+  topBar: `[data-slot="mobile-project-top-bar"], ${phoneFramePart('top-bar')}`,
+  viewer: `[data-slot="viewer-stage"], ${phoneFramePart('viewer', '[data-mobile-workspace="ready"] [data-slot="viewer-stage"]')}`,
+  sheet: `${livePhoneSheet}, ${phoneFramePart('sheet')}`,
+  tabBar: `nav[aria-label="Workbench"], ${phoneFramePart('tab-bar')}`,
 } as const;
 
 knownDefect(
-  'F5 (A15c): on a 390 by 844 reload with the workspace chunk 3 s late, the top bar, viewer, sheet and tab bar hold their final boxes from the first frame, with no skeleton and no sheet animation',
+  'F5 (A15c): on a 390 by 844 reload with the workspace chunk 3 s late, the top bar, viewer, sheet and tab bar hold their final boxes from the first frame, with no skeleton in them and no sheet animation',
   {
     artifact: 'f5-phone',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('phone', { regions: phoneFrameRegions });
@@ -1193,7 +1203,7 @@ knownDefect(
           .getByRole('navigation', { name: 'Workbench' })
           .getByRole('button', { name: 'Parameters', exact: true }),
       );
-      await target.expectVisible(selectors.getByCss(phoneFrameRegions.sheet), 30_000);
+      await target.expectVisible(selectors.getByCss(livePhoneSheet), 30_000);
       await target.delay(settleWindow);
       await delayWorkspaceChunk();
       await target.reload();
@@ -1224,17 +1234,28 @@ knownDefect(
         return [
           ...(standing === undefined ? [`${name} at first paint (${painted} ms): absent`] : []),
           ...boxChanges(fromPaint).map((change) => `${name} ${change}`),
+          /* In its box is not enough: a part held there but hidden is not drawn. */
+          ...fromPaint
+            .filter((entry) => entry.present && !entry.visible)
+            .map((entry) => `${name} hidden ${describeEntry(entry)}`),
         ];
       });
       const sheetAnimations = regionsOf(record, 'sheet').filter((entry) => entry.animations > 0);
+      /* Under the 2026-11-15 ruling (#2307) a skeleton in final geometry is allowed, so the sidebar sheet's held
+       * Recents and chat rows do not count: the phone frame's own four parts draw none. */
+      const partSkeletons = Object.keys(phoneFrameRegions).flatMap((name) =>
+        regionsOf(record, name)
+          .filter((entry) => entry.skeletons > 0)
+          .map((entry) => `${name} ${describeEntry(entry)}`),
+      );
       expectMeasured(
         {
           moved: moved.slice(0, 6),
-          skeletonFrames: record.skeletonFrames.length,
+          partSkeletons: partSkeletons.slice(0, 6),
           sheetAnimations: sheetAnimations.map((entry) => describeEntry(entry)),
         },
-        'F5: a part of the phone frame was absent or away from its settled box, a skeleton was drawn, or the sheet animated',
-        { moved: [], skeletonFrames: 0, sheetAnimations: [] },
+        'F5: a part of the phone frame was absent or away from its settled box, drew a skeleton, or the sheet animated',
+        { moved: [], partSkeletons: [], sheetAnimations: [] },
       );
     },
   },

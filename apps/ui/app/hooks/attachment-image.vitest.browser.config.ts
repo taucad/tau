@@ -8,8 +8,9 @@ import { uiResolveAlias } from '../../vite.config.js';
 /**
  * Composer image conversion (blueprint WP5): host parity over the web-worker transport against the raster
  * transcoder's `golden.json`, and the composer's intake and draft image step through the real worker. Host parity
- * (b) is the `chromium` project, run by `verify-browser` on each pull request; (c) is the `firefox` and `webkit`
- * projects, run nightly by `test:e2e:attachment-image-engines` under `test:e2e` (e2e-nightly.yml).
+ * (b) is the `chromium` project, run by `verify-browser` in the browser lane; (c) is the `firefox` and `webkit`
+ * projects, run by `test:e2e:attachment-image-engines` in the merge queue's `e2e-queue` lane (`test:e2e:queue`)
+ * whenever `ui` is affected.
  */
 export default defineConfig({
   root: fileURLToPath(new URL('../..', import.meta.url)),

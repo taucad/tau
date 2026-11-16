@@ -1,7 +1,22 @@
-import { useSyncExternalStore } from 'react';
+import { useLayoutEffect, useSyncExternalStore } from 'react';
+import { PanelLeft, Share2 } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
-import { defaultWideFrameHint, frameHintKey, frameHintVariables, readWideFrameHint } from '#lib/frame-hint.js';
-import type { WideFrameHint } from '#lib/frame-hint.js';
+import {
+  defaultPhoneFrameHint,
+  defaultWideFrameHint,
+  frameHintKey,
+  frameHintVariables,
+  frameTabAttribute,
+  phoneFrameDestination,
+  phoneFrameHintVariables,
+  readPhoneFrameHint,
+  readWideFrameHint,
+} from '#lib/frame-hint.js';
+import type { FrameHintVariables, PhoneFrameHint, PhoneFrameHintVariables, WideFrameHint } from '#lib/frame-hint.js';
+import {
+  MobileWorkbenchNavigationFrame,
+  mobileWorkbenchNavigationHeight,
+} from '#components/mobile-workbench-navigation.js';
 
 /** The value never changes on its own: the frame reads the hint when it renders, which a navigation causes. */
 const subscribeToNothing = (): (() => void) => {
@@ -20,6 +35,21 @@ const readDocumentFrameHint = (): WideFrameHint => {
   const key = frameHintKey(globalThis.location.pathname);
   return (key === undefined ? undefined : readWideFrameHint(key)) ?? defaultWideFrameHint;
 };
+
+/** Both shapes' variables, which the frame sets on itself on the client. */
+const frameVariables = (wide: WideFrameHint, phone: PhoneFrameHint): FrameHintVariables & PhoneFrameHintVariables => ({
+  ...frameHintVariables(wide),
+  ...phoneFrameHintVariables(phone),
+});
+
+/** The phone hint for the document's current URL, or the default phone layout (the model, the sheet closed). */
+const readDocumentPhoneFrameHint = (): PhoneFrameHint => {
+  const key = frameHintKey(globalThis.location.pathname);
+  return (key === undefined ? undefined : readPhoneFrameHint(key)) ?? defaultPhoneFrameHint;
+};
+
+/** The phone server render has no hint either: the pre-paint script's values on `<html>` stand. */
+const noPhoneHintOnServer = (): undefined => undefined;
 
 /**
  * The attribute the desktop workspace sets once its split view has sized its panes. The frame's lanes hide on that
@@ -60,6 +90,16 @@ export function WorkspaceFrame({
 }): React.JSX.Element {
   /* The document's URL, as the pre-paint script reads it: the frame also renders in suites with no router. */
   const wide = useSyncExternalStore(subscribeToNothing, readDocumentFrameHint, noHintOnServer);
+  const phone = useSyncExternalStore(subscribeToNothing, readDocumentPhoneFrameHint, noPhoneHintOnServer);
+  const tab = phone === undefined ? undefined : phoneFrameDestination(phone.tab);
+  /* The tab bar's selected destination is an attribute selector on `<html>`, which the pre-paint script set for the
+   * document's first project: on the client the frame names its own project's before paint, so a client move to
+   * another project never shows the first one's tab. */
+  useLayoutEffect(() => {
+    if (isDrawn && tab !== undefined) {
+      document.documentElement.setAttribute(frameTabAttribute, tab);
+    }
+  }, [isDrawn, tab]);
 
   if (!isDrawn) {
     return (
@@ -82,7 +122,9 @@ export function WorkspaceFrame({
          * chunk's) shows alone, as it did before the frame: no lane or composer box under it. */
         '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
       )}
-      style={wide === undefined ? undefined : (frameHintVariables(wide) as React.CSSProperties)}
+      style={
+        wide === undefined || phone === undefined ? undefined : (frameVariables(wide, phone) as React.CSSProperties)
+      }
     >
       <WorkspaceFrameLanes />
       {children}
@@ -119,6 +161,7 @@ function WorkspaceFrameLanes(): React.JSX.Element {
           className='[display:var(--frame-workbench-display,flex)] h-full w-(--frame-workbench-width,420px) shrink-0 border-l border-border @max-[1120px]:[display:var(--frame-workbench-compact-display,none)]'
         />
       </div>
+      <PhoneFrame />
       {/* Hoisted to the head by React. Until the parser reaches the marker after the lanes, Chromium holds rendering,
        * so a project load's first paint is never a document cut above the frame: no lanes, or the shell alone (the
        * blank first paint A11 reported, and F15's lane-less first frame). The held region ends at the lanes, not the
@@ -126,6 +169,71 @@ function WorkspaceFrameLanes(): React.JSX.Element {
       <link rel='expect' href={`#${workspaceFrameEndId}`} blocking='render' />
       <span id={workspaceFrameEndId} hidden />
     </>
+  );
+}
+
+/**
+ * The phone frame (blueprint P-h, § Editor frame, phone; A15c): the top bar with its controls' places, the viewer's
+ * box, the sheet at the detent this project's sheet opens at, and the tab bar with the remembered destination
+ * selected, each at the box the phone workspace draws it in, read from the frame hint's variables with the default
+ * (the model, the sheet closed) as each fallback. Nothing in it stands for content, and nothing in it moves. The phone
+ * workspace mounts hidden until its stored layout is read (`data-mobile-workspace=ready`); in that commit the top
+ * bar, the sheet and the tab bar give way to the live ones in the same boxes, and the viewer's box gives way once the
+ * live viewer stage is drawn too. The live sheet is drawn in a portal outside the frame, so the hand-over is the
+ * workspace's attribute, not the live part's presence.
+ *
+ * It is inert and hidden from assistive technology: the route's busy state is the gates' `WorkspaceOpening`. A
+ * failure or a notice that stands in the workspace's place shows alone, as on a wide screen.
+ *
+ * @returns The phone frame.
+ */
+function PhoneFrame(): React.JSX.Element {
+  return (
+    <div
+      aria-hidden='true'
+      inert
+      data-slot='workspace-frame-phone'
+      className={cn(
+        'absolute inset-0 flex flex-col overflow-hidden md:hidden',
+        mobileWorkbenchNavigationHeight,
+        '[[data-slot=workspace-frame]:has([role=alert]:not([data-mobile-workspace]_*))_&]:hidden',
+        '[[data-slot=workspace-frame]:has([data-slot=project-route-notice])_&]:hidden',
+      )}
+    >
+      <div
+        data-frame-part='top-bar'
+        className='flex h-12 shrink-0 items-center gap-0.5 border-b bg-background px-1 [[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:invisible'
+      >
+        <span className='flex size-10 shrink-0 items-center justify-center'>
+          <PanelLeft aria-hidden className='size-5' />
+        </span>
+        <span className='h-10 min-w-0 flex-1' />
+        <span className='flex size-10 shrink-0 items-center justify-center'>
+          <Share2 aria-hidden className='size-5' />
+        </span>
+      </div>
+      {/* The live viewer box's inset: the sheet's visible height while it is open, the tab bar's otherwise. */}
+      <div className='relative min-h-0 flex-1 pb-[max(var(--frame-sheet-height,0px),var(--nav-offset))]'>
+        <div
+          data-frame-part='viewer'
+          className='size-full [[data-slot=workspace-frame]:has([data-mobile-workspace=ready]_[data-slot=viewer-stage])_&]:hidden'
+        />
+      </div>
+      <div
+        data-frame-part='sheet'
+        className={cn(
+          /* The live sheet is the viewport's height, moved down to its detent: the same box. */
+          'fixed inset-x-0 top-[calc(100dvh_-_var(--frame-sheet-height,0px))] h-dvh flex-col rounded-t-[calc(var(--spacing)*11)] border-x border-t bg-sidebar',
+          '[display:var(--frame-sheet-display,none)]',
+          '[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden',
+        )}
+      >
+        <div className='relative h-2 shrink-0'>
+          <div className='absolute inset-x-0 bottom-0 mx-auto h-1 w-15 rounded-full bg-sidebar-primary/15' />
+        </div>
+      </div>
+      <MobileWorkbenchNavigationFrame className='fixed inset-x-0 bottom-0 [[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden' />
+    </div>
   );
 }
 

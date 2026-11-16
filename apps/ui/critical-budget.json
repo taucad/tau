@@ -11,9 +11,9 @@
   "variants": {
     "self-host": {
       "project": {
-        "brotliBytes": 2941434,
-        "requests": 403,
-        "largestChunkBrotliBytes": 228591,
+        "brotliBytes": 2953073,
+        "requests": 405,
+        "largestChunkBrotliBytes": 228543,
         "knownHeavy": {
           "editor": "PL5: the code viewer of the workbench dock",
           "react-three": "PL5: the printer viewer of the workbench dock",
@@ -21,17 +21,17 @@
         }
       },
       "home": {
-        "brotliBytes": 1253988,
-        "requests": 286,
-        "largestChunkBrotliBytes": 137775,
+        "brotliBytes": 1273734,
+        "requests": 294,
+        "largestChunkBrotliBytes": 138882,
         "knownHeavy": {}
       }
     },
     "cloud": {
       "project": {
-        "brotliBytes": 2966650,
-        "requests": 418,
-        "largestChunkBrotliBytes": 229666,
+        "brotliBytes": 2978856,
+        "requests": 420,
+        "largestChunkBrotliBytes": 229660,
         "knownHeavy": {
           "editor": "PL5: the code viewer of the workbench dock",
           "react-three": "PL5: the printer viewer of the workbench dock",
@@ -39,9 +39,9 @@
         }
       },
       "home": {
-        "brotliBytes": 1276255,
-        "requests": 300,
-        "largestChunkBrotliBytes": 137886,
+        "brotliBytes": 1296528,
+        "requests": 308,
+        "largestChunkBrotliBytes": 138947,
         "knownHeavy": {}
       }
     }

@@ -123,7 +123,7 @@ describe('WorkspaceFrame', () => {
     const frame = renderFrame('/w/home/one');
 
     expect(frame.className).toContain(
-      '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
+      '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
     );
   });
 
@@ -234,7 +234,7 @@ describe('WorkspaceFrame', () => {
     const frame = renderFrame('/w/home/one');
 
     expect(frame.className).toContain(
-      '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
+      '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
     );
     expect(frame.className).toContain('[&:has([data-chat-lane=hidden])>[data-slot=workspace-frame-composer]]:hidden');
     expect(handOffStore.holds({ surface: 'project-composer', scope: 'home/one' })).toBe(true);
@@ -246,6 +246,46 @@ describe('WorkspaceFrame', () => {
 
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(document.querySelector('[data-slot=workspace-frame] textarea')).toBeNull();
+  });
+
+  /* A15b2 (F11): drawn for a project the route has not committed, the frame's layers show and the page being left is
+   * hidden in place, so nothing of it shows over the lanes or the phone frame. */
+  it('hides every child but the lanes and the phone frame while the route is pending', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    const view = render(
+      <WorkspaceFrame isPending>
+        <p>home</p>
+      </WorkspaceFrame>,
+    );
+    const frame = view.container.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
+
+    expect(frame).toHaveAttribute('data-workspace-pending');
+    expect(frame.className).toContain(
+      '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone])]:invisible',
+    );
+    expect(frame.querySelector(':scope > [data-slot=workspace-frame-lanes]')).not.toBeNull();
+    expect(frame.querySelector(':scope > [data-slot=workspace-frame-phone]')).not.toBeNull();
+    view.rerender(
+      <WorkspaceFrame>
+        <p>home</p>
+      </WorkspaceFrame>,
+    );
+    expect(frame).not.toHaveAttribute('data-workspace-pending');
+  });
+
+  /* A15b2 review: drawn ahead of the route, the frame renders before the router pushes the URL, so it reads the
+   * destination's hint from the shell's pathname, not the document's URL (still the page being left). */
+  it("draws the destination's remembered layout while the URL is still the page being left's", () => {
+    writeWideFrameHint('home/two', workbenchClosed);
+    globalThis.history.replaceState(null, '', '/');
+    const view = render(
+      <WorkspaceFrame isPending pathname='/w/home/two'>
+        <p>home</p>
+      </WorkspaceFrame>,
+    );
+    const frame = view.container.querySelector<HTMLElement>('[data-slot=workspace-frame]')!;
+
+    expect(frame.style.getPropertyValue('--frame-workbench-display')).toBe('none');
   });
 
   // ── A15c: the phone frame (blueprint P-h; C6) ──
@@ -312,7 +352,9 @@ describe('WorkspaceFrame', () => {
     );
     expect(part('sheet')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden');
     expect(part('tab-bar')).toContain('[[data-slot=workspace-frame]:has([data-mobile-workspace=ready])_&]:hidden');
-    expect(phone.className).toContain('[[data-slot=workspace-frame]:has([data-slot=project-route-notice])_&]:hidden');
+    expect(phone.className).toContain(
+      '[[data-slot=workspace-frame]:not([data-workspace-pending]):has([data-slot=project-route-notice])_&]:hidden',
+    );
     expect(phone.className).toContain('md:hidden');
   });
 });

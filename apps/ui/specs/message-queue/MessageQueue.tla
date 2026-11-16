@@ -141,6 +141,10 @@
 \* WP5 (composer image formats): the store and the composer draft provide the image step from the app's
 \* attachment image actor, and a queued image carries its declared type for the intake counter only; admission,
 \* delivery, persistence and the queue barrier are unchanged.
+\* SP2g (change-event netting): the store's watch of a chat's foreign segment directory also refolds on a
+\* summary of that directory or any ancestor (the project root included), as the coalescer now delivers scoped
+\* `directoryChanged` resets; a refold only re-reads segments, so admission, delivery, persistence and the queue
+\* barrier are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

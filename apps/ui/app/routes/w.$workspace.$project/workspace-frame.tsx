@@ -33,8 +33,8 @@ const noHintOnServer = (): undefined => undefined;
  * pushed the URL before the frame renders for it. The default is set explicitly on the client, so a project with no
  * hint never inherits the variables the pre-paint script left on `<html>` for the project the document first loaded.
  */
-const readDocumentFrameHint = (): WideFrameHint => {
-  const key = frameHintKey(globalThis.location.pathname);
+const readDocumentFrameHint = (pathname = globalThis.location.pathname): WideFrameHint => {
+  const key = frameHintKey(pathname);
   return (key === undefined ? undefined : readWideFrameHint(key)) ?? defaultWideFrameHint;
 };
 
@@ -45,8 +45,8 @@ const frameVariables = (wide: WideFrameHint, phone: PhoneFrameHint): FrameHintVa
 });
 
 /** The phone hint for the document's current URL, or the default phone layout (the model, the sheet closed). */
-const readDocumentPhoneFrameHint = (): PhoneFrameHint => {
-  const key = frameHintKey(globalThis.location.pathname);
+const readDocumentPhoneFrameHint = (pathname = globalThis.location.pathname): PhoneFrameHint => {
+  const key = frameHintKey(pathname);
   return (key === undefined ? undefined : readPhoneFrameHint(key)) ?? defaultPhoneFrameHint;
 };
 
@@ -78,21 +78,33 @@ export const workspaceFrameEndId = 'workspace-frame-end';
  * On a phone the lanes are not drawn: the phone frame is its own (A15c). Data slots are the frame rows' contract:
  * `[data-slot=workspace-frame]` and one `[data-slot=workspace-lane]` per lane.
  *
- * @param props - The project route's content, and whether the frame is drawn: off a project route (a suite that
- *   mounts the route with no app host) the same host element stays, with no frame, so the content keeps its tree
- *   position.
+ * @param props - The content, whether the frame is drawn, and whether it is drawn ahead of the route. The shell draws
+ *   it (`Page`, A15b2) on a project route and for a navigation to one; on any other route the same host element stays,
+ *   with no frame, so the content keeps its tree position.
  * @returns The frame with the content over it.
  */
 export function WorkspaceFrame({
   children,
   isDrawn = true,
+  isPending = false,
+  pathname,
 }: {
   readonly children?: React.ReactNode;
   readonly isDrawn?: boolean;
+  /** The frame is drawn for a project the route has not committed yet: the content is still the page being left. */
+  readonly isPending?: boolean;
+  /**
+   * The project's pathname, which the shell passes: drawn ahead of the route, the frame renders before the router has
+   * pushed the URL. Without it, the document's URL, as the pre-paint script reads it (suites with no router).
+   */
+  readonly pathname?: string;
 }): React.JSX.Element {
-  /* The document's URL, as the pre-paint script reads it: the frame also renders in suites with no router. */
-  const wide = useSyncExternalStore(subscribeToNothing, readDocumentFrameHint, noHintOnServer);
-  const phone = useSyncExternalStore(subscribeToNothing, readDocumentPhoneFrameHint, noPhoneHintOnServer);
+  const wide = useSyncExternalStore(subscribeToNothing, () => readDocumentFrameHint(pathname), noHintOnServer);
+  const phone = useSyncExternalStore(
+    subscribeToNothing,
+    () => readDocumentPhoneFrameHint(pathname),
+    noPhoneHintOnServer,
+  );
   const tab = phone === undefined ? undefined : phoneFrameDestination(phone.tab);
   /* The tab bar's selected destination is an attribute selector on `<html>`, which the pre-paint script set for the
    * document's first project: on the client the frame names its own project's before paint, so a client move to
@@ -116,17 +128,22 @@ export function WorkspaceFrame({
   return (
     <div
       data-slot='workspace-frame'
+      data-workspace-pending={isPending || undefined}
       className={cn(
         'size-full bg-background md:relative md:isolate',
+        /* A15b2: drawn ahead of the route, the frame's layers (the lanes, the phone frame) show alone; the page being
+         * left stays in place, unseen, until the route's commit replaces it. */
+        '[&[data-workspace-pending]>:not([data-slot=workspace-frame-lanes]):not([data-slot=workspace-frame-phone])]:invisible',
         /* Literal for Tailwind: `workspaceLanesReadyAttribute`. */
         '[&:has([data-workspace-lanes=ready])>[data-slot=workspace-frame-lanes]]:hidden',
         /* Literal for Tailwind: the desktop workspace's `data-chat-lane`. The composer box stays past the lanes'
          * layout until a composer adopts its input, but not over a chat lane the live layout has closed. */
         '[&:has([data-chat-lane=hidden])>[data-slot=workspace-frame-composer]]:hidden',
         /* A failure that stands in the content region in the workspace's place (the file service's, the route
-         * chunk's) shows alone, as it did before the frame: no lane or composer box under it. */
-        '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
-        '[&:has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
+         * chunk's) shows alone, as it did before the frame: no lane or composer box under it. Not while pending: the
+         * content is then the page being left, hidden, and an alert of its own is not the destination's. */
+        '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-lanes]]:hidden',
+        '[&:not([data-workspace-pending]):has([role=alert]:not([data-project-workspace]_*))>[data-slot=workspace-frame-composer]]:hidden',
       )}
       style={
         wide === undefined || phone === undefined ? undefined : (frameVariables(wide, phone) as React.CSSProperties)
@@ -231,8 +248,8 @@ function PhoneFrame(): React.JSX.Element {
       className={cn(
         'absolute inset-0 flex flex-col overflow-hidden md:hidden',
         mobileWorkbenchNavigationHeight,
-        '[[data-slot=workspace-frame]:has([role=alert]:not([data-mobile-workspace]_*))_&]:hidden',
-        '[[data-slot=workspace-frame]:has([data-slot=project-route-notice])_&]:hidden',
+        '[[data-slot=workspace-frame]:not([data-workspace-pending]):has([role=alert]:not([data-mobile-workspace]_*))_&]:hidden',
+        '[[data-slot=workspace-frame]:not([data-workspace-pending]):has([data-slot=project-route-notice])_&]:hidden',
       )}
     >
       <div

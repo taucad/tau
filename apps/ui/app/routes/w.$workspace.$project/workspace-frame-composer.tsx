@@ -47,21 +47,26 @@ type ServedComposerState = 'served' | EarlyChatInput | 'gone';
  *
  * @param isDrawn - Whether the frame is drawn (a project route, or a navigation to one).
  * @param pathname - The frame's project path, where the shell passes it; none in a suite with no router.
+ * @param navigationType - How the router reached the committed location, where the shell passes it.
  * @returns The served field to draw over the content, and the handover the composer reads.
  */
 export function useServedComposer(
   isDrawn: boolean,
   pathname?: string,
+  navigationType?: 'POP' | 'PUSH' | 'REPLACE',
 ): { field: React.ReactNode; handover: EarlyInputHandover } {
   const isOnClient = useSyncExternalStore(subscribeToNothing, isClientRender, isServerRender);
   const [state, setState] = useState<ServedComposerState>(() => (isOnClient ? 'gone' : 'served'));
   /* A navigation off the project route ends the served input: a frame drawn again later was not served with it. So
-   * does a navigation to another project, which the frame's project path says (the shell's, from the router: the
-   * route's correction to the canonical slugs is a `replaceState` the router does not see, so it keeps the path). The
-   * path the frame is first drawn for is the project it was served for. */
+   * does a navigation to another project, which the frame's project path says (the shell's, from the router). The
+   * path the frame is first drawn for is the project it was served for. The route rewrites a served URL to the same
+   * project's canonical slugs by a router replace (the focus sink, after a case-folded slug or an id segment), so a
+   * replace moves the served path with it; a move to another project is a push or a traversal. */
   const projectKey = pathname === undefined ? undefined : frameHintKey(pathname);
-  const [servedProjectKey] = useState(projectKey);
-  if (state !== 'gone' && (!isDrawn || projectKey !== servedProjectKey)) {
+  const [servedProjectKey, setServedProjectKey] = useState(projectKey);
+  if (state !== 'gone' && isDrawn && projectKey !== servedProjectKey && navigationType === 'REPLACE') {
+    setServedProjectKey(projectKey);
+  } else if (state !== 'gone' && (!isDrawn || projectKey !== servedProjectKey)) {
     setState('gone');
   }
   const inputRef = useRef<EarlyTextarea>(null);

@@ -310,13 +310,14 @@ describe('WorkspaceFrame served composer', () => {
   };
   /* The shell's project path for the frame (A15b2), where a row passes one. */
   let framePath: string | undefined;
+  let frameNavigation: 'POP' | 'PUSH' | 'REPLACE' | undefined;
   const served = (url: string, isDrawn = true): React.JSX.Element => (
     <MemoryRouter initialEntries={[url]}>
       <Routes>
         <Route
           path='/w/:workspace/:project'
           element={
-            <WorkspaceFrame isDrawn={isDrawn} pathname={framePath}>
+            <WorkspaceFrame isDrawn={isDrawn} pathname={framePath} navigationType={frameNavigation}>
               <Consumer />
             </WorkspaceFrame>
           }
@@ -365,6 +366,7 @@ describe('WorkspaceFrame served composer', () => {
     globalThis.localStorage.clear();
     handover = undefined;
     framePath = undefined;
+    frameNavigation = undefined;
   });
 
   afterEach(() => {
@@ -604,6 +606,35 @@ describe('WorkspaceFrame served composer', () => {
         handover?.claim('p2');
       });
       expect(handover?.pending).toBeUndefined();
+    } finally {
+      await done();
+    }
+  });
+
+  /* Review round 12: the focus sink rewrites a served URL to the same project's canonical slugs by a router replace. */
+  it("keeps the served input and its text through the router's replace to the project's canonical slugs", async () => {
+    framePath = '/w/Home/proj_1';
+    frameNavigation = 'POP';
+    const { container, rerender, done } = await serveAndHydrate('/w/Home/proj_1', (input) => {
+      input.value = 'add fillets';
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    try {
+      rerender(true);
+      framePath = '/w/home/one';
+      frameNavigation = 'REPLACE';
+      rerender(true);
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).not.toBeNull();
+      act(() => {
+        handover?.release('p1');
+        handover?.claim('p1');
+      });
+      expect(handover?.pending?.text).toBe('add fillets');
+      /* A later push to another project still ends a served input. */
+      framePath = '/w/home/two';
+      frameNavigation = 'PUSH';
+      rerender(true);
+      expect(container.querySelector('[data-slot=workspace-frame-composer]')).toBeNull();
     } finally {
       await done();
     }

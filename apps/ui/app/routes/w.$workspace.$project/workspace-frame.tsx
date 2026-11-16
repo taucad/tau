@@ -88,6 +88,7 @@ export function WorkspaceFrame({
   isDrawn = true,
   isPending = false,
   pathname,
+  navigationType,
 }: {
   readonly children?: React.ReactNode;
   readonly isDrawn?: boolean;
@@ -98,6 +99,8 @@ export function WorkspaceFrame({
    * pushed the URL. Without it, the document's URL, as the pre-paint script reads it (suites with no router).
    */
   readonly pathname?: string;
+  /** How the router reached the committed location: a replace keeps the served input's project (`useServedComposer`). */
+  readonly navigationType?: 'POP' | 'PUSH' | 'REPLACE';
 }): React.JSX.Element {
   const wide = useSyncExternalStore(subscribeToNothing, () => readDocumentFrameHint(pathname), noHintOnServer);
   const phone = useSyncExternalStore(
@@ -114,7 +117,7 @@ export function WorkspaceFrame({
       document.documentElement.setAttribute(frameTabAttribute, tab);
     }
   }, [isDrawn, tab]);
-  const served = useServedComposer(isDrawn, pathname);
+  const served = useServedComposer(isDrawn, pathname, navigationType);
 
   if (!isDrawn) {
     return (

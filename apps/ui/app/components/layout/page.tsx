@@ -733,6 +733,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                   isDrawn={workspaceFrame.drawn}
                   isPending={workspaceFrame.pending}
                   pathname={workspaceFrame.pathname}
+                  navigationType={navigationType}
                 >
                   <Compose components={Providers}>
                     <RouteCommandPaletteItems />

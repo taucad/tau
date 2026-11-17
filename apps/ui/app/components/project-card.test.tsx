@@ -5,12 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createIsometricCaptureCamera } from '@taucad/agent-tools/capture';
 import { defaultStageOptions } from '@taucad/viewer/graphics/three/stage-options';
 import { cameraPresetOrientations } from '@taucad/workbench';
-import {
-  ProjectCard,
-  ProjectCardCadPreview,
-  ProjectCardMedia,
-  projectCardVerticalFieldOfView,
-} from '#components/project-card.js';
+import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
+import { projectCardVerticalFieldOfView } from '#components/project-card-camera.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const { cadPreviewViewerMock, warmProjectWorkspaceMock } = vi.hoisted(() => ({

@@ -1,6 +1,6 @@
 import { ENV } from '#environment.config.js';
-import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';

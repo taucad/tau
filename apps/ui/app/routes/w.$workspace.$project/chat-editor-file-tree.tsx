@@ -139,7 +139,7 @@ import {
   getFileTreeDownloadErrorMessage,
   getFileTreeDownloadPolicy,
 } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { previewProjectFileInQuickLook } from '#filesystem/desktop-quick-look.js';
 import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';
 import type { RevealInFileManager } from '#hooks/use-native-file-manager.js';
@@ -156,6 +156,16 @@ type RowPresentation = FileProvenanceLabel & {
   readonly provenance: FileProvenance | undefined;
   readonly isSubtreeRoot: boolean;
   readonly subtreeRootLevel?: number;
+  /**
+   * A file a tree write has yet to land, or a folder only such files make (STO-25, I7): shown arriving, never missing,
+   * and read-only until it lands.
+   */
+  readonly isArriving?: boolean;
+  /**
+   * Whether a file opens read-only, where it differs from `readOnly`: an arriving file is read-only in the tree only
+   * until it lands, so it opens as its source says, and its pane waits for its bytes.
+   */
+  readonly opensReadOnly?: boolean;
 };
 
 /** The shared read-only refusal copy, read once so the call site is not a pseudo-constructor. */
@@ -187,6 +197,9 @@ const sameProvenance = (previous?: FileProvenance, next?: FileProvenance): boole
     previous?.identity === next?.identity &&
     previous?.overrides === next?.overrides);
 
+/* A row a tree write has yet to land, or a folder only such rows make (STO-25, I7). */
+const isArrivingEntry = (entry: FileEntry): boolean => entry.pending === true;
+
 /**
  * Whether two tree snapshots draw the same rows.
  *
@@ -203,6 +216,7 @@ function sameTreeRows(previous: ReadonlyMap<string, FileEntry>, next: ReadonlyMa
       before !== entry &&
       (before?.name !== entry.name ||
         before.type !== entry.type ||
+        isArrivingEntry(before) !== isArrivingEntry(entry) ||
         !sameProvenance(before.provenance, entry.provenance))
     ) {
       return false;
@@ -220,8 +234,12 @@ function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<
 
   const presentation = new Map<string, RowPresentation>();
   for (const [path, label] of labels) {
+    /* Not on disk yet: nothing may rename, move, delete or make anything inside it until it lands. */
+    const arriving = isArrivingEntry(fileTreeMap.get(path)!)
+      ? { isArriving: true, readOnly: true, opensReadOnly: label.readOnly }
+      : {};
     if (!label.readOnly) {
-      presentation.set(path, { ...label, isSubtreeRoot: true });
+      presentation.set(path, { ...label, isSubtreeRoot: true, ...arriving });
       continue;
     }
 
@@ -238,6 +256,7 @@ function buildRowPresentation(fileTreeMap: ReadonlyMap<string, FileEntry>): Map<
       ...label,
       isSubtreeRoot: subtreeRoot === path,
       subtreeRootLevel: subtreeRoot.split('/').length - 1,
+      ...arriving,
     });
   }
 
@@ -556,6 +575,14 @@ export const ChatEditorFileTree = memo(function ({
   );
   /** The user's access is `source !== 'project'` (ruling P10), never `agentAccess`. */
   const isReadOnlyPath = useCallback((path: string): boolean => presentationFor(path).readOnly, [presentationFor]);
+  /** Whether a file opens read-only: an arriving one opens as its source says, writable once it lands. */
+  const opensReadOnlyPath = useCallback(
+    (path: string): boolean => {
+      const presentation = presentationFor(path);
+      return presentation.opensReadOnly ?? presentation.readOnly;
+    },
+    [presentationFor],
+  );
 
   const fileTree = useMemo((): FileItem[] => {
     if (fileTreeMap.size === 0) {
@@ -943,7 +970,7 @@ export const ChatEditorFileTree = memo(function ({
     onPrimaryAction(item) {
       if (!item.isFolder()) {
         const path = item.getId();
-        requestOpenFile(path, readOnly || isReadOnlyPath(path));
+        requestOpenFile(path, readOnly || opensReadOnlyPath(path));
       }
     },
     hotkeys: {
@@ -1369,9 +1396,9 @@ export const ChatEditorFileTree = memo(function ({
 
   const handleOpenInEditor = useCallback(
     (path: string) => {
-      requestOpenFile(path, isReadOnlyPath(path));
+      requestOpenFile(path, opensReadOnlyPath(path));
     },
-    [isReadOnlyPath, requestOpenFile],
+    [opensReadOnlyPath, requestOpenFile],
   );
 
   const handleOpenInViewer = useCallback(
@@ -2187,7 +2214,8 @@ export const ChatEditorFileTree = memo(function ({
  */
 /** An empty project offers one clear action, a touch path that does not depend on dropping files (PN-FIL-3, I2). */
 function FileTreeEmptyState({ onUpload }: { readonly onUpload: (() => void) | undefined }): React.JSX.Element {
-  const availability = useProjectAvailability();
+  /* "No files" speaks for every authored file: while an open's apply still writes them, it waits (I7). */
+  const availability = useProjectAvailability('absence');
   if (availability !== 'ready') {
     return <ProjectSyncPlaceholder state={availability} />;
   }
@@ -2368,7 +2396,7 @@ function TreeItem({
         <>
           <Item disabled>
             <Lock aria-hidden />
-            Read-only
+            {presentation.isArriving === true ? 'Arriving' : 'Read-only'}
           </Item>
           {overridableUnit ? (
             <Item
@@ -2578,10 +2606,14 @@ function TreeItem({
               {presentation.badge}
             </Badge>
           ) : null}
-          {isAwaitingLargeObject ? (
-            <span data-large-object-pending className='flex shrink-0 items-center'>
+          {isAwaitingLargeObject || presentation.isArriving === true ? (
+            <span
+              data-large-object-pending={isAwaitingLargeObject ? '' : undefined}
+              data-arriving={presentation.isArriving === true ? '' : undefined}
+              className='flex shrink-0 items-center'
+            >
               <Loader className='size-3 text-muted-foreground motion-reduce:animate-none' />
-              <span className='sr-only'>Downloading</span>
+              <span className='sr-only'>{isAwaitingLargeObject ? 'Downloading' : 'Arriving'}</span>
             </span>
           ) : null}
           {presentation.isSubtreeRoot && presentation.glyph === 'lock' ? (

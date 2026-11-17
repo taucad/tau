@@ -34,6 +34,7 @@ import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types'
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
 import { discoverAcpAgents, externalAgentDescriptors } from '#acp/index.js';
+import { runtimeTranscodePort } from '#acp/media.js';
 import type { AcpAdapterRefusal } from '#acp/index.js';
 import { chatToReport, startRunReporter } from '#run-reporter.js';
 import type { RunReporter } from '#run-reporter.js';
@@ -1020,6 +1021,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       runtimeClient: async (root) => {
         const { client } = await agentRuntimes.get(root);
         return client;
+      },
+      /* Agent media the chat cannot store as sent is converted by the served root's runtime child, started only when
+       * such an image arrives, from the formats that child's runtime reports converting to JPEG (WP6). */
+      mediaTranscoder: async () => {
+        const { child, client } = await agentRuntimes.get(agent.workspaceRoot);
+        return child.transcodeSources.length === 0
+          ? undefined
+          : { transcode: runtimeTranscodePort(client), transcodeSources: child.transcodeSources };
       },
       /*
        * Where this project's Tau Cloud repository is (C67, P51).

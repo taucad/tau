@@ -99,6 +99,7 @@ export { indexRemovalLimit, ProjectIndex, timestampGranularityMilliseconds } fro
 export { PendingContentError, pendingObjectOf, pendingStallMilliseconds } from '#pending-content.js';
 export type { PendingObject, PendingObjectRequest, PendingObjectSource } from '#pending-content.js';
 export type {
+  DeclaredPlaceholder,
   ExpectedEntry,
   FactsAt,
   IndexAdmits,
@@ -149,12 +150,22 @@ export type {
 export {
   EventCoalescer,
   coalesceChangeEvents,
+  overflowLossSignals,
+  pruneDirectorySummaries,
+  deliveryMessage,
   ChangeSetCoalescer,
   mergeChangeSets,
   nextFrame,
 } from '#event-coalescer.js';
-export type { CoalescerOptions, ChangeSetCoalescerOptions, FrameScheduler } from '#event-coalescer.js';
+export type {
+  CoalescerOptions,
+  ChangeSetCoalescerOptions,
+  FrameScheduler,
+  LossSignal,
+  SubtreeReset,
+} from '#event-coalescer.js';
 export { tagEventOrigin, getEventOrigin, isEventGloballyVisible } from '#event-origin-registry.js';
+export { scopeEventToRoot } from '#scope-event-to-root.js';
 export { WatchRegistry, watchEventsOfChangeSetFor } from '#watch-registry.js';
 export type { ChangeSetWatchRequest, WatchRegistryOptions } from '#watch-registry.js';
 export { streamChunkSize, bufferToStream } from '#backend/stream-utils.js';

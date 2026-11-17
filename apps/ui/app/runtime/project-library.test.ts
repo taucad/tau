@@ -36,10 +36,8 @@ const worker = vi.hoisted(() => ({
 /** The chat store each record client stands for. */
 const stores = vi.hoisted(() => new WeakMap<WeakKey, unknown>());
 
-vi.mock('#hooks/object-store.worker.js?worker', () => ({
-  default: class MockWorker {
-    public terminate = vi.fn();
-  },
+vi.mock('#hooks/object-store-worker.js', () => ({
+  createObjectStoreWorker: () => ({ terminate: vi.fn() }),
 }));
 
 vi.mock('comlink', () => ({ wrap: vi.fn(() => worker) }));
@@ -61,7 +59,7 @@ vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
   }),
 }));
 
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createNodeWorkspace: vi.fn(async (path: string) => ({
     workspaceId: 'wsp_node',

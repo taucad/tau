@@ -5,7 +5,7 @@ import { RootedFileSystemError } from '@taucad/filesystem';
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import type * as HandleStore from '#filesystem/handle-store.js';
+import type * as HandleStore from '@taucad/files-ui/filesystem/handle-store';
 import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { StrictMode, Suspense, use, useEffect, useState } from 'react';
@@ -30,8 +30,8 @@ import { mock } from 'vitest-mock-extended';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils.js';
 import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import type { WorkspaceEntry } from '#filesystem/handle-store.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
+import type { WorkspaceEntry } from '@taucad/files-ui/filesystem/handle-store';
 import type { AppRuntimeFiles } from '#runtime/app-runtime.js';
 
 const workerTestState = vi.hoisted(() => {
@@ -46,8 +46,8 @@ const workerTestState = vi.hoisted(() => {
   return { instances };
 });
 
-vi.mock('#machines/file-manager.worker.js?worker', () => ({
-  default: class MockWorker {
+vi.mock('#machines/file-manager-worker.js', () => {
+  class MockWorker {
     public terminate = vi.fn();
     public postMessage = vi.fn();
     public addEventListener = vi.fn((type: string, handler: (event: Event) => void) => {
@@ -68,8 +68,9 @@ vi.mock('#machines/file-manager.worker.js?worker', () => ({
       }
       return true;
     }
-  },
-}));
+  }
+  return { createFileManagerWorker: () => new MockWorker() };
+});
 
 const mockMount = vi.fn<(prefix: string, config: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();
@@ -257,7 +258,7 @@ const handleStoreTestState = vi.hoisted(() => ({
   restoreWorkspaceHandle: vi.fn(async () => false),
 }));
 
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
   getWorkspace: vi.fn(async () => undefined),
@@ -1788,7 +1789,7 @@ describe('FileManagerProvider — client + workspace facades', () => {
     const priorStorage = Object.getOwnPropertyDescriptor(navigator, 'storage');
     globalThis.indexedDB = new IDBFactory();
     Object.defineProperty(navigator, 'storage', { configurable: true, value: {} });
-    const store = await vi.importActual<typeof HandleStore>('#filesystem/handle-store.js');
+    const store = await vi.importActual<typeof HandleStore>('@taucad/files-ui/filesystem/handle-store');
     const projectId = 'proj_000000000000000000009';
     await store.setProjectFileSystemConfig({ projectId, backend: 'indexeddb', providerBasePath: 'before' });
     mockGetProjectRootConfigs.mockImplementation(store.getProjectRootConfigs);

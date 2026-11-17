@@ -18,7 +18,7 @@ import type {
 import { hashKey } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
-import type { HomeStorageBackend } from '#filesystem/handle-store.js';
+import type { HomeStorageBackend } from '@taucad/files-ui/filesystem/handle-store';
 import type { Analytics } from '#hooks/use-analytics.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
@@ -30,7 +30,7 @@ import type { EnvironmentDesktopQuit, EnvironmentHost, UnloadSequencer } from '#
 import { createFocusComposition } from '#runtime/app-runtime-focus.js';
 import type { FocusHandle } from '#runtime/app-runtime-focus.js';
 import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
-import { onDesktopQuitRequested, reportDesktopQuiesced } from '#filesystem/desktop-bridge.js';
+import { onDesktopQuitRequested, reportDesktopQuiesced } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { createFileManagerHost } from '#runtime/file-manager-host.js';
 import type {
   FileManagerActor,
@@ -44,6 +44,7 @@ import { createLeaseTable } from '#runtime/leases.js';
 import type { LeaseEntry, LeaseStore } from '#runtime/leases.js';
 import { createRootQueryClient } from '#runtime/root-query-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
+import { chatSdkSource } from '#services/chat-sdk-loader.js';
 import type { LiveProjectSessions } from '#services/chat-session-store.js';
 import { ProjectLibrary, selectLibraryRevision } from '#runtime/project-library.js';
 import { createRootFileFacade } from '#runtime/file-manager-facade.js';
@@ -190,6 +191,8 @@ const createChatSessions = (
     focusedProject,
     /* A7c: and every live project's session from the registry, so a run reports to the project that ran it (R2). */
     projectSessions,
+    /* PL1: each chat's AI SDK `Chat` loads on demand, by the chat's one dynamic import (D5's function form). */
+    chatSdk: chatSdkSource,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
     ...(options.onRejectedEvent === undefined

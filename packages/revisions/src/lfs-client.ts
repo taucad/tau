@@ -735,10 +735,13 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
       throw new Error(`The remote refused large object ${pointer.oid}.`);
     }
     let answer = initial;
+    /* Set when the remote refused the action itself; a dropped, stalled or throttled transfer keeps it (#2015). */
+    let refused = false;
     for (let attempt = 0; attempt < transferAttempts; attempt += 1) {
       signal?.throwIfAborted();
-      if (attempt > 0 || (answer.actions?.download !== undefined && expired(answer.actions.download))) {
+      if (refused || (answer.actions?.download !== undefined && expired(answer.actions.download))) {
         answer = await refresh('download', pointer, signal);
+        refused = false;
       }
       const action = answer.actions?.download;
       if (action === undefined) {
@@ -844,6 +847,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         ) {
           throw new Error(`Downloading large object ${pointer.oid} failed (${String(response.status)}).`);
         }
+        refused = response !== undefined && !retryable(response.status);
       }
       if (attempt === transferAttempts - 1) {
         throw new Error(`Downloading large object ${pointer.oid} failed after three attempts.`);

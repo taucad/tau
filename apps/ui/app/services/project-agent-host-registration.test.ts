@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const probe = vi.hoisted(() => vi.fn());
 const readConfig = vi.hoisted(() => vi.fn());
 
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   desktopBridge: () => undefined,
   isDesktopTarget: false,
 }));
@@ -12,7 +12,7 @@ vi.mock('#lib/agent-host-placement.js', () => ({
   openAgentHostChannel: vi.fn(),
 }));
 vi.mock('#services/agent-host-client.js', () => ({ probeBrowserAgentHostCapability: probe }));
-vi.mock('#filesystem/handle-store.js', () => ({ getProjectFileSystemConfig: readConfig }));
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({ getProjectFileSystemConfig: readConfig }));
 
 const { registerProjectAgentHost } = await import('#services/project-agent-host-registration.js');
 

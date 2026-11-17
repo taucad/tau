@@ -8,6 +8,7 @@ import { applyAnalyticsLink } from '#lib/analytics-link.lib.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { applyErrorDetails } from '#lib/error-details.js';
 import { decorateForNetworkFailure } from '@taucad/ui-core/lib/network-failure';
+import { decorateForGraphicsContextUnavailable } from '#lib/graphics-context-failure.lib.js';
 import { setKillContextSink } from '#lib/memory-kill-signal.js';
 import { applyTauEventContext } from '#lib/sentry-context.lib.js';
 import {
@@ -50,7 +51,7 @@ export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | u
  * The `beforeSend` hook: drop an unhandled abort rejection, apply what reporters recorded on the error (its
  * `api_request_id`, SB13, and the SB4 tags, contexts and fingerprint), scrub everything else. A transient network
  * failure still reports, as one `warning` group of its own, so a connection blip is counted without reading as a
- * fault in Tau (TAU-UI-E).
+ * fault in Tau (TAU-UI-E); so does a browser that gives no WebGL 2 context (TAU-UI-1M).
  *
  * @param event - The event the SDK is about to send.
  * @param hint - The SDK's hint for the event.
@@ -63,7 +64,12 @@ export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): Erro
     return null;
   }
   const failure = hint?.originalException;
-  return scrubSentryEvent(decorateForNetworkFailure(applyErrorDetails(event, failure), failure));
+  return scrubSentryEvent(
+    decorateForGraphicsContextUnavailable(
+      decorateForNetworkFailure(applyErrorDetails(event, failure), failure),
+      failure,
+    ),
+  );
 };
 
 /**

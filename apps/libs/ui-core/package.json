@@ -31,12 +31,17 @@
     "./constants/editor.constants": "./src/constants/editor.constants.ts",
     "./constants/gitattributes-template": "./src/constants/gitattributes-template.ts",
     "./constants/health.constants": "./src/constants/health.constants.ts",
+    "./constants/meta.constants": "./src/constants/meta.constants.ts",
     "./constants/project-names": "./src/constants/project-names.ts",
     "./constants/search-parameter.constants": "./src/constants/search-parameter.constants.ts",
     "./constants/sidebar.constants": "./src/constants/sidebar.constants.ts",
     "./constants/workspace-directory-copy.constants": "./src/constants/workspace-directory-copy.constants.ts",
     "./filesystem/workspace-errors": "./src/filesystem/workspace-errors.ts",
     "./lib/activity-breadcrumbs": "./src/lib/activity-breadcrumbs.ts",
+    "./lib/build-target": {
+      "tau-desktop": "./src/lib/build-target.desktop.ts",
+      "default": "./src/lib/build-target.web.ts"
+    },
     "./lib/builtin-share-provider-descriptor": "./src/lib/builtin-share-provider-descriptor.ts",
     "./lib/bundled-types-tree.constants": "./src/lib/bundled-types-tree.constants.ts",
     "./lib/chat-observation-guard": "./src/lib/chat-observation-guard.ts",

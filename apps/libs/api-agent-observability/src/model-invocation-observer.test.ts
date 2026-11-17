@@ -104,7 +104,7 @@ describe('ObservedModelInvocationService', () => {
   });
 
   it("should count a Vertex call's thinking as output, as the ledger does (LA3)", async () => {
-    const route = 'google-gemini-3.8-flash';
+    const route = 'google-gemini-4-hydrogen';
     const completions = new TextEncoder().encode(
       [
         { id: 'cmpl_1', model: 'gemini-test', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },

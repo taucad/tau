@@ -13,7 +13,7 @@ import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-crea
 import {
   projectCreationLocationAccessibleName,
   projectCreationLocationsEqual,
-} from '#utils/project-creation-location.utils.js';
+} from '@taucad/files-ui/utils/project-creation-location.utils';
 import { cn } from '@taucad/ui/utils/cn';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { useCookie } from '#hooks/use-cookie.js';

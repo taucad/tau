@@ -121,9 +121,9 @@ describe('root shouldRevalidate on client navigation', () => {
     expect(shouldRevalidate(rootNavigation('/', '/usage', 'POST'))).toBe(false);
   });
 
-  it('keeps the default into and out of the remote-host harness, whose check reads the loader pathname', () => {
-    expect(shouldRevalidate(rootNavigation('/', '/__e2e/remote-host'))).toBe(true);
-    expect(shouldRevalidate(rootNavigation('/__e2e/remote-host', '/projects/abc'))).toBe(true);
+  it('skips the remote-host harness too: its check reads the location, not loader data (P2)', () => {
+    expect(shouldRevalidate(rootNavigation('/', '/__e2e/remote-host'))).toBe(false);
+    expect(shouldRevalidate(rootNavigation('/__e2e/remote-host', '/projects/abc'))).toBe(false);
   });
 
   it('keeps the default when leaving the offline shell path, whose neutral document carries no real root data', () => {

@@ -21,6 +21,19 @@ vi.mock('#hooks/use-project-availability.js', () => ({
   useProjectAvailability: () => 'ready',
   useFileCheckSlow: () => mocks.slow,
 }));
+vi.mock('#hooks/use-project.js', () => ({
+  useProject: () => ({ projectId: 'p' }),
+}));
+vi.mock('#hooks/use-sessions.js', () => ({
+  useSessions: () => ({
+    getSnapshot: () => ({
+      context: {
+        status: { p: { availability: mocks.slow ? 'slow' : 'pending' } },
+      },
+    }),
+    subscribe: () => ({ unsubscribe: () => undefined }),
+  }),
+}));
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionClient: () => ({ send: mocks.send }),
   useRevisionCommands: () => ({ connectRemote: vi.fn(), syncNow: vi.fn() }),
@@ -63,19 +76,23 @@ describe('model files placeholder', () => {
   });
 
   /* T5: no download runs, so it never says one does; a wait the session reports slow offers a way out (A14). */
-  it('says it is preparing the model, not downloading, while no download runs, and offers a retry once the session reports it slow', () => {
+  /* P-j (A15e): the pane keeps its bare frame, with the check's words in a wait indicator CSS reveals from 1,000 ms. */
+  it('keeps the pane frame with "Checking model files", never a "Preparing model" block, and offers a retry once the session reports it slow', () => {
     mocks.facet = undefined;
     mocks.slow = false;
     mocks.send.mockClear();
     const { rerender } = render(<ProjectSyncPlaceholder state='filesChecking' />);
-    expect(screen.getByRole('region', { name: 'Preparing model' })).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByText('Checking your model files.')).toBeInTheDocument();
+    const region = screen.getByRole('region', { name: 'Checking model files' });
+    expect(region).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByRole('region', { name: 'Preparing model' })).not.toBeInTheDocument();
+    expect(region.querySelector('[data-slot="wait-indicator"]')).toHaveAttribute('data-state', 'waiting');
+    expect(region).toHaveTextContent('Checking model files…');
     expect(screen.queryByText('Downloading model files')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
 
     mocks.slow = true;
     rerender(<ProjectSyncPlaceholder state='filesChecking' />);
-    expect(screen.getByText('This is taking longer than it should.')).toBeInTheDocument();
+    expect(region).toHaveTextContent('Still checking model files…');
     act(() => {
       screen.getByRole('button', { name: 'Try again' }).click();
     });

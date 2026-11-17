@@ -8,7 +8,7 @@ import { createKernelParameterDeclaration, createKernelSuccess, defineKernel } f
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { imageEdgeSchemas } from '#image-export-options.js';
-import { imageTranscoder } from '#image.transcoder.js';
+import { renderTranscoder } from '#image.transcoder.js';
 
 type WebpInput = z.input<typeof imageEdgeSchemas.webp>;
 type WebpOutput = z.output<typeof imageEdgeSchemas.webp>;
@@ -60,7 +60,7 @@ const kernel = defineKernel({
     return { files: [createExportFile('glb', 'model.glb', handle)] };
   },
 });
-const runtime = defineRuntime({ kernels: [kernel()], transcoders: [imageTranscoder()] });
+const runtime = defineRuntime({ kernels: [kernel()], transcoders: [renderTranscoder()] });
 const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
 const client = createRuntimeClient({ transport });
 const entryPath = 'main.ts';

@@ -36,7 +36,7 @@ vi.mock('#hooks/use-machines.js', async (importOriginal) => ({
   ...(await importOriginal<typeof UseMachines>()),
   useMachinesFacet: () => state.facet ?? { available: false, reason: 'unsupported' },
 }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   desktopBridge: () => ({ machines: { completeBinding: state.completeBinding } }),
 }));
 

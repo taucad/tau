@@ -31,13 +31,12 @@ vi.mock('#hooks/use-project-manager.js', () => ({
     createNavigationRepairChat: async () => ({ id: 'chat_never' }),
   }),
 }));
-vi.mock('#hooks/object-store.worker.js?worker', () => ({
-  default: class MockWorker {
-    public terminate = vi.fn();
-  },
+vi.mock('#hooks/object-store-worker.js', () => ({
+  createObjectStoreWorker: () => ({ terminate: vi.fn() }),
 }));
 
-const { ProjectProvider, useProject } = await import('#hooks/use-project.js');
+const { ProjectProvider } = await import('#hooks/project-provider.js');
+const { useProject } = await import('#hooks/use-project.js');
 const { AppRuntimeProvider } = await import('#runtime/app-runtime-provider.js');
 const { createAppRuntime, selectRuntimeQueryClient } = await import('#runtime/app-runtime.js');
 const { createFakeEnvironmentHost } = await import('#runtime/environment.fixture.js');

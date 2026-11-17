@@ -41,7 +41,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import type { Chat } from '@ai-sdk/react';
+import type { ChatView } from '#services/deferred-chat.js';
 import { isResumableRun } from '@taucad/agent-host';
 import type { ForeignRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
@@ -54,7 +54,7 @@ import { isKernelAvailable } from '#constants/available-kernel-configurations.js
 import { chatKernelPreference } from '#hooks/chat-kernel-preference.js';
 import { useProjectKernelOwner } from '#hooks/use-project-kernel-owner.js';
 import { draftMachine } from '#hooks/draft.machine.js';
-import { resizeImageActor } from '@taucad/chat-ui/hooks/resize-image.actor';
+import { resizeImageActor } from '#hooks/attachment-image.actor.js';
 import { useDraftImageErrorToast } from '#hooks/use-draft-image-error-toast.js';
 import { inspect } from '#machines/inspector.js';
 import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.js';
@@ -89,7 +89,7 @@ import { effectiveEffort } from '#utils/model-reasoning.js';
 import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
 import type { AutoResumePlan } from '#utils/run-auto-resume-plan.js';
 
-type ChatInstance = Chat<MyUIMessage>;
+type ChatInstance = ChatView;
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -179,7 +179,7 @@ export type ActiveChatKernel = {
  */
 export type ActiveChatSessionContextValue = {
   activeChatId: string;
-  chat: Chat<MyUIMessage>;
+  chat: ChatView;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine>;
   draftActorRef: ActorRefFrom<typeof draftMachine>;
 };

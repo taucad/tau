@@ -34,7 +34,7 @@ import { isCloudProjectPending, getCloudDeletionState, tauCloudIntent } from '#l
 import { withNamedLock } from '#lib/named-lock.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { cloudProjectStub } from '#hooks/use-open-cloud-project.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import type { ProjectListItem } from '#types/project-library.types.js';

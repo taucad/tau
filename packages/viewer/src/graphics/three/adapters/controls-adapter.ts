@@ -31,6 +31,10 @@
  * Each frame, at `tickPriority` (after the canvas reports its surface and before the render), the adapter follows the
  * root's event source and steps the controls, unless they are disabled or the canvas's view cube holds its interaction
  * lock.
+ *
+ * Orbit style (roll Finding 10): in Tumble, after each step of a held orbit drag, the controls take the camera's screen
+ * up as their orbit axis (`applyCameraUp`, which keeps the view), so the drag never reaches a pole and turns through
+ * it. Switching to Turntable gives the camera the scene's up again through the camera actor (`setUpDirection`).
  */
 import type { RootState } from '@react-three/fiber';
 import type { Mesh } from 'three';
@@ -83,6 +87,14 @@ type FrameSubscribe = (
 export const tickPriority = -1;
 
 const upAxes = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const satisfies Record<string, CameraVector>;
+
+/** The `camera-controls` actions that orbit: a mouse drag, a one-finger drag and the two-finger rotate gestures. */
+const orbitActions: ReadonlySet<number> = new Set([
+  CameraControlsImpl.ACTION.ROTATE,
+  CameraControlsImpl.ACTION.TOUCH_ROTATE,
+  CameraControlsImpl.ACTION.TOUCH_DOLLY_ROTATE,
+  CameraControlsImpl.ACTION.TOUCH_ZOOM_ROTATE,
+]);
 
 /**
  * What a canvas gives its controls adapter. Every member is a host object or a host callback; the adapter keeps them in
@@ -323,6 +335,8 @@ export const createControlsAdapter = ({
     let observedZoom = 1;
     let held = false;
     let moved = false;
+    // Whether the last frame read the Tumble orbit style: a switch to Turntable straightens the camera's up.
+    let tumble = false;
     let published:
       | Readonly<{ camera: ThreeCamera; renderFrame: RenderFrame; up: CameraVector; near: number; far: number }>
       | undefined;
@@ -507,8 +521,17 @@ export const createControlsAdapter = ({
     const ticker = {
       current(state: RootState, delta: number): void {
         followSurface(state);
+        const wasTumble = tumble;
+        tumble = getCameraRouting?.()?.cameraInput.orbitStyle === 'tumble';
+        if (wasTumble && !tumble) {
+          camera.send({ type: 'setUpDirection', axis: getUpAxis() });
+        }
         if (controls.enabled && !isInteractionLocked()) {
           controls.update(delta);
+          if (tumble && held && orbitActions.has(controls.currentAction)) {
+            controls.applyCameraUp();
+            controls.update(0);
+          }
         }
       },
     };

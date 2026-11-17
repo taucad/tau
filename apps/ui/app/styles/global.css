@@ -12,6 +12,7 @@
 @import 'streamdown/styles.css';
 @import '@taucad/workbench-panes/styles/panes.css';
 @import '../components/layout/application-shell.css';
+@import './client-facts.css';
 @import './scroll-shadows.css';
 @import './syntax-highlight.css';
 @import './shiny-text.css';
@@ -246,6 +247,13 @@
 }
 
 /* Dark variant is provided by fumadocs-ui/css/preset.css: @variant dark (&:where(.dark, .dark *)) */
+
+/*
+ * Inside a closed desktop sidebar's shell. The shell's own attribute decides once React renders; before hydration the
+ * client-facts head script's `data-sidebar-closed` on `<html>` decides, so a closed sidebar paints closed
+ * (`#lib/client-facts`). The writer keeps that attribute equal to the stored state.
+ */
+@custom-variant sidebar-closed (&:where([data-slot='application-shell'][data-sidebar-open='false'] *, :root[data-sidebar-closed] [data-slot='application-shell'] *));
 
 @theme inline {
   --color-viewer-tool-active: var(--viewer-tool-active);

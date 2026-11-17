@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, render, screen } from '@testing-library/react';
 import { createActor } from 'xstate';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import type * as ChatMessageQueueModule from '@taucad/chat-ui/db/chat-message-queue-store';
 import type { AgentHostClient } from '#services/agent-host-client.js';
@@ -80,6 +81,12 @@ const { MirroredChatSessionStoreProvider: ChatSessionStoreProvider } =
   await import('#hooks/chat-session-store.fixture.js');
 const { useChatSession, useChatSessionSnapshot } = await import('#hooks/use-chat-session.js');
 const { useChatSelector } = await import('#hooks/use-chat.js');
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
 
 it('should deliver a reply through the retained active session without a sidebar observation', async () => {
   let store: ChatSessionStore | undefined;

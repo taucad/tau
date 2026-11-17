@@ -656,6 +656,52 @@ describe('desktop main compute owner', () => {
   );
 
   it(
+    'logs a quit that reached before-quit with no reason of its own as external',
+    async () => {
+      await bootstrap();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', { purpose: 'quit', reason: 'external' });
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'logs the session ending as the reason for the quit that follows it',
+    async () => {
+      await bootstrap();
+      const { powerMonitor } = await import('electron');
+      // `on` is overloaded per event, so its recorded calls are read untyped.
+      const calls: ReadonlyArray<readonly unknown[]> = vi.mocked(powerMonitor.on).mock.calls;
+      const shutdown = calls.findLast(([event]) => event === 'shutdown')?.[1];
+      expect(shutdown).toBeTypeOf('function');
+      (shutdown as () => void)();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', {
+          purpose: 'quit',
+          reason: 'system-shutdown',
+        });
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'logs an update restart as its own quit reason',
+    async () => {
+      await bootstrap();
+      await expect(state.prepareToRestart!()).resolves.toBe(true);
+      expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', {
+        purpose: 'restart',
+        reason: 'update-install',
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'installer failure restores services before permitting another install',
     async () => {
       await bootstrap();

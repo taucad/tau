@@ -40,6 +40,8 @@ const sentryLibrary = async () => {
 const load = async () => {
   vi.resetModules();
   vi.doMock('#lib/sentry.lib.js', sentryLibrary);
+  // The SDK's stack parser is a chunk of its own (PL5); these cases are about delivery, not frames.
+  vi.doMock('#lib/sentry-stack-parser.js', () => ({ parseSentryStack: () => [] }));
   return import('#lib/error-reporting.js');
 };
 
@@ -117,6 +119,8 @@ describe('error reporting', () => {
     await reporter.startErrorReporting();
     await reporter.reportUiError(failure);
     await reporter.reportUiError(failure);
+    // The event waits for the SDK's stack parser, a chunk of its own.
+    await settle();
     expect(sentry.loads).toBe(0);
     expect(reporter.isErrorTrackerListening()).toBe(false);
     expect(posted).toHaveLength(1);

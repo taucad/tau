@@ -81,6 +81,7 @@ export const runtimeCallers = [
   'converter',
   'capture',
   'viewer',
+  'attachment',
 ] as const;
 /** The transport a client was composed with. @public */
 export const runtimeTransports = ['in-process', 'web-worker', 'node-worker', 'utility', 'websocket'] as const;
@@ -703,7 +704,7 @@ export const usageCoverage = [
   },
   { dimension: 'export formats', series: 'tau_runtime_exports_total', by: 'tau_runtime_format', panel: 12 },
   {
-    dimension: 'callers (editor, agent, geospec, quicklook, host, converter, capture, viewer)',
+    dimension: 'callers (editor, agent, geospec, quicklook, host, converter, capture, viewer, attachment)',
     series: 'tau_runtime_operations_by_caller_total',
     by: 'tau_runtime_caller',
     panel: 19,

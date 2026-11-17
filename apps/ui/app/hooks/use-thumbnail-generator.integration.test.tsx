@@ -96,7 +96,7 @@ vi.mock('#providers/headless-image-provider.js', () => ({
 }));
 
 const getProjectFileSystemConfig = vi.fn();
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectFileSystemConfig,
 }));
 

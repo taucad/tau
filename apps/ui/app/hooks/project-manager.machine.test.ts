@@ -6,10 +6,8 @@ import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-s
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
-vi.mock('#hooks/object-store.worker.js?worker', () => ({
-  default: class MockWorker {
-    public terminate = vi.fn();
-  },
+vi.mock('#hooks/object-store-worker.js', () => ({
+  createObjectStoreWorker: () => ({ terminate: vi.fn() }),
 }));
 
 vi.mock('comlink', () => ({

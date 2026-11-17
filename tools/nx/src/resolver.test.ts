@@ -91,13 +91,13 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — fifty-seven today', () => {
+  it('is every non-private type:package project, sorted — fifty-eight today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    // `geospec` left for taucad/geospec (59 to 58), then `rhino` was removed (58 to 57).
-    expect(names).toHaveLength(57);
+    // `geospec` left for taucad/geospec (59 to 58), then `rhino` was removed (58 to 57), then `heif` was added (57 to 58, #2337).
+    expect(names).toHaveLength(58);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.
     for (const name of ['archive-core', 'runtime', 'runtime-testing', 'cli']) {
@@ -251,7 +251,7 @@ describe('validateTags()', () => {
         ],
       }),
     ).toEqual([
-      'fixture/unknown-lane: unknown tag "ci:packaged" (ci: must be one of browser, standalone, quarantined, shell, desktop, native-hosts)',
+      'fixture/unknown-lane: unknown tag "ci:packaged" (ci: must be one of browser, standalone, quarantined, shell, desktop, native-hosts, windows-unit)',
       'fixture/repeated-lane: duplicate tag "ci:desktop"',
     ]);
   });

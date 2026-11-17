@@ -30,6 +30,7 @@ import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-envi
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { viewerRendererCreated } from '#lib/viewer-events.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+import { GraphicsContextUnavailableError } from '#graphics/graphics-backend.js';
 import { canvasHostCreated } from '#graphics/three/three-canvas-instance-host.js';
 import { selectGraphicsViewportGizmoLocked } from '#machines/graphics.machine.js';
 import type { CanvasHostRoot } from '#graphics/three/three-canvas-instance-host.js';
@@ -105,10 +106,19 @@ function CanvasRendererLifetime({ factory }: { readonly factory: TauR3fGlFactory
  * @param failure - The canvas actor's recorded failure.
  * @returns The error to throw.
  */
-const failureError = (failure: CanvasFailure): Error =>
-  failure.kind === 'webgpu-initialization'
-    ? new WebGpuInitializationError(failure.message)
-    : new Error(failure.message);
+const failureError = (failure: CanvasFailure): Error => {
+  switch (failure.kind) {
+    case 'webgpu-initialization': {
+      return new WebGpuInitializationError(failure.message);
+    }
+    case 'context-unavailable': {
+      return new GraphicsContextUnavailableError();
+    }
+    case 'renderer': {
+      return new Error(failure.message);
+    }
+  }
+};
 
 /** What the input router reads: nothing without a camera input, so today's bindings hold. */
 const toCameraRouting = ({
@@ -248,7 +258,12 @@ export function ThreeCanvasInstance({
           sendToCanvas({
             type: 'rendererFailed',
             failure: {
-              kind: error instanceof WebGpuInitializationError ? 'webgpu-initialization' : 'renderer',
+              kind:
+                error instanceof WebGpuInitializationError
+                  ? 'webgpu-initialization'
+                  : error instanceof GraphicsContextUnavailableError
+                    ? 'context-unavailable'
+                    : 'renderer',
               message: error.message,
             },
           });
@@ -365,6 +380,7 @@ export function ThreeCanvasInstance({
             zoomSpeed={zoomSpeed}
             gizmoContainer={gizmoContainer}
             gizmoStyle={gizmoStyle}
+            orbitStyle={cameraInput?.orbitStyle}
           >
             {children}
           </Scene>

@@ -23,8 +23,8 @@ vi.mock('#routes/w.$workspace.$project/project-route-state.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-route-notices.js', () => ({
   ProjectRouteNotice: () => <p>Resolving the requested project</p>,
 }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({
-  WorkspaceSkeleton: () => <p role='status'>Loading workspace</p>,
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({
+  WorkspaceOpening: () => <p role='status'>Loading workspace</p>,
 }));
 
 describe('project entry module failure', () => {

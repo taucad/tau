@@ -10,7 +10,7 @@ const desktop = vi.hoisted(() => ({
 }));
 
 vi.mock('#flags/feature-flags.js', () => ({ isFeatureEnabled: () => desktop.enabled }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   desktopBridge: () => ({ agentHost: { retain: desktop.retain, release: desktop.release } }),
   isDesktopTarget: true,
 }));

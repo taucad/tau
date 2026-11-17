@@ -643,7 +643,11 @@ it.each(['live', 'linked'])(
               ]
             : [{ name: 'refs/heads/main', head }],
         fetch: async () => ({ refs: [{ name: 'refs/remotes/tau/main', head }] }),
-        readTree: async (id) => {
+        readTree: async (id, options) => {
+          /* The apply's read; the fetch's manifest reading (SP2h) names its one path. */
+          if (options?.paths?.join(',') === 'tau.json') {
+            return context.port.readTree(id, options);
+          }
           if (id === head) {
             reading = true;
             await apply.promise;
@@ -680,7 +684,8 @@ it.each(['live', 'linked'])(
         actor
           .getSnapshot()
           .children.sync?.getSnapshot()
-          .matches({ opening: kind === 'linked' ? 'fetching' : 'fastForwarding' }),
+          /* The live checkout's records run beside its fast-forward (SP2h). */
+          .matches({ opening: kind === 'linked' ? 'fetching' : { besideApply: { authored: 'fastForwarding' } } }),
       ).toBe(true);
       actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 2, refs: [] } });
       actor.send({ type: 'sync', event: { type: 'recordsChanged' } });
@@ -4187,6 +4192,54 @@ describe('independent sync record failures', () => {
     );
   }, 30_000);
 
+  /* SP2h review: a projection stopped once a chat's files were written still announces it; the next pull finds the
+   * chat current and would announce nothing, leaving the page's chat list without it. */
+  it('announces a chat whose files were written before its projection stopped', async () => {
+    const context = await fixture({ 'tau.json': '{"syncChats":true}\n' });
+    const writing = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const projecting = Object.assign(Object.create(context.filesystem) as RevisionFileSystem, {
+      writeFile: async (path: string, content: Parameters<RevisionFileSystem['writeFile']>[1]) => {
+        await context.filesystem.writeFile(path, content);
+        if (path.endsWith('/talk/events/device-a.jsonl')) {
+          writing.resolve();
+          await release.promise;
+        }
+      },
+    });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"sequence":0}\n']]),
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
+      summary: { generated: 'Chat talk' },
+    });
+    const fetchedRef = { name: 'refs/remotes/tau/tau/chats/talk', head: revisionId(receipt.commitId) };
+    await context.port.updateRef({ name: fetchedRef.name, expectedHead: undefined, head: fetchedRef.head });
+    const projected: string[][] = [];
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: context.port,
+      projectId: 'project-1',
+      filesystem: () => projecting,
+      deviceId: () => 'device-b',
+      onChatsProjected: (chatIds) => projected.push([...chatIds]),
+    });
+
+    const stopped = createActor(actors.sync.projectRecords, {
+      input: { remote: 'tau', fetchRefs: [], refs: [fetchedRef], syncChats: true, syncLargeExports: false },
+    });
+    stopped.start();
+    await writing.promise;
+    stopped.stop();
+    release.resolve();
+
+    await vi.waitFor(() => {
+      expect(projected).toEqual([['talk']]);
+    });
+    expect(await context.filesystem.readFile('.tau/chats/talk/events/device-a.jsonl', 'utf8')).toBe('{"sequence":0}\n');
+  }, 30_000);
+
   /* RV-W7 #5: a record conflict still wrote the other device's log, and the page has to hear of it. */
   it('announces a chat whose record conflicted, because its segments were still written', async () => {
     const context = await fixture({ '.tau/chats/talk/chat.json': '{"name":"Local name"}' });
@@ -4495,6 +4548,84 @@ describe('independent sync record failures', () => {
     expect(requested).toEqual([authored, ['refs/tau/chats/c1']]);
     /* Another device's operation log never comes down. */
     expect(requested.flat()).not.toContain('refs/tau/ops/device-b');
+  }, 30_000);
+
+  /* SP2h: chats project while the apply writes only when the manifest it writes agrees with the one on disk. */
+  it.each([
+    { remoteManifest: '{"syncChats":true}\n', beside: true },
+    { remoteManifest: '{"syncChats":false}\n', beside: false },
+  ])(
+    'lets records run beside a fast-forward when its manifest agrees: $remoteManifest',
+    async ({ remoteManifest, beside }) => {
+      const context = await fixture({ 'tau.json': '{"syncChats":true}\n' });
+      await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const receipt = await context.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          ['tau.json', remoteManifest],
+          ['main.ts', 'base\n'],
+        ]),
+        provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
+        summary: { generated: 'Main' },
+      });
+      const head = revisionId(receipt.commitId);
+      await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+      const actors = createRevisionActors({
+        identity: testIdentity,
+        port: {
+          ...context.port,
+          listRemoteRefs: async () => [
+            { name: 'refs/heads/main', head },
+            { name: 'refs/tau/chats/c1', head },
+          ],
+          fetch: async () => ({ refs: [] }),
+        },
+        projectId: 'project-1',
+        filesystem: () => context.filesystem,
+      });
+
+      const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+        remote: 'tau',
+        branch: 'main',
+        deadlineMilliseconds: 10_000,
+      });
+
+      expect(fetched.integration).toBe('fastForward');
+      expect(fetched.recordProjection?.besideApply).toBe(beside ? true : undefined);
+    },
+    30_000,
+  );
+
+  /* SP2h: beside the apply, the checkout's `tau.json` may be mid-write; the fetch's reading of the applied one decides. */
+  it('projects records beside the apply on the fetch’s chat preference, not the checkout’s', async () => {
+    const context = await fixture({ 'tau.json': '{"syncChats":true}\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const requested: Array<readonly string[] | undefined> = [];
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: {
+        ...context.port,
+        fetch: async (input) => {
+          requested.push(input.refs);
+          return { refs: [] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+      deviceId: () => 'device-b',
+    });
+
+    const result = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, {
+      remote: 'tau',
+      fetchRefs: ['refs/tau/chats/c1'],
+      refs: [{ name: 'refs/remotes/tau/tau/chats/c1', head: revisionId('a'.repeat(40)) }],
+      syncChats: false,
+      syncLargeExports: false,
+      besideApply: true,
+    });
+
+    expect(requested).toEqual([]);
+    expect(result).toEqual({ records: [], chats: 'disabled' });
   }, 30_000);
 
   /* R6: `validate`'s listing is the connect-time fetch's advertisement, for the same destination only. */
@@ -4887,6 +5018,188 @@ describe('independent sync record failures', () => {
     30_000,
   );
 
+  /* SP2h review: a projection stopped after its fetch moved the tracking ref, as a failed apply beside it stops it,
+   * leaves the exports owed: the next pull restores them rather than reading the moved tracking ref as applied. */
+  it('restores the exports on the next pull after a projection stopped once its fetch had landed', async () => {
+    const context = await fixture({ 'tau.json': '{"syncLargeExports":true}\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const recorded = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['exports/part.step', 'recorded output\n']]),
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
+      summary: { generated: 'Exports' },
+    });
+    const remoteHead = revisionId(recorded.commitId);
+    const tracking = 'refs/remotes/tau/tau/evidence/exports';
+    const landed = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let gate: Promise<void> | undefined = release.promise;
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head: remoteHead }],
+        fetch: async () => {
+          await context.port.updateRef({
+            name: tracking,
+            expectedHead: await context.port.readRef(tracking),
+            head: remoteHead,
+          });
+          landed.resolve();
+          if (gate !== undefined) {
+            await gate;
+          }
+          return { refs: [{ name: tracking, head: remoteHead }] };
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+    const fetchOnce = async () =>
+      run<SyncFetchActorOutput>(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+
+    const first = await fetchOnce();
+    const stopped = createActor(actors.sync.projectRecords, { input: first.recordProjection! });
+    stopped.start();
+    await landed.promise;
+    stopped.stop();
+    gate = undefined;
+    release.resolve();
+    expect(await context.filesystem.exists('exports/part.step')).toBe(false);
+
+    const retry = await fetchOnce();
+    expect(retry.recordProjection?.priorEvidenceHead).not.toBe(remoteHead);
+    await run(actors.sync.projectRecords, retry.recordProjection);
+    expect(await context.filesystem.readFile('exports/part.step', 'utf8')).toBe('recorded output\n');
+
+    /* Once restored, a later pull of the same record leaves the exports alone (C21). */
+    const after = await fetchOnce();
+    expect(after.recordProjection?.priorEvidenceHead).toBe(remoteHead);
+  }, 30_000);
+
+  /* SP2h re-review: a device that restored exports on an older build has only its tracking ref to say so. Its first
+   * pull on this build takes that as applied, once, and leaves an export it edited since alone (C21, R11). */
+  it('leaves an edited export alone on the first pull after an upgrade from tracking-ref trust', async () => {
+    const context = await fixture({
+      'tau.json': '{"syncLargeExports":true}\n',
+      'exports/shared.step': 'edited since it was restored\n',
+    });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const recorded = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['exports/shared.step', 'recorded output\n']]),
+      provenance: { source: 'user', ...recordedBy('device-a'), createdAt: 1 },
+      summary: { generated: 'Exports' },
+    });
+    const remoteHead = revisionId(recorded.commitId);
+    const tracking = 'refs/remotes/tau/tau/evidence/exports';
+    /* What the older build left: the tracking ref it restored from, and no evidence ref of this device's own. */
+    await context.port.updateRef({ name: tracking, expectedHead: undefined, head: remoteHead });
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head: remoteHead }],
+        fetch: async () => ({ refs: [{ name: tracking, head: remoteHead }] }),
+      },
+      projectId: 'project-1',
+      filesystem: () => context.filesystem,
+    });
+
+    const fetched = await run<SyncFetchActorOutput>(actors.sync.fetch, {
+      remote: 'tau',
+      branch: 'main',
+      deadlineMilliseconds: 10_000,
+    });
+    expect(fetched.recordProjection?.priorEvidenceHead).toBe(remoteHead);
+    const projected = await run<SyncProjectRecordsActorOutput>(actors.sync.projectRecords, fetched.recordProjection);
+
+    expect(projected.records).toEqual([{ name: 'refs/tau/evidence/exports', status: 'upToDate', head: remoteHead }]);
+    expect(await context.filesystem.readFile('exports/shared.step', 'utf8')).toBe('edited since it was restored\n');
+    expect(await context.filesystem.exists('.tau/artifacts/sync-conflicts')).toBe(false);
+  }, 30_000);
+
+  /* SP2h final review: each remote's applied record is its own, so two remotes seeded at once both keep theirs. */
+  it('keeps both remotes’ applied evidence when two pulls seed it at once', async () => {
+    const context = await fixture({ 'tau.json': '{"syncLargeExports":true}\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const write = async (createdAt: number) => {
+      const written = await context.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['exports/shared.step', `output ${createdAt}\n`]]),
+        provenance: { source: 'user', ...recordedBy('device-a'), createdAt },
+        summary: { generated: 'Exports' },
+      });
+      return revisionId(written.commitId);
+    };
+    const heads = { tau: await write(1), mirror: await write(2) };
+    const remotes = ['tau', 'mirror'] as const;
+    const moved = await write(3);
+    const trackingOf = (remote: string): string => `refs/remotes/${remote}/tau/evidence/exports`;
+    for (const remote of remotes) {
+      // oxlint-disable-next-line no-await-in-loop -- one ref after another.
+      await context.port.updateRef({ name: trackingOf(remote), expectedHead: undefined, head: heads[remote] });
+    }
+    /* Neither pull writes its applied evidence until both are about to: each has read it first, the interleaving that
+     * loses an entry from a shared record. */
+    const held: Array<() => void> = [];
+    const racing = new Proxy(context.filesystem, {
+      get: (target, key, receiver): unknown => {
+        const value: unknown = Reflect.get(target, key, receiver);
+        if (typeof value !== 'function') {
+          return value;
+        }
+        if (key !== 'writeFile') {
+          return value.bind(target) as unknown;
+        }
+        return async (path: string, ...rest: unknown[]): Promise<unknown> => {
+          if (path.includes('tau-applied-evidence') && held.length < 2) {
+            await new Promise<void>((resolve) => {
+              held.push(resolve);
+              if (held.length === 2) {
+                for (const release of held) {
+                  release();
+                }
+              }
+            });
+          }
+          return Reflect.apply(value, target, [path, ...rest]) as unknown;
+        };
+      },
+    });
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => [{ name: 'refs/tau/evidence/exports', head: moved }],
+        fetch: async ({ remote }: { remote: string }) => ({ refs: [{ name: trackingOf(remote), head: moved }] }),
+      },
+      projectId: 'project-1',
+      filesystem: () => racing,
+    });
+    const fetchFrom = async (remote: string) =>
+      run<SyncFetchActorOutput>(actors.sync.fetch, { remote, branch: 'main', deadlineMilliseconds: 10_000 });
+
+    const seeded = await Promise.all([fetchFrom('tau'), fetchFrom('mirror')]);
+    expect(seeded.map((fetched) => fetched.recordProjection?.priorEvidenceHead)).toEqual([heads.tau, heads.mirror]);
+
+    /* Both tracking refs have moved since: a remote whose entry was lost would be seeded again from the moved head. */
+    for (const remote of remotes) {
+      // oxlint-disable-next-line no-await-in-loop -- one ref after another.
+      await context.port.updateRef({ name: trackingOf(remote), expectedHead: heads[remote], head: moved });
+    }
+    const again = await Promise.all([fetchFrom('tau'), fetchFrom('mirror')]);
+    expect(again.map((fetched) => fetched.recordProjection?.priorEvidenceHead)).toEqual([heads.tau, heads.mirror]);
+
+    /* A corrupt record is absent for its own remote alone: that remote is seeded again, the other keeps its entry. */
+    await context.filesystem.writeFile('.git/tau-applied-evidence-tau.json', '{"head":');
+    const afterCorruption = await Promise.all([fetchFrom('tau'), fetchFrom('mirror')]);
+    expect(afterCorruption.map((fetched) => fetched.recordProjection?.priorEvidenceHead)).toEqual([
+      moved,
+      heads.mirror,
+    ]);
+  }, 30_000);
+
   it('retains a differing local export before adopting and re-offering the fetched value', async () => {
     const context = await fixture({
       'tau.json': '{"syncLargeExports":true}\n',
@@ -4984,7 +5297,11 @@ it('keeps a placeholder a fill wrote during a real merge, writing only the merge
   /* The checkout on `main`, the part still its placeholder. */
   await filesystem.writeFile('c.txt', 'ours\n');
   await filesystem.mkdir('models', { recursive: true });
-  await filesystem.writeFile('models/part.step', lfsPointerFor(new TextEncoder().encode(part)).bytes);
+  const { pointer: partPointer, bytes: partPointerBytes } = lfsPointerFor(new TextEncoder().encode(part));
+  await filesystem.writeFile('models/part.step', partPointerBytes);
+  /* The fill the merge's capture starts never delivers: the object is not on the device and no remote serves it,
+   * so the only writer of the part is the hook below, and nothing races it. */
+  await filesystem.unlink(`.git/${lfsObjectPath(partPointer.oid)}`);
   /* The fill lands the part after the merge captured the checkout and before its write. */
   const onApplyingTree = vi.fn(
     (..._parameters: unknown[]) =>
@@ -6580,6 +6897,67 @@ describe('opening before large objects arrive', () => {
     expect(revisionTreeId(cleanLargeObjects(live).tree, 'sha1')).toBe(recorded?.treeId);
 
     release();
+    await vi.waitFor(() => {
+      expect(reports.at(-1)?.facet).toBeUndefined();
+    });
+    expect(await filesystem.readFile('models/part.step', 'utf8')).toBe(part);
+  }, 30_000);
+  /* Review of #2010: a flush reads the attributes a capture reads, so an ignored attributes file never decides a fill. */
+  it('fills a placeholder an ignored attributes file would untrack, as the capture and the look read it', async () => {
+    const reports: LargeObjectsReport[] = [];
+    const part = 'solid part\n';
+    const { pointer, bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode(part));
+    const arrived = Promise.withResolvers<void>();
+    const { port: real, filesystem } = await fixture();
+    await real.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await real.setHead('main');
+    const receipt = await real.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        [generatedGitattributesPath, generatedGitattributesContent(undefined)],
+        ['.gitignore', 'models/.gitattributes\n'],
+        ['main.scad', 'import("models/part.step");\n'],
+        ['models/part.step', part],
+      ]),
+      provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 10, 16) },
+      summary: { generated: 'Remote' },
+    });
+    const remote = revisionId(receipt.commitId);
+    await real.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+    const objectFile = `.git/${lfsObjectPath(pointer.oid)}`;
+    await filesystem.unlink(objectFile);
+    const deliver = async (onLargeObject?: (oid: string, content: Uint8Array<ArrayBuffer>) => void): Promise<void> => {
+      await arrived.promise;
+      await filesystem.writeFile(objectFile, part);
+      onLargeObject?.(pointer.oid, new TextEncoder().encode(part));
+    };
+    const port: RevisionPort = {
+      ...real,
+      readTree: async (id, options) => {
+        if (options?.largeObjects === 'local') {
+          return real.readTree(id, options);
+        }
+        await deliver(options?.onLargeObject);
+        return real.readTree(id);
+      },
+      fetchLargeObjects: async (_pointers, options) => {
+        await deliver(options?.onLargeObject);
+        return new Map([[pointer.oid, new TextEncoder().encode(part)]]);
+      },
+    };
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port,
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+      onLargeObjects: (report) => reports.push(report),
+    });
+
+    await run(actors.sync.fastForward, { remote: 'tau', branch: 'main' });
+    expect(await filesystem.readFile('models/part.step')).toStrictEqual(pointerBytes);
+    /* A file the person keeps out of the project: Git reads no attributes from it, and neither does the fill. */
+    await filesystem.writeFile('models/.gitattributes', '*.step -filter\n');
+    arrived.resolve();
     await vi.waitFor(() => {
       expect(reports.at(-1)?.facet).toBeUndefined();
     });

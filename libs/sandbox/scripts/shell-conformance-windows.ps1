@@ -177,7 +177,7 @@ function Invoke-Inner {
   if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw "$($identity.Name) is elevated; the row runs only as a standard user."
   }
-  Write-Host "Running as $($identity.Name) ($($identity.User.Value)), not an administrator; profile $env:USERPROFILE."
+  Write-Host "Running as $($identity.Name) ($($identity.User.Value)), not an administrator; inherited USERPROFILE $env:USERPROFILE."
   $environment = Get-Content -LiteralPath $EnvFile -Raw | ConvertFrom-Json
   foreach ($entry in $environment.PSObject.Properties) {
     [Environment]::SetEnvironmentVariable($entry.Name, [string]$entry.Value, 'Process')
@@ -188,14 +188,18 @@ function Invoke-Inner {
   if (-not $profileDirectory -or -not $profileDirectory.EndsWith("\$user", [StringComparison]::OrdinalIgnoreCase)) {
     throw "The profile of $user is not loaded (got '$profileDirectory')."
   }
-  $temporary = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Temp'
+  # The known-folder lookups expand `%USERPROFILE%` from this process's inherited environment, which still names the
+  # elevated account (run 44002533057), so the per-user folders are derived from the profile directory itself.
+  $localAppData = Join-Path $profileDirectory 'AppData\Local'
+  $roamingAppData = Join-Path $profileDirectory 'AppData\Roaming'
+  $temporary = Join-Path $localAppData 'Temp'
   New-Item -ItemType Directory -Force -Path $temporary | Out-Null
   $own = [ordered]@{
     USERPROFILE = $profileDirectory
     HOMEDRIVE = $profileDirectory.Substring(0, 2)
     HOMEPATH = $profileDirectory.Substring(2)
-    APPDATA = [Environment]::GetFolderPath('ApplicationData')
-    LOCALAPPDATA = [Environment]::GetFolderPath('LocalApplicationData')
+    APPDATA = $roamingAppData
+    LOCALAPPDATA = $localAppData
     TEMP = $temporary
     TMP = $temporary
     USERNAME = $user

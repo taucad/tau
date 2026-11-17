@@ -1093,5 +1093,10 @@
     "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
     "target": "apps/desktop/scripts/desktop-receipt-provenance.mts",
     "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
+  },
+  {
+    "file": "packages/agent-host/src/log/chat-ledger.differential.test.ts",
+    "target": "out/test-results/formal/packages/agent-host/lean",
+    "reason": "lists the fresh-differential corpus directory this test writes, to clear the files no other part writes"
   }
 ]

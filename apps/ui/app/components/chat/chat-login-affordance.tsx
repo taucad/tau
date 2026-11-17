@@ -3,7 +3,13 @@ import { Button } from '@taucad/ui/components/button';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import type { AgentHostLogin } from '@taucad/chat-ui/services/agent-host-event-projection';
-import { CodeBlock, CodeBlockAction, CodeBlockContent, CodeBlockHeader, Pre } from '#components/code/code-block.js';
+import {
+  CodeBlock,
+  CodeBlockAction,
+  CodeBlockContent,
+  CodeBlockHeader,
+  Pre,
+} from '@taucad/editor-ui/components/code/code-block';
 import type { AgentSignInFailure } from '#components/terminal/agent-sign-ins.js';
 
 /**

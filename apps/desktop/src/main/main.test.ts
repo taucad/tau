@@ -2991,18 +2991,23 @@ describe('desktop main update path without a renderer (WP7)', () => {
   const checkForUpdatesItem = (): UpdateMenuItem =>
     state.installedUpdateMenuItems.find((item) => item.label === 'Check for Updates…')!;
 
+  /* The windows this launch created after `from`, as recovery windows or not. */
+  const createdSince = async (from: number): Promise<Array<string | undefined>> => {
+    const created = await windowsCreated();
+    return created.slice(from).map((options) => options?.webPreferences?.partition);
+  };
+
   it(
     'should open the recovery window, not a renderer window, for Check for Updates… before any window has mounted (T-B22.3)',
     async () => {
       await booted();
       state.updaterCheck.mockClear();
-      getWindows.mockReturnValue([]);
+      fakeWindow.focus.mockClear();
+      const { length: before } = await windowsCreated();
       checkForUpdatesItem().click!();
       await vi.waitFor(async () => {
-        expect(await windowsCreated()).toHaveLength(2);
+        expect(await createdSince(before)).toEqual(['tau-recovery']);
       });
-      const created = await windowsCreated();
-      expect(created[1]?.webPreferences?.partition).toBe('tau-recovery');
       expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
       expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
       await vi.waitFor(() => {
@@ -3020,13 +3025,15 @@ describe('desktop main update path without a renderer (WP7)', () => {
     async () => {
       await booted();
       reportStage('shell-mounted');
-      getWindows.mockReturnValue([]);
+      fakeWindow.focus.mockClear();
+      const { length: before } = await windowsCreated();
       checkForUpdatesItem().click!();
-      await vi.waitFor(async () => {
-        expect(await windowsCreated()).toHaveLength(2);
+      await vi.waitFor(() => {
+        expect(state.updaterCheck).toHaveBeenCalledWith(true);
       });
-      const created = await windowsCreated();
-      expect(created[1]?.webPreferences?.partition).not.toBe('tau-recovery');
+      expect(fakeWindow.focus).toHaveBeenCalled();
+      expect(await createdSince(before)).toEqual([]);
+      expect(fakeWindow.loadFile).not.toHaveBeenCalled();
     },
     bootMilliseconds,
   );

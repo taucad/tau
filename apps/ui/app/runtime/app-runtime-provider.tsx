@@ -7,10 +7,12 @@
  * provider never stops the runtime: it outlives every tree that reads it, StrictMode's simulated unmount included,
  * and a second start of a running actor does nothing.
  */
-import { createContext, useContext, useLayoutEffect } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect } from 'react';
 import type { Context, ReactNode } from 'react';
 import type { AppRuntime } from '#runtime/app-runtime.js';
+import { selectRuntimeIdleFileManagers, selectRuntimeRootFiles } from '#runtime/app-runtime.js';
 import { heldAppRuntime } from '#runtime/app-runtime-holder.js';
+import { followHomeReady } from '#lib/boot-signals.js';
 
 /* This module exports hooks beside the provider, so a hot update re-imports it rather than refreshing it; `hot.data`
  * keeps one context across updates, or the provider and its readers would end up on different contexts. */
@@ -44,6 +46,15 @@ export function AppRuntimeProvider({
    * registry instead of queueing on an unstarted one. The server runs no effect, so it never starts. */
   useLayoutEffect(() => {
     runtime.start();
+  }, [runtime]);
+
+  /* D0 (R12): Home works once `rootFiles` is ready; `home-ready` follows `shell-mounted` (`lib/boot-signals`). An idle
+   * runtime (the remote-host harness) never reads Home, so it reports nothing. */
+  useEffect(() => {
+    if (selectRuntimeIdleFileManagers(runtime) === true) {
+      return undefined;
+    }
+    return followHomeReady(selectRuntimeRootFiles(runtime));
   }, [runtime]);
 
   return <AppRuntimeContext.Provider value={runtime}>{children}</AppRuntimeContext.Provider>;

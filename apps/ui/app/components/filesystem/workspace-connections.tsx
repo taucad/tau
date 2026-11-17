@@ -758,6 +758,7 @@ export function WorkspaceConnections({
           status={row.status}
           description={row.workspace.path}
           isBusy
+          isChecking
           meta={meta}
         />
       );

@@ -75,6 +75,9 @@ export const workspaceDirectoryCopy: Record<
   },
 } as const;
 
+/** The label a folder row shows in place of the copy when its folder works (blueprint D2's table). */
+export const workspaceDirectoryRowLabel = { connected: 'Connected' } as const;
+
 /** CTA labels used by the panel + recovery overlay. */
 export const workspaceDirectoryActions = {
   connect: 'Connect Folder',

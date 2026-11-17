@@ -22,6 +22,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import {
   workspaceDirectoryActions,
   workspaceDirectoryCopy,
+  workspaceDirectoryRowLabel,
 } from '@taucad/ui-core/constants/workspace-directory-copy.constants';
 import type { WorkspaceDirectoryStatus } from '@taucad/ui-core/constants/workspace-directory-copy.constants';
 
@@ -57,6 +58,8 @@ export type WorkspaceDirectoryPanelProps = {
   readonly onRemove?: () => void | Promise<void>;
   /** Why a `conflict` or `error` folder can't be used, shown after the row's label. */
   readonly reason?: string;
+  /** The `row` variant's status is not published yet: it shows no label and no command until it is (T-R3.2). */
+  readonly isChecking?: boolean;
   /**
    * Optional right-aligned metadata node rendered in the `row` variant
    * between the description block and the action group. Lets callers
@@ -79,6 +82,7 @@ export function WorkspaceDirectoryPanel({
   onLocate,
   onRemove,
   reason,
+  isChecking = false,
   meta,
 }: WorkspaceDirectoryPanelProps): React.JSX.Element {
   const copy = workspaceDirectoryCopy[status];
@@ -143,7 +147,9 @@ export function WorkspaceDirectoryPanel({
           <div className='flex min-w-0 flex-col'>
             <span className='truncate text-sm font-medium text-foreground'>{workspaceName ?? copy.title}</span>
             {description ? <span className='text-xs break-all text-muted-foreground'>{description}</span> : undefined}
-            {status === 'connected' ? undefined : (
+            {isChecking ? undefined : status === 'connected' ? (
+              <span className='text-xs text-muted-foreground'>{workspaceDirectoryRowLabel.connected}</span>
+            ) : (
               <span className='text-xs text-muted-foreground'>
                 <span className='font-medium text-foreground'>{copy.title}</span>
                 {(status === 'conflict' || status === 'error') && reason ? <span>: {reason}</span> : undefined}
@@ -154,17 +160,19 @@ export function WorkspaceDirectoryPanel({
         </div>
         <div className='flex shrink-0 flex-wrap items-center gap-2'>
           {meta}
-          <RowActions
-            status={status}
-            isBusy={isBusy}
-            connectLabel={connectLabel}
-            onConnect={onConnect}
-            onGrantAccess={onGrantAccess}
-            onDisconnect={onDisconnect}
-            onRetry={onRetry}
-            onLocate={onLocate}
-            onRemove={onRemove}
-          />
+          {isChecking ? undefined : (
+            <RowActions
+              status={status}
+              isBusy={isBusy}
+              connectLabel={connectLabel}
+              onConnect={onConnect}
+              onGrantAccess={onGrantAccess}
+              onDisconnect={onDisconnect}
+              onRetry={onRetry}
+              onLocate={onLocate}
+              onRemove={onRemove}
+            />
+          )}
         </div>
       </div>
     );
@@ -231,7 +239,10 @@ function RowActions({
 }: Pick<
   WorkspaceDirectoryPanelProps,
   'status' | 'onConnect' | 'onGrantAccess' | 'onDisconnect' | 'onRetry' | 'onLocate' | 'onRemove'
-> & { readonly isBusy: boolean; readonly connectLabel: string }): React.JSX.Element {
+> & {
+  readonly isBusy: boolean;
+  readonly connectLabel: string;
+}): React.JSX.Element {
   const handlers: Readonly<Record<RowAction, (() => void | Promise<void>) | undefined>> = {
     connect: onConnect,
     grantAccess: onGrantAccess,

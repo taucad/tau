@@ -24,7 +24,7 @@ export type DesktopPackagePlan = Readonly<{
   icon: string | undefined;
   /** Branding files main loads from `resources/branding` (`icon.ico` is the Windows window icon). */
   branding: readonly string[];
-  /** Whether `prepare-git.mts` can build this target's git payload. */
+  /** Whether `prepare-git.mts` can prepare this target's git payload, so a release archive must carry it. */
   gitPayloadSupported: boolean;
   /** Whether the Terminal's git store guard (`libs/sandbox/store-guard`) ships for this target: Linux only. */
   storeGuard: boolean;
@@ -50,7 +50,7 @@ export const desktopPackagePlans: Readonly<Record<DesktopPackageTarget, DesktopP
     archive: { name: 'Tau-win32-x64.zip', format: 'zip' },
     icon: 'icon.ico',
     branding: ['icon.png', 'icon-dark.png', 'icon.ico'],
-    gitPayloadSupported: false,
+    gitPayloadSupported: true,
     storeGuard: false,
   },
 };
@@ -103,9 +103,7 @@ export const desktopPackageOmissions = (
   ...(present.git
     ? []
     : [
-        plan.gitPayloadSupported
-          ? `git payload: none at ${present.gitResourceRoot}; this package records with the machine's own git and git-lfs.`
-          : "git payload: prepare-git builds git from kernel.org source, which is not how git ships on Windows; this package records with the machine's own git and git-lfs.",
+        `git payload: none at ${present.gitResourceRoot}; this package records with the machine's own git and git-lfs.`,
       ]),
   ...(!plan.storeGuard || present.storeGuard === true
     ? []
@@ -142,8 +140,8 @@ export const desktopStoreGuardRefusal = (
  *
  * A shipped app records revisions with the binaries it carries: a machine with no `git-lfs` on `PATH`, which is most of
  * them, cannot back a project up otherwise (OQ3). macOS refuses a release without the payload; this is the same rule
- * for the Linux distribution archive. A development package (no `--archive`) still assembles and names the omission,
- * and a target `prepare-git` cannot build (Windows) is never refused.
+ * for the Linux and Windows distribution archives. A development package (no `--archive`) still assembles and names
+ * the omission, and a target `prepare-git` cannot prepare is never refused.
  * @param plan - The selected package.
  * @param archive - Whether a distribution archive is written.
  * @param payload - Whether the prepared `git` and `git-lfs` are executable files, and where they were looked for.

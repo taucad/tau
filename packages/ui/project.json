@@ -14,6 +14,7 @@
         "{workspaceRoot}/apps/libs/chat-ui/src/**/*.tsx",
         "{workspaceRoot}/apps/libs/project-workspace/src/**/*.tsx",
         "{workspaceRoot}/apps/libs/files-ui/src/**/*.tsx",
+        "{workspaceRoot}/apps/libs/revisions-ui/src/**/*.tsx",
         "{workspaceRoot}/apps/libs/ui-core/src/**/*.tsx",
         "reactEventLayer"
       ]

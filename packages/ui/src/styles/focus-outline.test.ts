@@ -14,6 +14,7 @@ const uiKitDirectory = join(import.meta.dirname, '../../../../apps/libs/ui-kit/s
 const chatUiDirectory = join(import.meta.dirname, '../../../../apps/libs/chat-ui/src');
 const projectWorkspaceDirectory = join(import.meta.dirname, '../../../../apps/libs/project-workspace/src');
 const filesUiDirectory = join(import.meta.dirname, '../../../../apps/libs/files-ui/src');
+const revisionsUiDirectory = join(import.meta.dirname, '../../../../apps/libs/revisions-ui/src');
 const uiCoreDirectory = join(import.meta.dirname, '../../../../apps/libs/ui-core/src');
 
 const sourcesIn = (directory: string, recursive = false) =>
@@ -29,6 +30,7 @@ const appSources = [
   ...sourcesIn(chatUiDirectory, true),
   ...sourcesIn(projectWorkspaceDirectory, true),
   ...sourcesIn(filesUiDirectory, true),
+  ...sourcesIn(revisionsUiDirectory, true),
   ...sourcesIn(uiCoreDirectory, true),
 ];
 

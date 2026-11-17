@@ -69,6 +69,7 @@ import { usePlaceableExecution } from '#hooks/use-placeable-execution.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { reportKernelOverride } from '#chat-clients/_internal/kernel-selection-telemetry.js';
+import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
 import { withTauExecutionModel } from '@taucad/chat-ui/utils/chat-execution';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { composerRecordPaths, createComposerRecordStore } from '@taucad/chat-ui/db/composer-record-store';
@@ -780,6 +781,8 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
           resolved: ownerKernel,
           manual: next,
           turnsSince: runs === undefined ? 0 : Object.keys(runs).length,
+          /* The page's resolved consent under the one rule (AR-W6-02); no page composition reads as `unknown`. */
+          consent: pageTelemetry()?.consent() ?? 'unknown',
         });
       }
       setActiveKernel(next);

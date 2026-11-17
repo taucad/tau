@@ -744,7 +744,7 @@
       "for": "30m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/runtime-observability-bootstrap.md",
-        "summary": "Capacity refusals (RESOURCE_LIMIT issues and supervisor limit kills) over the last hour are more than twice their 7-day hourly mean, with at least 20 in the hour. Info until a 7-day baseline exists, then warning. Added paused (package.md §12.2): info rules stay paused until Tau Cloud PR-5a gives them per-rule repeat and routing, so they never mail the operator contact every four hours."
+        "summary": "Capacity refusals (RESOURCE_LIMIT issues and supervisor limit kills) over the last hour are more than twice their 7-day hourly mean, with at least 20 in the hour. Info until a 7-day baseline exists, then warning. Info trigger (package.md §12.2): Tau Cloud routes it to the environment's info contact point with its own per-rule repeat interval, so it never mails the operator contact every four hours. It is live in staging and production; isPaused here applies only to the local stack, since Tau Cloud reads pausing from its rule_overrides."
       },
       "labels": {
         "severity": "info",
@@ -782,7 +782,7 @@
       "for": "30m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/runtime-observability-bootstrap.md",
-        "summary": "Stall evidence: worker replies that arrived after their attempt settled plus abandoned attempts longer than 120 s reached 5 in an hour. Cancellation, supersession and abandonment never page. Drill: T23 in CI only. Added paused (package.md §12.2): info rules stay paused until Tau Cloud PR-5a gives them per-rule repeat and routing, so they never mail the operator contact every four hours."
+        "summary": "Stall evidence: worker replies that arrived after their attempt settled plus abandoned attempts longer than 120 s reached 5 in an hour. Cancellation, supersession and abandonment never page. Drill: T23 in CI only. Info trigger (package.md §12.2): Tau Cloud routes it to the environment's info contact point with its own per-rule repeat interval, so it never mails the operator contact every four hours. It is live in staging and production; isPaused here applies only to the local stack, since Tau Cloud reads pausing from its rule_overrides."
       },
       "labels": {
         "severity": "info",
@@ -820,7 +820,7 @@
       "for": "30m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/runtime-observability-bootstrap.md",
-        "summary": "More than 2 % of viewer first frames on one backend (webgl, webgpu) were followed by a context loss in the last hour, with at least 200 first frames (FR-17). Drill: Playwright forced WEBGL_lose_context in T12. Added paused (package.md §12.2): info rules stay paused until Tau Cloud PR-5a gives them per-rule repeat and routing, so they never mail the operator contact every four hours."
+        "summary": "More than 2 % of viewer first frames on one backend (webgl, webgpu) were followed by a context loss in the last hour, with at least 200 first frames (FR-17). Drill: Playwright forced WEBGL_lose_context in T12. Info trigger (package.md §12.2): Tau Cloud routes it to the environment's info contact point with its own per-rule repeat interval, so it never mails the operator contact every four hours. It is live in staging and production; isPaused here applies only to the local stack, since Tau Cloud reads pausing from its rule_overrides."
       },
       "labels": {
         "severity": "info",
@@ -926,7 +926,7 @@
       "for": "1h",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/runtime-observability-bootstrap.md",
-        "summary": "Hosts reported at least 10,000 spans refused by worker collectors at their 10,000-entry bound in an hour (D-T5): local traces are being lost under load. Drill: T22 in CI. Added paused (package.md §12.2): info rules stay paused until Tau Cloud PR-5a gives them per-rule repeat and routing, so they never mail the operator contact every four hours."
+        "summary": "Hosts reported at least 10,000 spans refused by worker collectors at their 10,000-entry bound in an hour (D-T5): local traces are being lost under load. Drill: T22 in CI. Info trigger (package.md §12.2): Tau Cloud routes it to the environment's info contact point with its own per-rule repeat interval, so it never mails the operator contact every four hours. It is live in staging and production; isPaused here applies only to the local stack, since Tau Cloud reads pausing from its rule_overrides."
       },
       "labels": {
         "severity": "info",
@@ -998,7 +998,7 @@
       "for": "15m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/runtime-observability-bootstrap.md",
-        "summary": "The p95 age of the oldest entry in delivered runtime telemetry batches exceeded 120 s over 30 min, with at least 20 batches. Drill: throttled network in Playwright. Added paused (package.md §12.2): info rules stay paused until Tau Cloud PR-5a gives them per-rule repeat and routing, so they never mail the operator contact every four hours."
+        "summary": "The p95 age of the oldest entry in delivered runtime telemetry batches exceeded 120 s over 30 min, with at least 20 batches. Drill: throttled network in Playwright. Info trigger (package.md §12.2): Tau Cloud routes it to the environment's info contact point with its own per-rule repeat interval, so it never mails the operator contact every four hours. It is live in staging and production; isPaused here applies only to the local stack, since Tau Cloud reads pausing from its rule_overrides."
       },
       "labels": {
         "severity": "info",
@@ -1138,7 +1138,7 @@
       "for": "0s",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/operate/runtime-observability-bootstrap.md",
-        "summary": "Always firing: the operator's weekly receipt proves the notification path, and a missing receipt is the alarm (resolved Q19). Requires Tau Cloud PR-5a for a 7-day repeat interval; until then it stays paused and the operator's scheduled contact-point test replaces it."
+        "summary": "Always firing: the operator's weekly receipt proves the notification path, and a missing receipt is the alarm (resolved Q19). Tau Cloud routes it to the environment's info contact point and repeats it every 7 days (its repeat_interval label). It is live in staging and production; isPaused here applies only to the local stack."
       },
       "labels": {
         "severity": "info",

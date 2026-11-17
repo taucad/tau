@@ -29,7 +29,8 @@ vi.mock('#flags/feature-flags.js', () => ({
 }));
 
 const { ViewerSettings } = await import('#components/settings/viewer/viewer-settings.js');
-const { viewerPersonPropertyNames } = await import('#components/settings/viewer/viewer-person-properties.js');
+const { viewerPersonPropertyNames } =
+  await import('@taucad/settings-ui/components/settings/viewer/viewer-person-properties');
 
 const renderSection = (): ReturnType<typeof render> =>
   render(

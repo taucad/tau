@@ -4,6 +4,7 @@ import {
   IngestEntryName,
   AttributeKey,
   knownAgentIds,
+  retiredIngestEntryNames,
   runtimeEntryNames,
   workerTimingSpanNames,
 } from '@taucad/telemetry';
@@ -43,7 +44,8 @@ export class TelemetryController {
    * (AR-W5-09). A batch with no runtime entries and no batch id answers 204 as
    * before. Runtime entries go through the runtime ingest, which records
    * signed-out batches too under its own abuse controls, and answer 200 with a
-   * receipt (or 400, 413, 425, 429).
+   * receipt (or 400, 413, 425, 429). A retired entry (`retiredIngestEntryNames`)
+   * is dropped unrecorded, so a batch of only retired entries answers 204.
    *
    * @param body - The validated batch.
    * @param userId - The signed-in user, when there is one.
@@ -63,6 +65,10 @@ export class TelemetryController {
     const legacy: ClientMetricEntry[] = [];
     const runtime: unknown[] = [];
     for (const entry of body.entries) {
+      if (retiredNames.has(entry.name)) {
+        /* A stale client's retired entry is admitted so its batch is not refused, and dropped unrecorded. */
+        continue;
+      }
       if (isLegacyEntry(entry)) {
         legacy.push(entry);
       } else {
@@ -113,14 +119,6 @@ export class TelemetryController {
 
   private recordEntry(entry: ClientMetricEntry, durationSeconds: number): void {
     switch (entry.name) {
-      case IngestEntryName.KERNEL_CREATE_GEOMETRY: {
-        this.recordKernelCreate(entry, durationSeconds);
-        return;
-      }
-      case IngestEntryName.KERNEL_EXPORT_GEOMETRY: {
-        this.recordKernelExport(entry, durationSeconds);
-        return;
-      }
       case IngestEntryName.AGENT_SESSION: {
         this.recordAgentSession(entry);
         return;
@@ -158,27 +156,6 @@ export class TelemetryController {
         throw new Error(`Unhandled ingest entry: ${(exhaustive as { name: string }).name}`);
       }
     }
-  }
-
-  private recordKernelCreate(
-    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.KERNEL_CREATE_GEOMETRY }>,
-    durationSeconds: number,
-  ): void {
-    const status = entry.detail?.status ?? 'unknown';
-    this.metrics.kernelExecutionDuration.record(durationSeconds, { [AttributeKey.KERNEL_STATUS]: status });
-    this.metrics.kernelExecutions.add(1, { [AttributeKey.KERNEL_STATUS]: status });
-  }
-
-  private recordKernelExport(
-    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.KERNEL_EXPORT_GEOMETRY }>,
-    durationSeconds: number,
-  ): void {
-    const status = entry.detail?.status ?? 'unknown';
-    const format = entry.detail?.exportFormat ?? 'unknown';
-    this.metrics.kernelExportDuration.record(durationSeconds, {
-      [AttributeKey.KERNEL_STATUS]: status,
-      [AttributeKey.EXPORT_FORMAT]: format,
-    });
   }
 
   private recordAgentSession(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_SESSION }>): void {
@@ -428,15 +405,17 @@ export class TelemetryController {
 }
 
 const runtimeNames: ReadonlySet<string> = new Set(runtimeEntryNames);
+const retiredNames: ReadonlySet<string> = new Set(retiredIngestEntryNames);
 
 /**
- * Whether an entry is a legacy client metric, not one of the four runtime entries (validated by the runtime ingest).
+ * Whether an entry is a legacy client metric, not one of the four runtime entries (validated by the runtime ingest) nor
+ * a retired entry.
  *
  * @param entry - The entry.
  * @returns `true` for a client metric entry.
  */
 const isLegacyEntry = (entry: IngestPayloadDto['entries'][number]): entry is ClientMetricEntry =>
-  !runtimeNames.has(entry.name);
+  !runtimeNames.has(entry.name) && !retiredNames.has(entry.name);
 
 /** The ingest validates an id's shape; only known agents are recorded as themselves (bounded cardinality). */
 const recordedAgentId = (agentId: string): string => (knownAgentIds.has(agentId) ? agentId : 'other');

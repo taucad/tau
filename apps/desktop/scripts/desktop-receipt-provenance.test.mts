@@ -135,7 +135,7 @@ for (const name of ['desktop-route-row-macos-dmg-arm64', 'desktop-route-vm-recei
     verifyDesktopReceiptProvenance(vmRun, { ...macVm, name }, { environment: 'vm', manifest, scope: 'macos' }),
   );
 }
-// Bound platform scopes (Mac and Linux, staging and production) admit a descendant qualification head, which the
+// Bound platform scopes (Mac, Windows and Linux, staging and production) admit a descendant qualification head, which the
 // mandatory sidecar then binds by S≤K≤H≤P; the all-platform scope keeps exact source on both channels.
 const descendant = 'e'.repeat(40);
 const productionCopy: typeof manifest = { ...manifest, channel: 'production' };
@@ -145,6 +145,8 @@ for (const candidate of [manifest, productionCopy]) {
     ['linux', 'vm', 'desktop-linux-vm-receipts', vmRun.path],
     ['macos', 'ci', 'desktop-macos-ci-receipts', run.path],
     ['macos', 'vm', 'desktop-macos-vm-receipts', vmRun.path],
+    ['windows', 'ci', 'desktop-windows-ci-receipts', run.path],
+    ['windows', 'vm', 'desktop-windows-vm-receipts', vmRun.path],
   ] as const) {
     const admitted = verifyDesktopReceiptProvenance(
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
@@ -172,8 +174,10 @@ for (const [candidate, scope] of [
   [manifest, 'all'],
   [manifest, undefined],
   [manifest, 'linux'],
+  [manifest, 'windows'],
   [production, 'all'],
   [production, 'linux'],
+  [production, 'windows'],
 ] as const) {
   // oxlint-disable-next-line no-await-in-loop -- Each refusal is independent and must not reach the GitHub API.
   await assert.rejects(

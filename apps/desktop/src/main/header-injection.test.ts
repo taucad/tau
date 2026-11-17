@@ -1,7 +1,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- HTTP header names are case-insensitive and tested as sent */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { injectTauHeaders, originOf } from '#main/header-injection.js';
+import {
+  credentialWaitMilliseconds,
+  injectTauHeaders,
+  installTauHeaderInjection,
+  originOf,
+} from '#main/header-injection.js';
 
 const options = {
   allowedOrigins: ['http://localhost:4000', 'ws://localhost:4001'],
@@ -80,5 +85,57 @@ describe('originOf', () => {
     expect(originOf('ws://localhost:4001')).toBe('ws://localhost:4001');
     expect(originOf(undefined)).toBeUndefined();
     expect(originOf('not-a-url')).toBeUndefined();
+  });
+});
+
+describe('installTauHeaderInjection', () => {
+  type Listener = (
+    details: { url: string; requestHeaders: Record<string, string> },
+    callback: (response: { requestHeaders: Record<string, string> }) => void,
+  ) => void;
+  const install = (ready: Promise<unknown>, token: () => string | undefined): Listener => {
+    let listener: Listener | undefined;
+    installTauHeaderInjection(
+      {
+        onBeforeSendHeaders: (_filter, installed) => {
+          listener = installed;
+        },
+      },
+      { ...options, token, ready },
+    );
+    return listener!;
+  };
+
+  it('should hold an authenticated request until the credential is read, and let others through at once (B32)', async () => {
+    const ready = Promise.withResolvers<void>();
+    const credential: { token?: string } = {};
+    const listener = install(ready.promise, () => credential.token);
+    const api = vi.fn();
+    const elsewhere = vi.fn();
+    listener({ url: 'http://localhost:4000/v1/projects', requestHeaders: {} }, api);
+    listener({ url: 'https://example.com/', requestHeaders: {} }, elsewhere);
+    expect(elsewhere).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(api).not.toHaveBeenCalled();
+    credential.token = 'restored';
+    ready.resolve();
+    await vi.waitFor(() => {
+      expect(api).toHaveBeenCalledWith({
+        requestHeaders: { authorization: 'Bearer restored', 'tau-client': 'tau-desktop/0.0.1' },
+      });
+    });
+  });
+
+  it('should send a held request without a credential once the wait is over', async () => {
+    vi.useFakeTimers();
+    try {
+      const listener = install(Promise.withResolvers<void>().promise, () => undefined);
+      const api = vi.fn();
+      listener({ url: 'http://localhost:4000/v1/projects', requestHeaders: {} }, api);
+      await vi.advanceTimersByTimeAsync(credentialWaitMilliseconds);
+      expect(api).toHaveBeenCalledWith({ requestHeaders: { 'tau-client': 'tau-desktop/0.0.1' } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

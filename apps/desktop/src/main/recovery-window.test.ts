@@ -29,24 +29,21 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 /** A BrowserWindow stand-in whose web contents emit like Electron's. */
-type FakeWindow = RecoveryWindowLike & {
-  readonly contents: EventEmitter;
-  readonly events: EventEmitter;
-  readonly loadFile: ReturnType<typeof vi.fn>;
-  readonly focus: ReturnType<typeof vi.fn>;
-  readonly destroy: ReturnType<typeof vi.fn>;
-};
-
-const fakeWindow = (): FakeWindow => {
+const fakeWindow = () => {
   // oxlint-disable-next-line unicorn/prefer-event-target -- Electron's emitters are Node EventEmitters.
   const contents = new EventEmitter();
   // oxlint-disable-next-line unicorn/prefer-event-target -- Electron's emitters are Node EventEmitters.
   const events = new EventEmitter();
-  const mainFrame = { url: 'file:///resources/recovery/index.html' };
   const window = {
     contents,
     events,
-    webContents: Object.assign(contents, { id: 77, mainFrame, send: vi.fn(), isDestroyed: () => false }),
+    webContents: {
+      id: 77,
+      send: vi.fn(),
+      isDestroyed: () => false,
+      on: (event: string, listener: (...args: never[]) => void) =>
+        contents.on(event, listener as (...args: unknown[]) => void),
+    },
     loadFile: vi.fn(async () => undefined),
     focus: vi.fn(),
     show: vi.fn(),
@@ -55,8 +52,8 @@ const fakeWindow = (): FakeWindow => {
     once: (event: string, listener: (...args: unknown[]) => void) => {
       events.once(event, listener);
     },
-  };
-  return window as unknown as FakeWindow;
+  } satisfies RecoveryWindowLike & { readonly contents: EventEmitter; readonly events: EventEmitter };
+  return window;
 };
 
 const controllerFor = (window = fakeWindow()) => {
@@ -199,9 +196,9 @@ describe('recovery window (T-R12.6)', () => {
 });
 
 describe('recovery actions (T-R12.6)', () => {
-  const actions = (): RecoveryActions & Record<string, ReturnType<typeof vi.fn>> => {
+  const actions = () => {
     const fakes = {
-      restart: vi.fn(async () => undefined),
+      restart: vi.fn(async (_mode: 'normal' | 'safe') => undefined),
       showLogs: vi.fn(),
       copyDiagnostics: vi.fn(async () => undefined),
       openRecoveryWindow: vi.fn(),
@@ -210,8 +207,8 @@ describe('recovery actions (T-R12.6)', () => {
       cancelAutoInstall: vi.fn(),
       downloadTau: vi.fn(async () => undefined),
       resetsChanged: vi.fn(),
-    };
-    return fakes as unknown as RecoveryActions & Record<string, ReturnType<typeof vi.fn>>;
+    } satisfies RecoveryActions;
+    return fakes;
   };
 
   it('should parse only the actions the specification names', () => {

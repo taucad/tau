@@ -35,8 +35,6 @@ export const AttributeKey = {
   /* Files service blueprint §4, §8: which kind of host served an open's LFS downloads, from the action host. */
   LFS_TRANSPORT: 'tau.lfs.transport',
   KERNEL_ID: 'kernel.id',
-  KERNEL_STATUS: 'kernel.status',
-  EXPORT_FORMAT: 'export.format',
   WS_CLOSE_REASON: 'ws.close.reason',
   GEN_AI_TOOL_NAME: 'gen_ai.tool.name',
   GEN_AI_TOOL_STATUS: 'gen_ai.tool.status',

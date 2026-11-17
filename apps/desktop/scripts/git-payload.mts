@@ -3,10 +3,11 @@
  *
  * The pure half of `prepare-git.mts`, kept apart so the pins, the layout the
  * app resolves and the GPL-2.0 source copy are checked without a compile.
- * `git` is built from the upstream source tarball (there is no official macOS
- * binary) and `git-lfs` is the official release binary, placed in that git's
- * own exec path so `git lfs` resolves through the one executable
- * `bundledGitEnvironment` names.
+ * On macOS and Linux `git` is built from the upstream source tarball (there is
+ * no official macOS binary); on Windows it is Git for Windows' MinGit, the
+ * official redistributable build of the same git release. `git-lfs` is the
+ * official release binary, placed in that git's own exec path so `git lfs`
+ * resolves through the one executable `bundledGitEnvironment` names.
  */
 
 import { createHash } from 'node:crypto';
@@ -45,22 +46,119 @@ const gitLfsArchive = (platform: string, format: GitLfsArchive['format'], sha256
   };
 };
 
+/** Git for Windows' MinGit release, the Windows payload's git: the same git release as `gitVersion`. */
+export const mingitVersion = `${gitVersion}.windows.2`;
+export const mingitArchive: Readonly<{
+  name: string;
+  sha256: string;
+  url: string;
+}> = {
+  name: `MinGit-${gitVersion}.2-64-bit.zip`,
+  /* Pinned from the release asset fetched over TLS on 2026-11-17; Git for Windows signs its PE files, not the zip. */
+  sha256: 'e3ea2944cea4b3fabcd69c7c1669ef69b1b66c05ac7806d81224d0abad2dec31',
+  url: `https://github.com/git-for-windows/git/releases/download/v${mingitVersion}/MinGit-${gitVersion}.2-64-bit.zip`,
+};
+
+/**
+ * What the Windows payload leaves out of MinGit, by path under its root.
+ *
+ * Git Credential Manager (its .NET assemblies and UI toolkit, about 29 MB and
+ * 50 PE files to sign) and the helper selector that only chooses it: Tau sends
+ * its own credentials through the child environment and clears
+ * `credential.helper`, and the macOS and Linux payloads carry no helper either.
+ * The self-updater, which would download a Git for Windows installer. The
+ * system `gitconfig`, which turns on `core.autocrlf` and GCM and includes the
+ * machine's own `C:/Program Files/Git/etc/gitconfig`: the source-built payloads
+ * have no system config, and neither does this one.
+ *
+ * Every path must exist in the pinned archive, so a MinGit bump that renames or
+ * drops one fails `prepare-git` instead of shipping it silently.
+ */
+export const mingitOmittedPaths: readonly string[] = [
+  'etc/gitconfig',
+  'mingw64/bin/git-update-git-for-windows',
+  'mingw64/bin/git-credential-helper-selector.exe',
+  ...[
+    'Atlassian.Bitbucket.dll',
+    'Avalonia.Base.dll',
+    'Avalonia.Controls.dll',
+    'Avalonia.DesignerSupport.dll',
+    'Avalonia.Dialogs.dll',
+    'Avalonia.Markup.Xaml.dll',
+    'Avalonia.Markup.dll',
+    'Avalonia.Metal.dll',
+    'Avalonia.MicroCom.dll',
+    'Avalonia.OpenGL.dll',
+    'Avalonia.Remote.Protocol.dll',
+    'Avalonia.Skia.dll',
+    'Avalonia.Themes.Fluent.dll',
+    'Avalonia.Vulkan.dll',
+    'Avalonia.Win32.dll',
+    'Avalonia.dll',
+    'GitHub.dll',
+    'GitLab.dll',
+    'HarfBuzzSharp.dll',
+    'MicroCom.Runtime.dll',
+    'Microsoft.AzureRepos.dll',
+    'Microsoft.Bcl.AsyncInterfaces.dll',
+    'Microsoft.Identity.Client.Broker.dll',
+    'Microsoft.Identity.Client.Extensions.Msal.dll',
+    'Microsoft.Identity.Client.NativeInterop.dll',
+    'Microsoft.Identity.Client.dll',
+    'Microsoft.IdentityModel.Abstractions.dll',
+    'SkiaSharp.dll',
+    'System.Buffers.dll',
+    'System.CommandLine.dll',
+    'System.ComponentModel.Annotations.dll',
+    'System.Diagnostics.DiagnosticSource.dll',
+    'System.IO.FileSystem.AccessControl.dll',
+    'System.Memory.dll',
+    'System.Numerics.Vectors.dll',
+    'System.Runtime.CompilerServices.Unsafe.dll',
+    'System.Security.AccessControl.dll',
+    'System.Security.Cryptography.ProtectedData.dll',
+    'System.Security.Principal.Windows.dll',
+    'System.Text.Encodings.Web.dll',
+    'System.Text.Json.dll',
+    'System.Threading.Tasks.Extensions.dll',
+    'System.ValueTuple.dll',
+    'av_libglesv2.dll',
+    'gcmcore.dll',
+    'git-credential-manager.exe',
+    'git-credential-manager.exe.config',
+    'libHarfBuzzSharp.dll',
+    'libSkiaSharp.dll',
+    'msalruntime.dll',
+  ].map((name) => `mingw64/bin/${name}`),
+];
+
+/** How one target's git is obtained: compiled from `gitSourceName` on the target, or MinGit's release extracted. */
+export type GitTarget = Readonly<{
+  gitLfs: GitLfsArchive;
+  build: 'source' | 'mingit';
+}>;
+
 /**
  * Every target this script prepares, as the other `prepare-*.mts` scripts do.
  *
- * Hashes from git-lfs's signed `sha256sums.asc`. Windows is absent: no
- * `prepare-*` script covers it and git there is Git for Windows, not a build of
- * this tarball.
+ * Hashes from git-lfs's signed `sha256sums.asc`.
  */
-export const gitTargets: Readonly<Record<string, Readonly<{ gitLfs: GitLfsArchive }>>> = {
+export const gitTargets: Readonly<Record<string, GitTarget>> = {
   'darwin-arm64': {
     gitLfs: gitLfsArchive('darwin-arm64', 'zip', 'caff76a7d070d8160c89bc39b6e85d98f24135b6fed038a3b4de2590d25102d8'),
+    build: 'source',
   },
   'darwin-x64': {
     gitLfs: gitLfsArchive('darwin-amd64', 'zip', 'f1c17aeca0b4eaab9ea606226477dbed3b84b56fe0811a9f967d2ea2b2393c53'),
+    build: 'source',
   },
   'linux-x64': {
     gitLfs: gitLfsArchive('linux-amd64', 'tar.gz', 'e455e00f15d9b95661b8d53498ffb0c3367962cf1ec73c31ab7369516cd6ab8d'),
+    build: 'source',
+  },
+  'win32-x64': {
+    gitLfs: gitLfsArchive('windows-amd64', 'zip', 'b62e7b8ceddee635f691233d77de8eaa4b213e9209e0173811d8cfa77f7882c1'),
+    build: 'mingit',
   },
 };
 
@@ -122,8 +220,8 @@ export const foreignLibraries = (otoolOutput: string): string[] => [
   ),
 ];
 
-/** What the payload was built from and what it holds: the up-to-date check's record. */
-export type GitPayloadManifest = Readonly<{
+/** What a source-built payload was built from and what it holds: the up-to-date check's record. */
+export type GitSourcePayloadManifest = Readonly<{
   schemaVersion: 1;
   target: string;
   gitVersion: string;
@@ -136,6 +234,22 @@ export type GitPayloadManifest = Readonly<{
   gitLfsSha256: string;
   probed?: Readonly<{ git: string; gitLfs: string }>;
 }>;
+
+/** What a MinGit payload was extracted from, what it left out and what it holds. */
+export type GitMingitPayloadManifest = Readonly<{
+  schemaVersion: 1;
+  target: string;
+  gitVersion: string;
+  mingitArchiveSha256: string;
+  omittedPaths: readonly string[];
+  gitLfsVersion: string;
+  gitLfsArchiveSha256: string | undefined;
+  gitSha256: string;
+  gitLfsSha256: string;
+  probed?: Readonly<{ git: string; gitLfs: string }>;
+}>;
+
+export type GitPayloadManifest = GitSourcePayloadManifest | GitMingitPayloadManifest;
 
 /**
  * The manifest for one target's payload, built from the current pins.
@@ -150,19 +264,36 @@ export const gitPayloadManifest = (
     gitLfsSha256: string;
     probed?: Readonly<{ git: string; gitLfs: string }>;
   }>,
-): GitPayloadManifest => ({
-  schemaVersion: 1,
-  target: built.target,
-  gitVersion,
-  gitSourceSha256,
-  gitLfsVersion,
-  gitLfsArchiveSha256: gitTargets[built.target]?.gitLfs.sha256,
-  makeVariables: gitMakeVariables,
-  macosDeploymentTarget: gitMacosDeploymentTarget,
-  gitSha256: built.gitSha256,
-  gitLfsSha256: built.gitLfsSha256,
-  ...(built.probed === undefined ? {} : { probed: built.probed }),
-});
+): GitPayloadManifest => {
+  const probed = built.probed === undefined ? {} : { probed: built.probed };
+  if (gitTargets[built.target]?.build === 'mingit') {
+    return {
+      schemaVersion: 1,
+      target: built.target,
+      gitVersion: mingitVersion,
+      mingitArchiveSha256: mingitArchive.sha256,
+      omittedPaths: mingitOmittedPaths,
+      gitLfsVersion,
+      gitLfsArchiveSha256: gitTargets[built.target]?.gitLfs.sha256,
+      gitSha256: built.gitSha256,
+      gitLfsSha256: built.gitLfsSha256,
+      ...probed,
+    };
+  }
+  return {
+    schemaVersion: 1,
+    target: built.target,
+    gitVersion,
+    gitSourceSha256,
+    gitLfsVersion,
+    gitLfsArchiveSha256: gitTargets[built.target]?.gitLfs.sha256,
+    makeVariables: gitMakeVariables,
+    macosDeploymentTarget: gitMacosDeploymentTarget,
+    gitSha256: built.gitSha256,
+    gitLfsSha256: built.gitLfsSha256,
+    ...probed,
+  };
+};
 
 /**
  * Whether a manifest read back from disk describes the payload the current pins would build.
@@ -187,15 +318,24 @@ export const gitPayloadManifestIsCurrent = (
  * Where each part of one target's payload lives under `resources/git`.
  *
  * `git` is the path `bundledGitEnvironment` resolves; `gitLfs` is in that git's
- * exec path. The source tarball sits beside every target, once (GPL-2.0 §3(a)).
+ * exec path. A source-built payload's source tarball sits beside every target,
+ * once (GPL-2.0 §3(a)).
+ *
+ * On Windows the payload root is MinGit's own tree: `bin/git.exe` is Git for
+ * Windows' launcher (MinGit's `cmd/git.exe`, the same file a full install
+ * ships as `bin/git.exe`), which puts `mingw64/bin` and `usr/bin` on `PATH`
+ * and runs `mingw64/bin/git.exe`, whose exec path is `mingw64/libexec/git-core`.
+ * Its licence is MinGit's own `LICENSE.txt`, and it carries no source tarball.
  *
  * @param resourceRoot - `apps/desktop/resources/git`, or a packaged app's `Resources/git`.
  * @param target - `<platform>-<arch>`.
+ * @param directory - The payload's directory name under `resourceRoot`: the target's own, or a staging name.
  * @returns The payload's paths.
  */
 export const gitPayloadLayout = (
   resourceRoot: string,
   target: string,
+  directory: string = target,
 ): Readonly<{
   root: string;
   git: string;
@@ -204,18 +344,21 @@ export const gitPayloadLayout = (
   notice: string;
   gitCopying: string;
   gitLfsLicense: string;
-  source: string;
+  source: string | undefined;
 }> => {
-  const root = join(resourceRoot, target);
+  const mingit = gitTargets[target]?.build === 'mingit';
+  const root = join(resourceRoot, directory);
   return {
     root,
-    git: join(root, 'bin', 'git'),
-    gitLfs: join(root, 'libexec', 'git-core', 'git-lfs'),
+    git: mingit ? join(root, 'bin', 'git.exe') : join(root, 'bin', 'git'),
+    gitLfs: mingit
+      ? join(root, 'mingw64', 'libexec', 'git-core', 'git-lfs.exe')
+      : join(root, 'libexec', 'git-core', 'git-lfs'),
     manifest: join(root, 'tau-runtime-manifest.json'),
     notice: join(root, 'NOTICE'),
-    gitCopying: join(root, 'git-COPYING'),
+    gitCopying: mingit ? join(root, 'LICENSE.txt') : join(root, 'git-COPYING'),
     gitLfsLicense: join(root, 'git-lfs-LICENSE.md'),
-    source: join(resourceRoot, 'SOURCES', gitSourceName),
+    source: mingit ? undefined : join(resourceRoot, 'SOURCES', gitSourceName),
   };
 };
 
@@ -251,6 +394,23 @@ export const gitPayloadNotice = `This directory carries two programs Tau runs as
 Git ${gitVersion} — GNU General Public License, version 2 (git-COPYING).
 Built unmodified from ${gitSourceName} (sha256 ${gitSourceSha256}); that exact
 corresponding source is distributed with this application at ../SOURCES/${gitSourceName}.
+
+Git LFS ${gitLfsVersion} — MIT License (git-lfs-LICENSE.md), the official release binary.
+`;
+
+/** The NOTICE that travels with the Windows (MinGit) payload. */
+export const mingitPayloadNotice = `This directory carries two programs Tau runs as separate executables.
+
+Git for Windows ${mingitVersion} (MinGit) — GNU General Public License, version 2,
+with the licences of the components it bundles (LICENSE.txt; their versions are
+in etc/package-versions.txt). This is the official ${mingitArchive.name}
+(sha256 ${mingitArchive.sha256}), unmodified, with these files left out:
+${mingitOmittedPaths.map((path) => `  ${path}`).join('\n')}
+Its corresponding source is Git for Windows' tag v${mingitVersion}
+(https://github.com/git-for-windows/git/tree/v${mingitVersion}) and the package
+sources of https://github.com/git-for-windows/MINGW-packages and
+https://github.com/git-for-windows/MSYS2-packages at the versions listed in
+etc/package-versions.txt.
 
 Git LFS ${gitLfsVersion} — MIT License (git-lfs-LICENSE.md), the official release binary.
 `;

@@ -36,6 +36,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./occt": "./src/occt.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -45,6 +46,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./occt": {
+        "types": "./dist/occt.d.mts",
+        "import": "./dist/occt.mjs",
+        "default": "./dist/occt.mjs"
       },
       "./package.json": "./package.json"
     },

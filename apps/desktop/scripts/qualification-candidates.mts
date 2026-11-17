@@ -35,17 +35,16 @@ export const assertQualificationConsumerScope = (options: {
         : options.route === 'linux-apt' || options.route === 'linux-appimage'
           ? 'linux'
           : undefined;
-  // D-H5: production clean-host evidence exists only for the Mac and Linux platform scopes.
-  const channelAdmitted = options.channel === 'staging' || (options.channel === 'production' && expected !== 'windows');
-  if (!expected || options.scope !== expected || !channelAdmitted) {
-    throw new Error('Consumer acceptance requires its staging platform scope (or Mac/Linux production)');
+  // D-H5: clean-host evidence comes from its own platform scope, on staging or production.
+  if (!expected || options.scope !== expected || !['staging', 'production'].includes(options.channel)) {
+    throw new Error('Consumer acceptance requires its own platform scope on staging or production');
   }
 };
 
 /**
- * The Mac and Linux platform scopes (CI and clean-host, staging and production) may test trusted ancestors; their
- * publication additionally authenticates a source/harness binding. Windows clean-host and all-platform runs retain
- * exact-source admission.
+ * The Mac, Windows and Linux platform scopes (CI and clean-host, staging and production) may test trusted ancestors;
+ * their publication additionally authenticates a source/harness binding. All-platform runs retain exact-source
+ * admission.
  */
 export const assertQualificationSource = (options: {
   sourceCommit: string;
@@ -59,8 +58,7 @@ export const assertQualificationSource = (options: {
     !/^[a-f\d]{40}$/u.test(options.workflowCommit) ||
     !['ci', 'vm'].includes(options.kind) ||
     !['all', 'linux', 'macos', 'windows'].includes(options.scope) ||
-    !['staging', 'production'].includes(options.channel) ||
-    (options.scope === 'windows' && options.channel !== 'staging')
+    !['staging', 'production'].includes(options.channel)
   ) {
     throw new Error('Invalid qualification source scope/channel');
   }

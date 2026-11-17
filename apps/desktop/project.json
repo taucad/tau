@@ -326,7 +326,8 @@
           "projects": ["ui"],
           "target": "check-desktop-payload"
         },
-        "prepare-build123d-python-windows"
+        "prepare-build123d-python-windows",
+        "prepare-git-windows"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {

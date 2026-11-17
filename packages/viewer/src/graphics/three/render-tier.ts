@@ -59,13 +59,16 @@ export type RenderTier = Readonly<{
 }>;
 
 /**
- * Test-only: run one rasterizer's features whatever the adapter is, so a software GPU in CI exercises the hardware
- * pipeline (`{ features: 'hardware' }`). `rasterizer` still reports the adapter. An embedder passes it through
- * `ViewerEnvironment.renderTierOverride` only in an undeployed debug build; a production build never sets it.
+ * Test-only: choose a canvas's features apart from its adapter. A rasterizer name runs that rasterizer's whole feature
+ * set whatever the adapter is (`{ features: 'hardware' }` runs the hardware pipeline on a software GPU in CI). A
+ * partial feature set runs those features over the adapter's own, so a row can exercise the hardware composition (AO,
+ * FXAA, speculative preparation) on SwiftShader while the environment keeps the size the adapter can filter.
+ * `rasterizer` still reports the adapter. An embedder passes it through `ViewerEnvironment.renderTierOverride` only in
+ * an undeployed debug build; a production build never sets it.
  *
  * @public
  */
-export type RenderTierOverride = Readonly<{ features: RenderTier['rasterizer'] }>;
+export type RenderTierOverride = Readonly<{ features: RenderTier['rasterizer'] | Partial<RenderTierFeatures> }>;
 
 const {
   default: defaultEnvironmentResolution,
@@ -117,6 +120,18 @@ export const hardwareRenderTier = (backend: ResolvedGraphicsBackend): RenderTier
   overridden: false,
 });
 
+/** The features a canvas runs: its adapter's, or the override's rasterizer, with any chosen features laid over. */
+const overriddenFeatures = (
+  backend: ResolvedGraphicsBackend,
+  rasterizer: RenderTier['rasterizer'],
+  override: RenderTierOverride | undefined,
+): RenderTierFeatures => {
+  const chosen = override?.features;
+  return typeof chosen === 'object'
+    ? { ...renderTierFeatures(backend, rasterizer), ...chosen }
+    : renderTierFeatures(backend, chosen ?? rasterizer);
+};
+
 /** One tier per renderer: a canvas incarnation resolves its tier once, and every reader sees that one. */
 const tiers = new WeakMap<WeakKey, RenderTier>();
 
@@ -141,7 +156,7 @@ export const resolveRenderTier = (renderer: unknown, override?: RenderTierOverri
   const tier: RenderTier = {
     backend,
     rasterizer,
-    features: renderTierFeatures(backend, override?.features ?? rasterizer),
+    features: overriddenFeatures(backend, rasterizer, override),
     fallbackReason: webGpuFallbackReason(),
     overridden: override !== undefined,
   };

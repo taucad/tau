@@ -3,8 +3,8 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Extension } from '@codemirror/state';
-import { EditorDocument } from '#lib/editor-document.js';
-import type { CodeEditorProps } from '#components/code/code-editor.client.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import type { CodeEditorProps } from '@taucad/editor-ui/components/code/code-editor.client';
 import type { EditorLanguageRequest } from '#lib/editor-language-runtime.js';
 import { ChatEditorCodeViewer } from '#routes/w.$workspace.$project/chat-editor-code-viewer.js';
 
@@ -17,7 +17,7 @@ vi.mock('#hooks/use-editor-document-session.js', () => ({
   useEditorLanguageEnvironment: () => runtime.environment,
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'project' }) }));
-vi.mock('#components/code/code-editor.client.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/code-editor.client', () => ({
   markCodeEditorMilestone: () => undefined,
   CodeEditor: ({ document, extensions, onApply }: CodeEditorProps) => (
     <div>

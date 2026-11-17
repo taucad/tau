@@ -196,7 +196,7 @@ const withRemote = (opened: ProjectRevisions): ProjectRevisions => {
  */
 const remoteSettled = async (
   opened: ProjectRevisions,
-  state: 'none' | 'failed' = 'none',
+  state: 'none' | 'retrying' | 'failed' = 'none',
 ): Promise<ProjectRevisions> => {
   await waitFor(opened.actor, (snapshot) => snapshot.children.remote?.getSnapshot().value === state);
   return opened;
@@ -991,7 +991,7 @@ describe('createTurnPlacementPort (TS-S3)', { timeout: fileHeavyTimeout(5000) },
   /* XD3: another device sees a run before it settles; the host's heartbeats keep it current through `publish`. */
   it('should record the chats when an attempt is admitted and each time the host publishes, never on its own', async () => {
     const project = await createProject();
-    const { revisions, syncs } = observeSyncs(withRemote(project.open().revisions));
+    const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: () => 'device-1' }).revisions));
     const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
     const admitted = await placement.admit({ requestId: 'admit:run-1:1', key });
@@ -1022,6 +1022,23 @@ describe('createTurnPlacementPort (TS-S3)', { timeout: fileHeavyTimeout(5000) },
   it('should refuse a publish CHAT_NOT_SHARED, and record nothing, where the project syncs with no remote', async () => {
     const project = await createProject();
     const { revisions, syncs } = observeSyncs(await remoteSettled(project.open().revisions));
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+    expect(await placement.publish({ requestId: 'publish:1', chatId: key.chatId })).toMatchObject({
+      status: 'refused',
+      code: 'CHAT_NOT_SHARED',
+    });
+    expect(syncs).toEqual([]);
+  });
+
+  /*
+   * Tau #1098, item 3: `publish` and `pull` answer one `sharesChats()`. With chat sync off a pull was refused but a
+   * publish applied, so the host kept writing a heartbeat row a minute, and recording the chats, that no device reads.
+   */
+  it('should refuse a publish CHAT_NOT_SHARED, and record nothing, where the project does not sync its chats', async () => {
+    const project = await createProject();
+    await project.filesystem.writeFile('tau.json', JSON.stringify({ syncChats: false }));
+    const { revisions, syncs } = observeSyncs(withRemote(project.open({ deviceId: () => 'device-1' }).revisions));
     const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
     expect(await placement.publish({ requestId: 'publish:1', chatId: key.chatId })).toMatchObject({
@@ -1085,6 +1102,27 @@ describe('createTurnPlacementPort (TS-S3)', { timeout: fileHeavyTimeout(5000) },
       expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject(notShared);
       expect(syncs).toEqual([]);
     });
+
+    /*
+     * Tau #1098, item 1: a first connect that failed undoes its own config write and lands in `failed`, which nothing
+     * leaves on its own. The project still syncs with no remote, but `failed` counted as "may arrive", so the host
+     * waited on pulls that could never come and held the chat as "waiting on sync" until the project was reopened.
+     */
+    it('should refuse a pull CHAT_NOT_SHARED, and pull nothing, where a first connect failed', async () => {
+      const project = await createProject();
+      const revisionPort: RevisionPort = {
+        ...project.port,
+        setRemote: vi.fn(project.port.setRemote).mockRejectedValue(new Error('The config is read-only.')),
+      };
+      const opened = await remoteSettled(project.open({ deviceId: () => 'device-1', revisionPort }).revisions);
+      opened.actor.send({ type: 'remote', event: { type: 'connect', kind: 'git', url: 'https://example.com/p.git' } });
+      const { revisions, syncs } = observeSyncs(await remoteSettled(opened, 'failed'));
+      expect(revisions.actor.getSnapshot().children.remote?.getSnapshot().context.remote).toBeUndefined();
+      const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+      expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject(notShared);
+      expect(syncs).toEqual([]);
+    });
   });
 
   /*
@@ -1102,12 +1140,33 @@ describe('createTurnPlacementPort (TS-S3)', { timeout: fileHeavyTimeout(5000) },
         listRemotes: vi.fn(project.port.listRemotes).mockRejectedValueOnce(new Error('The config is locked.')),
       };
       const { revisions, syncs } = observeSyncs(
-        await remoteSettled(project.open({ deviceId: () => 'device-1', revisionPort }).revisions, 'failed'),
+        await remoteSettled(project.open({ deviceId: () => 'device-1', revisionPort }).revisions, 'retrying'),
       );
       const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
       expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toEqual(pulled);
       expect(syncs).toEqual([{ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } }]);
+    });
+
+    /* Tau #1098, item 1: a failed remotes read is asked again, so a project with no remote stops waiting once it is. */
+    it('should refuse CHAT_NOT_SHARED once a failed remotes read is read again and finds no remote', async () => {
+      const project = await createProject();
+      const revisionPort: RevisionPort = {
+        ...project.port,
+        listRemotes: vi.fn(project.port.listRemotes).mockRejectedValueOnce(new Error('The config is locked.')),
+      };
+      const opened = await remoteSettled(
+        project.open({ deviceId: () => 'device-1', revisionPort }).revisions,
+        'retrying',
+      );
+      const { revisions, syncs } = observeSyncs(await remoteSettled(opened, 'none'));
+      const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+      expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toMatchObject({
+        status: 'refused',
+        code: 'CHAT_NOT_SHARED',
+      });
+      expect(syncs).toEqual([]);
     });
 
     it('should pull, never refuse CHAT_NOT_SHARED, where the record devices could not be read', async () => {

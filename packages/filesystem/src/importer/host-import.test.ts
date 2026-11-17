@@ -26,6 +26,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsChannel, NodeFsImportSources, NodeFsProviderClient } from '#backend/node/client.js';
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
+import { heldDescriptorPath } from '#backend/node/import-source.js';
 import type { ImportSourceGrant } from '#backend/node/import-source.js';
 import { nodeFsProtocolVersion } from '#backend/node/protocol.js';
 import { tauPathPolicy } from '#path-registry.js';
@@ -75,7 +76,8 @@ type Fixture = Readonly<{
 }>;
 
 const serve = (): Fixture => {
-  const sandbox = realpathSync(mkdtempSync(join(tmpdir(), 'tau-host-import-')));
+  // The native realpath, as the host spells a root: the JavaScript `realpathSync` keeps a Windows 8.3 short name.
+  const sandbox = realpathSync.native(mkdtempSync(join(tmpdir(), 'tau-host-import-')));
   const root = join(sandbox, 'home');
   const folder = join(sandbox, 'chosen', 'Bracket');
   const authorityRoot = join(sandbox, 'authority');
@@ -131,6 +133,58 @@ const folderGrant = (fixture: Fixture, path = fixture.folder): HostImportGrant =
 
 const sizeOf = (path: string): number => Buffer.byteLength(tree[path] as string);
 
+/*
+ * Whether this host's file system holds a FIFO. Windows has none: its named
+ * pipes live under `\\.\pipe\`, outside every folder, and Git for Windows'
+ * MSYS `mkfifo` leaves an entry Win32 cannot see (`lstat` answers ENOENT,
+ * measured in Windows run 43996958515).
+ */
+const holdsFifo = ((): boolean => {
+  const probe = mkdtempSync(join(tmpdir(), 'tau-host-import-fifo-'));
+  try {
+    execFileSync('mkfifo', [join(probe, 'pipe')], { stdio: 'ignore' });
+    return lstatSync(join(probe, 'pipe')).isFIFO();
+  } catch {
+    return false;
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+})();
+
+/*
+ * Intercept the copy that fills the sibling named for `target`, on whichever
+ * path this platform copies by: `copyFile` from the held descriptor's path
+ * where one exists (Linux), else a stream from the descriptor into a sibling
+ * the provider creates itself (`wx`, 0o600), intercepted once that sibling is
+ * closed. `copy` lands the bytes where they have not landed yet.
+ */
+const interceptCopy = (
+  target: string,
+  intercept: (sibling: string, copy: () => Promise<void>) => Promise<void>,
+): void => {
+  if (heldDescriptorPath(0) !== undefined) {
+    const copyFile = fs.copyFile.bind(fs);
+    vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) =>
+      String(to).includes(target)
+        ? intercept(String(to), async () => copyFile(from, to, mode))
+        : copyFile(from, to, mode),
+    );
+    return;
+  }
+  const open = fs.open.bind(fs);
+  vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+    const handle = await open(path, flags, mode);
+    if (String(path).includes(target) && flags === 'wx' && mode === 0o600) {
+      const close = handle.close.bind(handle);
+      handle.close = async () => {
+        await close();
+        await intercept(String(path), async () => undefined);
+      };
+    }
+    return handle;
+  });
+};
+
 const stage = async (fixture: Fixture, plan: Awaited<ReturnType<typeof planImport>>, operationId: string) =>
   stageImport({
     port: fixture.port,
@@ -141,8 +195,9 @@ const stage = async (fixture: Fixture, plan: Awaited<ReturnType<typeof planImpor
   });
 
 describe('a host-side import', () => {
-  it('speaks protocol 12', () => {
-    expect(nodeFsProtocolVersion).toBe(12);
+  it('speaks protocol 12 or later', () => {
+    /* Introduced at 12; 13 adds the host's `describe` and keeps it. */
+    expect(nodeFsProtocolVersion).toBeGreaterThanOrEqual(12);
   });
 
   it('lists, copies and records the facts of a chosen folder, end to end', async () => {
@@ -178,7 +233,11 @@ describe('a host-side import', () => {
     const plan = await planImport(hostImportSource(fixture.sources, [folderGrant(fixture)]), { policy: tauPathPolicy });
     const onLinux = await stage(fixture, plan, 'op_linux');
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
-    Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+    /* Only Linux copies through a descriptor path; elsewhere the platform already is one that cannot. Posing as
+     * macOS on Windows would also make the provider sync a directory, which Windows refuses (EPERM). */
+    if (platform.value === 'linux') {
+      Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+    }
     const copyFile = vi.spyOn(fs, 'copyFile');
     try {
       const replanned = await planImport(hostImportSource(fixture.sources, [folderGrant(fixture)]), {
@@ -242,7 +301,7 @@ describe('a host-side import', () => {
     expect(staged.entries.map(({ path }) => path).toSorted()).toEqual(['main.ts', 'mesh.bin']);
   });
 
-  it('refuses a special file by its kind before opening it', async () => {
+  it.runIf(holdsFifo)('refuses a special file by its kind before opening it', async () => {
     const fixture = serve();
     const { grant } = folderGrant(fixture);
     /* Opening a FIFO for reading blocks until a writer comes; it is refused from the walk's lstat instead. */
@@ -250,6 +309,26 @@ describe('a host-side import', () => {
     await expect(fixture.sources.read(grant, 'pipe', 64)).rejects.toMatchObject({ code: 'EOPNOTSUPP' });
     const copied = await fixture.client.copyFromImportGrant(grant, [{ from: 'pipe', path: 'pipe-copy', size: 0 }]);
     expect(copied[0]).toMatchObject({ outcome: 'failed', error: { code: 'EOPNOTSUPP' } });
+  });
+
+  it('refuses an entry the walk finds is no regular file, without opening it, on every platform', async () => {
+    const fixture = serve();
+    const { grant } = folderGrant(fixture);
+    const special = join(fixture.folder, 'main.ts');
+    const lstat = fs.lstat.bind(fs);
+    /* What a device, socket or FIFO looks like to the walk, on a platform whose folders can hold none. */
+    vi.spyOn(fs, 'lstat').mockImplementation((async (path: string, options?: { bigint?: boolean }) => {
+      const stats = await lstat(path, options);
+      return String(path) === special
+        ? /* The real entry's facts, inherited, with a kind that is neither file nor folder. */
+          Object.assign(Object.create(stats) as typeof stats, { isFile: () => false })
+        : stats;
+    }) as typeof fs.lstat);
+    const open = vi.spyOn(fs, 'open');
+    await expect(fixture.sources.read(grant, 'main.ts', 64)).rejects.toMatchObject({ code: 'EOPNOTSUPP' });
+    const copied = await fixture.client.copyFromImportGrant(grant, [{ from: 'main.ts', path: 'main.ts', size: 0 }]);
+    expect(copied[0]).toMatchObject({ outcome: 'failed', error: { code: 'EOPNOTSUPP' } });
+    expect(open.mock.calls.filter(([path]) => String(path) === special)).toEqual([]);
   });
 
   it('refuses a source outside what the person chose', async () => {
@@ -292,14 +371,10 @@ describe('a host-side import', () => {
     const fixture = serve();
     const { grant } = folderGrant(fixture);
     writeFileSync(join(fixture.root, 'main.ts'), 'old');
-    const copyFile = fs.copyFile.bind(fs);
-    vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) => {
-      /* The source is the held descriptor's path; the sibling is named for its target. */
-      if (String(to).includes('main.ts')) {
-        await fs.writeFile(to, 'export const a');
-        throw Object.assign(new Error('EIO: i/o error, copyfile'), { code: 'EIO' });
-      }
-      return copyFile(from, to, mode);
+    /* The sibling is named for its target: it is left half-written, and the copy fails. */
+    interceptCopy('main.ts', async (sibling) => {
+      await fs.writeFile(sibling, 'export const a');
+      throw Object.assign(new Error('EIO: i/o error, copyfile'), { code: 'EIO' });
     });
     const receipts = await fixture.client.copyFromImportGrant(grant, [
       { from: 'main.ts', path: 'main.ts', size: Buffer.byteLength(tree['main.ts'] as string) },
@@ -368,9 +443,8 @@ describe('a host-side import', () => {
   it('refuses a file written to while it was copied', async () => {
     const fixture = serve();
     const { grant } = folderGrant(fixture);
-    const copyFile = fs.copyFile.bind(fs);
-    vi.spyOn(fs, 'copyFile').mockImplementation(async (from, to, mode) => {
-      await copyFile(from, to, mode);
+    interceptCopy('main.ts', async (_sibling, copy) => {
+      await copy();
       /* Same size, new bytes: only its times say it changed. */
       await fs.writeFile(join(fixture.folder, 'main.ts'), (tree['main.ts'] as string).toUpperCase());
     });

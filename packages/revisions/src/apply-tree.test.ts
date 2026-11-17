@@ -48,7 +48,7 @@ import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { generatedGitattributesContent, generatedGitattributesPath, tauRevisionPolicy } from '#workspace-config.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import { testIdentity } from '#test/identity.js';
-import { fileHeavyTimeout, removalRetries } from '#test/native-git-harness.js';
+import { diskKeepsExecutableBit, fileHeavyTimeout, removalRetries } from '#test/native-git-harness.js';
 
 /** A clock stopped at `time`: these rows read only its `now()`. */
 const clockAt = (time: number): StepClock => {
@@ -187,8 +187,13 @@ const countingCheckout = (
       mutate('rename', async () => real.rename(pathOf(from), pathOf(to))),
     unlink: async (path: string): Promise<void> => mutate('unlink', async () => real.unlink(pathOf(path))),
     exists: async (path: string): Promise<boolean> => real.exists(pathOf(path)),
-    setFileMode: async (path: string, mode: FileMode): Promise<void> =>
-      mutate('setFileMode', async () => real.setFileMode(pathOf(path), mode)),
+    /* A disk without an executable bit (Windows) exposes no mode seam, so neither does this surface. */
+    ...(real.setFileMode === undefined
+      ? {}
+      : {
+          setFileMode: async (path: string, mode: FileMode): Promise<void> =>
+            mutate('setFileMode', async () => real.setFileMode?.(pathOf(path), mode)),
+        }),
     ...(options.statAge === undefined ? {} : { statTree }),
   };
   const checkout: RevisionFileSystem = Object.assign(Object.create(real) as RevisionFileSystem, counted, {
@@ -693,7 +698,8 @@ describe('a large apply', () => {
     fileHeavyTimeout(5000),
   );
 
-  it('should keep an executable mode on a new file it writes in place', async () => {
+  // Measured: NTFS keeps no executable bit, so a Windows checkout has no mode to keep; the next row is its side.
+  it.runIf(diskKeepsExecutableBit)('should keep an executable mode on a new file it writes in place', async () => {
     const context = await project({});
     const target = new ImmutableRevisionTree([
       ['bin/run.sh', '#!/bin/sh\necho run\n', '100755'],
@@ -704,9 +710,29 @@ describe('a large apply', () => {
     await materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
 
     expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
-    await expect(context.tree.getFileMode('bin/run.sh')).resolves.toBe('100755');
-    await expect(context.tree.getFileMode('bin/readme.txt')).resolves.toBe('100644');
+    await expect(context.tree.getFileMode?.('bin/run.sh')).resolves.toBe('100755');
+    await expect(context.tree.getFileMode?.('bin/readme.txt')).resolves.toBe('100644');
   });
+
+  it.runIf(!diskKeepsExecutableBit)(
+    'should write an executable entry in place on a disk that keeps no mode, and claim none',
+    async () => {
+      const context = await project({});
+      const target = new ImmutableRevisionTree([
+        ['bin/run.sh', '#!/bin/sh\necho run\n', '100755'],
+        ['bin/readme.txt', 'plain\n'],
+      ]);
+      context.reset();
+
+      await materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
+
+      expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
+      expect(context.counts.calls).not.toContain('setFileMode');
+      expect(context.tree.getFileMode).toBeUndefined();
+      await expect(context.tree.readFile('bin/run.sh', 'utf8')).resolves.toBe('#!/bin/sh\necho run\n');
+      await expect(context.tree.readFile('bin/readme.txt', 'utf8')).resolves.toBe('plain\n');
+    },
+  );
 });
 
 describe('an apply through the Node provider’s own batch (D16)', () => {

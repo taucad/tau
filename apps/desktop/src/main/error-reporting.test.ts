@@ -184,7 +184,7 @@ it('sends a revision-engine failure redacted, once per window for the same failu
     {
       level: 'error',
       fingerprint: ['desktop-revision-engine-failed', 'ENGINE_FAILED', 'worktree'],
-      tags: { error_code: 'ENGINE_FAILED', git_subcommand: 'worktree' },
+      tags: { error_code: 'ENGINE_FAILED', git_subcommand: 'worktree', tau_event: 'desktop-revision-engine-failed' },
       contexts: {
         revision_engine: { code: 'ENGINE_FAILED', subcommand: 'worktree', git_error: 'fatal: path already exists' },
       },

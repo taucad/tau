@@ -2896,12 +2896,12 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       fakeWindow.loadURL.mockRejectedValueOnce(Object.assign(new Error('ERR_FILE_NOT_FOUND'), { errno: -6 }));
       await booted();
       const { BrowserWindow } = await import('electron');
+      const partitions = (): unknown[] =>
+        vi.mocked(BrowserWindow).mock.calls.map(([options]) => options?.webPreferences?.partition);
+      /* Counted by partition, not by position: a slow host may create the app's windows at other times. */
       await vi.waitFor(() => {
-        expect(vi.mocked(BrowserWindow).mock.calls).toHaveLength(2);
+        expect(partitions().filter((partition) => partition === 'tau-recovery')).toHaveLength(1);
       });
-      expect(vi.mocked(BrowserWindow).mock.calls[1]![0]).toEqual(
-        expect.objectContaining({ webPreferences: expect.objectContaining({ partition: 'tau-recovery' }) as unknown }),
-      );
       expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
       expect(signals('desktop-recovery-shown')).toEqual([
         expect.objectContaining({ tags: { surface: 'window', trigger: 'load-failed' } }),

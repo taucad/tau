@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for tests
 import 'fake-indexeddb/auto';
-import { IDBDatabase as FakeIDBDatabase, IDBFactory } from 'fake-indexeddb';
+import { IDBDatabase as FakeIDBDatabase, IDBFactory, IDBObjectStore as FakeIDBObjectStore } from 'fake-indexeddb';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { workspaceMarkerPath, workspaceMarkerSchemaUrl } from '@taucad/types';
 import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
@@ -1811,11 +1811,9 @@ describe('relinkWorkspace (Locate)', () => {
     ...overrides,
   });
 
-  const ports = (
-    found: Evidence,
-  ): { readEvidence: ReturnType<typeof vi.fn>; revokeGrant: ReturnType<typeof vi.fn> } => ({
-    readEvidence: vi.fn(async () => found),
-    revokeGrant: vi.fn(async () => undefined),
+  const ports = (found: Evidence) => ({
+    readEvidence: vi.fn<HandleStore.RelinkPorts['readEvidence']>(async () => found),
+    revokeGrant: vi.fn<(path: string) => Promise<void>>(async () => undefined),
   });
 
   /** A node workspace at {@link oldPath} with the given projects bound to it, plus Studio as another workspace. */
@@ -1930,8 +1928,7 @@ describe('relinkWorkspace (Locate)', () => {
       const confirmed = await store.relinkWorkspace(
         workspace.workspaceId,
         { backend: 'node', path: newPath, wasGranted: false },
-        ports(found),
-        { confirmed: true },
+        { ...ports(found), confirmed: true },
       );
       expect(confirmed).toMatchObject({ status: 'relinked', matched: 1, unmatched: [projectId(2), projectId(3)] });
       /* An unmatched project keeps its binding; it is never dropped silently. */
@@ -2014,17 +2011,19 @@ describe('relinkWorkspace (Locate)', () => {
       const result = await store.relinkWorkspace(
         workspace.workspaceId,
         { backend: 'node', path: newPath, wasGranted: false },
-        ports(
-          evidence({
-            projects: [
-              { projectId: projectId(1), directory: 'gearbox' },
-              { projectId: projectId(1), directory: 'gearbox copy' },
-              { projectId: projectId(2), directory: 'bracket-a' },
-              { projectId: projectId(2), directory: 'bracket-b' },
-            ],
-          }),
-        ),
-        { confirmed: true },
+        {
+          ...ports(
+            evidence({
+              projects: [
+                { projectId: projectId(1), directory: 'gearbox' },
+                { projectId: projectId(1), directory: 'gearbox copy' },
+                { projectId: projectId(2), directory: 'bracket-a' },
+                { projectId: projectId(2), directory: 'bracket-b' },
+              ],
+            }),
+          ),
+          confirmed: true,
+        },
       );
 
       expect(result).toMatchObject({ status: 'relinked', matched: 1, unmatched: [projectId(2)] });
@@ -2119,8 +2118,7 @@ describe('relinkWorkspace (Locate)', () => {
           ],
         }),
       );
-      const { IDBObjectStore: FakeIDBObjectStore } = await import('fake-indexeddb');
-      const put = FakeIDBObjectStore.prototype.put;
+      const { put } = FakeIDBObjectStore.prototype;
       let puts = 0;
       const failing = vi.spyOn(FakeIDBObjectStore.prototype, 'put').mockImplementation(function (
         this: IDBObjectStore,

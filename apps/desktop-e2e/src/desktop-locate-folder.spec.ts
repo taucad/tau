@@ -71,6 +71,7 @@ test('relinks a moved folder through Locate and keeps its workspace id (T-R4.6)'
     token: 'offline-preferences',
     profileRoot,
     preserveProfile: true,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- The shell's environment variable name.
     env: { TAU_E2E_PICK_DIRECTORY: moved },
   });
   const relaunched = session.page;

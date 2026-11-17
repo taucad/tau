@@ -485,6 +485,14 @@
       "owner": "desktop resilient startup WP2 (D3)"
     },
     {
+      "id": "FS-ROOT-RECHECK",
+      "bound": "Roots that are not found, need access or do not answer are probed again every 30 s while the page is visible, and on window focus; a probe only re-reads",
+      "site": "apps/ui/app/machines/file-manager.machine.ts",
+      "token": "rootRecheckIntervalMilliseconds",
+      "class": "Liveness",
+      "owner": "desktop resilient startup WP4 (B2, R4)"
+    },
+    {
       "id": "E5",
       "bound": "Socket open",
       "site": "apps/ui/app/lib/agent-host-placement.ts",

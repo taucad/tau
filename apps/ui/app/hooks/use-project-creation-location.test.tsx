@@ -284,7 +284,7 @@ describe('useProjectCreationLocation', () => {
     expect(mockGetPreference).toHaveBeenCalledWith(
       expect.objectContaining({ webAccessSupported: true, rootStatuses: rootStatusState.roots }),
     );
-    expect(first.result.current.value).toEqual({ kind: 'home' });
+    expect(capableReady(first.result.current).value).toEqual({ kind: 'home' });
     expect(first.result.current.canCreate).toBe(true);
     expect(mockToastInfo).toHaveBeenCalledOnce();
     expect(String(mockToastInfo.mock.calls[0]![0])).toMatch(/Home/);

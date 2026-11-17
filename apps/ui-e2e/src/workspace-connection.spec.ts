@@ -281,7 +281,8 @@ describe('large workspace connection', () => {
     expect(after.workspaces).toHaveLength(1);
     expect(after.workspaces[0]?.workspaceId).toBe(before.workspaces[0]?.workspaceId);
     expect(after.configs).toEqual(before.configs);
-    expect((await readOpfsWorkspaceMarker(movedName))?.['workspaceId']).toBe(originalMarker?.['workspaceId']);
+    const movedMarker = await readOpfsWorkspaceMarker(movedName);
+    expect(movedMarker?.['workspaceId']).toBe(originalMarker?.['workspaceId']);
   });
 
   test('leaves durable state untouched when generic and exact reconnect pickers are cancelled', async () => {

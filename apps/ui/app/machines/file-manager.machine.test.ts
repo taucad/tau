@@ -2227,7 +2227,7 @@ describe('fileManagerMachine', () => {
         });
         expect(mockRecheckRoots).not.toHaveBeenCalled();
 
-        window.dispatchEvent(new Event('focus'));
+        globalThis.dispatchEvent(new Event('focus'));
         await flush();
         expect(mockRecheckRoots).toHaveBeenCalledTimes(1);
 
@@ -2264,7 +2264,7 @@ describe('fileManagerMachine', () => {
         await vi.waitFor(() => {
           expect(actor.getSnapshot().value).toBe('ready');
         });
-        window.dispatchEvent(new Event('focus'));
+        globalThis.dispatchEvent(new Event('focus'));
         await flush();
         expect(mockRecheckRoots).not.toHaveBeenCalled();
       } finally {

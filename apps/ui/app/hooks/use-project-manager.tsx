@@ -7,7 +7,11 @@ import type { ProjectLocator } from '@taucad/filesystem';
 import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { projectManagerMachine } from '#hooks/project-manager.machine.js';
-import type { WorkspaceBindingRepairResult } from '@taucad/files-ui/filesystem/handle-store';
+import type {
+  FolderEvidence,
+  RelinkTarget,
+  WorkspaceBindingRepairResult,
+} from '@taucad/files-ui/filesystem/handle-store';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
 import type { AppUiPreferences, ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
@@ -94,6 +98,8 @@ type ProjectManagerContextType = {
   /** Drop a pending operation the user has given up on (DF11). */
   discardRecovery: (operationId: string) => Promise<void>;
   assertWorkspaceMutationAllowed: (workspaceId: string) => Promise<void>;
+  /** Read what a folder picked for Locate holds; reads only (blueprint D2). */
+  readFolderEvidence: (target: RelinkTarget) => Promise<FolderEvidence>;
   getAppUiPreferences: () => Promise<AppUiPreferences>;
   setProjectDisclosure: (projectId: string, expanded: boolean | undefined) => Promise<AppUiPreferences | undefined>;
   // Chat methods
@@ -219,6 +225,7 @@ export function ProjectManagerProvider({
     repairWorkspaceBindings,
     chooseProjectDirectory,
     assertWorkspaceMutationAllowed,
+    readFolderEvidence,
   } = workspaceCommands;
 
   /** The chat store over the facade's current record client, read when a command runs. */
@@ -460,6 +467,7 @@ export function ProjectManagerProvider({
       recoveries,
       discardRecovery,
       assertWorkspaceMutationAllowed,
+      readFolderEvidence,
       getAppUiPreferences,
       setProjectDisclosure,
       createChat,
@@ -519,6 +527,7 @@ export function ProjectManagerProvider({
     recoveries,
     discardRecovery,
     assertWorkspaceMutationAllowed,
+    readFolderEvidence,
     getAppUiPreferences,
     setProjectDisclosure,
     createChat,

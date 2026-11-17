@@ -43,6 +43,7 @@ import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#compon
 import { PublicationAccessPanel } from '#components/publish/publication-access-panel.js';
 import type { PublicationAccessGrant } from '#components/publish/publication-access-panel.js';
 import { ENV } from '#environment.config.js';
+import { shareEnvelopeFailureOf } from '#components/publish/share-envelope-state.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { CommercialUpgradeLabel, useCommercialFeatures } from '#cloud/commercial-features.js';
 import {
@@ -701,7 +702,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   const apiBaseUrl = useMemo(() => ENV.TAU_API_URL.replace(/\/$/u, ''), []);
   const [envelope, setEnvelope] = useState<ProjectShareEnvelope>();
   const [loadingEnvelope, setLoadingEnvelope] = useState(false);
-  const [envelopeError, setEnvelopeError] = useState<string | undefined>();
+  /* Why the envelope read failed, as the cloud state it says (W30): a deleted copy is not a network fault (#2304). */
+  const [envelopeFailure, setEnvelopeFailure] = useState<ReturnType<typeof shareEnvelopeFailureOf>>();
   const [visibility, setVisibility] = useState<PublishVisibility>('private');
   const { canCreatePrivateShares, isResolved: isPlanResolved, requestUpgrade } = useCommercialFeatures();
   // Free tier publishes public-only (T4/T5/AD11); derived so an async
@@ -730,7 +732,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
 
   const loadEnvelope = useCallback(async (): Promise<void> => {
     setLoadingEnvelope(true);
-    setEnvelopeError(undefined);
+    setEnvelopeFailure(undefined);
+    let status: number | undefined;
     try {
       const response = await fetch(`${apiBaseUrl}/v1/projects/${projectId}/share`, {
         credentials: 'include',
@@ -738,10 +741,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       });
 
       if (!response.ok) {
-        throw recordApiRequestId(
-          new Error(response.status === 401 ? 'SIGN_IN_REQUIRED' : 'SHARE_ENVELOPE_FAILED'),
-          response,
-        );
+        status = response.status;
+        throw recordApiRequestId(new Error('SHARE_ENVELOPE_FAILED'), response);
       }
 
       const nextEnvelope = parseProjectShareEnvelope(await response.json());
@@ -750,8 +751,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       }
 
       setEnvelope(nextEnvelope);
-    } catch (error) {
-      setEnvelopeError(error instanceof Error ? error.message : 'SHARE_ENVELOPE_FAILED');
+    } catch {
+      setEnvelopeFailure(shareEnvelopeFailureOf(status));
     } finally {
       setLoadingEnvelope(false);
     }
@@ -900,8 +901,21 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   };
 
   return () => {
-    if (envelopeError) {
-      const signInRequired = envelopeError === 'SIGN_IN_REQUIRED';
+    if (envelopeFailure === 'absent') {
+      return (
+        <SharePaneFrame isDisabled={busy} description='This project has no copy in Tau Cloud.'>
+          <div className='flex flex-col gap-4'>
+            <div className='rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground'>
+              Its Tau Cloud copy was deleted, so it has no hosted link. Share it with a Direct link or a GitHub Gist, or
+              duplicate the project to publish a new copy.
+            </div>
+          </div>
+        </SharePaneFrame>
+      );
+    }
+
+    if (envelopeFailure !== undefined) {
+      const signInRequired = envelopeFailure === 'sign-in';
       return (
         <SharePaneFrame
           isDisabled={busy || visibilityMutating}

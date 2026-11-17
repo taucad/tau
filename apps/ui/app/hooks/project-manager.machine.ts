@@ -6,6 +6,7 @@ import { createObjectStoreWorker } from '#hooks/object-store-worker.js';
 import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
+import { reportProjectLibraryWorkerFailed } from '#lib/file-service-reports.js';
 
 type ProjectManagerContext = {
   worker: Worker | undefined;
@@ -165,6 +166,8 @@ export const projectManagerMachine = setup({
       entry: ({ context }, enq) => {
         enq(() => {
           console.error('[ProjectManager] state → error', context.error);
+          /* D5: the library's worker failing is reported by name, never by message. */
+          reportProjectLibraryWorkerFailed(context.error);
         });
       },
       on: {

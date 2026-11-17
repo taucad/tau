@@ -3,9 +3,8 @@
  * server-rendered document's inline watchdog shows its strip after 20 s; its safe-mode link loads Home with the
  * safe-mode bar, and the first navigation drops `safe=1`, so safe mode lasts one page load.
  *
- * The blueprint row also asserts that safe mode polls no workspace. Home-only narrowing belongs to WP2, which owns the
- * root file manager and the root configuration read (`homeOnlyConfiguration` in `lib/boot-signals.ts` is the narrowing
- * it applies), so that assertion is its own expected-failure row below; WP2 removes the mark.
+ * The blueprint row also asserts that safe mode polls no workspace: the root file manager configures Home alone in safe
+ * mode (`homeOnlyConfiguration` in `lib/boot-signals.ts`, applied through `runtime/root-configuration.ts`).
  */
 import { test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
@@ -80,9 +79,9 @@ const installWorkspaceWithProject = async (): Promise<void> => {
   );
 };
 
-/* Expected failure, owned by WP2 (R12 web, Home-only narrowing): safe mode still publishes every connected root, so the
- * workspace's project is listed and its folder is polled. WP2 applies `homeOnlyConfiguration` and removes `.fails`. */
-test.fails('lists and polls no connected workspace in safe mode', async () => {
+/* R12 web, Home-only narrowing (WP2): safe mode configures Home alone, so the workspace's project is neither listed nor
+ * polled. */
+test('lists and polls no connected workspace in safe mode', async () => {
   await installWorkspaceWithProject();
   await target.navigate('/files');
   await target.click(selectors.getByRole('button', { name: 'Add Workspace' }));

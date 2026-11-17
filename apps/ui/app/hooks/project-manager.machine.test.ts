@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag and context keys are snake_case (blueprint "Sentry events"). */
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import type { Remote } from 'comlink';
@@ -228,7 +229,7 @@ describe('projectManagerMachine', () => {
 
   // T-R9.2 (D5): the library worker's failure is reported, not only logged.
   describe('reporting', () => {
-    afterEach(() => {
+    beforeEach(() => {
       uiReports.calls.length = 0;
     });
 

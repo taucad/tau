@@ -385,7 +385,11 @@ export const createAppRuntime = ({
   ...options
 }: AppRuntimeOptions = {}): AppRuntime => {
   const readHome = idleFileManagers ? neverReadHome : loadHomeBackend;
-  const host = createFileManagerHost({ analytics, ...(readHome === undefined ? {} : { loadHomeBackend: readHome }) });
+  const host = createFileManagerHost({
+    analytics,
+    safeMode,
+    ...(readHome === undefined ? {} : { loadHomeBackend: readHome }),
+  });
   const table = createLeaseTable();
   /* Row L7: the library's delete asks the registry and the chat store, both built after it, so it reads them late. */
   const composed: { runtime?: AppRuntime; chatSessions?: ChatSessionStore; rootFiles?: RootFileFacade } = {};

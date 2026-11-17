@@ -283,21 +283,20 @@ describe('file-manager host composition', () => {
         loadHomeBackend: async () => Promise.withResolvers<HomeStorageBackend>().promise,
         deadlineBackend,
       });
-      const clock = new StepClock();
+      vi.useFakeTimers();
       const rootFiles = createActor(fileManagerMachine, {
         input: { rootDirectory: '/', backendResolution: 'pending', shouldInitializeOnStart: false },
       }).start();
-      const ref = createActor(host.logic, { input: { rootFiles }, clock }).start();
+      const ref = createActor(host.logic, { input: { rootFiles } }).start();
       stops.push(() => {
         ref.stop();
         rootFiles.stop();
+        vi.useRealTimers();
       });
 
-      clock.advance(19_999);
-      await flush();
+      await vi.advanceTimersByTimeAsync(19_999);
       expect(ref.getSnapshot().value).toBe('resolving');
-      clock.advance(1);
-      await flush();
+      await vi.advanceTimersByTimeAsync(1);
 
       expect(ref.getSnapshot().value).toBe(state);
       expect(selectHomeBackend(ref.getSnapshot())).toBe(backend);
@@ -308,6 +307,12 @@ describe('file-manager host composition', () => {
       }
     },
   );
+
+  it('should give every file manager it builds the page load\u2019s safe mode', () => {
+    const host = createFileManagerHost({ analytics: noAnalytics, safeMode: true });
+    expect(host.rootFilesInput()).toMatchObject({ safeMode: true });
+    expect(createFileManagerHost({ analytics: noAnalytics }).rootFilesInput()).toMatchObject({ safeMode: false });
+  });
 
   it('should build an actor for Home with the resolved backend as input', async () => {
     const { host, ref } = composeHost(Promise.resolve('opfs'));

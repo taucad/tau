@@ -938,12 +938,11 @@ describe('SharedWorkerGate', () => {
           </SharedWorkerGate>
         </RootFileManagerProvider>,
       );
-      /* The one automatic retry of a first, transient failure. */
-      await vi.waitFor(() => {
-        expect(workerTestState.instances.length).toBeGreaterThan(0);
-      });
+      /* The one automatic retry of a first, transient failure, once the failure is in. */
+      await screen.findByRole('alert');
       testClock.advance(1000);
-      return screen.findByRole('alert');
+      /* The panel is rendered again after the retry: read it afresh each time. */
+      return () => screen.getByRole('alert');
     };
     const named = (name: string, message: string): Error => Object.assign(new Error(message), { name });
 
@@ -952,12 +951,12 @@ describe('SharedWorkerGate', () => {
       const panel = await renderFailure(named('VersionError', 'The requested version is less than the existing one'));
 
       await vi.waitFor(() => {
-        expect(within(panel).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
+        expect(within(panel()).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
       });
-      expect(within(panel).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
-      expect(within(panel).getByRole('button', { name: 'Troubleshooting' })).toBeInTheDocument();
-      expect(within(panel).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
-      fireEvent.click(within(panel).getByRole('button', { name: 'Update Tau' }));
+      expect(within(panel()).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+      expect(within(panel()).getByRole('button', { name: 'Troubleshooting' })).toBeInTheDocument();
+      expect(within(panel()).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+      fireEvent.click(within(panel()).getByRole('button', { name: 'Update Tau' }));
       expect(updates.check).toHaveBeenCalledTimes(1);
     });
 
@@ -966,9 +965,9 @@ describe('SharedWorkerGate', () => {
       const panel = await renderFailure(named('StorageUpgradeBlockedError', 'Opening the database is blocked'));
 
       await vi.waitFor(() => {
-        expect(within(panel).getByText(/close the other Tau window/iu)).toBeInTheDocument();
+        expect(within(panel()).getByText(/close the other Tau window/iu)).toBeInTheDocument();
       });
-      expect(within(panel).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+      expect(within(panel()).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
     });
 
     it('offers Restart in Safe Mode, Check for Updates and Show logs when the services utility will not start', async () => {
@@ -978,11 +977,11 @@ describe('SharedWorkerGate', () => {
       );
 
       await vi.waitFor(() => {
-        expect(within(panel).getByRole('button', { name: 'Restart in Safe Mode' })).toBeInTheDocument();
+        expect(within(panel()).getByRole('button', { name: 'Restart in Safe Mode' })).toBeInTheDocument();
       });
-      expect(within(panel).getByRole('button', { name: 'Check for Updates' })).toBeInTheDocument();
-      expect(within(panel).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
-      fireEvent.click(within(panel).getByRole('button', { name: 'Restart in Safe Mode' }));
+      expect(within(panel()).getByRole('button', { name: 'Check for Updates' })).toBeInTheDocument();
+      expect(within(panel()).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+      fireEvent.click(within(panel()).getByRole('button', { name: 'Restart in Safe Mode' }));
       expect(troubleshooting.restartInSafeMode).toHaveBeenCalledTimes(1);
     });
 
@@ -991,10 +990,10 @@ describe('SharedWorkerGate', () => {
       const panel = await renderFailure(named('VersionError', 'The requested version is less than the existing one'));
 
       await vi.waitFor(() => {
-        expect(within(panel).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
+        expect(within(panel()).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
       });
-      expect(within(panel).queryByRole('button', { name: 'Show logs' })).not.toBeInTheDocument();
-      expect(within(panel).queryByRole('button', { name: 'Troubleshooting' })).not.toBeInTheDocument();
+      expect(within(panel()).queryByRole('button', { name: 'Show logs' })).not.toBeInTheDocument();
+      expect(within(panel()).queryByRole('button', { name: 'Troubleshooting' })).not.toBeInTheDocument();
     });
 
     it('opens safe mode as a page load on the web and offers no logs', async () => {
@@ -1003,9 +1002,9 @@ describe('SharedWorkerGate', () => {
       );
 
       await vi.waitFor(() => {
-        expect(within(panel).getByRole('link', { name: 'Restart in Safe Mode' })).toHaveAttribute('href', '/?safe=1');
+        expect(within(panel()).getByRole('link', { name: 'Restart in Safe Mode' })).toHaveAttribute('href', '/?safe=1');
       });
-      expect(within(panel).queryByRole('button', { name: 'Show logs' })).not.toBeInTheDocument();
+      expect(within(panel()).queryByRole('button', { name: 'Show logs' })).not.toBeInTheDocument();
     });
   });
 

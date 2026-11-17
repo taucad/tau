@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
 import type * as FsBridge from '@taucad/fs-bridge';
 import type * as EnvironmentConfig from '#environment.config.js';
@@ -2184,7 +2185,7 @@ describe('fileManagerMachine', () => {
    * outlives one deadline, a failure carries a phase and a class, and the start's failures are reported without a path.
    */
   describe('resilient start', () => {
-    const neverSettles = <T>(): Promise<T> => Promise.withResolvers<T>().promise;
+    const neverSettles = async <T>(): Promise<T> => Promise.withResolvers<T>().promise;
 
     it('should reach ready with Home available and publish the status of a root that was not found (T-B1.4)', async () => {
       const roots = [
@@ -2277,7 +2278,7 @@ describe('fileManagerMachine', () => {
         return [value.name, value.message];
       }
       if (Array.isArray(value)) {
-        return value.flatMap(reportedStrings);
+        return value.flatMap((entry) => reportedStrings(entry));
       }
       if (typeof value === 'object' && value !== null) {
         return Object.entries(value).flatMap(([key, entry]) => [key, ...reportedStrings(entry)]);
@@ -2319,6 +2320,7 @@ describe('fileManagerMachine', () => {
         expect(reportsOf('file_service.start_failed')).toHaveLength(1);
       });
       const [report] = reportsOf('file_service.start_failed');
+      /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag and context keys are snake_case. */
       expect(report?.details).toMatchObject({
         tags: {
           tau_event: 'file_service.start_failed',
@@ -2330,6 +2332,7 @@ describe('fileManagerMachine', () => {
         contexts: { file_service: { roots_by_state: {} } },
         level: 'error',
       });
+      /* eslint-enable @typescript-eslint/naming-convention -- end of the Sentry report shape. */
       for (const text of reportedStrings(uiReports.calls)) {
         expect(text).not.toMatch(/[/\\]/u);
       }
@@ -2369,15 +2372,43 @@ describe('fileManagerMachine', () => {
         level: 'warning',
       });
       expect(reportsOf('file_service.started_degraded')[0]?.details).toMatchObject({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry tag keys are snake_case.
         tags: { input: 'records', error_name: 'VersionError' },
         level: 'error',
       });
-      expect(reportsOf('file_service.root_unavailable')[0]?.details).toMatchObject({
-        tags: { state: 'notFound', code: 'ENOENT', root_hash: expect.stringMatching(/^[\da-f]{12}$/u) },
-      });
+      const unavailable = reportsOf('file_service.root_unavailable')[0]?.details as
+        | { tags: Record<string, string> }
+        | undefined;
+      expect(unavailable?.tags).toMatchObject({ state: 'notFound', code: 'ENOENT' });
+      expect(unavailable?.tags['root_hash']).toMatch(/^[\da-f]{12}$/u);
       for (const text of reportedStrings(uiReports.calls)) {
         expect(text).not.toMatch(/[/\\]/u);
       }
+      actor.stop();
+    });
+
+    /* Principal ruling on WP13: a safe-mode page load configures Home alone, so no other folder is admitted or polled. */
+    it('should configure Home alone in safe mode', async () => {
+      const handle = mock<FileSystemDirectoryHandle>();
+      mockGetProjectRootConfigs.mockResolvedValue({
+        roots: [{ backend: 'indexeddb' }, { backend: 'webaccess', workspaceId: 'wsp_1', directoryHandle: handle }],
+        projects: [
+          { projectId: 'proj_home', backend: 'indexeddb', providerBasePath: 'home-project' },
+          { projectId: 'proj_ws', backend: 'webaccess', workspaceId: 'wsp_1', providerBasePath: 'ws-project' },
+        ],
+      });
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/', shouldInitializeOnStart: true, safeMode: true },
+      });
+      actor.start();
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      expect(mockConfigureProjectRoots).toHaveBeenCalledWith({
+        roots: [{ backend: 'indexeddb' }],
+        projects: [{ projectId: 'proj_home', backend: 'indexeddb', providerBasePath: 'home-project' }],
+      });
       actor.stop();
     });
 

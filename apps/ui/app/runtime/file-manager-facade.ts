@@ -26,7 +26,6 @@ import { Topic } from '@taucad/events';
 import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-errors';
 import {
   disconnectWorkspace as disconnectStoredWorkspace,
-  getProjectRootConfigs,
   restoreWorkspaceHandle as restoreStoredWorkspaceHandle,
   updateWorkspaceHandle,
 } from '@taucad/files-ui/filesystem/handle-store';
@@ -40,6 +39,7 @@ import type { FileSystemClientFacade, WorkspaceFacade } from '#hooks/use-file-ma
 import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
 import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import { ENV } from '#environment.config.js';
+import { readRootConfigurationOnly } from '#runtime/root-configuration.js';
 
 /** A file manager's content and tree services. @public */
 export type FileManagerServices = Readonly<{ contentService: FileContentService; treeService: FileTreeService }>;
@@ -375,7 +375,7 @@ export const createWorkspaceFacade = ({
     const [proxy, services, configuration] = await Promise.all([
       getReadiedProxy(),
       whenServicesReady(),
-      getProjectRootConfigs(),
+      readRootConfigurationOnly(fileManagerRef.getSnapshot().context.safeMode),
     ]);
     assertOpen(owner);
     if (selectProxy(fileManagerRef) !== proxy) {
@@ -456,7 +456,7 @@ export const createWorkspaceFacade = ({
       const proxy = await getConnectedProxy();
       await updateWorkspaceHandle(workspaceId, handle);
       proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-      await proxy.configureProjectRoots(await getProjectRootConfigs());
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(fileManagerRef.getSnapshot().context.safeMode));
     },
     disconnectWorkspace: async (workspaceId) => {
       const proxy = await getReadiedProxy();

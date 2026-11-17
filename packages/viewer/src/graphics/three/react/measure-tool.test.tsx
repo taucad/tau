@@ -18,7 +18,12 @@ import type { MeasurementFeatureWorkerClient } from '#graphics/three/utils/measu
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn<
-    (event: { type: string; candidates?: Array<{ id: string; label: string }>; hasMore?: boolean }) => void
+    (event: {
+      type: string;
+      candidates?: Array<{ id: string; label: string }>;
+      hasMore?: boolean;
+      activeId?: string;
+    }) => void
   >(),
   workerClientFactory: undefined as (() => MeasurementFeatureWorkerClient) | undefined,
   kinematics: undefined as Actor<typeof kinematicsMachine> | undefined,

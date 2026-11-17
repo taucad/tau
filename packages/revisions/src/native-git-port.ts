@@ -27,6 +27,7 @@ import type { RecordedProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
 import { CommandAbortedError, gitCommandActivity, runGitCommand } from '#git-command.js';
+import { largeObjectFiltersIn, writeLargeObjectFilters } from '#lfs-filters.js';
 import type { GitCommandResult } from '#git-command.js';
 import { parseTransportValue } from '#native-git-adapter.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
@@ -184,6 +185,13 @@ export type NativeGitRevisionPortOptions = Readonly<{
   tauCredential?: () => TauApiCredential | undefined;
   /** Read per network command and injected through the child environment, never argv or git config. */
   remoteCredential?: () => NativeGitRemoteCredential | undefined;
+  /**
+   * Whether this machine's `git` answers `git lfs` (the host's toolchain probe). When it does, a store with none of
+   * git-lfs's filter keys gets them written directly, exactly as `git lfs install --local --skip-repo` writes them,
+   * rather than through that command and the Git processes it starts. Absent or `false`, the port runs the command,
+   * which fails on a machine without git-lfs and leaves the store without filters it could not run.
+   */
+  gitLfsInstalled?: () => Promise<boolean>;
 }>;
 
 /**
@@ -2389,6 +2397,26 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
+  /*
+   * Git-lfs's filters in a store this port did not adopt, without a process when it can (W8 diagnostics): a store
+   * that holds them already is left alone, and one with none of them gets them written when the host knows git-lfs
+   * is installed. Anything else, a value somebody changed included, is git-lfs's own to answer.
+   */
+  const configureLargeObjectFilters = async (): Promise<void> => {
+    const state = largeObjectFiltersIn(await readFile(join(storePath, 'config'), 'utf8').catch(() => ''));
+    if (state === 'configured') {
+      return;
+    }
+    if (
+      state === 'absent' &&
+      (await options.gitLfsInstalled?.()) === true &&
+      (await writeLargeObjectFilters(storePath))
+    ) {
+      return;
+    }
+    await run(['lfs', 'install', '--local', '--skip-repo']);
+  };
+
   const initStore = async (input: InitRevisionStoreInput): Promise<void> => {
     /* Asked first, and it throws for a bare repository or a `.git` file: a path this port
      * refuses is left exactly as it was, ignore file included (review 4 R40).
@@ -2454,7 +2482,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * config is the person's: the pointers its own attributes ask for are
      * resolved by whatever filters they configured (D16). Asked on every
      * open and idempotent, so a session after a crash between `git init` and
-     * here still configures them.
+     * here still configures them; read from the store's `config` first, so an
+     * open that finds them spawns nothing (`configureLargeObjectFilters`).
      *
      * The filters only: `--skip-repo` installs no hooks. Tau's plumbing runs
      * none (`core.hooksPath` names the store's empty hooks file). Without it,
@@ -2462,7 +2491,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * flag reverted (run 44036304364) left `dev/null/pre-push` and three more
      * in a Windows project under the old `/dev/null` pin. */
     if (!(await isAdopted())) {
-      await run(['lfs', 'install', '--local', '--skip-repo']);
+      await configureLargeObjectFilters();
     }
     /* Every project an older build recorded has no index at all, so this open
      * heals it. An existing index is left alone: in a repository Tau adopted

@@ -759,6 +759,13 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-profile-access.test.mts"
       }
     },
+    "collect-qualification-recovery": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/collect-qualification-recovery.mts"
+      }
+    },
     "test-qualification-recovery": {
       "executor": "nx:run-commands",
       "options": {

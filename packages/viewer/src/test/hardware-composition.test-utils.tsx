@@ -30,7 +30,8 @@ export function HardwareComposition({ children }: { readonly children: ReactNode
 
 /**
  * Assert that a canvas runs the hardware composition, so a pixel row cannot pass or fail against the reduced one. On
- * the software profile it also asserts the adapter really is software, which is what makes the override necessary.
+ * the software profile it also asserts that the override chose the features. (The classic WebGL renderer does not
+ * name its rasterizer to the tier, so the rasterizer itself is not asserted.)
  *
  * @param renderer - The canvas's renderer (R3F's `gl`).
  */
@@ -41,8 +42,7 @@ export const expectHardwareComposition = (renderer: unknown): void => {
     antialias: true,
     speculativePreparation: true,
   });
-  if (hardwareCompositionOverride) {
-    expect(tier.rasterizer).toBe('software');
-    expect(tier.overridden).toBe(true);
-  }
+  expect(tier.overridden, 'Software profile runs the hardware composition by override').toBe(
+    hardwareCompositionOverride !== undefined,
+  );
 };

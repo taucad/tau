@@ -339,7 +339,11 @@ export type DesktopBridge = {
      * `undefined` when the user cancels — the shape `showDirectoryPicker`'s
      * `AbortError` is normalized to.
      */
-    selectDirectory(options?: { readonly id?: string }): Promise<string | undefined>;
+    selectDirectory(options?: {
+      readonly id?: string;
+      /** Where to open: Locate passes a folder's old place, and the picker opens at its nearest existing part (R4). */
+      readonly defaultPath?: string;
+    }): Promise<string | undefined>;
     /**
      * Native folder picker for an import (W7.4): the folder is copied, not
      * opened in place, so it is not admitted as a root. Resolves to the grant

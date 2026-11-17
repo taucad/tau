@@ -19,7 +19,7 @@ import { installBrowserHost } from '#main/browser-host.js';
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { totalmem } from 'node:os';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -175,6 +175,28 @@ import {
 import type { QuickLookResult } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
+/**
+ * The deepest existing directory on `path`, walking up from it: where a folder picker should open for a folder that
+ * moved or was deleted (blueprint R4).
+ *
+ * @param path - An absolute path that may no longer exist.
+ * @returns The nearest existing ancestor directory, or `undefined` when none of it exists.
+ */
+const nearestExistingDirectory = async (path: string): Promise<string | undefined> => {
+  let candidate = resolve(path);
+  for (;;) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Each step up depends on the one below not existing.
+    const found = await stat(candidate).catch(() => undefined);
+    if (found?.isDirectory() === true) {
+      return candidate;
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      return undefined;
+    }
+    candidate = parent;
+  }
+};
 /** Whether `inner` is `outer` or inside it, the node host's containment rule (`host.ts` `isContained`). */
 const isPathWithin = (outer: string, inner: string): boolean => {
   const fromOuter = relative(outer, inner);
@@ -1681,16 +1703,23 @@ const bootstrapElectronApp = async (): Promise<void> => {
       return undefined;
     }
     const pickerId = (options as { id?: unknown } | undefined)?.id;
+    const requestedStart = (options as { defaultPath?: unknown } | undefined)?.defaultPath;
     const rememberedFor = typeof pickerId === 'string' ? pickerId : undefined;
     const directory = await (async () => {
       if (seededPick !== undefined) {
         return seededPick;
       }
       const window = BrowserWindow.fromWebContents(event.sender);
+      /* Locate asks to start at a folder's old place (R4); the nearest part of it that still exists is where it opens. */
+      const start =
+        typeof requestedStart === 'string' && isAbsolute(requestedStart) && !requestedStart.includes('\0')
+          ? await nearestExistingDirectory(requestedStart)
+          : undefined;
       const remembered = rememberedFor === undefined ? undefined : lastDirectoryById.get(rememberedFor);
+      const defaultPath = start ?? remembered;
       const request = {
         properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'>,
-        ...(remembered === undefined ? {} : { defaultPath: remembered }),
+        ...(defaultPath === undefined ? {} : { defaultPath }),
       };
       const result = await (window ? dialog.showOpenDialog(window, request) : dialog.showOpenDialog(request));
       return result.canceled ? undefined : result.filePaths[0];

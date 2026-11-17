@@ -49,7 +49,7 @@ use super::sid::{EVERYONE, Sid, current_user, open_process_token, token_logon_si
 use super::util::{Error, Local, Owned, Result, check, clear_ctrl_c_ignore, program_files, system_root, wide};
 use super::volume;
 use crate::appcontainer::{is_package_sid, verify_token};
-use crate::cmdline::{command_line, environment_block, is_capability_sid};
+use crate::cmdline::{command_line, creation_environment, environment_block, is_capability_sid};
 use crate::frame::{self, Frame, read_frame, write_frame};
 use crate::protocol::{Exit, Resize, RunnerError, RunnerSpec, Started};
 use crate::spec::{ExecutableRoots, Stdio, check_executable};
@@ -286,17 +286,34 @@ impl PseudoConsole {
 }
 
 enum Prepared {
-    Pipes { stdin: Owned, stdout_child: Owned, stderr_child: Owned, stdout: Owned, stderr: Owned },
-    Terminal { console: Arc<PseudoConsole>, input: Owned, output: Owned },
+    /// `input` is the write end of the child's stdin pipe when the launch takes input; otherwise `stdin` is `NUL`.
+    Pipes {
+        stdin: Owned,
+        input: Option<Owned>,
+        stdout_child: Owned,
+        stderr_child: Owned,
+        stdout: Owned,
+        stderr: Owned,
+    },
+    Terminal {
+        console: Arc<PseudoConsole>,
+        input: Owned,
+        output: Owned,
+    },
 }
 
 fn prepare_stdio(stdio: &Stdio) -> Result<Prepared> {
     match stdio {
-        Stdio::Pipes => {
-            let stdin = open_nul()?;
+        Stdio::Pipes { input } => {
+            let (stdin, input) = if *input {
+                let (child_reads, ours) = pipe_pair(Some(false))?;
+                (child_reads, Some(ours))
+            } else {
+                (open_nul()?, None)
+            };
             let (stdout, stdout_child) = pipe_pair(Some(true))?;
             let (stderr, stderr_child) = pipe_pair(Some(true))?;
-            Ok(Prepared::Pipes { stdin, stdout_child, stderr_child, stdout, stderr })
+            Ok(Prepared::Pipes { stdin, input, stdout_child, stderr_child, stdout, stderr })
         }
         Stdio::Terminal { columns, rows } => {
             let (in_read, input) = pipe_pair(None)?;
@@ -313,6 +330,30 @@ fn prepare_stdio(stdio: &Stdio) -> Result<Prepared> {
             Ok(Prepared::Terminal { console: Arc::new(PseudoConsole(console)), input, output })
         }
     }
+}
+
+/// What the host sends a child's stdin pipe.
+enum Input {
+    Bytes(Vec<u8>),
+    Close,
+}
+
+/// Write the host's input to the child's stdin on a thread of its own, so a child that does not read never
+/// stalls the runner's frame loop (and with it `terminate`). `Close`, or the end of the launch, closes the pipe:
+/// the child reads end of file. Input after a failed write (the child closed its stdin) is dropped.
+fn feed(pipe: Owned, input: std::sync::mpsc::Receiver<Input>) {
+    std::thread::spawn(move || {
+        let mut writer = HandleIo(pipe.raw());
+        let mut open = true;
+        for event in input {
+            match event {
+                Input::Bytes(bytes) if open => open = writer.write_all(&bytes).is_ok(),
+                Input::Bytes(_) => {}
+                Input::Close => break,
+            }
+        }
+        drop(pipe);
+    });
 }
 
 fn pump(mut source: HandleIo, kind: u8, sink: Sink) -> std::thread::JoinHandle<()> {
@@ -376,7 +417,9 @@ fn spawn(spec: &RunnerSpec, identity: &Identity, job: &Job, prepared: &Prepared)
     let application = wide(&spec.executable);
     let cwd = wide(&spec.working_directory);
     let mut desktop = wide(&spec.desktop);
-    let environment = environment_block(&spec.environment);
+    // Windows needs a `LOCALAPPDATA` to create an AppContainer process; `enforce` takes it away again.
+    let local_app_data = container::own_local_app_data()?;
+    let environment = environment_block(&creation_environment(&spec.environment, &local_app_data));
     let jobs = [job.raw()];
 
     let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
@@ -544,8 +587,12 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
         return Err(Error::msg("the AppContainer package SID is malformed")).at("spec");
     }
     let person = Sid::parse(&spec.person_sid).at("spec")?;
-    let executable =
-        roots().and_then(|roots| check_executable(&spec.executable, &roots).map_err(|r| Error::msg(r.message)));
+    // `launch` checked the digest on a handle it holds until the launch ends; the runner re-checks the path.
+    let executable = roots().and_then(|roots| {
+        check_executable(&spec.executable, spec.executable_digest.as_deref(), &roots)
+            .map(|executable| executable.path)
+            .map_err(|r| Error::msg(r.message))
+    });
     if executable.as_deref().ok() != Some(spec.executable.as_str()) {
         return Err(Error::msg("the runner refused the executable")).at("spec");
     }
@@ -586,6 +633,9 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
     let mut prepared = Some(prepared);
     let mut console: Option<Arc<PseudoConsole>> = None;
     let mut terminal_input: Option<Owned> = None;
+    // Input for a pipes launch that takes it, queued from `ready` on and fed once the child exists.
+    let (stdin_sender, stdin_queue) = std::sync::mpsc::channel::<Input>();
+    let mut stdin_queue = Some(stdin_queue);
     while let Ok(Some(frame)) = read_frame(&mut reader) {
         match frame.kind {
             frame::START => {
@@ -618,9 +668,12 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
                 shell.resume().at("spawn")?;
                 send(sink, &Frame::json(frame::STARTED, &Started { shell_pid: shell.pid }));
                 let pumps = match ready {
-                    Prepared::Pipes { stdin, stdout_child, stderr_child, stdout, stderr } => {
+                    Prepared::Pipes { stdin, input, stdout_child, stderr_child, stdout, stderr } => {
                         // The child holds its own copies now; ours would keep the pipes open forever.
                         drop((stdin, stdout_child, stderr_child));
+                        if let (Some(pipe), Some(queue)) = (input, stdin_queue.take()) {
+                            feed(pipe, queue);
+                        }
                         let out = pump(HandleIo(stdout.raw()), frame::STDOUT, sink.clone());
                         let err = pump(HandleIo(stderr.raw()), frame::STDERR, sink.clone());
                         vec![(out, stdout), (err, stderr)]
@@ -636,7 +689,12 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
             frame::INPUT => {
                 if let Some(input) = &terminal_input {
                     let _ = HandleIo(input.raw()).write_all(&frame.payload);
+                } else if spec.stdio.closes_input() {
+                    let _ = stdin_sender.send(Input::Bytes(frame.payload));
                 }
+            }
+            frame::CLOSE_INPUT if spec.stdio.closes_input() => {
+                let _ = stdin_sender.send(Input::Close);
             }
             frame::RESIZE => {
                 if let (Some(pc), Ok(size)) = (&console, serde_json::from_slice::<Resize>(&frame.payload))

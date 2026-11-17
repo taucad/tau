@@ -8,8 +8,7 @@
  * Every row starts with a positive control that must succeed inside the same sandbox, then the negatives, and every
  * deny verdict is decided outside the sandbox: file digests, canaries and ACLs the test process placed and reads back,
  * listeners and a named-pipe server that count their own clients, and the process table. What the sandboxed command
- * prints is recorded as context only. Launches run one at a time because the provider admits one session at a time
- * (A23 fallback clause); only the A23 row overlaps two on purpose.
+ * prints is recorded as context only. Launches run one at a time unless a row overlaps them on purpose (A23, NW02-NW04).
  *
  * Off unless `TAU_SHELL_CONFORMANCE=1`, which only `sandbox:test:shell-conformance:windows` sets. On any platform but
  * win32 the suite fails rather than skips. `TAU_SHELL_CONFORMANCE_ROW` names the row (WIN-X64),
@@ -20,8 +19,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { createSocket } from 'node:dgram';
-import type { Socket as DatagramSocket } from 'node:dgram';
 import {
   copyFileSync,
   existsSync,
@@ -34,13 +31,12 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { connect, createServer } from 'node:net';
-import type { AddressInfo, Server } from 'node:net';
+import { connect } from 'node:net';
 import { arch, homedir, networkInterfaces, platform, release, tmpdir, version } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import {
@@ -54,6 +50,14 @@ import {
 } from '#shell/shell-identity.js';
 import type { ShellExecutable } from '#shell/shell-identity.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellProcess, ShellProvider } from '#shell/shell-provider.js';
+import {
+  nativeWorkerRows,
+  personSession,
+  statusWithoutSystemEnvironment,
+} from '#shell/windows-native-worker.fixture.js';
+import type { NativeWorkerContext, PersonSession } from '#shell/windows-native-worker.fixture.js';
+import { atomicWrite, pipeObserverScript } from '#shell/windows-conformance-scripts.fixture.js';
+import { tcpCanary, tcpControl, udpCanary, udpControl } from '#shell/windows-conformance-network.fixture.js';
 import { createWindowsShellProvider } from '#shell/windows-shell-provider.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
@@ -62,6 +66,15 @@ const helperPath =
   process.env['TAU_SHELL_CONFORMANCE_WINDOWS_HELPER'] ??
   fileURLToPath(
     new URL('../../windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe', import.meta.url),
+  );
+/** NW01's stand-in native worker (`windows-sandbox/examples/tau_worker_probe.rs`), built beside the helper. */
+const workerProbe =
+  process.env['TAU_SHELL_CONFORMANCE_WINDOWS_WORKER_PROBE'] ??
+  fileURLToPath(
+    new URL(
+      '../../windows-sandbox/target/x86_64-pc-windows-msvc/release/examples/tau-worker-probe.exe',
+      import.meta.url,
+    ),
   );
 const systemRoot = process.env['SystemRoot'] ?? process.env['SYSTEMROOT'] ?? String.raw`C:\Windows`;
 /** Windows PowerShell 5.1 at its fixed path; T02 runs on it too when present beside PowerShell 7. */
@@ -140,7 +153,6 @@ const delay = async (milliseconds: number): Promise<void> =>
 
 /** A PowerShell single-quoted literal. */
 const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`;
-
 /** `-EncodedCommand` text: UTF-16LE, base64, so a nested script survives every command line it passes through. */
 const encoded = (script: string): string => Buffer.from(script, 'utf16le').toString('base64');
 
@@ -268,57 +280,6 @@ const interfaceAddress = (): string | undefined =>
     .flat()
     .find((entry) => entry?.family === 'IPv4' && !entry.internal)?.address;
 
-/** A TCP listener outside the sandbox on one address that counts every connection it ever sees. */
-const tcpCanary = async (address: string): Promise<{ server: Server; port: number; connections: () => number }> => {
-  let connections = 0;
-  const server = createServer((socket) => {
-    connections += 1;
-    socket.end('HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n');
-  });
-  await new Promise<void>((resolve) => {
-    server.listen(0, address, resolve);
-  });
-  const { port } = server.address() as AddressInfo;
-  return { server, port, connections: () => connections };
-};
-
-/** A UDP socket outside the sandbox on one address that counts every datagram it receives. */
-const udpCanary = async (
-  address: string,
-): Promise<{ socket: DatagramSocket; port: number; datagrams: () => number }> => {
-  let datagrams = 0;
-  const socket = createSocket('udp4');
-  socket.on('message', () => {
-    datagrams += 1;
-  });
-  await new Promise<void>((resolve) => {
-    socket.bind(0, address, resolve);
-  });
-  return { socket, port: socket.address().port, datagrams: () => datagrams };
-};
-
-const tcpControl = async (address: string, port: number): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const socket = connect({ host: address, port }, () => {
-      socket.end();
-      resolve();
-    });
-    socket.on('error', reject);
-  });
-
-const udpControl = async (address: string, port: number): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const socket = createSocket('udp4');
-    socket.send(Buffer.from('control'), port, address, (error) => {
-      socket.close();
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    });
-  });
-
 const waitUntil = async (condition: () => boolean, milliseconds: number): Promise<boolean> => {
   for (const deadline = Date.now() + milliseconds; !condition(); ) {
     if (Date.now() > deadline) {
@@ -344,53 +305,21 @@ const pipeServer = async (
   const count = join(directory, 'count');
   const listening = join(directory, 'listening');
   const stop = join(directory, 'stop');
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    '$security = [System.IO.Pipes.PipeSecurity]::new()',
-    "$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')",
-    '$self = [System.Security.Principal.WindowsIdentity]::GetCurrent().User',
-    "$security.AddAccessRule([System.IO.Pipes.PipeAccessRule]::new($everyone, 'FullControl', 'Allow'))",
-    "$security.AddAccessRule([System.IO.Pipes.PipeAccessRule]::new($self, 'FullControl', 'Allow'))",
-    'function New-Instance {',
-    "  if ($env:CONFORMANCE_PIPE_DACL -eq 'default') {",
-    "    [System.IO.Pipes.NamedPipeServerStream]::new($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous')",
-    '  } elseif ($PSVersionTable.PSVersion.Major -ge 6) {',
-    "    [System.IO.Pipes.NamedPipeServerStreamAcl]::Create($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous', 0, 0, $security)",
-    '  } else {',
-    "    [System.IO.Pipes.NamedPipeServerStream]::new($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous', 0, 0, $security)",
-    '  }',
-    '}',
-    '$servers = @(1..4 | ForEach-Object { New-Instance })',
-    '$waits = @($servers | ForEach-Object { $_.WaitForConnectionAsync() })',
-    '$accepted = 0',
-    'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_COUNT -Value 0 -NoNewline',
-    'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_LISTENING -Value 1 -NoNewline',
-    'while (-not (Test-Path -LiteralPath $env:CONFORMANCE_PIPE_STOP)) {',
-    '  for ($i = 0; $i -lt $servers.Count; $i++) {',
-    '    if ($waits[$i].IsCompleted) {',
-    "      if ($waits[$i].Status -eq 'RanToCompletion') {",
-    '        $accepted++',
-    '        Set-Content -LiteralPath $env:CONFORMANCE_PIPE_COUNT -Value $accepted -NoNewline',
-    '      }',
-    '      $servers[$i].Dispose()',
-    '      $servers[$i] = New-Instance',
-    '      $waits[$i] = $servers[$i].WaitForConnectionAsync()',
-    '    }',
-    '  }',
-    '  Start-Sleep -Milliseconds 20',
-    '}',
-  ].join('\n');
-  const child: ChildProcess = spawn(shell.path, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
-    env: {
-      ...process.env,
-      CONFORMANCE_PIPE: name,
-      CONFORMANCE_PIPE_DACL: dacl,
-      CONFORMANCE_PIPE_COUNT: count,
-      CONFORMANCE_PIPE_LISTENING: listening,
-      CONFORMANCE_PIPE_STOP: stop,
+  const child: ChildProcess = spawn(
+    shell.path,
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', pipeObserverScript],
+    {
+      env: {
+        ...process.env,
+        CONFORMANCE_PIPE: name,
+        CONFORMANCE_PIPE_DACL: dacl,
+        CONFORMANCE_PIPE_COUNT: count,
+        CONFORMANCE_PIPE_LISTENING: listening,
+        CONFORMANCE_PIPE_STOP: stop,
+      },
+      stdio: 'ignore',
     },
-    stdio: 'ignore',
-  });
+  );
   const exited = new Promise<void>((resolve) => {
     child.once('exit', () => {
       resolve();
@@ -536,6 +465,8 @@ const receipt = (): Record<string, unknown> => {
   };
 };
 
+let sessionBefore: PersonSession | undefined;
+
 describe.runIf(enabled)('Windows shell conformance', () => {
   beforeAll(async () => {
     if (process.platform !== 'win32') {
@@ -548,6 +479,10 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     if (helperStatus['installed'] === false) {
       throw new Error('the Windows sandbox is not set up on this machine; run the helper `setup --for-user` elevated.');
     }
+    sessionBefore = personSession(workerProbe);
+    /* Chromium's GPU process needs exactly this; a session that refuses it before any row is not a baseline. */
+    expect(sessionBefore.restrictedChild).toStrictEqual({ stage: 'exit', exitCode: '0x00000000' });
+    observations['session'] = sessionBefore;
     proxyPorts = Array.isArray(helperStatus['proxyPorts']) ? (helperStatus['proxyPorts'] as number[]) : [];
     const resolved = await resolveShellExecutable({ platform: 'win32', environment: process.env });
     if ('status' in resolved) {
@@ -621,6 +556,13 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     ready = true;
   });
 
+  /* Every row ends with the person's session as it began: the same window-station, desktop and volume-root DACLs (as
+     `setup` left them), a new process of theirs that starts and creates a window, and a Chromium-style restricted,
+     Low-integrity child of theirs on an alternate desktop that starts and creates one too. */
+  afterEach(() => {
+    expect(personSession(workerProbe)).toStrictEqual(sessionBefore);
+  });
+
   afterAll(() => {
     const path = process.env['TAU_SHELL_CONFORMANCE_RECEIPT'];
     if (path !== undefined && ready) {
@@ -641,6 +583,59 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     expect(result.stdout.trim()).toMatch(/^\d+\.\d+/u);
     shellVersion = result.stdout.trim();
   });
+
+  conformance(
+    'W09',
+    'status, quick and full, reads the install record with no SystemDrive, SystemRoot, windir, ProgramData or ALLUSERSPROFILE',
+    async () => {
+      statusWithoutSystemEnvironment(shell.path, helperPath, helperStatus['accountSid']);
+    },
+  );
+
+  conformance(
+    'W10',
+    "a journal kept in denied app data under the person's profile on the system drive: the launch runs, the shell cannot read it, and it is restored",
+    async () => {
+      /* Tau's desktop keeps custody in Electron's userData (under the profile, on the system drive) and denies it whole. */
+      const appData = mkdtempSync(join(homedir(), 'AppData', 'Local', 'tau-conformance-appdata-'));
+      try {
+        expect(appData.slice(0, 2).toUpperCase()).toBe((process.env['SystemDrive'] ?? 'C:').toUpperCase());
+        const custody = join(appData, 'shell-custody');
+        mkdirSync(custody);
+        const kept = join(appData, 'kept.txt');
+        writeFileSync(kept, 'APP-DATA\n');
+        const before = sddlOf([appData, custody]);
+        const through = createWindowsShellProvider({
+          helperPath,
+          custody: { directory: custody, sessionDirectory: join(custodyRoot, 'sessions') },
+        });
+        const filesystem = defaultFilesystem();
+        const process_ = await start(
+          launchOf(
+            `[Console]::Write('ran;'); try { [void][IO.File]::ReadAllText(${quote(kept)}); [Console]::Write('read') } catch { [Console]::Write('denied') }`,
+            { filesystem: { ...filesystem, denied: [...filesystem.denied, appData] } },
+          ),
+          through,
+        );
+        if (process_.kind !== 'pipes') {
+          throw new Error('expected a pipes launch');
+        }
+        const [stdout, stderr, exit] = await Promise.all([
+          text(process_.stdout),
+          text(process_.stderr),
+          process_.exited,
+        ]);
+
+        expect(exit, stderr).toStrictEqual({ exitCode: 0 });
+        expect(stdout).toBe('ran;denied');
+        /* The journal is gone once restored, and the denied root reads back as it was. */
+        expect(readdirSync(custody).filter((name) => name.endsWith('.acl.json'))).toStrictEqual([]);
+        expect(sddlOf([appData, custody])).toStrictEqual(before);
+      } finally {
+        rmSync(appData, { recursive: true, force: true });
+      }
+    },
+  );
 
   conformance('W02', 'the receipt binds the shell kind, fixed path, real path and digest (I12)', async () => {
     const programFiles = process.env['ProgramFiles'] ?? String.raw`C:\Program Files`;
@@ -1157,7 +1152,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
         mkdirSync(sync, { recursive: true });
         const parked = run(
           [
-            `@{ pid = $PID; TEMP = $env:TEMP; LOCALAPPDATA = $env:LOCALAPPDATA; APPDATA = $env:APPDATA } | ConvertTo-Json -Compress | Set-Content -LiteralPath ${quote(join(sync, 'seen.json'))} -NoNewline`,
+            `$seen = @{ pid = $PID; TEMP = $env:TEMP; LOCALAPPDATA = $env:LOCALAPPDATA; APPDATA = $env:APPDATA } | ConvertTo-Json -Compress`,
+            atomicWrite(quote(join(sync, 'seen.json')), '$seen'),
             `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
           ].join('\n'),
           { commandId: `conformance#w08-${tag}` },
@@ -1167,8 +1163,9 @@ describe.runIf(enabled)('Windows shell conformance', () => {
           return parked;
         };
         try {
-          if (!(await waitUntil(() => existsSync(join(sync, 'seen.json')), 30_000))) {
-            throw new Error(`the ${tag} launch never recorded its PID`);
+          await Promise.race([waitUntil(() => existsSync(join(sync, 'seen.json')), 30_000), parked]);
+          if (!existsSync(join(sync, 'seen.json'))) {
+            throw new Error(`the ${tag} launch recorded no PID: ${JSON.stringify(await release())}`);
           }
           const seen = JSON.parse(readFileSync(join(sync, 'seen.json'), 'utf8')) as Record<string, string | number>;
           const token = shellTokenOf(Number(seen['pid']));
@@ -1223,7 +1220,7 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     const sentinels = Object.fromEntries(names.map((name) => [name, join(work, `${prefix}-${name}.beat`)]));
     const pids = Object.fromEntries(names.map((name) => [name, join(work, `${prefix}-${name}.pid`)]));
     const writer = (name: (typeof names)[number]): string =>
-      `Set-Content -LiteralPath ${quote(pids[name]!)} -Value $PID -NoNewline; while ($true) { Add-Content -LiteralPath ${quote(sentinels[name]!)} -Value b -NoNewline; Start-Sleep -Milliseconds 100 }`;
+      `${atomicWrite(quote(pids[name]!), '"$PID"')}; while ($true) { Add-Content -LiteralPath ${quote(sentinels[name]!)} -Value b -NoNewline; Start-Sleep -Milliseconds 100 }`;
     const argumentsOf = (name: (typeof names)[number]): string =>
       `-NoLogo -NoProfile -NonInteractive -EncodedCommand ${encoded(writer(name))}`;
     const breakaway = [
@@ -1330,46 +1327,41 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     expect(escapePids(aborted.pids, output).filter((pid) => alive(pid))).toStrictEqual([]);
   });
 
-  conformance('A23', 'a second concurrent launch is refused while the first runs to completion', async () => {
-    const sync = join(work, 'a23');
-    mkdirSync(sync, { recursive: true });
-    const first = run(
-      [
-        `Set-Content -LiteralPath ${quote(join(sync, 'ready'))} -Value ready -NoNewline`,
-        `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
-        `Set-Content -LiteralPath ${quote(join(sync, 'first-done'))} -Value done -NoNewline`,
-      ].join('\n'),
-      { commandId: 'conformance#a23-first' },
-    );
-    try {
-      expect(await waitUntil(() => existsSync(join(sync, 'ready')), 30_000)).toBe(true);
-      const second = await prepared(
-        launchOf(`Set-Content -LiteralPath ${quote(join(sync, 'second-ran'))} -Value ran`, {
-          commandId: 'conformance#a23-second',
-        }),
+  conformance(
+    'A23',
+    'a second launch runs to completion beside a live first one, over the same workspace',
+    async () => {
+      const sync = join(work, 'a23');
+      mkdirSync(sync, { recursive: true });
+      const first = run(
+        [
+          `Set-Content -LiteralPath ${quote(join(sync, 'ready'))} -Value ready -NoNewline`,
+          `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
+          `Set-Content -LiteralPath ${quote(join(sync, 'first-done'))} -Value done -NoNewline`,
+        ].join('\n'),
+        { commandId: 'conformance#a23-first' },
       );
+      try {
+        expect(await waitUntil(() => existsSync(join(sync, 'ready')), 30_000)).toBe(true);
+        /* Concurrent launches (README "Sessions"): the second grants the same workspace and ends first. */
+        const second = await run(`Set-Content -LiteralPath ${quote(join(sync, 'second-ran'))} -Value ran -NoNewline`, {
+          commandId: 'conformance#a23-second',
+        });
 
-      /*
-       * The provider answers an overlapping launch `sandbox-unavailable` with nothing started; the desktop's shell
-       * service turns the same overlap into `session-limit` before it reaches the provider (`maxExecutions: 1`).
-       */
-      expect(second).toMatchObject({ status: 'sandbox-unavailable' });
-      expect(JSON.stringify(second)).toMatch(/one sandboxed shell at a time/u);
-      expect(existsSync(join(sync, 'second-ran'))).toBe(false);
-    } finally {
-      writeFileSync(join(sync, 'release'), '');
-      await first.catch(() => undefined);
-    }
-    const ended = await first;
+        expect(second.exitCode, second.stderr).toBe(0);
+        expect(readFileSync(join(sync, 'second-ran'), 'utf8')).toBe('ran');
+        /* The second's restore left the first's grants: it still writes where it was granted. */
+        expect(existsSync(join(sync, 'first-done'))).toBe(false);
+      } finally {
+        writeFileSync(join(sync, 'release'), '');
+        await first.catch(() => undefined);
+      }
+      const ended = await first;
 
-    expect(ended.exitCode, ended.stderr).toBe(0);
-    expect(readFileSync(join(sync, 'first-done'), 'utf8')).toBe('done');
-    /* The limit is about overlap only: once the first settled, the next launch runs. */
-    const after = await run(`Set-Content -LiteralPath ${quote(join(sync, 'after'))} -Value after -NoNewline`);
-
-    expect(after.exitCode, after.stderr).toBe(0);
-    expect(readFileSync(join(sync, 'after'), 'utf8')).toBe('after');
-  });
+      expect(ended.exitCode, ended.stderr).toBe(0);
+      expect(readFileSync(join(sync, 'first-done'), 'utf8')).toBe('done');
+    },
+  );
 
   conformance(
     'A26',
@@ -1603,6 +1595,24 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       }
     },
   );
+
+  const nativeWorkerContext = (): NativeWorkerContext => ({
+    root,
+    helperPath,
+    workerProbe,
+    systemRoot,
+    recordHelperDiagnostic,
+    sddlOf,
+    interfaceAddress,
+    tcpCanary,
+    tcpControl,
+    waitUntil,
+    pause: delay,
+  });
+
+  for (const [id, title, body] of nativeWorkerRows(nativeWorkerContext)) {
+    conformanceWithin(180_000)(id, title, body);
+  }
 
   conformance('W07', 'after every launch, each path the suite touched has exactly its original ACL', async () => {
     expect(sddlOf(aclPaths)).toStrictEqual(aclBaseline);

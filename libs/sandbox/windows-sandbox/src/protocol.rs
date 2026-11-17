@@ -62,6 +62,16 @@ impl Refused {
         Self { status: RefusedStatus::SandboxUnavailable, requirement: None, message: message.into(), diagnostic }
     }
 
+    /// `sandbox-unavailable` while another launch holds what this one needs; `requirement` says what.
+    pub fn busy(requirement: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            status: RefusedStatus::SandboxUnavailable,
+            requirement: Some(requirement.into()),
+            message: message.into(),
+            diagnostic: None,
+        }
+    }
+
     pub fn unsupported(requirement: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             status: RefusedStatus::Unsupported,
@@ -100,6 +110,10 @@ pub struct RunnerSpec {
     /// `WinSta0\<private desktop>`, created by `launch`.
     pub desktop: String,
     pub executable: String,
+    /// The launch's `executableDigest`, which `launch` already checked on a handle it holds until the process
+    /// exists. The runner needs it only to admit an executable outside the fixed roots.
+    #[serde(default)]
+    pub executable_digest: Option<String>,
     pub arguments: Vec<String>,
     pub working_directory: String,
     pub environment: BTreeMap<String, String>,

@@ -159,6 +159,27 @@ pub fn system_root() -> Result<String> {
     Ok(String::from_utf16_lossy(&buf[..len]))
 }
 
+/// Give this process the system variables Windows itself expands, where its caller left them out: `SystemDrive`,
+/// `SystemRoot` and `windir`, from the Windows directory (`GetSystemWindowsDirectoryW`, which reads no environment).
+/// `SHGetKnownFolderPath` expands `%SystemDrive%` for `ProgramData` from the process environment and fails with
+/// `ERROR_PATH_NOT_FOUND` without it, so the install paths of every subcommand would otherwise depend on what the host
+/// chose to pass (the desktop app's services utility passed no `SystemDrive`). Values the caller did set are kept.
+/// Called first in `main`, before any thread starts.
+pub fn ensure_system_environment() -> Result<()> {
+    let windows = system_root()?;
+    let drive = crate::paths::drive_of(&windows)
+        .ok_or_else(|| Error::msg(format!("the Windows directory {windows} is not on a drive")))?;
+    for (name, value) in
+        [("SystemDrive", drive.as_str()), ("SystemRoot", windows.as_str()), ("windir", windows.as_str())]
+    {
+        if std::env::var_os(name).is_none_or(|current| current.is_empty()) {
+            // SAFETY: called at the start of `main`, while this process has one thread.
+            unsafe { std::env::set_var(name, value) };
+        }
+    }
+    Ok(())
+}
+
 /// Survive Ctrl-C and Ctrl-Break on this process's own console without exiting.
 unsafe extern "system" fn ignore_interrupts(kind: u32) -> windows_sys::core::BOOL {
     i32::from(kind == CTRL_C_EVENT || kind == CTRL_BREAK_EVENT)

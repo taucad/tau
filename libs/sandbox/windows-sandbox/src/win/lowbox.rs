@@ -304,11 +304,19 @@ pub fn probe(token: HANDLE, station: &str, desktop: &str) -> String {
     };
     parts.push(format!("namespace {path}"));
     // Layout, as the runner: what CreateProcess built.
-    let layout = [("RPC Control", false), ("Global", true), ("Local", true), ("Session", true)]
+    // Each entry is reported as a link, a directory, or the open's status: `Global` is not always a link.
+    let layout = ["RPC Control", "Global", "Local", "Session"]
         .iter()
-        .map(|(name, link)| {
-            let access = if *link { SYMBOLIC_LINK_QUERY } else { DIRECTORY_QUERY };
-            format!("{name}={}", status_text(open_native(&format!("{path}\\{name}"), access, *link)))
+        .map(|name| {
+            let full = format!("{path}\\{name}");
+            let kind = match open_native(&full, SYMBOLIC_LINK_QUERY, true) {
+                Ok(_) => "link".to_owned(),
+                Err(_) => match open_native(&full, DIRECTORY_QUERY, false) {
+                    Ok(_) => "directory".to_owned(),
+                    Err(status) => format!("{:#010x}", status as u32),
+                },
+            };
+            format!("{name}={kind}")
         })
         .collect::<Vec<_>>()
         .join(",");

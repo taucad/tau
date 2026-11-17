@@ -57,6 +57,16 @@ SID>`, with its `RPC Control` directory and its `Global`, `Local` and `Session` 
   logs that the name stays registered until the next launch or `revoke`. A leftover holds no grant on anything of the
   person's: those ACEs are journaled and restored by the launcher. `revoke` deletes the account's profile, which
   removes every leftover with it.
+- **Environment.** For a registered AppContainer, `CreateProcess` rewrites the environment it is given. `LOCALAPPDATA`
+  becomes `<LOCALAPPDATA>\Packages\<package name>\AC`, and `TEMP` and `TMP` become `…\AC\Temp` (WIN-X64 run
+  44019164917). Those folders sit inside whatever root held the given `LOCALAPPDATA`, often a readable-only one, and
+  usually do not exist. The given `TEMP` is a granted, journaled, writable location, and PowerShell needs a writable
+  `TEMP`: Windows PowerShell 5.1 probes it for its script policy, and `Add-Type` compiles there. So the launch's
+  environment is the contract. While the shell is still suspended, the runner reads its environment back through the
+  process parameters (`PEB.ProcessParameters`, then `Environment` and `EnvironmentSize`, the 64-bit layout of every
+  Windows since Vista). If any variable differs from the launch's, it writes the launch's own block into new memory
+  of the shell's process, points the parameters at it, and reads it back to compare. It logs the names it restored,
+  never their values. Any failure refuses the launch at stage `environment`.
 - **Admission.** The runner starts the shell suspended. It reads the token the kernel actually assigned to the shell and
   refuses anything but an AppContainer token for this launch's package with zero capabilities, the launch's capability
   SID among its restricting SIDs, and Low integrity. Any other token is killed before its first instruction, and the

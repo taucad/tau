@@ -40,6 +40,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::container::{self, Container};
+use super::environment;
 use super::job::Job;
 use super::lowbox::{self, Capabilities, grant_kernel_object, token_facts};
 use super::pipe::{self, HandleIo};
@@ -593,6 +594,10 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
                             .into_bytes(),
                     ),
                 );
+                // Windows rewrites LOCALAPPDATA, TEMP and TMP for a registered AppContainer: the launch's own
+                // environment is the contract. Refused, the suspended shell is terminated when `shell` drops.
+                let environment = environment::enforce(shell.process.raw(), &spec.environment).at("environment")?;
+                send(sink, &Frame::new(frame::RUNNER_LOG, environment.into_bytes()));
                 let namespace = lowbox::admit_namespace(shell.own_token.raw(), &logon)
                     .unwrap_or_else(|err| format!("namespace grant failed: {err}"));
                 send(sink, &Frame::new(frame::RUNNER_LOG, namespace.into_bytes()));

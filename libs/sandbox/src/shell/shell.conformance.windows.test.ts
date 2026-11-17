@@ -1194,6 +1194,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       /* Wait, bounded, for the two writers that must start; the escapes get a few more seconds to show themselves. */
       `$deadline = (Get-Date).AddSeconds(25); while ((Get-Date) -lt $deadline -and -not (${started('detached')} -and ${started('job')})) { Start-Sleep -Milliseconds 100 }`,
       `$deadline = (Get-Date).AddSeconds(3); while ((Get-Date) -lt $deadline -and -not (${started('breakaway')} -and ${started('wmi')})) { Start-Sleep -Milliseconds 100 }`,
+      /* Context only, for a job that never ran: its state and the reason PowerShell gives. */
+      `Write-Output ('job ' + $job.State + ' ' + $job.ChildJobs[0].JobStateInfo.Reason)`,
     ].join('\n');
     return { sentinels, pids, command };
   };
@@ -1221,7 +1223,10 @@ describe.runIf(enabled)('Windows shell conformance', () => {
 
       expect(result.exitCode, result.stderr).toBe(0);
       /* Positive controls: the detached process and the job really ran inside the session. */
-      expect([settled['detached']! > 0, settled['job']! > 0], JSON.stringify(settled)).toStrictEqual([true, true]);
+      expect(
+        [settled['detached']! > 0, settled['job']! > 0],
+        `${JSON.stringify(settled)} ${result.stdout}`,
+      ).toStrictEqual([true, true]);
       await delay(1500);
 
       expect(sizesOf(exited.sentinels)).toStrictEqual(settled);

@@ -1272,6 +1272,40 @@ describe('reads of a tree write still landing (D10, I7)', () => {
     raw.endExpectation!();
   });
 
+  it('should keep a failed write’s refusals when a later write fails before announcing its entries', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.expectEntries!([{ path: 'main.scad', size: next.byteLength, arriving: true }]);
+    raw.endExpectation!({ failed: true });
+    /* A second write fails before it learns its tree: the checkout the first one tore is still torn. */
+    raw.endExpectation!({ failed: true });
+    expect(await rejectionOf(Promise.allSettled([view.readFile('main.scad')]))).toMatchObject({ reason: 'failed' });
+    expect(raw.entriesLanded!(['main.scad'])).toBe(false);
+    raw.endExpectation!();
+    await expect(view.readFile('main.scad', 'utf8')).resolves.toBe('import("models/part.step");');
+  });
+
+  it('should count a named path’s staged bytes as progress, so a long staging never stalls a held read', async () => {
+    service.dispose();
+    service = await createService(120);
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.expectEntries!([{ path: 'main.scad', size: next.byteLength, arriving: true }]);
+    const read = view.readFile('main.scad', 'utf8');
+    const staged = '.main.scad.tau-staged.0123abcd-0123-4abc-8def-0123456789ab.tmp';
+    /* Staging that outlasts the bound twice over, one chunk well inside it each time. */
+    for (let chunk = 0; chunk < 12; chunk += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one staged chunk after another, as a large restore stages.
+      await raw.writeFile(staged, String(chunk));
+      // oxlint-disable-next-line no-await-in-loop -- paced inside the bound.
+      await tick(25);
+    }
+    expect(await settledYet(read)).toBe(false);
+    await raw.writeFile('main.scad', next);
+    await expect(read).resolves.toBe('cube(2);');
+    raw.endExpectation!();
+  });
+
   it('should stop holding a stream when its reader aborts', async () => {
     const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = service.createRootedFileSystem(route);

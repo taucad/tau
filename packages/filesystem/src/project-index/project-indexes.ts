@@ -204,6 +204,13 @@ const foldersAbove = (path: string): string[] =>
     .slice(0, -1)
     .map((_, index, segments) => segments.slice(0, index + 1).join('/'));
 
+/* A tree write's staged sibling (`dir/.name.tau-staged.<uuid>.tmp`) stands for its path: staging it is progress. */
+const stagedSibling = /^(?<folder>.*\/)?\.(?<name>.+)\.tau-staged\.[\da-f-]{36}\.tmp$/u;
+const stagedOriginal = (relative: string | undefined): string | undefined => {
+  const match = relative === undefined ? undefined : stagedSibling.exec(relative)?.groups;
+  return match === undefined ? relative : `${match['folder'] ?? ''}${match['name'] ?? ''}`;
+};
+
 const parentOf = (path: string): string => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 
 /*
@@ -1119,7 +1126,8 @@ export class ProjectIndexes {
        * neither tree: each such path refuses until the root's next expectation or end, never answering what is left.
        */
       landing.failed = this._stillOwed(key, landing);
-    } else {
+    } else if (options?.failed !== true || landing?.failed === undefined) {
+      /* A later write that failed before announcing its entries leaves an earlier failure's checkout torn still. */
       this._landing.delete(key);
     }
     if (options?.failed === true) {
@@ -2005,10 +2013,10 @@ export class ProjectIndexes {
     }
   }
 
-  /* A path a live write names landed, went or came back: progress for the reads that write holds. */
+  /* A path a live write names landed, went or came back, or its staged bytes did: progress for the reads it holds. */
   private _progress(normalized: string): void {
     for (const [root, landing] of this._landing) {
-      const relative = relativeTo(root, normalized);
+      const relative = stagedOriginal(relativeTo(root, normalized));
       if (
         relative !== undefined &&
         (landing.expected.has(relative) ||

@@ -25,12 +25,12 @@ use super::desktop::{PrivateDesktop, WindowStation, current_station_name};
 use super::job::Job;
 use super::pipe::{self, HandleIo};
 use super::restore::restore_journal;
-use super::setup::{load_password, load_record};
+use super::setup::{fence, load_password, load_record};
 use super::sid::{Sid, current_user};
 use super::util::{Error, Owned, Result, program_files, random_u32s, system_root, wide, wipe, wipe_wide};
 use crate::cmdline::{capability_sid, quote_arg};
 use crate::frame::{self, Frame, read_frame, write_frame};
-use crate::install::InstallRecord;
+use crate::install::{InstallRecord, firewall_off_message};
 use crate::journal::{Entry, Header, JOURNAL_VERSION, JournalWriter};
 use crate::paths::is_within;
 use crate::protocol::{CleanupFailed, Exit, Ready, Refused, RunnerError, RunnerSpec};
@@ -98,6 +98,10 @@ pub fn run() -> i32 {
     if let Err(refused) = check_runner(&record) {
         return refuse(&sink, &refused);
     }
+    // The network fence must hold before anything changes: no ACL, journal or desktop exists yet.
+    if let Err(refused) = check_fence(&record) {
+        return refuse(&sink, &refused);
+    }
     let session = match Session::prepare(valid, &record) {
         Ok(session) => session,
         Err(refused) => return refuse(&sink, &refused),
@@ -115,6 +119,23 @@ fn check_runner(record: &InstallRecord) -> std::result::Result<(), Refused> {
     let current = std::env::current_exe().and_then(std::fs::read).map_err(|err| stale(err.to_string()))?;
     if installed != current {
         return Err(stale("the installed runner differs from this helper".to_owned()));
+    }
+    Ok(())
+}
+
+/// Refuse while Windows Firewall is off for any current profile, or while any firewall rule or WFP filter
+/// is missing or would not apply.
+fn check_fence(record: &InstallRecord) -> std::result::Result<(), Refused> {
+    let fence = fence(Some(record))
+        .map_err(|err| Refused::unavailable("the sandbox network fence cannot be confirmed", Some(err.to_string())))?;
+    if !fence.firewall_enabled() {
+        return Err(Refused::unavailable(firewall_off_message(&fence.off_profiles), None));
+    }
+    if !fence.rules_present() {
+        return Err(Refused::unavailable(
+            "the sandbox network rules are missing or disabled (run setup again)",
+            Some(fence.problems.join("; ")),
+        ));
     }
     Ok(())
 }

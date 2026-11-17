@@ -29,10 +29,20 @@ WRITE_RESTRICTED`) whose restricting SIDs are a fresh random per-launch capabili
 - **Descendants.** The runner places the shell in a Job Object with `KILL_ON_JOB_CLOSE`, no `BREAKAWAY_OK` and no
   `SILENT_BREAKAWAY_OK`; the launcher places the runner in its own kill-on-close job. Closing either kills the tree.
   `exit` is reported only once the job reports zero active processes.
-- **Network.** `setup` installs Windows Firewall rules scoped to the `TauSandbox` account: block all outbound (and
-  inbound) traffic to non-loopback addresses, block loopback UDP, and block loopback TCP except the fixed proxy port
-  block recorded in the install record. A launch with nonempty
-  `network.domains` is `unsupported: network-isolation` until the per-launch proxy lands (Q4 §7 risk 2).
+- **Network.** `setup` installs two layers, both scoped to the `TauSandbox` account. Windows Firewall rules
+  (`LocalUserAuthorizedList` `O:LSD:(A;;CC;;;<account SID>)`, all profiles, read back after writing): block all
+  outbound (and inbound) traffic to non-loopback addresses, block loopback UDP, and block loopback TCP except the fixed
+  proxy port block recorded in the install record. Firewall rules do not filter loopback or the host's own addresses
+  (run 44005787685 reached both with the firewall on) and do nothing for a profile whose firewall is off, so `setup`
+  also installs persistent Windows Filtering Platform filters in Tau's own provider and sublayer, matched on the
+  account through `FWPM_CONDITION_ALE_USER_ID`: block every `ALE_AUTH_CONNECT` (v4 and v6), every non-loopback
+  `ALE_AUTH_RECV_ACCEPT` and every ICMP socket (`ALE_RESOURCE_ASSIGNMENT`), and, at a higher weight in the same
+  sublayer, permit loopback TCP to each run of proxy ports (at most 8 runs). `launch` checks, before it changes
+  anything, that Windows Firewall is on for every current profile and that every rule and filter is present and
+  enabled; otherwise it refuses `sandbox-unavailable` ("Windows Firewall is off for <profiles>, so Tau cannot keep the
+  sandbox off the network. Turn it on, then try again.", or "the sandbox network rules are missing or disabled (run
+  setup again)"). `setup` never turns the firewall on (machine policy); its output says when it is off. A launch with
+  nonempty `network.domains` is `unsupported: network-isolation` until the per-launch proxy lands (Q4 §7 risk 2).
 - **ACL lifecycle.** Granting through `SetNamedSecurityInfoW` propagates the inheritable ACEs to every descendant and
   sets `SE_DACL_AUTO_INHERITED` on the root and on each descendant it rewrites. So before it changes any ACL the
   launcher journals the full original descriptor (owner, group, DACL and its control flags, as SDDL) of every root and
@@ -63,18 +73,19 @@ WRITE_RESTRICTED`) whose restricting SIDs are a fresh random per-launch capabili
 
 ## Subcommands
 
-| Command                    | Runs as             | Purpose                                                                                                                                                                            |
-| -------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `status`                   | the person          | Print the install record as JSON with `"installed":true`, `{"installed":false}` when absent or unreadable. Never elevates.                                                         |
-| `setup`                    | Administrator (UAC) | Create or repair the account, group, password file and firewall rules; write the install record. Idempotent. `--for-user <SID>` names the person whose host may read the password. |
-| `revoke`                   | Administrator (UAC) | Remove the firewall rules, the account, the group, the password file and the install record. Idempotent.                                                                           |
-| `launch`                   | the person          | Speak the framed protocol below on stdin/stdout: apply and journal ACLs, start the runner as `TauSandbox`, relay I/O, restore ACLs.                                                |
-| `runner`                   | `TauSandbox`        | Internal. Started by `launch` with `CreateProcessWithLogonW` (no profile). Builds the token, job and stdio, then starts the shell on the launcher's private desktop.               |
-| `restore --journal <path>` | the person          | Restore the descriptors a crashed `launch` journaled, then delete the journal. Idempotent.                                                                                         |
+| Command                    | Runs as             | Purpose                                                                                                                                                                                         |
+| -------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`                   | the person          | Print the install record as JSON with `"installed":true`, `{"installed":false}` when absent or unreadable, plus `firewallEnabled` and `rulesPresent` (below). Never elevates.                   |
+| `setup`                    | Administrator (UAC) | Create or repair the account, group, password file, firewall rules and WFP filters; write the install record. Idempotent. `--for-user <SID>` names the person whose host may read the password. |
+| `revoke`                   | Administrator (UAC) | Remove the firewall rules, the WFP filters, sublayer and provider, the account, the group, the password file and the install record. Idempotent.                                                |
+| `launch`                   | the person          | Speak the framed protocol below on stdin/stdout: apply and journal ACLs, start the runner as `TauSandbox`, relay I/O, restore ACLs.                                                             |
+| `runner`                   | `TauSandbox`        | Internal. Started by `launch` with `CreateProcessWithLogonW` (no profile). Builds the token, job and stdio, then starts the shell on the launcher's private desktop.                            |
+| `restore --journal <path>` | the person          | Restore the descriptors a crashed `launch` journaled, then delete the journal. Idempotent.                                                                                                      |
 
 Install record: `%ProgramData%\Tau\Sandbox\install.json`, with `password.bin` beside it and the runner copy in `bin\`.
 The directory's DACL is protected: SYSTEM and Administrators full control, the `--for-user` person read. `setup` also
-takes `--proxy-ports <list or a-b block>` (default `47311,47312`) and prints the record. The account is a member of
+takes `--proxy-ports <list or a-b block>` (default `47311,47312`) and prints the record with `firewallEnabled`,
+`rulesPresent` and, when the firewall is off for a current profile, a `warning` carrying the refusal message above. The account is a member of
 `TauSandboxUsers` only (never Administrators: `setup` checks and refuses) and is hidden from the sign-in screen.
 
 ```json
@@ -86,10 +97,16 @@ takes `--proxy-ports <list or a-b block>` (default `47311,47312`) and prints the
   "groupSid": "S-1-5-21-…",
   "proxyPorts": [47311, 47312],
   "firewallRules": ["…"],
+  "wfpFilters": ["tau_sandbox_wfp_block_connect_v4", "…"],
   "forUser": "S-1-5-21-…",
   "runner": "C:\\ProgramData\\Tau\\Sandbox\\bin\\tau-windows-sandbox.exe"
 }
 ```
+
+`status` adds two booleans: `firewallEnabled` (Windows Firewall is on for every profile in `CurrentProfileTypes`) and
+`rulesPresent` (the four firewall rules exist, are enabled, block, apply to every profile and name the account, and
+every WFP filter for the recorded proxy ports exists). Either is `false` when it cannot be read; the reasons go to
+stderr. `launch` refuses unless both are `true`.
 
 ## Launch protocol
 

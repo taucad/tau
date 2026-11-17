@@ -322,8 +322,7 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
 
 describe('desktop missing-folder recovery (the operator rehearsal)', () => {
   /* T-REH.1: the incident's profile, produced and opened by the candidate. */
-  // Expected-failure: @rifont until 2026-12-15
-  it.fails(
+  it(
     'should start Home over 28 deleted folders with nothing forgotten automatically',
     async () => {
       await rehearse('rehearsal', undefined);

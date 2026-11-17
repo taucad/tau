@@ -17,6 +17,7 @@ export type { NativeSandboxLaunch, NativeSandboxProfile } from '#native-sandbox.
 export {
   configureWindowsNativeSandbox,
   isWindowsSandboxedChild,
+  nativeSandboxRefusal,
   recoverWindowsNativeJournals,
 } from '#native-sandbox-windows.js';
 export type { WindowsNativeHelperSpawn, WindowsNativeSandboxOptions } from '#native-sandbox-windows.js';

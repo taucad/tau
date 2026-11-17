@@ -16,6 +16,7 @@ import {
   configureWindowsNativeSandbox,
   ensureWindowsNativeSandbox,
   isWindowsSandboxedChild,
+  nativeSandboxRefusal,
   recoverWindowsNativeJournals,
   spawnWindowsNative,
   windowsNativeLaunchVector,
@@ -226,6 +227,17 @@ describe('ensureWindowsNativeSandbox', () => {
     await expect(windowsNativeLaunchVector({ ...request, executableSha256: 'ABC' })).rejects.toThrow(
       'a native launch on Windows needs its executable’s verified sha256 digest',
     );
+  });
+});
+
+describe('nativeSandboxRefusal', () => {
+  it('should refuse a Windows host until it configures the helper, and never another OS', () => {
+    expect(nativeSandboxRefusal({ os: 'win32' }, '@taucad/build123d')).toBe(
+      'Native kernels do not run on Windows in this Tau: it has no Windows sandbox, and no native worker runs unsandboxed. Use macOS or Linux (glibc) for @taucad/build123d.',
+    );
+    expect(nativeSandboxRefusal({ os: 'linux' }, '@taucad/build123d')).toBeUndefined();
+    configureWindowsNativeSandbox(options());
+    expect(nativeSandboxRefusal({ os: 'win32' }, '@taucad/build123d')).toBeUndefined();
   });
 });
 

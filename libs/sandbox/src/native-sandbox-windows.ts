@@ -126,6 +126,21 @@ export const configureWindowsNativeSandbox = (options: WindowsNativeSandboxOptio
   recovery = undefined;
 };
 
+/**
+ * Why this host cannot contain a native worker, for the preparation host's `nativeContainment`: refused before
+ * anything downloads. Windows contains native workers only once a host configured the helper
+ * ({@link configureWindowsNativeSandbox}); every other OS contains them in its own sandbox.
+ *
+ * @public
+ * @param indicators - The host's operating system.
+ * @param packageName - The package whose native variant is asked for.
+ * @returns The refusal, or `undefined` when this host contains native workers.
+ */
+export const nativeSandboxRefusal = (indicators: Readonly<{ os: string }>, packageName: string): string | undefined =>
+  indicators.os === 'win32' && configured === undefined
+    ? `Native kernels do not run on Windows in this Tau: it has no Windows sandbox, and no native worker runs unsandboxed. Use macOS or Linux (glibc) for ${packageName}.`
+    : undefined;
+
 const defaultProcessAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);

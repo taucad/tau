@@ -27,7 +27,11 @@
 # Optional, for a host that serves a static shell (progressive loading PL3, shell invariant 5):
 #   SHELL_PATH     A URL the host answers with a static shell, e.g. /w/home/example. Its COOP, COEP, CORP,
 #                  Content-Security-Policy-Report-Only, Reporting-Endpoints and Document-Policy must equal those of
-#                  PARITY_PATH, and it must expire the skew protection cookie (tau_skew).
+#                  PARITY_PATH, and it must expire the skew protection cookie (tau_skew) on every response,
+#                  including the CDN cache hits that follow the first request.
+#   SHELL_REPEAT   Requests of SHELL_PATH after the first, each of which must expire tau_skew (default: 3, minimum 1).
+#                  The first request fills the edge cache; the next ones are usually answered from it, so a cookie set
+#                  only on the response that fills the cache fails here (`cache-status` is printed with the failure).
 #   PARITY_PATH    A function-rendered document of the same host to compare with (default: /projects)
 #   NO_DOCUMENT_POLICY  1 to also require that neither carries Document-Policy (production, check C6)
 #
@@ -189,6 +193,14 @@ if [[ -n "${SHELL_PATH:-}" ]]; then
   done
   [[ -n "$(header "$work/shell.headers" content-security-policy-report-only)" ]] || problems+=("no report-only CSP")
   grep -qiE '^set-cookie:[[:space:]]*tau_skew=;.*max-age=0' "$work/shell.headers" || problems+=("tau_skew not expired")
+  shell_repeat="${SHELL_REPEAT:-3}"
+  [[ "$shell_repeat" =~ ^[0-9]+$ && "$shell_repeat" -ge 1 ]] || shell_repeat=1
+  for attempt in $(seq 2 $((shell_repeat + 1))); do
+    repeat_code="$(fetch "$SHELL_PATH" "$work/shell-repeat")"
+    [[ "$repeat_code" == 200 ]] || problems+=("request $attempt status $repeat_code")
+    grep -qiE '^set-cookie:[[:space:]]*tau_skew=;.*max-age=0' "$work/shell-repeat.headers" ||
+      problems+=("tau_skew not expired on request $attempt (cache-status '$(header "$work/shell-repeat.headers" cache-status)')")
+  done
   if [[ ${#problems[@]} -eq 0 ]]; then
     printf 'PASS %-8s %s matches %s\n' parity "$SHELL_PATH" "$parity_path"
   else

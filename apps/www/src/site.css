@@ -374,6 +374,12 @@ main > .band:not(.band ~ .band)::before {
   display: grid;
   gap: calc(var(--spacing) * 4);
 }
+.download-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
 .download-actions .fine,
 .download-options .fine {
   margin-top: 0;
@@ -1408,6 +1414,13 @@ main > .band:not(.band ~ .band)::before {
 .contact-grid .text-link,
 .download-grid .text-link {
   margin-top: 1rem;
+}
+/* The badge sits on the link's line, so the title row carries the link's top margin. */
+.download-grid .download-title {
+  margin-top: 1rem;
+}
+.download-grid .download-title .text-link {
+  margin-top: 0;
 }
 .download-grid [data-detected] .kicker::after {
   content: '· Your device';

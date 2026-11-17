@@ -3,7 +3,8 @@ import { expect, inject } from 'vitest';
 import { defaultViewerEnvironment, ViewerEnvironmentProvider } from '#environment/viewer-environment.jsx';
 import { resolveRenderTier } from '#graphics/three/render-tier.js';
 import type { RenderTierOverride } from '#graphics/three/render-tier.js';
-import '#test/webgpu-profile.test-utils.js';
+// oxlint-disable-next-line import/no-empty-named-blocks -- Type-only ProvidedContext augmentation for `webGpuProfile`.
+import type {} from '#test/webgpu-profile.test-utils.js';
 
 /**
  * The override a row that asserts the hardware composition runs under. On the software profile (SwiftShader in CI) the

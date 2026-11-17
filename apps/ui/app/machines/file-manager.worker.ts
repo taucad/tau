@@ -60,7 +60,7 @@ import {
 import { dependencyMountRoot } from '@taucad/ui-core/lib/bundled-types-tree.constants';
 import { readBuildIdentity } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { reportToApi } from '#runtime/observability/report-to-api.js';
+import { createRevisionLoadReporter } from '#machines/revision-load-telemetry.js';
 import { summarizeLast, withPendingGauge, workerSpanTotals } from '@taucad/ui-core/lib/worker-timing-report';
 import { createProjectOpenTimer, markProjectOpen } from '@taucad/project-workspace/utils/project-open-timer';
 import type { ProjectOpenTimer } from '@taucad/project-workspace/utils/project-open-timer';
@@ -483,22 +483,22 @@ const revisionRegistry = createWorkerRevisionRegistry({
    * `RevisionStatus` projection comes from the Node side.
    */
   hostServesRevisions: (projectId) => hostServedProjects.has(projectId),
-  createPort: (projectId, credential) => {
+  createPort: (projectId, credential, telemetryConsent) => {
     const recorder = recordLastPush(
       createRevisionHttpClient({ credentials: 'include', ...createGitRemoteTransport(credential) }),
     );
     pushRecorders.set(projectId, recorder);
+    /* PR-7 follow-up (AR-W6-02): the project's load entries under the page's resolved consent, read per entry. */
+    const reportLoad = createRevisionLoadReporter({
+      apiBaseUrl: () => credential()?.apiBaseUrl,
+      telemetryConsent,
+      isDesktop: isDesktopTarget,
+    });
     const openTimer = createProjectOpenTimer({
       report: ({ durationMilliseconds, ...detail }) => {
-        const apiBaseUrl = credential()?.apiBaseUrl;
-        if (apiBaseUrl === undefined || isDesktopTarget()) {
-          return;
-        }
-        reportToApi({
-          reportUrl: `${apiBaseUrl}/v1/telemetry/ingest`,
-          name: 'observability.projectOpen',
-          duration: durationMilliseconds,
-          detail: { ...detail, spans: workerSpanTotals(summarizeLast(durationMilliseconds)) },
+        reportLoad('observability.projectOpen', durationMilliseconds, {
+          ...detail,
+          spans: workerSpanTotals(summarizeLast(durationMilliseconds)),
         });
       },
     });
@@ -525,15 +525,10 @@ const revisionRegistry = createWorkerRevisionRegistry({
       /* Load-path audit: the open's hydrate settles after the pull attempt is reported, so it is reported on its own. */
       onLfsFetch: ({ durationMilliseconds, ...detail }) => {
         openTimer.fetchedFromNetwork(detail.transport);
-        const apiBaseUrl = credential()?.apiBaseUrl;
-        if (apiBaseUrl === undefined || isDesktopTarget()) {
-          return;
-        }
-        reportToApi({
-          reportUrl: `${apiBaseUrl}/v1/telemetry/ingest`,
-          name: 'observability.lfsFetch',
-          duration: durationMilliseconds,
-          detail: { ...detail, placement: 'browser', spans: workerSpanTotals(summarizeLast(durationMilliseconds)) },
+        reportLoad('observability.lfsFetch', durationMilliseconds, {
+          ...detail,
+          placement: 'browser',
+          spans: workerSpanTotals(summarizeLast(durationMilliseconds)),
         });
       },
     });

@@ -8,6 +8,7 @@ import type { ClientMetricEntry } from '@taucad/telemetry';
 import { kernelRoutingRubricVersion } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 import type { CadAgentExecution } from '@taucad/chat';
+import type { ReportingConsent } from '@taucad/telemetry/client';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
@@ -131,16 +132,22 @@ export const reportAutoKernelTurn = (
 };
 
 /**
- * Report a manual kernel pick in a chat that was on Auto.
+ * Report a manual kernel pick in a chat that was on Auto. Like every agent usage entry it is sent only when the page's
+ * resolved consent (`resolveTelemetryConsent`, AR-W6-02) is `granted`: `denied` (telemetry off, Global Privacy
+ * Control) and `unknown` send nothing.
  *
- * @param pick - The kernel Auto had bound (absent when none), the kernel picked, and the chat's turns so far.
+ * @param pick - The kernel Auto had bound (absent when none), the kernel picked, the chat's turns so far, and the
+ * page's resolved consent at the pick.
  * @param report - Where to report.
  * @public
  */
 export const reportKernelOverride = (
-  pick: Readonly<{ resolved: KernelId | undefined; manual: KernelId; turnsSince: number }>,
+  pick: Readonly<{ resolved: KernelId | undefined; manual: KernelId; turnsSince: number; consent: ReportingConsent }>,
   report: KernelSelectionReport = defaultKernelSelectionReport,
 ): void => {
+  if (pick.consent !== 'granted') {
+    return;
+  }
   const manual = kernelLabelOf(pick.manual);
   if (manual === undefined) {
     return;

@@ -49,6 +49,11 @@ export default {
    * `v8_viteEnvironmentApi` is React Router 8's build (blueprint B6, RR5): one Vite config builds the client and server
    * environments, so server-only options live under `environments.ssr` in `vite.config.ts`, and the Netlify adapter
    * (4.x) writes a function that imports `build/server/index.js` and the adapter's `serverless` handler.
+   *
+   * `v8_splitRouteModules` is React Router 8's default (blueprint B8, RR6): a route's `clientLoader`, `clientAction`,
+   * `clientMiddleware` and `HydrateFallback` load as their own chunks. No route has one that splits today, and
+   * `scripts/check-critical-budget.mts` fails when a split module first appears in the manifest, because split chunks
+   * load outside the patched `loadRouteModule` stale-build fallback.
    */
   future: {
     /* eslint-disable @typescript-eslint/naming-convention -- React Router's flag names. */
@@ -57,6 +62,7 @@ export default {
     v8_middleware: true,
     v8_trailingSlashAwareDataRequests: true,
     v8_viteEnvironmentApi: true,
+    v8_splitRouteModules: true,
     /* eslint-enable @typescript-eslint/naming-convention -- The flag names end here. */
   },
   /**

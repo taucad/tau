@@ -10,6 +10,7 @@ export default {
    * which the app's marketing edge function accepts beside the earlier `/pricing.data` and `/_root.data`.
    * The Environment API build (B6, RR5) writes one server `build/server/index.js`, which the Netlify adapter's function
    * and `scripts/serve.ts` import.
+   * Route module splitting (B8, RR6) is React Router 8's default; no `www` route has a client loader to split.
    */
   future: {
     /* eslint-disable @typescript-eslint/naming-convention -- React Router's flag names. */
@@ -17,6 +18,7 @@ export default {
     v8_middleware: true,
     v8_trailingSlashAwareDataRequests: true,
     v8_viteEnvironmentApi: true,
+    v8_splitRouteModules: true,
     /* eslint-enable @typescript-eslint/naming-convention -- The flag names end here. */
   },
 } satisfies Config;

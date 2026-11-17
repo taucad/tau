@@ -179,10 +179,10 @@ describe('Platform-scoped production evidence', () => {
     ).toThrow();
   });
 
-  it('refuses production Windows clean-host acceptance and runs the rest in the channel environment', () => {
+  it('admits every platform on either channel and runs each job in the channel environment', () => {
     const guard = acceptance.jobs['admission']?.steps?.find((step) => step.name?.startsWith('Fail closed'))?.run;
-    expect(guard).toContain('production evidence is Mac or Linux only');
-    for (const job of ['installed', 'linux-canary', 'linux', 'linux-receipts']) {
+    expect(guard).toContain('the channel must be staging or production');
+    for (const job of ['installed', 'windows', 'windows-receipts', 'linux-canary', 'linux', 'linux-receipts']) {
       expect(String((acceptance.jobs[job] as { environment?: unknown } | undefined)?.environment)).toBe(
         `desktop-qualification-${channelExpression}`,
       );

@@ -53,34 +53,26 @@ for (const route of ['windows-nsis', 'macos-zip', 'macos-dmg', 'linux-apt', 'lin
     channel: 'staging',
   } as const;
   assertQualificationConsumerScope(input);
-  if (route === 'windows-nsis') {
-    assert.throws(() => {
-      assertQualificationConsumerScope({ ...input, channel: 'production' });
-    }, /staging platform scope/u);
-  } else {
-    assertQualificationConsumerScope({ ...input, channel: 'production' });
-  }
+  // D-H5: every platform, Windows included, produces its own production clean-host evidence.
+  assertQualificationConsumerScope({ ...input, channel: 'production' });
   for (const change of [
     { channel: 'preview' },
     { scope: 'all' },
     { scope: undefined },
     { scope: linux ? 'macos' : 'linux' },
+    { scope: route === 'windows-nsis' ? 'macos' : 'windows' },
     { route: linux ? 'macos-zip' : 'linux-apt' },
   ]) {
     assert.throws(() => {
       assertQualificationConsumerScope({ ...input, ...change });
-    }, /staging platform scope/u);
+    }, /its own platform scope/u);
   }
   assertQualificationConsumerScope({ ...input, kind: 'ci', scope: 'all', channel: 'production' });
 }
-assertQualificationSource({
-  sourceCommit: current,
-  workflowCommit: current,
-  scope: 'windows',
-  channel: 'staging',
-  kind: 'vm',
-});
-for (const change of [{ channel: 'production' }, { sourceCommit: 'a'.repeat(40) }, { scope: 'windows-ci' }]) {
+for (const channel of ['staging', 'production']) {
+  assertQualificationSource({ sourceCommit: current, workflowCommit: current, scope: 'windows', channel, kind: 'vm' });
+}
+for (const change of [{ channel: 'preview' }, { sourceCommit: 'a'.repeat(40) }, { scope: 'windows-ci' }]) {
   assert.throws(() => {
     assertQualificationSource({
       sourceCommit: current,
@@ -93,17 +85,18 @@ for (const change of [{ channel: 'production' }, { sourceCommit: 'a'.repeat(40) 
   });
 }
 // A Mac clean-host C is the notarized newest-green ancestor of the vm dispatch: an ancestor source is admitted
-// there (its authenticated binding sidecar carries S≤K≤H), while Windows, all-platform production and reversed ancestry stay refused.
+// there (its authenticated binding sidecar carries S≤K≤H), as it is for the Windows and Linux platform scopes, while
+// all-platform runs and reversed ancestry stay refused.
 const parent = execFileSync('git', ['rev-parse', 'HEAD~1'], { encoding: 'utf8' }).trim();
-assertQualificationSource({
-  sourceCommit: parent,
-  workflowCommit: current,
-  scope: 'macos',
-  channel: 'staging',
-  kind: 'vm',
-});
+for (const scope of ['macos', 'windows', 'linux']) {
+  for (const channel of ['staging', 'production']) {
+    for (const kind of ['ci', 'vm'] as const) {
+      assertQualificationSource({ sourceCommit: parent, workflowCommit: current, scope, channel, kind });
+    }
+  }
+}
 for (const options of [
-  { scope: 'windows', channel: 'staging', kind: 'vm' },
+  { scope: 'all', channel: 'staging', kind: 'vm' },
   { scope: 'all', channel: 'production', kind: 'vm' },
   { scope: 'all', channel: 'production', kind: 'ci' },
 ] as const) {

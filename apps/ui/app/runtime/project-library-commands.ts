@@ -266,6 +266,12 @@ export type ProjectLibraryChatSessions = Pick<
   'noteCreatedEmpty' | 'observedChatIdsOf' | 'getProjection' | 'getProjectClosePlan'
 >;
 
+/** A chat as a refusal names it: its name, else its id. */
+const chatLabelOf = (chats: readonly Chat[], chatId: string): string => {
+  const name = chats.find((chat) => chat.id === chatId)?.name;
+  return name === undefined || name.length === 0 ? `Chat ${chatId}` : `The chat "${name}"`;
+};
+
 /** What the commands take from the library: its binding, worker, discovery, journal and listing. */
 export type ProjectCommandsHost = Readonly<{
   facade: () => Promise<ProjectLibraryFileManager>;
@@ -710,39 +716,96 @@ export class ProjectCommands {
   };
 
   /**
-   * Refuse a delete while the project is not quiescent (row L7): a stored chat whose history no live session has
-   * caught up on, or running work. A project with stored chats must be open, so its chats can be verified.
+   * Refuse a delete while the project is not quiescent (row L7): running work, or a chat whose history cannot be
+   * verified. A live project is verified through its session: every stored chat observed and caught up, and no live run
+   * a close would cut. Any other project, a trashed one included, is verified headlessly from its durable chat logs under
+   * a lease (W30), so it need not be restored or opened.
    *
    * @param projectId - The project.
    */
   public readonly verifyProjectQuiescent = async (projectId: string): Promise<void> => {
-    const sessions = this.#sessions();
-    const chatSessions = this.#chatSessions();
-    const chats = await this.#host.readChats(
+    if (selectProjectLive(this.#sessions().getSnapshot(), projectId)) {
+      await this.#verifyLiveProjectQuiescent(projectId);
+      return;
+    }
+    const lease = await this.leaseQuiescentProject(projectId);
+    lease.release();
+  };
+
+  /**
+   * Hold a project that has no live session quiescent (W30, row L7): take every stored chat's log lease, so no tab can
+   * open a chat writer, and read each log headlessly while it is held. A run that has not ended refuses, with its
+   * reason; so does a chat another tab still leads. The caller releases the lease once its irreversible step is done.
+   *
+   * @param projectId - The project, closed in this tab.
+   * @returns The held lease: `lost` once a peer stole a chat's lock, `release` to end it.
+   */
+  public readonly leaseQuiescentProject = async (
+    projectId: string,
+  ): Promise<Readonly<{ lost: () => boolean; release: () => void }>> => {
+    if (selectProjectLive(this.#sessions().getSnapshot(), projectId)) {
+      throw new Error('Close this project before deleting it.');
+    }
+    const chats = await this.#storedChatsOf(projectId);
+    if (chats.length === 0) {
+      return { lost: () => false, release: () => undefined };
+    }
+    const [{ leaseChatLogs }, { unsettledLogRun }] = await Promise.all([
+      import('@taucad/agent-host/browser'),
+      import('@taucad/agent-host'),
+    ]);
+    const lease = await leaseChatLogs({ projectId, chatIds: chats.map((chat) => chat.id) });
+    if (lease.status === 'led-elsewhere') {
+      throw new Error(
+        `${chatLabelOf(chats, lease.chatId)} is open in another tab or window. Close the project there before deleting it.`,
+      );
+    }
+    try {
+      for (const chat of chats) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- one log at a time, so a refusal names its chat.
+        const bytes = await this.#host.readChats(async (source) => source.readChatLog(chat.id, projectId), projectId, {
+          retry: false,
+        });
+        const run = unsettledLogRun(bytes);
+        if (run !== undefined) {
+          throw new Error(
+            `${chatLabelOf(chats, chat.id)} has a run that has not ended (${run.state}). Open the project and stop it, or wait for it to settle, before deleting.`,
+          );
+        }
+      }
+    } catch (error) {
+      lease.release();
+      throw error;
+    }
+    return lease;
+  };
+
+  async #storedChatsOf(projectId: string): Promise<readonly Chat[]> {
+    return this.#host.readChats(
       async (source) => source.getChatsForResource(projectId, { includeDeleted: true }),
       projectId,
       /* The person's read is not asked again when its records are replaced, as the hook's own read was not. */
       { retry: false },
     );
-    if (chats.length > 0) {
-      if (!selectProjectLive(sessions.getSnapshot(), projectId)) {
-        throw new Error('Restore and open this project to verify its chats before deleting it.');
-      }
-      const observed = new Set(chatSessions.observedChatIdsOf(projectId));
-      if (
-        chats.some((chat: Chat) => {
-          const projection = chatSessions.getProjection(chat.id);
-          return !observed.has(chat.id) || projection === undefined || !selectCaughtUp(projection);
-        })
-      ) {
-        throw new Error('Wait for every chat history to load before deleting this project.');
-      }
+  }
+
+  async #verifyLiveProjectQuiescent(projectId: string): Promise<void> {
+    const chatSessions = this.#chatSessions();
+    const chats = await this.#storedChatsOf(projectId);
+    const observed = new Set(chatSessions.observedChatIdsOf(projectId));
+    if (
+      chats.some((chat: Chat) => {
+        const projection = chatSessions.getProjection(chat.id);
+        return !observed.has(chat.id) || projection === undefined || !selectCaughtUp(projection);
+      })
+    ) {
+      throw new Error('Wait for every chat history to load before deleting this project.');
     }
     const plan = await chatSessions.getProjectClosePlan(projectId);
     if (plan.liveChatIds.length > 0) {
       throw new Error('This project has running work. Stop it and wait for the chat log to settle before deleting.');
     }
-  };
+  }
 
   /**
    * Close the project's live session, for a person's delete or directory change: resolves once the registry has

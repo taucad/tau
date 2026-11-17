@@ -238,6 +238,7 @@ describe('composed per-platform desktop download catalog', () => {
   };
   const mac = () => platformCatalog(({ route, target }) => route === 'macos-zip' && target === 'darwin-arm64');
   const linux = () => platformCatalog(({ target }) => target === 'linux-x64');
+  const windows = () => platformCatalog(({ target }) => target === 'win32-x64');
   const composed = (platforms: unknown[]) => ({ schemaVersion: 2, channel: 'production', promoted: true, platforms });
 
   it('admits a production Linux platform alone, then Mac and Linux from different tags', () => {
@@ -262,6 +263,21 @@ describe('composed per-platform desktop download catalog', () => {
     expect(both[1]?.alternatives.some(({ href }) => href.includes('desktop%400.3.0'))).toBe(true);
   });
 
+  it('admits a production Windows platform alone and beside Mac and Linux', () => {
+    expect(select(composed([{ lane: 'windows', catalog: windows() }]))?.map(({ platform }) => platform)).toEqual([
+      'windows',
+    ]);
+    const all = select(
+      composed([
+        { lane: 'macos', catalog: mac() },
+        { lane: 'windows', catalog: windows() },
+        { lane: 'linux', catalog: linux() },
+      ]),
+    )!;
+    expect(all.map(({ platform }) => platform)).toEqual(['mac', 'windows', 'linux', 'linuxPortable']);
+    expect(all[1]?.href).toBe('https://downloads.tau.new/releases/desktop%400.2.0/Tau-win32-x64.exe');
+  });
+
   it('refuses a partial, mislabelled, duplicated or other-channel platform', () => {
     const appImageOnly = platformCatalog(({ route }) => route === 'linux-appimage');
     for (const document of [
@@ -270,6 +286,9 @@ describe('composed per-platform desktop download catalog', () => {
       composed([{ lane: 'macos', catalog: linux() }]),
       composed([{ lane: 'linux', catalog: projection() }]),
       composed([{ lane: 'windows', catalog: projection() }]),
+      composed([{ lane: 'windows', catalog: linux() }]),
+      composed([{ lane: 'linux', catalog: windows() }]),
+      composed([{ lane: '__proto__', catalog: windows() }]),
       composed([
         { lane: 'linux', catalog: linux() },
         { lane: 'linux', catalog: linux() },

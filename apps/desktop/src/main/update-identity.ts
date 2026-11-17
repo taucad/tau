@@ -61,7 +61,8 @@ const descriptorSchema = z.strictObject({
   size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   sha512: z.string().regex(/^[A-Za-z\d+/]{85}[AQgw]==$/u),
   issuedAt: z.iso.datetime(),
-  expiresAt: z.iso.datetime(),
+  // Not enforced: update descriptors no longer expire. Publication still writes it for 0.4.0 clients, which require it.
+  expiresAt: z.iso.datetime().optional(),
 });
 export type DesktopUpdateDescriptor = z.infer<typeof descriptorSchema>;
 const envelopeSchema = z.strictObject({
@@ -106,7 +107,6 @@ export const parseDesktopUpdateDescriptor = (
   const descriptor = descriptorSchema.parse(input);
   const identity = desktopReleaseIdentity(descriptor.tag);
   const issued = Date.parse(descriptor.issuedAt);
-  const descriptorExpires = Date.parse(descriptor.expiresAt);
   const artifact = desktopArtifactName({
     kind: descriptor.route === 'windows-nsis' ? 'windows-nsis' : 'linux-appimage',
     channel: descriptor.channel,
@@ -119,12 +119,9 @@ export const parseDesktopUpdateDescriptor = (
     identity.channel !== descriptor.channel ||
     identity.version !== descriptor.version ||
     descriptor.path !== `releases/${encodeURIComponent(descriptor.tag)}/${artifact}` ||
-    issued > now + 300_000 ||
-    descriptorExpires <= now ||
-    descriptorExpires <= issued ||
-    descriptorExpires - issued > 7 * 24 * 60 * 60 * 1000
+    issued > now + 300_000
   ) {
-    throw new Error('Update descriptor identity, path or validity period is invalid');
+    throw new Error('Update descriptor identity, path or issue time is invalid');
   }
   if (descriptor.version !== installation.version && !isNewerVersion(descriptor.version, installation.version)) {
     throw new Error('Update descriptor would downgrade the installed app');

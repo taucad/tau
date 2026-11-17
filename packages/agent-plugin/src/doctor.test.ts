@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { chmod, copyFile, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -10,6 +10,7 @@ import { expectedTools } from '#doctor-probe.js';
 type Run = { readonly stdout: string; readonly stderr: string; readonly code: number | undefined };
 
 const version = '0.0.0-doctor-test';
+const windows = process.platform === 'win32';
 
 /** A `tau mcp` that answers `initialize`, `tools/list` and `resources/list` as the real server does. */
 const servingBody = String.raw`
@@ -34,20 +35,40 @@ process.stdin.setEncoding('utf8').on('data', (chunk) => {
   }
 });`;
 
-describe.skipIf(process.platform === 'win32')('doctor', () => {
+/**
+ * Write an executable stand-in that the current Node.js runs. Windows has no shebang, so there it is an
+ * npm-style `.cmd` shim beside a `.cjs` script, as `npm install -g` writes for `tau`, and the returned path
+ * names the shim.
+ *
+ * @param path - The executable's path, without an extension.
+ * @param source - CommonJS source; its arguments are `process.argv.slice(2)`.
+ * @returns The path to start.
+ */
+const writeExecutable = async (path: string, source: string): Promise<string> => {
+  await mkdir(dirname(path), { recursive: true });
+  if (windows) {
+    await writeFile(`${path}.cjs`, source);
+    await writeFile(`${path}.cmd`, `@"${process.execPath}" "%~dpn0.cjs" %*\r\n`);
+    return `${path}.cmd`;
+  }
+  await writeFile(path, `#!${process.execPath}\n${source}`);
+  await chmod(path, 0o755);
+  return path;
+};
+
+describe('doctor', () => {
   let directory: string;
   let entry: string;
   let tools: string;
+  /** The matching `tau` on `PATH`: `tau.cmd` on Windows. */
+  let tau: string;
 
   /** An executable stand-in, run by the current Node.js, that answers `--version` with `answer`. */
   const fakeExecutable = async (path: string, answer: string, body: string): Promise<string> => {
-    await mkdir(join(path, '..'), { recursive: true });
-    await writeFile(
+    return writeExecutable(
       path,
-      `#!${process.execPath}\nif (process.argv[2] === '--version') { process.stdout.write(${JSON.stringify(answer)} + '\\n'); process.exit(0); }\n${body}\n`,
+      `if (process.argv[2] === '--version') { process.stdout.write(${JSON.stringify(answer)} + '\\n'); process.exit(0); }\n${body}\n`,
     );
-    await chmod(path, 0o755);
-    return path;
   };
 
   /** An `npm` 11.19.0 whose cache is `cache` and whose registry has this plugin's version as `beta`. */
@@ -71,6 +92,10 @@ describe.skipIf(process.platform === 'win32')('doctor', () => {
       const environment: NodeJS.ProcessEnv = {};
       environment['PATH'] = tools;
       environment['HOME'] = directory;
+      /* Windows processes, `cmd.exe` and Node.js among them, need the system root a host always passes. */
+      if (windows) {
+        environment['SystemRoot'] = process.env['SystemRoot'];
+      }
       const child = spawn(process.execPath, [entry, ...args], { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';
@@ -106,7 +131,7 @@ describe.skipIf(process.platform === 'win32')('doctor', () => {
     tools = join(directory, 'tools');
     await fakeNpm(join(directory, 'npm-cache'));
     await fakeClaude(true);
-    await fakeExecutable(join(tools, 'tau'), version, servingBody);
+    tau = await fakeExecutable(join(tools, 'tau'), version, servingBody);
   });
 
   afterEach(async () => {
@@ -134,7 +159,7 @@ describe.skipIf(process.platform === 'win32')('doctor', () => {
       node: { status: 'ok' },
       npm: { status: 'ok', version: '11.19.0', cache: join(directory, 'npm-cache') },
       hosts: { claude: { status: 'ok', version: '2.1.303' }, codex: { status: 'warn', detail: 'not on PATH' } },
-      cli: { status: 'ok', source: 'installed', path: join(tools, 'tau'), cliVersion: version },
+      cli: { status: 'ok', source: 'installed', path: tau, cliVersion: version },
       registry: { status: 'ok', version },
       server: { status: 'ok', tools: [...expectedTools], missingTools: [], viewer: 'ui://tau/viewer.html' },
       skills: { status: 'ok', names: ['tau'] },
@@ -148,7 +173,7 @@ describe.skipIf(process.platform === 'win32')('doctor', () => {
     expect(code).toBe(0);
     expect(stdout.split('\n')[0]).toBe(`tau doctor: plugin ${version} at ${join(directory, 'plugin')}`);
     expect(line(stdout, 'claude')).toBe(`ok    claude    2.1.303; tau@taucad ${version} enabled (user scope)`);
-    expect(line(stdout, 'cli')).toBe(`ok    cli       installed tau ${version} at ${join(tools, 'tau')}`);
+    expect(line(stdout, 'cli')).toBe(`ok    cli       installed tau ${version} at ${tau}`);
     expect(line(stdout, 'server')).toMatch(
       /^ok {4}server {4}initialize \d+\.\d s; @taucad\/mcp 0\.0\.0-doctor-test; 10 tools; viewer resource ui:\/\/tau\/viewer\.html$/u,
     );
@@ -173,7 +198,12 @@ describe.skipIf(process.platform === 'win32')('doctor', () => {
 
     expect(code).toBe(3);
     expect(line(stdout, 'npm')).toBe(`fail  npm       npm cache ${cache} is not writable`);
-    expect(stdout).toContain(`next  sudo chown -R ${process.getuid?.()}:${process.getgid?.()} "${cache}"\n`);
+    /* Windows has no owner for `chown` to restore, so no fix follows there. */
+    if (windows) {
+      expect(stdout).not.toContain('next  sudo chown');
+    } else {
+      expect(stdout).toContain(`next  sudo chown -R ${process.getuid?.()}:${process.getgid?.()} "${cache}"\n`);
+    }
   });
 
   it('should warn that npx will run, and name the install, when only an older tau is installed', async () => {

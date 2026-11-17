@@ -136,6 +136,22 @@ jobs:
           & $helper status
           if ($LASTEXITCODE -ne 0) { throw "the sandbox status exited $LASTEXITCODE" }
 
+      # The window station and desktop DACLs, the temp folder ACL, and whether a Chromium-style restricted,
+      # low-integrity child on an alternate desktop can still create a window: once before the suite's native
+      # launches and once after them (below), to tell whether a sandboxed launch changed the session the GPU process
+      # needs. Diagnostics only: the probe never fails the run.
+      - name: Record the session before native launches
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $probe = 'libs/sandbox/windows-sandbox/target/x86_64-pc-windows-msvc/release/examples/tau-worker-probe.exe'
+          $dir = Join-Path $env:RUNNER_TEMP 'desktop-e2e-services'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          if (-not (Test-Path -LiteralPath $probe)) { "the build has no $probe" | Tee-Object (Join-Path $dir 'worker-probe-session-before.log'); exit 0 }
+          '{"op":"session"}' | & $probe *> (Join-Path $dir 'worker-probe-session-before.log')
+          "probe exit $LASTEXITCODE" | Add-Content (Join-Path $dir 'worker-probe-session-before.log')
+          Get-Content (Join-Path $dir 'worker-probe-session-before.log') -TotalCount 200
+
       - name: Run the packaged Windows suite
         id: packaged
         timeout-minutes: 90
@@ -162,6 +178,19 @@ jobs:
             ../../node_modules/.bin/vitest run --config vitest.config.ts \
             src/desktop-webgl-renderer.spec.ts src/desktop-build123d.spec.ts \
             | tee "$RUNNER_TEMP/desktop-packaged-windows.log"
+
+      - name: Record the session after native launches
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $probe = 'libs/sandbox/windows-sandbox/target/x86_64-pc-windows-msvc/release/examples/tau-worker-probe.exe'
+          $dir = Join-Path $env:RUNNER_TEMP 'desktop-e2e-services'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          if (-not (Test-Path -LiteralPath $probe)) { "the build has no $probe" | Tee-Object (Join-Path $dir 'worker-probe-session-after.log'); exit 0 }
+          '{"op":"session"}' | & $probe *> (Join-Path $dir 'worker-probe-session-after.log')
+          "probe exit $LASTEXITCODE" | Add-Content (Join-Path $dir 'worker-probe-session-after.log')
+          Get-Content (Join-Path $dir 'worker-probe-session-after.log') -TotalCount 200
 
       - name: Record the Windows sandbox and crash evidence
         if: failure()

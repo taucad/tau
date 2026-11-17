@@ -9,6 +9,7 @@ import { toast } from '@taucad/ui/components/sonner';
 import type { RootStatus } from '@taucad/filesystem';
 import { WorkspaceRecoveryPendingError } from '@taucad/ui-core/filesystem/workspace-errors';
 
+const homePath = vi.hoisted(() => '/Users/tester/Library/Application Support/Tau/home');
 const state = vi.hoisted(() => ({
   paths: ['/Users/tester/Documents/Tau Workspace'],
   disconnect: vi.fn<(path: string) => Promise<void>>(),
@@ -20,7 +21,7 @@ const state = vi.hoisted(() => ({
   retry: vi.fn(),
   connection: vi.fn<() => WorkspaceConnectionState>(),
   listWorkspaces: vi.fn<() => Promise<Workspace[]>>(),
-  homeRoot: vi.fn(() => '/Users/tester/Library/Application Support/Tau/home'),
+  homeRoot: vi.fn(() => homePath),
   changed: undefined as (() => void) | undefined,
   removeWorkspace: vi.fn<(workspaceId: string) => Promise<boolean>>(),
   rootStatuses: [] as RootStatus[],
@@ -112,7 +113,8 @@ beforeEach(() => {
   state.listWorkspaces.mockResolvedValue([workspace]);
   state.connection.mockReturnValue({ phase: 'idle' });
   state.retry.mockReset();
-  state.rootStatuses = [];
+  /* The file service has started and published Home's status; a folder it has not published keeps its grant's word. */
+  state.rootStatuses = [{ storageRootKey: `node:${homePath}`, backend: 'node', state: 'available' }];
   state.fileManagerState = 'ready';
   state.removeWorkspace.mockResolvedValue(true);
   state.disconnect.mockImplementation(async (path) => {

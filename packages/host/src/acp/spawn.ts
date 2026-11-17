@@ -122,11 +122,11 @@ export type SpawnedAcpAdapter = {
   readonly stream: Stream;
   /** The adapter's most recent stderr, for a typed failure reason. */
   stderr(): string;
-  /** Send SIGTERM to the adapter's process group. Idempotent. */
+  /** Send SIGTERM to the adapter's process group; on Windows end its tree. Idempotent. */
   close(): void;
   /**
    * Signal the adapter's whole process group (W10 EA-R7): the adapter leads its
-   * own group, so SIGKILL also ends the tools it started. On Windows SIGKILL is
+   * own group, so SIGKILL also ends the tools it started. On Windows either is
    * `taskkill /T /F` over its tree. Idempotent once the adapter has exited.
    */
   signal(signal: 'SIGTERM' | 'SIGKILL'): void;
@@ -233,11 +233,10 @@ export const spawnAcpAdapter = (options: {
       if (child.exitCode !== null || child.signalCode !== null) {
         return;
       }
-      if (name === 'SIGKILL') {
-        spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
-      } else {
-        child.kill(name);
-      }
+      /* Windows has no signal a process can catch: `child.kill` is TerminateProcess either way, and it
+       * ends the adapter alone, orphaning the CLI or tools it started (and their cwd handles in the
+       * checkout). Both names end the tree, as a group signal does on POSIX. */
+      spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
       return;
     }
     try {

@@ -8,6 +8,7 @@
  * is the fix, and this is the test that keeps it honest.
  */
 
+import { once } from 'node:events';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
@@ -19,6 +20,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { acpAgentProfiles, resolveAcpAdapters } from '#acp/registry.js';
 import { acpAdapterEnvironment, spawnAcpAdapter } from '#acp/spawn.js';
+import type { SpawnedAcpAdapter } from '#acp/spawn.js';
 import type { AcpAdapter, AcpWireFrame } from '#acp/index.js';
 import { writeWindowsExecutable } from '#acp/fixtures/windows-executable.js';
 
@@ -32,12 +34,19 @@ const fakeAgent: AcpAdapter = {
 };
 
 const roots: string[] = [];
-const spawned: Array<{ close(): void }> = [];
+const spawned: SpawnedAcpAdapter[] = [];
 
 afterEach(async () => {
-  for (const adapter of spawned.splice(0)) {
-    adapter.close();
-  }
+  /* Each adapter's tree must be gone before its cwd is removed: Windows refuses to remove a directory
+   * that is a live process's working directory (EBUSY). */
+  await Promise.all(
+    spawned.splice(0).map(async (adapter) => {
+      const { child } = adapter;
+      const exited = child.exitCode === null && child.signalCode === null ? once(child, 'exit') : undefined;
+      adapter.close();
+      await exited;
+    }),
+  );
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 

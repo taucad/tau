@@ -8,6 +8,7 @@
  * sampled while the agent works (SP-4's measurement, ported into Node).
  */
 
+import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import type { Server } from 'node:http';
@@ -1632,7 +1633,11 @@ const openFixture = async (
     cwd,
   });
   closers.push(async () => {
+    /* Gone before its cwd is removed: Windows refuses to remove a live process's working directory (EBUSY). */
+    const { child } = adapter;
+    const exited = child.exitCode === null && child.signalCode === null ? once(child, 'exit') : undefined;
     adapter.close();
+    await exited;
   });
   const handler: Client = {
     sessionUpdate: (params) => {

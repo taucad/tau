@@ -222,6 +222,17 @@ const removeCreatedParents = async ({ first, last }: Readonly<{ first: string; l
 };
 
 /* Whether a process with this pid exists: `EPERM` means it does, under another user. */
+/**
+ * Whether files on this process's disk keep a Git executable bit. NTFS has
+ * none: Node reports no execute bit for a Windows file and `chmod` touches
+ * only the read-only flag, so there a provider exposes no mode at all and a
+ * revision keeps the mode it recorded instead of reading `100644` back.
+ *
+ * @returns `false` on Windows, `true` elsewhere.
+ * @public
+ */
+export const nodeDiskKeepsFileModes = (): boolean => process.platform !== 'win32';
+
 const isProcessAlive = (pid: number): boolean => {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return false;
@@ -529,6 +540,10 @@ const nativeIgnores = (rootedPath: string, directory: string, excludes: readonly
  */
 export class NodeFsProvider extends AbstractFileSystemProvider {
   public readonly capabilities: ProviderCapabilities;
+  /** Present only on a disk that keeps an executable bit ({@link nodeDiskKeepsFileModes}). */
+  public readonly getFileMode?: (path: string) => Promise<FileMode>;
+  /** Present only on a disk that keeps an executable bit ({@link nodeDiskKeepsFileModes}). */
+  public readonly setFileMode?: (path: string, mode: FileMode) => Promise<void>;
 
   private readonly _base: string;
   private readonly _policy: PathPolicy | undefined;
@@ -574,6 +589,10 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       movesInPlace: true,
       ...(store === undefined ? {} : { largeObjectSources: true }),
     };
+    if (nodeDiskKeepsFileModes()) {
+      this.getFileMode = async (rooted) => this._readFileMode(rooted);
+      this.setFileMode = async (rooted, mode) => this._writeFileMode(rooted, mode);
+    }
     entryObservers.set(this, createEntryObserver({ root: this._base, policy: this._policy }));
     boundedReads.set(this, async (rooted, maximumBytes) => this._readBounded(rooted, maximumBytes));
     boundedListings.set(this, async (rooted, limits) => this._listBounded(rooted, limits));
@@ -829,28 +848,6 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     this._assertRootedPath(path_);
     const target = await this._resolve(path_);
     return headStat(await fs.stat(target));
-  }
-
-  public async getFileMode(path_: string): Promise<FileMode> {
-    this._assertRootedPath(path_);
-    const stats = await fs.stat(await this._resolve(path_));
-    if (!stats.isFile()) {
-      throw this._einval(path_);
-    }
-    const permissions = stats.mode % 0o1000;
-    const executable =
-      Math.floor(permissions / 0o100) % 2 === 1 || Math.floor(permissions / 0o10) % 2 === 1 || permissions % 2 === 1;
-    return executable ? '100755' : '100644';
-  }
-
-  public async setFileMode(path_: string, mode: FileMode): Promise<void> {
-    this._assertRootedPath(path_);
-    const target = await this._resolve(path_, 'mutate');
-    const stats = await fs.stat(target);
-    if (!stats.isFile()) {
-      throw this._einval(path_);
-    }
-    await fs.chmod(target, mode === '100755' ? 0o755 : 0o644);
   }
 
   public async unlink(path_: string): Promise<void> {
@@ -1358,6 +1355,28 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     } catch {
       return false;
     }
+  }
+
+  private async _readFileMode(path_: string): Promise<FileMode> {
+    this._assertRootedPath(path_);
+    const stats = await fs.stat(await this._resolve(path_));
+    if (!stats.isFile()) {
+      throw this._einval(path_);
+    }
+    const permissions = stats.mode % 0o1000;
+    const executable =
+      Math.floor(permissions / 0o100) % 2 === 1 || Math.floor(permissions / 0o10) % 2 === 1 || permissions % 2 === 1;
+    return executable ? '100755' : '100644';
+  }
+
+  private async _writeFileMode(path_: string, mode: FileMode): Promise<void> {
+    this._assertRootedPath(path_);
+    const target = await this._resolve(path_, 'mutate');
+    const stats = await fs.stat(target);
+    if (!stats.isFile()) {
+      throw this._einval(path_);
+    }
+    await fs.chmod(target, mode === '100755' ? 0o755 : 0o644);
   }
 
   private async _lstatOrUndefined(absolute: string): Promise<Stats | undefined> {

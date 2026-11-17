@@ -9,15 +9,23 @@
  * and never touches the worker global once a message source is injected.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import { serveNodeFsProvider } from '@taucad/filesystem/backend/node';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ChangeEvent } from '@taucad/types';
-import type { ExposeFileSystemHandle, FileSystemBridgeProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
+import type {
+  BridgeRootStatusEvents,
+  ExposeFileSystemHandle,
+  FileSystemBridgeProxy,
+  RootedBridgeConsumer,
+} from '@taucad/fs-bridge';
+import type { RootStatus } from '@taucad/filesystem';
 import {
   createTransferredFileSystemBridgeProxy,
   exposeFileSystem,
@@ -33,6 +41,7 @@ const projectRoot = `/projects/${projectId}`;
 type Workspace = {
   readonly service: WorkspaceFileService;
   readonly bus: ChangeEventBus;
+  readonly rootStatusEvents?: BridgeRootStatusEvents;
 };
 
 const createWorkspace = async (): Promise<Workspace> => {
@@ -80,11 +89,12 @@ type NodeHost = {
  * post connect envelopes into the other end — the same handshake a browser
  * worker performs, with the worker boundary replaced by a port pair.
  */
-const hostOnNode = ({ service, bus }: Workspace): NodeHost => {
+const hostOnNode = ({ service, bus, rootStatusEvents }: Workspace): NodeHost => {
   const boundary = new MessageChannel();
   const exposed = exposeFileSystem(workspaceBridgeService(service), {
     policy: tauPathPolicy,
     changeEventBus: bus,
+    ...(rootStatusEvents === undefined ? {} : { rootStatusEvents }),
     /*
      * The composition every host performs (charter D2): the connection's view,
      * plus the read content operations served over it. The mask comes with the
@@ -496,6 +506,115 @@ describe('one rooted connection as the change transport (W12a)', () => {
       global.stop();
       author.dispose();
       peer.dispose();
+      surface.dispose();
+      host.dispose();
+    }
+  });
+});
+
+describe('project root isolation through the bridge (T-B1.3)', () => {
+  it('should resolve with notFound for a deleted folder while Home lists its files', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'tau-bridge-home-'));
+    const lost = mkdtempSync(path.join(tmpdir(), 'tau-bridge-lost-'));
+    const homeProject = 'proj_hhhhhhhhhhhhhhhhhhhhh';
+    const lostProject = 'proj_lllllllllllllllllllll';
+    mkdirSync(path.join(home, 'alpha'));
+    writeFileSync(path.join(home, 'alpha', 'main.ts'), 'export default 1;\n');
+    rmSync(lost, { recursive: true, force: true });
+
+    const nodeChannel = new MessageChannel();
+    const stopNodeHost = serveNodeFsProvider(nodeChannel.port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === home || candidate === lost,
+    }).close;
+    const service = new WorkspaceFileService({
+      providerRegistry: new ProviderRegistry({ createNodeFsPort: async () => nodeChannel.port1 }),
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable: new MountTable(),
+    });
+    const host = hostOnNode({ service, bus: new ChangeEventBus() });
+    const workspace = host.connect();
+    try {
+      await workspace.proxy.ready;
+      const result = await workspace.proxy.configureProjectRoots({
+        projects: [
+          { backend: 'node', path: home, projectId: homeProject, providerBasePath: 'alpha' },
+          { backend: 'node', path: lost, projectId: lostProject, providerBasePath: 'beta' },
+        ],
+        roots: [
+          { backend: 'node', path: home },
+          { backend: 'node', path: lost },
+        ],
+      });
+
+      expect(result.roots).toEqual([
+        { storageRootKey: `node:${home}`, backend: 'node', state: 'available' },
+        { storageRootKey: `node:${lost}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+      ]);
+      const rooted = host.connect(`/projects/${homeProject}`, 'working-copy');
+      try {
+        await rooted.proxy.ready;
+        expect(await rooted.proxy.readdir('')).toEqual(['main.ts']);
+      } finally {
+        rooted.dispose();
+      }
+    } finally {
+      workspace.dispose();
+      host.dispose();
+      await stopNodeHost();
+      nodeChannel.port2.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+/* Review of #2384 (CodeRabbit): the broadcast listen validates every frame, and accepted only `fileChanged`, so the first
+ * `rootStatus` frame ended the shared subscription and the connection heard no further file changes. */
+describe('root statuses on the workspace surface', () => {
+  it('should deliver a rootStatus frame and keep delivering fileChanged after it', async () => {
+    const workspace = await createWorkspace();
+    const publishers = new Set<(roots: readonly RootStatus[]) => void>();
+    const host = hostOnNode({
+      ...workspace,
+      rootStatusEvents: {
+        subscribe: (handler) => {
+          publishers.add(handler);
+          return () => {
+            publishers.delete(handler);
+          };
+        },
+      },
+    });
+    const surface = host.connect();
+    const statuses: unknown[] = [];
+    const changes: unknown[] = [];
+    const stopStatuses = surface.proxy.listen('rootStatus', (roots) => {
+      statuses.push(roots);
+    });
+    const stopChanges = surface.proxy.listen('fileChanged', (event) => {
+      changes.push(event);
+    });
+    try {
+      await surface.proxy.ready;
+      const roots: RootStatus[] = [
+        { storageRootKey: 'node:/srv/gone', backend: 'node', state: 'notFound', code: 'ENOENT' },
+      ];
+      for (const publish of publishers) {
+        publish(roots);
+      }
+      await vi.waitFor(() => {
+        expect(statuses).toEqual([roots]);
+      });
+
+      await workspace.service.writeFile(`${projectRoot}/after-status.ts`, 'export default 2;\n');
+
+      await vi.waitFor(() => {
+        expect(changes.length).toBeGreaterThan(0);
+      });
+    } finally {
+      stopStatuses();
+      stopChanges();
       surface.dispose();
       host.dispose();
     }

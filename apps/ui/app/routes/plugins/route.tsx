@@ -44,7 +44,6 @@ export const meta: MetaFunction = () => [{ title: 'Plugins · Tau' }];
 
 export const handle: Handle = {
   title: 'Plugins',
-  enableOverflowY: true,
 };
 
 export type StoreItem = {

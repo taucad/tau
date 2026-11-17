@@ -237,7 +237,7 @@ const freshState = vi.hoisted(() => ({
   retry: (() => undefined) as () => void,
   settled: (() => undefined) as (path: string | undefined) => void,
 }));
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFreshContent: (path: string | undefined, open: boolean) => ({
     state: open
       ? path !== undefined && freshState.failed.has(path)

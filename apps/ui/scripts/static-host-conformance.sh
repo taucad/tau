@@ -34,9 +34,13 @@
 #                  only on the response that fills the cache fails here (`cache-status` is printed with the failure).
 #   PARITY_PATH    A function-rendered document of the same host to compare with (default: /projects)
 #   NO_DOCUMENT_POLICY  1 to also require that neither carries Document-Policy (production, check C6)
+#   SHELL_COOKIE   A Cookie header sent with the SHELL_PATH requests only. The Home shell (PL4) answers `/` only to the
+#                  app preference: SHELL_PATH=/ SHELL_COOKIE=tau-entry=app. A shell at `/` must also answer
+#                  `Cache-Control: private, no-store`, since the document there depends on that cookie.
 #
 # Usage:
 #   apps/ui/scripts/static-host-conformance.sh https://taucad-prod-us.netlify.app
+#   SHELL_PATH=/ SHELL_COOKIE=tau-entry=app apps/ui/scripts/static-host-conformance.sh https://taucad.dev
 #   WASM_PATH=/assets/kernel-abc.wasm apps/ui/scripts/static-host-conformance.sh http://127.0.0.1:8080
 #
 # Exit codes:
@@ -61,12 +65,12 @@ scan_limit="${SCAN_LIMIT:-400}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-# fetch <path> <body-file>: GET one path, headers to <body-file>.headers; prints the status code.
+# fetch <path> <body-file> [cookie]: GET one path, headers to <body-file>.headers; prints the status code.
 # A transport failure prints curl's reason on stderr and status 000, so it is reported rather than ending the run.
 fetch() {
   : >"$2"
   : >"$2.headers"
-  curl --silent --show-error --location --max-time 60 --compressed \
+  curl --silent --show-error --location --max-time 60 --compressed ${3:+--cookie "$3"} \
     --dump-header "$2.headers" --output "$2" --write-out '%{http_code}' "$base$1" || true
 }
 
@@ -177,7 +181,7 @@ resources=4
 if [[ -n "${SHELL_PATH:-}" ]]; then
   resources=6
   parity_path="${PARITY_PATH:-/projects}"
-  shell_code="$(fetch "$SHELL_PATH" "$work/shell")"
+  shell_code="$(fetch "$SHELL_PATH" "$work/shell" "${SHELL_COOKIE:-}")"
   parity_code="$(fetch "$parity_path" "$work/parity")"
   check shell "$SHELL_PATH" "$shell_code" "$work/shell.headers" '^text/html(;|$)'
   problems=()
@@ -193,10 +197,14 @@ if [[ -n "${SHELL_PATH:-}" ]]; then
   done
   [[ -n "$(header "$work/shell.headers" content-security-policy-report-only)" ]] || problems+=("no report-only CSP")
   grep -qiE '^set-cookie:[[:space:]]*tau_skew=;.*max-age=0' "$work/shell.headers" || problems+=("tau_skew not expired")
+  if [[ "${SHELL_PATH%%\?*}" == / ]]; then
+    shell_cache="$(header "$work/shell.headers" cache-control)"
+    [[ "${shell_cache,,}" == *no-store* ]] || problems+=("Cache-Control '${shell_cache}' at / is not no-store")
+  fi
   shell_repeat="${SHELL_REPEAT:-3}"
   [[ "$shell_repeat" =~ ^[0-9]+$ && "$shell_repeat" -ge 1 ]] || shell_repeat=1
   for attempt in $(seq 2 $((shell_repeat + 1))); do
-    repeat_code="$(fetch "$SHELL_PATH" "$work/shell-repeat")"
+    repeat_code="$(fetch "$SHELL_PATH" "$work/shell-repeat" "${SHELL_COOKIE:-}")"
     [[ "$repeat_code" == 200 ]] || problems+=("request $attempt status $repeat_code")
     grep -qiE '^set-cookie:[[:space:]]*tau_skew=;.*max-age=0' "$work/shell-repeat.headers" ||
       problems+=("tau_skew not expired on request $attempt (cache-status '$(header "$work/shell-repeat.headers" cache-status)')")

@@ -9,7 +9,7 @@ import {
   parseAnswersFile,
   parseQuestionsFile,
 } from '@taucad/chat';
-import type { FileContentSelection } from '#hooks/use-file-content.js';
+import type { FileContentSelection } from '@taucad/files-ui/hooks/use-file-content';
 import type { useFileManager } from '#hooks/use-file-manager.js';
 
 const files = new Map<string, string>();
@@ -17,7 +17,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const manager = mock<ReturnType<typeof useFileManager>>();
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => manager }));
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: (path: string) =>
     files.has(path)
       ? { ...mock<FileContentSelection>(), kind: 'text', content: encoder.encode(files.get(path)) }

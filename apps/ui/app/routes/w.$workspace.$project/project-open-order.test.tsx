@@ -515,12 +515,12 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', async (importOr
 vi.mock('#workbench-records/view-actions.js', () => ({
   useWorkbenchViewCommands: () => ({ edit: async () => true, remove: async () => true }),
 }));
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeSelector: <T,>(selector: (tree: ReadonlyMap<string, unknown>) => T) => selector(new Map()),
   useFileTreeMap: () => new Map(),
 }));
 /* The viewer content's file read: its effect is the viewer marker's mount and removal. */
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: () => {
     useEffect(() => {
       facts.viewer.mounts += 1;

@@ -1,6 +1,6 @@
 [
   {
-    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces and the live operation tier — measured 24.32 kB brotlied on 2026-11-17",
+    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces and the live operation tier — measured 24.8 kB brotlied on 2026-11-17",
     "path": ["dist/**/*.mjs"],
     "limit": "25 kB"
   },

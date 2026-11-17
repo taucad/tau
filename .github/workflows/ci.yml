@@ -157,8 +157,9 @@ jobs:
           # Formal nightly lane (`formal-nightly.yml`, CI throughput review Q-4): a project with a `formal:nightly`
           # target is affected; the deep formal tiers run per project in the merge queue only, seeded by the commit.
           # End-to-end ratchet (`e2e-queue`, operator ruling 2026-11-15): a project with a `test:e2e:queue` target
-          # is affected. That target's `dependsOn` lists the project's end-to-end suites that passed two consecutive
-          # e2e-nightly runs; `e2e-queue-suites` names one row per suite, and e2e-nightly.yml leaves them out.
+          # is affected. That target's `dependsOn` lists the project's end-to-end suites that passed five consecutive
+          # e2e-nightly runs (two before 2026-11-17, when merge-queue defect MQ-3 raised the bar); `e2e-queue-suites`
+          # names one row per suite, and e2e-nightly.yml leaves them out.
           # `pr` is a lane's pull-request rule; without it a pull request runs the lane as the queue does.
           # "queue": the lane runs in the merge queue only. "touched": a pull request runs the lane only
           # for the selected projects that own a file of its own diff (Nx's file-to-project map: the
@@ -808,8 +809,8 @@ jobs:
       projects: ${{ needs.plan.outputs.formal-nightly-projects }}
       seed: ${{ github.sha }}
 
-  # The end-to-end ratchet (operator ruling 2026-11-15): every end-to-end suite that passed two consecutive
-  # e2e-nightly runs leaves the nightly for good and runs here, in the merge queue (and on a push to `main` the
+  # The end-to-end ratchet (operator ruling 2026-11-15): every end-to-end suite that passed five consecutive
+  # e2e-nightly runs (two before 2026-11-17, MQ-3) leaves the nightly for good and runs here, in the merge queue (and on a push to `main` the
   # queue did not prove), whenever its project is affected. A project lists its ratcheted suites in its
   # `test:e2e:queue` target's `dependsOn`; the plan turns them into one row per suite and e2e-nightly.yml skips
   # them, so a later ratchet is a one-line `project.json` edit. A pull request leaves the lane to the queue.

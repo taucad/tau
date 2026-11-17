@@ -111,11 +111,17 @@ const separatorPattern = String.raw`[\\/]`;
  * The `-x` pattern that keeps compileall off the sources whose bytecode a dependency file ships, grouped by
  * directory so it stays short: Windows' interpreter ships hundreds (its standard library and pip), and one absolute path each would pass the
  * 32,767-character command-line limit.
+ * Whole trees of `.py` files that are data, not modules on `sys.path`, are skipped too.
  * @param root - The closure's real root, as compileall is handed it.
  * @param sources - Closure-relative POSIX paths of the sources to skip.
+ * @param dataTrees - Closure-relative POSIX directories whose files compileall must not visit at all.
  * @returns A pattern compileall searches each visited path with.
  */
-export const shippedBytecodeExclusion = (root: string, sources: readonly string[]): string => {
+export const shippedBytecodeExclusion = (
+  root: string,
+  sources: readonly string[],
+  dataTrees: readonly string[] = [],
+): string => {
   const byDirectory = new Map<string, string[]>();
   for (const source of sources) {
     const slash = source.lastIndexOf('/');
@@ -140,8 +146,25 @@ export const shippedBytecodeExclusion = (root: string, sources: readonly string[
     .split(/[\\/]/u)
     .map((part) => escapeRegExp(part))
     .join(separatorPattern);
-  return `^${rootPattern}${separatorPattern}(?:${directories.join('|')})\\.py$`;
+  const sourceAlternative = directories.length === 0 ? [] : [`(?:${directories.join('|')})\\.py`];
+  const treeAlternatives = dataTrees.map(
+    (tree) =>
+      `${tree
+        .split('/')
+        .map((part) => escapeRegExp(part))
+        .join(separatorPattern)}${separatorPattern}.*`,
+  );
+  return `^${rootPattern}${separatorPattern}(?:${[...sourceAlternative, ...treeAlternatives].join('|')})$`;
 };
+
+/**
+ * Trees of `.py` files in python-build-standalone's Windows interpreter that are Tcl/Tk data, never imported: Tix's
+ * preference scripts (`tcl/tix8.4.3/pref/*.py`) are not even valid Python 3, so compiling them fails the seal.
+ * @param platform - The platform the closure is for.
+ * @returns Closure-relative POSIX directories compileall must not visit.
+ */
+const interpreterDataTrees = (platform: NodeJS.Platform): readonly string[] =>
+  platform === 'win32' ? ['python/tcl'] : [];
 
 /**
  * The `.py` sources whose bytecode a dependency file already ships, as closure-relative POSIX paths.
@@ -242,6 +265,7 @@ export const createPythonSeal =
       // staging root from the recorded file names, and `-x` leaves alone the sources whose bytecode a dependency file ships
       // (python-build-standalone's three `encodings` files), which a seal step may not rewrite.
       const shipped = shippedBytecodeSources(input.files);
+      const dataTrees = interpreterDataTrees(platform);
       const compiler = platform === 'win32' ? await stageWindowsCompiler(root, kernelId) : undefined;
       const compiled = await run({
         executablePath: compiler?.executablePath ?? python,
@@ -263,7 +287,9 @@ export const createPythonSeal =
           root,
           '-e',
           root,
-          ...(shipped.length === 0 ? [] : ['-x', shippedBytecodeExclusion(root, shipped)]),
+          ...(shipped.length === 0 && dataTrees.length === 0
+            ? []
+            : ['-x', shippedBytecodeExclusion(root, shipped, dataTrees)]),
           root,
         ],
         readablePaths: compiler === undefined ? [root] : [compiler.directory],

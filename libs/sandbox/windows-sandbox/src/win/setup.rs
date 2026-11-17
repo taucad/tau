@@ -21,6 +21,7 @@ use super::pipe::HandleIo;
 use super::profile;
 use super::sid::{ADMINISTRATORS, Sid};
 use super::util::{Error, Local, Owned, Result, check, check_status, program_data, random_bytes, wide, wipe};
+use super::volume;
 use super::wfp;
 use crate::install::{
     ACCOUNT, FIREWALL_RULES, GROUP, INSTALL_DIR, InstallRecord, PASSWORD_FILE, RECORD_FILE, RECORD_VERSION, RUNNER_DIR,
@@ -97,6 +98,22 @@ fn with_fence(mut value: serde_json::Value, record: Option<&InstallRecord>) -> s
     value
 }
 
+/// `%SystemDrive%\`, the volume root that must carry the volume capability's grant.
+fn system_drive_root() -> String {
+    let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_owned());
+    format!("{}\\", drive.trim_end_matches('\\'))
+}
+
+/// Whether the record names the volume capability this build derives and every recorded root still carries
+/// its grant, the system drive's among them.
+pub fn volume_roots_granted(record: &InstallRecord) -> bool {
+    let Ok(sid) = volume::capability_sid() else { return false };
+    let system_root = system_drive_root();
+    record.volume_capability_sid.as_deref().is_some_and(|recorded| recorded.eq_ignore_ascii_case(&sid.to_sddl()))
+        && record.volume_roots.iter().any(|root| root.eq_ignore_ascii_case(&system_root))
+        && record.volume_roots.iter().all(|root| volume::granted(root, &sid))
+}
+
 pub fn status() -> i32 {
     let value = match load_record() {
         Ok(Some(record)) => {
@@ -104,6 +121,7 @@ pub fn status() -> i32 {
             value["installed"] = true.into();
             value["profilePresent"] =
                 Sid::parse(&record.account_sid).map(|sid| profile::present(&sid)).unwrap_or(false).into();
+            value["volumeRootsGranted"] = volume_roots_granted(&record).into();
             with_fence(value, Some(&record))
         }
         Ok(None) => with_fence(serde_json::json!({ "installed": false }), None),
@@ -258,6 +276,21 @@ pub fn setup(options: &SetupOptions) -> Result<InstallRecord> {
         &protected,
     )?;
 
+    // The volume capability's root grants (`volume.rs`). The system drive must take it; another fixed volume
+    // that refuses (locked, or not NTFS) is reported and left out.
+    let volume_sid = volume::capability_sid()?;
+    let system_root = system_drive_root();
+    let mut volume_roots = Vec::new();
+    for root in volume::fixed_roots() {
+        match volume::grant(&root, &volume_sid) {
+            Ok(()) => volume_roots.push(root),
+            Err(err) if !root.eq_ignore_ascii_case(&system_root) => {
+                eprintln!("tau-windows-sandbox setup: {root} not granted to the volume capability: {err}");
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
     let rules = firewall::ensure_rules(&account_sid.to_sddl(), &options.proxy_ports)?;
     let filters = wfp::install(&account_sid.to_sddl(), &options.proxy_ports)?;
 
@@ -272,6 +305,8 @@ pub fn setup(options: &SetupOptions) -> Result<InstallRecord> {
         wfp_filters: filters,
         for_user: for_user_sddl,
         runner: runner.to_string_lossy().into_owned(),
+        volume_capability_sid: Some(volume_sid.to_sddl()),
+        volume_roots,
     };
     let bytes = serde_json::to_vec_pretty(&record).map_err(|err| Error::msg(err.to_string()))?;
     let record_path = dir.join(RECORD_FILE);
@@ -291,7 +326,20 @@ pub fn revoke() -> Result<()> {
             errors.push(err.to_string());
         }
     };
-    let recorded = load_record().ok().flatten().map(|r| r.firewall_rules).unwrap_or_default();
+    let record = load_record().ok().flatten();
+    // The volume capability's grants: every recorded root, and every fixed root now, in case a record was lost.
+    if let Ok(volume_sid) = volume::capability_sid() {
+        let mut roots = record.as_ref().map(|r| r.volume_roots.clone()).unwrap_or_default();
+        for root in volume::fixed_roots() {
+            if !roots.iter().any(|known| known.eq_ignore_ascii_case(&root)) {
+                roots.push(root);
+            }
+        }
+        for root in roots {
+            note(volume::revoke(&root, &volume_sid));
+        }
+    }
+    let recorded = record.map(|r| r.firewall_rules).unwrap_or_default();
     let mut names: Vec<&str> = FIREWALL_RULES.to_vec();
     for name in &recorded {
         if name.starts_with("tau_sandbox_") && !names.contains(&name.as_str()) {

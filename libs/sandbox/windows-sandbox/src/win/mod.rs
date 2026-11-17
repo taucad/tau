@@ -17,4 +17,5 @@ pub mod runner;
 pub mod setup;
 pub mod sid;
 pub mod util;
+pub mod volume;
 pub mod wfp;

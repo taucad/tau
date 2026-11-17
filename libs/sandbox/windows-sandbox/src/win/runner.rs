@@ -47,6 +47,7 @@ use super::pipe::{self, HandleIo};
 use super::profile;
 use super::sid::{EVERYONE, Sid, current_user, open_process_token, token_logon_sid};
 use super::util::{Error, Local, Owned, Result, check, clear_ctrl_c_ignore, program_files, system_root, wide};
+use super::volume;
 use crate::appcontainer::{is_package_sid, verify_token};
 use crate::cmdline::{command_line, environment_block, is_capability_sid};
 use crate::frame::{self, Frame, read_frame, write_frame};
@@ -364,6 +365,8 @@ struct Identity<'a> {
     logon: &'a Sid,
     package: &'a Sid,
     person: &'a Sid,
+    /// The volume capability (`volume.rs`), the shell's one capability.
+    volume: &'a Sid,
 }
 
 /// Create the shell suspended in this launch's AppContainer and admit it ([`admit`]). It runs only once the
@@ -379,7 +382,7 @@ fn spawn(spec: &RunnerSpec, identity: &Identity, job: &Job, prepared: &Prepared)
     let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
     startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
     startup.StartupInfo.lpDesktop = desktop.as_mut_ptr();
-    let capabilities = Capabilities::none(identity.package)?;
+    let capabilities = Capabilities::new(identity.package, std::slice::from_ref(identity.volume));
     let mut attributes = AttributeList::new(3)?;
     attributes.set(
         PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
@@ -479,7 +482,8 @@ fn admit(process: &Owned, spec: &RunnerSpec, identity: &Identity) -> Result<(Own
     )?;
     let token = Owned(raw);
     let facts = token_facts(token.raw())?;
-    verify_token(&facts, &spec.package_sid, &spec.capability_sid).map_err(Error::msg)?;
+    verify_token(&facts, &spec.package_sid, &spec.capability_sid, &[identity.volume.to_sddl().as_str()])
+        .map_err(Error::msg)?;
     set_default_dacl(token.raw(), identity.logon, identity.package)?;
     grant_kernel_object(process.raw(), identity.person, PROCESS_QUERY_LIMITED_INFORMATION, "shell process")?;
     grant_kernel_object(token.raw(), identity.person, PERSON_TOKEN_ACCESS, "shell token")?;
@@ -561,7 +565,8 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
     );
     let (token, logon) = mint_token(&capability, &package).at("token")?;
     let account = current_user().at("registry")?;
-    let identity = Identity { token: &token, logon: &logon, package: &package, person: &person };
+    let volume = volume::capability_sid().at("token")?;
+    let identity = Identity { token: &token, logon: &logon, package: &package, person: &person, volume: &volume };
     send(
         sink,
         &Frame::new(

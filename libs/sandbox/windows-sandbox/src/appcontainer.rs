@@ -6,6 +6,19 @@
 /// (concurrent or later) ever share a package SID, and with it any grant.
 pub const PACKAGE_NAME_PREFIX: &str = "tau.sandbox.";
 
+/// The one capability every launch's AppContainer carries. `setup` grants its SID (derived from this name with
+/// `DeriveCapabilitySidsFromName`) on each fixed volume's root folder, this folder only, so PowerShell's
+/// FileSystem provider can resolve `C:\`: a root's default DACL admits no AppContainer, and without it
+/// `Start-Job` failed with "Cannot find path 'C:\'" (WIN-X64 run 44020877855). The same pattern as Chromium's
+/// installer granting its `lpacChromeInstallFiles` capability on its own folder.
+pub const VOLUME_CAPABILITY_NAME: &str = "tauSandboxVolumeRoot";
+
+/// What the volume capability gets on a root, this folder only: `FILE_LIST_DIRECTORY | FILE_TRAVERSE |
+/// FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE`. Listing is included because the provider resolves a path's
+/// case by enumerating each parent folder, the root among them; attributes alone would make `Test-Path C:\` true
+/// and still fail every path below it.
+pub const VOLUME_ROOT_ACCESS: u32 = 0x0012_00A1;
+
 /// `S-1-16-4096`: the Low mandatory level every AppContainer token carries.
 pub const LOW_INTEGRITY_SID: &str = "S-1-16-4096";
 
@@ -64,10 +77,10 @@ impl TokenFacts {
     }
 }
 
-/// The shell's token must be an AppContainer token for exactly this launch's package, with no capability
-/// at all, still write-restricted by this launch's capability SID, at Low integrity. Anything else is
-/// refused before the shell's first instruction runs.
-pub fn verify_token(facts: &TokenFacts, package: &str, capability: &str) -> Result<(), String> {
+/// The shell's token must be an AppContainer token for exactly this launch's package, with exactly the
+/// `capabilities` given (the volume capability) and no other, still write-restricted by this launch's
+/// capability SID, at Low integrity. Anything else is refused before the shell's first instruction runs.
+pub fn verify_token(facts: &TokenFacts, package: &str, capability: &str, capabilities: &[&str]) -> Result<(), String> {
     if !facts.app_container {
         return Err("the shell's token is not an AppContainer token".to_owned());
     }
@@ -76,8 +89,16 @@ pub fn verify_token(facts: &TokenFacts, package: &str, capability: &str) -> Resu
         Some(actual) => return Err(format!("the shell's package SID is {actual}, not this launch's {package}")),
         None => return Err("the shell's token names no package SID".to_owned()),
     }
-    if !facts.capabilities.is_empty() {
-        return Err(format!("the shell's token carries capabilities: {}", facts.capabilities.join(",")));
+    let mut actual: Vec<String> = facts.capabilities.iter().map(|sid| sid.to_uppercase()).collect();
+    let mut expected: Vec<String> = capabilities.iter().map(|sid| sid.to_uppercase()).collect();
+    actual.sort();
+    expected.sort();
+    if actual != expected {
+        return Err(format!(
+            "the shell's token carries capabilities [{}], not exactly [{}]",
+            facts.capabilities.join(","),
+            capabilities.join(",")
+        ));
     }
     if !facts.restricted.iter().any(|sid| sid.eq_ignore_ascii_case(capability)) {
         return Err("the shell's token is not restricted by this launch's capability SID".to_owned());
@@ -126,6 +147,94 @@ pub fn label_aces(sacl: &str) -> Vec<&str> {
     aces
 }
 
+/// A DACL in SDDL (`D:<flags>(ace)(ace)…`, as `ConvertSecurityDescriptorToStringSecurityDescriptorW` writes it
+/// for `DACL_SECURITY_INFORMATION`) as its `D:<flags>` prefix and its ACE strings, parentheses included. `None`
+/// when it is not one.
+pub fn dacl_aces(dacl: &str) -> Option<(&str, Vec<&str>)> {
+    if !dacl.starts_with("D:") {
+        return None;
+    }
+    let start = dacl.find('(').unwrap_or(dacl.len());
+    let (prefix, mut rest) = dacl.split_at(start);
+    if prefix[2..].contains([')', ':']) {
+        return None;
+    }
+    let mut aces = Vec::new();
+    while !rest.is_empty() {
+        if !rest.starts_with('(') {
+            return None;
+        }
+        let mut depth = 0usize;
+        let mut end = None;
+        for (i, c) in rest.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let end = end?;
+        aces.push(&rest[..=end]);
+        rest = &rest[end + 1..];
+    }
+    Some((prefix, aces))
+}
+
+/// The ACE's field `index` (`type;flags;rights;object;inherited object;SID`), split at top level.
+fn ace_field(ace: &str, index: usize) -> Option<&str> {
+    ace.strip_prefix('(')?.strip_suffix(')')?.split(';').nth(index)
+}
+
+/// `dacl` without any ACE for `sid`. `None` when `dacl` does not parse.
+pub fn dacl_without(dacl: &str, sid: &str) -> Option<String> {
+    let (prefix, aces) = dacl_aces(dacl)?;
+    let kept: String = aces
+        .into_iter()
+        .filter(|ace| !ace_field(ace, 5).is_some_and(|field| field.eq_ignore_ascii_case(sid)))
+        .collect();
+    Some(format!("{prefix}{kept}"))
+}
+
+/// `dacl` with exactly one access-allowed ACE for `sid` (`mask`, no inheritance: this folder only) in place of
+/// any it had, after the explicit ACEs and before the inherited ones, so the DACL stays in canonical order.
+pub fn dacl_with_root_grant(dacl: &str, sid: &str, mask: u32) -> Option<String> {
+    let cleaned = dacl_without(dacl, sid)?;
+    let (prefix, aces) = dacl_aces(&cleaned)?;
+    let grant = format!("(A;;0x{mask:x};;;{sid})");
+    let at =
+        aces.iter().position(|ace| ace_field(ace, 1).is_some_and(|flags| flags.contains("ID"))).unwrap_or(aces.len());
+    let mut out = prefix.to_owned();
+    for (i, ace) in aces.iter().enumerate() {
+        if i == at {
+            out.push_str(&grant);
+        }
+        out.push_str(ace);
+    }
+    if at == aces.len() {
+        out.push_str(&grant);
+    }
+    Some(out)
+}
+
+/// Whether `dacl` holds exactly the root grant [`dacl_with_root_grant`] writes for `sid`.
+pub fn dacl_has_root_grant(dacl: &str, sid: &str, mask: u32) -> bool {
+    dacl_aces(dacl).is_some_and(|(_, aces)| {
+        let mine: Vec<&&str> =
+            aces.iter().filter(|ace| ace_field(ace, 5).is_some_and(|field| field.eq_ignore_ascii_case(sid))).collect();
+        mine.len() == 1
+            && ace_field(mine[0], 0) == Some("A")
+            && ace_field(mine[0], 1) == Some("")
+            && ace_field(mine[0], 2).and_then(|rights| u32::from_str_radix(rights.trim_start_matches("0x"), 16).ok())
+                == Some(mask)
+    })
+}
+
 /// Whether a descriptor read back after a restore is the journaled one: owner, group, DACL and the DACL's
 /// control flags exactly, and the same mandatory-label ACEs. The SACL's own control flags (`S:AI`, `S:P`)
 /// are not compared: writing them needs `SACL_SECURITY_INFORMATION` and with it `SeSecurityPrivilege`,
@@ -142,13 +251,44 @@ mod tests {
 
     const PACKAGE: &str = "S-1-15-2-1-2-3-4-5-6-4294967295";
     const CAPABILITY: &str = "S-1-5-21-11-22-33-44";
+    const VOLUME: &str = "S-1-15-3-1024-1-2-3-4-5-6-7-8";
+
+    #[test]
+    fn grants_the_volume_capability_on_a_root_exactly_once_and_removes_it_exactly() {
+        let root = "D:PAI(A;OICIIO;FA;;;CO)(A;;0x1301bf;;;AU)(A;OICI;FA;;;SY)(A;;0x1200a9;;;BU)";
+        let granted = dacl_with_root_grant(root, VOLUME, VOLUME_ROOT_ACCESS).unwrap();
+        assert_eq!(granted, format!("{root}(A;;0x1200a1;;;{VOLUME})"));
+        assert!(dacl_has_root_grant(&granted, VOLUME, VOLUME_ROOT_ACCESS));
+        assert!(!dacl_has_root_grant(root, VOLUME, VOLUME_ROOT_ACCESS));
+        // Idempotent, and a stale or widened grant is replaced, not merged.
+        assert_eq!(dacl_with_root_grant(&granted, VOLUME, VOLUME_ROOT_ACCESS).unwrap(), granted);
+        let widened = format!("{root}(A;OICI;FA;;;{VOLUME})");
+        assert_eq!(dacl_with_root_grant(&widened, VOLUME, VOLUME_ROOT_ACCESS).unwrap(), granted);
+        assert!(!dacl_has_root_grant(&widened, VOLUME, VOLUME_ROOT_ACCESS));
+        assert_eq!(dacl_without(&granted, &VOLUME.to_lowercase()).unwrap(), root);
+        // Before the inherited ACEs, and a conditional ACE's nested parentheses survive.
+        let inherited = "D:AI(D;;FA;;;S-1-5-21-1-2-3-4)(XA;;FR;;;WD;(Member_of {SID(BA)}))(A;ID;FA;;;SY)";
+        assert_eq!(
+            dacl_with_root_grant(inherited, VOLUME, VOLUME_ROOT_ACCESS).unwrap(),
+            format!(
+                "D:AI(D;;FA;;;S-1-5-21-1-2-3-4)(XA;;FR;;;WD;(Member_of {{SID(BA)}}))(A;;0x1200a1;;;{VOLUME})(A;ID;FA;;;SY)"
+            )
+        );
+        for malformed in ["O:SYD:(A;;FA;;;SY)", "D:(A;;FA;;;SY", "D:(A;;FA;;;SY)x"] {
+            assert_eq!(dacl_with_root_grant(malformed, VOLUME, VOLUME_ROOT_ACCESS), None, "{malformed}");
+        }
+        assert_eq!(
+            dacl_with_root_grant("D:", VOLUME, VOLUME_ROOT_ACCESS).unwrap(),
+            format!("D:(A;;0x1200a1;;;{VOLUME})")
+        );
+    }
 
     fn facts() -> TokenFacts {
         TokenFacts {
             user: "S-1-5-21-9-9-9-1001".into(),
             app_container: true,
             package: Some(PACKAGE.into()),
-            capabilities: Vec::new(),
+            capabilities: vec![VOLUME.into()],
             restricted: vec![CAPABILITY.into(), "S-1-5-5-0-12345".into(), "S-1-1-0".into()],
             integrity: LOW_INTEGRITY_SID.into(),
         }
@@ -191,25 +331,27 @@ mod tests {
 
     #[test]
     fn accepts_exactly_this_launchs_bare_appcontainer() {
-        assert_eq!(verify_token(&facts(), PACKAGE, CAPABILITY), Ok(()));
+        assert_eq!(verify_token(&facts(), PACKAGE, CAPABILITY, &[VOLUME]), Ok(()));
         assert!(facts().describe().contains("appContainer=true package=S-1-15-2-"));
     }
 
     #[test]
     fn refuses_every_other_token() {
         type Change = fn(&mut TokenFacts);
-        let cases: [(&str, Change); 6] = [
+        let cases: [(&str, Change); 8] = [
             ("not appcontainer", |f| f.app_container = false),
             ("no package", |f| f.package = None),
             ("other package", |f| f.package = Some("S-1-15-2-9-9-9-9-9-9-9".into())),
-            ("capabilities", |f| f.capabilities = vec!["S-1-15-3-1".into()]),
+            ("no capability", |f| f.capabilities.clear()),
+            ("another capability", |f| f.capabilities = vec!["S-1-15-3-1".into()]),
+            ("an extra capability", |f| f.capabilities.push("S-1-15-3-1".into())),
             ("unrestricted", |f| f.restricted.clear()),
             ("medium", |f| f.integrity = "S-1-16-8192".into()),
         ];
         for (name, change) in cases {
             let mut token = facts();
             change(&mut token);
-            assert!(verify_token(&token, PACKAGE, CAPABILITY).is_err(), "{name}");
+            assert!(verify_token(&token, PACKAGE, CAPABILITY, &[VOLUME]).is_err(), "{name}");
         }
     }
 

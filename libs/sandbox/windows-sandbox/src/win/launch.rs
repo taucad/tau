@@ -27,7 +27,7 @@ use super::lowbox::derive_package_sid;
 use super::pipe::{self, HandleIo};
 use super::profile;
 use super::restore::restore_journal;
-use super::setup::{fence, load_password, load_record};
+use super::setup::{fence, load_password, load_record, volume_roots_granted};
 use super::sid::{Sid, current_user};
 use super::util::{
     Error, Owned, Result, clear_ctrl_c_ignore, program_files, random_u32s, system_root, wide, wipe, wipe_wide,
@@ -177,6 +177,14 @@ impl Session {
         }
         if !profile::present(&account) {
             return Err(Refused::unavailable("the sandbox account has no profile (run setup again)", None));
+        }
+        // The shell's one capability must be granted on the system drive's root, or PowerShell cannot resolve
+        // `C:\` (`volume.rs`).
+        if !volume_roots_granted(record) {
+            return Err(Refused::unavailable(
+                "the sandbox's volume capability is not granted on the volume roots (run setup again)",
+                None,
+            ));
         }
         let capability_text =
             capability_sid(random_u32s::<4>().map_err(unavailable("no randomness for the capability SID"))?);

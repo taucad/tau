@@ -48,6 +48,13 @@ pub struct InstallRecord {
     pub for_user: String,
     /// The installed runner copy `launch` starts as `TauSandbox`.
     pub runner: String,
+    /// The volume capability SID (`DeriveCapabilitySidsFromName("tauSandboxVolumeRoot")`). Absent in records
+    /// written before it existed; `launch` then refuses until `setup` runs again.
+    #[serde(default)]
+    pub volume_capability_sid: Option<String>,
+    /// The fixed volume roots `setup` granted the volume capability on, this folder only; `revoke` removes it.
+    #[serde(default)]
+    pub volume_roots: Vec<String>,
 }
 
 impl InstallRecord {
@@ -313,6 +320,8 @@ mod tests {
             wfp_filters: wfp_filters(&PROXY_PORTS).unwrap().into_iter().map(|f| f.name).collect(),
             for_user: "S-1-5-21-9-9-9-500".into(),
             runner: "C:\\ProgramData\\Tau\\Sandbox\\bin\\tau-windows-sandbox.exe".into(),
+            volume_capability_sid: Some("S-1-15-3-1024-1-2-3-4-5-6-7-8".into()),
+            volume_roots: vec!["C:\\".into()],
         };
         let bytes = serde_json::to_vec(&record).unwrap();
         assert!(String::from_utf8_lossy(&bytes).contains("\"accountSid\""));

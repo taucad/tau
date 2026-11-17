@@ -1079,11 +1079,14 @@ describe.runIf(enabled)('Windows shell conformance', () => {
 
   conformance(
     'W08',
-    'the shell runs in a fresh AppContainer per launch: lowbox token, no capability, write-restricted, Low integrity',
+    'the shell runs in a fresh AppContainer per launch: lowbox token, only the volume capability, write-restricted, Low integrity',
     async () => {
-      const { accountSid } = helperStatus;
+      const { accountSid, volumeCapabilitySid, volumeRootsGranted } = helperStatus;
 
       expect(typeof accountSid).toBe('string');
+      /* The volume capability: a capability SID derived from Tau's fixed name, granted on the volume roots. */
+      expect(volumeCapabilitySid).toMatch(/^S-1-15-3-1024(?:-\d+){8}$/u);
+      expect(volumeRootsGranted).toBe(true);
       /* One launch that parks once it has recorded its PID and the environment it sees, so its token is read live. */
       const observeLaunch = async (
         tag: string,
@@ -1129,7 +1132,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
         expect(token.image.toLowerCase()).toBe(shell.path.toLowerCase());
         expect(token.isAppContainer).toBe(true);
         expect(token.package).toMatch(/^S-1-15-2(?:-\d+){7}$/u);
-        expect(token.capabilities).toStrictEqual([]);
+        /* Exactly one capability: Tau's volume capability, granted on the volume roots by `setup`. */
+        expect(token.capabilities).toStrictEqual([volumeCapabilitySid]);
         /* Still write-restricted: the launch's capability SID, the runner's logon SID and Everyone. */
         expect(token.restricted).toHaveLength(3);
         expect(token.restricted).toContain('S-1-1-0');

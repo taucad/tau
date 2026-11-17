@@ -43,6 +43,8 @@ use super::sid::{Sid, token_information, token_user};
 use super::util::{Error, Local, Owned, Result, check_status, wide};
 use crate::appcontainer::TokenFacts;
 
+/// `SE_GROUP_ENABLED`: a capability the token carries enabled.
+const SE_GROUP_ENABLED: u32 = 0x0000_0004;
 /// `DIRECTORY_QUERY | DIRECTORY_TRAVERSE | DIRECTORY_CREATE_OBJECT | DIRECTORY_CREATE_SUBDIRECTORY`: what
 /// kernelbase asks for when an AppContainer process opens its own named-object directory.
 const DIRECTORY_OPEN_ACCESS: u32 = 0x000F;
@@ -84,23 +86,28 @@ unsafe extern "system" {
     fn NtOpenSymbolicLinkObject(handle: *mut HANDLE, access: u32, attributes: *const ObjectAttributes) -> NTSTATUS;
 }
 
-/// The `SECURITY_CAPABILITIES` attribute value for a package with no capability. Owns the package SID the
-/// pointer refers to, so it must outlive the `CreateProcessAsUserW` call it is passed to.
+/// The `SECURITY_CAPABILITIES` attribute value for a package and its capabilities (enabled). Owns the SIDs the
+/// pointers refer to, so it must outlive the `CreateProcessAsUserW` call it is passed to.
 pub struct Capabilities {
     _package: Sid,
+    _sids: Vec<Sid>,
+    _entries: Vec<SID_AND_ATTRIBUTES>,
     value: SECURITY_CAPABILITIES,
 }
 
 impl Capabilities {
-    pub fn none(package: &Sid) -> Result<Box<Self>> {
+    pub fn new(package: &Sid, capabilities: &[Sid]) -> Box<Self> {
         let package = package.clone();
+        let sids = capabilities.to_vec();
+        let mut entries: Vec<SID_AND_ATTRIBUTES> =
+            sids.iter().map(|sid| SID_AND_ATTRIBUTES { Sid: sid.as_psid(), Attributes: SE_GROUP_ENABLED }).collect();
         let value = SECURITY_CAPABILITIES {
             AppContainerSid: package.as_psid(),
-            Capabilities: std::ptr::null_mut(),
-            CapabilityCount: 0,
+            Capabilities: if entries.is_empty() { std::ptr::null_mut() } else { entries.as_mut_ptr() },
+            CapabilityCount: entries.len() as u32,
             Reserved: 0,
         };
-        Ok(Box::new(Self { _package: package, value }))
+        Box::new(Self { _package: package, _sids: sids, _entries: entries, value })
     }
 
     pub fn as_ptr(&self) -> *const c_void {

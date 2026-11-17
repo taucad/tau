@@ -20,33 +20,33 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
   token. The runner first mints the restricted token (`DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED`) with three
   restricting SIDs: a fresh random per-launch capability SID (`S-1-5-21-…`), the runner's logon SID and Everyone. It
   then starts the shell with `CreateProcessAsUserW` on that token and `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` for
-  a fresh per-launch package SID and no capabilities (no `internetClient`, nothing else). Windows derives the lowbox
-  token from the restricted token, makes it Low integrity and keeps the restricting SIDs. Every access check on every
-  securable (files, registry, named pipes, sections, ALPC ports, desktops) then has three passes, and access needs all
-  three. The first pass is the account and its groups. The second is the AppContainer pass, which matches only ACEs for
-  the launch's package SID or for `ALL APPLICATION PACKAGES`. The third, for writes only, is the restricted pass, which
-  matches only ACEs for the restricting SIDs. Mandatory integrity applies on top: a Low process cannot write to an
-  unlabelled (Medium) object. So an object whose DACL grants only Everyone (A22), or uses the default named-pipe DACL
-  (Everyone may read), is closed to the shell. The default DACL of the shell's token gives the logon SID and the package
-  all access and `OWNER RIGHTS` read-control only.
+  a fresh per-launch package SID and exactly one capability, Tau's volume capability (below; no `internetClient`,
+  nothing else). Windows derives the lowbox token from the restricted token, makes it Low integrity and keeps the
+  restricting SIDs. Every access check on every securable (files, registry, named pipes, sections, ALPC ports, desktops)
+  then has three passes, and access needs all three. The first pass is the account and its groups. The second is the
+  AppContainer pass, which matches only ACEs for the launch's package SID or for `ALL APPLICATION PACKAGES`. The third,
+  for writes only, is the restricted pass, which matches only ACEs for the restricting SIDs. Mandatory integrity applies
+  on top: a Low process cannot write to an unlabelled (Medium) object. So an object whose DACL grants only Everyone
+  (A22), or uses the default named-pipe DACL (Everyone may read), is closed to the shell. The default DACL of the
+  shell's token gives the logon SID and the package all access and `OWNER RIGHTS` read-control only.
 - **A registered AppContainer per launch.** The launcher derives the package SID from a random name,
-  `tau.sandbox.<32 hex digits>`, with `DeriveAppContainerSidFromAppContainerName`, a hash with no side effect, so it
-  can grant and journal before anything runs. No two launches, concurrent or later, share a package or any grant to
-  it. The runner registers that name with `CreateAppContainerProfile` (no capabilities) in `TauSandbox`'s own profile,
-  which `LOGON_WITH_PROFILE` loads: the mapping goes in `TauSandbox`'s `HKCU` and the folder under its own
-  `%LOCALAPPDATA%\Packages`. The runner refuses at stage `appcontainer` unless the returned SID is the launcher's and
-  the folder lies under the account's own `%LOCALAPPDATA%`, so nothing lands in the person's profile. `CreateProcess`
-  needs the registration: for an unregistered package it fails with `ERROR_FILE_NOT_FOUND` (WIN-X64 run 44017795494).
-  `CreateProcess` builds the package's named-object namespace (`\Sessions\<n>\AppContainerNamedObjects\<package
-SID>`, with its `RPC Control` directory and its `Global`, `Local` and `Session` links) as it does for any
-  AppContainer, and hands the handles to the kernel, so the namespace lives as long as a token of the package. A name
-  the shell creates lands in its own directory; a name it opens elsewhere still faces the AppContainer check. Tau does
-  not lay the namespace out itself: with a hand-built one (`NtCreateLowBoxToken`, after Chromium's lowbox policy)
-  PowerShell started and then failed its first COM wait with `E_FAIL` (WIN-X64 run 44014261732). That namespace's DACL
-  is built for unrestricted AppContainer tokens, and a write-restricted token needs one of its restricting SIDs
-  granted to create an object there. So the runner adds one non-inheritable ACE for its logon SID (query, traverse,
-  create object, create subdirectory and read-control; never `DELETE` or `WRITE_DAC`) to the directory and to its
-  `RPC Control`. These are temporary objects of the launch, so nothing is journaled; a failed grant is logged and the
+  `tau.sandbox.<32 hex digits>`, with `DeriveAppContainerSidFromAppContainerName`, a hash with no side effect, so it can
+  grant and journal before anything runs. No two launches, concurrent or later, share a package or any grant to it. The
+  runner registers that name with `CreateAppContainerProfile` in `TauSandbox`'s own profile, which `LOGON_WITH_PROFILE`
+  loads: the mapping goes in `TauSandbox`'s `HKCU` and the folder under its own `%LOCALAPPDATA%\Packages`. The runner
+  refuses at stage `appcontainer` unless the returned SID is the launcher's and the folder lies under the account's own
+  `%LOCALAPPDATA%`, so nothing lands in the person's profile. `CreateProcess` needs the registration: for an
+  unregistered package it fails with `ERROR_FILE_NOT_FOUND` (WIN-X64 run 44017795494). `CreateProcess` builds the
+  package's named-object namespace ( \Sessions\<n>\AppContainerNamedObjects\<package
+  SID>`, with its `RPC Control`directory and its`Global`, `Local`and`Session` links) as it does for any
+AppContainer, and hands the handles to the kernel, so the namespace lives as long as a token of the package. A name
+the shell creates lands in its own directory; a name it opens elsewhere still faces the AppContainer check. Tau does
+not lay the namespace out itself: with a hand-built one (`NtCreateLowBoxToken`, after Chromium's lowbox policy)
+PowerShell started and then failed its first COM wait with `E_FAIL`(WIN-X64 run 44014261732). That namespace's DACL
+is built for unrestricted AppContainer tokens, and a write-restricted token needs one of its restricting SIDs
+granted to create an object there. So the runner adds one non-inheritable ACE for its logon SID (query, traverse,
+create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`) to the directory and to its
+`RPC Control`. These are temporary objects of the launch, so nothing is journaled; a failed grant is logged and the
   launch goes on.
 - **Registration lifetime.** Before registering, the runner creates the named mutex `Global\<package name>` and holds
   it until it exits, so a live launch is visible to every other runner. The runner deletes the registration with
@@ -67,10 +67,28 @@ SID>`, with its `RPC Control` directory and its `Global`, `Local` and `Session` 
   Windows since Vista). If any variable differs from the launch's, it writes the launch's own block into new memory
   of the shell's process, points the parameters at it, and reads it back to compare. It logs the names it restored,
   never their values. Any failure refuses the launch at stage `environment`.
+- **Volume roots.** A volume root's default DACL grants Users and Authenticated Users but no AppContainer, so
+  PowerShell's FileSystem provider cannot resolve `C:\`. `Start-Job` failed with "Cannot find path 'C:\' because it does
+  not exist" (WIN-X64 run 44020877855). Per-launch grants cannot fix this, because the person has no `WRITE_DAC` on
+  `C:\`, and granting `ALL APPLICATION PACKAGES` would open the root to every app on the machine. So Tau has one durable
+  capability, `DeriveCapabilitySidsFromName("tauSandboxVolumeRoot")` (`S-1-15-3-1024-…`, the same SID on every machine),
+  and every launch's AppContainer carries exactly that capability. Elevated `setup` grants it one non-inheritable ACE on
+  each fixed volume's root folder, this folder only:
+  `FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE` (`0x1200a1`). Listing is
+  included because the provider resolves a path's case by enumerating each parent folder, the root among them, so
+  attributes alone would make `Test-Path C:\` true and still fail every path below it. The cost is that the shell sees
+  the names of a volume's top-level folders. This is the pattern Chromium's installer uses for its
+  `lpacChromeInstallFiles` capability. The DACL is written with `SetKernelObjectSecurity` on the root's handle, which
+  never propagates to the volume's contents, and only that one ACE is added or replaced; it is read back to check.
+  `setup` must grant it on the system drive and reports any other fixed volume that refuses. The install record keeps
+  `volumeCapabilitySid` and `volumeRoots`. `status` reports `volumeRootsGranted`, and `launch` refuses "run setup again"
+  unless every recorded root, the system drive's among them, still carries the grant. `revoke` removes every ACE for the
+  capability from the recorded and current fixed roots, and nothing else. A volume added after `setup` gets the grant on
+  the next `setup`.
 - **Admission.** The runner starts the shell suspended. It reads the token the kernel actually assigned to the shell and
-  refuses anything but an AppContainer token for this launch's package with zero capabilities, the launch's capability
-  SID among its restricting SIDs, and Low integrity. Any other token is killed before its first instruction, and the
-  runner reports `runner-error` at stage `spawn`. It then adds one ACE for the person to the shell's process
+  refuses anything but an AppContainer token for this launch's package with exactly the volume capability, the launch's
+  capability SID among its restricting SIDs, and Low integrity. Any other token is killed before its first instruction,
+  and the runner reports `runner-error` at stage `spawn`. It then adds one ACE for the person to the shell's process
   (`PROCESS_QUERY_LIMITED_INFORMATION`) and to its token (`TOKEN_QUERY`), so the host can confirm all of this from
   outside (conformance W08). It sets the token's default DACL (above), grants the namespace (above) and checks `HKCU`
   (below). Last, it logs a `probe:` line of what the shell's own token can reach, impersonated on a separate thread: the
@@ -78,9 +96,9 @@ SID>`, with its `RPC Control` directory and its `Global`, `Local` and `Session` 
   apartment with `CoWaitForMultipleHandles` on a signalled and an unsignalled event (what .NET does for
   `WaitHandle.WaitOne` on an STA thread). The probe never admits or refuses a launch. Only then does it resume the
   shell. It logs the token through `runner-log`, for example
-  `shell token: user=… appContainer=true package=S-1-15-2-… capabilities=[] restricted=[…] integrity=S-1-16-4096`. A
-  host sees these lines through the provider's `onHelperDiagnostic` option; the conformance suite prints them and keeps
-  them in its receipt.
+  `shell token: user=… appContainer=true package=S-1-15-2-… capabilities=[S-1-15-3-1024-…] restricted=[…] integrity=S-1-16-4096`.
+  A host sees these lines through the provider's `onHelperDiagnostic` option; the conformance suite prints them and
+  keeps them in its receipt.
 - **Reads and writes.** `TauSandbox` cannot open another account's profile (the default profile DACL). The helper grants
   on the launch's readable and writable roots and adds deny ACEs for the denied set inside them. Every grant names the
   package SID beside the account: nothing is granted to `ALL APPLICATION PACKAGES`, and nothing to a broad root. Per
@@ -187,14 +205,14 @@ SID>`, with its `RPC Control` directory and its `Global`, `Local` and `Session` 
 
 ## Subcommands
 
-| Command                    | Runs as             | Purpose                                                                                                                                                                                                      |
-| -------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `status`                   | the person          | Print the install record as JSON with `"installed":true`, `{"installed":false}` when absent or unreadable, plus `firewallEnabled` and `rulesPresent` (below). Never elevates.                                |
-| `setup`                    | Administrator (UAC) | Create or repair the account, its profile, group, password file, firewall rules and WFP filters; write the install record. Idempotent. `--for-user <SID>` names the person whose host may read the password. |
-| `revoke`                   | Administrator (UAC) | Remove the firewall rules, the WFP filters, sublayer and provider, the account's profile, the account, the group, the password file and the install record. Idempotent.                                      |
-| `launch`                   | the person          | Speak the framed protocol below on stdin/stdout: apply and journal ACLs, start the runner as `TauSandbox`, relay I/O, restore ACLs.                                                                          |
-| `runner`                   | `TauSandbox`        | Internal. Started by `launch` with `CreateProcessWithLogonW` (`LOGON_WITH_PROFILE`). Builds the token, job and stdio, then starts the shell on the launcher's private desktop.                               |
-| `restore --journal <path>` | the person          | Restore the descriptors a crashed `launch` journaled, then delete the journal. Idempotent.                                                                                                                   |
+| Command                    | Runs as             | Purpose                                                                                                                                                                                                                          |
+| -------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`                   | the person          | Print the install record as JSON with `"installed":true`, `{"installed":false}` when absent or unreadable, plus `firewallEnabled` and `rulesPresent` (below). Never elevates.                                                    |
+| `setup`                    | Administrator (UAC) | Create or repair the account, its profile, group, password file, firewall rules, WFP filters and volume-root grants; write the install record. Idempotent. `--for-user <SID>` names the person whose host may read the password. |
+| `revoke`                   | Administrator (UAC) | Remove the volume-root grants, the firewall rules, the WFP filters, sublayer and provider, the account's profile, the account, the group, the password file and the install record. Idempotent.                                  |
+| `launch`                   | the person          | Speak the framed protocol below on stdin/stdout: apply and journal ACLs, start the runner as `TauSandbox`, relay I/O, restore ACLs.                                                                                              |
+| `runner`                   | `TauSandbox`        | Internal. Started by `launch` with `CreateProcessWithLogonW` (`LOGON_WITH_PROFILE`). Builds the token, job and stdio, then starts the shell on the launcher's private desktop.                                                   |
+| `restore --journal <path>` | the person          | Restore the descriptors a crashed `launch` journaled, then delete the journal. Idempotent.                                                                                                                                       |
 
 Install record: `%ProgramData%\Tau\Sandbox\install.json`, with `password.bin` beside it and the runner copy in `bin\`.
 The directory's DACL is protected: SYSTEM and Administrators full control, the `--for-user` person read. `setup` also

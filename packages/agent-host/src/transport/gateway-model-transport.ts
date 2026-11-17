@@ -32,10 +32,18 @@ import type {
   ModelSystemPromptBlock,
   ProviderMessage,
 } from '#log/event-types.js';
-import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
+import type {
+  DeploymentModeAnswer,
+  InvocationFunding,
+  InvocationResolutionRequest,
+  ModelInvocationBinding,
+  ModelStreamEvent,
+  ModelStreamRequest,
+  ModelTransport,
+} from '#waist/ports.js';
 import { gatewayProviderKinds } from '#wire/admission.schema.js';
-import { gatewayErrorCodes } from '#wire/gateway.js';
-import type { GatewayErrorCode, GatewayHostLabels, GatewayTurnLabels } from '#wire/gateway.js';
+import { attemptReceiptSchema, gatewayErrorCodes } from '#wire/gateway.js';
+import type { GatewayErrorCode, GatewayHostLabels, GatewayTurnLabels, InvocationResolution } from '#wire/gateway.js';
 import type { RefusalCode } from '#wire/refusals.js';
 
 const openAiGatewayPath = 'v1/llm/openai/v1';
@@ -246,6 +254,11 @@ export type GatewayModelTransportOptions = {
   /** Optional funded-operation protocol supplied only by a managed Cloud composition. */
   readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
   /**
+   * The billing layer, chosen per run from the API's deployment answer (D1). Configured, the transport carries a
+   * `deployment` whose run owner asks the port once at each run's admission; omitted, every call is unfunded.
+   */
+  readonly billing?: GatewayBillingOptions | undefined;
+  /**
    * The host, build and kernel labels every call from this composition carries, with each request's model (LW17).
    * Omitted, the call sends none of the four, so a composition opts in only once the gateway admits them (I6).
    */
@@ -266,6 +279,25 @@ export type GatewayModelTransportOptions = {
 export type GatewayFundedOperationProtocol = {
   /** Require and validate the operation identity on an accepted gateway response. */
   bindResponse(response: Response): ModelInvocationBinding;
+};
+
+/**
+ * The host's side of the billing layer (D1): how a run learns its mode, and the account a funded call charges.
+ *
+ * @public
+ */
+export type GatewayBillingOptions = {
+  /**
+   * The deployment answer for this transport's API origin, asked at a run's admission. The host owns fetching and
+   * caching it; `unfunded` only for an explicit answer (a `funded: false` body or a `404` for the route, I2), and
+   * `unknown` for a timeout, a `5xx`, a malformed body or a refused connection, which ends the run (I1).
+   */
+  readonly deployment: () => Promise<DeploymentModeAnswer>;
+  /**
+   * The account the gateway charges, read from the host's credential port on every prepare (W6 RH-S6; W11 GI-Q6).
+   * Absent or `undefined`, the host cannot check an attempt's account.
+   */
+  readonly principal?: (() => string | undefined | Promise<string | undefined>) | undefined;
 };
 
 type WireRecord = Record<string, unknown>;
@@ -1341,15 +1373,13 @@ const streamPiEvents = async function* (options: {
 };
 
 /**
- * Create the browser-safe Tau gateway transport — cookie-authenticated by
- * default, bearer-authenticated when `auth` is supplied.
+ * The provider transport with no billing facet: every call is unprepared, and `fundedOperations`, when set, binds it.
  *
- * @param options - Gateway base URL, catalog model limits, optional bearer provider, and optional fetch seam.
- * @returns A W3 model transport delegated to pi-ai provider implementations.
- * @public
+ * @param options - The gateway configuration.
+ * @returns A transport whose `funding` is `unfunded`.
  */
-export const createGatewayModelTransport = (options: GatewayModelTransportOptions): ModelTransport => ({
-  /* Self-host: no gateway ledger. Tau Cloud's transport replaces this facet with its funded one. */
+const providerTransport = (options: GatewayModelTransportOptions): ModelTransport => ({
+  /* No gateway ledger here: the billing layer replaces this facet with its funded one for a funded run. */
   funding: { type: 'unfunded' },
   async *stream(request) {
     if (!request.attemptId || request.attemptId.length > 128 || !/^[\u0021-\u007E]+$/u.test(request.attemptId)) {
@@ -1570,3 +1600,232 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     });
   },
 });
+
+// ── The billing layer (D1): operation binding, attempt resolution and the charged account ─────────────
+
+const validIdentity = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= 128 && /^[!-~]+$/u.test(value);
+
+/**
+ * One owner-scoped GET of the attempt route; the caller maps the answer.
+ *
+ * @param options - The transport's gateway configuration.
+ * @param attemptId - The attempt key to look up.
+ * @param signal - Cancels the lookup.
+ * @returns The route's raw response.
+ */
+const fetchAttempt = async (
+  options: GatewayModelTransportOptions,
+  attemptId: string,
+  signal: AbortSignal,
+): Promise<Response> => {
+  if (!validIdentity(attemptId)) {
+    throw new GatewayModelTransportError({
+      code: 'INVALID_REQUEST',
+      message: 'Invalid Tau invocation attempt identity.',
+    });
+  }
+  const headers = new Headers();
+  const token = await options.auth?.();
+  if (token !== undefined) {
+    headers.set('authorization', `Bearer ${token}`);
+  }
+  return (options.fetch ?? globalThis.fetch.bind(globalThis))(
+    new URL(
+      `v1/billing/attempts/gateway/${encodeURIComponent(attemptId)}`,
+      options.baseUrl.endsWith('/') ? options.baseUrl : `${options.baseUrl}/`,
+    ),
+    { credentials: 'include', headers, signal },
+  );
+};
+
+const isTimeout = (reason: unknown): boolean => reason instanceof DOMException && reason.name === 'TimeoutError';
+
+const malformedAttempt = (): GatewayModelTransportError =>
+  new GatewayModelTransportError({
+    code: 'MALFORMED_RESPONSE',
+    message: 'Tau attempt lookup returned an answer this build cannot read. Update Tau, then resume the chat.',
+  });
+
+/**
+ * Maps the route's answer (GI mapping table). A body this build cannot read is a defect, never a wait.
+ *
+ * @param body - The route's parsed JSON body.
+ * @returns The host's resolution.
+ */
+const toResolution = (body: unknown): InvocationResolution => {
+  const parsed = attemptReceiptSchema.safeParse(body);
+  if (!parsed.success) {
+    throw malformedAttempt();
+  }
+  const answer = parsed.data;
+  switch (answer.state) {
+    case 'pending': {
+      // W2: the instant the gateway settles the attempt by bounds the host's wait; an older image does not state it.
+      return answer.settlesBy === undefined
+        ? { status: 'pending' }
+        : { status: 'pending', settlesBy: answer.settlesBy };
+    }
+    case 'unavailable': {
+      return { status: 'unavailable' };
+    }
+    case 'not_found': {
+      // RV5-F3: a bare not_found comes from an image older than the void, which did not fence the key.
+      return answer.voided === true ? { status: 'voided' } : { status: 'unavailable' };
+    }
+    case 'terminal': {
+      return {
+        status: 'terminal',
+        operationId: answer.operationId,
+        outcome: answer.receipt.customerState,
+        chargedCreditAtoms: answer.receipt.chargedCreditAtoms,
+      };
+    }
+  }
+};
+
+/** RA-Q5: the run actor's opening waits on this lookup, so the transport bounds it; past it the answer is `unavailable`. */
+const attemptLookupTimeout = 10_000;
+
+const lookUpAttempt = async (
+  options: GatewayModelTransportOptions,
+  { attemptId, signal }: InvocationResolutionRequest,
+  bounded: AbortSignal,
+): Promise<InvocationResolution> => {
+  // A timeout, the caller's or the bound's, is "no answer now"; any other cancellation is the caller's to handle.
+  const cancelled = (): boolean => signal.aborted && !isTimeout(signal.reason);
+  let response: Response;
+  try {
+    response = await fetchAttempt(options, attemptId, bounded);
+  } catch (error) {
+    if (error instanceof GatewayModelTransportError || cancelled()) {
+      throw error;
+    }
+    return { status: 'unavailable' };
+  }
+  if (response.status === 401) {
+    // RV5-F2: never `unavailable` or `voided`; the same retry class (`reauth`) `stream()` throws.
+    throw new GatewayModelTransportError({
+      code: 'UNAUTHENTICATED',
+      message: 'Sign in to Tau again to finish this chat; its last model request cannot be checked until then.',
+      status: response.status,
+    });
+  }
+  if (response.status === 403) {
+    // A closed or restricted account or a refused origin is its own code (`BILLING_ACCOUNT_CLOSED`,
+    // `BILLING_ACCOUNT_RESTRICTED`, `ORIGIN_NOT_ALLOWED`), read as `stream()` reads a 403 and passed through with its
+    // details: never a sign-in failure, which signing in again would not fix.
+    throw await gatewayResponseError(response);
+  }
+  if (!response.ok) {
+    return { status: 'unavailable' };
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    if (cancelled()) {
+      throw error;
+    }
+    if (bounded.aborted) {
+      return { status: 'unavailable' };
+    }
+    throw malformedAttempt();
+  }
+  return toResolution(body);
+};
+
+const resolveInvocation = async (
+  options: GatewayModelTransportOptions,
+  request: InvocationResolutionRequest,
+): Promise<InvocationResolution> => {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => {
+    deadline.abort(new DOMException('The attempt lookup timed out.', 'TimeoutError'));
+  }, attemptLookupTimeout);
+  try {
+    return await lookUpAttempt(options, request, AbortSignal.any([request.signal, deadline.signal]));
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const fundedOperations: GatewayFundedOperationProtocol = {
+  bindResponse(response) {
+    const operationId = response.headers.get('x-tau-operation-id');
+    if (!validIdentity(operationId)) {
+      throw new GatewayModelTransportError({
+        code: 'MALFORMED_RESPONSE',
+        message: 'Tau model gateway did not return a valid operation identity.',
+        status: response.status,
+      });
+    }
+    return { operationId };
+  },
+};
+
+/**
+ * The funded run's transport: mandatory operation binding and recovery, and its `funded` facet.
+ *
+ * @param gateway - The gateway configuration, without a billing layer of its own.
+ * @param principal - The host's credential port for the charged account.
+ * @returns The transport a funded run uses.
+ */
+const fundedTransport = (
+  gateway: GatewayModelTransportOptions,
+  principal: GatewayBillingOptions['principal'],
+): ModelTransport & { readonly funding: Extract<InvocationFunding, { type: 'funded' }> } => ({
+  ...providerTransport({ ...gateway, fundedOperations }),
+  funding: {
+    type: 'funded',
+    usesBillingAttempt: isGatewayProviderKind,
+    resolveInvocation: async (request) => resolveInvocation(gateway, request),
+    // The transport holds a bearer or a cookie, never the account id: the host's credential port supplies it.
+    principal: async () => principal?.(),
+  },
+});
+
+const deploymentUnknown = (message: string): Error =>
+  Object.assign(new Error(message), { code: 'DEPLOYMENT_UNKNOWN' satisfies RefusalCode });
+
+/**
+ * Create the browser-safe Tau gateway transport — cookie-authenticated by
+ * default, bearer-authenticated when `auth` is supplied.
+ *
+ * With `billing`, the transport's billing layer is chosen per run (D1): its `deployment` asks the host's port at a run's
+ * admission, and `deployment.forRun` gives a funded run operation binding, attempt resolution and the charged account,
+ * and an unfunded run the plain transport. The transport's own `funding` is then the funded facet, so attempts an
+ * earlier funded run left are still resolved, and its own `stream` refuses `DEPLOYMENT_UNKNOWN`: no call leaves without
+ * its run's mode (I1). Without `billing`, every call is unfunded.
+ *
+ * @param options - Gateway base URL, catalog model limits, optional bearer provider, fetch seam and billing layer.
+ * @returns A W3 model transport delegated to pi-ai provider implementations.
+ * @public
+ */
+export const createGatewayModelTransport = (options: GatewayModelTransportOptions): ModelTransport => {
+  const { billing, ...gateway } = options;
+  if (billing === undefined) {
+    return providerTransport(gateway);
+  }
+  const { fundedOperations: _ignored, ...plain } = gateway;
+  const funded = fundedTransport(plain, billing.principal);
+  const unfunded = providerTransport(plain);
+  return {
+    funding: funded.funding,
+    // oxlint-disable-next-line require-yield -- refuses before its first event.
+    async *stream() {
+      throw deploymentUnknown('This model call was made outside a run whose billing mode is known.');
+    },
+    deployment: {
+      resolve: async () => {
+        try {
+          const answer: unknown = await billing.deployment();
+          return answer === 'funded' || answer === 'unfunded' ? answer : 'unknown';
+        } catch {
+          return 'unknown';
+        }
+      },
+      forRun: (mode) => (mode === 'funded' ? funded : unfunded),
+    },
+  };
+};

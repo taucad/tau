@@ -681,7 +681,7 @@
     {
       "id": "E31",
       "bound": "Gateway attempt lookup (resolveInvocation), 10 s, then `unavailable` (RA-Q5)",
-      "site": "packages/agent-host/src/transport/tau-cloud-gateway-model-transport.ts",
+      "site": "packages/agent-host/src/transport/gateway-model-transport.ts",
       "token": "attemptLookupTimeout",
       "class": "External edge",
       "owner": "W11"

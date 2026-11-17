@@ -237,3 +237,41 @@ export const resolveTerminalZsh = async (platform: NodeJS.Platform): Promise<Ter
  * @public
  */
 export const terminalZshArguments: readonly string[] = ['-l', '-i'];
+
+/**
+ * The environment variable that names PowerShell's module analysis cache file, read by Windows PowerShell 5.1 and
+ * PowerShell 7 alike. Without it PowerShell keeps the cache under the account's `LocalApplicationData` known folder,
+ * which it resolves from the account's profile rather than from `LOCALAPPDATA`; the sandbox account runs without its
+ * profile and every launch's roots are new, so no launch reuses a cache and each command that resolves a cmdlet
+ * analyses the modules on `PSModulePath` again (the WIN-X64 row T02-cache records where that folder resolves).
+ *
+ * @public
+ */
+export const powerShellModuleCacheVariable = 'PSModuleAnalysisCachePath';
+
+/** The cache's file name inside the folder Tau keeps it in. @public */
+export const powerShellModuleCacheFile = 'ModuleAnalysisCache';
+
+/**
+ * The command a host runs once, with no user code, to build PowerShell's module analysis cache at
+ * {@link powerShellModuleCacheVariable}: `Get-Command` over every alias, function, filter and cmdlet analyses every
+ * module on `PSModulePath` without importing one, and a lookup of a name no module exports walks the same modules as
+ * command auto-loading does. PowerShell writes the cache about ten seconds after its last change, or at exit, so the
+ * command waits, at most thirty seconds, until the file exists with a size that held for one half-second poll. It
+ * always exits 0: the host judges the build by the file it finds, never by what the shell reports.
+ *
+ * @public
+ */
+export const powerShellModuleCacheCommand: string = [
+  "$ErrorActionPreference = 'SilentlyContinue'",
+  '$null = Get-Command -Name * -CommandType Alias, Function, Filter, Cmdlet',
+  '$null = Get-Command -Name Tau-NoSuchCommand',
+  '$size = -1',
+  'foreach ($attempt in 1..60) {',
+  `  $file = [System.IO.FileInfo]::new($env:${powerShellModuleCacheVariable})`,
+  '  if ($file.Exists -and $file.Length -gt 0 -and $file.Length -eq $size) { break }',
+  '  $size = if ($file.Exists) { $file.Length } else { -1 }',
+  '  [System.Threading.Thread]::Sleep(500)',
+  '}',
+  'exit 0',
+].join('\n');

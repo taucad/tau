@@ -68,3 +68,57 @@ describe('shellEnvironment', () => {
     }
   });
 });
+
+describe('shellEnvironment on Windows', () => {
+  const windows = {
+    ...options,
+    platform: 'win32',
+    executablePath: String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+    home: String.raw`C:\Temp\tau-shell-1\home`,
+    temporary: String.raw`C:\Temp\tau-shell-1\tmp`,
+    host: {
+      SystemRoot: String.raw`C:\WINDOWS`,
+      USERNAME: 'me',
+      APPDATA: String.raw`C:\Users\me\AppData\Roaming`,
+    },
+    terminal: false,
+  } as const;
+
+  it("keeps per-user application data inside the private home, never the host's", () => {
+    expect(shellEnvironment(windows)).toMatchObject({
+      USERPROFILE: String.raw`C:\Temp\tau-shell-1\home`,
+      APPDATA: String.raw`C:\Temp\tau-shell-1\home\AppData\Roaming`,
+      LOCALAPPDATA: String.raw`C:\Temp\tau-shell-1\home\AppData\Local`,
+      TEMP: String.raw`C:\Temp\tau-shell-1\tmp`,
+    });
+  });
+
+  it("names Windows PowerShell's module folder once, whatever its case, and PowerShell 7's first", () => {
+    expect(
+      shellEnvironment({
+        ...windows,
+        executablePath: String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+      })['PSModulePath'],
+    ).toBe(String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\Modules`);
+    expect(
+      shellEnvironment({
+        ...windows,
+        executablePath: String.raw`C:\Program Files\PowerShell\7\pwsh.exe`,
+      })['PSModulePath'],
+    ).toBe(String.raw`C:\Program Files\PowerShell\7\Modules;C:\WINDOWS\System32\WindowsPowerShell\v1.0\Modules`);
+  });
+
+  it('points PowerShell at a module analysis cache only when the launch has one', () => {
+    expect(shellEnvironment(windows)).not.toHaveProperty('PSModuleAnalysisCachePath');
+    const file = String.raw`C:\Temp\tau-powershell-cache\v1-ab\ModuleAnalysisCache`;
+    expect(shellEnvironment({ ...windows, powerShellModuleCache: file })['PSModuleAnalysisCachePath']).toBe(file);
+  });
+
+  it('builds only environments the sandbox provider admits', () => {
+    const environment = shellEnvironment({
+      ...windows,
+      powerShellModuleCache: String.raw`C:\Temp\tau-powershell-cache\v1-ab\ModuleAnalysisCache`,
+    });
+    expect(refusedShellEnvironment(environment)).toStrictEqual([]);
+  });
+});

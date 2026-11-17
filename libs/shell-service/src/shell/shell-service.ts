@@ -17,6 +17,8 @@ import { basename, dirname, join } from 'node:path';
 
 import type { InterruptResolution } from '@taucad/agent-host';
 import {
+  powerShellModuleCacheCommand,
+  powerShellModuleCacheFile,
   resolveShellExecutable,
   resolveTerminalZsh,
   shellCommandArguments,
@@ -56,6 +58,13 @@ import {
   terminalGitAccess,
 } from '#shell/shell-grant.js';
 import type { ShellGrantHost, ShellProjectProtected, ShellResolvedAccess } from '#shell/shell-grant.js';
+import {
+  adoptPowerShellModuleCache,
+  builtPowerShellModuleCache,
+  powerShellModuleCacheLocation,
+  powerShellModuleCacheStore,
+} from '#shell/shell-module-cache.js';
+import type { PowerShellModuleCache } from '#shell/shell-module-cache.js';
 import { createShellCapture } from '#shell/shell-output.js';
 
 /**
@@ -238,6 +247,11 @@ export type ShellServiceOptions = Readonly<{
   toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }> | undefined;
   /** Where private HOME and temporary roots are created; the system temporary directory by default. */
   sessionDirectory?: string | undefined;
+  /**
+   * On Windows, the PowerShell module analysis cache {@link probeHostShell} built for this shell: every launch reads it
+   * and none writes it. Absent, each launch analyses the modules it resolves a command from again.
+   */
+  powerShellModuleCache?: PowerShellModuleCache | undefined;
   /** Agent executions running at once; later calls wait their turn. */
   maxExecutions?: number | undefined;
   /** Human Terminal sessions open at once; more are refused `session-limit`. */
@@ -489,15 +503,23 @@ const finishExecution = async (
   return 'released';
 };
 
-/** Private HOME and temporary roots for one launch, outside every project, removed after the launch settles. */
+/**
+ * Private HOME and temporary roots for one launch, outside every project, removed after the launch settles. On Windows
+ * the home also holds the `AppData` folders the launch's `APPDATA` and `LOCALAPPDATA` name ({@link shellEnvironment}).
+ */
 const createSessionRoots = async (
   base: string,
+  platform: NodeJS.Platform,
 ): Promise<Readonly<{ root: string; home: string; temporary: string }>> => {
   const root = await mkdtemp(join(base, 'tau-shell-'));
   const home = join(root, 'home');
   const temporary = join(root, 'tmp');
   await mkdir(home, { mode: 0o700 });
   await mkdir(temporary, { mode: 0o700 });
+  if (platform === 'win32') {
+    await mkdir(join(home, 'AppData', 'Roaming'), { recursive: true });
+    await mkdir(join(home, 'AppData', 'Local'), { recursive: true });
+  }
   return { root, home, temporary };
 };
 
@@ -515,6 +537,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
   const sessionBase = options.sessionDirectory ?? tmpdir();
   const now = options.now ?? (() => performance.now());
   const { executable, provider } = options;
+  const moduleCacheRoots = options.powerShellModuleCache === undefined ? [] : [options.powerShellModuleCache.directory];
   const executions = createGate(options.maxExecutions ?? 8);
   const maxTerminals = options.maxTerminals ?? 4;
   let terminals = 0;
@@ -876,7 +899,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     await mkdir(join(admitted.root, '.tau', 'offloaded-tool-results', 'shell'), { recursive: true }).catch(
       () => undefined,
     );
-    const session = await createSessionRoots(sessionBase);
+    const session = await createSessionRoots(sessionBase, platform);
     /* Set once custody is prepared: from then on only `finish` may delete the private roots (I7). */
     let custody: Readonly<{ executionId: string; holds: ShellExecutionHolds | undefined }> | undefined;
     try {
@@ -896,6 +919,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         access: admitted.access,
         host: admitted.host,
         git,
+        caches: moduleCacheRoots,
       });
       if (!(await unchanged(request, admitted.checkout, fingerprints))) {
         return didNotStart(
@@ -971,6 +995,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           host: environment,
           terminal: false,
           git,
+          powerShellModuleCache: options.powerShellModuleCache?.file,
         }),
         stdio: { kind: 'pipes' },
         signal: controller.signal,
@@ -1127,7 +1152,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         terminals--;
       }
     };
-    const session = await createSessionRoots(sessionBase);
+    const session = await createSessionRoots(sessionBase, platform);
     const sessionId = randomUUID();
     let executionId: string;
     try {
@@ -1177,6 +1202,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         toolchain: options.toolchain?.roots ?? [],
         access,
         host,
+        caches: moduleCacheRoots,
       });
       const { terminalZsh } = options;
       outcome = await provider.launch({
@@ -1199,6 +1225,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           host: environment,
           terminal: true,
           terminalGit,
+          powerShellModuleCache: options.powerShellModuleCache?.file,
         }),
         stdio: { kind: 'terminal', size: request.size },
         signal: request.signal,
@@ -1274,7 +1301,113 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
 export type ShellProbe = Readonly<{ status: 'available'; shell: HostShell }> | ShellUnavailable;
 
 /** @public */
-export type ProbeHostShellOptions = Omit<ShellServiceOptions, 'executable' | 'identity' | 'terminalZsh'>;
+export type ProbeHostShellOptions = Omit<
+  ShellServiceOptions,
+  'executable' | 'identity' | 'terminalZsh' | 'powerShellModuleCache'
+>;
+
+/**
+ * How long the one launch that builds PowerShell's module analysis cache may run. A single command that analysed the
+ * modules took up to 26 seconds on Windows PowerShell 5.1 (WIN-X64 run 44009882001); the build analyses every module
+ * and then waits up to 30 seconds for PowerShell to write the file, so it gets twice their sum.
+ */
+const moduleCacheMilliseconds = 120_000;
+
+/**
+ * Build, or find, the PowerShell module analysis cache for this shell (`shell-module-cache.ts`): on Windows only, in one
+ * sandboxed launch that runs {@link powerShellModuleCacheCommand} and no user code, with nothing readable beyond the
+ * system and its own private roots. A build that fails or times out leaves the shell without a cache, so each launch
+ * analyses modules as before; the next probe tries again.
+ *
+ * @param options - The provider, the shell and what the probe launch itself was given.
+ * @returns The cache every launch is granted, or `undefined`.
+ */
+export const preparePowerShellModuleCache = async (
+  options: Readonly<{
+    provider: ShellProvider;
+    executable: ShellExecutable;
+    platform: NodeJS.Platform;
+    environment: Readonly<Record<string, string | undefined>>;
+    appDataRoots: readonly string[];
+    sessionBase: string;
+    milliseconds?: number | undefined;
+  }>,
+): Promise<PowerShellModuleCache | undefined> => {
+  const { provider, executable, platform, sessionBase } = options;
+  if (platform !== 'win32' || executable.kind !== 'powershell') {
+    return undefined;
+  }
+  const cache = powerShellModuleCacheLocation(join(sessionBase, powerShellModuleCacheStore), executable);
+  if (await builtPowerShellModuleCache(cache)) {
+    return cache;
+  }
+  const session = await createSessionRoots(sessionBase, platform);
+  /* The build writes into its own temporary root; Tau copies the file out before that root is deleted. */
+  const written = join(session.temporary, powerShellModuleCacheFile);
+  const custody: { executionId?: string } = {};
+  try {
+    ({ executionId: custody.executionId } = await provider.prepare({
+      privateRoot: session.root,
+      resource: undefined,
+    }));
+    const outcome = await provider.launch({
+      executionId: custody.executionId,
+      executablePath: executable.path,
+      arguments: shellCommandArguments(executable.kind, powerShellModuleCacheCommand),
+      workingDirectory: session.home,
+      commandId: 'shell:module-cache',
+      filesystem: {
+        readable: [],
+        writable: [session.home, session.temporary],
+        denied: [...options.appDataRoots],
+      },
+      network: { domains: [] },
+      environment: shellEnvironment({
+        platform,
+        executablePath: executable.path,
+        home: session.home,
+        temporary: session.temporary,
+        toolchainBins: [],
+        host: options.environment,
+        terminal: false,
+        powerShellModuleCache: written,
+      }),
+      stdio: { kind: 'pipes' },
+      signal: AbortSignal.timeout(options.milliseconds ?? moduleCacheMilliseconds),
+    });
+    if (outcome.status !== 'started') {
+      return undefined;
+    }
+    if (outcome.process.kind !== 'pipes') {
+      await outcome.process.terminate().catch(() => undefined);
+      return undefined;
+    }
+    const { stdout, stderr, exited } = outcome.process;
+    const discard = async (chunks: AsyncIterable<Uint8Array<ArrayBuffer>>): Promise<void> => {
+      // oxlint-disable-next-line no-unused-vars -- the build's output is never read.
+      for await (const _chunk of chunks) {
+        /* Drained so the launch never waits on a full stream. */
+      }
+    };
+    const [exit] = await Promise.all([exited, discard(stdout), discard(stderr)]);
+    /* A build stopped at its deadline may have stopped mid-write, so only one that exited by itself is kept. */
+    if (exit.exitCode !== 0) {
+      return undefined;
+    }
+    return (await adoptPowerShellModuleCache(written, cache)) ? cache : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    await (custody.executionId === undefined
+      ? rm(session.root, { recursive: true, force: true }).catch(() => undefined)
+      : finishExecution(provider, {
+          executionId: custody.executionId,
+          sessionBase,
+          privateRoot: session.root,
+          holds: undefined,
+        }));
+  }
+};
 
 /**
  * Prove the provider and the machine's own shell on this host before anything is offered (D1, I2): resolve the shell
@@ -1309,9 +1442,11 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
     };
   }
   const sessionBase = options.sessionDirectory ?? tmpdir();
-  const session = await createSessionRoots(sessionBase);
+  const session = await createSessionRoots(sessionBase, platform);
   /* Set once custody is prepared: then only a confirmed stopped claim deletes the probe's roots (I7). */
   const custody: { executionId?: string } = {};
+  /* Set once the shell answered its version; the module cache is built after the probe's own launch is finished. */
+  let found: Readonly<{ identity: ShellIdentity; terminalZsh: TerminalZsh | undefined }> | undefined;
   try {
     /* A probe is the one launch with no resource: it may run only in its private roots. */
     ({ executionId: custody.executionId } = await options.provider.prepare({
@@ -1400,8 +1535,7 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
     };
     /* On macOS the human Terminal runs the verified system Zsh; without one it keeps the clean Bash. */
     const zsh = platform === 'darwin' ? await resolveTerminalZsh(platform) : undefined;
-    const terminalZsh = zsh === undefined || 'status' in zsh ? undefined : zsh;
-    return { status: 'available', shell: createShellService({ ...options, executable, terminalZsh, identity }) };
+    found = { identity, terminalZsh: zsh === undefined || 'status' in zsh ? undefined : zsh };
   } catch (error) {
     return {
       status: 'unavailable',
@@ -1419,4 +1553,23 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
           holds: undefined,
         }));
   }
+  /* One sandbox account serves every Windows launch, one at a time: the build starts once the probe's launch is gone. */
+  const powerShellModuleCache = await preparePowerShellModuleCache({
+    provider: options.provider,
+    executable,
+    platform,
+    environment,
+    appDataRoots: options.appDataRoots,
+    sessionBase,
+  });
+  return {
+    status: 'available',
+    shell: createShellService({
+      ...options,
+      executable,
+      terminalZsh: found.terminalZsh,
+      identity: found.identity,
+      powerShellModuleCache,
+    }),
+  };
 };

@@ -28,6 +28,9 @@ export { shellBaselineDenied, zshStartupFiles } from '#shell/shell-baseline.js';
 export type { ShellBaselineOptions } from '#shell/shell-baseline.js';
 export { refusedShellEnvironment } from '#shell/shell-environment.js';
 export {
+  powerShellModuleCacheCommand,
+  powerShellModuleCacheFile,
+  powerShellModuleCacheVariable,
   resolveShellExecutable,
   resolveTerminalZsh,
   shellCommandArguments,

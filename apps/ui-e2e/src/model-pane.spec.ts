@@ -515,13 +515,13 @@ test('shows decoded part previews in the real Model rows and selected Properties
   expect(propertiesImageState).toEqual({ width: 80, height: 80, decoded: true });
   /* The Properties preview is the "Preview <part>" button that opens the gallery; the image inside it is decorative,
    * and only the gallery's own image is named "Rendered <part>". */
-  expect(
-    await target.evaluateLocator(propertiesImage, (image) => ({
-      alt: (image as HTMLImageElement).alt,
-      hidden: image.getAttribute('aria-hidden'),
-      button: image.closest('button')?.getAttribute('aria-label'),
-    })),
-  ).toEqual({ alt: '', hidden: 'true', button: expect.stringMatching(/^Preview \S/u) });
+  const { button: previewButton, ...decorative } = await target.evaluateLocator(propertiesImage, (image) => ({
+    alt: (image as HTMLImageElement).alt,
+    hidden: image.getAttribute('aria-hidden'),
+    button: image.closest('button')?.getAttribute('aria-label'),
+  }));
+  expect(decorative).toEqual({ alt: '', hidden: 'true' });
+  expect(previewButton).toMatch(/^Preview \S/u);
 
   await target.hover(part);
   const action = list.getByRole('button', { name: /^Actions for /u }).first();

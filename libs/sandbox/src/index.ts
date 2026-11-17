@@ -14,5 +14,11 @@ export {
   spawnInNativeSandbox,
 } from '#native-sandbox.js';
 export type { NativeSandboxLaunch, NativeSandboxProfile } from '#native-sandbox.js';
+export {
+  configureWindowsNativeSandbox,
+  isWindowsSandboxedChild,
+  recoverWindowsNativeJournals,
+} from '#native-sandbox-windows.js';
+export type { WindowsNativeHelperSpawn, WindowsNativeSandboxOptions } from '#native-sandbox-windows.js';
 export { linuxChildrenTree, sampleLinuxResident } from '#child-resident.js';
 export { ownedProcesses, processTable, terminateOwnedProcesses, trackDescendants } from '#shell/process-tree.js';

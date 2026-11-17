@@ -210,8 +210,9 @@ const settledState = async (page: Page, nextBuildId: number): Promise<Settled> =
         return 'error page';
       }
       // While the page's own reload is pending the same screen shows with its button disabled; that is not an offer.
+      // Only a Reload on screen counts: every document also carries the boot watchdog's hidden strip and its Reload.
       const offered = [...document.querySelectorAll('button')].some(
-        (button) => button.textContent.trim() === 'Reload' && !button.disabled,
+        (button) => button.textContent.trim() === 'Reload' && !button.disabled && button.checkVisibility(),
       );
       return headings.has('Tau has been updated') && offered ? 'reload offered' : false;
     },

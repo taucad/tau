@@ -1,0 +1,97 @@
+/**
+ * The recovery actions a classified start failure offers (desktop resilient startup blueprint D3).
+ *
+ * On the desktop they are the shell's: `tau.updates.check()` for Update Tau and Check for Updates, and the optional
+ * `tau.troubleshooting` members for Show logs, Troubleshooting (the recovery window) and Restart in Safe Mode. The
+ * troubleshooting members are declared here, renderer-local and optional, because the preload that provides them
+ * (WP6) may not be present: an action whose member is missing is not offered. On the web there are no logs or
+ * recovery window; Restart in Safe Mode is the `/?safe=1` page load, and an update is a reload.
+ */
+import { safeModeHref } from '#lib/boot-signals.js';
+
+/** The shell's troubleshooting members (WP6's preload), each optional. */
+type TroubleshootingBridge = Readonly<{
+  showLogs?: () => Promise<void>;
+  open?: () => Promise<void>;
+  restartInSafeMode?: () => Promise<void>;
+}>;
+
+/** What the panel reads of `window.tau`, each member optional. */
+type RecoveryShell = Readonly<{
+  troubleshooting?: TroubleshootingBridge;
+  updates?: Readonly<{ check?: () => Promise<void> }>;
+}>;
+
+/** The recovery actions, by the label the panel shows. @public */
+export type RecoveryActionId = 'updateTau' | 'checkForUpdates' | 'showLogs' | 'troubleshooting' | 'restartInSafeMode';
+
+/** One action the panel can offer: a button that runs, or a link to follow. @public */
+export type RecoveryAction = Readonly<{ id: RecoveryActionId; label: string }> &
+  (Readonly<{ kind: 'run'; run: () => void | Promise<void> }> | Readonly<{ kind: 'link'; href: string }>);
+
+const labels: Readonly<Record<RecoveryActionId, string>> = {
+  updateTau: 'Update Tau',
+  checkForUpdates: 'Check for Updates',
+  showLogs: 'Show logs',
+  troubleshooting: 'Troubleshooting',
+  restartInSafeMode: 'Restart in Safe Mode',
+};
+
+const shell = (): RecoveryShell | undefined => (globalThis as { tau?: RecoveryShell }).tau;
+
+const runner = (call: () => Promise<void>) => async (): Promise<void> => {
+  try {
+    await call();
+  } catch (error) {
+    console.error('[Recovery] action failed', error);
+  }
+};
+
+const action = (id: RecoveryActionId): RecoveryAction | undefined => {
+  const label = labels[id];
+  const tau = shell();
+  if (tau === undefined) {
+    /* The web: no logs and no recovery window; safe mode is a page load and an update is a reload. */
+    switch (id) {
+      case 'restartInSafeMode': {
+        return { id, label, kind: 'link', href: safeModeHref };
+      }
+      case 'updateTau':
+      case 'checkForUpdates': {
+        return {
+          id,
+          label,
+          kind: 'run',
+          run: () => {
+            globalThis.location.reload();
+          },
+        };
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+  const calls: Readonly<Record<RecoveryActionId, (() => Promise<void>) | undefined>> = {
+    updateTau: tau.updates?.check === undefined ? undefined : async () => tau.updates?.check?.(),
+    checkForUpdates: tau.updates?.check === undefined ? undefined : async () => tau.updates?.check?.(),
+    showLogs: tau.troubleshooting?.showLogs === undefined ? undefined : async () => tau.troubleshooting?.showLogs?.(),
+    troubleshooting: tau.troubleshooting?.open === undefined ? undefined : async () => tau.troubleshooting?.open?.(),
+    restartInSafeMode:
+      tau.troubleshooting?.restartInSafeMode === undefined
+        ? undefined
+        : async () => tau.troubleshooting?.restartInSafeMode?.(),
+  };
+  const call = calls[id];
+  return call === undefined ? undefined : { id, label, kind: 'run', run: runner(call) };
+};
+
+/**
+ * The actions this page can offer, of those asked for, in order.
+ *
+ * @param ids - The actions the failure calls for.
+ * @returns The ones available here.
+ * @public
+ */
+export const recoveryActions = (ids: readonly RecoveryActionId[]): RecoveryAction[] =>
+  ids.map((id) => action(id)).filter((entry): entry is RecoveryAction => entry !== undefined);

@@ -368,45 +368,80 @@ describe('ProviderRegistry', () => {
       hosts.push(serveNodeFsProvider(port, { policy: tauPathPolicy, allowRoot: () => false }).close);
     };
 
-    /** Run `body` while this process reports `platform`, as a host on that disk would. */
-    const onPlatform = async (platform: NodeJS.Platform, body: () => Promise<void>): Promise<void> => {
-      const original = Object.getOwnPropertyDescriptor(process, 'platform');
-      if (original === undefined) {
-        throw new Error('process.platform has no descriptor to fake.');
-      }
-      Object.defineProperty(process, 'platform', { ...original, value: platform });
-      try {
-        await body();
-      } finally {
-        Object.defineProperty(process, 'platform', original);
-      }
+    /**
+     * A port to a real host through a relay that may answer the host's description itself, so a test can
+     * give the host a disk unlike this process's.
+     *
+     * @param answer - Given the count of `describe` asks so far, the reply's fields, or `undefined` to let the host answer.
+     * @returns The client's end of the relay.
+     */
+    const relayHost = (answer: (asks: number) => Record<string, unknown> | undefined): MessagePort => {
+      const client = new MessageChannel();
+      const host = new MessageChannel();
+      serveHost(host.port2);
+      let asks = 0;
+      client.port2.addEventListener('message', ({ data }: MessageEvent<{ v: number; id: number; op: string }>) => {
+        if (data.op === 'describe') {
+          asks += 1;
+          const reply = answer(asks);
+          if (reply !== undefined) {
+            client.port2.postMessage({ v: data.v, id: data.id, ...reply });
+            return;
+          }
+        }
+        host.port1.postMessage(data);
+      });
+      host.port1.addEventListener('message', ({ data }: MessageEvent<unknown>) => {
+        client.port2.postMessage(data);
+      });
+      client.port2.start();
+      host.port1.start();
+      hosts.push(async () => {
+        client.port1.close();
+        client.port2.close();
+        host.port1.close();
+      });
+      return client.port1;
     };
 
     afterEach(async () => {
       await Promise.all(hosts.splice(0).map(async (close) => close()));
     });
 
-    it("should take file modes from the host's disk, not the worker's platform", async () => {
-      const connectTo = async (hostPlatform: NodeJS.Platform): Promise<FileSystemProvider> => {
-        const { port1, port2 } = new MessageChannel();
-        serveHost(port2);
-        const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort: async () => port1 });
-        let provider: FileSystemProvider | undefined;
-        // Only the host answers under the faked platform; the registry passes on what it was told.
-        await onPlatform(hostPlatform, async () => {
-          provider = await nodeRegistry.getProvider(nodeScope);
-        });
-        port1.close();
-        return provider!;
+    it("should take file modes from the host's answer, not the worker's platform", async () => {
+      const connectTo = async (fileModes: boolean): Promise<FileSystemProvider> => {
+        const port = relayHost(() => ({ type: 'result', value: { fileModes } }));
+        return new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort: async () => port }).getProvider(
+          nodeScope,
+        );
       };
 
-      const windowsHost = await connectTo('win32');
-      expect(windowsHost.getFileMode).toBeUndefined();
-      expect(windowsHost.setFileMode).toBeUndefined();
+      // One of the two answers always contradicts this process's own disk.
+      const modelessHost = await connectTo(false);
+      expect(modelessHost.getFileMode).toBeUndefined();
+      expect(modelessHost.setFileMode).toBeUndefined();
 
-      const posixHost = await connectTo('linux');
-      expect(posixHost.getFileMode).toBeTypeOf('function');
-      expect(posixHost.setFileMode).toBeTypeOf('function');
+      const modeHost = await connectTo(true);
+      expect(modeHost.getFileMode).toBeTypeOf('function');
+      expect(modeHost.setFileMode).toBeTypeOf('function');
+    });
+
+    it("should report the real host's disk", async () => {
+      const port = relayHost(() => undefined);
+      const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort: async () => port });
+      const provider = await nodeRegistry.getProvider(nodeScope);
+      expect(provider.getFileMode === undefined).toBe(process.platform === 'win32');
+    });
+
+    it('keeps the channel when the host fails to describe its disk, and asks it again', async () => {
+      const port = relayHost((asks) => (asks === 1 ? { type: 'error', message: 'host is busy' } : undefined));
+      const createNodeFsPort = vi.fn(async () => port);
+      const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort });
+
+      await expect(nodeRegistry.getProvider(nodeScope)).rejects.toThrow('host is busy');
+      await expect(nodeRegistry.getProvider(nodeScope)).resolves.toBeDefined();
+      // The second resolution reused the open channel instead of orphaning it for a fresh port.
+      expect(createNodeFsPort).toHaveBeenCalledOnce();
     });
 
     it('retries a refused services port on the next provider resolution', async () => {

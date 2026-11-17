@@ -182,14 +182,14 @@ jobs:
              "formal": {"targets": ["formal:tla"], "pr": "queue"},
              "formal-nightly": {"targets": ["formal:nightly"], "pr": "queue", "queue": "touched"},
              "geospec-examples": {"targets": ["test-geospec"], "pr": "queue"},
-             "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "queue"},
+             "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "touched"},
              "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue", "queue": "closure"},
              "native-linux": {"targets": ["test:native-linux"], "pr": "queue", "queue": "closure"},
              "native-darwin": {"targets": ["test:native-darwin"], "pr": "queue"},
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
              "desktop": {"tags": ["ci:desktop"]},
              "shell": {"tags": ["ci:shell"], "pr": "queue", "queue": "any-touched"},
-             "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "queue"}}
+             "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "touched"}}
           QUEUE_HUBS: '["agent-host", "host"]'
           SHELL_LANE_PATHS: >-
             [".github/workflows/shell-conformance.yml",
@@ -468,7 +468,7 @@ jobs:
       actions: 'read'
       pull-requests: 'read'
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         lane: [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3]
     steps:
@@ -853,7 +853,8 @@ jobs:
   # e2e-nightly runs (two before 2026-11-17, MQ-3) leaves the nightly for good and runs here, in the merge queue (and on a push to `main` the
   # queue did not prove), whenever its project is affected. A project lists its ratcheted suites in its
   # `test:e2e:queue` target's `dependsOn`; the plan turns them into one row per suite and e2e-nightly.yml skips
-  # them, so a later ratchet is a one-line `project.json` edit. A pull request leaves the lane to the queue.
+  # them, so a later ratchet is a one-line `project.json` edit. A pull request runs the suites of the projects its
+  # own diff touches (`pr: touched`, merge-queue defect MQ-5), so a deterministic failure is seen before it queues.
   # Each row is the nightly's job for that suite: one suite per runner (one after another they outlast a job,
   # run 37221169741), the same browsers, Pandoc, sandbox, software Vulkan and xvfb, and the same chat log
   # validation for a suite that opens a chat. The slowest first-batch suite took 10.4 min as a whole nightly job
@@ -869,7 +870,7 @@ jobs:
       contents: 'read'
       actions: 'read'
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         suite: ${{ fromJSON(needs.plan.outputs.e2e-queue-suites) }}
     env:
@@ -963,6 +964,12 @@ jobs:
   # required check of their own as well, so the queue already waited for them; in the ten latest
   # queue runs that ran formal and billing contracts (2026-11-12), both finished before the gate
   # or before API tests.
+  #
+  # In the merge queue the gate runs even in a cancelled run (`always()`), so the `fail-fast-*` jobs below can
+  # end a failed run early: a lane they cancelled reports `cancelled`, which fails the gate's checks, and the
+  # gate itself ends `failure`. Under `!cancelled()` it would be skipped instead, and GitHub counts a skipped
+  # required check as passed. Pull requests and pushes keep `!cancelled()`, so a pull request run superseded
+  # by a newer push still skips it.
   affected:
     name: Run affected tasks
     needs:
@@ -982,7 +989,7 @@ jobs:
         formal-nightly,
         e2e-queue,
       ]
-    if: ${{ !cancelled() }}
+    if: ${{ github.event_name == 'merge_group' && always() || !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Require every affected lane
@@ -1040,6 +1047,165 @@ jobs:
           if [ "$FORMAL_NIGHTLY_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$FORMAL_NIGHTLY_RESULT" = success; fi
           if [ "$E2E_QUEUE_REQUIRED" = true ]; then test "$E2E_QUEUE_RESULT" = success; fi
 
+  # Merge-queue fail-fast (CI throughput review, merge-queue ejection review MQ-7). The queue builds five
+  # entries at a time, and removes a failed entry and rebuilds every entry behind it only once the failed
+  # run concludes. `Validate workspace` failed about 3 min into a run while the gate waited 25–35 min for
+  # the slowest lane, holding the failed entry and each rebuild behind it (Brain
+  # research/artifacts/ci-throughput-review/runs/2026-11-17-cloud/mq/queue-18h). So in the merge queue only,
+  # one small job per required lane (each lane the gate needs, and `Validate workspace`) waits for that lane
+  # alone and, when it failed, cancels the rest of this run. A matrix lane fails fast there for the same
+  # reason, so its first failed row ends the lane. The gate still runs (`always()` above) and ends `failure`:
+  # the failed lane fails it, and so does every lane the cancellation stopped. A job here fires only on its
+  # own lane's `failure`: a lane skipped because the plan failed is the plan job's to report, and a lane
+  # cancelled by the sweep or by another `fail-fast-*` job never fires one. Each cancels its own run
+  # (`GITHUB_RUN_ID`) and nothing else, with the run cancel, never the force cancel, which would also stop
+  # the gate. Only these jobs hold `actions: write`. Pull requests and pushes never run them.
+  fail-fast-workspace:
+    name: Fail fast (workspace)
+    needs: [workspace]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.workspace.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: &fail-fast-permissions
+      actions: write # Cancel this run, and only this run
+    steps: &fail-fast-steps
+      - name: Cancel the rest of this merge-queue run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/cancel" > /dev/null; then
+            echo "::notice::A required lane failed; cancelled the rest of run ${GITHUB_RUN_ID}, so the queue removes the entry now."
+          else
+            echo "::warning::Could not cancel run ${GITHUB_RUN_ID}; it may already be cancelling."
+          fi
+
+  fail-fast-plan:
+    name: Fail fast (plan)
+    needs: [plan]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.plan.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-affected-lane:
+    name: Fail fast (affected-lane)
+    needs: [affected-lane]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.affected-lane.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-browser:
+    name: Fail fast (browser)
+    needs: [browser]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.browser.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-geospec-examples:
+    name: Fail fast (geospec-examples)
+    needs: [geospec-examples]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.geospec-examples.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-cli-e2e:
+    name: Fail fast (cli-e2e)
+    needs: [cli-e2e]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.cli-e2e.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-native-hosts:
+    name: Fail fast (native-hosts)
+    needs: [native-hosts]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.native-hosts.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-native-darwin:
+    name: Fail fast (native-darwin)
+    needs: [native-darwin]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.native-darwin.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-viewer-parity:
+    name: Fail fast (viewer-parity)
+    needs: [viewer-parity]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.viewer-parity.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-formal:
+    name: Fail fast (formal)
+    needs: [formal]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.formal.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-api:
+    name: Fail fast (api)
+    needs: [api]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.api.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-billing-e2e:
+    name: Fail fast (billing-e2e)
+    needs: [billing-e2e]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.billing-e2e.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-shell:
+    name: Fail fast (shell)
+    needs: [shell]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.shell.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-formal-nightly:
+    name: Fail fast (formal-nightly)
+    needs: [formal-nightly]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.formal-nightly.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-e2e-queue:
+    name: Fail fast (e2e-queue)
+    needs: [e2e-queue]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.e2e-queue.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal:tla` or `formal:lean` target. A known counterexample is an
   # expected verdict and never turns this red; a changed verdict, a stale generated
@@ -1065,7 +1231,7 @@ jobs:
     # for the up-to-twofold runner variance the formal nightly showed (runs 43167548945 and 43178267338).
     timeout-minutes: 20
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         shard: [1, 2, 3]
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
@@ -1775,7 +1941,7 @@ jobs:
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.cli-e2e == 'true' }}
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         shard: [1, 2]
     env:

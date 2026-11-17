@@ -17,10 +17,17 @@ import { pbkdf2 } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { join, sep } from 'node:path';
-import { NodeFsProvider, drainNodeFsProviderWatchClosures, nodeDiskKeepsFileModes } from '#backend/node/provider.js';
+import {
+  NodeFsProvider,
+  drainNodeFsProviderWatchClosures,
+  nodeDiskKeepsFileModes,
+  writeNodeFileCheckedWithAuthority,
+} from '#backend/node/provider.js';
+import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { BatchEntry } from '#changeset.js';
 import parcelWatcher from '@parcel/watcher';
+import { answeringWatchProbes } from '#testing/answering-watch-probes.js';
 import type { Event as ParcelEvent } from '@parcel/watcher';
 
 /* Every `statSync` the provider makes, so a case can show which events it never measured. */
@@ -190,6 +197,126 @@ describe('NodeFsProvider file modes', () => {
   });
 });
 
+/** Run `body` while this process reports `platform`, restoring it however `body` ends. */
+const whileOnPlatform = async <Result>(platform: NodeJS.Platform, body: () => Promise<Result>): Promise<Result> => {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  if (original === undefined) {
+    throw new Error('process.platform has no descriptor to fake.');
+  }
+  Object.defineProperty(process, 'platform', { ...original, value: platform });
+  try {
+    return await body();
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+};
+
+/** A rename that fails with `code` for its first `failures` calls, then renames. */
+const renameFailingFirst = (code: string, failures: number) => {
+  const rename = fs.rename.bind(fs);
+  let calls = 0;
+  const spy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+    calls += 1;
+    if (calls <= failures) {
+      throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+    }
+    await rename(from, to);
+  });
+  return { spy, calls: () => calls };
+};
+
+/* A Windows scanner or indexer holds a freshly written file for a moment (revisions A4, Windows run 44028941814:
+ * EPERM renaming `.gitignore`'s temporary file into place). */
+describe('NodeFsProvider atomic writes over a briefly held file on Windows', () => {
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('should retry a rename that fails with %s until it lands', async (code) => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst(code, 3);
+    try {
+      await whileOnPlatform('win32', async () => provider.writeFile('target.txt', 'new'));
+
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+      expect(calls()).toBe(4);
+      expect(temporaryFiles(root)).toEqual([]);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should give up after about a second and answer the last error', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst('EPERM', Number.POSITIVE_INFINITY);
+    const startedAt = Date.now();
+    try {
+      await expect(whileOnPlatform('win32', async () => provider.writeFile('target.txt', 'new'))).rejects.toMatchObject(
+        { code: 'EPERM' },
+      );
+
+      const elapsed = Date.now() - startedAt;
+      expect(elapsed).toBeGreaterThanOrEqual(1000);
+      expect(elapsed).toBeLessThan(3000);
+      expect(calls()).toBeGreaterThan(3);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should refuse a retry once the writer lost its claim during the backoff, publishing nothing', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst('EPERM', Number.POSITIVE_INFINITY);
+    let asked = 0;
+    const writer: NodeAuthorityWriter = {
+      lockPath: join(root, '.lock'),
+      /* Current for the write's own checks and its first rename; lost while that rename's backoff runs. */
+      assertCurrent: async () => {
+        asked += 1;
+        if (calls() > 0) {
+          throw Object.assign(new Error('Another window owns this project.'), { code: 'AUTHORITY_LOCK_UNAVAILABLE' });
+        }
+      },
+      release: async () => undefined,
+    };
+    try {
+      await expect(
+        whileOnPlatform('win32', async () =>
+          writeNodeFileCheckedWithAuthority(
+            provider,
+            { path: 'target.txt', data: 'new', preconditions: [{ path: 'target.txt', expected: 'old' }] },
+            writer,
+          ),
+        ),
+      ).rejects.toMatchObject({ code: 'AUTHORITY_LOCK_UNAVAILABLE', applicationState: 'known-not-applied' });
+
+      expect(calls()).toBe(1);
+      expect(asked).toBe(3);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+      expect(temporaryFiles(root)).toEqual([]);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should answer a rename error at once off Windows, where it is never a passing lock', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst('EPERM', 1);
+    try {
+      await expect(whileOnPlatform('linux', async () => provider.writeFile('target.txt', 'new'))).rejects.toMatchObject(
+        {
+          code: 'EPERM',
+        },
+      );
+
+      expect(calls()).toBe(1);
+    } finally {
+      provider.dispose();
+    }
+  });
+});
+
 describe('NodeFsProvider atomic writes', () => {
   it('cancels observation before the optional backend import finishes', async () => {
     const provider = new NodeFsProvider(createRoot());
@@ -205,7 +332,9 @@ describe('NodeFsProvider atomic writes', () => {
     const root = createRoot();
     const admission = Promise.withResolvers<{ unsubscribe(): Promise<void> }>();
     const close = vi.fn(async () => undefined);
-    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockReturnValue(admission.promise);
+    const subscribe = vi
+      .spyOn(parcelWatcher, 'subscribe')
+      .mockImplementation(answeringWatchProbes(async () => admission.promise));
     const provider = new NodeFsProvider(root);
     const events: unknown[] = [];
     try {
@@ -266,10 +395,12 @@ describe('NodeFsProvider atomic writes', () => {
     const root = createRoot();
     const provider = new NodeFsProvider(root);
     let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
-    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
-      onEvents = callback;
-      return { unsubscribe: async () => undefined };
-    });
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+      answeringWatchProbes(async (_directory, callback) => {
+        onEvents = callback;
+        return { unsubscribe: async () => undefined };
+      }),
+    );
     vi.spyOn(fs, 'stat').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
     const events: unknown[] = [];
     const stop = await provider.watch({ paths: [''], recursive: true }, (event) => events.push(event));
@@ -286,10 +417,12 @@ describe('NodeFsProvider atomic writes', () => {
     const provider = new NodeFsProvider(createRoot());
     const close = vi.fn(async () => undefined);
     let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
-    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
-      onEvents = callback;
-      return { unsubscribe: close };
-    });
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+      answeringWatchProbes(async (_directory, callback) => {
+        onEvents = callback;
+        return { unsubscribe: close };
+      }),
+    );
     const events: unknown[] = [];
     const stop = await provider.watch({ paths: [''], recursive: true }, (event) => events.push(event));
     onEvents?.(new Error('native stream lost'), []);
@@ -304,10 +437,12 @@ describe('NodeFsProvider atomic writes', () => {
     const provider = new NodeFsProvider(root);
     const close = vi.fn(async () => undefined);
     let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
-    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
-      onEvents = callback;
-      return { unsubscribe: close };
-    });
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+      answeringWatchProbes(async (_directory, callback) => {
+        onEvents = callback;
+        return { unsubscribe: close };
+      }),
+    );
     const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const events: unknown[] = [];
     const stop = await provider.watch({ paths: [''], recursive: true }, (event) => {
@@ -339,10 +474,12 @@ describe('NodeFsProvider atomic writes', () => {
     const provider = new NodeFsProvider(root);
     const close = vi.fn(async () => undefined);
     let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
-    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
-      onEvents = callback;
-      return { unsubscribe: close };
-    });
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+      answeringWatchProbes(async (_directory, callback) => {
+        onEvents = callback;
+        return { unsubscribe: close };
+      }),
+    );
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const events: unknown[] = [];
     let failures = 2;
@@ -377,14 +514,16 @@ describe('NodeFsProvider atomic writes', () => {
     const provider = new NodeFsProvider(root);
     const close = vi.fn(async () => undefined);
     let subscriptions = 0;
-    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async () => {
-      subscriptions += 1;
-      /* The target's parent appears while the first subscription starts, so admission reconciles with a reset. */
-      if (subscriptions === 1) {
-        mkdirSync(join(root, 'later'));
-      }
-      return { unsubscribe: close };
-    });
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+      answeringWatchProbes(async () => {
+        subscriptions += 1;
+        /* The target's parent appears while the first subscription starts, so admission reconciles with a reset. */
+        if (subscriptions === 1) {
+          mkdirSync(join(root, 'later'));
+        }
+        return { unsubscribe: close };
+      }),
+    );
     const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const stop = await provider.watch({ paths: ['later/file.txt'], recursive: false }, () => {
       throw new Error('handler broke');
@@ -401,10 +540,12 @@ describe('NodeFsProvider atomic writes', () => {
     const provider = new NodeFsProvider(root);
     const close = vi.fn(async () => undefined);
     let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
-    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
-      onEvents = callback;
-      return { unsubscribe: close };
-    });
+    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+      answeringWatchProbes(async (_directory, callback) => {
+        onEvents = callback;
+        return { unsubscribe: close };
+      }),
+    );
     const events: unknown[] = [];
     const stop = await provider.watch(
       { paths: [''], recursive: true, excludes: ['.tau/cache/**', 'exact.txt'] },
@@ -440,10 +581,12 @@ describe('NodeFsProvider atomic writes', () => {
     const root = createRoot();
     const provider = new NodeFsProvider(root);
     let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
-    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
-      onEvents = callback;
-      return { unsubscribe: async () => undefined };
-    });
+    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+      answeringWatchProbes(async (_directory, callback) => {
+        onEvents = callback;
+        return { unsubscribe: async () => undefined };
+      }),
+    );
     const events: unknown[] = [];
     const stop = await provider.watch({ paths: [''], recursive: true }, (event) => events.push(event));
     try {
@@ -485,10 +628,12 @@ describe('NodeFsProvider atomic writes', () => {
     const provider = new NodeFsProvider(createRoot());
     const close = vi.fn(async () => undefined);
     const lost = new Error('native stream lost during admission');
-    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
-      callback(lost, []);
-      return { unsubscribe: close };
-    });
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+      answeringWatchProbes(async (_directory, callback) => {
+        callback(lost, []);
+        return { unsubscribe: close };
+      }),
+    );
     const events: unknown[] = [];
     await expect(provider.watch({ paths: [''], recursive: true }, (event) => events.push(event))).rejects.toBe(lost);
     await drainNodeFsProviderWatchClosures(provider);
@@ -504,13 +649,15 @@ describe('NodeFsProvider atomic writes', () => {
       const firstClose = vi.fn(async () => undefined);
       const replacementClose = vi.fn(async () => undefined);
       let onAncestorEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
-      const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
-        if (!onAncestorEvents) {
-          onAncestorEvents = callback;
-          return { unsubscribe: firstClose };
-        }
-        return replacement.promise;
-      });
+      const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+        answeringWatchProbes(async (_directory, callback) => {
+          if (!onAncestorEvents) {
+            onAncestorEvents = callback;
+            return { unsubscribe: firstClose };
+          }
+          return replacement.promise;
+        }),
+      );
       const provider = new NodeFsProvider(root);
       const events: unknown[] = [];
       const requestedPath = 'absent/nested/deep.ts';
@@ -562,7 +709,9 @@ describe('NodeFsProvider atomic writes', () => {
     const replacementClose = vi.fn(async () => undefined);
     const subscribe = vi
       .spyOn(parcelWatcher, 'subscribe')
-      .mockImplementation(async () => (subscribe.mock.calls.length === 1 ? first.promise : replacement.promise));
+      .mockImplementation(
+        answeringWatchProbes(async () => (subscribe.mock.calls.length === 1 ? first.promise : replacement.promise)),
+      );
     const provider = new NodeFsProvider(root);
     const events: unknown[] = [];
     const opening = provider.watch({ paths: ['absent/deep.txt'], recursive: false }, (event) => events.push(event));
@@ -601,14 +750,16 @@ describe('NodeFsProvider atomic writes', () => {
       const callbacks: Array<Parameters<typeof parcelWatcher.subscribe>[1]> = [];
       const firstClose = vi.fn(async () => undefined);
       const replacementClose = vi.fn(async () => undefined);
-      vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
-        callbacks.push(callback);
-        if (callbacks.length === 1) {
-          return { unsubscribe: firstClose };
-        }
-        replacementStarted.resolve();
-        return replacement.promise;
-      });
+      vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+        answeringWatchProbes(async (_directory, callback) => {
+          callbacks.push(callback);
+          if (callbacks.length === 1) {
+            return { unsubscribe: firstClose };
+          }
+          replacementStarted.resolve();
+          return replacement.promise;
+        }),
+      );
       const provider = new NodeFsProvider(root);
       const events: unknown[] = [];
       try {
@@ -1237,5 +1388,109 @@ describe('NodeFsProvider applyBatch (D16)', () => {
     );
     expect(receipts[0]?.outcome).toBe('failed');
     expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+  });
+});
+
+/* Windows' `@parcel/watcher` resolves `subscribe` once it has queued the watch, and its backend thread issues
+ * `ReadDirectoryChangesW` later: Windows job 133856230090 lost a change written right after a watch was admitted. */
+describe('NodeFsProvider watch admission on Windows', () => {
+  /** A `subscribe` that resolves at once and starts the real watcher 300 ms later, as Windows' backend thread does. */
+  const subscribeListeningLate = (): void => {
+    const realSubscribe = parcelWatcher.subscribe.bind(parcelWatcher);
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (directory, callback, options) => {
+      const live = new Promise<Awaited<ReturnType<typeof realSubscribe>>>((resolve) => {
+        setTimeout(() => {
+          resolve(realSubscribe(directory, callback, options));
+        }, 300);
+      });
+      return {
+        unsubscribe: async () => {
+          const subscription = await live;
+          await subscription.unsubscribe();
+        },
+      };
+    });
+  };
+
+  /** Run `body` while this process reports `platform`, restoring it however `body` ends. */
+  const asPlatform = async <Result>(platform: NodeJS.Platform, body: () => Promise<Result>): Promise<Result> => {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform');
+    if (original === undefined) {
+      throw new Error('process.platform has no descriptor to fake.');
+    }
+    Object.defineProperty(process, 'platform', { ...original, value: platform });
+    try {
+      return await body();
+    } finally {
+      Object.defineProperty(process, 'platform', original);
+    }
+  };
+
+  const probeEvents = (events: readonly unknown[]): unknown[] =>
+    events.filter((event) => JSON.stringify(event).includes('tau-watch-probe'));
+
+  it('should admit a watch only once its native watcher is listening, so a change written next is delivered', async () => {
+    subscribeListeningLate();
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const events: unknown[] = [];
+    try {
+      await asPlatform('win32', async () =>
+        provider.watch({ paths: [''], recursive: true }, (event) => events.push(event)),
+      );
+      writeFileSync(join(root, 'watched.txt'), 'external');
+
+      await vi.waitFor(
+        () => {
+          expect(events).toContainEqual({ type: 'change', path: 'watched.txt', kind: 'file' });
+        },
+        { timeout: 5000 },
+      );
+      expect(probeEvents(events)).toEqual([]);
+      expect(temporaryFiles(root)).toEqual([]);
+    } finally {
+      provider.dispose();
+      await drainNodeFsProviderWatchClosures(provider);
+    }
+  }, 30_000);
+
+  it('should admit a watch of a single file once its parent watch is listening', async () => {
+    subscribeListeningLate();
+    const root = createRoot();
+    writeFileSync(join(root, 'target.txt'), 'old');
+    const provider = new NodeFsProvider(root);
+    const events: unknown[] = [];
+    try {
+      await asPlatform('win32', async () =>
+        provider.watch({ paths: ['target.txt'], recursive: false }, (event) => events.push(event)),
+      );
+      writeFileSync(join(root, 'target.txt'), 'external');
+
+      await vi.waitFor(
+        () => {
+          expect(events).toContainEqual({ type: 'change', path: 'target.txt', kind: 'file' });
+        },
+        { timeout: 5000 },
+      );
+      expect(probeEvents(events)).toEqual([]);
+      expect(temporaryFiles(root)).toEqual([]);
+    } finally {
+      provider.dispose();
+      await drainNodeFsProviderWatchClosures(provider);
+    }
+  }, 30_000);
+
+  it('should write no probe off Windows, where subscribe resolves with the watch live', async () => {
+    const writeFile = vi.spyOn(fs, 'writeFile');
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    try {
+      await asPlatform('linux', async () => provider.watch({ paths: [''], recursive: true }, () => undefined));
+
+      expect(writeFile).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+      await drainNodeFsProviderWatchClosures(provider);
+    }
   });
 });

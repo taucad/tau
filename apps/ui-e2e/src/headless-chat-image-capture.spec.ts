@@ -142,11 +142,7 @@ const attachmentSource = async (index: number): Promise<string> => {
 
 const setViewerCamera = async (camera: ViewerCamera): Promise<void> => {
   await target.evaluate((nextCamera) => {
-    const bridge = (
-      globalThis as {
-        __TAU_SECTION_VIEW_TEST__?: { setCamera(value: ViewerCamera): void };
-      }
-    ).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     bridge?.setCamera(nextCamera);
   }, camera);
   await target.evaluate(
@@ -193,7 +189,7 @@ const withPresentationBridge = async (
 ): Promise<void> => {
   await target.evaluate(
     ({ action: method, value: argument }) => {
-      const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: PresentationBridge }).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!bridge) {
         throw new Error('Presentation test bridge is unavailable');
       }
@@ -231,7 +227,7 @@ const withPresentationBridge = async (
 
 const componentId = async (name: string): Promise<string> =>
   target.evaluate((componentName) => {
-    const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: PresentationBridge }).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     const component = bridge?.getModelComponents().find(({ name: candidate }) => candidate === componentName);
     if (!component) {
       throw new Error(`Model component ${componentName} is unavailable`);
@@ -241,7 +237,7 @@ const componentId = async (name: string): Promise<string> =>
 
 const modelVisibility = async (): Promise<ReturnType<PresentationBridge['getModelVisibility']>> =>
   target.evaluate(() => {
-    const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: PresentationBridge }).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Presentation test bridge is unavailable');
     }
@@ -250,7 +246,7 @@ const modelVisibility = async (): Promise<ReturnType<PresentationBridge['getMode
 
 const sectionState = async (): Promise<SectionState> =>
   target.evaluate(() => {
-    const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: PresentationBridge }).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Presentation test bridge is unavailable');
     }
@@ -260,7 +256,7 @@ const sectionState = async (): Promise<SectionState> =>
 /** Replaces the viewer's cuts and waits until the caps commit them, since a capture draws the committed cuts. */
 const setSectionCuts = async (cuts: readonly SectionCut[]): Promise<string[]> => {
   const ids = await target.evaluate((nextCuts) => {
-    const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: PresentationBridge }).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Presentation test bridge is unavailable');
     }
@@ -365,9 +361,7 @@ const openSecondaryViewer = async (): Promise<void> => {
   await target.click(selectors.getByRole('menuitem', { name: 'Open in Viewer' }));
   await target.expectClass(selectors.getByCss(`.dv-tab[aria-label="src/${fileName}"]`), /\bdv-active-tab\b/u, 60_000);
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
-  await target.waitFor(() =>
-    Boolean((globalThis as { __TAU_SECTION_VIEW_TEST__?: unknown }).__TAU_SECTION_VIEW_TEST__),
-  );
+  await target.waitFor(() => Boolean(globalThis.__TAU_SECTION_VIEW_TEST__));
 };
 
 test('GLTF toolbar and @ actions use one annotated headless camera path', async () => {
@@ -615,8 +609,7 @@ test('GLTF toolbar and @ actions use one annotated headless camera path', async 
     .poll(async () =>
       target.evaluate(() => {
         const canvas = document.querySelector('[data-testid="cad-viewer-canvas-region"] canvas');
-        const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getCamera(): { aspect: number } } })
-          .__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         if (!canvas || !bridge) {
           return false;
         }

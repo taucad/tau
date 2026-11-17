@@ -47,7 +47,9 @@ const readLayoutMetrics = async (): Promise<LayoutMetrics> =>
     const root = workspace?.querySelector<HTMLElement>('[data-resize-owner] > .split-view');
     const firstPane = root?.querySelector<HTMLElement>(':scope > .split-view-container > .split-view-view-visible');
     const sashContainer = root?.querySelector<HTMLElement>(':scope > .sash-container');
-    const content = document.querySelector<HTMLElement>('[data-slot="collection-empty-state"]');
+    /* The chat lane's content inset: its composer. An empty chat lists no examples since #1938 (a5a509d44), so the
+     * composer is the one lane content every chat has. */
+    const content = document.querySelector<HTMLElement>('[data-chat-composer="main"]');
     if (!outerRoot || !main || !sidebar || !workspace || !root || !firstPane || !sashContainer || !content) {
       throw new Error('Desktop editor layout was not ready.');
     }
@@ -176,7 +178,8 @@ test('the project shell keeps stable controls, split geometry, and focus scroll'
   expect.soft(sidebarOpenBounds.height).toBe(28);
   expect.soft(workbenchOpenBounds.width).toBe(28);
   expect.soft(workbenchOpenBounds.height).toBe(28);
-  expect.soft(sidebarOpenBounds.x - (homeBounds.x + homeBounds.width)).toBe(4);
+  // The trigger leads the titlebar and the Home wordmark follows it (#679, 1aa71b0fe), one 4 px gap apart.
+  expect.soft(homeBounds.x - (sidebarOpenBounds.x + sidebarOpenBounds.width)).toBe(4);
   expect.soft(sidebarOpenBounds.y).toBe(workbenchOpenBounds.y);
   expect.soft(beforeFocus.compact).toBe(false);
   expectConstrainedLayout(beforeFocus);

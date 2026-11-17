@@ -529,7 +529,16 @@ export function ModelPropertiesPaneviewPanel({
   readonly params: ModelPropertiesPanelParams;
 }): React.JSX.Element {
   return (
-    <div className={cn('h-full overflow-y-auto! scroll-shadows-y', paneviewAttachedBodyClassName)}>
+    <div
+      role='group'
+      aria-label='Properties'
+      // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable column must be keyboard reachable (WCAG 2.1.1), even when it holds no control, as the empty state on a half-height phone sheet
+      tabIndex={0}
+      className={cn(
+        'h-full overflow-y-auto! scroll-shadows-y outline-none focus-visible:focus-outline',
+        paneviewAttachedBodyClassName,
+      )}
+    >
       <PartPropertiesPanel
         node={params.selected?.node}
         entryPath={params.selected?.entryPath}

@@ -85,6 +85,19 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
     };
   }, [api]);
 
+  /* A tab moved to another group keeps this content but gets a new `.dv-tab`, which Dockview names by the bare title:
+   * the group is a dependency of naming it, so a moved tab keeps its full path (#2291). */
+  const [group, setGroup] = useState(api.group);
+  useEffect(() => {
+    const disposable = api.onDidGroupChange(() => {
+      setGroup(api.group);
+    });
+
+    return () => {
+      disposable.dispose();
+    };
+  }, [api]);
+
   // Dockview owns the actual keyboard-focus target outside this React root.
   useEffect(() => {
     const tab = closeRef.current?.closest<HTMLElement>('.dv-tab');
@@ -100,7 +113,7 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
         tab.removeAttribute('aria-label');
       }
     };
-  }, [fullTitle]);
+  }, [fullTitle, group]);
 
   /*
    * Dockview listens natively on `.dv-tab`, which sits between this portal and

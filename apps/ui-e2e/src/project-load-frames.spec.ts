@@ -1620,6 +1620,16 @@ knownDefect(
               ? `right ${x + width}, y ${y}, h ${height}`
               : rect;
         });
+      /* Both bars are measured whole (bar, input row, Add, mode, model, Send), so a selector that stops matching
+       * cannot make the comparison below pass on two empty lists. */
+      expectMeasured(
+        {
+          controls: after.length,
+          hasInputRow: after[1]?.startsWith('input row ') === true && !after[1].endsWith('none'),
+        },
+        'F7b: the rich bar, its input row or one of its controls was not measured',
+        { controls: 6, hasInputRow: true },
+      );
       expectMeasured(
         { controls: before.length, slots: slot(before) },
         'F7b: the served bar does not reserve the rich bar controls in their boxes',

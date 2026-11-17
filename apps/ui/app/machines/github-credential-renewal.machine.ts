@@ -126,7 +126,8 @@ export type GithubCredentialRenewal = Readonly<{
 
 /**
  * Start one project's renewal actor. A module-level lease outlives every mount, so this is its owner, not a component
- * (I1): the revision client's lease map creates one per project and stops it when the lease is reset.
+ * (I1): the revision client's lease map creates one per project for the page's life; only a test's reset stops it.
+ * The start sits here, in a module, so the ownership ratchet does not count it: xstate-policy records it as debt.
  *
  * It counts on XState's clock, as the runtime's actors do in production, where no clock is injected; a test that fakes
  * `setTimeout` moves it, and the machine's own rows step it with a `StepClock`.

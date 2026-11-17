@@ -20,14 +20,59 @@
  * added to the ownership ratchet. One boundary keeps a site: `project-route-intent.tsx` reports each committed route
  * to focus, and the router's commit is its only source (boundary 1). Boundary 2, the runtime's start after hydration
  * in `runtime/app-runtime-provider.tsx`, is not a counted site; the ownership ratchet holds it. A new boundary needs a
- * ruling, and a file added to the programme's paths joins this list.
+ * ruling, and a file added to the programme's paths joins this list; the second row fails a ratchet file left out.
  */
 
 // Test-only tooling import: kept out of the Nx graph so lint-rule churn in libs/oxlint does not invalidate this
 // project's test and typecheck cache; nx.json lists the helper as a `test` and `typecheck` input instead.
 // nx-ignore-next-line
 import { checkReactEventLayerCeiling } from '@taucad/oxlint/react-event-layer';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+
+/** The zero scope's files and directories (`URL`s ending in `/` are directories). */
+const zeroScope = [
+  new URL('chat-clients/debug-probes.tsx', import.meta.url),
+  new URL('components/geometry/debug/section-view-test-bridge.tsx', import.meta.url),
+  new URL('hooks/chat-session-store.fixture.tsx', import.meta.url),
+  new URL('hooks/use-file-manager.tsx', import.meta.url),
+  new URL('hooks/use-project-manager.tsx', import.meta.url),
+  new URL('hooks/use-project.tsx', import.meta.url),
+  new URL('hooks/use-projects.ts', import.meta.url),
+  new URL('hooks/use-revision-status.ts', import.meta.url),
+  new URL('hooks/use-sessions.tsx', import.meta.url),
+  new URL('hooks/use-wait-start.ts', import.meta.url),
+  new URL('lib/frame-hint.ts', import.meta.url),
+  new URL('machines/focus.machine.ts', import.meta.url),
+  new URL('machines/focus.route-state.ts', import.meta.url),
+  new URL('machines/github-credential-renewal.machine.ts', import.meta.url),
+  new URL('machines/library-access.machine.ts', import.meta.url),
+  new URL('machines/library-discovery.machine.ts', import.meta.url),
+  new URL('machines/library-recovery.machine.ts', import.meta.url),
+  new URL('machines/project-session.machine.ts', import.meta.url),
+  new URL('machines/project.machine.ts', import.meta.url),
+  new URL('machines/session-file-check.machine.ts', import.meta.url),
+  new URL('machines/sessions.machine.ts', import.meta.url),
+  new URL('routes/[__e2e].onshape-render-profile/route.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/chat-viewer-dockview.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/chat-workbench-dockview.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/focused-project-view.session.ts', import.meta.url),
+  new URL('routes/w.$workspace.$project/focused-project-view.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/project-live-sessions.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/project-route-intent.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/project-route.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/project-sync-placeholder.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/project-workspace-context.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/workbench-checkout-root.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/workbench-layout-controller.shim.ts', import.meta.url),
+  new URL('routes/w.$workspace.$project/workbench-layout-controller.ts', import.meta.url),
+  new URL('routes/w.$workspace.$project/workbench-record-host.tsx', import.meta.url),
+  new URL('routes/w.$workspace.$project/workspace-frame.tsx', import.meta.url),
+  new URL('runtime/', import.meta.url),
+  new URL('services/sessions-store.ts', import.meta.url),
+  new URL('workbench-records/', import.meta.url),
+];
 
 describe('React event layer ceiling', () => {
   it('should hold every file at or below its committed ceiling', () => {
@@ -35,47 +80,7 @@ describe('React event layer ceiling', () => {
       manifest: new URL('react-event-layer.ceiling.json', import.meta.url),
       directories: [new URL('.', import.meta.url)],
       zero: {
-        scope: [
-          new URL('chat-clients/debug-probes.tsx', import.meta.url),
-          new URL('components/geometry/debug/section-view-test-bridge.tsx', import.meta.url),
-          new URL('hooks/chat-session-store.fixture.tsx', import.meta.url),
-          new URL('hooks/use-file-manager.tsx', import.meta.url),
-          new URL('hooks/use-project-manager.tsx', import.meta.url),
-          new URL('hooks/use-project.tsx', import.meta.url),
-          new URL('hooks/use-projects.ts', import.meta.url),
-          new URL('hooks/use-revision-status.ts', import.meta.url),
-          new URL('hooks/use-sessions.tsx', import.meta.url),
-          new URL('hooks/use-wait-start.ts', import.meta.url),
-          new URL('lib/frame-hint.ts', import.meta.url),
-          new URL('machines/focus.machine.ts', import.meta.url),
-          new URL('machines/focus.route-state.ts', import.meta.url),
-          new URL('machines/github-credential-renewal.machine.ts', import.meta.url),
-          new URL('machines/library-access.machine.ts', import.meta.url),
-          new URL('machines/library-discovery.machine.ts', import.meta.url),
-          new URL('machines/library-recovery.machine.ts', import.meta.url),
-          new URL('machines/project-session.machine.ts', import.meta.url),
-          new URL('machines/project.machine.ts', import.meta.url),
-          new URL('machines/session-file-check.machine.ts', import.meta.url),
-          new URL('machines/sessions.machine.ts', import.meta.url),
-          new URL('routes/[__e2e].onshape-render-profile/route.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/chat-viewer-dockview.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/chat-workbench-dockview.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/focused-project-view.session.ts', import.meta.url),
-          new URL('routes/w.$workspace.$project/focused-project-view.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/project-live-sessions.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/project-route-intent.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/project-route.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/project-sync-placeholder.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/project-workspace-context.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/workbench-checkout-root.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/workbench-layout-controller.shim.ts', import.meta.url),
-          new URL('routes/w.$workspace.$project/workbench-layout-controller.ts', import.meta.url),
-          new URL('routes/w.$workspace.$project/workbench-record-host.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/workspace-frame.tsx', import.meta.url),
-          new URL('runtime/', import.meta.url),
-          new URL('services/sessions-store.ts', import.meta.url),
-          new URL('workbench-records/', import.meta.url),
-        ],
+        scope: zeroScope,
         exceptions: {
           'apps/ui/app/routes/w.$workspace.$project/project-route-intent.tsx': {
             sites: 1,
@@ -99,4 +104,16 @@ describe('React event layer ceiling', () => {
     });
     expect(problems, problems.join('\n')).toEqual([]);
   }, 60_000);
+
+  it('should hold every apps/ui/app file in the ownership ratchet inside the zero scope', () => {
+    const ratchet = JSON.parse(
+      readFileSync(new URL('app-state-ownership.ratchet.json', import.meta.url), 'utf8'),
+    ) as Readonly<Record<'components' | 'modules', Readonly<{ files: readonly string[] }>>>;
+    const root = fileURLToPath(new URL('../../../', import.meta.url));
+    const scoped = zeroScope.map((entry) => fileURLToPath(entry).slice(root.length));
+    const outside = [...ratchet.components.files, ...ratchet.modules.files]
+      .filter((file) => file.startsWith('apps/ui/app/'))
+      .filter((file) => !scoped.some((entry) => (entry.endsWith('/') ? file.startsWith(entry) : file === entry)));
+    expect(outside).toEqual([]);
+  });
 });

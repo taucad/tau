@@ -96,6 +96,14 @@ describe('GitHub credential renewal (A10)', () => {
     actor.send({ type: 'schedule', delayMilliseconds: Number.MAX_SAFE_INTEGER });
 
     expect(actor.getSnapshot().context.delayMilliseconds).toBe(longestRenewalDelayMilliseconds);
+
+    clock.advance(longestRenewalDelayMilliseconds - 1);
+
+    expect(due()).toBe(2);
+
+    clock.advance(1);
+
+    expect(due()).toBe(3);
   });
 });
 

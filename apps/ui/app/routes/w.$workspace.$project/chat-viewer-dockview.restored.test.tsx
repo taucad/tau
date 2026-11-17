@@ -236,6 +236,7 @@ vi.mock('#components/panes/dockview.js', () => ({
 }));
 
 const { ViewerDockview } = await import('./chat-viewer-dockview.js');
+const { WorkspaceLayoutReadyContext } = await import('#routes/w.$workspace.$project/project-workspace-context.js');
 
 describe('restored viewer layout admission', () => {
   beforeEach(() => {
@@ -339,6 +340,26 @@ describe('restored viewer layout admission', () => {
     });
     expect(registerA).toHaveBeenCalledOnce();
     expect(registerB).toHaveBeenCalledOnce();
+  });
+
+  /* #2293: a returning project's layout lands as its dock attaches, before the lanes are laid out; a canvas mounted
+   * then keeps the 100 px box's aspect. The viewer mounts only at layout-ready, and shows its frame until then. */
+  it('should mount the viewer only once the workspace is layout-ready', () => {
+    const view = render(
+      <WorkspaceLayoutReadyContext.Provider value={false}>
+        <ViewerDockview />
+      </WorkspaceLayoutReadyContext.Provider>,
+    );
+    expect(screen.queryByTestId('content:main.ts')).not.toBeInTheDocument();
+    expect(view.container.querySelector('[data-slot=viewer-frame]')).toBeInTheDocument();
+
+    view.rerender(
+      <WorkspaceLayoutReadyContext.Provider value>
+        <ViewerDockview />
+      </WorkspaceLayoutReadyContext.Provider>,
+    );
+    expect(screen.getByTestId('content:main.ts')).toBeInTheDocument();
+    expect(view.container.querySelector('[data-slot=viewer-frame]')).not.toBeInTheDocument();
   });
 
   it('should publish the resolved main entry when a viewer starts before its manifest', () => {

@@ -3,11 +3,16 @@ import { describe, expect, it } from 'vitest';
 import { consumerParity, consumers, parityReport, resolveOracle } from '#consumer-parity-summary.js';
 import type { ActionsReader, Consumer, Oracle, RunFilter, WorkflowJob, WorkflowRun } from '#consumer-parity-summary.js';
 
-const run = (id: number, branch = 'main'): WorkflowRun => ({
+const run = (
+  id: number,
+  branch = 'main',
+  { event = 'push', sha = `${String(id)}abcdef0123456789` }: { readonly event?: string; readonly sha?: string } = {},
+): WorkflowRun => ({
   id,
   url: `https://github.com/taucad/tau/actions/runs/${String(id)}`,
   branch,
-  sha: `${String(id)}abcdef0123456789`,
+  sha,
+  event,
   createdAt: '2026-10-17T13:23:00Z',
 });
 
@@ -32,7 +37,10 @@ const reader = (fixture: {
     runs: async (workflow, filter) => {
       asked.push({ workflow, ...filter });
       return (fixture.runs[workflow] ?? []).filter(
-        (candidate) => filter.branch === undefined || candidate.branch === filter.branch,
+        (candidate) =>
+          (filter.branch === undefined || candidate.branch === filter.branch) &&
+          (filter.event === undefined || candidate.event === filter.event) &&
+          (filter.sha === undefined || candidate.sha === filter.sha),
       );
     },
   };
@@ -63,7 +71,7 @@ describe('resolveOracle', () => {
   it('should fall back to the latest nightly on main that ran the job when this run skipped it', async () => {
     const fake = reader({
       current: run(9, 'claude/branch'),
-      runs: { 'e2e-nightly.yml': [run(8), run(7)] },
+      runs: { 'e2e-nightly.yml': [run(8, 'main', { event: 'schedule' }), run(7, 'main', { event: 'schedule' })] },
       jobs: { 9: [job(desktop, 'skipped')], 8: [job(desktop, 'skipped')], 7: [job(desktop, 'failure')] },
     });
 
@@ -102,6 +110,114 @@ describe('resolveOracle', () => {
     expect(result.status).toBe('fail');
     expect(result.evidence).toContain('Affected (test-2)');
     expect(result.evidence).not.toContain('Affected (lint)');
+  });
+
+  describe('on main, keyed by commit', () => {
+    const cli: Oracle = {
+      kind: 'job',
+      workflow: 'ci.yml',
+      job: 'CLI end-to-end (',
+      match: 'prefix',
+      scope: 'main',
+      proves: 'cli',
+    };
+    const landed = 'aaaa111122223333';
+    const queue = (id: number, sha: string): WorkflowRun =>
+      run(id, `gh-readonly-queue/main/pr-${String(id)}-${sha}`, { event: 'merge_group', sha });
+
+    it('should read a lane the push skipped from the merge-queue run on the same commit', async () => {
+      const fake = reader({
+        current: run(9),
+        runs: { 'ci.yml': [run(20, 'main', { sha: landed }), queue(31, landed)] },
+        jobs: {
+          20: [job('CLI end-to-end (1/2)', 'skipped'), job('CLI end-to-end (2/2)', 'skipped')],
+          31: [job('CLI end-to-end (1/2)', 'success'), job('CLI end-to-end (2/2)', 'success')],
+        },
+      });
+
+      const result = await resolveOracle(cli, fake);
+
+      expect(result.status).toBe('pass');
+      expect(result.evidence).toContain('run 31');
+      expect(result.evidence).toContain('merge-queue run on this commit, reused by push [run 20]');
+      expect(fake.asked).toEqual([
+        { workflow: 'ci.yml', branch: 'main' },
+        { workflow: 'ci.yml', sha: landed, event: 'merge_group' },
+      ]);
+    });
+
+    it('should never read a queue run of a group that did not land', async () => {
+      const fake = reader({
+        current: run(9),
+        runs: {
+          'ci.yml': [queue(40, 'bbbb999988887777'), run(20, 'main', { sha: landed }), queue(31, landed)],
+        },
+        jobs: {
+          40: [job('CLI end-to-end (1/2)', 'failure')],
+          20: [job('CLI end-to-end (1/2)', 'skipped')],
+          31: [job('CLI end-to-end (1/2)', 'success')],
+        },
+      });
+
+      const result = await resolveOracle(cli, fake);
+
+      expect(result.status).toBe('pass');
+      expect(result.evidence).not.toContain('run 40');
+    });
+
+    it('should walk back to the newest commit whose push or queue run ran an affected-only lane', async () => {
+      const older = 'cccc444455556666';
+      const fake = reader({
+        current: run(9),
+        runs: {
+          'ci.yml': [
+            run(21, 'main', { sha: landed }),
+            queue(32, landed),
+            run(20, 'main', { sha: older }),
+            queue(30, older),
+          ],
+        },
+        jobs: {
+          21: [job('CLI end-to-end (1/2)', 'skipped')],
+          32: [job('CLI end-to-end (1/2)', 'skipped')],
+          20: [job('CLI end-to-end (1/2)', 'skipped')],
+          30: [job('CLI end-to-end (1/2)', 'failure')],
+        },
+      });
+
+      const result = await resolveOracle(cli, fake);
+
+      expect(result.status).toBe('fail');
+      expect(result.evidence).toContain('run 30');
+    });
+
+    it('should prefer the push run on a commit that did not reuse the queue', async () => {
+      const fake = reader({
+        current: run(9),
+        runs: { 'ci.yml': [run(20, 'main', { sha: landed }), queue(31, landed)] },
+        jobs: { 20: [job('CLI end-to-end (1/2)', 'failure')], 31: [job('CLI end-to-end (1/2)', 'success')] },
+      });
+
+      const result = await resolveOracle(cli, fake);
+
+      expect(result.status).toBe('fail');
+      expect(result.evidence).toContain('run 20');
+      expect(fake.asked).toEqual([{ workflow: 'ci.yml', branch: 'main' }]);
+    });
+
+    it('should name the queue in the evidence when no commit ran the lane', async () => {
+      const result = await resolveOracle(
+        cli,
+        reader({
+          current: run(9),
+          runs: { 'ci.yml': [run(20)] },
+          jobs: { 20: [job('CLI end-to-end (1/2)', 'skipped')] },
+        }),
+      );
+
+      expect(result.status).toBe('fail');
+      expect(result.evidence).toContain('on `main` (nor the merge-queue run on its commit) ran `CLI end-to-end (`');
+    });
   });
 
   it('should read a path-filtered workflow on any ref', async () => {
@@ -159,7 +275,12 @@ describe('resolveOracle', () => {
     const smoke = (conclusion: string) => ({ name: 'Smoke the preview agent plugin with doctor', conclusion });
     const fake = reader({
       current: run(9),
-      runs: { 'preview-packages.yml': [run(6), run(5)] },
+      runs: {
+        'preview-packages.yml': [
+          run(6, 'main', { event: 'workflow_dispatch' }),
+          run(5, 'main', { event: 'workflow_dispatch' }),
+        ],
+      },
       jobs: {
         6: [job('Install the previews (ubuntu-latest)', 'failure', [install])],
         5: [
@@ -298,19 +419,16 @@ describe('consumerParity', () => {
     expect(consumers.flatMap(({ oracles }) => oracles).filter(({ kind }) => kind === 'missing')).toEqual([]);
   });
 
-  it('should read the merge-queue-only ci.yml lanes from merge_group runs on any ref', () => {
+  it('should read the merge-queue-only ci.yml lanes by main commit, never from a queue run on any ref', () => {
     // A `main` push reuses the queue verdict and skips these lanes (DC-16), and Q-2 moved the darwin rows into
-    // `ci.yml`, so a `main`-scoped oracle would find no run that ran them.
-    const queueOnly = consumers
+    // `ci.yml`. They are read on `main` commits, which follow the reuse to the queue run on the same commit (#2296).
+    const ciLanes = consumers
       .flatMap(({ oracles }) => oracles)
-      .filter(
-        (oracle) =>
-          oracle.kind === 'job' &&
-          (oracle.job === 'CLI end-to-end (' || oracle.job === 'Native darwin / Native kernels on darwin-arm64'),
-      );
-    expect(queueOnly).toHaveLength(8);
-    for (const oracle of queueOnly) {
-      expect(oracle).toMatchObject({ workflow: 'ci.yml', scope: 'any', event: 'merge_group' });
+      .filter((oracle) => oracle.kind === 'job' && oracle.workflow === 'ci.yml');
+    expect(ciLanes).toHaveLength(11);
+    for (const oracle of ciLanes) {
+      expect(oracle).toMatchObject({ scope: 'main' });
+      expect(oracle).not.toHaveProperty('event');
     }
     expect(
       consumers

@@ -96,6 +96,22 @@ const until = async (condition: () => boolean): Promise<void> => {
   expect(condition()).toBe(true);
 };
 
+/** {@link until} for a condition only an asynchronous read can answer. */
+const untilResolved = async (condition: () => Promise<boolean>): Promise<void> => {
+  let met = false;
+  for (let turn = 0; turn < 10_000 && !met; turn += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- Each turn reads once, then yields to the host's message port.
+    met = await condition();
+    if (!met) {
+      // oxlint-disable-next-line no-await-in-loop -- Each turn yields to the host's message port.
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+    }
+  }
+  expect(met).toBe(true);
+};
+
 /** Yield real I/O turns, so admissions and queued topology work run. */
 const turns = async (count: number): Promise<void> => {
   for (let turn = 0; turn < count; turn += 1) {
@@ -126,10 +142,12 @@ const baseOf = (provider: NodeFsProvider): string => provider.root;
 /**
  * Replace native admission for the named roots; every other root admits for real.
  *
- * @param behaviour - Per root: an error code to reject with, or `'hang'`.
+ * @param behaviour - Per root: an error code to reject with, `'hang'`, or an admission that may call the native one.
  * @returns The spy and the roots whose admission was asked for, in call order.
  */
-const stubAdmission = (behaviour: ReadonlyMap<string, string | 'hang' | (() => Promise<() => void>)>) => {
+const stubAdmission = (
+  behaviour: ReadonlyMap<string, string | 'hang' | ((admit: () => Promise<() => void>) => Promise<() => void>)>,
+) => {
   const nativeWatch = NodeFsProvider.prototype.watch;
   const calls: string[] = [];
   const spy = vi
@@ -147,7 +165,7 @@ const stubAdmission = (behaviour: ReadonlyMap<string, string | 'hang' | (() => P
         return hung.promise;
       }
       if (typeof outcome === 'function') {
-        return outcome();
+        return outcome(async () => nativeWatch.call(this, request, handler));
       }
       if (typeof outcome === 'string') {
         throw Object.assign(new Error(`${outcome}: refused for ${base}`), { code: outcome });
@@ -556,7 +574,18 @@ describe('WorkspaceFileService root isolation', () => {
     const late = createRoot('late', lostProjectId);
     const replacement = createRoot('replacement', lostProjectId);
     const gate = admissionGate();
-    stubAdmission(new Map([[late, gate.wait]]));
+    /* A slow disk: the replacement admits for real, but only after far more I/O turns than the row ever counted.
+     * Windows run 44027216143 admitted it after the deadline the row fired by hand, and its route stayed unbound. */
+    const slowDisk = async (admit: () => Promise<() => void>): Promise<() => void> => {
+      await turns(500);
+      return admit();
+    };
+    const { calls } = stubAdmission(
+      new Map([
+        [late, gate.wait],
+        [replacement, slowDisk],
+      ]),
+    );
     const { service, providerRegistry } = createNodeService([home, late, replacement]);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const first = service.configureProjectRoots({
@@ -566,7 +595,8 @@ describe('WorkspaceFileService root isolation', () => {
         { backend: 'node', path: late },
       ],
     });
-    await turns(50);
+    /* Only the late root's own deadline may fire: advance once its admission is pending. */
+    await until(() => calls.includes(late));
     await vi.advanceTimersByTimeAsync(5000);
     const firstResult = await first;
     expect(firstResult.roots[1]?.state).toBe('unreachable');
@@ -605,12 +635,28 @@ describe('WorkspaceFileService root isolation', () => {
     });
     await until(() => holding);
     gate.open();
-    await turns(200);
+    /* The late admission lands while the configuration in flight still holds the topology. */
+    await untilResolved(async () => {
+      const statuses = await service.getRootStatuses();
+      return statuses.some(({ storageRootKey, state }) => storageRootKey === nodeKey(late) && state === 'available');
+    });
+    /* The attach that admission queued runs once this configuration settles; the row reads after it, not after a
+     * count of turns. */
+    const lateAttaches: Array<Promise<void>> = [];
+    const attaching = service as unknown as { _attachLateRoots: () => Promise<void> };
+    const attachLateRoots = attaching._attachLateRoots.bind(service);
+    vi.spyOn(attaching, '_attachLateRoots').mockImplementation(async () => {
+      const attach = attachLateRoots();
+      lateAttaches.push(attach);
+      return attach;
+    });
     held.resolve();
-    await turns(50);
-    await vi.advanceTimersByTimeAsync(5000);
-    await second;
-    await turns(50);
+    /* Every root of this configuration admits, however slowly: no deadline is fired by hand, so the slow
+     * replacement settles on its own I/O. */
+    const secondResult = await second;
+    expect(secondResult.roots.map(({ state }) => state)).toEqual(['available', 'available', 'available']);
+    await until(() => lateAttaches.length > 0);
+    await Promise.all(lateAttaches);
     vi.useRealTimers();
 
     await expect(service.readFile(`/projects/${lostProjectId}/main.ts`, 'utf8')).resolves.toBe('replacement source');

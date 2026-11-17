@@ -48,6 +48,48 @@ export const transportFailureDiagnosticType = 'tau.model-transport-failure';
 const providerMetadataDiagnosticType = 'tau.provider-message-metadata';
 const liveMessageIdentityDiagnosticType = 'tau.live-message-identity';
 
+/** How many errors under a transport failure its diagnostic names, and how many members of one aggregate. */
+const transportCauseDepth = 4;
+
+/** The fields of one underlying error that are safe to keep: never its message, which can name local paths. */
+const transportCause = (error: Record<string, unknown>): Record<string, JsonValue> => {
+  const name = error instanceof Error ? error.name : undefined;
+  const code =
+    typeof error['code'] === 'string' || typeof error['code'] === 'number' ? String(error['code']) : undefined;
+  const syscall = typeof error['syscall'] === 'string' ? error['syscall'] : undefined;
+  return {
+    ...(name === undefined ? {} : { name }),
+    ...(code === undefined ? {} : { code }),
+    ...(syscall === undefined ? {} : { syscall }),
+  };
+};
+
+/**
+ * The chain of errors under a coded transport failure, outermost first, by name,
+ * code and syscall. A `NETWORK_ERROR` on its own says only that the request did
+ * not complete; the cause tells a refused connection (`ECONNREFUSED`) from a
+ * socket the OS would not create or a request the runtime rejected before it
+ * left. An `AggregateError` (Node's dual-stack connect) lists its members.
+ */
+const transportFailureCauses = (error: Record<string, unknown>): JsonValue[] => {
+  const causes: JsonValue[] = [];
+  let current: unknown = error['cause'];
+  while (causes.length < transportCauseDepth && zodUtility.isObject(current)) {
+    const members = Array.isArray(current['errors'])
+      ? current['errors']
+          .slice(0, transportCauseDepth)
+          .filter((member): member is Record<string, unknown> => zodUtility.isObject(member))
+          .map((member) => transportCause(member))
+      : [];
+    causes.push({
+      ...transportCause(current),
+      ...(members.length === 0 ? {} : { errors: members }),
+    });
+    current = current['cause'];
+  }
+  return causes;
+};
+
 /** Convert a coded transport exception into pi's durable diagnostic shape. @internal */
 export const createTransportFailureDiagnostic = (
   error: unknown,
@@ -60,7 +102,12 @@ export const createTransportFailureDiagnostic = (
     error instanceof Error ? error.message : typeof error['message'] === 'string' ? error['message'] : error['code'];
   const status = typeof error['status'] === 'number' && Number.isFinite(error['status']) ? error['status'] : undefined;
   const refusal = zodUtility.isObject(error['details']) ? toJsonValue(error['details']) : undefined;
-  const details = { ...(status === undefined ? {} : { status }), ...(refusal === undefined ? {} : { refusal }) };
+  const causes = transportFailureCauses(error);
+  const details = {
+    ...(status === undefined ? {} : { status }),
+    ...(refusal === undefined ? {} : { refusal }),
+    ...(causes.length === 0 ? {} : { causes }),
+  };
   return {
     type: transportFailureDiagnosticType,
     timestamp,
@@ -398,10 +445,14 @@ export type AttachmentReader = {
  */
 export const chatAttachmentPath = (chatId: string, path: string): string => {
   if (!chatId || chatId === '.' || chatId === '..' || /[/\\]/u.test(chatId)) {
-    throw Object.assign(new Error('chatId must be one storage path segment.'), { code: 'STORAGE_PATH_INVALID' });
+    throw Object.assign(new Error('chatId must be one storage path segment.'), {
+      code: 'STORAGE_PATH_INVALID',
+    });
   }
   if (!attachmentPathPattern.test(path)) {
-    throw Object.assign(new Error(`"${path}" is not an attachment path.`), { code: 'STORAGE_PATH_INVALID' });
+    throw Object.assign(new Error(`"${path}" is not an attachment path.`), {
+      code: 'STORAGE_PATH_INVALID',
+    });
   }
   return `.tau/chats/${chatId}/${path}`;
 };
@@ -490,7 +541,10 @@ const isBlockList = (built: JsonValue | readonly JsonValue[]): built is readonly
 export const materializeAttachments = async (
   messages: readonly ProviderMessage[],
   read: (path: string) => Promise<Uint8Array<ArrayBuffer> | undefined>,
-  buildDocument: DocumentBlockBuilder = (hash) => ({ type: 'text', text: documentSentinel(hash) }),
+  buildDocument: DocumentBlockBuilder = (hash) => ({
+    type: 'text',
+    text: documentSentinel(hash),
+  }),
 ): Promise<MaterializedAttachments> => {
   const documents = new Map<string, MaterializedDocument>();
   const absent: string[] = [];
@@ -547,7 +601,10 @@ export const materializeAttachments = async (
       }
       const blocks = await Promise.all(message.content.map(materializeBlock));
       const content = blocks.flat();
-      return { ...message, content: content.length === 0 ? [{ type: 'text', text: absentAttachmentMarker }] : content };
+      return {
+        ...message,
+        content: content.length === 0 ? [{ type: 'text', text: absentAttachmentMarker }] : content,
+      };
     }),
   );
   return { messages: materialized, documents, absent, malformed };
@@ -580,13 +637,19 @@ export const piMessageToProvider = (message: AgentMessage, identities: MessageId
       id,
       role: 'user',
       content: toJsonValue(message.content),
-      metadata: { ...identities.metadata(message), timestamp: message.timestamp },
+      metadata: {
+        ...identities.metadata(message),
+        timestamp: message.timestamp,
+      },
     };
   }
   if (message.role === 'assistant') {
     const content = message.content.map((block) =>
       block.type === 'toolCall'
-        ? { ...block, arguments: normalizeToolInput(block.name, block.arguments) as typeof block.arguments }
+        ? {
+            ...block,
+            arguments: normalizeToolInput(block.name, block.arguments) as typeof block.arguments,
+          }
         : block,
     );
     const diagnostics = message.diagnostics?.filter(
@@ -705,7 +768,9 @@ export function providerMessageToPi(
       /* Pi-ai puts the level back in front of the reply when the model reads its effort from the transcript. */
       ...(typeof metadata.reasoningLevel === 'string' ? { providerThinkingLevel: metadata.reasoningLevel } : {}),
       ...(Array.isArray(metadata.diagnostics)
-        ? { diagnostics: metadata.diagnostics as AssistantMessage['diagnostics'] }
+        ? {
+            diagnostics: metadata.diagnostics as AssistantMessage['diagnostics'],
+          }
         : {}),
       usage: isUsage(metadata.usage) ? metadata.usage : zeroUsage,
       stopReason: metadata.stopReason ?? 'stop',

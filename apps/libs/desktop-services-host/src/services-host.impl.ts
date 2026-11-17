@@ -32,6 +32,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
+import { promises as fsPromises } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 
@@ -440,6 +441,15 @@ const heldImportGrant = (entry: unknown): HeldImportGrant | undefined => {
     : undefined;
 };
 
+/** One admitted root: its canonical spelling once known, and whether finding it ran out of time. */
+type TrustedRoot = { canonical?: string; timedOut: boolean };
+
+/** How long a background `realpath` of one admitted root may take before it is matched by its stored spelling. */
+const trustedRootCanonicalDeadlineMilliseconds = 2000;
+
+/** Background `realpath` calls of admitted roots in flight at once (blueprint D8). */
+const maxTrustedRootCanonicalisations = 2;
+
 export const createServicesHost = (options: ServicesHostOptions = {}): ServicesHost => {
   const machinesEnabled = isMachinesFeatureEnabled(process.env['TAU_MACHINES_ENABLED']);
   const log =
@@ -482,7 +492,50 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
            * unrelated files. */
           authorityIdentity: () => 'desktop',
         });
-  const trustedRoots = new Set<string>();
+  /**
+   * Admitted roots by the spelling main published, each with its canonical
+   * spelling once a background `realpath` settles (blueprint D8, B30). A root
+   * on a mount that stopped answering is never canonicalised on a request's
+   * path, so it cannot stall a request for another root.
+   */
+  const trustedRoots = new Map<string, TrustedRoot>();
+  const canonicalisation = { active: 0, queue: [] as Array<() => void> };
+  const releaseCanonicalisationSlot = (): void => {
+    const next = canonicalisation.queue.shift();
+    if (next === undefined) {
+      canonicalisation.active -= 1;
+      return;
+    }
+    next();
+  };
+  const settleCanonical = async (stored: string, entry: TrustedRoot): Promise<void> => {
+    try {
+      entry.canonical = await fsPromises.realpath(stored);
+    } catch {
+      /* Unresolvable now: a request matches the stored spelling or canonicalises it itself. */
+    } finally {
+      /* The slot is held until `realpath` returns, deadline or not: a hung call
+       * holds a libuv thread, and at most two may (blueprint D1). */
+      releaseCanonicalisationSlot();
+    }
+  };
+  const canonicaliseInBackground = (stored: string, entry: TrustedRoot): void => {
+    const start = (): void => {
+      const timer = setTimeout(() => {
+        entry.timedOut = entry.canonical === undefined;
+      }, trustedRootCanonicalDeadlineMilliseconds);
+      timer.unref();
+      // async-iife: bootstrap -- canonicalisation runs behind requests, which never wait for it.
+      void settleCanonical(stored, entry);
+    };
+    if (canonicalisation.active < maxTrustedRootCanonicalisations) {
+      canonicalisation.active += 1;
+      start();
+    } else {
+      canonicalisation.queue.push(start);
+    }
+  };
+
   const candidateRoots = new Map<string, number>();
   /**
    * The large-object store each root lands objects from (W11.3): a project's
@@ -635,7 +688,24 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     /* Descendants are admitted because projects live inside Home
      * (`userData/home/<project>`); the `sep` suffix keeps `…/home-evil` from
      * matching `…/home`. */
-    return [...trustedRoots].some((trusted) => candidate === trusted || candidate.startsWith(trusted + sep));
+    const within = (trusted: string): boolean => candidate === trusted || candidate.startsWith(trusted + sep);
+    for (const [stored, entry] of trustedRoots) {
+      if (within(stored) || (entry.canonical !== undefined && within(entry.canonical))) {
+        return true;
+      }
+    }
+    /* No spelling matched yet: canonicalise, here, only the roots whose
+     * background canonicalisation is still inside its deadline. One past it is
+     * matched by its stored spelling alone (blueprint D8). */
+    for (const [stored, entry] of trustedRoots) {
+      if (entry.canonical === undefined && !entry.timedOut) {
+        entry.canonical = canonicalPath(stored);
+        if (within(entry.canonical)) {
+          return true;
+        }
+      }
+    }
+    return false;
   };
 
   const terminals = createTerminalConcern({
@@ -761,7 +831,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * @returns Project roots by id; an id two folders share names both.
    */
   const scanProjectRoots = async (): Promise<ReadonlyMap<string, readonly string[]>> => {
-    const children = await Promise.all([...trustedRoots].map(async (root) => childDirectories(root)));
+    const children = await Promise.all([...trustedRoots.keys()].map(async (root) => childDirectories(root)));
     const found = new Map<string, string[]>();
     for (const [root, id] of await Promise.all(
       children.flat().map(async (root) => [root, await readProjectId(providerForAgentRoot(root))] as const),
@@ -1383,7 +1453,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       case 'allowRoots': {
         trustedRoots.clear();
         for (const root of (frame['roots'] as readonly string[] | undefined) ?? []) {
-          trustedRoots.add(canonicalPath(root));
+          const stored = resolve(root);
+          const entry: TrustedRoot = { timedOut: false };
+          trustedRoots.set(stored, entry);
+          canonicaliseInBackground(stored, entry);
         }
         log('roots-updated', { count: trustedRoots.size });
         terminals.revokeUntrusted();

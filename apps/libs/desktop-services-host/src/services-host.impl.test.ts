@@ -262,7 +262,7 @@ describe('createServicesHost — root admission', () => {
     const realpathAsync = fsPromises.realpath;
     const asyncRealpath = vi.spyOn(fsPromises, 'realpath').mockImplementation((async (candidate: string) => {
       if (String(candidate).startsWith(hung)) {
-        return new Promise<string>(() => undefined);
+        return Promise.withResolvers<string>().promise;
       }
       return realpathAsync(candidate);
     }) as typeof fsPromises.realpath);

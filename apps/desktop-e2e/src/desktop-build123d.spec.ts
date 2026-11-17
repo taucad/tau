@@ -9,7 +9,6 @@ import { getBoundingBoxFromInspect, getInspectReport, validateGlbData } from '@t
 
 import { authenticatePackagedDesktop, desktopDescendants, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { desktopE2ECompletedArtifact } from '#support/config.js';
 import { expectFirstNativeRender } from '#support/prepared-kernels.js';
 import {
   gatewayFixtureFinalText,
@@ -584,9 +583,7 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    if (desktopE2ECompletedArtifact) {
-      await authenticatePackagedDesktop(session, token);
-    }
+    await authenticatePackagedDesktop(session, token);
     await expectSignedIn(page);
     await selectKernel(page, 'Replicad');
     await connectPickedFolder(session);

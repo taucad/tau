@@ -289,6 +289,46 @@ describe('createServicesHost — root admission', () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+  it('should serve Home by its published non-canonical spelling before that root settles', async () => {
+    /* Windows names the profile by its 8.3 spelling (`C:\\Users\\RUNNER~1`) and macOS `$TMPDIR` lives under
+     * `/var` for `/private/var`: main publishes that spelling, and the renderer's first request names it, before
+     * the background `realpath` has answered (packaged Windows e2e, "Refusing to serve an unadmitted filesystem
+     * root"). A symlink is the portable stand-in for either. */
+    const { promises: fsPromises } = await import('node:fs');
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-published-spelling-')));
+    const physical = join(sandbox, 'physical-home');
+    const outside = join(sandbox, 'outside');
+    const published = join(sandbox, 'published-home');
+    await Promise.all([mkdir(join(physical, 'project'), { recursive: true }), mkdir(outside)]);
+    await symlink(physical, published, 'junction');
+    await symlink(outside, join(physical, 'escape'), 'junction');
+    /* Every background `realpath` hangs, so nothing settles. */
+    const asyncRealpath = vi.spyOn(fsPromises, 'realpath').mockImplementation((async (candidate: string) => {
+      void candidate;
+      return Promise.withResolvers<string>().promise;
+    }) as typeof fsPromises.realpath);
+    const serve = vi.fn<NonNullable<ServicesHostOptions['serve']>>(() => ({
+      run: vi.fn(),
+      close: async () => undefined,
+    }));
+    const { host } = hostHarness({ serve });
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [published] }));
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+      const [, options] = serve.mock.calls[0]!;
+
+      expect(options.allowRoot(published)).toBe(true);
+      expect(options.allowRoot(join(published, 'project'))).toBe(true);
+      /* Still physical: a link under the root that leaves it is refused by either spelling. */
+      expect(options.allowRoot(join(published, 'escape'))).toBe(false);
+      expect(options.allowRoot(`${published}-evil`)).toBe(false);
+    } finally {
+      asyncRealpath.mockRestore();
+      host.dispose();
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('createServicesHost — concern ports', () => {
@@ -1933,6 +1973,26 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     expect(options.credential()).toEqual({ mode: 'session' });
     host.handleMessage(frame({ type: 'authToken', token: 'bearer-2', principal: 'user_2' }));
     expect(options.credential()).toEqual({ mode: 'session', principal: 'user_2' });
+  });
+
+  /* PR-7 follow-up (AR-W6-02): desktop sync telemetry follows the consent main relays, read per attempt. */
+  it("should give each project host the renderer's consent as main relays it, and unknown until then", async () => {
+    const { host, workspaceRoot } = await configuredHost();
+    connect(host, workspaceRoot);
+    await vi.waitFor(() => {
+      expect(projectHostCalls).toHaveLength(1);
+    });
+    const options = projectHostCalls[0]!.host();
+    expect(options.syncTelemetryPlacement).toBe('desktop');
+    /* Nothing said yet: the host's sync reporter sends nothing. */
+    expect(options.syncTelemetryConsent?.()).toBe('unknown');
+    host.handleMessage(frame({ type: 'telemetryConsent', consent: 'granted' }));
+    expect(options.syncTelemetryConsent?.()).toBe('granted');
+    /* Telemetry off, or GPC, resolves to denied in the renderer; main relays it as such. */
+    host.handleMessage(frame({ type: 'telemetryConsent', consent: 'denied' }));
+    expect(options.syncTelemetryConsent?.()).toBe('denied');
+    host.handleMessage(frame({ type: 'telemetryConsent', consent: 'yes' }));
+    expect(options.syncTelemetryConsent?.()).toBe('unknown');
   });
 
   /* W6.r1 round 3: the funded transport names the same account, read per invocation. */

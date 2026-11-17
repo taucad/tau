@@ -1,6 +1,6 @@
 import { TypeScriptWorkerClient } from '@taucad/lsp/typescript-worker/client';
 import type { TauLanguageHostInit } from '@taucad/lsp/language-fs-sync-host';
-import type { DocumentChange, EditorDocument } from '#lib/editor-document.js';
+import type { DocumentChange, EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import { loadKernelStaticTypes } from '#lib/typescript-language/static-types.js';
 import type { DependencyReader } from '#lib/typescript-language/static-types.js';
 import { TypeAcquisitionController } from '#lib/typescript-language/type-acquisition.js';

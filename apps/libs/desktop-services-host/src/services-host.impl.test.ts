@@ -246,6 +246,42 @@ describe('createServicesHost — root admission', () => {
       await rm(sandbox, { recursive: true, force: true });
     }
   });
+  it('should serve Home while another root canonicalises in the background (T-B30.2)', async () => {
+    const { promises: fsPromises } = await import('node:fs');
+    const home = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-home-root-')));
+    const hung = '/Volumes/tau-unanswering-drive/workspace';
+    const nativeRealpath = realpathSync.native;
+    const syncCalls: string[] = [];
+    const syncRealpath = vi.spyOn(realpathSync, 'native').mockImplementation(((candidate: string) => {
+      syncCalls.push(String(candidate));
+      if (String(candidate).startsWith(hung)) {
+        throw Object.assign(new Error(`EIO: i/o error, realpath '${String(candidate)}'`), { code: 'EIO' });
+      }
+      return nativeRealpath(candidate);
+    }) as typeof realpathSync.native);
+    const realpathAsync = fsPromises.realpath;
+    const asyncRealpath = vi.spyOn(fsPromises, 'realpath').mockImplementation((async (candidate: string) => {
+      if (String(candidate).startsWith(hung)) {
+        return new Promise<string>(() => undefined);
+      }
+      return realpathAsync(candidate);
+    }) as typeof fsPromises.realpath);
+    const { host, serve } = hostHarness();
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [home, hung] }));
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+      const [, options] = serve.mock.calls[0] as unknown as [unknown, { allowRoot: (root: string) => boolean }];
+
+      expect(options.allowRoot(join(home, 'widget'))).toBe(true);
+      expect(syncCalls.filter((candidate) => candidate.startsWith(hung))).toEqual([]);
+    } finally {
+      syncRealpath.mockRestore();
+      asyncRealpath.mockRestore();
+      host.dispose();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('createServicesHost — concern ports', () => {

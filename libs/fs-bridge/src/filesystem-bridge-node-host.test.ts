@@ -501,3 +501,63 @@ describe('one rooted connection as the change transport (W12a)', () => {
     }
   });
 });
+
+describe('project root isolation through the bridge (T-B1.3)', () => {
+  it('should resolve with notFound for a deleted folder while Home lists its files', async () => {
+    const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { serveNodeFsProvider } = await import('@taucad/filesystem/backend/node');
+    const home = mkdtempSync(path.join(tmpdir(), 'tau-bridge-home-'));
+    const lost = mkdtempSync(path.join(tmpdir(), 'tau-bridge-lost-'));
+    const homeProject = 'proj_hhhhhhhhhhhhhhhhhhhhh';
+    const lostProject = 'proj_lllllllllllllllllllll';
+    mkdirSync(path.join(home, 'alpha'));
+    writeFileSync(path.join(home, 'alpha', 'main.ts'), 'export default 1;\n');
+    rmSync(lost, { recursive: true, force: true });
+
+    const nodeChannel = new MessageChannel();
+    const stopNodeHost = serveNodeFsProvider(nodeChannel.port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === home || candidate === lost,
+    }).close;
+    const service = new WorkspaceFileService({
+      providerRegistry: new ProviderRegistry({ createNodeFsPort: async () => nodeChannel.port1 }),
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable: new MountTable(),
+    });
+    const host = hostOnNode({ service, bus: new ChangeEventBus() });
+    const workspace = host.connect();
+    try {
+      await workspace.proxy.ready;
+      const result = await workspace.proxy.configureProjectRoots({
+        projects: [
+          { backend: 'node', path: home, projectId: homeProject, providerBasePath: 'alpha' },
+          { backend: 'node', path: lost, projectId: lostProject, providerBasePath: 'beta' },
+        ],
+        roots: [
+          { backend: 'node', path: home },
+          { backend: 'node', path: lost },
+        ],
+      });
+
+      expect(result.roots).toEqual([
+        { storageRootKey: `node:${home}`, backend: 'node', state: 'available' },
+        { storageRootKey: `node:${lost}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+      ]);
+      const rooted = host.connect(`/projects/${homeProject}`, 'working-copy');
+      try {
+        await rooted.proxy.ready;
+        expect(await rooted.proxy.readdir('')).toEqual(['main.ts']);
+      } finally {
+        rooted.dispose();
+      }
+    } finally {
+      workspace.dispose();
+      host.dispose();
+      await stopNodeHost();
+      nodeChannel.port2.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

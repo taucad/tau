@@ -1369,3 +1369,78 @@ describe('WorkspaceFileService', () => {
     });
   });
 });
+
+describe('project discovery over unavailable roots (T-B13.3)', () => {
+  it('should list Home and report a root that is not available as inaccessible without resolving its provider', async () => {
+    const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { serveNodeFsProvider } = await import('#backend/node/host.js');
+    const { NodeFsProvider } = await import('#backend/node/provider.js');
+    const { tauPathPolicy } = await import('#path-registry.js');
+    const homeProjectId = 'proj_hhhhhhhhhhhhhhhhhhhhh';
+    const home = mkdtempSync(join(tmpdir(), 'tau-discovery-home-'));
+    const hung = mkdtempSync(join(tmpdir(), 'tau-discovery-hung-'));
+    mkdirSync(join(home, 'alpha'));
+    writeFileSync(
+      join(home, 'alpha', 'tau.json'),
+      JSON.stringify({ $schema: projectManifestSchemaUrl, id: homeProjectId, name: 'Alpha' }),
+    );
+    const nativeWatch = NodeFsProvider.prototype.watch;
+    vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(async function (
+      this: InstanceType<typeof NodeFsProvider>,
+      request,
+      handler,
+    ) {
+      if ((this as unknown as { _base: string })._base === hung) {
+        return new Promise<() => void>(() => undefined);
+      }
+      return nativeWatch.call(this, request, handler);
+    });
+    const { port1, port2 } = new MessageChannel();
+    const stopHost = serveNodeFsProvider(port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === home || candidate === hung,
+    }).close;
+    const registry = new ProviderRegistry({ createNodeFsPort: async () => port1 });
+    const nodeService = new WorkspaceFileService({
+      providerRegistry: registry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable: new MountTable(),
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const configured = nodeService.configureProjectRoots({
+        projects: [],
+        roots: [
+          { backend: 'node', path: home },
+          { backend: 'node', path: hung },
+        ],
+      });
+      await vi.advanceTimersByTimeAsync(5000);
+      await configured;
+      vi.useRealTimers();
+      const getProvider = vi.spyOn(registry, 'getProvider');
+
+      const result = await nodeService.listProjectManifests();
+
+      expect(result.entries.map((entry) => (entry.status === 'valid' ? entry.projectId : entry.status))).toEqual([
+        homeProjectId,
+      ]);
+      expect(result.roots).toEqual([
+        expect.objectContaining({ status: 'complete' }),
+        expect.objectContaining({ status: 'inaccessible', reason: 'unreachable' }),
+      ]);
+      expect(getProvider.mock.calls.some(([scope]) => scope.backend === 'node' && scope.path === hung)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      nodeService.dispose();
+      await stopHost();
+      port2.close();
+      rmSync(home, { recursive: true, force: true });
+      rmSync(hung, { recursive: true, force: true });
+    }
+  });
+});

@@ -420,6 +420,7 @@ export const createDesktopRouteDescriptor = (options: {
     size: artifact.size,
     sha512: artifact.sha512,
     issuedAt: options.issuedAt,
+    // Clients from this release on ignore expiresAt. Installed 0.4.0 AppImage clients still require a window of at most 7 days.
     expiresAt: new Date(issued + 7 * 24 * 60 * 60 * 1000).toISOString(),
   };
   if (options.route === 'windows-nsis') {

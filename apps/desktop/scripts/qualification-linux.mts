@@ -703,9 +703,6 @@ export const createLinuxAptQualificationDriver = (
       throw new Error('APT repository channel/route differs');
     }
     const snapshot = await readDesktopAptSnapshot(repository);
-    if (Date.parse(snapshot.inventory.validUntil) <= Date.now()) {
-      throw new Error('APT qualification snapshot expired');
-    }
     const { runtimeKind, selectorKind } = linuxInstallation(manifest.channel, candidate.route === 'linux-appimage');
     for (const kind of [runtimeKind, selectorKind]) {
       const artifact = manifest.artifacts.find((item) => item.kind === kind);

@@ -193,7 +193,29 @@ jobs:
           $sampler = Start-Process -FilePath typeperf -PassThru -WindowStyle Hidden -ArgumentList (
             ($counters | ForEach-Object { '"{0}"' -f $_ }) + @('-si', '1', '-f', 'CSV', '-y', '-o', ('"{0}"' -f (Join-Path $dir 'load-samples.csv')))
           )
-          Set-Content -Path (Join-Path $env:RUNNER_TEMP 'load-sampler.pid') -Value $sampler.Id
+          # Which processes use the CPU: every 5 s, the ten that used the most CPU time since the last sample.
+          $topScript = Join-Path $env:RUNNER_TEMP 'process-cpu-sampler.ps1'
+          Set-Content -Path $topScript -Value @'
+          param([string]$Out)
+          $last = @{}
+          while ($true) {
+            $now = Get-Date
+            $rows = foreach ($p in Get-Process -ErrorAction SilentlyContinue) {
+              $cpu = $p.TotalProcessorTime.TotalSeconds
+              $delta = if ($last.ContainsKey($p.Id)) { $cpu - $last[$p.Id] } else { 0 }
+              $last[$p.Id] = $cpu
+              [pscustomobject]@{ Name = $p.ProcessName; Id = $p.Id; Seconds = [math]::Round($delta, 2) }
+            }
+            $top = $rows | Sort-Object Seconds -Descending | Select-Object -First 10
+            '{0:o} {1}' -f $now, (($top | ForEach-Object { '{0}[{1}]={2}' -f $_.Name, $_.Id, $_.Seconds }) -join ' ') |
+              Add-Content -Path $Out
+            Start-Sleep -Seconds 5
+          }
+          '@
+          $top = Start-Process -FilePath pwsh -PassThru -WindowStyle Hidden -ArgumentList @(
+            '-NoProfile', '-File', ('"{0}"' -f $topScript), '-Out', ('"{0}"' -f (Join-Path $dir 'process-cpu.log'))
+          )
+          Set-Content -Path (Join-Path $env:RUNNER_TEMP 'load-sampler.pid') -Value @($sampler.Id, $top.Id)
 
       - name: Run the packaged Windows suite
         id: packaged
@@ -270,7 +292,7 @@ jobs:
         shell: pwsh
         run: |
           $pidFile = Join-Path $env:RUNNER_TEMP 'load-sampler.pid'
-          if (Test-Path -LiteralPath $pidFile) { Stop-Process -Id (Get-Content $pidFile) -ErrorAction SilentlyContinue }
+          if (Test-Path -LiteralPath $pidFile) { Get-Content $pidFile | ForEach-Object { Stop-Process -Id $_ -ErrorAction SilentlyContinue } }
           $csv = Join-Path $env:RUNNER_TEMP 'desktop-e2e-services/load-samples.csv'
           if (Test-Path -LiteralPath $csv) { "load samples: $((Get-Content $csv).Count - 1) rows" }
 

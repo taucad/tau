@@ -230,15 +230,22 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   which does not propagate, and read back. It never writes an ACE list from the journal, so it never removes or
   restores an ACE it did not add, and never writes an owner or group (I11, E19; Q4 §7 risk 4). A granted or denied path
   that is itself a link or junction is refused (`absolute-paths`). The journal must not already exist (a leftover
-  belongs to a crashed launch: `restore` it first) and must not lie inside a granted or denied path. Journaling costs
-  one handle open per object under the granted paths, the same order of work as the propagation itself.
+  belongs to a crashed launch: `restore` it first) and must not lie inside a readable, writable or read-only path, where
+  the shell could read or rewrite it. It may lie inside a denied path, and Tau's desktop keeps it there: its custody
+  directory is in Electron's `userData`, under the person's profile, which every launch denies whole. The journal is
+  then left out of the descriptors it records (it is being written, and teardown deletes it). Journaling costs one
+  handle open per object under the granted paths, the same order of work as the propagation itself.
 - **Desktop.** The launcher creates the shell's private desktop on its window station. The runner cannot: as
   `TauSandbox` it may not change `WinSta0`, and both the spike and Codex create the desktop here too. The desktop's
   protected DACL admits the person and, as participants, `TauSandbox`, the launch's capability SID and its package SID.
   The desktop carries a Low label (`S:(ML;;NW;;;LW)`) so the Low-integrity shell can attach to it. The launcher adds one
   session ACE for each of the launch's capability and package SIDs to the shared window station when the person may
   change its DACL (best-effort: the ACE only widens access), and removes exactly the ACEs naming those SIDs at
-  teardown ("Sessions"), so a concurrent launch's and the person's stay.
+  teardown ("Sessions"), so a concurrent launch's and the person's stay. Because teardown never writes an original
+  back, the grant must change nothing else: it appends the ACEs to the current ones copied byte for byte (never
+  `SetEntriesInAclW`, which rebuilds the whole DACL), keeps the descriptor's control flags, and reads the result back,
+  writing the original back if anything else changed. Chromium's GPU process opens the station through the person's
+  ACEs; the conformance suite's `restrictedChild` check starts a child like it after every row.
 - **Cleanup.** The AppContainer leaves no durable state once its registration is deleted (above). There is no firewall
   or loopback exemption and no permanent kernel object. The account's own profile is account-level state, created by
   `setup` and deleted by `revoke`. The named-object directory and its links are temporary objects that go away with the

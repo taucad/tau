@@ -21,6 +21,7 @@ import { PreparationError } from '#preparation/preparation-error.js';
 import {
   advanceGeneration,
   blobKey,
+  closureRoot,
   collectStoreGarbage,
   createStaging,
   linkEntry,
@@ -277,9 +278,9 @@ const defaultNativeContainment = (indicators: HostIndicators, packageName: strin
  * ```
  */
 export const createPreparationHost = (options: CreatePreparationHostOptions): PreparationHost => {
-  const layout = storeLayout(resolve(options.store));
-  const plugins = new Map(options.plugins.map((plugin) => [plugin.package, plugin]));
   const indicators = options.indicators ?? detectHostIndicators();
+  const layout = storeLayout(resolve(options.store), { compact: (indicators?.os ?? process.platform) === 'win32' });
+  const plugins = new Map(options.plugins.map((plugin) => [plugin.package, plugin]));
   const hostPath = resolve(options.hostPath ?? process.argv[1] ?? process.execPath);
   const tauVersion = options.tauVersion ?? packageVersion;
   const transport: typeof fetch = options.fetch ?? (async (input, init) => fetch(input, init));
@@ -867,7 +868,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
       const attemptStaging = await createStaging(layout, attemptId);
       staging = attemptStaging;
       // Each closure stages under a one-character name rather than its 64-character key, so a staged path is never
-      // longer than the sealed one (`closures/sha256/<key>`) and fits wherever the sealed closure does (Windows'
+      // longer than the sealed one (`closures/sha256/<key>`, or `c/<16 hex>` on Windows) and fits wherever the sealed closure does (Windows'
       // 260-character limit on loading libraries).
       const stagedRoots = new Map(work.map((item, index) => [item.key, join(attemptStaging, String(index))]));
       await Promise.all([...stagedRoots.values()].map(async (root) => mkdir(root, { recursive: true })));
@@ -971,7 +972,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
         const staged = stagedRoots.get(item.key)!;
         const built = [...unpacked, ...sealed.rows];
         const overflow =
-          indicators!.os === 'win32' ? windowsPathOverflow(join(layout.closures, item.key), built) : undefined;
+          indicators!.os === 'win32' ? windowsPathOverflow(closureRoot(layout, item.key), built) : undefined;
         if (overflow !== undefined) {
           return finish({
             status: 'blocked',
@@ -991,7 +992,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
         const files = (index === undefined ? built : [...built, index]).toSorted(byPath);
         // oxlint-disable-next-line no-await-in-loop -- ditto
         const treeIntegrity = await computeTreeIntegrity(files);
-        const root = join(layout.closures, item.key);
+        const root = closureRoot(layout, item.key);
         // `tauVersion` comes first, so a launch reads the stamp from the receipt's head (readLaunch).
         const receipt: ClosureReceipt = {
           tauVersion,

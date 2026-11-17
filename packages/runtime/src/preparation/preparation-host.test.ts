@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { createServer, get } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { join, relative, sep } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 
 import { measureCapacityDomain } from '@taucad/filesystem';
 import type * as Filesystem from '@taucad/filesystem';
@@ -1217,8 +1217,17 @@ describe('createPreparationHost', () => {
       expect(refused).toMatchObject({ status: 'blocked', reason: 'unsupported-target' });
       expect(refused.status === 'blocked' && refused.message).toContain("past Windows' 259-character limit");
       expect(refused.status === 'blocked' && refused.message).toContain('y'.repeat(120));
-      await expect(readdir(join(tooDeep.store, 'closures', 'sha256'))).rejects.toThrow();
-      expect(ready.status).toBe('ready');
+      await expect(readdir(join(tooDeep.store, 'c'))).rejects.toThrow();
+      /* A Windows store is compact: the closure is published under 16 hex of its key, and GC still knows it. */
+      const receipt = readyReceipt(ready);
+      expect(dirname(receipt.root)).toBe(join(fits.store, 'c'));
+      expect(basename(receipt.root)).toMatch(/^[\da-f]{16}$/u);
+      await expect(fits.host.collectGarbage({ dryRun: true })).resolves.toMatchObject({ closures: [] });
+      // A compact closure with no readable receipt is damage: GC names it by its directory and removes it.
+      await mkdir(join(fits.store, 'c', '0123456789abcdef'), { recursive: true });
+      await expect(fits.host.collectGarbage()).resolves.toMatchObject({ closures: ['0123456789abcdef'] });
+      await expect(readdir(join(fits.store, 'c'))).resolves.toEqual([basename(receipt.root)]);
+      await expect(fits.reopen().describe()).resolves.toMatchObject([{ state: 'ready' }]);
     });
 
     it('should record the host snapshot, the candidates and the emulation flag in every receipt', async () => {

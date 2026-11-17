@@ -1099,9 +1099,11 @@ describe('the entry closure of a tree write (D10)', () => {
         throw new Error('host bracket failed');
       })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree' }),
     ).rejects.toThrow('host bracket failed');
-    expect(endExpectation).toHaveBeenCalledTimes(1);
-    /* A failed write's entries no longer answer: what it did not land is what is on disk (I7). */
-    expect(endExpectation).toHaveBeenLastCalledWith({ failed: true });
+    /*
+     * A failed write's entries no longer answer, and what it still owed refuses (I7) until the checkout is whole
+     * again: here it changed nothing, so the expectation ends at once after.
+     */
+    expect(endExpectation.mock.calls).toStrictEqual([[{ failed: true }], []]);
 
     /* An aborted write releases its bracket as failed, so its tree is never read as written. */
     const outcomes: unknown[] = [];
@@ -1120,7 +1122,8 @@ describe('the entry closure of a tree write (D10)', () => {
     ).rejects.toThrow();
     /* It tore the checkout and the recovery put the prior files back, so it left the checkout whole: neither is told failed (L5). */
     expect(outcomes).toEqual([{ failed: false }, { failed: false }]);
-    expect(endExpectation).toHaveBeenCalledTimes(3);
+    /* The failed write's end, the rollback's own, and the end that lets the whole checkout answer again. */
+    expect(endExpectation.mock.calls.slice(2)).toStrictEqual([[{ failed: true }], [{ failed: false }], []]);
 
     /* One that fails before any byte lands leaves the checkout whole: it is not told failed, and nothing recovers. */
     outcomes.length = 0;

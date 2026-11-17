@@ -911,6 +911,13 @@ export const createApplyTreeEffects = (
               ...(materialization.purpose === undefined ? {} : { purpose: materialization.purpose }),
             });
           }
+          /*
+           * Whole again: what the failed write still owed refused until now, and may answer as the disk (I7). A
+           * rollback that held the tree ended it already; one that did not, or none, ends it here.
+           */
+          await useFileSystem(place, async (live) => {
+            live.endExpectation?.();
+          });
           /* Told after the rollback, not before: a rollback that landed left the checkout whole (L5). */
           tell(false);
         } catch (recoveryError) {

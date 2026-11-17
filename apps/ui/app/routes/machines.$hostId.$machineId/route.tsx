@@ -68,7 +68,9 @@ function ConnectedMachine({
   );
   const errors = useMemo(() => [directory.error, ledger.error], [directory.error, ledger.error]);
   return (
-    <div className='container mx-auto flex h-full min-h-0 flex-col gap-3 px-4 pt-5 pb-4'>
+    // A document page (D4.2): the header and controls scroll with the page; the workbench panel fills what is left
+    // and keeps a usable floor in a short window.
+    <div className='container mx-auto flex min-h-full flex-col gap-3 px-4 pt-5 pb-4'>
       <div>
         <Link className='text-xs underline' to='/machines'>
           All machines
@@ -126,7 +128,7 @@ function ConnectedMachine({
           </Button>
         </PanelEmptyState>
       ) : (
-        <div className='flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border'>
+        <div className='flex min-h-96 min-w-0 flex-1 flex-col rounded-lg border'>
           <MachineWorkbench
             key={`${hostId}:${machineId}`}
             client={client}

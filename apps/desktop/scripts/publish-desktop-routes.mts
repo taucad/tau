@@ -743,9 +743,6 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
             artifactDirectory: root,
             ...(previous ? { previous } : {}),
           });
-    if (Date.parse(apt.inventory.validUntil) <= Date.now()) {
-      throw new Error('Expired APT snapshot cannot be published');
-    }
     await apt.publish({
       async put(object) {
         const remoteKey = `apt/${object.path}`;

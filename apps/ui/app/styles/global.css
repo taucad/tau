@@ -33,6 +33,7 @@
 @source '../../../libs/chat-ui/src';
 @source '../../../libs/project-workspace/src';
 @source '../../../libs/files-ui/src';
+@source '../../../libs/editor-ui/src';
 @source '../../../libs/publish-ui/src';
 @source '../../../libs/ui-core/src';
 @source '../../../../packages/ui/src';

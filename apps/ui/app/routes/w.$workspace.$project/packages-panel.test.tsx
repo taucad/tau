@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: (path: string | undefined): FileContentResult => {
     if (path === undefined) {
       return { kind: 'loading' };

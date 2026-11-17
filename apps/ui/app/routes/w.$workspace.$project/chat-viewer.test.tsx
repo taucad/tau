@@ -432,11 +432,11 @@ vi.mock('#hooks/use-revision-status.js', () => ({
 // directory placeholder branches
 // =============================================================================
 
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeSelector: <T,>(select: (tree: typeof mockFileTree) => T): T => select(mockFileTree),
 }));
 
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: () => mockFileContent,
 }));
 

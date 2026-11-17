@@ -58,8 +58,10 @@ import {
   launchExclusionConformance,
   nativeWorkerConformance,
   personSession,
+  statusWithoutSystemEnvironment,
 } from '#shell/windows-native-worker.fixture.js';
 import type { NativeWorkerContext, PersonSession } from '#shell/windows-native-worker.fixture.js';
+import { atomicWrite, pipeObserverScript } from '#shell/windows-conformance-scripts.fixture.js';
 import { createWindowsShellProvider } from '#shell/windows-shell-provider.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
@@ -155,15 +157,6 @@ const delay = async (milliseconds: number): Promise<void> =>
 
 /** A PowerShell single-quoted literal. */
 const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`;
-/**
- * PowerShell that writes `value` (an expression) to `path` (an expression) atomically: a sibling temporary file, then a
- * rename into place (`File.Replace` over an existing target, which never leaves it missing). `File.Move` and
- * `File.Replace` touch only the two paths; `Move-Item` inspects the destination's ancestors, which the AppContainer may
- * not read. A file the test polls while a shell writes it must never be seen half written.
- */
-const atomicWrite = (path: string, value: string): string =>
-  `& { param($target, $text) $ErrorActionPreference = 'Stop'; $partial = $target + '.partial'; Set-Content -LiteralPath $partial -Value $text -NoNewline; if (Test-Path -LiteralPath $target) { [System.IO.File]::Replace($partial, $target, [NullString]::Value) } else { [System.IO.File]::Move($partial, $target) } } ${path} ${value}`;
-
 /** `-EncodedCommand` text: UTF-16LE, base64, so a nested script survives every command line it passes through. */
 const encoded = (script: string): string => Buffer.from(script, 'utf16le').toString('base64');
 
@@ -367,53 +360,21 @@ const pipeServer = async (
   const count = join(directory, 'count');
   const listening = join(directory, 'listening');
   const stop = join(directory, 'stop');
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    '$security = [System.IO.Pipes.PipeSecurity]::new()',
-    "$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')",
-    '$self = [System.Security.Principal.WindowsIdentity]::GetCurrent().User',
-    "$security.AddAccessRule([System.IO.Pipes.PipeAccessRule]::new($everyone, 'FullControl', 'Allow'))",
-    "$security.AddAccessRule([System.IO.Pipes.PipeAccessRule]::new($self, 'FullControl', 'Allow'))",
-    'function New-Instance {',
-    "  if ($env:CONFORMANCE_PIPE_DACL -eq 'default') {",
-    "    [System.IO.Pipes.NamedPipeServerStream]::new($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous')",
-    '  } elseif ($PSVersionTable.PSVersion.Major -ge 6) {',
-    "    [System.IO.Pipes.NamedPipeServerStreamAcl]::Create($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous', 0, 0, $security)",
-    '  } else {',
-    "    [System.IO.Pipes.NamedPipeServerStream]::new($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous', 0, 0, $security)",
-    '  }',
-    '}',
-    '$servers = @(1..4 | ForEach-Object { New-Instance })',
-    '$waits = @($servers | ForEach-Object { $_.WaitForConnectionAsync() })',
-    '$accepted = 0',
-    atomicWrite('$env:CONFORMANCE_PIPE_COUNT', "'0'"),
-    'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_LISTENING -Value 1 -NoNewline',
-    'while (-not (Test-Path -LiteralPath $env:CONFORMANCE_PIPE_STOP)) {',
-    '  for ($i = 0; $i -lt $servers.Count; $i++) {',
-    '    if ($waits[$i].IsCompleted) {',
-    "      if ($waits[$i].Status -eq 'RanToCompletion') {",
-    '        $accepted++',
-    `        ${atomicWrite('$env:CONFORMANCE_PIPE_COUNT', '"$accepted"')}`,
-    '      }',
-    '      $servers[$i].Dispose()',
-    '      $servers[$i] = New-Instance',
-    '      $waits[$i] = $servers[$i].WaitForConnectionAsync()',
-    '    }',
-    '  }',
-    '  Start-Sleep -Milliseconds 20',
-    '}',
-  ].join('\n');
-  const child: ChildProcess = spawn(shell.path, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
-    env: {
-      ...process.env,
-      CONFORMANCE_PIPE: name,
-      CONFORMANCE_PIPE_DACL: dacl,
-      CONFORMANCE_PIPE_COUNT: count,
-      CONFORMANCE_PIPE_LISTENING: listening,
-      CONFORMANCE_PIPE_STOP: stop,
+  const child: ChildProcess = spawn(
+    shell.path,
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', pipeObserverScript],
+    {
+      env: {
+        ...process.env,
+        CONFORMANCE_PIPE: name,
+        CONFORMANCE_PIPE_DACL: dacl,
+        CONFORMANCE_PIPE_COUNT: count,
+        CONFORMANCE_PIPE_LISTENING: listening,
+        CONFORMANCE_PIPE_STOP: stop,
+      },
+      stdio: 'ignore',
     },
-    stdio: 'ignore',
-  });
+  );
   const exited = new Promise<void>((resolve) => {
     child.once('exit', () => {
       resolve();
@@ -674,6 +635,14 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     expect(result.stdout.trim()).toMatch(/^\d+\.\d+/u);
     shellVersion = result.stdout.trim();
   });
+
+  conformance(
+    'W09',
+    'status, quick and full, reads the install record with no SystemDrive, SystemRoot, windir, ProgramData or ALLUSERSPROFILE',
+    async () => {
+      statusWithoutSystemEnvironment(shell.path, helperPath, helperStatus['accountSid']);
+    },
+  );
 
   conformance('W02', 'the receipt binds the shell kind, fixed path, real path and digest (I12)', async () => {
     const programFiles = process.env['ProgramFiles'] ?? String.raw`C:\Program Files`;

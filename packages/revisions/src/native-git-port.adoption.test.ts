@@ -374,6 +374,27 @@ describe.runIf(gitToolchainOnPath)('opening a fresh store from two places at onc
   }, 120_000);
 });
 
+/*
+ * Git LFS writes its hooks under `core.hooksPath`, which every command pins to
+ * `/dev/null`. Git for Windows' git-lfs read that against the checkout and
+ * planted `dev/null/pre-push` and three more inside the project: an untracked
+ * folder every cut then saw as unsaved work.
+ */
+describe.runIf(gitToolchainOnPath)('a store this port creates', () => {
+  it("configures git-lfs's filters and writes nothing in the project but its ignore file", async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-new-store-'));
+    roots.push(root);
+    const port = createNativeGitRevisionPort({ repositoryPath: root });
+
+    await port.init({ author });
+
+    const entries = await readdir(root);
+    expect(entries.toSorted()).toStrictEqual(['.git', generatedIgnorePath]);
+    expect(await readFile(join(root, '.git', 'config'), 'utf8')).toContain('[filter "lfs"]');
+    expect(git(root, ['status', '--porcelain', '--untracked-files=all'])).toBe(`?? ${generatedIgnorePath}`);
+  });
+});
+
 describe.runIf(gitToolchainOnPath)('a folder with its own setup files and no repository', () => {
   const folder = async (files: Readonly<Record<string, string>>): Promise<string> => {
     const root = await mkdtemp(join(tmpdir(), 'tau-revisions-folder-'));

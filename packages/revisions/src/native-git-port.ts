@@ -2379,9 +2379,16 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * config is the person's: the pointers its own attributes ask for are
      * resolved by whatever filters they configured (D16). Asked on every
      * open and idempotent, so a session after a crash between `git init` and
-     * here still configures them. */
+     * here still configures them.
+     *
+     * The filters only: `--skip-repo` installs no hooks. Tau's plumbing runs
+     * none (`core.hooksPath` is pinned off), and git-lfs writes its hooks
+     * under that pinned path: on Linux `/dev/null` refused them (exit 2, after
+     * the filters were set), and on Windows git-lfs read `/dev/null` against the
+     * checkout and planted `dev/null/pre-push` and three more inside the
+     * project, an untracked folder every cut then saw as unsaved work. */
     if (!(await isAdopted())) {
-      await run(['lfs', 'install', '--local']);
+      await run(['lfs', 'install', '--local', '--skip-repo']);
     }
     /* Every project an older build recorded has no index at all, so this open
      * heals it. An existing index is left alone: in a repository Tau adopted

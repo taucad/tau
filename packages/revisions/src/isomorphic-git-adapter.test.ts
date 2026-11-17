@@ -192,6 +192,21 @@ node_modules/
     expect(await filesystem.exists(generatedGitattributesPath)).toBe(false);
   });
 
+  /*
+   * The effects' `ensureStore` and a caller's own `init` both reach a new
+   * store. Run at once, each wrote the ignore file: on Windows the second
+   * rename over the file the first writer still held failed with EPERM.
+   */
+  it('should create the ignore file once when two opens of a new store race', async () => {
+    const { filesystem, written } = counting();
+    const port = createIsomorphicGitRevisionPort({ filesystem });
+
+    await Promise.all([port.init({ author }), port.init({ author })]);
+
+    expect(written).toStrictEqual([generatedIgnorePath]);
+    expect(await filesystem.readFile(generatedIgnorePath, 'utf8')).toBe(generatedIgnoreContent(undefined));
+  });
+
   it('should write nothing when the project is already current', async () => {
     const { filesystem, written } = counting();
     const port = createIsomorphicGitRevisionPort({ filesystem });

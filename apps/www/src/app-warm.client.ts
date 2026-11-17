@@ -4,8 +4,9 @@
  * On the app's own host the app's edge function serves these pages, so the app build's warm manifest is a same-origin
  * file. Once the page has loaded and is idle, this prefetches the app Home's interactive tier from it with
  * `<link rel="prefetch">`: lowest priority, into the HTTP cache, nothing evaluated, so the page's own paint and
- * interaction never wait on it. A first app open then finds its modules cached. Anywhere the file is absent (the
- * marketing deploy's own host, local development) nothing is warmed.
+ * interaction never wait on it. A first app open then finds its modules cached. Only the app's public hosts
+ * ({@link appHosts}) serve the file; anywhere else (the marketing deploy's own host, a preview, local development) the
+ * request would 404 and the browser would log that as a console error, so nothing is requested there.
  *
  * The manifest's path, shape and URL rules are the app's (`apps/ui/app/lib/warm-manifest.ts`); this site imports
  * nothing from the app, so they are repeated here. The app build checks every listed file is part of an interactive
@@ -15,6 +16,17 @@
 /** The app build's warm manifest on the app's host. */
 export const appWarmManifestPath = '/__shell/warm.json';
 
+/** The app's public hosts, where the app's edge function serves these pages beside the app build. */
+export const appHosts: ReadonlySet<string> = new Set(['tau.new', 'taucad.dev']);
+
+/**
+ * Whether this page is served on an app host, the only place the warm manifest exists.
+ *
+ * @param hostname - The page's `location.hostname`.
+ * @returns `true` on {@link appHosts}.
+ */
+export const servesAppWarmManifest = (hostname: string): boolean => appHosts.has(hostname);
+
 /** The app route class a marketing visitor opens: Home, which every "open the app" link leads to. */
 export const appWarmClass = 'home';
 
@@ -23,6 +35,7 @@ export const idleFallbackDelay = 1500;
 
 /** The part of a window this module touches. */
 export type WarmHost = Readonly<{
+  location: Pick<Location, 'hostname'>;
   document: Pick<Document, 'readyState' | 'createElement' | 'head' | 'querySelectorAll'>;
   /** Read for `connection.saveData`, which the DOM library does not declare. */
   navigator: unknown;
@@ -111,15 +124,15 @@ let state: 'none' | 'scheduled' | 'started' = 'none';
 
 /**
  * Schedule the warm-up once per document: after `load`, at the next idle period (with no `requestIdleCallback`,
- * {@link idleFallbackDelay} after `load`), and never under Save-Data. A page change aborts a warm-up still waiting,
- * and the next page schedules it again.
+ * {@link idleFallbackDelay} after `load`), only on an app host, and never under Save-Data. A page change aborts a
+ * warm-up still waiting, and the next page schedules it again.
  *
  * @param signal - Cancels a warm-up that has not started.
  * @param host - The window; the global one by default.
  * @returns Whether a warm-up was scheduled by this call.
  */
 export function scheduleAppWarm(signal: AbortSignal, host: WarmHost = globalThis): boolean {
-  if (state !== 'none' || prefersReducedData(host.navigator)) {
+  if (state !== 'none' || !servesAppWarmManifest(host.location.hostname) || prefersReducedData(host.navigator)) {
     return false;
   }
   state = 'scheduled';

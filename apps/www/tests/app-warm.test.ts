@@ -25,6 +25,7 @@ const fakeHost = ({
   body = manifest,
   ok = true,
   present = [],
+  hostname = 'tau.new',
 }: {
   idle?: boolean;
   readyState?: DocumentReadyState;
@@ -32,6 +33,7 @@ const fakeHost = ({
   body?: unknown;
   ok?: boolean;
   present?: readonly string[];
+  hostname?: string;
 } = {}) => {
   const head: Link[] = present.map((href) => ({ rel: 'modulepreload', href, getAttribute: () => href }));
   const loadListeners = new Set<() => void>();
@@ -57,6 +59,7 @@ const fakeHost = ({
   const connection = { saveData };
   const fetch = vi.fn(async (_input: string, _init?: RequestInit) => ({ ok, json: async () => body }));
   // The module reads the window's globals, as on a page; each is stubbed for one test.
+  vi.stubGlobal('location', { hostname });
   vi.stubGlobal('document', document);
   vi.stubGlobal('navigator', { connection });
   vi.stubGlobal('addEventListener', (_type: 'load', listener: () => void) => {
@@ -115,6 +118,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('servesAppWarmManifest', () => {
+  test('should hold to the app hosts, where the manifest exists', async () => {
+    const { servesAppWarmManifest } = await load();
+    expect(servesAppWarmManifest('tau.new')).toBe(true);
+    expect(servesAppWarmManifest('taucad.dev')).toBe(true);
+  });
+
+  test("should refuse the marketing deploy's own host, previews and local servers, where the request would 404", async () => {
+    const { servesAppWarmManifest } = await load();
+    for (const hostname of ['tau-www.pages.dev', 'www.tau.new', '127.0.0.1', 'localhost']) {
+      expect(servesAppWarmManifest(hostname)).toBe(false);
+    }
+  });
+});
+
 describe('homeTierHrefs', () => {
   test("lists the app Home's scripts and stylesheets and never a wasm, worker, font or foreign URL", async () => {
     const { homeTierHrefs } = await load();
@@ -135,6 +153,15 @@ describe('homeTierHrefs', () => {
 });
 
 describe('scheduleAppWarm', () => {
+  test('should request nothing away from an app host, where the manifest request would 404', async () => {
+    const page = fakeHost({ hostname: '127.0.0.1', readyState: 'complete' });
+    const { scheduleAppWarm } = await load();
+    expect(scheduleAppWarm(new AbortController().signal)).toBe(false);
+    page.runIdle();
+    await settle();
+    expect(page.fetch).not.toHaveBeenCalled();
+  });
+
   test('prefetches the app Home tier once the page has loaded and is idle', async () => {
     const { scheduleAppWarm, appWarmManifestPath } = await load();
     const page = fakeHost();

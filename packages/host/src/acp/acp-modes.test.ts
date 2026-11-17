@@ -189,4 +189,15 @@ describe('discoveredModeOptions', () => {
       false,
     );
   });
+
+  it('should move a discovery session that opens in plan to its fallback and drop plan', () => {
+    const [mode] = discoveredModeOptions(
+      [select('mode', ['default', 'dontAsk', 'plan'], 'plan')],
+      preferenceOf('claude'),
+    );
+    expect(mode).toMatchObject({ currentValue: 'default' });
+    expect(mode?.type === 'select' && mode.options.some((entry) => 'value' in entry && entry.value === 'plan')).toBe(
+      false,
+    );
+  });
 });

@@ -185,7 +185,17 @@ export const discoveredModeOptions = (
   preference: readonly string[] | undefined,
 ): SessionConfigOption[] => {
   const mode = modeOptionOf(options);
-  const value = mode === undefined ? undefined : defaultModeOf(valuesOf(mode), preference);
+  /* The first turn's own decision, so a discovery session that opens in plan shows its fallback, not plan. */
+  const value =
+    mode === undefined
+      ? undefined
+      : modeDecisionOf({
+          option: mode,
+          offered: valuesOf(mode),
+          requested: undefined,
+          defaulted: undefined,
+          preference,
+        })?.value;
   return withoutPlanModes(
     options.map((option) => (option === mode && value !== undefined ? { ...option, currentValue: value } : option)),
   );

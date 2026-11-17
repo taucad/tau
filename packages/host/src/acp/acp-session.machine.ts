@@ -669,10 +669,13 @@ const modeDecision = (context: AcpSessionContext, lent: AcpLend): ModeDecision |
   const grokAutoUnverified =
     context.grokControls && option.id === grokPermissionConfigId && context.grokAutoAvailable !== true;
   const recorded = lent.record?.['defaultModeId'];
+  /* A turn that names no mode keeps the person's pick (marker `null`) while it is offered. */
+  const owned = context.defaultModeId === undefined ? recorded === null : context.defaultModeId === null;
+  const named = lent.configuration?.[option.id];
   return modeDecisionOf({
     option,
     offered: grokAutoUnverified ? values.filter((value) => value !== 'auto') : values,
-    requested: lent.configuration?.[option.id],
+    requested: named === undefined && owned ? option.currentValue : named,
     defaulted:
       context.defaultModeId === undefined
         ? typeof recorded === 'string'
@@ -741,6 +744,14 @@ const usageState = (usage: AcpUsage): JsonObject => ({
  */
 export const sessionRecordOf = (context: AcpSessionContext, lent: AcpLend): JsonObject => {
   const prior = lent.record;
+  /* Until this child decides the mode, the chat's stored marker stands (an opening, cancelled or failed record keeps it). */
+  const priorDefault = prior?.['defaultModeId'];
+  const defaultModeId =
+    context.defaultModeId === undefined
+      ? typeof priorDefault === 'string' || priorDefault === null
+        ? priorDefault
+        : undefined
+      : context.defaultModeId;
   const model = modelChoice(context.configOptions)?.currentValue ?? lent.model;
   const title = context.presentation.title ?? stringField(prior, 'title');
   const { limit } = context;
@@ -750,7 +761,7 @@ export const sessionRecordOf = (context: AcpSessionContext, lent: AcpLend): Json
     acpPromptedRequestId: context.promptedRequestId ?? null,
     cwd: context.cwd,
     ...(context.mode === undefined ? {} : { mode: context.mode }),
-    ...(context.defaultModeId === undefined ? {} : { defaultModeId: context.defaultModeId }),
+    ...(defaultModeId === undefined ? {} : { defaultModeId }),
     ...(model === undefined ? {} : { model }),
     config: confirmedConfiguration(context.configOptions),
     ...(context.priorUsage === undefined ? {} : { acpPriorUsage: usageState(context.priorUsage) }),

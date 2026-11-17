@@ -495,6 +495,23 @@ describe('acpSession', () => {
       }
     });
 
+    it("should keep the person's pick on a turn that names no mode", async () => {
+      const harness = start({
+        opening: { ...input().opening, adapter: claudeLike },
+        lend: { ...lent, configuration: { mode: 'default' } },
+      });
+      try {
+        await openWith(harness, [modeSelect('default'), models('opus')]);
+        expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
+        nextTurn(harness, { ...lent, requestId: 'run-2:0' });
+        expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
+        expect(modeCalls(harness)).toEqual([]);
+        expect(harness.actor.getSnapshot().context.defaultModeId).toBeNull();
+      } finally {
+        harness.actor.stop();
+      }
+    });
+
     it('should move a defaulted chat to acceptEdits when a model loses auto, and back to auto when it returns', async () => {
       const harness = start({ opening: { ...input().opening, adapter: claudeLike } });
       try {

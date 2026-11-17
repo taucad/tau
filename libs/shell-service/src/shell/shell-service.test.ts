@@ -1050,11 +1050,20 @@ describe('probeHostShell (D1, I2)', () => {
     sessionDirectory: sessions,
   });
 
-  it('answers sandbox-unavailable on Windows without starting anything', async () => {
-    const options = probeOptions(() => ({ status: 'started', exit: { exitCode: 0 } }), 'win32');
+  it('answers shell-missing on Windows without a fixed-path PowerShell, starting nothing', async () => {
+    const options = {
+      ...probeOptions(() => ({ status: 'started', exit: { exitCode: 0 } }), 'win32'),
+      environment: {},
+    };
+    await expect(probeHostShell(options)).resolves.toMatchObject({ status: 'unavailable', code: 'shell-missing' });
+    expect(options.provider.launches).toEqual([]);
+  });
+
+  it('answers platform-unsupported on a platform with no sandbox, starting nothing', async () => {
+    const options = probeOptions(() => ({ status: 'started', exit: { exitCode: 0 } }), 'freebsd');
     await expect(probeHostShell(options)).resolves.toMatchObject({
       status: 'unavailable',
-      code: 'sandbox-unavailable',
+      code: 'platform-unsupported',
     });
     expect(options.provider.launches).toEqual([]);
   });

@@ -1278,8 +1278,8 @@ export type ProbeHostShellOptions = Omit<ShellServiceOptions, 'executable' | 'id
 
 /**
  * Prove the provider and the machine's own shell on this host before anything is offered (D1, I2): resolve the shell
- * from its fixed path, then ask it for its version inside an empty sandbox. Never runs project code. Windows has no
- * provider in this delivery and answers `sandbox-unavailable` without starting anything.
+ * from its fixed path, then ask it for its version inside an empty sandbox. Never runs project code. On Windows the
+ * desktop composes a provider only behind `TAU_WINDOWS_SHELL_SANDBOX`, and answers `sandbox-unavailable` itself otherwise.
  *
  * @public
  * @param options - The service options, less what the probe resolves.
@@ -1288,15 +1288,7 @@ export type ProbeHostShellOptions = Omit<ShellServiceOptions, 'executable' | 'id
 export const probeHostShell = async (options: ProbeHostShellOptions): Promise<ShellProbe> => {
   const platform = options.platform ?? process.platform;
   const environment = options.environment ?? process.env;
-  if (platform === 'win32') {
-    return {
-      status: 'unavailable',
-      code: 'sandbox-unavailable',
-      message: 'The Windows shell sandbox is not part of this Tau build.',
-      recovery: 'Use Tau on macOS or Linux for the shell and Terminal until the Windows sandbox ships.',
-    };
-  }
-  if (platform !== 'darwin' && platform !== 'linux') {
+  if (platform !== 'darwin' && platform !== 'linux' && platform !== 'win32') {
     return {
       status: 'unavailable',
       code: 'platform-unsupported',
@@ -1310,7 +1302,10 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
       status: 'unavailable',
       code: 'shell-missing',
       message: executable.message,
-      recovery: 'Restore the system Bash at /bin/bash; Tau never runs a user-installed copy.',
+      recovery:
+        platform === 'win32'
+          ? 'Install PowerShell 7 under Program Files or restore Windows PowerShell; Tau never runs a user-installed copy.'
+          : 'Restore the system Bash at /bin/bash; Tau never runs a user-installed copy.',
     };
   }
   const sessionBase = options.sessionDirectory ?? tmpdir();

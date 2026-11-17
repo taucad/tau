@@ -703,6 +703,7 @@ export const ChatTextareaDesktop = memo(function ({
       !earlyInput.edited &&
       (content.text !== earlyInput.text || attachments.length > 0)
     ) {
+      // oxlint-disable-next-line react/set-state-in-effect -- the editor (Tiptap) is the external system read here, and only it holds the draft the Enter would send.
       cancelReplacedPaintedSend();
       return;
     }

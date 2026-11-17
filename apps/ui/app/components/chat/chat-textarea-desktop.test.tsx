@@ -815,7 +815,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     };
 
     it('should hold it, shown as queued, while the record is unread, and send it once the record holds the same text', async () => {
-      const handleSubmit = vi.fn(asyncNoop);
+      const handleSubmit = vi.fn(async (_text?: string) => undefined);
       const verdict: { current: PaintedSendVerdict | undefined } = { current: { kind: 'wait' } };
       const view = renderComposer('Fillet it', codexSession, {
         earlyInput: paintedQueued,

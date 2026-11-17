@@ -1,0 +1,99 @@
+# Temporary measurement workflow (lane L2, Windows unit-lane variance). Never merged: it lives only on
+# claude/win-l2-load-probe. It runs the revisions suite on windows-2025 at two worker counts, twice each,
+# and records Defender's state and per-second CPU, git/node process CPU and disk load, so the lane-wide fix
+# is chosen from measurements, not guesses.
+name: Windows unit load probe
+
+on:
+  push:
+    branches:
+      - claude/win-l2-load-probe
+
+permissions:
+  contents: read
+
+env:
+  pnpm_config_verify_deps_before_run: warn
+  NX_NO_CLOUD: 'true'
+  NX_DAEMON: 'false'
+
+jobs:
+  probe:
+    name: revisions, workers ${{ matrix.workers }}, rep ${{ matrix.rep }}
+    strategy:
+      fail-fast: false
+      matrix:
+        workers: ['default', '2']
+        rep: [1, 2]
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Check out text as committed
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Record Defender state and machine shape
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP/probe" | Out-Null
+          $out = "$env:RUNNER_TEMP/probe/defender-state.log"
+          "--- Get-MpComputerStatus ---" | Out-File $out
+          Get-MpComputerStatus | Select-Object AMRunningMode,RealTimeProtectionEnabled,OnAccessProtectionEnabled,IoavProtectionEnabled,BehaviorMonitorEnabled | Format-List | Out-File $out -Append
+          "--- Get-MpPreference ---" | Out-File $out -Append
+          Get-MpPreference | Select-Object DisableRealtimeMonitoring,ExclusionPath,ExclusionProcess | Format-List | Out-File $out -Append
+          "--- Processors ---" | Out-File $out -Append
+          [Environment]::ProcessorCount | Out-File $out -Append
+          (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory | Out-File $out -Append
+          Get-Content $out
+
+      - name: Start load sampler
+        shell: pwsh
+        run: |
+          $counters = @(
+            '\Processor(_Total)\% Processor Time',
+            '\Process(MsMpEng)\% Processor Time',
+            '\Process(git*)\% Processor Time',
+            '\Process(node*)\% Processor Time',
+            '\Process(_Total)\% Processor Time',
+            '\PhysicalDisk(_Total)\% Disk Time',
+            '\PhysicalDisk(_Total)\Avg. Disk Queue Length',
+            '\System\Processor Queue Length',
+            '\Memory\Available MBytes'
+          )
+          Start-Process -WindowStyle Hidden -FilePath typeperf -ArgumentList (@($counters | ForEach-Object { "`"$_`"" }) + @('-si','1','-f','CSV','-o',"$env:RUNNER_TEMP\probe\load-samples.csv",'-y'))
+
+      - name: Test revisions on Windows
+        shell: bash
+        env:
+          WORKERS: ${{ matrix.workers }}
+        run: |
+          start=$(date +%s)
+          if [ "$WORKERS" = default ]; then
+            pnpm nx run revisions:test --outputStyle=static | tee "$RUNNER_TEMP/probe/test.log" || true
+          else
+            pnpm nx run revisions:test --outputStyle=static -- --maxWorkers="$WORKERS" | tee "$RUNNER_TEMP/probe/test.log" || true
+          fi
+          echo "wall seconds: $(( $(date +%s) - start ))" | tee -a "$RUNNER_TEMP/probe/test.log"
+
+      - name: Stop sampler
+        if: always()
+        shell: pwsh
+        run: Get-Process typeperf -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: probe-${{ matrix.workers }}-${{ matrix.rep }}
+          path: ${{ runner.temp }}/probe
+          retention-days: 7

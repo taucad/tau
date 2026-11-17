@@ -2941,7 +2941,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
       return trusted(event.senderFrame) && event.senderFrame === event.sender.mainFrame ? 'app' : undefined;
     },
     actions: {
-      restart: async (mode) => (mode === 'safe' ? hooks.restartInSafeMode() : hooks.restartNormally()),
+      restart: async (mode) => {
+        await (mode === 'safe' ? hooks.restartInSafeMode() : hooks.restartNormally());
+      },
       showLogs: () => {
         shell.showItemInFolder(log.filePath);
       },
@@ -2968,7 +2970,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
   ipcMain.handle(recoveryChannels.action, async (event, payload: unknown) => handleRecoveryAction(payload, event));
   /* Help → Troubleshooting (U5, D6): reachable with no working page, and installed with Check for Updates… before
    * the first window. */
-  const restartInSafeMode = async (): Promise<void> => hooks.restartInSafeMode();
+  const restartInSafeMode = async (): Promise<void> => {
+    await hooks.restartInSafeMode();
+  };
   const copyDiagnostics = async (): Promise<void> => {
     await log.flush();
     clipboard.writeText(

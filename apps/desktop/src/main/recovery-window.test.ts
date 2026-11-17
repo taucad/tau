@@ -63,7 +63,7 @@ const controllerFor = (window = fakeWindow()) => {
   const createWindow = vi.fn(() => window);
   const showMessageBox = vi.fn(async () => ({ response: 3 }));
   const fallback = {
-    restartInSafeMode: vi.fn(async () => undefined),
+    restartInSafeMode: vi.fn(async () => true),
     downloadTau: vi.fn(async () => undefined),
     showLogs: vi.fn(),
     quit: vi.fn(),
@@ -165,6 +165,19 @@ describe('recovery window (T-R12.6)', () => {
     await vi.waitFor(() => {
       expect(showMessageBox).toHaveBeenCalledOnce();
     });
+  });
+
+  it('should show the native dialog again when the safe-mode restart is refused, and leave once it is accepted', async () => {
+    const { controller, window, showMessageBox, fallback } = controllerFor();
+    showMessageBox.mockResolvedValueOnce({ response: 0 }).mockResolvedValueOnce({ response: 0 });
+    fallback.restartInSafeMode.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    controller.open('shell-timeout');
+    window.contents.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 1 });
+    await vi.waitFor(() => {
+      expect(fallback.restartInSafeMode).toHaveBeenCalledTimes(2);
+    });
+    expect(showMessageBox).toHaveBeenCalledTimes(2);
+    expect(fallback.quit).not.toHaveBeenCalled();
   });
 
   it('should fall back to the native dialog when loadFile rejects', async () => {
@@ -297,7 +310,7 @@ describe('recovery hooks for the watchdog and the reload policy', () => {
 
   it('should restart in safe mode through the quit owner, then relaunch with --safe-mode and quit', async () => {
     const { restartInSafeMode, prepareToQuit, relaunch, quit } = hooks();
-    await restartInSafeMode();
+    expect(await restartInSafeMode()).toBe(true);
     expect(prepareToQuit).toHaveBeenCalledExactlyOnceWith('restart', 'safe-mode');
     expect(relaunch).toHaveBeenCalledExactlyOnceWith(['--safe-mode']);
     expect(quit).toHaveBeenCalledOnce();
@@ -310,9 +323,9 @@ describe('recovery hooks for the watchdog and the reload policy', () => {
     expect(relaunch).toHaveBeenCalledExactlyOnceWith([]);
   });
 
-  it('should neither relaunch nor quit when the quit owner keeps the app open', async () => {
+  it('should neither relaunch nor quit when the quit owner keeps the app open, and say so', async () => {
     const { restartInSafeMode, relaunch, quit } = hooks(false);
-    await restartInSafeMode();
+    expect(await restartInSafeMode()).toBe(false);
     expect(relaunch).not.toHaveBeenCalled();
     expect(quit).not.toHaveBeenCalled();
   });

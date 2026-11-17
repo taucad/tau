@@ -212,7 +212,8 @@ export type RecoveryWindowOptions = {
 
 /** The core actions of the native fallback. */
 export type RecoveryFallbackActions = {
-  readonly restartInSafeMode: () => Promise<void>;
+  /** Resolves true once the restart is under way, false when the quit owner kept the app open. */
+  readonly restartInSafeMode: () => Promise<boolean>;
   readonly downloadTau: () => Promise<void>;
   readonly showLogs: () => void;
   readonly quit: () => void;
@@ -268,7 +269,7 @@ export const createRecoveryWindowController = (host: {
     host.log('error', 'main.recovery-dialog-shown', { trigger });
     host.report(recoveryShownSignal('dialog', trigger));
     try {
-      /* Show Logs and Download Tau leave the dialog up; the other two end the launch. */
+      /* Show Logs, Download Tau and a refused restart leave the dialog up; the other two end the launch. */
       for (let shown = 0; shown < 64; shown += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one modal dialog at a time, re-shown after each non-final choice.
         const { response } = await host.showMessageBox({
@@ -282,9 +283,11 @@ export const createRecoveryWindowController = (host: {
         });
         switch (recoveryFallbackButtons[response]) {
           case 'Restart in Safe Mode': {
-            // oxlint-disable-next-line no-await-in-loop -- the restart ends this launch.
-            await host.fallback.restartInSafeMode();
-            return;
+            // oxlint-disable-next-line no-await-in-loop -- an accepted restart ends this launch.
+            if (await host.fallback.restartInSafeMode()) {
+              return;
+            }
+            continue;
           }
           case 'Download Tau': {
             // oxlint-disable-next-line no-await-in-loop -- the browser opens before the dialog returns.
@@ -400,10 +403,10 @@ export const createRecoveryWindowController = (host: {
 export type RecoveryHooks = {
   /** Open the recovery window for a reason. */
   readonly openRecovery: (trigger: RecoveryTrigger) => void;
-  /** Quit through the quit owner, then start again with `--safe-mode`. */
-  readonly restartInSafeMode: () => Promise<void>;
-  /** Quit through the quit owner, then start again normally. */
-  readonly restartNormally: () => Promise<void>;
+  /** Quit through the quit owner, then start again with `--safe-mode`; false when the quit owner kept the app open. */
+  readonly restartInSafeMode: () => Promise<boolean>;
+  /** Quit through the quit owner, then start again normally; false when the quit owner kept the app open. */
+  readonly restartNormally: () => Promise<boolean>;
 };
 
 /**
@@ -420,9 +423,9 @@ export const createRecoveryHooks = (options: {
   readonly quit: () => void;
   readonly log: (level: 'error', event: string, detail?: unknown) => void;
 }): RecoveryHooks => {
-  const restart = async (reason: string, switches: readonly string[]): Promise<void> => {
+  const restart = async (reason: string, switches: readonly string[]): Promise<boolean> => {
     if (!(await options.prepareToQuit('restart', reason))) {
-      return;
+      return false;
     }
     try {
       await options.relaunch(switches);
@@ -430,6 +433,7 @@ export const createRecoveryHooks = (options: {
       options.log('error', 'main.relaunch-failed', error);
     }
     options.quit();
+    return true;
   };
   return {
     openRecovery: (trigger) => {

@@ -71,12 +71,20 @@ const connect = (): Connected => {
   return { root, outside, provider: new NodeFsProviderClient(channel, root), port: port1 };
 };
 
+/** A file only {@link armLiveWatch} writes, to learn when the native watcher is listening. */
+const watchProbe = '.watch-armed';
+
 /**
- * Arm a watch after the host's native admission completes.
+ * Arm a watch, then wait until the native watcher reports a change, so the row's own change cannot fall before it.
+ *
+ * Admission settling is not enough on Windows: `@parcel/watcher` resolves `subscribe` once it has queued the
+ * subscription to its backend thread (`QueueUserAPC`), and the first `ReadDirectoryChangesW` that starts recording
+ * changes runs later on that thread. A write in between is never reported. The probe is rewritten until one of its
+ * events arrives.
  */
 const armLiveWatch = async (
   provider: NodeFsProviderClient,
-  _root: string,
+  root: string,
   request: { recursive?: boolean; excludes?: string[] } = {},
 ): Promise<{ readonly events: NodeFsWatchEvent[] }> => {
   const events: NodeFsWatchEvent[] = [];
@@ -87,6 +95,15 @@ const armLiveWatch = async (
     },
   );
   cleanups.push(unsubscribe);
+  const listening = (): boolean => events.some((event) => event.type !== 'reset' && event.path === watchProbe);
+  for (let write = 0; write < 100 && !listening(); write += 1) {
+    writeFileSync(join(root, watchProbe), String(write));
+    // oxlint-disable-next-line no-await-in-loop -- One probe write per 100 ms until the watcher reports one.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
+  }
+  expect(listening()).toBe(true);
   return { events };
 };
 
@@ -1059,6 +1076,33 @@ describe('node filesystem client/host round trip', () => {
   });
 
   it('delivers a watch change event with its entry kind', async () => {
+    const { root, provider } = connect();
+    const { events } = await armLiveWatch(provider, root);
+
+    writeFileSync(join(root, 'watched.txt'), 'external');
+
+    await expect(
+      waitForEvent(events, (event) => event.type === 'change' && event.path === 'watched.txt'),
+    ).resolves.toEqual({ type: 'change', path: 'watched.txt', kind: 'file' });
+  }, 30_000);
+
+  it('delivers a change written right after arming through a watcher that starts listening late', async () => {
+    /* Windows' `@parcel/watcher` resolves `subscribe` before its backend thread issues `ReadDirectoryChangesW`
+     * (Windows run job 133856230090 saw no event at all); this stand-in listens 300 ms after it resolves. */
+    const realSubscribe = parcelWatcher.subscribe.bind(parcelWatcher);
+    vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (directory, callback, options) => {
+      const live = new Promise<Awaited<ReturnType<typeof realSubscribe>>>((resolve) => {
+        setTimeout(() => {
+          resolve(realSubscribe(directory, callback, options));
+        }, 300);
+      });
+      return {
+        unsubscribe: async () => {
+          const subscription = await live;
+          await subscription.unsubscribe();
+        },
+      };
+    });
     const { root, provider } = connect();
     const { events } = await armLiveWatch(provider, root);
 

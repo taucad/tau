@@ -1,4 +1,4 @@
-import { detectDesktopPlatform, desktopDownloadHref } from '#www/downloads.js';
+import { betaDownloadHref, detectDesktopPlatform, desktopDownloadHref } from '#www/downloads.js';
 import { test, expect, vi } from 'vitest';
 import { renderToStaticMarkup, renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
@@ -240,8 +240,13 @@ test('should render download CTAs and every archive before JavaScript', () => {
   expect(downloads).toContain('data-mac-route="macIntel" data-mac-hero="true" hidden=""');
   expect(downloads).toContain('data-mac-route="mac" hidden=""');
   expect(downloads).toContain('data-mac-route="macIntel" hidden=""');
-  expect(downloads).not.toContain('Tau-macos');
-  expect(downloads).not.toContain('ZIP for');
+  // The only Mac file before JavaScript is the Intel beta ZIP, listed beside its beta badge and never as a qualified DMG.
+  expect(downloads.match(/Tau-macos[^"]*/gu)).toEqual(['Tau-macos-x64.zip']);
+  const intelBeta = /<div data-beta-route="macIntel">.*?<\/div><p class="fine">[^<]*<\/p><\/div>/u.exec(downloads)?.[0];
+  expect(intelBeta).toContain(`href="${betaDownloadHref('macIntel')}"`);
+  expect(intelBeta).toContain('<span>Download ZIP for Intel Mac</span>');
+  expect(intelBeta).toMatch(/<span data-slot="badge"[^>]*>Beta<\/span>/u);
+  expect(downloads.match(/ZIP for/gu)).toHaveLength(1);
   // The icon is the link's own child, as the client renders the Apple silicon button, so both get the same padding.
   expect(downloads).toMatch(/<a\b[^>]*data-download-platform="macIntel"[^>]*><svg/u);
   expect(downloads).toContain('Download for Windows');

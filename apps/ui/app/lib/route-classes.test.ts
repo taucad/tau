@@ -40,6 +40,7 @@ import {
 } from '../../netlify/edge-functions/marketing.js';
 import { config as marketingEventsEdge } from '../../netlify/edge-functions/marketing-events.js';
 import { config as posthogEdge } from '../../netlify/edge-functions/posthog.js';
+import { config as staticShellEdge, shellSkewCookieExpiry } from '../../netlify/edge-functions/static-shell.js';
 /* oxlint-enable eslint/no-restricted-imports */
 
 const appRoot = resolve(import.meta.dirname, '..');
@@ -248,7 +249,7 @@ describe('static-shell routing on Netlify (PL3)', () => {
     }
   });
 
-  it('should keep the shell URLs out of every edge function', () => {
+  it('should keep the shell URLs out of every edge function but the static shell one', () => {
     const shellUrls = ['/w/home/bracket-v2', '/w/home/bracket-v2/', '/w/__shell/__shell'];
     const edgePaths = [marketingEdge.path, marketingEventsEdge.path, posthogEdge.path].flat();
     for (const edgePath of edgePaths) {
@@ -256,6 +257,32 @@ describe('static-shell routing on Netlify (PL3)', () => {
       for (const pathname of shellUrls) {
         expect(pattern.test({ pathname }), `${edgePath} would run before ${pathname}`).toBe(false);
       }
+    }
+  });
+
+  it('should run the static shell edge function on exactly the URLs the function excludes', () => {
+    expect(staticShellEdge.path).toStrictEqual(netlifyFunctionExcludedPaths());
+    // `@netlify/edge-bundler` compiles an edge path as `getRoutes` does an excluded one: with an optional trailing slash.
+    const runsEdge = (pathname: string): boolean =>
+      staticShellEdge.path.some((path) => {
+        const pattern = new URLPattern({ pathname: path });
+        return (
+          pattern.test({ pathname }) || (pathname.endsWith('/') && pattern.test({ pathname: pathname.slice(0, -1) }))
+        );
+      });
+    const shapes = [
+      '/w/home/bracket-v2',
+      '/w/home/bracket-v2/',
+      '/w/__shell/__shell',
+      '/w/home/bracket-v2.data',
+      '/w/home/bracket-v2/preview',
+      '/w/home/bracket-v2/preview.data',
+      '/w/home',
+      '/w/a//',
+      '/',
+    ];
+    for (const pathname of shapes) {
+      expect(runsEdge(pathname), pathname).toBe(staticShellFor(pathname) !== undefined);
     }
   });
 });
@@ -354,6 +381,10 @@ describe('skew protection on a shell response', () => {
     );
     // `netlify.toml` header rules do not apply to function responses, so `.data` and `/preview` keep their pin.
     expect(route('/w/home/bracket-v2.data')).toStrictEqual({ kind: 'function' });
+  });
+
+  it('should expire it from the edge function too, since the edge cache serves the file without the header rule', () => {
+    expect(shellSkewCookieExpiry).toBe(shellSkewCookie(skewProtectionCookieName));
   });
 });
 

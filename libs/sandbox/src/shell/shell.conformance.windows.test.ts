@@ -756,37 +756,47 @@ describe.runIf(enabled)('Windows shell conformance', () => {
   const cacheConformance = conformanceWithin(330_000);
 
   /**
-   * Context for a pipeline that could not find `Measure-Object`: one more launch of the same shell and environment that
-   * only reads and prints what decides whether `Microsoft.PowerShell.Utility` loads. It writes no file. It uses
-   * `[Console]` and .NET calls rather than Utility's own cmdlets, which are the ones missing.
+   * Context for a pipeline that could not find `Measure-Object`: `module-diagnostics.fixture.ps1`, which only reads and
+   * prints what decides whether command discovery finds `Microsoft.PowerShell.Utility`, run in the failing launch's
+   * sandbox, again there with no cache, and with no cache outside the sandbox as the test user. No variant can write a
+   * cache: the session one reads the read-only cache, and the cold ones name a path under the shell's executable file.
    */
+  const moduleDiagnosticsScript = readFileSync(join(import.meta.dirname, 'module-diagnostics.fixture.ps1'), 'utf8');
   const moduleDiagnostics = async (executablePath: string, overrides: Partial<ShellLaunch>): Promise<string> => {
-    const say = (expression: string): string =>
-      `try { [Console]::Out.WriteLine(${expression}) } catch { [Console]::Out.WriteLine('failed: ' + $_.Exception.Message) }`;
-    const script = [
-      "$ErrorActionPreference = 'Continue'",
-      say(`'language ' + $ExecutionContext.SessionState.LanguageMode`),
-      say(`'version ' + $PSVersionTable.PSVersion`),
-      say(`'PSModulePath ' + $env:PSModulePath`),
-      say(`'TEMP ' + $env:TEMP + ' exists ' + [System.IO.Directory]::Exists($env:TEMP)`),
-      say(`'root exists ' + [System.IO.Directory]::Exists($env:SystemDrive + '\\')`),
-      `foreach ($m in (Get-Module -ListAvailable Microsoft.PowerShell.Utility)) { [Console]::Out.WriteLine('available ' + $m.Name + ' ' + $m.Version + ' ' + $m.Path) }`,
-      `foreach ($m in (Get-Module)) { [Console]::Out.WriteLine('loaded ' + $m.Name + ' ' + $m.Path) }`,
-      `$psd1 = [System.IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')`,
-      say(`'psd1 ' + $psd1 + ' exists ' + [System.IO.File]::Exists($psd1)`),
-      say(`'psd1 bytes ' + [System.IO.File]::ReadAllBytes($psd1).Length`),
-      `$gac = [System.IO.Path]::Combine($env:SystemRoot, 'Microsoft.NET\\assembly\\GAC_MSIL\\Microsoft.PowerShell.Commands.Utility')`,
-      say(`'gac ' + $gac + ' exists ' + [System.IO.Directory]::Exists($gac)`),
-      `try { $assembly = [System.Reflection.Assembly]::Load('Microsoft.PowerShell.Commands.Utility, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35'); [Console]::Out.WriteLine('assembly ' + $assembly.Location) } catch { [Console]::Out.WriteLine('assembly ' + $_.Exception.ToString()) }`,
-      `try { Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop; [Console]::Out.WriteLine('import ok') } catch { [Console]::Out.WriteLine('import ' + $_.FullyQualifiedErrorId + ' ' + $_.Exception.ToString()) }`,
-      `foreach ($e in $Error) { [Console]::Out.WriteLine('error ' + $e.FullyQualifiedErrorId + ' ' + $e.Exception.ToString()) }`,
-    ].join('\n');
+    const environment = overrides.environment ?? baseEnvironment();
+    /*
+     * A cache "inside" the shell's own executable file: PowerShell finds no cache, and neither its folder creation nor
+     * its write can succeed, since a file already holds that folder's name.
+     */
+    const cold = { ...environment, [powerShellModuleCacheVariable]: join(executablePath, powerShellModuleCacheFile) };
+    const variants: Array<{ label: string; overrides: Partial<ShellLaunch> }> = [
+      ...(environment[powerShellModuleCacheVariable] === undefined ? [] : [{ label: 'session', overrides }]),
+      { label: 'cold', overrides: { ...overrides, environment: cold } },
+    ];
+    /* The variants only read, so they run side by side. */
+    const sections = await Promise.all(
+      variants.map(async (variant) => {
+        try {
+          const result = await run(moduleDiagnosticsScript, { executablePath, ...variant.overrides });
+          return `[module diagnostics, ${variant.label}, exit ${String(result.exitCode)}]\n${result.stdout.trim()}\n${result.stderr.trim()}`;
+        } catch (error) {
+          return `[module diagnostics, ${variant.label}, failed] ${error instanceof Error ? error.message : String(error)}`;
+        }
+      }),
+    );
     try {
-      const result = await run(script, { executablePath, ...overrides });
-      return `[module diagnostics, exit ${String(result.exitCode)}]\n${result.stdout.trim()}\n${result.stderr.trim()}`;
+      const outside = execFileSync(
+        executablePath,
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', moduleDiagnosticsScript],
+        { encoding: 'utf8', env: cold, stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000 },
+      );
+      sections.push(`[module diagnostics, cold, outside the sandbox]\n${outside.trim()}`);
     } catch (error) {
-      return `[module diagnostics failed] ${error instanceof Error ? error.message : String(error)}`;
+      sections.push(
+        `[module diagnostics, cold, outside the sandbox, failed] ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
+    return sections.join('\n');
   };
 
   /** T02: the language cases in a session's launch, decided by comparing stdout and the exit status outside the sandbox. */

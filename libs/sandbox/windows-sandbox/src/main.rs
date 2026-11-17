@@ -13,6 +13,7 @@ mod cmdline;
 mod frame;
 mod install;
 mod journal;
+mod overlap;
 mod paths;
 mod protocol;
 mod spec;

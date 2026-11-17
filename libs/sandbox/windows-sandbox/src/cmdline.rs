@@ -61,6 +61,23 @@ pub fn environment_block(environment: &BTreeMap<String, String>) -> Vec<u16> {
     block
 }
 
+/// The environment `CreateProcess` is given for the shell. For an AppContainer, Windows derives the package's
+/// `LOCALAPPDATA`, `TEMP` and `TMP` from the block's `LOCALAPPDATA` while it creates the process, and fails with
+/// `ERROR_ENVVAR_NOT_FOUND` (203) when the block has none (WIN-X64 job 133892533972: a native worker whose launch
+/// names only `SystemRoot`). So a launch without `LOCALAPPDATA` is created with the sandbox account's own, where
+/// its package is registered; the runner then gives the suspended process exactly the launch's environment
+/// (`win/environment.rs`), so the worker never sees it. A launch that names `LOCALAPPDATA` is created as given.
+pub fn creation_environment(
+    given: &BTreeMap<String, String>,
+    account_local_app_data: &str,
+) -> BTreeMap<String, String> {
+    let mut environment = given.clone();
+    if !environment.keys().any(|name| name.eq_ignore_ascii_case("LOCALAPPDATA")) {
+        environment.insert("LOCALAPPDATA".to_owned(), account_local_app_data.to_owned());
+    }
+    environment
+}
+
 /// The `NAME=value` entries of an environment block (UTF-16, each entry NUL-terminated, the block ended by an
 /// empty entry), or `None` when `block` is not a well-formed block. Entries whose name starts with `=` (the
 /// per-drive current directories) are kept like any other.
@@ -202,5 +219,20 @@ mod tests {
         assert!(!is_capability_sid("S-1-5-21-1-2-3"));
         assert!(!is_capability_sid("S-1-5-32-544"));
         assert!(!is_capability_sid("S-1-5-21-1-2-3-4294967296"));
+    }
+
+    #[test]
+    fn creates_an_appcontainer_with_a_local_app_data_only_when_the_launch_has_none() {
+        let account = r"C:\Users\TauSandbox\AppData\Local";
+        let worker: BTreeMap<String, String> = [("SystemRoot".to_owned(), r"C:\Windows".to_owned())].into();
+        let created = creation_environment(&worker, account);
+        assert_eq!(created.get("LOCALAPPDATA").map(String::as_str), Some(account));
+        assert_eq!(created.get("SystemRoot"), worker.get("SystemRoot"));
+        assert_eq!(
+            changed_environment_names(&worker, &created.clone().into_iter().collect::<Vec<_>>()),
+            ["LOCALAPPDATA"]
+        );
+        let shell: BTreeMap<String, String> = [("LocalAppData".to_owned(), r"C:\Temp\home\local".to_owned())].into();
+        assert_eq!(creation_environment(&shell, account), shell);
     }
 }

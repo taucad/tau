@@ -102,6 +102,7 @@ import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
   bundledGitEnvironment,
   bundledStoreGuardEnvironment,
+  windowsShellSandboxEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -601,6 +602,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const storeGuardEnvironment = bundledStoreGuardEnvironment(
     app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
   );
+  /* The Windows shell sandbox helper this build ships, and its off-by-default switch (Q15, D15). */
+  const windowsSandboxEnvironment = windowsShellSandboxEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
+    environment,
+  );
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
   log.log('info', 'main.ready', {
@@ -995,8 +1001,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   /* Windows: native workers and main's own seal step run in the sandbox helper's AppContainer, and only main may run
    * its one-time elevated setup; the frame names the helper to every kernel utility. Off, a native kernel refuses. */
   const windowsNativeSandbox = resolveDesktopWindowsNativeSandbox({
-    environment: process.env,
-    resourcesPath: process.resourcesPath,
+    sandboxEnvironment: windowsSandboxEnvironment,
     userDataPath: app.getPath('userData'),
   });
   if (windowsNativeSandbox !== undefined) {
@@ -1110,6 +1115,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       ...desktopShellBwrapEnvironment(),
       ...storeGuardEnvironment,
+      ...windowsSandboxEnvironment,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),

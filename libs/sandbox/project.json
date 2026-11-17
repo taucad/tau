@@ -44,18 +44,22 @@
         "{projectRoot}/windows-sandbox/examples/**/*",
         "{projectRoot}/windows-sandbox/Cargo.toml",
         "{projectRoot}/windows-sandbox/Cargo.lock",
-        "{projectRoot}/windows-sandbox/rust-toolchain.toml"
+        "{projectRoot}/windows-sandbox/rust-toolchain.toml",
+        "{projectRoot}/windows-sandbox/.cargo/config.toml",
+        "{projectRoot}/scripts/build-windows-sandbox.mts",
+        "{projectRoot}/scripts/rust-payload.mts",
+        "{projectRoot}/scripts/windows-executable.mts"
       ],
       "outputs": [
         "{projectRoot}/windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe",
-        "{projectRoot}/windows-sandbox/target/x86_64-pc-windows-msvc/release/examples/tau-worker-probe.exe"
+        "{workspaceRoot}/out/windows-sandbox/win32-x64"
       ],
       "metadata": {
-        "description": "Build the Windows shell sandbox helper (windows-sandbox/, Rust) as tau-windows-sandbox.exe for x86_64-pc-windows-msvc, and the conformance row's stand-in native worker (examples/tau-worker-probe.exe, never installed). Windows only: it links against the MSVC toolchain. Elsewhere use `cargo check --target x86_64-pc-windows-msvc` in the crate."
+        "description": "Build the Windows shell sandbox helper (windows-sandbox/, Rust, static CRT) as tau-windows-sandbox.exe for x86_64-pc-windows-msvc, refuse it unless it is an x64 console executable that imports no Visual C++ runtime DLL and answers `status`, and stage it with its NOTICE and manifest under out/windows-sandbox/win32-x64. Windows x64 only: it links against the MSVC toolchain. Elsewhere use `cargo check --target x86_64-pc-windows-msvc` in the crate."
       },
       "options": {
-        "cwd": "{workspaceRoot}/libs/sandbox/windows-sandbox",
-        "command": "cargo build --release --locked --target x86_64-pc-windows-msvc --bin tau-windows-sandbox --example tau-worker-probe"
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-windows-sandbox.mts"
       }
     },
     "test:windows-sandbox": {
@@ -83,8 +87,20 @@
         }
       ]
     },
+    "test:scripts": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/scripts/**/*.mts"],
+      "metadata": {
+        "description": "The staging scripts' own checks, on any host: the Windows helper's ship gate (an x64 console executable importing no Visual C++ runtime DLL) against synthetic PE images."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register --test libs/sandbox/scripts/windows-executable.test.mts"
+      }
+    },
     "test": {
-      "dependsOn": ["test:store-guard"]
+      "dependsOn": ["test:store-guard", "test:scripts"]
     },
     "test:shell-conformance": {
       "executor": "nx:run-commands",

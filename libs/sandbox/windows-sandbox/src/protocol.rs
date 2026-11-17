@@ -62,6 +62,16 @@ impl Refused {
         Self { status: RefusedStatus::SandboxUnavailable, requirement: None, message: message.into(), diagnostic }
     }
 
+    /// `sandbox-unavailable` while another launch holds what this one needs; `requirement` says what.
+    pub fn busy(requirement: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            status: RefusedStatus::SandboxUnavailable,
+            requirement: Some(requirement.into()),
+            message: message.into(),
+            diagnostic: None,
+        }
+    }
+
     pub fn unsupported(requirement: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             status: RefusedStatus::Unsupported,

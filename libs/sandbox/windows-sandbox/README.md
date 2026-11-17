@@ -140,6 +140,10 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   is what an image load needs in both access-check passes, so the worker loads its DLLs and `.pyd` modules from the
   runtime root (NW01 loads a DLL it carries there with `LoadLibraryW` and checks the module's path). Nothing
   PowerShell-specific is forced on a worker: its environment is the spec's, plus `SystemRoot` when left out.
+  Windows derives an AppContainer's `LOCALAPPDATA`, `TEMP` and `TMP` from the `LOCALAPPDATA` of the block it is
+  given and fails `CreateProcess` with `ERROR_ENVVAR_NOT_FOUND` (203) when there is none, so a launch without one is
+  created with the sandbox account's own (where its package is registered), and the runner then gives the suspended
+  process exactly the spec's environment, as for every launch (NW01 reads the worker's whole environment back).
 - **Sessions.** One launch at a time per computer, enforced by the helper itself. Read and write isolation between
   two launches would hold (each has its own package SID, which every grant names, and its own capability SID for the
   restricted pass; the restricting SIDs are that capability, the runner's own logon SID and Everyone, and the volume
@@ -151,8 +155,9 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   last would write the other's grants back after it ended. So `launch` holds the named mutex
   `Global\tau.sandbox.descriptors` from before it journals until its teardown has restored everything, and `restore`
   holds it while it writes a journal back. A second launch is refused at once, before anything changes: `refused`
-  with status `sandbox-unavailable` and the message "another sandboxed launch is running on this computer, and Windows
-  runs one at a time; try again when it ends" (NW02). `restore` then exits 1 with the same failure and keeps
+  with status `sandbox-unavailable`, `requirement: "exclusive-launch"` (what a host matches to wait and retry; the
+  TS constant is `windowsExclusiveLaunchRequirement`) and the message "another sandboxed launch is running on this computer, and Windows
+  runs one at a time; try again when it ends" (NW02). `restore` then exits 1 with the same failure and `"requirement": "exclusive-launch"` and keeps
   the journal. A launcher that dies abandons the mutex, and the next caller takes it. The provider also serializes its
   own launches and answers a second one `sandbox-unavailable` without running the helper.
 - **Descendants.** The runner places the shell in a Job Object with `KILL_ON_JOB_CLOSE`, no `BREAKAWAY_OK` and no
@@ -336,7 +341,9 @@ The helper fails closed: an unknown field anywhere in the spec is refused. `unsu
 `.exe`, a `.cmd`/`.bat`, one outside `%ProgramFiles%` and `%SystemRoot%` without `executableDigest`, a runtime root
 that is not readable or is writable, or a file that is missing, a link or open for writing elsewhere),
 `executable-digest` (a malformed digest, or one the file does not match), `absolute-paths`, `environment` (a name with
-`=` or NUL, or a name given twice in different case), `stdio` (a zero terminal size), `network-isolation`.
+`=` or NUL, or a name given twice in different case), `stdio` (a zero terminal size), `network-isolation`. A `sandbox-unavailable` refusal carries a `requirement` only
+when another launch holds the sandbox: `exclusive-launch` ("Sessions"); nothing changed, and the launch may be
+retried once that one has ended.
 
 Ordering. `refused` normally comes instead of `ready`. If the runner reported `ready` but the shell then could not be
 started (for example `CreateProcessAsUserW` failed), the helper restores the ACLs and sends `refused`
@@ -391,7 +398,17 @@ keeps the journal and exits 1. It is idempotent.
 ## Build
 
 ```bash
-pnpm nx run sandbox:build:windows-sandbox      # on Windows; cargo build --release --target x86_64-pc-windows-msvc
+pnpm nx run sandbox:build:windows-sandbox      # on Windows x64: build, check and stage under out/windows-sandbox/win32-x64
+pnpm nx run desktop:prepare-windows-sandbox    # the same, copied into apps/desktop/resources/windows-sandbox/win32-x64
 cargo check --target x86_64-pc-windows-msvc    # anywhere the target is installed
 pnpm nx run sandbox:test:windows-sandbox       # cargo test: the portable unit tests, on any host
 ```
+
+`.cargo/config.toml` links the C runtime statically, so the helper starts on a machine without the Visual C++
+Redistributable. `scripts/build-windows-sandbox.mts` refuses a build that is not an x64 console executable, imports a
+Visual C++ runtime DLL or does not answer `status`, and stages it with a NOTICE for every linked crate and the
+toolchain, and a manifest with its sha256. `desktop:package-windows` depends on `prepare-windows-sandbox` and ships
+the three files at `resources/windows-sandbox/win32-x64/`; a release archive refuses to assemble without them. The
+Windows installer's signing step signs every PE file in the app, this helper included. Main points the services host
+at it (`TAU_WINDOWS_SANDBOX_HELPER`) and passes `TAU_WINDOWS_SHELL_SANDBOX=1` through when Tau was started with it;
+the Terminal pane then offers the one-time `setup` (one UAC prompt) while the probe answers `provisioning-required`.

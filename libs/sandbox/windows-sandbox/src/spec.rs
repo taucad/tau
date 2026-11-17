@@ -19,6 +19,9 @@ pub mod requirement {
     pub const ENVIRONMENT: &str = "environment";
     pub const STDIO: &str = "stdio";
     pub const NETWORK_ISOLATION: &str = "network-isolation";
+    /// Not an `unsupported` value: the requirement a `sandbox-unavailable` refusal carries while another launch
+    /// holds the sandbox (README "Sessions"), so a host can wait and retry without matching the message.
+    pub const EXCLUSIVE_LAUNCH: &str = "exclusive-launch";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

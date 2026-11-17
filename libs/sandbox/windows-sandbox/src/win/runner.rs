@@ -49,7 +49,7 @@ use super::sid::{EVERYONE, Sid, current_user, open_process_token, token_logon_si
 use super::util::{Error, Local, Owned, Result, check, clear_ctrl_c_ignore, program_files, system_root, wide};
 use super::volume;
 use crate::appcontainer::{is_package_sid, verify_token};
-use crate::cmdline::{command_line, environment_block, is_capability_sid};
+use crate::cmdline::{command_line, creation_environment, environment_block, is_capability_sid};
 use crate::frame::{self, Frame, read_frame, write_frame};
 use crate::protocol::{Exit, Resize, RunnerError, RunnerSpec, Started};
 use crate::spec::{ExecutableRoots, Stdio, check_executable};
@@ -417,7 +417,9 @@ fn spawn(spec: &RunnerSpec, identity: &Identity, job: &Job, prepared: &Prepared)
     let application = wide(&spec.executable);
     let cwd = wide(&spec.working_directory);
     let mut desktop = wide(&spec.desktop);
-    let environment = environment_block(&spec.environment);
+    // Windows needs a `LOCALAPPDATA` to create an AppContainer process; `enforce` takes it away again.
+    let local_app_data = container::own_local_app_data()?;
+    let environment = environment_block(&creation_environment(&spec.environment, &local_app_data));
     let jobs = [job.raw()];
 
     let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };

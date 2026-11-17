@@ -122,7 +122,14 @@ pub fn run(path: &str) -> i32 {
         Ok(Some(exclusive)) => exclusive,
         Ok(None) => {
             eprintln!("tau-windows-sandbox restore: {}; the journal is kept", super::exclusive::BUSY);
-            println!("{}", serde_json::json!({ "restored": false, "failures": [super::exclusive::BUSY] }));
+            println!(
+                "{}",
+                serde_json::json!({
+                    "restored": false,
+                    "requirement": crate::spec::requirement::EXCLUSIVE_LAUNCH,
+                    "failures": [super::exclusive::BUSY]
+                })
+            );
             return 1;
         }
         Err(err) => {

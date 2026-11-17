@@ -122,7 +122,9 @@ pub fn run() -> i32 {
     // One launch at a time: held from before the journal until teardown has restored it (`exclusive.rs`).
     let exclusive = match exclusive::try_acquire() {
         Ok(Some(exclusive)) => exclusive,
-        Ok(None) => return refuse(&sink, &Refused::unavailable(exclusive::BUSY, None)),
+        Ok(None) => {
+            return refuse(&sink, &Refused::busy(spec::requirement::EXCLUSIVE_LAUNCH, exclusive::BUSY));
+        }
         Err(err) => {
             return refuse(
                 &sink,

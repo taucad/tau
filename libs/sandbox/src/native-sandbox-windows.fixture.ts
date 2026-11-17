@@ -76,6 +76,7 @@ if (command === 'restore') {
           ended = true;
           json(0x86, {
             status: 'sandbox-unavailable',
+            requirement: 'exclusive-launch',
             message:
               'another sandboxed launch is running on this computer, and Windows runs one at a time; try again when it ends',
           });

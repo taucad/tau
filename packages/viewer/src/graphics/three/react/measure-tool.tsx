@@ -35,7 +35,7 @@ import {
   useRenderFrame,
 } from '#hooks/use-graphics.jsx';
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
-import { createRaycastClipTest, raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
+import { createRaycastClipTest, isFatLineMesh, raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
 import type { MeshPick } from '#graphics/three/utils/bvh-raycast.js';
 import { resolveSectionViewRaycastClip } from '#graphics/three/use-section-view.js';
 import { measureSessionMachine } from '#machines/measure-session.machine.js';
@@ -560,7 +560,14 @@ export function MeasureTool(): React.JSX.Element {
       ) {
         return;
       }
-      if (object instanceof THREE.Mesh && object.visible && object.userData['measurementFeatures']?.kind !== 'line') {
+      if (
+        object instanceof THREE.Mesh &&
+        object.visible &&
+        // Fat edge lines are meshes to the renderer, not surfaces: as one, they occlude every edge target and stop
+        // the target catalog at a mesh with no feature graph.
+        !isFatLineMesh(object) &&
+        object.userData['measurementFeatures']?.kind !== 'line'
+      ) {
         meshes.push(object as THREE.Mesh);
       } else if (
         object.userData['measurementFeatures']?.kind === 'line' &&

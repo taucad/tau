@@ -62,6 +62,13 @@ describe('utilityEnvironment', () => {
     });
   });
 
+  it('carries the Windows system drive, which known folders such as ProgramData expand', () => {
+    expect(utilityEnvironment({ SystemRoot: String.raw`C:\Windows`, SystemDrive: 'C:', ProgramData: 'x' })).toEqual({
+      SystemRoot: String.raw`C:\Windows`,
+      SystemDrive: 'C:',
+    });
+  });
+
   it('omits an allowlisted name that main itself does not have', () => {
     expect(utilityEnvironment({})).toEqual({});
   });

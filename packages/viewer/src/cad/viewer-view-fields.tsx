@@ -24,7 +24,6 @@ export type ViewerViewFieldValues = {
   'display.grid': boolean;
   'display.axes': boolean;
   'display.matcap': boolean;
-  'display.postProcessing': boolean;
   'grid.unit': string;
 };
 
@@ -49,7 +48,6 @@ export const viewerViewFieldPaths: readonly ViewerViewFieldPath[] = Object.freez
   'display.grid',
   'display.axes',
   'display.matcap',
-  'display.postProcessing',
   'grid.unit',
 ]);
 

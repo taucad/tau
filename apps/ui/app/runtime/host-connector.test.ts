@@ -66,7 +66,7 @@ vi.mock('#chat-clients/_internal/turn-body.js', async (importOriginal) => ({
     return { close: () => undefined };
   },
 }));
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getProjectFileSystemConfig: async (projectId: string) => ({
     projectId,
@@ -177,7 +177,15 @@ const createSession = (
 ) => {
   const session = setup({
     schemas: { context: types<Record<string, never>>(), events: eventSchemas<{ type: 'noop' }>() },
-    actors: { hostConnector: createHostConnectorLogic({ chatSessions: input.store, choices: input.choices }) },
+    actors: {
+      hostConnector: createHostConnectorLogic({
+        chatSessions: input.store,
+        choices: input.choices,
+        reportFault: (error) => {
+          throw error;
+        },
+      }),
+    },
   }).createMachine({
     id: 'host-connector-session',
     context: {},

@@ -17,12 +17,38 @@ import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { createAppRuntime } from '#runtime/app-runtime.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
-import { reportRegionReady } from '#services/sessions-store.js';
+import type * as FileManagerHostModule from '#runtime/file-manager-host.js';
 
+/* A6d: the session's runtime is a stand-in; these rows read the session's other regions. */
+vi.mock('#runtime/project-runtime.session.js', async () => {
+  const { openSessionRuntimeStandIn } = await import('#runtime/project-runtime.session.fixture.js');
+  return { openSessionProjectRuntime: openSessionRuntimeStandIn, sessionProjectRuntimeOf: () => undefined };
+});
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
 vi.mock('#db/billing-snapshot-store.js', () => ({ purgeSavedUsage: async () => undefined }));
+/* A6c: the session builds its file manager through the runtime's host once `rootFiles` holds the shared worker. jsdom
+ * has no worker, so the host reports an inert one and a ready stand-in opens. */
+vi.mock('#runtime/file-manager-host.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof FileManagerHostModule>();
+  const inertWorker = { postMessage: () => undefined } as unknown as Worker;
+  return {
+    ...actual,
+    createFileManagerHost: (...args: Parameters<typeof actual.createFileManagerHost>) => ({
+      ...actual.createFileManagerHost(...args),
+      sharedWorker: () => inertWorker,
+      onSharedWorker: () => () => undefined,
+    }),
+  };
+});
+vi.mock('#runtime/session-file-manager.js', async (importOriginal) => {
+  const { openSessionFileManagerStandIn } = await import('#runtime/session-file-manager.fixture.js');
+  return {
+    ...(await importOriginal<Record<string, unknown>>()),
+    openSessionFileManager: (projectId: string) => openSessionFileManagerStandIn(projectId),
+  };
+});
 
 type Seen = { registry: unknown; session: unknown; mounts: number };
 
@@ -67,15 +93,15 @@ describe('B9: the runtime survives an owner change below the billing fence', () 
     const registryA = seen.registry as ReturnType<typeof useSessions>;
     await act(async () => {
       registryA.send({ type: 'open', projectId: 'p1' });
-      reportRegionReady('p1', 'views');
-      reportRegionReady('p1', 'runtime');
       await Promise.resolve();
     });
-    /* The agent-host double settles after a microtask; one macrotask lets every region report. */
+    /* The agent-host double settles after a microtask, and the session's runtime loads by dynamic import (A6d). */
     await act(async () => {
       await flush();
     });
-    expect(registryA.getSnapshot().context.status['p1']?.state).toBe('live');
+    await vi.waitFor(() => {
+      expect(registryA.getSnapshot().context.status['p1']?.state).toBe('live');
+    });
     const sessionA = seen.session;
     expect(sessionA).toBeDefined();
     expect(seen.mounts).toBe(1);

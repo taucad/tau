@@ -89,7 +89,7 @@ In a broad zone every listed kernel is correct: weigh the signals against the re
 - If the host refuses the entry ("No kernel handles…", `PRO_REQUIRED`, or `KERNEL_NOT_PREPARED` when its prerequisites cannot be met), choose again from the kernels above.
 - When a kernel reaches a limit (`RESOURCE_LIMIT`), state the limit and stop; do not offer to move the model to another kernel.
 
-After choosing, load that kernel's skill before writing model code; a kernel whose skill is none has no skill in this plugin.
+After choosing, load that kernel's skill before writing model code; a kernel whose skill is none has no skill in this plugin. While `tau.json` names no main model, the first model `evaluate_model` renders or `test_model` loads becomes it (`assets.main.entryPath`): render the entry file before any library file, and write that field yourself only to name another file.
 
 <!-- generated:kernel-routing-card:end -->
 

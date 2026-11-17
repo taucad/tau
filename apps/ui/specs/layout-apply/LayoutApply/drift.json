@@ -2,12 +2,17 @@
   "actions": {
     "workbenchLayout.adapterShown": "Acknowledged",
     "workbenchLayout.applyTaken": "ApplyLanded",
+    "workbenchLayout.deviceChanged": "Unmodelled",
+    "workbenchLayout.dockReady": "Unmodelled",
+    "workbenchLayout.dockReleased": "Unmodelled",
     "workbenchLayout.flush": "Unmodelled",
     "workbenchLayout.intents.intent": "IntentSent",
     "workbenchLayout.intents.intentApplied": "IntentApplied",
     "workbenchLayout.intents.intentUnavailable": "IntentDropped",
+    "workbenchLayout.intents.lanesSeeded": "Unmodelled",
     "workbenchLayout.intents.routeChanged": "RouteKeyChanged",
     "workbenchLayout.intents.workbenchLaneChanged": "WorkbenchClosed",
+    "workbenchLayout.lanesApplied": "Unmodelled",
     "workbenchLayout.lanesEdited": "PersonEdited",
     "workbenchLayout.personEdited": "PersonEdited",
     "workbenchLayout.record.reading.recordPublished": "Published",
@@ -48,11 +53,16 @@
     "adapterDetached",
     "adapterShown",
     "applyTaken",
+    "deviceChanged",
+    "dockReady",
+    "dockReleased",
     "flush",
     "intent",
     "intentApplied",
     "intentUnavailable",
+    "lanesApplied",
     "lanesEdited",
+    "lanesSeeded",
     "personEdited",
     "recordEditAnswered",
     "recordFailed",
@@ -66,10 +76,10 @@
     "workbenchLaneChanged"
   ],
   "specs": {
-    "LayoutApply.tla": "2dfba219a0dcc28e405a2891639eecd17c0b1e9801fd96a1e2bd35b66b07b165"
+    "LayoutApply.tla": "c0808b59329bc4c1a012d4801b59cd0e787f0158028940c6ba1b1efc555b89a9"
   },
   "tables": {},
   "versions": {
-    "workbenchLayout": "1"
+    "workbenchLayout": "4"
   }
 }

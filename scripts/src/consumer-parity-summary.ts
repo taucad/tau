@@ -5,7 +5,8 @@
  * It runs no suite. Each oracle is a job in a workflow that already runs it, and this script reads that job's latest
  * conclusion through the GitHub REST API: in this run for the nightly's own jobs (falling back to the latest nightly
  * on `main` when this run skipped them), on `main` for the push and candidate workflows, and the
- * latest run on any ref for the path-filtered pull-request workflows, marked stale but still deciding after seven days
+ * latest run on any ref for the path-filtered pull-request workflows and the affected-only merge-queue rows, marked
+ * stale but still deciding after seven days
  * (ruling X62). An oracle may name one step of a job that runs several. A consumer whose oracle runs in no workflow is
  * a failing row, not an omission.
  *
@@ -66,22 +67,31 @@ const ciTests = (proves: string): Oracle => ({
   proves,
 });
 
-/** The `ci.yml` lane that runs `cli-e2e:test:scenarios`, the CLI's end-to-end suites, when they are affected: every shard. */
+/**
+ * The `ci.yml` lane that runs `cli-e2e:test:scenarios`, the CLI's end-to-end suites, when they are affected: every
+ * shard. It runs in the merge queue only; a `main` push reuses the queue's verdict and skips it.
+ */
 const cliEndToEnd = (proves: string): Oracle => ({
   kind: 'job',
   workflow: 'ci.yml',
   job: 'CLI end-to-end (',
   match: 'prefix',
-  scope: 'main',
+  scope: 'any',
+  event: 'merge_group',
   proves,
 });
 
+/**
+ * The merge-queue `native-darwin` lane of `ci.yml` (Q-2), which runs `test:native-darwin` when it is affected. A `main`
+ * push reuses the queue's verdict and skips it, and `native-darwin.yml` itself runs only when called or dispatched.
+ */
 const nativeDarwin = (proves: string): Oracle => ({
   kind: 'job',
-  workflow: 'native-darwin.yml',
-  job: 'Native kernels on darwin-arm64',
+  workflow: 'ci.yml',
+  job: 'Native darwin / Native kernels on darwin-arm64',
   match: 'exact',
-  scope: 'main',
+  scope: 'any',
+  event: 'merge_group',
   proves,
 });
 
@@ -180,10 +190,13 @@ export const consumers: readonly Consumer[] = [
     oracles: [
       {
         kind: 'job',
-        workflow: nightly,
+        /* Ratcheted out of the nightly into the merge queue (`test:e2e:queue`): ci.yml's `e2e-queue` row, which runs only
+        when `agent-plugin` is affected, so the latest merge-queue run that ran it. */
+        workflow: 'ci.yml',
         job: 'Browser end-to-end (agent-plugin test:e2e)',
         match: 'exact',
-        scope: 'this-run',
+        scope: 'any',
+        event: 'merge_group',
         proves: '`agent-plugin:test:e2e`, the viewer page against a real `tau mcp`',
       },
       {

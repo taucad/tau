@@ -115,3 +115,29 @@ describe('after a sign-up that needs verification', () => {
     expect(screen.queryByRole('heading', { name: 'Check your email' })).not.toBeInTheDocument();
   });
 });
+
+// Email bounce blueprint R11: a mistyped domain is the commonest hard bounce, and the cheapest to prevent.
+describe('domain typo hint', () => {
+  it('suggests the corrected address for a known misspelling and applies it on click', () => {
+    state.fields = [];
+    render(<SignUp />);
+    const input = screen.getByLabelText(localization.auth.email);
+
+    fireEvent.change(input, { target: { value: 'ada@gmial.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'ada@gmail.com' }));
+
+    expect(input).toHaveProperty('value', 'ada@gmail.com');
+    expect(screen.queryByText(/did you mean/iu)).not.toBeInTheDocument();
+  });
+
+  it('suggests nothing for a domain it does not know to be a misspelling', () => {
+    state.fields = [];
+    render(<SignUp />);
+
+    fireEvent.change(screen.getByLabelText(localization.auth.email), {
+      target: { value: 'ada@mail.com' },
+    });
+
+    expect(screen.queryByText(/did you mean/iu)).not.toBeInTheDocument();
+  });
+});

@@ -10,6 +10,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -47,7 +48,7 @@ import { publicationRepositoryLeasesKey } from '#publications/repository-leases.
 import type { PublicationRepositoryLeases, ReadLease } from '#publications/repository-leases.js';
 import { DatabaseService } from '@taucad/api-database';
 import { assertProjectActive, assertActiveProjectLocked } from '@taucad/api-database/project-lifecycle';
-import { buildPublicationViewUrl, EmailService } from '@taucad/api-email';
+import { buildPublicationViewUrl, EmailDeliverabilityService, EmailService } from '@taucad/api-email';
 import type { CommercialEntitlementsService } from '#entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#entitlements/commercial-entitlements.js';
 import * as schema from '@taucad/api-database/schema';
@@ -127,6 +128,14 @@ export class PublicationsService {
      * admission, owner fairness and hydrate budget as every git route (I11).
      */
     @Inject(publicationRepositoryLeasesKey) private readonly repositories: PublicationRepositoryLeases,
+    /*
+     * Tau's mirror of Resend's suppression list (email bounce blueprint R9): invites skip an undeliverable
+     * recipient before the owner's daily cap and its grant reads "Not delivered". The API module always
+     * provides it; without one (unit fixtures) every address counts as deliverable, which is Resend's view
+     * too until a bounce arrives.
+     */
+    // oxlint-disable-next-line eslint/new-cap -- Nest's Optional decorator is a function by contract.
+    @Optional() private readonly deliverability?: EmailDeliverabilityService,
   ) {}
 
   /**
@@ -484,7 +493,7 @@ export class PublicationsService {
       )
       .orderBy(desc(schema.publicationAccess.createdAt));
 
-    return { grants: rows.map((row) => this.toAccessGrantDto(row)) };
+    return { grants: await this.toAccessGrantDtos(rows) };
   }
 
   public async updateVisibility(args: {
@@ -602,7 +611,7 @@ export class PublicationsService {
         visibility: publication.visibility as ProjectShareCurrentPublication['visibility'],
         createdAt: publication.createdAt.toISOString(),
         urls: { share: shareUrl },
-        access: { grants: grants.map((grant) => this.toAccessGrantDto(grant)) },
+        access: { grants: await this.toAccessGrantDtos(grants) },
       },
       snapshot: {
         state: 'published-current',
@@ -677,7 +686,7 @@ export class PublicationsService {
       });
     }
 
-    return this.toAccessGrantDto(grant);
+    return this.toAccessGrantDto(grant, await this.undeliverableRecipients([grant.recipientEmail]));
   }
 
   public async revokeAccess(args: {
@@ -705,7 +714,7 @@ export class PublicationsService {
         });
       }
 
-      return this.toAccessGrantDto(grant);
+      return this.toAccessGrantDto(grant, new Set());
     });
   }
 
@@ -1329,7 +1338,26 @@ export class PublicationsService {
     readonly publicationTitle: string;
     readonly url: string;
   }): Promise<void> {
-    const emailCount = args.recipientEmails.length;
+    /* An address Resend suppresses would be accepted and then silently dropped, so it is skipped before the
+     * owner's cap is consumed; its grant still exists and reads "Not delivered" (bounce blueprint R9, D5). */
+    const undeliverable = await this.undeliverableRecipients(args.recipientEmails);
+    const recipientEmails = args.recipientEmails.filter(
+      (recipientEmail) => !undeliverable.has(this.normalizeEmail(recipientEmail)),
+    );
+    const skipped = args.recipientEmails.length - recipientEmails.length;
+    if (skipped > 0) {
+      this.logger.log(
+        `Skipping ${skipped} invite notification(s) to undeliverable recipients for owner ${args.ownerId}`,
+      );
+      this.metrics.publicationInviteEmailsSuppressedTotal.add(skipped, {
+        trigger: args.trigger,
+        reason: 'recipient_undeliverable',
+      });
+    }
+    if (recipientEmails.length === 0) {
+      return;
+    }
+    const emailCount = recipientEmails.length;
 
     let limit: { allowed: boolean; count: number };
     try {
@@ -1360,7 +1388,7 @@ export class PublicationsService {
     }
 
     await Promise.all(
-      args.recipientEmails.map(async (recipientEmail) => {
+      recipientEmails.map(async (recipientEmail) => {
         try {
           await this.emailService.sendPublicationInvite({
             recipientEmail,
@@ -1391,7 +1419,34 @@ export class PublicationsService {
     };
   }
 
-  private toAccessGrantDto(row: typeof schema.publicationAccess.$inferSelect): PublicationAccessGrant {
+  /**
+   * The undeliverable addresses among the given recipients. A failed read is not a reason to drop invites:
+   * Resend still suppresses at send time, so this fails open.
+   */
+  private async undeliverableRecipients(recipientEmails: readonly string[]): Promise<ReadonlySet<string>> {
+    if (this.deliverability === undefined || recipientEmails.length === 0) {
+      return new Set();
+    }
+    try {
+      return await this.deliverability.undeliverableAmong(recipientEmails);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Email deliverability lookup failed; treating recipients as deliverable: ${message}`);
+      return new Set();
+    }
+  }
+
+  private async toAccessGrantDtos(
+    rows: ReadonlyArray<typeof schema.publicationAccess.$inferSelect>,
+  ): Promise<PublicationAccessGrant[]> {
+    const undeliverable = await this.undeliverableRecipients(rows.map((row) => row.recipientEmail));
+    return rows.map((row) => this.toAccessGrantDto(row, undeliverable));
+  }
+
+  private toAccessGrantDto(
+    row: typeof schema.publicationAccess.$inferSelect,
+    undeliverable: ReadonlySet<string>,
+  ): PublicationAccessGrant {
     return {
       id: row.id,
       publicationId: row.publicationId,
@@ -1399,6 +1454,8 @@ export class PublicationsService {
       status: row.status as PublicationAccessGrant['status'],
       createdAt: row.createdAt.toISOString(),
       revokedAt: row.revokedAt?.toISOString() ?? null,
+      // Only "Not delivered": whether the mailbox is missing or its owner reported the mail is theirs (D5).
+      notDelivered: undeliverable.has(this.normalizeEmail(row.recipientEmail)),
     };
   }
 

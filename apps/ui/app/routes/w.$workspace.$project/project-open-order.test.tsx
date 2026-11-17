@@ -8,6 +8,11 @@
  * order, so a row that rendered one pane could never go green: `ChatViewer`
  * keeps its swap (`chat-viewer.tsx`, the `ChatViewer` wrapper). The viewer
  * dock is a stand-in that renders the real `ChatViewer` for one view.
+ *
+ * A14: the session owns the file check. The registry is composed with a
+ * file-manager stand-in and a `revisions` stand-in that reports the check from
+ * the scripted status through the real derivation (`isFileCheckSettled`), as
+ * `session-revisions.ts` does from its client's projections.
  */
 import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
@@ -19,21 +24,28 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import type { ViewerNode } from '@taucad/workbench';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
-import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import type { ProjectRouteAccess } from '#runtime/project-library.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
+import type { SessionWiring } from '#services/sessions-store.js';
+import type { SessionRevisionsCallback, SessionRevisionsPorts } from '#runtime/session-revisions.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
+import { isFileCheckSettled } from '#hooks/use-project-availability.js';
 import type * as AgentHostClientModule from '#services/agent-host-client.js';
-import type * as HandleStoreModule from '#filesystem/handle-store.js';
+import type * as HandleStoreModule from '@taucad/files-ui/filesystem/handle-store';
 import type * as ProjectWorkspaceContextModule from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type * as PartThumbnailProviderModule from '#providers/part-thumbnail-provider.js';
+import type * as WorkspaceFrameModule from '#routes/w.$workspace.$project/workspace-frame.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type * as ViewerDockviewModule from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import type * as UnavailableOverlayModule from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
-
-/** The registry these rows share, composed as the app's root composes its own (MC-R4). */
-const sessionsActor = createSessionsActor().start();
+import { createActor, createAsyncLogic } from 'xstate';
+import type { Actor } from 'xstate';
+import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
+import { viewerAdapterLogic } from '#workbench-records/viewer-adapter.js';
+import type { ViewerDockReady } from '#workbench-records/viewer-adapter.js';
 
 const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const mainEntryPath = 'main.ts';
@@ -71,6 +83,47 @@ const facts = vi.hoisted(() => ({
 
 /** What the revision client has published: `undefined` until its first projection. */
 const revisionStatus = createFact<RevisionStatusProjection | undefined>(undefined);
+
+/**
+ * The session's `revisions` child (A14), as `session-revisions.ts` reports the file check: from each projection the
+ * scripted client publishes, through the real derivation, once on start and then on each change.
+ */
+const revisionsStandIn: SessionRevisionsCallback = ({ sendBack }) => {
+  let settled: boolean | undefined;
+  const report = (): void => {
+    const status = revisionStatus.get();
+    const next = isFileCheckSettled(status, false);
+    if (next !== settled) {
+      settled = next;
+      sendBack({ type: 'fileCheckChanged', settled: next, judged: status !== undefined });
+    }
+  };
+  report();
+  return revisionStatus.subscribe(report);
+};
+
+const sessionWiring: SessionWiring = {
+  loadRevisions: async () => ({
+    sessionRevisionsCallback: () => revisionsStandIn,
+    createSessionRevisionsPorts: (ports) => ports as SessionRevisionsPorts,
+  }),
+  loadHostConnector: async () => ({ hostConnectorCallback: () => () => () => undefined }),
+  registerCloseCut: () => () => undefined,
+  registerProducer: () => () => undefined,
+  focusedProject: { get: () => undefined, subscribe: () => () => undefined },
+  documentVisible: { get: () => true, subscribe: () => () => undefined },
+  chatSessions: { setRevisionFacts: () => undefined } as unknown as SessionWiring['chatSessions'],
+  choices: () => {
+    throw new Error('no chat attaches in these rows');
+  },
+  rootSync: () => ({ syncProjectRoots: async () => undefined, close: () => undefined }),
+};
+
+/** The registry these rows share, composed as the app's root composes its own (MC-R4). */
+const sessionsActor = createSessionsActor({
+  openFileManager: (projectId) => openSessionFileManagerStandIn(projectId),
+  wiring: sessionWiring,
+}).start();
 
 /** The shared harness's clean local checkout; the fact the rows move is its readiness (D10). */
 const statusAt = (readiness: ProjectReadiness): RevisionStatusProjection => ({
@@ -145,7 +198,12 @@ const routeProject = createProjectFixture({
   assets: { main: { entryPath: mainEntryPath } },
 });
 const projectSnapshot = {
-  context: { project: routeProject, viewGraphics: new Map(), error: undefined },
+  /* The viewer stage rows (A15e) put a graphics actor for `view-main` here, as the viewer adapter's admission does. */
+  context: {
+    project: routeProject,
+    viewGraphics: new Map<string, Actor<typeof graphicsMachine>>(),
+    error: undefined,
+  },
   matches: (state: unknown) => state !== 'runtimeCloseFailed' && state !== 'error',
 };
 const projectRef = {
@@ -162,7 +220,8 @@ const projectValue = {
   viewGraphics: projectSnapshot.context.viewGraphics,
   viewRecords: new Map(),
   entriesRecord: undefined,
-  geometryUnits: new Map(),
+  /* The viewer stage rows (A15e) put a geometry unit here once the files settle, as the viewer adapter's admission does. */
+  geometryUnits: new Map<string, unknown>(),
   mainEntryPath,
   setViewEntryPath: () => undefined,
   flushWorkbenchRecordProducers: async () => undefined,
@@ -170,24 +229,70 @@ const projectValue = {
 
 /**
  * The layout record as the record host serves it (`workbench-record-host.tsx`, `registerViewer`): a viewer that
- * registers after the record was read is applied at once. The phone rows read it before the route mounts.
+ * registers after the record was read is applied at once, and one that registered before it is applied when it is read
+ * (`readLayoutRecord`). The phone rows read it before the route mounts, except the A8d rows, which read it later.
  */
 const mainViewer: ViewerNode = { kind: 'group', tabs: [{ kind: 'view', view: 'view-main' }] };
-const layoutRecord: { viewer: ViewerNode | undefined } = { viewer: undefined };
+const layoutRecord: {
+  viewer: ViewerNode | undefined;
+  applyViewer: ((node: ViewerNode, applied: () => void) => void) | undefined;
+  listeners: Set<() => void>;
+  viewerAdapter: Actor<typeof viewerAdapterLogic> | undefined;
+  viewerDockId: string;
+} = { viewer: undefined, applyViewer: undefined, listeners: new Set(), viewerAdapter: undefined, viewerDockId: '' };
+/** The record's first read lands: the registered viewer applies it, and the page's readers hear it. */
+const readLayoutRecord = (viewer: ViewerNode): void => {
+  layoutRecord.viewer = viewer;
+  layoutRecord.applyViewer?.(viewer, () => undefined);
+  for (const listener of layoutRecord.listeners) {
+    listener();
+  }
+};
 const layoutController: WorkbenchLayoutController = {
   snapshot: () => undefined,
-  subscribe: () => () => undefined,
+  subscribe(listener) {
+    layoutRecord.listeners.add(listener);
+    return () => {
+      layoutRecord.listeners.delete(listener);
+    };
+  },
   restorePreviousArrangement: async () => false,
   registerViewer(apply) {
+    layoutRecord.applyViewer = apply;
     if (layoutRecord.viewer) {
       apply(layoutRecord.viewer, () => undefined);
     }
-    return () => undefined;
+    return () => {
+      if (layoutRecord.applyViewer === apply) {
+        layoutRecord.applyViewer = undefined;
+      }
+    };
   },
   registerWorkbench: () => () => undefined,
   personViewerChanged: () => undefined,
   personWorkbenchChanged: () => undefined,
   ready: () => layoutRecord.viewer !== undefined,
+  connectViewerIntents: () => () => undefined,
+  requestViewerFile: () => undefined,
+};
+
+/** The layout as a dock host: it spawns the viewer's adapter on `dockReady` and stops it on `dockReleased` (A8d). */
+const layoutDockHost = {
+  send(event: Readonly<{ type: string }> | ViewerDockReady) {
+    layoutRecord.viewerAdapter?.stop();
+    layoutRecord.viewerAdapter = undefined;
+    if ('api' in event) {
+      layoutRecord.viewerAdapter = createActor(viewerAdapterLogic, { input: { api: event.api, ports: event.ports } });
+      layoutRecord.viewerDockId = event.dockId;
+      layoutRecord.viewerAdapter.start();
+    }
+  },
+  getSnapshot: () => ({
+    children:
+      layoutRecord.viewerAdapter === undefined
+        ? {}
+        : { [`viewerAdapter:${layoutRecord.viewerDockId}`]: layoutRecord.viewerAdapter },
+  }),
 };
 
 const getProjectRouteAccess = vi.fn<(projectId: string) => Promise<ProjectRouteAccess>>();
@@ -224,7 +329,7 @@ vi.mock('#services/agent-host-client.js', async (importOriginal) => ({
 vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
 }));
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<typeof HandleStoreModule>()),
   getProjectFileSystemConfig: async (projectId: string) => ({
     projectId,
@@ -239,7 +344,7 @@ vi.mock('#cloud/commercial-features.js', () => ({
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => projectManager }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-  HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => (
+  SessionFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => (
     <div data-testid='project-session' data-project-id={projectId}>
       {children}
     </div>
@@ -251,8 +356,10 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   }),
   useOptionalFileManager: () => undefined,
 }));
+vi.mock('#hooks/project-provider.js', () => ({
+  SessionProjectProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
 vi.mock('#hooks/use-project.js', () => ({
-  ProjectProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   useProject: () => projectValue,
 }));
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({
@@ -260,7 +367,6 @@ vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({
 }));
 vi.mock('./workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
 vi.mock('./view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
-vi.mock('./entries-sync-host.js', () => ({ EntriesSyncHost: () => null }));
 vi.mock('#hooks/use-flush-on-close.js', () => {
   const flushProducers = async (): Promise<void> => undefined;
   return { useFlushOnClose: () => undefined, useFlushProducers: () => flushProducers };
@@ -272,14 +378,8 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 vi.mock('#hooks/use-revision-status.js', () => {
   const useStatus = (): RevisionStatusProjection | undefined =>
     useSyncExternalStore(revisionStatus.subscribe, revisionStatus.get, revisionStatus.get);
-  const revisionClient = {
-    subscribeEvents: () => () => undefined,
-    quiesce: async () => undefined,
-    send: () => undefined,
-  };
   return {
     useRevisionClient: () => undefined,
-    useRevisionClientLifecycle: () => revisionClient,
     useRevisionClientStatus: useStatus,
     useRevisionStatus: useStatus,
     useProjectRole: () => 'owner',
@@ -315,10 +415,17 @@ vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
   ProjectShareRouteIntent: () => null,
   ProjectShareWorkbenchPanel: () => null,
 }));
+vi.mock('#routes/w.$workspace.$project/project-workspace-provider.js', () => ({
+  ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ProjectWorkspaceContextModule>()),
-  ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-  useProjectWorkspace: () => ({ setChatOpen: () => undefined, setWorkbenchOpen: () => undefined, layoutController }),
+  useProjectWorkspace: () => ({
+    setChatOpen: () => undefined,
+    setWorkbenchOpen: () => undefined,
+    layoutController,
+    layout: layoutDockHost,
+  }),
 }));
 vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({ RevisionConflictChat: () => null }));
 vi.mock('#hooks/use-focused-chat-read-state.js', () => ({ useFocusedChatReadState: () => undefined }));
@@ -348,8 +455,9 @@ vi.mock('#components/tour/tour-host.js', () => ({
   TourHost: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#components/layout/command-palette.js', () => ({ useCommandPaletteItems: () => undefined }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({
-  WorkspaceSkeleton: () => <div data-testid='workspace-skeleton' />,
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof WorkspaceFrameModule>()),
+  WorkspaceOpening: () => <div data-testid='workspace-opening' />,
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   ActiveChatProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -407,12 +515,12 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', async (importOr
 vi.mock('#workbench-records/view-actions.js', () => ({
   useWorkbenchViewCommands: () => ({ edit: async () => true, remove: async () => true }),
 }));
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeSelector: <T,>(selector: (tree: ReadonlyMap<string, unknown>) => T) => selector(new Map()),
   useFileTreeMap: () => new Map(),
 }));
 /* The viewer content's file read: its effect is the viewer marker's mount and removal. */
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: () => {
     useEffect(() => {
       facts.viewer.mounts += 1;
@@ -440,10 +548,51 @@ vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => ({
   useProjectSidebarRow: () => ({ attention: 0, conflicted: false, settings: 0, failed: 0 }),
 }));
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
-vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
+vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({
+  MobileProjectTopBar: () => null,
+}));
+
+/* The viewer stage (A15e): the canvas is a stand-in element, so a row can tell one canvas from a replaced one. */
+vi.mock('@taucad/viewer/cad/cad-viewer', () => ({
+  CadViewer: () => <canvas data-testid='stage-canvas' />,
+}));
+vi.mock('#routes/w.$workspace.$project/chat-stack-trace.js', () => ({
+  ViewerIssues: ({
+    children,
+  }: {
+    readonly children: (parts: { segment: React.ReactNode; list: React.ReactNode }) => React.ReactNode;
+  }): React.ReactNode => children({ segment: null, list: null }),
+}));
+vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
+  ChatViewerControls: () => null,
+}));
+vi.mock('#components/cad/ar-button.js', () => ({ ArButton: () => null }));
+vi.mock('#components/geometry/cad/model-component-action-menu.js', () => ({
+  useModelComponentMenuActions: () => ({
+    addToChat: () => undefined,
+    revealInExplorer: () => undefined,
+    showKinematics: () => undefined,
+    openPreview: () => undefined,
+  }),
+}));
 
 const routeModule = await import('./project-route.js');
 const sessionsModule = await import('./project-live-sessions.js');
+const { startFocusHost } = await import('#runtime/app-runtime-focus.fixture.js');
+
+/* Focus and its ports over the registry, as the runtime root composes them (A5b). One host per row, so a focus a row
+ * left on a project never answers the next row's request. */
+const startRowFocus = () =>
+  startFocusHost({
+    sessions: sessionsActor,
+    library: {
+      routeAccess: async (projectId) => getProjectRouteAccess(projectId),
+      epoch: () => projectManager.libraryRevision,
+      onEpochChanged: () => () => undefined,
+    },
+    loadModule: async () => undefined,
+  });
+let focusHost = startRowFocus();
 /* Both layouts are lazy chunks; load them before a row runs so a fake clock never waits on a module read. */
 await import('./chat-interface-desktop.js');
 await import('./chat-interface-mobile.js');
@@ -452,10 +601,10 @@ const OpenRoute = (): React.JSX.Element => (
   <MemoryRouter>
     <KeyboardProvider>
       <TooltipProvider>
-        <SessionsProvider actor={sessionsActor}>
-          <routeModule.ProjectRouteGate requestedProjectId={projectA}>
+        <SessionsProvider actor={sessionsActor} focus={focusHost}>
+          <routeModule.ProjectRouteProviders projectId={projectA}>
             <sessionsModule.ProjectChatRoute />
-          </routeModule.ProjectRouteGate>
+          </routeModule.ProjectRouteProviders>
         </SessionsProvider>
       </TooltipProvider>
     </KeyboardProvider>
@@ -561,11 +710,21 @@ const recordAdditions = (
 
 beforeEach(() => {
   vi.useFakeTimers();
+  focusHost = startRowFocus();
   facts.isMobile = false;
   facts.isRealViewerBox = false;
   layoutRecord.viewer = undefined;
+  layoutRecord.applyViewer = undefined;
+  layoutRecord.listeners.clear();
+  layoutRecord.viewerAdapter?.stop();
+  layoutRecord.viewerAdapter = undefined;
   facts.viewer.mounts = 0;
   facts.viewer.removals = 0;
+  for (const graphics of projectSnapshot.context.viewGraphics.values()) {
+    graphics.stop();
+  }
+  projectSnapshot.context.viewGraphics.clear();
+  projectValue.geometryUnits.clear();
   revisionStatus.set(undefined);
   editorFact.set({ value: editorReady, focusedChatId: 'chat-1' });
   getProjectRouteAccess.mockReset();
@@ -583,6 +742,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.useRealTimers();
+  focusHost.stop();
   /* The registry is one app singleton: close what a row left live, as the route suite does. */
   await act(async () => {
     for (const projectId of Object.keys(sessionsActor.getSnapshot().context.refs)) {
@@ -602,14 +762,14 @@ afterEach(async () => {
 });
 
 describe('project open order (A0.7)', () => {
-  it.fails('U13: should mount the viewer once and never remove it when the files check follows live', async () => {
+  it('U13: should mount the viewer once and never remove it when the files check follows live', async () => {
     render(<OpenRoute />);
     await settle();
     expect(isSessionLive()).toBe(true);
 
-    /* The revision client's first projection: the fill has not answered for this tree yet. */
+    /* The revision client's first projection: the authored files of this tree are still landing. */
     await act(async () => {
-      revisionStatus.set(statusAt('materialized'));
+      revisionStatus.set(statusAt('entryReady'));
     });
     await settle();
     expect(
@@ -629,10 +789,12 @@ describe('project open order (A0.7)', () => {
     );
   });
 
-  it.fails('U20: should never render "Preparing model" when local files settle 200 ms after live', async () => {
-    const preparing = recordAdditions('[role="region"][aria-label="Preparing model"]');
-    /* Local files: no Tau Cloud open is owed, and the fill's word on this tree is still out. */
-    revisionStatus.set(statusAt('materialized'));
+  it('U20: should never render "Preparing model" when local files settle 200 ms after live', async () => {
+    const preparing = recordAdditions(
+      '[role="region"][aria-label="Preparing model"], [data-testid="viewer-dock"] [role="region"][aria-label="Checking model files"]',
+    );
+    /* Local files: no Tau Cloud open is owed, and this tree's authored files are still landing. */
+    revisionStatus.set(statusAt('entryReady'));
     const session = createFact(false);
     const unsubscribe = sessionsActor.subscribe(() => {
       if (!session.get() && isSessionLive()) {
@@ -664,6 +826,100 @@ describe('project open order (A0.7)', () => {
     } finally {
       unsubscribe.unsubscribe();
       preparing.stop();
+    }
+  });
+});
+
+describe('viewer stage through the file check (A15e; C11, P-j, U13 remainder)', () => {
+  /** The view's graphics owner, as the viewer adapter admits it once the project is ready (A15e). */
+  const admitViewGraphics = (): void => {
+    const graphics = createActor(
+      graphicsMachine.provide({
+        actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) },
+      }),
+      { input: {} },
+    ).start();
+    projectSnapshot.context.viewGraphics.set('view-main', graphics);
+  };
+  /** The entry's geometry unit, as the adapter creates it once the files settle: idle, with nothing built yet. */
+  const admitGeometryUnit = (): void => {
+    projectValue.geometryUnits.set(mainEntryPath, {
+      id: 'cad-main',
+      getSnapshot: () => ({
+        status: 'active',
+        context: {
+          entryPath: mainEntryPath,
+          kernelIssues: new Map(),
+          units: { length: 'mm' },
+        },
+        hasTag: () => false,
+        matches: () => false,
+      }),
+      subscribe: () => ({ unsubscribe: () => undefined }),
+      on: () => ({ unsubscribe: () => undefined }),
+      send: () => undefined,
+    });
+  };
+  const stage = '[data-slot="viewer-stage"]';
+  /* The old block, under its old name and its new one: the viewer dock never draws a pane check view (U20). */
+  const preparing =
+    '[role="region"][aria-label="Preparing model"], [data-testid="viewer-dock"] [role="region"][aria-label="Checking model files"]';
+
+  it('C11: should show the viewer stage with its canvas, and no "Preparing model" block, during a first file check past the open bound', async () => {
+    admitViewGraphics();
+    const preparingAdded = recordAdditions(preparing);
+    revisionStatus.set(statusAt('entryReady'));
+    try {
+      render(<OpenRoute />);
+      await settle();
+      /* The open waits for the check up to its bound (A14), then shows the editor while the check runs on. */
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      await settle();
+
+      expect(screen.getByTestId('viewer-dock').querySelector(stage)).not.toBeNull();
+      expect(screen.getByTestId('stage-canvas')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /reopen renderer/i })).toBeNull();
+      expect(preparingAdded.read()).toEqual([]);
+    } finally {
+      preparingAdded.stop();
+    }
+  });
+
+  it('C11: should keep the same canvas element across filesChecking, ready and filesChecking', async () => {
+    admitViewGraphics();
+    const preparingAdded = recordAdditions(preparing);
+    const canvases = recordAdditions('[data-testid="stage-canvas"]');
+    revisionStatus.set(statusAt('entryReady'));
+    try {
+      render(<OpenRoute />);
+      await settle();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      await settle();
+      const canvas = screen.getByTestId('stage-canvas');
+
+      await act(async () => {
+        admitGeometryUnit();
+        revisionStatus.set(statusAt('filled'));
+      });
+      await settle();
+      expect(screen.getByTestId('stage-canvas')).toBe(canvas);
+
+      /* A later check of the same tree. */
+      await act(async () => {
+        revisionStatus.set(statusAt('entryReady'));
+      });
+      await settle();
+      expect(screen.getByTestId('stage-canvas')).toBe(canvas);
+      expect(screen.queryByRole('button', { name: /reopen renderer/i })).toBeNull();
+      expect(canvases.read()).toEqual([canvas]);
+      expect(preparingAdded.read()).toEqual([]);
+    } finally {
+      preparingAdded.stop();
+      canvases.stop();
     }
   });
 });
@@ -728,8 +984,55 @@ describe('phone viewer box while the focused chat is ensured (A0.7)', () => {
     /* Today the layout mounts while the chat is ensured and its pane waits below the viewer; once the open waits for
      * the chat, nothing of the layout mounts until it is ready. Either way, no viewer box shows an empty state. */
     const boxes = viewerBoxes();
-    expect(boxes.length === 0 || screen.queryByTestId('chat-pane-skeleton-ensuring') !== null).toBe(true);
+    expect(
+      boxes.length === 0 || document.querySelector('[data-testid="chat-lane-frame"][aria-busy="true"]') !== null,
+    ).toBe(true);
     expect(boxes.filter((box) => box.querySelector(emptyState) !== null)).toEqual([]);
     expect(added.map((node) => node.textContent)).toEqual([]);
+  });
+
+  /** Render the phone route over the real viewer dock with the editor ready and the layout record not yet read. */
+  const openOnPhoneUnread = async (): Promise<ReturnType<typeof recordAdditions>> => {
+    facts.isMobile = true;
+    facts.isRealViewerBox = true;
+    revisionStatus.set(statusAt('filled'));
+    editorFact.set({ value: editorReady, focusedChatId: 'chat-1' });
+    const emptyStates = recordAdditions(emptyState, isInViewerBoxAt);
+    render(<OpenRoute />);
+    await settle();
+    return emptyStates;
+  };
+
+  it('M2 (A8d): should render no empty-state panel in the phone viewer box before the viewer layout record is applied', async () => {
+    const emptyStates = await openOnPhoneUnread();
+    try {
+      // The dock is mounted and waits for the record: what it will show is not known yet, so it offers no choice.
+      expect(viewerBoxes()).toHaveLength(1);
+      expect(
+        emptyStates.read().map((node) => node.textContent),
+        'M2: the viewer watermark was shown before the layout record was applied',
+      ).toEqual([]);
+
+      await act(async () => {
+        readLayoutRecord(mainViewer);
+      });
+      await settle();
+      expect(emptyStates.read().map((node) => node.textContent)).toEqual([]);
+    } finally {
+      emptyStates.stop();
+    }
+  });
+
+  it('should show the empty state once the applied layout record names no view (A8d guard)', async () => {
+    const emptyStates = await openOnPhoneUnread();
+    try {
+      await act(async () => {
+        readLayoutRecord({ kind: 'group', tabs: [] });
+      });
+      await settle();
+      expect(viewerBoxes().filter((box) => box.querySelector(emptyState) !== null)).toHaveLength(1);
+    } finally {
+      emptyStates.stop();
+    }
   });
 });

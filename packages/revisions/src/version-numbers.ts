@@ -30,7 +30,7 @@
 
 import { bytesToHex } from '#object-hash.js';
 import { versionIdPattern } from '#revision-headers.js';
-import { RevisionPortError, versionTagName } from '#revision-port.js';
+import { RevisionPortError, versionTagName, versionTagRef } from '#revision-port.js';
 import type { RevisionActor } from '#revision-authority.js';
 import type { CreateRevisionTagInput, RemoteRef, RevisionPort, RevisionTag } from '#revision-port.js';
 import type { VersionRenumbering } from '#sync.types.js';
@@ -255,16 +255,29 @@ export const planVersionRenumbering = (
   return Object.freeze(steps);
 };
 
+/**
+ * A version tag whose push was refused, with the lease that push carried for
+ * it: the tag object this host last fetched, or `undefined` for "must not
+ * exist". @public
+ */
+export type RefusedVersionTag = Readonly<{
+  number: number;
+  lease: string | undefined;
+}>;
+
 /** What {@link renumberUnpushedVersions} is asked. @public */
 export type RenumberUnpushedVersionsInput = Readonly<{
   /** The remote that refused. */
   remote: string;
   /**
-   * Numbers whose push lost its lease: a rename the remote refused because
-   * another device renamed the same version first. Where the remote holds the
-   * same version there, the remote's tag wins and replaces this store's.
+   * Version tags whose push was refused, each with its lease. One is adopted
+   * only when the remote's own advertisement now names another object than
+   * the lease (another device renamed the same version first) and that object
+   * is the same version: then the remote's tag wins and replaces this store's.
+   * A tag refused only because another ref of the atomic push moved still sits
+   * at its lease on the remote, so its rename is kept and offered again.
    */
-  adopt?: readonly number[];
+  adopt?: readonly RefusedVersionTag[];
   /** The push's signal. */
   signal?: AbortSignal;
 }>;
@@ -281,10 +294,12 @@ export type RenumberUnpushedVersionsInput = Readonly<{
  * time, and its old number is given back to the version the remote holds
  * there by fetching it again. A move that was interrupted after the new tag
  * was written lets go of its old number and takes no other. A refused rename
- * is let go of the same way, so the fetch puts the remote's tag in its place.
+ * whose tag the remote moved off its lease is let go of the same way, so the
+ * fetch puts the remote's tag in its place; whether it moved is read from the
+ * remote's advertisement, never from why the push was refused.
  *
  * @param port - The store.
- * @param input - The remote that refused, the numbers whose lease was lost, and the push's signal.
+ * @param input - The remote that refused, the refused version tags with their leases, and the push's signal.
  * @returns The versions that moved; empty when none had to.
  * @public
  */
@@ -312,10 +327,15 @@ export const renumberUnpushedVersions = async (
     port.listTags({ remote: input.remote }),
     port.listRefs('refs/tags'),
   ]);
-  const adopted = (input.adopt ?? []).filter((number) => {
+  const advertisedHeads = new Map(advertised.map((ref) => [ref.name, String(ref.head)] as const));
+  const adopted = (input.adopt ?? []).flatMap(({ number, lease }) => {
+    const there = advertisedHeads.get(versionTagRef(number));
+    if (there === undefined || there === lease) {
+      return [];
+    }
     const mine = local.find((tag) => tag.number === number);
     const theirs = remote.find((tag) => tag.number === number);
-    return mine !== undefined && theirs !== undefined && isSameVersion(mine, theirs);
+    return mine !== undefined && theirs !== undefined && isSameVersion(mine, theirs) ? [number] : [];
   });
   for (const number of adopted) {
     input.signal?.throwIfAborted();

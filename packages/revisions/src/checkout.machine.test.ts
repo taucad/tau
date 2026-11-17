@@ -84,6 +84,8 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  *     every window, and once the operation ends mints on the head it left
  * 34  while waiting, a leaving page's cut is answered `nothingToSave` at once,
  *     every other request waits, and a queued one can still be withdrawn
+ * 35  a rebase whose todo runs commands holds every mint like any other, and the
+ *     parent hears when a look finds that fact changed (LP7)
  * --  `getSimplePaths` generates no state value the table above leaves unexercised
  */
 
@@ -1853,6 +1855,45 @@ describe('checkoutMachine waits out a Git operation in progress', () => {
       status: 'waiting',
       waitFor: { kind: 'detached', branch: 'main' },
     });
+
+    actor.stop();
+  });
+
+  it('should hold every mint on a rebase that will run commands, and report when that changes', async () => {
+    const harness = start();
+    const { actor, promises, callbacks, clock, parent } = harness;
+    const running = { kind: 'rebase', runsCommands: true } as const;
+    actor.send({ type: 'changed', paths: ['a.ts'], generation: 1 });
+    actor.send({ type: 'cut', requestId: 'r-1', trigger: 'save', leaseIds: [] });
+    callbacks.sendBack('fence', { type: 'fenceGranted' });
+    promises.settle('cut', { output: { treeId: '', cutId: '', waitFor: running } });
+    await flush();
+
+    expect(actor.getSnapshot().matches({ waiting: 'holding' })).toBe(true);
+    expect(promises.inputsFor('writeRevision')).toEqual([]);
+    expect(answersOf(parent.events)).toEqual([]);
+    expect(statusFacts(harness).at(-1)).toMatchObject({ status: 'waiting', waitFor: running });
+
+    /* Autosave stays paused: the idle window mints nothing either. */
+    actor.send({ type: 'changed', paths: ['b.ts'], generation: 2 });
+    clock.advance(checkoutWaitWindowMilliseconds);
+    promises.settle('readHead', {
+      output: { revisionId: 'rev-1', treeId: headTreeId, branch: undefined, waitFor: running },
+    });
+    await flush();
+    expect(actor.getSnapshot().matches({ waiting: 'holding' })).toBe(true);
+    expect(promises.inputsFor('writeRevision')).toEqual([]);
+    const reported = statusFacts(harness).length;
+
+    /* The person dropped the exec line: still a rebase, no longer one that runs commands. */
+    clock.advance(checkoutWaitWindowMilliseconds);
+    promises.settle('readHead', {
+      output: { revisionId: 'rev-1', treeId: headTreeId, branch: undefined, waitFor: { kind: 'rebase' } },
+    });
+    await flush();
+    expect(statusFacts(harness)).toHaveLength(reported + 1);
+    expect(statusFacts(harness).at(-1)?.['waitFor']).toEqual({ kind: 'rebase' });
+    expect(promises.inputsFor('writeRevision')).toEqual([]);
 
     actor.stop();
   });

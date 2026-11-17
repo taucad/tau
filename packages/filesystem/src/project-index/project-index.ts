@@ -132,6 +132,21 @@ export type ProjectIndexOptions = Readonly<{
  */
 export type ExpectedEntry = Readonly<{ path: string; size: number; pending?: PendingObject; arriving: boolean }>;
 
+/**
+ * One placeholder the revision layer declares (D9): the large object its pointer names, and the pointer's size, which
+ * the file must still have to be it.
+ *
+ * @public
+ */
+export type DeclaredPlaceholder = Readonly<{ object: PendingObject; pointerSize: number }>;
+
+/**
+ * What one declaration speaks for: every path under a directory (`''` for the whole root), or exactly these paths.
+ *
+ * @public
+ */
+export type DeclarationScope = Readonly<{ under: string }> | Readonly<{ paths: readonly string[] }>;
+
 /** One row an observation of the provider listed: head metadata only. @public */
 export type ObservedRow = Readonly<{ path: string; kind: IndexEntryKind; size: number; mtimeMs: number }>;
 
@@ -145,6 +160,8 @@ export type IndexSearchOptions = {
   readonly admits?: IndexAdmits;
   /** Stops a query still waiting for its root's index to open. */
   readonly signal?: AbortSignal;
+  /** Answer a pending entry as its object: its size, `pending`, and none of the pointer's facts (D9). */
+  readonly asObjects?: boolean;
 };
 
 /** What one head-metadata compare found (D5). @public */
@@ -269,17 +286,22 @@ export class ProjectIndex {
    * @param rows - Serialized entries.
    * @param generation - The snapshot's generation.
    * @param stored - What the snapshot kept beside its rows: the pending entries by path (D9), as
-   *   {@link ProjectIndex.pendingSnapshot} gave them, and the removal record (S10), as
-   *   {@link ProjectIndex.removalSnapshot} gave it.
+   *   {@link ProjectIndex.pendingSnapshot} gave them, whether they were declared for the whole root, and the removal
+   *   record (S10), as {@link ProjectIndex.removalSnapshot} gave it.
    * @returns The index.
    */
   public static fromSnapshot(
     rows: readonly SnapshotRow[],
     generation: number,
-    stored?: Readonly<{ pending?: Readonly<Record<string, PendingObject>>; removals?: RemovalSnapshot }>,
+    stored?: Readonly<{
+      pending?: Readonly<Record<string, PendingObject>>;
+      declared?: boolean;
+      removals?: RemovalSnapshot;
+    }>,
   ): ProjectIndex {
-    const { pending, removals } = stored ?? {};
+    const { pending, declared, removals } = stored ?? {};
     const index = new ProjectIndex({ generation, trustworthyMtime: true });
+    index._declared = declared === true;
     /* The snapshot is the writer's state at `generation`, so a `since` it
      * issued up to there is answered here; one past it may name generations
      * the writer issued after storing, which this index issues again: rescan. */
@@ -332,6 +354,8 @@ export class ProjectIndex {
   private readonly _removed = new Map<string, Readonly<{ kind: IndexEntryKind; generation: number }>>();
   /** The record holds every removal after this generation. */
   private _removedFloor: number;
+  /** Whether the revision layer has declared this whole root, so its marks are the whole answer (D9). */
+  private _declared = false;
 
   /**
    * @param options - The generation to continue from, and whether the provider's mtime can key facts.
@@ -364,6 +388,25 @@ export class ProjectIndex {
     const adopted = this._adoptedMtimes;
     this._adoptedMtimes = 0;
     return adopted;
+  }
+
+  /**
+   * Whether the revision layer has declared this whole root (D9): its marks are then every placeholder it holds, and
+   * a snapshot keeps the stamp so a reload answers by them at once.
+   */
+  public get declared(): boolean {
+    return this._declared;
+  }
+
+  /**
+   * Drop the declared stamp: something since may have written a placeholder the marks do not name (D9).
+   *
+   * @returns Whether the stamp was set.
+   */
+  public forgetDeclared(): boolean {
+    const was = this._declared;
+    this._declared = false;
+    return was;
   }
 
   /** Whether an observation of the whole root has completed (a scan, or a load and its compare). */
@@ -558,10 +601,13 @@ export class ProjectIndex {
    * `statTree` answers, with content facts only where known (I3).
    *
    * @param prefix - Root-relative directory.
-   * @param options - Optional mask, asked before a descent.
+   * @param options - Optional mask, asked before a descent, and whether a pending entry is answered as its object.
    * @returns File rows relative to `prefix`.
    */
-  public statTree(prefix: string, options?: { readonly admits?: IndexAdmits }): FileStatEntry[] {
+  public statTree(
+    prefix: string,
+    options?: { readonly admits?: IndexAdmits; readonly asObjects?: boolean },
+  ): FileStatEntry[] {
     const strip = prefix === '' ? 0 : prefix.length + 1;
     const admits = options?.admits;
     const relativeAdmits =
@@ -569,14 +615,7 @@ export class ProjectIndex {
     const rows: FileStatEntry[] = [];
     for (const entry of this.walk(prefix, { admits: relativeAdmits, kinds: ['file'] })) {
       const path = entry.path.slice(strip);
-      rows.push({
-        path,
-        name: path.split('/').at(-1) ?? path,
-        type: 'file',
-        size: entry.size,
-        mtimeMs: entry.mtimeMs,
-        ...statFields(this._validFacts(entry)),
-      });
+      rows.push(this._fileRow(entry, path, options?.asObjects === true));
     }
     return rows;
   }
@@ -603,14 +642,7 @@ export class ProjectIndex {
         continue;
       }
       if (entry.kind === 'file') {
-        results.push({
-          path: entry.path,
-          name,
-          type: 'file',
-          size: entry.size,
-          mtimeMs: entry.mtimeMs,
-          ...statFields(this._validFacts(entry)),
-        });
+        results.push(this._fileRow(entry, entry.path, options?.asObjects === true));
       } else if (options?.includeDirectories === true) {
         results.push({ path: entry.path, name, type: 'dir', size: 0, mtimeMs: entry.mtimeMs });
       }
@@ -887,30 +919,69 @@ export class ProjectIndex {
 
   /**
    * Make one file a pending entry: it holds the pointer of `object`. A write
-   * over it, or an observation that finds its bytes changed, ends it. Not
-   * persisted: the revision layer's first read of the checkout marks it again.
+   * over it, or an observation that finds its bytes changed, ends it. Kept in
+   * the snapshot with every other mark (see {@link ProjectIndex.pendingSnapshot}).
    *
    * @param path - Root-relative file path.
    * @param object - The large object its pointer names.
-   * @param observed - The size the pointer was read at, and the entry's generation before the read: a write
-   *   that landed since (another size, or a later generation) is not the pointer, and is left as it is.
+   * @param observed - The size the pointer was written at: a file of another size is not the pointer, and is left
+   *   as it is.
    */
-  public markPending(
-    path: string,
-    object: PendingObject,
-    observed?: Readonly<{ size: number; generation?: number | undefined }>,
-  ): void {
+  public markPending(path: string, object: PendingObject, observed?: Readonly<{ size: number }>): void {
     const node = this._resolve(segmentsOf(path));
     if (
       node?.kind !== 'file' ||
       (node.pending?.oid === object.oid && node.pending.size === object.size) ||
-      (observed !== undefined &&
-        (node.size !== observed.size || (observed.generation !== undefined && node.generation > observed.generation)))
+      (observed !== undefined && node.size !== observed.size)
     ) {
       return;
     }
     node.pending = object;
     node.generation = this._bump(path);
+  }
+
+  /**
+   * Keep what the revision layer says the placeholders are (D9): it is their only writer, and reads the attributes
+   * that make a pointer one. Each declared file the index holds at its pointer's size is pending on its object; every
+   * other pending entry the declaration speaks for stops being one. A file of another size was written since, and is
+   * left as it is.
+   *
+   * @param declared - The placeholders, by root-relative path.
+   * @param scope - The paths the declaration speaks for; `under: ''` speaks for the whole root and stamps it declared.
+   * @returns Whether a mark or the stamp changed.
+   */
+  public declarePending(declared: ReadonlyMap<string, DeclaredPlaceholder>, scope: DeclarationScope): boolean {
+    let changed = 'under' in scope && scope.under === '' && !this._declared;
+    if (changed) {
+      this._declared = true;
+    }
+    const spoken =
+      'paths' in scope
+        ? scope.paths
+        : [...this.walk(scope.under, { kinds: ['file'] })].flatMap((entry) =>
+            entry.pending === undefined ? [] : [entry.path],
+          );
+    for (const path of spoken) {
+      const node = this._resolve(segmentsOf(path));
+      if (node?.pending !== undefined && !declared.has(path)) {
+        delete node.pending;
+        node.generation = this._bump(path);
+        changed = true;
+      }
+    }
+    for (const [path, { object, pointerSize }] of declared) {
+      const node = this._resolve(segmentsOf(path));
+      if (
+        node?.kind === 'file' &&
+        node.size === pointerSize &&
+        (node.pending?.oid !== object.oid || node.pending.size !== object.size)
+      ) {
+        node.pending = object;
+        node.generation = this._bump(path);
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   /**
@@ -1136,6 +1207,14 @@ export class ProjectIndex {
       return undefined;
     }
     return facts;
+  }
+
+  /* One file's stat row; a pending entry as its object when asked, whose facts are unknown until its bytes land (I7). */
+  private _fileRow(entry: IndexEntry, path: string, asObjects: boolean): FileStatEntry {
+    const row = { path, name: path.split('/').at(-1) ?? path, type: 'file', mtimeMs: entry.mtimeMs } as const;
+    return asObjects && entry.pending !== undefined
+      ? { ...row, size: entry.pending.size, pending: true }
+      : { ...row, size: entry.size, ...statFields(this._validFacts(entry)) };
   }
 
   /* A node a write recorded before the provider reported its mtime takes the provider's; its facts are re-measured. */

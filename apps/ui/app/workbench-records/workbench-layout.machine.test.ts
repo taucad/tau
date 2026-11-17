@@ -46,6 +46,11 @@ import type {
   WorkbenchLayoutInput,
 } from '#workbench-records/workbench-layout.machine.js';
 import type { LayoutAdapterId, PaneIntentTarget } from '#workbench-records/pane-intents.js';
+import type {
+  WorkbenchAdapterEvent,
+  WorkbenchAdapterInput,
+  WorkbenchDockReady,
+} from '#workbench-records/workbench-adapter.js';
 
 const viewer = (...views: string[]): ViewerNode => ({
   kind: 'group',
@@ -97,6 +102,8 @@ function mount(input: Partial<WorkbenchLayoutInput> = {}) {
       adapters: input.adapters ?? ['workbench', 'viewer'],
       routeKey: input.routeKey ?? 'route-1',
       workbenchOpen: input.workbenchOpen ?? true,
+      ...(input.lanes === undefined ? {} : { lanes: input.lanes }),
+      ...(input.awaitsLanes === undefined ? {} : { awaitsLanes: input.awaitsLanes }),
     },
     inspect: guard.inspect,
   });
@@ -305,6 +312,63 @@ describe('workbenchLayout', () => {
       harness.applyIntent('model', panes('parameters', 'model'));
       expect(harness.context().editCount).toBe(edits);
       expect(harness.shown()).toEqual(stored);
+    });
+
+    it('should take an unavailable answer naming the delivery as the late answer of a dropped intent, and retire it', () => {
+      const harness = ready();
+      harness.intent('model', modelPane);
+      const [delivery] = harness.deliveries('model');
+      harness.actor.send({ type: 'routeChanged', routeKey: 'route-2' });
+      expect(harness.context().intents['model']).toMatchObject({ state: 'dropped', late: delivery!.deliveryId });
+      const edits = harness.context().editCount;
+      harness.actor.send({ type: 'intentUnavailable', intentId: 'model', deliveryId: delivery!.deliveryId });
+      expect(harness.context().intents['model']).toBeUndefined();
+      expect(selectIntentOutcome(harness.actor.getSnapshot(), 'model')).toEqual({
+        outcome: 'dropped',
+        reason: 'routeChanged',
+      });
+      // Its late answer was taken: a late apply after it is not folded in as an edit.
+      harness.applyIntent('model', panes('parameters', 'model'));
+      expect(harness.context().editCount).toBe(edits);
+      expect(harness.shown()).toEqual(stored);
+    });
+
+    it('should ignore an unavailable answer naming a stale delivery', () => {
+      const harness = ready();
+      harness.intent('model', modelPane);
+      const [delivery] = harness.deliveries('model');
+      harness.actor.send({ type: 'intentUnavailable', intentId: 'model', deliveryId: delivery!.deliveryId + 1 });
+      expect(harness.context().intents['model']).toMatchObject({
+        state: 'delivered',
+        deliveryId: delivery!.deliveryId,
+      });
+      harness.actor.send({ type: 'routeChanged', routeKey: 'route-2' });
+      harness.actor.send({ type: 'intentUnavailable', intentId: 'model', deliveryId: delivery!.deliveryId + 1 });
+      expect(harness.context().intents['model']).toMatchObject({ state: 'dropped', late: delivery!.deliveryId });
+    });
+
+    it('should retire a delivered intent its own unavailable answer drops, with no late answer still owed', () => {
+      const harness = ready();
+      harness.intent('model', modelPane);
+      const [delivery] = harness.deliveries('model');
+      const edits = harness.context().editCount;
+      harness.actor.send({ type: 'intentUnavailable', intentId: 'model', deliveryId: delivery!.deliveryId });
+      expect(harness.context().intents['model']).toBeUndefined();
+      expect(selectIntentOutcome(harness.actor.getSnapshot(), 'model')).toEqual({
+        outcome: 'dropped',
+        reason: 'unavailable',
+      });
+      // The delivery was answered: a stray apply for it afterwards is not folded in as an edit.
+      harness.applyIntent('model', panes('parameters', 'model'));
+      expect(harness.context().editCount).toBe(edits);
+    });
+
+    it('should keep the late answer of a delivered intent dropped unavailable without naming its delivery', () => {
+      const harness = ready();
+      harness.intent('model', modelPane);
+      const [delivery] = harness.deliveries('model');
+      harness.actor.send({ type: 'intentUnavailable', intentId: 'model' });
+      expect(harness.context().intents['model']).toMatchObject({ state: 'dropped', late: delivery!.deliveryId });
     });
 
     it('should treat ids that name inherited object properties as new ids', () => {
@@ -812,6 +876,82 @@ describe('workbenchLayout', () => {
     });
   });
 
+  /* A8b review: a project runtime's layout starts before its editor has loaded its lanes, and the editor takes no panel
+   * change until it is ready. The intents wait for the lanes the editor loads (`lanesSeeded`), which are a baseline:
+   * neither a lane close (rule 7) nor an edit (rule 1). */
+  describe('the lanes the editor loads', () => {
+    const defaults = { chat: true, workbench: true } as const;
+    const filesPane: PaneIntentTarget = { kind: 'pane', adapter: 'workbench', pane: 'files' };
+
+    it('should open the lane the editor loaded closed for an intent sent before it loaded, and drop nothing', () => {
+      const harness = mount({ lanes: defaults, awaitsLanes: true });
+      harness.publish(stored);
+      harness.attach('workbench');
+      harness.attach('viewer');
+      harness.intent('files', filesPane);
+      // The lanes are the editor's defaults: the intent neither opens the lane nor reaches the workbench yet.
+      expect(harness.of('workbenchOpenRequested')).toEqual([]);
+      expect(harness.deliveries('files')).toEqual([]);
+      harness.actor.send({ type: 'lanesSeeded', lanes: { chat: true, workbench: false } });
+      expect(harness.of('workbenchOpenRequested')).toEqual([{ type: 'workbenchOpenRequested', intentId: 'files' }]);
+      expect(harness.deliveries('files')).toHaveLength(1);
+      expect(harness.of('intentSettled')).toEqual([]);
+      expect(harness.record.commands.filter((command) => command.type === 'edit')).toEqual([]);
+    });
+
+    it('should open the lane the first read closes for an intent the seeded lanes left waiting for it', () => {
+      const closed = { ...stored, lanes: { chat: true, workbench: false } };
+      const harness = mount({ lanes: defaults, awaitsLanes: true });
+      harness.actor.send({ type: 'lanesSeeded', lanes: defaults });
+      harness.intent('files', filesPane);
+      // The record's lanes are shown with its first read: the lane is not opened before them, or they would close it.
+      expect(harness.of('workbenchOpenRequested')).toEqual([]);
+      harness.publish(closed);
+      expect(harness.context().workbenchOpen).toBe(true);
+      expect(harness.of('workbenchOpenRequested')).toEqual([{ type: 'workbenchOpenRequested', intentId: 'files' }]);
+      expect(selectIntentOutcome(harness.actor.getSnapshot(), 'files')).toBeUndefined();
+    });
+
+    it('should not settle a phone pane intent before the editor can show its tab', () => {
+      const harness = mount({ device: 'phone', lanes: defaults, awaitsLanes: true });
+      harness.intent('model', modelPane);
+      expect(harness.of('mobileTabRequested')).toEqual([]);
+      expect(selectIntentOutcome(harness.actor.getSnapshot(), 'model')).toBeUndefined();
+      harness.actor.send({ type: 'lanesSeeded', lanes: defaults });
+      expect(harness.of('mobileTabRequested')).toEqual([
+        { type: 'mobileTabRequested', intentId: 'model', target: modelPane },
+      ]);
+      expect(selectIntentOutcome(harness.actor.getSnapshot(), 'model')).toEqual({ outcome: 'applied' });
+    });
+
+    it('should acknowledge nothing before the lanes are seeded', () => {
+      const harness = mount({ lanes: defaults, awaitsLanes: true });
+      harness.publish(stored);
+      harness.attach('workbench');
+      harness.attach('viewer');
+      harness.reportAll();
+      expect(harness.applied()).toBeUndefined();
+      harness.actor.send({ type: 'lanesSeeded', lanes: defaults });
+      harness.reportAll();
+      expect(harness.applied()).toBe(digestOf(stored));
+    });
+  });
+
+  /* A8b review: a live project's runtime holds its layout for its whole life, so a settled intent keeps its outcome
+   * only (I11), not its entry. */
+  it('should retire a settled intent to its outcome and still answer its re-sent id from it', () => {
+    const harness = ready();
+    harness.intent('model', modelPane);
+    harness.applyIntent('model', panes('parameters', 'model'));
+    expect(harness.context().intents).toEqual({});
+    harness.intent('model', modelPane);
+    expect(harness.deliveries('model')).toHaveLength(1);
+    expect(harness.of('intentSettled')).toEqual([
+      { type: 'intentSettled', intentId: 'model', outcome: 'applied' },
+      { type: 'intentSettled', intentId: 'model', outcome: 'applied' },
+    ]);
+  });
+
   describe('attach cycles with a queued intent and a pending apply', () => {
     it('should keep both across a detach and reattach, and settle each once', () => {
       const harness = ready();
@@ -1161,12 +1301,27 @@ describe('totality', () => {
     personEdited: { type: 'personEdited', adapter: 'viewer', node: viewer('top') },
     lanesEdited: { type: 'lanesEdited', lanes: { chat: false, workbench: true } },
     workbenchLaneChanged: { type: 'workbenchLaneChanged', open: false },
+    lanesApplied: { type: 'lanesApplied', lanes: { chat: true, workbench: true } },
+    lanesSeeded: { type: 'lanesSeeded', lanes: { chat: true, workbench: false } },
+    deviceChanged: { type: 'deviceChanged', device: 'phone' },
     routeChanged: { type: 'routeChanged', routeKey: 'route-2' },
     intent: { type: 'intent', intentId: 'i1', source: 'person', target: modelPane },
     intentApplied: { type: 'intentApplied', intentId: 'i1', deliveryId: 1, node: panes('model') },
     intentUnavailable: { type: 'intentUnavailable', intentId: 'i1' },
     restore: { type: 'restore', restoreId: 'r1', expected: 'sha256:x', layout: sample },
+    // A Dockview's adapter, answered at the root in every state (A8c); the run below provides a stub adapter.
+    dockReady: {
+      type: 'dockReady',
+      adapter: 'workbench',
+      dockId: 'dock_1',
+      api: 'dockview' as unknown as WorkbenchDockReady['api'],
+      ports: 'ports' as unknown as WorkbenchDockReady['ports'],
+    },
+    dockReleased: { type: 'dockReleased', adapter: 'workbench', dockId: 'dock_1' },
   };
+  const stubbed = workbenchLayoutMachine.provide({
+    actors: { workbenchAdapter: createCallbackLogic(() => () => undefined) },
+  });
   const events = [
     ...Object.values(samples),
     { type: 'adapterAttaching', adapter: 'workbench' },
@@ -1185,12 +1340,64 @@ describe('totality', () => {
   });
 
   it('should reach every state', () => {
-    expect(unreachedStates(workbenchLayoutMachine, pathOptions)).toEqual([]);
+    expect(unreachedStates(stubbed, pathOptions)).toEqual([]);
   });
 
   it('should answer every sampled event in every state', () => {
-    expect(unansweredEvents(workbenchLayoutMachine, { ...pathOptions, ignore: workbenchLayoutIgnoredEvents })).toEqual(
-      [],
+    expect(unansweredEvents(stubbed, { ...pathOptions, ignore: workbenchLayoutIgnoredEvents })).toEqual([]);
+  });
+});
+
+describe('dock adapters (A8c)', () => {
+  /* A Dockview's adapter, recorded by the `api` it was handed: the machine starts and stops it, and never reads it. */
+  const dockHarness = () => {
+    const running = new Set<string>();
+    const workbenchAdapter = createCallbackLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput>(({ input }) => {
+      running.add(input.api as unknown as string);
+      return () => {
+        running.delete(input.api as unknown as string);
+      };
+    });
+    const actor = createActor(
+      workbenchLayoutMachine.provide({
+        actors: { layoutRecord: createCallbackLogic(() => () => undefined), workbenchAdapter },
+      }),
+      { input: { device: 'desktop', adapters: ['workbench', 'viewer'], routeKey: 'route-1', workbenchOpen: true } },
     );
+    actor.start();
+    const ready = (dockId: string, api: string): void => {
+      actor.send({
+        type: 'dockReady',
+        adapter: 'workbench',
+        dockId,
+        api: api as unknown as WorkbenchDockReady['api'],
+        ports: 'ports' as unknown as WorkbenchDockReady['ports'],
+      });
+    };
+    return { actor, running, ready };
+  };
+
+  // I1, D4: the Dockview hands its adapter over and takes it back; the machine runs it as a child, keeping the
+  // `DockviewApi` out of its context.
+  it('should run a Dockview adapter as a child until that Dockview releases it', () => {
+    const { actor, running, ready } = dockHarness();
+    ready('dock-1', 'api-1');
+    expect([...running]).toEqual(['api-1']);
+    expect(JSON.stringify(actor.getSnapshot().context)).not.toContain('api-1');
+    actor.send({ type: 'dockReleased', adapter: 'workbench', dockId: 'dock-1' });
+    expect([...running]).toEqual([]);
+    actor.stop();
+  });
+
+  // A new mount replaces the adapter it had, and a late release of the old mount stops nothing newer.
+  it('should replace an adapter on a new mount and ignore a release of the mount it replaced', () => {
+    const { actor, running, ready } = dockHarness();
+    ready('dock-1', 'api-1');
+    ready('dock-2', 'api-2');
+    expect([...running]).toEqual(['api-2']);
+    actor.send({ type: 'dockReleased', adapter: 'workbench', dockId: 'dock-1' });
+    expect([...running]).toEqual(['api-2']);
+    actor.stop();
+    expect([...running]).toEqual([]);
   });
 });

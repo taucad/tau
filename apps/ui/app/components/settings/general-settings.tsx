@@ -5,10 +5,11 @@ import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import { useColor } from '#hooks/use-color.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
+import { useClientFact, writeClientFacts } from '#lib/client-facts.js';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { ColorPicker } from '@taucad/ui-kit/components/color-picker';
-import { Button } from '@taucad/ui/components/button';
 import { Switch } from '@taucad/ui/components/switch';
+import { Button } from '@taucad/ui/components/button';
 
 function getThemeIcon(themeId: ThemeWithSystem): React.JSX.Element {
   switch (themeId) {
@@ -41,7 +42,7 @@ export function GeneralSettings(): React.JSX.Element {
   const { themeWithSystem, setTheme, currentOption } = useTheme();
   const { hue, setHue, resetHue } = useColor();
   const [areCodeInlayHintsEnabled, setCodeInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
-  const [usePointerCursors, setUsePointerCursors] = useCookie(cookieName.pointerCursors, false);
+  const usePointerCursors = useClientFact('pointerCursors') === true;
 
   const handleThemeChange = (value: string): void => {
     const newTheme = value === 'null' ? null : (value as Theme);
@@ -77,12 +78,12 @@ export function GeneralSettings(): React.JSX.Element {
               )}
               onSelect={handleThemeChange}
             >
-              <Button variant='outline' size='sm' className='w-36 justify-between'>
+              <Button variant='outline' className='w-36 justify-between font-normal'>
                 <span className='flex items-center gap-2'>
                   {getThemeIcon(themeWithSystem)}
                   <span className='truncate'>{currentOption.name}</span>
                 </span>
-                <ChevronDown className='size-4 shrink-0 opacity-50' />
+                <ChevronDown className='size-4 shrink-0 text-muted-foreground' />
               </Button>
             </ComboBoxResponsive>
           }
@@ -100,12 +101,12 @@ export function GeneralSettings(): React.JSX.Element {
                 setHue(value.h);
               }}
             >
-              <Button variant='outline' size='sm' className='w-36 justify-between'>
+              <Button variant='outline' className='w-36 justify-between font-normal'>
                 <span className='flex items-center gap-2'>
                   <span className='size-4 shrink-0 rounded-full bg-primary' />
                   <span className='truncate'>Hue {hue}°</span>
                 </span>
-                <ChevronDown className='size-4 shrink-0 opacity-50' />
+                <ChevronDown className='size-4 shrink-0 text-muted-foreground' />
               </Button>
             </ColorPicker>
           }
@@ -115,7 +116,13 @@ export function GeneralSettings(): React.JSX.Element {
           title='Pointer cursors'
           description='Show a hand cursor over buttons and links'
           control={
-            <Switch aria-label='Pointer cursors' checked={usePointerCursors} onCheckedChange={setUsePointerCursors} />
+            <Switch
+              aria-label='Pointer cursors'
+              checked={usePointerCursors}
+              onCheckedChange={(pointerCursors) => {
+                writeClientFacts({ pointerCursors });
+              }}
+            />
           }
         />
       </SettingsGroup>

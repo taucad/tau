@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router';
-import type { GizmoStyleId, GoalId, LanguageId, MousePresetId, ToolId } from '@taucad/preferences';
+import type { GizmoStyleId, GoalId, LanguageId, MousePresetId, OrbitStyleId, ToolId } from '@taucad/preferences';
 import { resetLeaf } from '@taucad/preferences';
 import { Button } from '@taucad/ui/components/button';
 import { Heading } from '@taucad/ui/components/heading';
@@ -10,9 +10,8 @@ import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.
 import { useFeature } from '#flags/use-feature.js';
 import { settingsSectionSchema } from '#hooks/use-settings-dialog.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { deviceRecordStore, personRecordStores } from '#preferences/person-record.store.js';
+import { personRecordStores } from '#preferences/person-record.store.js';
 import type { SectionWriteResult } from '#preferences/section-store.js';
-import { useDeviceRecord } from '#preferences/use-device-record.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { SetupAnswersPanel } from '#components/onboarding/setup-answers-panel.js';
 import { setupChromeCopy, setupStepCopy, setupStorageCopy, stepCountLabel } from '#components/onboarding/setup-copy.js';
@@ -33,7 +32,7 @@ const viewerSettingsSection = settingsSectionSchema.safeParse('viewer');
 type Stage = SetupStepId | 'done';
 
 /** The record sections setup writes; the device keeps or refuses each on its own. */
-type RecordSection = 'profile' | 'viewer' | 'device' | 'onboarding';
+type RecordSection = 'profile' | 'viewer' | 'onboarding';
 
 /**
  * The header: the step bars, the step count and Skip. After Finish it shows only the title.
@@ -113,7 +112,6 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
   const isWarehouseEnabled = useFeature('partsWarehouse');
   const steps = setupSteps(isViewerControlsEnabled);
   const { profile, viewer, onboarding, writeProfile, writeViewer, writeOnboarding } = usePersonRecord();
-  const { device, writeDevice } = useDeviceRecord();
   const kernels = useMemo(() => readKernelLanguages(), []);
   const isDesktop = isDesktopTarget();
   const telemetry = useSetupTelemetry(entry);
@@ -143,13 +141,12 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
     }
   }, [current]);
 
-  const rows = answerRows({ profile, viewer, device, kernels, isViewerControlsEnabled });
+  const rows = answerRows({ profile, viewer, kernels, isViewerControlsEnabled });
 
   /** The record as the stores hold it now, after a write in this handler. */
-  const readRecord = (): Readonly<{ profile: typeof profile; viewer: typeof viewer; device: typeof device }> => ({
+  const readRecord = (): Readonly<{ profile: typeof profile; viewer: typeof viewer }> => ({
     profile: personRecordStores.profile.read(),
     viewer: personRecordStores.viewer.read(),
-    device: deviceRecordStore.read(),
   });
 
   /** Note whether the device kept a write to one section. */
@@ -192,6 +189,9 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
       answer('viewer', () => writeViewer({ controls: { preset } }));
       telemetry.presetSelected(preset, profile);
     },
+    orbitStyle: (orbitStyle: OrbitStyleId) => {
+      answer('viewer', () => writeViewer({ controls: { orbitStyle } }));
+    },
     gizmo: (choice: GizmoChoiceId) => {
       if (choice === 'none') {
         telemetry.gizmoHidden();
@@ -208,11 +208,6 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
                 : {}),
             }),
       );
-    },
-    trackpad: (isTrackpad: boolean) => {
-      const inputDevice = isTrackpad ? 'trackpad' : 'mouse';
-      answer('device', () => writeDevice({ inputDevice }));
-      telemetry.inputDeviceChanged(inputDevice);
     },
   };
 
@@ -255,7 +250,6 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
               headingRef={heading}
               profile={profile}
               viewer={viewer}
-              device={device}
               isTourWanted={isTourWanted}
               hasTakenTour={hasTakenTour(onboarding)}
               isDesktop={isDesktop}
@@ -296,10 +290,9 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
                 <SetupViewerStep
                   profile={profile}
                   viewer={viewer}
-                  device={device}
                   onPresetChange={answers.preset}
                   onGizmoChange={answers.gizmo}
-                  onTrackpadChange={answers.trackpad}
+                  onOrbitStyleChange={answers.orbitStyle}
                 />
               ) : null}
               {current === 'how' ? (

@@ -50,7 +50,7 @@ repos:
     upstream: Fennec-hub/three-viewport-gizmo
     description: Three Viewport Gizmo - interactive three.js view helper
     fork: taucad/three-viewport-gizmo
-    commit: bbad36f3e1a2b80650a9d31831c8b1bb7443eefb
+    commit: bed9a3c809abe7fac8203707261297143b8a0acc
   three.js:
     upstream: mrdoob/three.js
     branch: dev

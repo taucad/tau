@@ -28,6 +28,7 @@ import type {
 import { tauToolKinds } from '@taucad/agent-host';
 import type { RunEntry } from '@taucad/agent-host';
 import type { CadAgentExecution } from '@taucad/chat';
+import type { ReportingConsent } from '@taucad/telemetry/client';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import { chunksSince } from '#machines/chat-projection.logic.js';
 import { agentPlacementOf } from '#lib/agent-host-placement.js';
@@ -885,13 +886,14 @@ export const createAgentSessionTracker = (report: AgentTelemetryReport = default
 };
 
 /**
- * What the admitting surface knows about consent and the kernel the turn runs on. `autoKernel` is present when Auto
- * runs the turn, which then reports how it resolved (blueprint D10).
+ * What the admitting surface knows about consent and the kernel the turn runs on. `consent` is the page's resolved
+ * usage-and-diagnostics consent (`resolveTelemetryConsent`, AR-W6-02): only `granted` reports anything, and `unknown`
+ * reports nothing. `autoKernel` is present when Auto runs the turn, which then reports how it resolved (blueprint D10).
  * @public
  */
 export type AgentTurnConsent = Readonly<{
   kernelId: string;
-  allowsUsageMetrics: boolean;
+  consent: ReportingConsent;
   autoKernel?: Omit<AutoKernelTurn, 'execution'>;
 }>;
 
@@ -901,8 +903,12 @@ export type AgentTurnTelemetry = Readonly<{
   refused: (error: unknown) => void;
 }>;
 
+/** A turn admitted without consent: nothing about it is reported. */
+const unreportedTurn: AgentTurnTelemetry = { admitted: () => undefined, refused: () => undefined };
+
 /**
- * Agent usage telemetry for one chat surface: its session, and every turn it admits.
+ * Agent usage telemetry for one chat surface: its session, and every turn it admits. A turn admitted without granted
+ * consent reports nothing, and the session it finds open ends without a report.
  *
  * @param source - The chat's projection.
  * @param report - Where to report; defaults to the ingest API.
@@ -917,15 +923,24 @@ export const createAgentUsageTelemetry = (
   begin: (execution: CadAgentExecution, consent: AgentTurnConsent) => AgentTurnTelemetry;
   end: () => void;
 }> => {
-  const session = createAgentSessionTracker(report);
+  /* The latest admission's consent: a session opened with consent and left after it was withdrawn ends unreported. */
+  let granted = false;
+  const session = createAgentSessionTracker((entry) => {
+    if (granted) {
+      report(entry);
+    }
+  });
   return {
     begin(execution, consent) {
+      granted = consent.consent === 'granted';
+      if (!granted) {
+        return unreportedTurn;
+      }
       const admittedAt = performance.now();
       const { autoKernel } = consent;
-      const usageMetrics: AgentTurnUsageMetrics | undefined =
-        consent.allowsUsageMetrics && knownKernels.has(consent.kernelId)
-          ? { kernelId: consent.kernelId as AgentTurnUsageMetrics['kernelId'] }
-          : undefined;
+      const usageMetrics: AgentTurnUsageMetrics | undefined = knownKernels.has(consent.kernelId)
+        ? { kernelId: consent.kernelId as AgentTurnUsageMetrics['kernelId'] }
+        : undefined;
       let identity: AgentIdentity | undefined;
       quietly(() => {
         identity = agentIdentityOf(execution);

@@ -129,7 +129,7 @@ export const flagRegistry = {
     schema: z.boolean().default(false),
     posthogKey: 'onboarding',
     label: 'Onboarding',
-    description: 'The setup route, the product tour and home suggestions',
+    description: 'The setup route and the product tour',
   },
   onboardingAutoOpen: {
     showInExperimental: false,

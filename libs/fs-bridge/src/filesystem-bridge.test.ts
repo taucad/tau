@@ -993,7 +993,64 @@ describe('exposeFileSystem coalesced delivery', () => {
     channel.port1.close();
   });
 
-  it('should replace every discarded backend with one backendChanged loss signal', () => {
+  /*
+   * STO-25 SP2g: a window past its bound is a scoped loss, not a backend swap.
+   * A root-wide `backendChanged` made the page re-list every directory it had
+   * shown and re-read every document it held, for a fill that wrote one folder.
+   * Each directory a discarded fact touched is reset instead, so a rooted
+   * connection hears its own part of the loss and nothing outside it (I7).
+   */
+  it('should replace a discarded window with a directoryChanged per directory it touched', () => {
+    const bus = new ChangeEventBus();
+    const handle = exposeFileSystem(
+      {},
+      {
+        policy: tauPathPolicy,
+        changeEventBus: bus,
+        createCoalescer: (deliver, coalescingWindow, onOverflow) =>
+          new EventCoalescer(deliver, { coalescingWindow, maxQueueDepth: 4, onOverflow }),
+      },
+    );
+    const channel = new MessageChannel();
+    for (const h of messageHandlers) {
+      h(
+        new MessageEvent('message', {
+          data: { v: fileSystemBridgeProtocolVersion, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+        }),
+      );
+    }
+    const serverHandle = [...handle.serverHandles.values()][0]!;
+    const emitSpy = vi.spyOn(serverHandle, 'emit');
+
+    bus.emit(written('/projects/alpha/parts/a.scad'));
+    bus.emit(written('/projects/alpha/parts/b.scad'));
+    bus.emit({
+      type: 'fileRenamed',
+      oldPath: '/projects/alpha/parts/b.scad',
+      newPath: '/projects/alpha/b.scad',
+      backend: testBackend,
+    });
+    bus.emit({ type: 'directoryDeleted', path: '/projects/alpha/old', backend: testBackend });
+    bus.emit({ type: 'fileWritten', path: '/c.txt', backend: 'opfs' });
+
+    /* One message per port per delivery (D6): every loss signal travels together. */
+    expect(emitSpy).toHaveBeenCalledOnce();
+    expect(emitSpy).toHaveBeenCalledWith('fileChanged', {
+      type: 'changeSet',
+      /* The removal as itself, then one re-list per directory no later re-list of an ancestor covers. */
+      entries: [
+        { type: 'directoryDeleted', path: '/projects/alpha/old', backend: testBackend },
+        { type: 'directoryChanged', path: '/projects/alpha', backend: testBackend },
+        { type: 'directoryChanged', path: '/projects/alpha/old', backend: testBackend },
+        { type: 'directoryChanged', path: '/', backend: 'opfs' },
+      ],
+    });
+
+    handle.cleanup();
+    channel.port2.close();
+  });
+
+  it('should keep a discarded backendChanged as the loss signal of its backend', () => {
     const bus = new ChangeEventBus();
     const handle = exposeFileSystem(
       {},
@@ -1015,17 +1072,15 @@ describe('exposeFileSystem coalesced delivery', () => {
     const serverHandle = [...handle.serverHandles.values()][0]!;
     const emitSpy = vi.spyOn(serverHandle, 'emit');
 
-    bus.emit(written('/a.txt'));
-    bus.emit(written('/b.txt'));
-    bus.emit({ type: 'fileWritten', path: '/c.txt', backend: 'opfs' });
+    bus.emit(written('/a/one.txt'));
+    bus.emit({ type: 'backendChanged', backend: testBackend });
+    bus.emit({ type: 'fileWritten', path: '/b/two.txt', backend: 'opfs' });
 
-    /* One message per port per delivery (D6): both loss signals travel together. */
-    expect(emitSpy).toHaveBeenCalledOnce();
     expect(emitSpy).toHaveBeenCalledWith('fileChanged', {
       type: 'changeSet',
       entries: [
-        { type: 'backendChanged', backend: 'memory' },
-        { type: 'backendChanged', backend: 'opfs' },
+        { type: 'backendChanged', backend: testBackend },
+        { type: 'directoryChanged', path: '/b', backend: 'opfs' },
       ],
     });
 

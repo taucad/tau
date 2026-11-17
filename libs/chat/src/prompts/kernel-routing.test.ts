@@ -3,6 +3,7 @@ import { kernelConfigurations, resolveKernel } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 import {
   buildSnapshotKernel,
+  entryAdoptionSentence,
   groupKernelsByRepresentation,
   kernelChoiceCondition,
   renderKernelGuidance,
@@ -145,7 +146,9 @@ describe('renderKernelGuidance', () => {
     const text = renderKernelGuidance({ preference: 'auto', profile: profiles.web });
     expect(text.startsWith(`${kernelChoiceCondition}\n\n`)).toBe(true);
     expect(text).toContain(renderKernelRoutingCard(profiles.web));
-    expect(text.endsWith("After choosing, activate that kernel's `cad-` skill before writing.")).toBe(true);
+    expect(
+      text.endsWith(`After choosing, activate that kernel's \`cad-\` skill before writing. ${entryAdoptionSentence}`),
+    ).toBe(true);
   });
 
   it("should keep today's sentence for a manual pick with no entry or the same kernel", () => {

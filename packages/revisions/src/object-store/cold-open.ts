@@ -484,7 +484,14 @@ const openCatalogue = async (options: ColdOpenOptions): Promise<OpenedCatalogue 
   const getBytes = async (href: string, range?: readonly [number, number]): Promise<Uint8Array<ArrayBuffer>> => {
     const response = await filesFetch(href, {
       credentials: 'omit',
-      ...(range === undefined ? {} : { headers: { range: `bytes=${String(range[0])}-${String(range[1] - 1)}` } }),
+      /*
+       * A Range read skips the HTTP cache: Chrome holds one cache entry lock per URL, so parallel ranges of one pack
+       * link waited on each other (10 in parallel: 2,057 ms, against 230 ms uncached; speed phase SP0). A cold open reads
+       * each range once, so the cache bought nothing here.
+       */
+      ...(range === undefined
+        ? {}
+        : { cache: 'no-store', headers: { range: `bytes=${String(range[0])}-${String(range[1] - 1)}` } }),
       ...(signal === undefined ? {} : { signal }),
     });
     if (response.status !== (range === undefined ? 200 : 206)) {

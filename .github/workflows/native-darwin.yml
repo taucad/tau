@@ -23,8 +23,8 @@
 #   their rows in the queue like any other.
 # - Benchmarks: `release-desktop-staging.yml` calls this workflow with `benchmarks` on the commit it is
 #   about to tag, so no desktop candidate exists without green benchmark gates on its own commit. The
-#   15:41 nightly stays until two candidates have run them green (resume § 4, § 5b); a dispatch runs them
-#   with `benchmarks`.
+#   15:41 nightly was retired once two candidates had run them green (resume § 4, § 5b); a dispatch runs
+#   them with `benchmarks`.
 #
 # When called, `ref` is set: the plan takes the rows from the caller instead of selecting them.
 name: Native darwin
@@ -36,8 +36,6 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     branches-ignore:
       - production
-  schedule:
-    - cron: '41 15 * * *' # 15:41 UTC, after the e2e nightly has its macOS runner
   workflow_dispatch:
     inputs:
       benchmarks:
@@ -80,7 +78,7 @@ env:
 # A labelled pull request's newer push cancels its outdated run, and another label added to it starts a
 # run whose jobs skip, in a group of its own so it cannot cancel the rows already running. A run called
 # from `ci.yml` or the candidate gate (`inputs.ref` set) gets a group of its own (`github.run_id`) and is
-# never cancelled; the nightly and each dispatch keep groups of their own. The group names this workflow
+# never cancelled; each dispatch keeps a group of its own. The group names this workflow
 # literally: called, `github.workflow` is the caller's, and a group equal to the caller's would cancel the
 # call.
 concurrency:
@@ -119,15 +117,15 @@ jobs:
         with:
           save-pnpm-store: 'false'
 
-      # Called (`CALLED_REF` set), the caller's projects. Otherwise every project on a dispatch, the
-      # affected ones on a labelled pull request, and none on the nightly (it runs only the gates).
+      # Called (`CALLED_REF` set), the caller's projects. Otherwise every project on a dispatch and the
+      # affected ones on a labelled pull request.
       # `pipefail` so a failing `nx show projects` fails the step; `tail -1` drops Nx's log lines.
       - name: Select the projects with a test:native-darwin target
         id: plan
         env:
           CALLED_REF: ${{ inputs.ref }}
           CALLED_PROJECTS: ${{ inputs.projects }}
-          BENCHMARKS: ${{ github.event_name == 'schedule' || inputs.benchmarks == true }}
+          BENCHMARKS: ${{ inputs.benchmarks == true }}
         run: |
           set -o pipefail
           if [ -n "$CALLED_REF" ]; then
@@ -287,8 +285,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The two benchmark-native scripts as gates (charter D23, W15): on each desktop candidate's commit,
-  # nightly and on dispatch, on a macos-26 runner of their own so a long soak never delays a row. Build123d's
+  # The two benchmark-native scripts as gates (charter D23, W15): on each desktop candidate's commit
+  # and on dispatch, on a macos-26 runner of their own so a long soak never delays a row. Build123d's
   # benchmark runs the closure sealed from the cached seed; PicoGK's builds its worker first.
   benchmarks:
     name: Native benchmark gates on darwin-arm64

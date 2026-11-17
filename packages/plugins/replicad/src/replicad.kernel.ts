@@ -171,8 +171,8 @@ const replicadMultiWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs
 // start) only recovers these values. `asset-ownership.test.ts` recomputes both from the
 // installed binaries and fails when the dependency moves.
 const replicadWasmDigests = {
-  single: 'sha256:ca354769b158aa38479e6fa59bc7511d0fa896059ce755a0cff85261a637ee6a',
-  multi: 'sha256:31b1fdd375d8257218bdeb155f7aeaf34e074f8ddb01a815ea7ebfa85d4e6444',
+  single: 'sha256:b35be25eee599f8476d0bd33f45fa3ec0394482fc6a9899aa38cbf1c547495d3',
+  multi: 'sha256:b00c4337d605d6f4c11492deae1e3bc14c10ab6e41126df421ac50cae4186435',
 } as const;
 
 // =============================================================================
@@ -503,7 +503,7 @@ export const replicadKernel = defineKernel({
   builtinModuleNames: ['replicad', '@taucad/replicad/annotations'],
   builtinPackages: {
     replicad: replicadPackage,
-    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '0.23.0-beta.0' },
+    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '0.23.0-beta.1' },
   },
   name: 'ReplicadKernel',
   // 1.5.0: native-handle snapshots are binary BRep. The version keys every cached entry, so text
@@ -653,7 +653,7 @@ export const replicadKernel = defineKernel({
       }
       const computeProducer = {
         id: '@taucad/replicad',
-        version: `replicad@${replicadPackage.version}|replicad-opencascadejs@0.23.0-beta.0|adapter@1`,
+        version: `replicad@${replicadPackage.version}|replicad-opencascadejs@0.23.0-beta.1|adapter@1`,
         implementationAssets,
       };
       const computeEnvironment = {

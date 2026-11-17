@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { createPackage } from '@electron/asar';
@@ -46,6 +46,11 @@ const main = async (): Promise<void> => {
   );
   await createPackage(source, join(input, 'resources/app.asar'));
   await writeFile(join(input, 'Tau'), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+  // The Linux Terminal writes git stores through the bundled guard; the image carries it executable, with its NOTICE.
+  const storeGuard = join(input, 'resources/store-guard/linux-x64');
+  await mkdir(storeGuard, { recursive: true });
+  await writeFile(join(storeGuard, 'tau-store-guard'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  await writeFile(join(storeGuard, 'NOTICE'), 'tau-store-guard notices\n');
   const inputBytes = await readFile(join(input, 'resources/app.asar'));
   const keyFile = join(fixture, 'keys.json');
   const { publicKey } = generateKeyPairSync('ed25519');
@@ -71,6 +76,15 @@ const main = async (): Promise<void> => {
   assert.deepEqual(await readFile(join(input, 'resources/app.asar')), inputBytes);
   const appDirectory = join(output, 'verification/squashfs-root');
   const image = join(output, 'Tau-linux-x64.AppImage');
+  const shippedGuard = join(appDirectory, 'resources/store-guard/linux-x64');
+  assert.deepEqual(
+    await readFile(join(shippedGuard, 'tau-store-guard')),
+    await readFile(join(storeGuard, 'tau-store-guard')),
+  );
+  const guardStatus = await stat(join(shippedGuard, 'tau-store-guard'));
+  // oxlint-disable-next-line no-bitwise -- Permission bits are a bit mask.
+  assert.equal(guardStatus.mode & 0o777, 0o755);
+  assert.equal(await readFile(join(shippedGuard, 'NOTICE'), 'utf8'), 'tau-store-guard notices\n');
   const packages = await buildLinuxAptPackages({
     appDirectory,
     appImagePath: image,

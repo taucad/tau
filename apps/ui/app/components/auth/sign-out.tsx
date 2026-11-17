@@ -7,6 +7,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
 import { setEntryPreference } from '@taucad/ui-core/lib/entry-preference';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { clearLegacyProjectListing } from '#lib/legacy-project-listing.lib.js';
 import { authErrorMessage } from '@taucad/ui-core/utils/auth-error.utils';
 
 export type SignOutProps = {
@@ -33,6 +34,8 @@ export function SignOut({ className }: SignOutProps): React.JSX.Element {
       });
     },
     onSuccess: () => {
+      /* An earlier build's project listing snapshot holds names; a shared device keeps none of them. */
+      clearLegacyProjectListing();
       if (!isDesktopTarget()) {
         const prefersWebsite = setEntryPreference('website');
         globalThis.location.replace(prefersWebsite ? '/' : '/?website=1');

@@ -204,10 +204,20 @@ type HostLabels = Readonly<{ host?: string; build?: string; kernel?: string; mod
 const turnHost = (host: NonNullable<OutcomeTurn>['host']): string | undefined =>
   host === 'cli' ? 'daemon' : (host ?? undefined);
 
+/* A run's labels as its outcome or one of its tools names them, in the gateway's terms. */
+const runLabels = (labels: Pick<NonNullable<OutcomeTurn>, 'host' | 'kernel' | 'model'>): HostLabels => {
+  const host = turnHost(labels.host);
+  return {
+    ...(host === undefined ? {} : { host }),
+    ...(labels.kernel === null ? {} : { kernel: labels.kernel }),
+    ...(labels.model === null ? {} : { model: labels.model }),
+  };
+};
+
 /**
  * The host labels one fact carries (LW17): a model call's as the host sent them with the call and the gateway admitted
- * them, a run's outcome's as the host recorded its turn. A helper or direct call, a tool and every other fact carry
- * none.
+ * them, a run's outcome's as the host recorded its turn, and a tool's as the host recorded its run. A helper or direct
+ * call, an older host's tool and every other fact carry none.
  */
 const hostLabelsOf = (evidence: Evidence): HostLabels => {
   const fact = evidence.payload.plane === 'feedback' ? undefined : evidence.payload.fact;
@@ -215,12 +225,10 @@ const hostLabelsOf = (evidence: Evidence): HostLabels => {
     return fact.labels ?? {};
   }
   if (fact?.kind === 'outcome' && fact.turn !== undefined) {
-    const host = turnHost(fact.turn.host);
-    return {
-      ...(host === undefined ? {} : { host }),
-      ...(fact.turn.kernel === null ? {} : { kernel: fact.turn.kernel }),
-      ...(fact.turn.model === null ? {} : { model: fact.turn.model }),
-    };
+    return runLabels(fact.turn);
+  }
+  if (fact?.kind === 'tool' && fact.labels !== undefined) {
+    return runLabels(fact.labels);
   }
   return {};
 };

@@ -1,6 +1,5 @@
 import { chatComposerTrayClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
-import { ChatAutoKernelRow } from '#components/chat/chat-auto-kernel-row.js';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
@@ -18,8 +17,10 @@ import {
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
+import { useProjectComposerHandOff } from '#components/chat/project-composer-hand-off.js';
 import { useTourAnchors } from '#components/tour/tour-anchors.js';
 import { ChatTodoList } from '#components/chat/chat-todo-list.js';
+import type { ChatTranscriptState } from '#services/chat-session-store.js';
 import { ChatQuestionQueue } from '#components/chat/chat-question-queue.js';
 import { ChatQuestionsProvider } from '#components/chat/chat-questions-context.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
@@ -52,11 +53,9 @@ import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
 // One conversational turn per virtual row, sized only by its content.
 const TurnGroup = memo(function ({
   messageIds,
-  isFirst,
   isLast,
 }: {
   readonly messageIds: readonly string[];
-  readonly isFirst: boolean;
   readonly isLast: boolean;
 }) {
   return (
@@ -70,7 +69,6 @@ const TurnGroup = memo(function ({
           footer={index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : undefined}
         />
       ))}
-      {isFirst ? <ChatAutoKernelRow /> : null}
       {isLast ? <ChatError className='mx-4' /> : null}
     </div>
   );
@@ -89,26 +87,42 @@ const appendedTurnOverscan = { top: 0, bottom: 120 } as const;
 // `ScrollerProps` is `Pick<ComponentProps<'div'>, 'children' | 'style' | 'tabIndex'>`
 // — Virtuoso also forwards `className` at runtime (so consumers can style via
 // `<Virtuoso className=...>`), but the public type omits it. We widen here.
-const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: string }>(function (props, ref) {
-  return (
-    <div
-      {...props}
-      ref={ref}
-      role='region'
-      aria-label='Chat history'
-      className={cn('[scrollbar-gutter:stable]', props.className)}
-    />
-  );
-});
+// The list's `context` is the transcript's load state (I21), marked on the Scroller: busy, and drawing nothing,
+// while it loads (U7, U19).
+const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: string; context?: ChatTranscriptState }>(
+  function ({ context, ...props }, ref) {
+    return (
+      <div
+        {...props}
+        ref={ref}
+        role='region'
+        aria-label='Chat history'
+        aria-busy={context === 'loading' ? true : undefined}
+        data-transcript-state={context}
+        className={cn('[scrollbar-gutter:stable]', props.className)}
+      />
+    );
+  },
+);
 
 const ChatHistoryHeader = (): undefined => undefined;
 /* The phone sheet at half on a short phone leaves the transcript too little height for the whole empty state:
  * there it keeps its icon and title, so nothing runs under the composer (a size container, queried by height). */
-const ChatHistoryEmptyPlaceholder = (): React.JSX.Element => (
-  <div className='[container-type:size] mx-auto flex h-full w-[calc(100%_-_1rem)] max-w-xl px-3 py-6'>
-    <ChatHistoryEmpty className='[@container_(max-height:15rem)]:py-0 [@container_(max-height:15rem)]:[&_[data-slot=panel-empty-state-description]]:hidden' />
-  </div>
-);
+/* Only a chat whose load settled with no turns is empty: while it loads the feed draws nothing (U7, I21). */
+const ChatHistoryEmptyPlaceholder = ({
+  context,
+}: {
+  readonly context?: ChatTranscriptState;
+}): React.JSX.Element | undefined =>
+  context === 'empty' ? (
+    <div className='[container-type:size] mx-auto flex h-full w-[calc(100%_-_1rem)] max-w-xl px-3 py-6'>
+      <ChatHistoryEmpty className='[@container_(max-height:15rem)]:py-0 [@container_(max-height:15rem)]:[&_[data-slot=panel-empty-state-description]]:hidden' />
+    </div>
+  ) : undefined;
+/* A tray frame that holds only a reserved height draws nothing: the reservation keeps the composer's height (U10). */
+// Literal, so the stylesheet scanner sees it; the slot is `composerTrayReserveSlot`.
+const reservedTrayClassName =
+  'has-[>[data-slot=composer-tray-reserve]:only-child]:border-transparent has-[>[data-slot=composer-tray-reserve]:only-child]:bg-transparent';
 // Initial positioning waits for Virtuoso's measured content, including an initially empty pane.
 const initialChatTurn = { index: 'LAST', align: 'end' } as const;
 
@@ -175,6 +189,7 @@ const ExpandedChatHistory = memo(function ({
   const isMobile = useIsMobile();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
+  const composerHandOff = useProjectComposerHandOff();
   /* The product tour points at the composer; the region is also the foot of the chat lane, where a tip about a
    * transcript row that has scrolled away is placed. */
   const composerAnchor = useTourAnchors('composer', 'chat-lane');
@@ -227,11 +242,13 @@ const ExpandedChatHistory = memo(function ({
   );
 
   const groups = useChatSelector((state) => state.turnGroups);
+  const transcript = useChatSelector((state) => state.transcript);
+  const reservesTaskList = useChatSelector((state) => state.rememberedComposerTrays.includes('todo'));
 
   const renderItem = useCallback(
     (index: number, group: TurnGroupData) => {
       const isLast = index === groups.length - 1;
-      return <TurnGroup messageIds={group.messageIds} isFirst={index === 0} isLast={isLast} />;
+      return <TurnGroup messageIds={group.messageIds} isLast={isLast} />;
     },
     [groups.length],
   );
@@ -296,6 +313,7 @@ const ExpandedChatHistory = memo(function ({
               <Virtuoso
                 ref={virtuosoRef}
                 data={groups}
+                context={transcript}
                 initialTopMostItemIndex={initialChatTurn}
                 itemContent={renderItem}
                 computeItemKey={computeItemKey}
@@ -337,8 +355,12 @@ const ExpandedChatHistory = memo(function ({
                 onScrollToBottom={scrollToBottom}
               />
               <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
-              <div className={chatComposerTrayClassName}>
-                <ChatTodoList key={activeChatId} />
+              <div className={cn(chatComposerTrayClassName, reservedTrayClassName)}>
+                <ChatTodoList
+                  key={activeChatId}
+                  reserveHeight={reservesTaskList}
+                  isTranscriptLoading={transcript === 'loading'}
+                />
                 <ChatMessageQueue key={`${activeChatId}:messages`} />
                 <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
               </div>
@@ -347,6 +369,8 @@ const ExpandedChatHistory = memo(function ({
                 enableMobileCollapse={isMobile}
                 mode='main'
                 enableAutoFocus={false}
+                /* The workspace frame served this composer's native input; adopt it at the reveal (PL6). */
+                handOff={composerHandOff}
                 onSubmit={onSubmit}
               />
             </div>

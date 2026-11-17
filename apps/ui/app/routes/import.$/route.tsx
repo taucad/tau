@@ -25,7 +25,7 @@ import { Label } from '@taucad/ui/components/label';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { useProjects } from '#hooks/use-projects.js';
-import { withNamedLock } from '#hooks/use-cloud-projects.js';
+import { withNamedLock } from '#lib/named-lock.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { RepositoryCard } from '#routes/import.$/repository-card.js';
@@ -56,7 +56,7 @@ import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { largeObjectThresholdBytes, RevisionPortError } from '@taucad/revisions';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -75,7 +75,6 @@ import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {
   title: 'Import',
-  enableOverflowY: true,
 };
 
 const readSplatPath = (params: Record<string, string | undefined>): string => params['*'] ?? '';
@@ -126,9 +125,9 @@ export function meta({ params, location }: Route.MetaArgs): MetaDescriptor[] {
  * React Router SPA mode (`ui:build:desktop`) bans server `loader` exports.
  */
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- inferred type
-export function clientLoader({ request, params }: Route.ClientLoaderArgs) {
+export function clientLoader({ url, params }: Route.ClientLoaderArgs) {
   /* An address that is not a GitHub repository opens the form holding it, never the crash page. */
-  return resolveImportRoute(readSplatPath(params), new URL(request.url).search);
+  return resolveImportRoute(readSplatPath(params), url.search);
 }
 
 type ImportMode = 'github' | 'disk';

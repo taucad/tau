@@ -2,16 +2,25 @@ import { describe, expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import type { CloudLoadRecord, CloudRequestCounts, CloudStandInDelays } from '#support/cloud-stand-ins.js';
-import { waitForOfflineShell } from '#support/billing-usage-fixture.js';
+import { setTargetOffline, waitForOfflineShell } from '#support/billing-usage-fixture.js';
 import {
   cloudDefectRow,
   cloudLoadProbe,
   cloudStandInCommands,
+  cloudStandInPaths,
   cloudStandInOwner,
   cloudStandInProject,
   readCloudLoadRecord,
   recordCloudLoad,
 } from '#support/cloud-stand-ins.js';
+
+/** F14: what an offline reload of a project draws. */
+type OfflineRead = {
+  readonly url: string;
+  readonly frame: boolean;
+  readonly workspace: boolean;
+  readonly alerts: readonly string[];
+};
 
 /**
  * The cloud-build load tier (lane A0.11, `ui-e2e:test:e2e:cloud-load`): the loading defects a self-host build cannot
@@ -34,6 +43,20 @@ const wide = { width: 1440, height: 900 } as const;
 const held = 2000;
 /** How long a settled load is watched for a late request or change. Milliseconds. */
 const settleWindow = 3000;
+/** The timing ladder (UI Policy § 6): an indicator shows from 1,000 ms and says the wait is long at 10,000 ms. */
+const indicatorDelay = 1000;
+const slowWait = 10_000;
+/** K-b's late listing, past the indicator delay; K-d's, past the slow mark. Milliseconds. */
+const cloudWait = 3000;
+const longCloudWait = 12_000;
+/** How long K-c counts requests after its Retry. Milliseconds. */
+const retryWatch = 9000;
+/** A row's own setup failed: not the defect, so it fails the row whatever `expectedFailure` says. */
+const precondition = (condition: boolean, message: string): void => {
+  if (!condition) {
+    throw new Error(message);
+  }
+};
 const workspace = selectors.getByCss('[data-project-workspace]');
 /** How long K-f holds the usage document, as the audit's 17 to 19 s stalls held it. Milliseconds. */
 const documentStall = 20_000;
@@ -116,7 +139,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: 'N2: requests get-session, /v1/projects, /v1/agents and the file-manager worker once per load of Home',
     },
     async (defect) => {
@@ -176,7 +199,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: `U1: keeps the sidebar wrapper on a project route while get-session is held ${String(held)} ms, the chunk undelayed`,
     },
     async (defect) => {
@@ -202,7 +225,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
-      expectedFailure: true,
+      expectedFailure: false,
       title: `H6: holds the project grid's top offset on Home while /v1/projects is held ${String(held)} ms`,
     },
     async (defect) => {
@@ -215,11 +238,118 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await waitForSettledHome();
       const record = await keep('h6-listing-held');
       expect(record.gridTops.length, 'the project grid was never on screen').toBeGreaterThan(0);
+      precondition(
+        record.gridTops.some((sample) => sample.cloudListing),
+        'H6: the Tau Cloud listing was never awaited while the grid was on screen',
+      );
       const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
       await defect(() => {
         expect(tops, `H6: the project grid's top offset moved (${JSON.stringify(record.gridTops)})`).toEqual([
           record.gridTops.at(-1)?.top,
         ]);
+      });
+    },
+  );
+
+  /* K-b to K-d (P-k): the Tau Cloud listing's wait, slow notice and failure are said in the Projects header's slot. */
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: false,
+      title: `K-b: says Home waits for Tau Cloud in the Projects header's slot from ${String(indicatorDelay)} ms, the grid still, while /v1/projects is ${String(cloudWait)} ms late`,
+    },
+    async (defect) => {
+      await openSignedIn();
+      await seedLocalProject();
+      await target.navigate('/');
+      await waitForSettledHome();
+      await cloud.uiSetCloudStandInDelays({ projects: cloudWait });
+      await target.navigate('/');
+      await waitForSettledHome();
+      const record = await keep('k-b-listing-late');
+      const waits = record.cloudStates.filter((state) => state.text.includes('Loading Tau Cloud projects'));
+      precondition(waits.length > 0, 'K-b: the Tau Cloud wait was never shown');
+      const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
+      await defect(() => {
+        expect(
+          {
+            firstShownAt: Math.min(...waits.map((state) => state.t)) >= indicatorDelay,
+            inHeader: waits.every((state) => state.inHeader),
+            gridMoved: tops.length > 1,
+          },
+          `K-b: the Tau Cloud wait as shown ${JSON.stringify(waits)}, grid tops ${JSON.stringify(record.gridTops)}`,
+        ).toEqual({ firstShownAt: true, inHeader: true, gridMoved: false });
+      });
+    },
+  );
+
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: false,
+      title:
+        "K-c: reports a failed Tau Cloud listing in the Projects header's slot, the grid still, and its Retry asks once",
+    },
+    async (defect) => {
+      await openSignedIn();
+      await seedLocalProject();
+      await target.navigate('/');
+      await waitForSettledHome();
+      await cloud.uiSetCloudStandInFailures({ projects: 500 });
+      await target.navigate('/');
+      await waitForSignedIn();
+      await target.waitFor(
+        () =>
+          (
+            globalThis as typeof globalThis & { __TAU_CLOUD_LOAD__: CloudLoadRecord }
+          ).__TAU_CLOUD_LOAD__.cloudStates.some((state) => state.role === 'alert'),
+        undefined,
+        { timeout: 60_000 },
+      );
+      await target.delay(settleWindow);
+      await cloud.uiReadCloudRequestCounts(true);
+      await target.click(selectors.getByRole('button', { name: 'Retry Tau Cloud' }));
+      /* Long enough for react-query's own retries of a failed listing (1, 2 and 4 s) to be counted. */
+      await target.delay(retryWatch);
+      const counts = await cloud.uiReadCloudRequestCounts();
+      const record = await keep('k-c-listing-failed', counts);
+      const alerts = record.cloudStates.filter((state) => state.role === 'alert');
+      const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
+      await defect(() => {
+        expect(
+          {
+            words: alerts.every((state) => state.text.includes('Tau Cloud projects not loaded')),
+            inHeader: alerts.every((state) => state.inHeader),
+            gridMoved: tops.length > 1,
+            retryRequests: counts.projects,
+          },
+          `K-c: alerts ${JSON.stringify(alerts)}, grid tops ${JSON.stringify(record.gridTops)}, requests after Retry ${JSON.stringify(counts)}`,
+        ).toEqual({ words: true, inHeader: true, gridMoved: false, retryRequests: 1 });
+      });
+    },
+  );
+
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: false,
+      title: `K-d: says the Tau Cloud wait is long, with Retry, in the Projects header's slot at ${String(slowWait)} ms, while /v1/projects is ${String(longCloudWait)} ms late`,
+    },
+    async (defect) => {
+      await openSignedIn();
+      await seedLocalProject();
+      await target.navigate('/');
+      await waitForSettledHome();
+      await cloud.uiSetCloudStandInDelays({ projects: longCloudWait });
+      await target.navigate('/');
+      await waitForSettledHome();
+      const record = await keep('k-d-listing-long');
+      const slow = record.cloudStates.filter((state) => state.text.includes('Still loading Tau Cloud projects'));
+      await defect(() => {
+        expect(
+          slow.some((state) => state.inHeader && state.t >= slowWait && state.text.includes('Retry')),
+          `K-d: the Tau Cloud states shown ${JSON.stringify(record.cloudStates)}`,
+        ).toBe(true);
       });
     },
   );
@@ -245,4 +375,84 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       });
     },
   );
+
+  /*
+   * F14 (A15b2, programme control 2026-11-16T12:12Z): with the service worker installed and the browser offline, a
+   * reload of a project on this device draws the workspace frame and the workspace, with no error state.
+   */
+  cloudDefectRow(
+    {
+      api: test,
+      expectedFailure: true,
+      title:
+        'F14: an offline reload of a project on this device renders the workspace frame and the workspace, the service worker installed',
+    },
+    async (defect) => {
+      await openSignedIn();
+      const route = await seedLocalProject();
+      await waitForSettledProject();
+      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-offline-shell-/u);
+      await setTargetOffline(true);
+      let reloadError = '';
+      let offline: OfflineRead;
+      /* Back online whatever happens, so a later row never runs offline. */
+      try {
+        try {
+          await target.reload();
+        } catch (error) {
+          reloadError = error instanceof Error ? error.message.split('\n')[0]! : String(error);
+        }
+        const readOffline = async (): Promise<OfflineRead> =>
+          target.evaluate(() => ({
+            url: location.href,
+            frame: document.querySelector('[data-slot="workspace-frame"]') !== null,
+            workspace: document.querySelector('[data-project-workspace]') !== null,
+            alerts: [...document.querySelectorAll('[role="alert"]')].map((node) =>
+              node.textContent.trim().slice(0, 120),
+            ),
+          }));
+        /* Up to 30 s for the workspace; a page that never draws it is the defect, read as it stands. */
+        await target
+          .waitFor(() => document.querySelector('[data-project-workspace]') !== null, undefined, { timeout: 30_000 })
+          .catch(() => undefined);
+        /* Not caught: a failed read is a harness fault, which must fail the row, not stand as the defect. */
+        offline = await readOffline();
+        await target.writeArtifact(
+          'cloud-load-gate/f14-offline-reload.json',
+          `${JSON.stringify({ route, reloadError, offline }, null, 2)}\n`,
+        );
+      } finally {
+        await setTargetOffline(false);
+      }
+      await defect(() => {
+        expect(
+          { frame: offline.frame, workspace: offline.workspace, alerts: offline.alerts },
+          `F14: after an offline reload of ${route} (${reloadError || 'the reload resolved'}), the page at ${offline.url || 'unknown'}`,
+        ).toEqual({ frame: true, workspace: true, alerts: [] });
+      });
+    },
+  );
+
+  /* K-e (A15e), report-only, ruled by programme control on 2026-11-15: the first open of a Tau Cloud project with its
+     download held. The viewer stage should stay mounted and show the status pill with the download's percent, never be
+     replaced. This tier cannot force it: its stand-ins answer only the session, the listing and the paired hosts. The
+     listing names `cloudStandInProject` as on the Tau remote, but nothing here serves its repository (see N2's
+     project-route note), so no clone or large-object download ever starts. The forced row needs a stand-in for the API's git proxy that serves a clone of `cloudStandInProject` with
+     at least one large object, and holds either the clone (`git-upload-pack`) or the large-object answer
+     (`info/lfs/objects/batch` or the object itself). That need joins the git-proxy stand-in item carried to A10's
+     handback. The stage's own half is pinned by `chat-viewer.test.tsx` (the download pill with its percent, the
+     failure overlay) and the frame row F8. This row records the gap and fails once a stand-in answers anything else,
+     so the lane that adds one turns it into the forced row. */
+  test('K-e report-only: the first open of a Tau Cloud project with its download held cannot be forced in this tier', async ({
+    annotate,
+  }) => {
+    await annotate(
+      'K-e report-only: needs a git-proxy stand-in serving the Tau-remote project with a large object, holding its clone or its large-object answer',
+      'notice',
+    );
+    expect(
+      Object.keys(cloudStandInPaths),
+      'K-e: a stand-in now answers more than the session, the listing and the paired hosts; turn this row into the forced K-e row',
+    ).toEqual(['session', 'projects', 'agents']);
+  });
 });

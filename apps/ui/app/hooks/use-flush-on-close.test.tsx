@@ -6,34 +6,50 @@ import { fileURLToPath } from 'node:url';
 import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StepClock } from '@taucad/xstate-testing/clock';
-import type * as DesktopBridgeModule from '#filesystem/desktop-bridge.js';
 import { UnloadProvider, useFlushOnClose, useFlushProducers } from '#hooks/use-flush-on-close.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
-import { createSessionsActor, registerProjectSessionServices } from '#services/sessions-store.js';
+import { startEnvironmentHost } from '#runtime/environment.fixture.js';
+import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
+import { createSessionsRegistryLogic } from '#services/sessions-store.js';
+import { sessionRuntimeOpenerStandIn } from '#runtime/project-runtime.session.fixture.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
 
-/* A0.2: the desktop quit seam, captured so a row can ask the renderer to quit. */
-const desktopQuit = vi.hoisted(() => ({
+/* A0.2: the desktop quit seam `environment` is composed with, captured so a row can ask the renderer to quit. */
+const desktopQuit = {
   ask: undefined as ((attemptId: string) => void) | undefined,
   answers: [] as string[],
-}));
-vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof DesktopBridgeModule>()),
-  onDesktopQuitRequested: (handler: (attemptId: string) => void) => {
-    desktopQuit.ask = handler;
-    return () => {
-      desktopQuit.ask = undefined;
-    };
+  seam: {
+    onQuitRequested: (handler: (attemptId: string) => void) => {
+      desktopQuit.ask = handler;
+      return () => {
+        desktopQuit.ask = undefined;
+      };
+    },
+    reportQuiesced: (attemptId: string, forced: boolean) => {
+      desktopQuit.answers.push(`${attemptId}:${String(forced)}`);
+    },
   },
-  reportDesktopQuiesced: (attemptId: string, forced: boolean) => {
-    desktopQuit.answers.push(`${attemptId}:${String(forced)}`);
-  },
-}));
+};
 vi.mock('#components/nav/project-close-dialogs.js', () => ({ BudgetRefusedDialog: () => null }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
 }));
 
 let visibility: DocumentVisibilityState = 'visible';
+
+/* D26: `environment` is the one listener; each row composes it over the page with a sequencer of its own. */
+let environment: EnvironmentHostFixture = startEnvironmentHost();
+const startEnvironment = (options?: Parameters<typeof startEnvironmentHost>[0]): EnvironmentHostFixture => {
+  environment.stop();
+  environment = startEnvironmentHost(options);
+  return environment;
+};
+beforeEach(() => {
+  startEnvironment();
+});
+afterEach(() => {
+  environment.stop();
+});
 
 function Registration({
   callback,
@@ -60,7 +76,7 @@ describe('UnloadProvider', () => {
     const producer = Promise.withResolvers<void>();
 
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment.sequencer}>
         <Registration
           callback={(phase) => {
             sequence.push(`session:${phase}`);
@@ -103,7 +119,7 @@ describe('UnloadProvider', () => {
     }
 
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment.sequencer}>
         <Registration
           callback={(phase) => {
             sequence.push(`session:${phase}`);
@@ -146,7 +162,7 @@ describe('UnloadProvider', () => {
       return undefined;
     }
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment.sequencer}>
         <Registration
           stage='producer'
           callback={() => {
@@ -179,7 +195,7 @@ describe('UnloadProvider', () => {
         return undefined;
       };
       render(
-        <UnloadProvider>
+        <UnloadProvider sequencer={environment.sequencer}>
           <Registration
             stage='producer'
             callback={async () => {
@@ -220,19 +236,23 @@ describe('UnloadProvider', () => {
 });
 
 /*
- * A0.2 (row S26, D26): the eight `useFlushOnClose` registrations the app mounts today, with the stage each
- * declares. Seven are producers; the revision lifecycle's is the session stage — the close cut.
+ * A0.2 (row S26, D26): the `useFlushOnClose` registrations the app mounts today, with the stage each declares: three
+ * producers. The layout record's producer left `workbench-record-host.tsx` in A8b and the entries host's left with the
+ * host in A9: the project runtime registers both. The persistence guard's registration and the view settings host's
+ * left in A7c: each live session registers once at the producer stage through the app runtime's wiring, and its
+ * runtime's producer set holds the view record sessions' flush. The session stage's close cut left
+ * `useRevisionClientLifecycle` in A7b: each session's `revisions` child registers it through the same wiring.
  */
-const unloadRegistrations = [
-  { site: 'routes/w.$workspace.$project/project-live-sessions.tsx', stage: 'producer' },
-  { site: 'routes/w.$workspace.$project/entries-sync-host.tsx', stage: 'producer' },
-  { site: 'routes/w.$workspace.$project/workbench-record-host.tsx', stage: 'producer' },
-  { site: 'routes/w.$workspace.$project/view-settings-sync-host.tsx', stage: 'producer' },
-  { site: 'hooks/use-revision-status.ts', stage: 'session' },
+const reactRegistrations = [
   { site: 'hooks/use-editor-document-session.tsx', stage: 'producer' },
   { site: 'hooks/active-chat-provider.tsx', stage: 'producer' },
   { site: 'components/global-chat-flush-guard.tsx', stage: 'producer' },
 ] as const;
+
+/** The session's close cut, which the app runtime registers for each `revisions` child (A7b). */
+const sessionCut = { site: 'runtime/session-revisions.ts', stage: 'session' } as const;
+
+const unloadRegistrations = [...reactRegistrations, sessionCut] as const;
 
 /** Each registration's callback, as a step a row can hold open and release. */
 const heldRegistrations = (sequence: string[]) =>
@@ -252,6 +272,19 @@ const heldRegistrations = (sequence: string[]) =>
     };
   });
 
+/** A producer an actor registers straight on the sequencer, outside React (plan § 4 A5b order row). */
+const actorProducer = (sequence: string[]) => {
+  const gate = Promise.withResolvers<void>();
+  return {
+    release: gate.resolve,
+    callback: async (phase: 'hidden' | 'pagehide'): Promise<void> => {
+      sequence.push(`producer:actor:${phase}:start`);
+      await gate.promise;
+      sequence.push(`producer:actor:${phase}:done`);
+    },
+  };
+};
+
 describe('UnloadProvider — the unload order over the S26 registrations (A0.2 item 9)', () => {
   beforeEach(() => {
     visibility = 'visible';
@@ -261,23 +294,30 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
     });
   });
 
-  it('should name the eight registration sites with the stage each declares', async () => {
+  it('should name the three React registration sites with the stage each declares, the sessions and the session cut', async () => {
+    const read = async (site: string): Promise<string> =>
+      readFile(join(dirname(fileURLToPath(import.meta.url)), '..', site), 'utf8');
+    expect(await read('runtime/app-runtime.ts')).toContain("unload.register('session', cut)");
+    expect(await read('runtime/app-runtime.ts')).toContain("unload.register('producer', flush)");
+    expect(await read('services/sessions-store.ts')).toContain('wiring.registerProducer(');
+    expect(await read('routes/w.$workspace.$project/project-live-sessions.tsx')).not.toContain('useFlushOnClose(');
+    expect(await read(sessionCut.site)).not.toContain('useFlushOnClose(');
     const declared = await Promise.all(
-      unloadRegistrations.map(async ({ site }) => {
-        const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), '..', site), 'utf8');
+      reactRegistrations.map(async ({ site }) => {
+        const source = await read(site);
         return [...source.matchAll(/useFlushOnClose\([\s\S]*?\{ stage: '(producer|session)' \}\s*,?\s*\)/gu)].map(
           (match) => match[1],
         );
       }),
     );
-    expect(declared).toEqual(unloadRegistrations.map(({ stage }) => [stage]));
+    expect(declared).toEqual(reactRegistrations.map(({ stage }) => [stage]));
   });
 
   it('should settle every producer on hidden before the session stage runs, and run only the session stage on pagehide', async () => {
     const sequence: string[] = [];
     const registrations = heldRegistrations(sequence);
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment.sequencer}>
         {registrations.map(({ site, stage, callback }) => (
           <Registration key={site} stage={stage} callback={callback} />
         ))}
@@ -302,26 +342,84 @@ describe('UnloadProvider — the unload order over the S26 registrations (A0.2 i
       });
     }
     await waitFor(() => {
-      expect(sequence.at(-1)).toBe('session:hooks/use-revision-status.ts:hidden:done');
+      expect(sequence.at(-1)).toBe('session:runtime/session-revisions.ts:hidden:done');
     });
     const firstSession = sequence.findIndex((entry) => entry.startsWith('session:'));
     const producerDone = sequence.filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done'));
-    expect(producerDone).toHaveLength(7);
+    expect(producerDone).toHaveLength(reactRegistrations.length);
     expect(sequence.slice(0, firstSession).filter((entry) => entry.endsWith(':done'))).toEqual(producerDone);
 
     sequence.length = 0;
     globalThis.dispatchEvent(new Event('pagehide'));
     expect(sequence).toEqual([
-      'session:hooks/use-revision-status.ts:pagehide:start',
-      'session:hooks/use-revision-status.ts:pagehide:done',
+      'session:runtime/session-revisions.ts:pagehide:start',
+      'session:runtime/session-revisions.ts:pagehide:done',
     ]);
+  });
+  it('should settle an actor-registered producer with the React ones on hidden before any session stage (round 15)', async () => {
+    const sequence: string[] = [];
+    const registrations = heldRegistrations(sequence);
+    const actor = actorProducer(sequence);
+    const unregister = environment.sequencer.register('producer', actor.callback);
+    render(
+      <UnloadProvider sequencer={environment.sequencer}>
+        {registrations.map(({ site, stage, callback }) => (
+          <Registration key={site} stage={stage} callback={callback} />
+        ))}
+      </UnloadProvider>,
+    );
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(sequence).toContain('producer:actor:hidden:start');
+    for (const producer of registrations.filter(({ stage }) => stage === 'producer')) {
+      // oxlint-disable-next-line no-await-in-loop -- one release per step, in order, is the point
+      await act(async () => {
+        producer.release();
+        await Promise.resolve();
+      });
+    }
+    /* Every React producer is done; the actor's still holds the session stage back. */
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(sequence.some((entry) => entry.startsWith('session:'))).toBe(false);
+    await act(async () => {
+      actor.release();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(sequence.at(-1)).toBe('session:runtime/session-revisions.ts:hidden:done');
+    });
+    const firstSession = sequence.findIndex((entry) => entry.startsWith('session:'));
+    expect(sequence.slice(0, firstSession)).toContain('producer:actor:hidden:done');
+    unregister();
   });
 });
 
-describe('the quit guard — producers before the close cut (A0.2 item 9, D26)', () => {
+describe('the quit guard — producers before the session close (A0.2 item 9, D26, A7c)', () => {
   const projectId = 'proj_quit_aaaaaaaaaaaaaaa';
-  let releaseServices: (() => void) | undefined;
-  let registry: ReturnType<typeof createSessionsActor> | undefined;
+  /* A7c: the registry's sessions build their runtime on a stand-in, whose close flush and runtime close the row hears
+   * in order with the producers. Without wiring the sync step has no client to quiesce and passes through. */
+  const startQuitEnvironment = (sequence: string[]) => {
+    const opener = sessionRuntimeOpenerStandIn();
+    opener.onBuilt(projectId, (standIn) => {
+      standIn.onSignal((signal) => sequence.push(`session-runtime:${signal}`));
+    });
+    return startEnvironment({
+      registry: true,
+      sessions: createSessionsRegistryLogic({
+        sharedWorker: () => undefined,
+        openRuntime: opener,
+        openFileManager: (id: string) => openSessionFileManagerStandIn(id),
+      }),
+      desktopQuit: desktopQuit.seam,
+      clock: new StepClock(),
+    });
+  };
 
   beforeEach(() => {
     /* The order rows above leave the page hidden. */
@@ -333,32 +431,20 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
   });
 
   afterEach(() => {
-    registry?.stop();
-    registry = undefined;
-    releaseServices?.();
-    releaseServices = undefined;
     desktopQuit.ask = undefined;
     desktopQuit.answers.length = 0;
   });
 
-  it("should settle every producer registration before the registry takes a session's close cut", async () => {
+  it("should settle every producer registration before the registry starts a session's close flush", async () => {
     const sequence: string[] = [];
     const registrations = heldRegistrations(sequence);
-    const started = createSessionsActor({ clock: new StepClock() }).start();
-    registry = started;
-    releaseServices = registerProjectSessionServices(projectId, {
-      cancelRuns: async () => undefined,
-      flushProducers: async () => {
-        sequence.push('session-service:flushProducers');
-      },
-      flushSync: async () => {
-        sequence.push('session-service:close-cut');
-      },
-      closeRuntime: async () => undefined,
-    });
+    const { registry: started } = startQuitEnvironment(sequence);
+    if (started === undefined) {
+      throw new Error('the environment host spawns a registry');
+    }
     started.send({ type: 'open', projectId });
     render(
-      <UnloadProvider>
+      <UnloadProvider sequencer={environment.sequencer}>
         {registrations.map(({ site, stage, callback }) => (
           <Registration key={site} stage={stage} callback={callback} />
         ))}
@@ -374,7 +460,7 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
     });
     const producers = registrations.filter(({ stage }) => stage === 'producer');
     for (const producer of producers) {
-      expect(sequence).not.toContain('session-service:close-cut');
+      expect(sequence).not.toContain('session-runtime:flush:close');
       expect(started.getSnapshot().matches('ready')).toBe(true);
       // oxlint-disable-next-line no-await-in-loop -- one release per step, in order, is the point
       await act(async () => {
@@ -386,13 +472,63 @@ describe('the quit guard — producers before the close cut (A0.2 item 9, D26)',
       expect(desktopQuit.answers).toEqual(['quit-attempt:false']);
     });
 
-    const cut = sequence.indexOf('session-service:close-cut');
-    expect(cut).toBeGreaterThan(-1);
+    const closeFlush = sequence.indexOf('session-runtime:flush:close');
+    expect(closeFlush).toBeGreaterThan(-1);
     expect(
-      sequence.slice(0, cut).filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done')),
-    ).toHaveLength(7);
+      sequence.slice(0, closeFlush).filter((entry) => entry.startsWith('producer:') && entry.endsWith(':done')),
+    ).toHaveLength(reactRegistrations.length);
     /* Quit runs the producer stage itself; the session stage is the registry's close, not `hidden`'s. */
     expect(sequence.filter((entry) => entry.startsWith('session:'))).toEqual([]);
     expect(started.getSnapshot().matches('quiesced')).toBe(true);
+  });
+  it("should settle an actor-registered producer with the React ones before a session's close flush on quit (round 15)", async () => {
+    const sequence: string[] = [];
+    const registrations = heldRegistrations(sequence);
+    const { registry: started } = startQuitEnvironment(sequence);
+    if (started === undefined) {
+      throw new Error('the environment host spawns a registry');
+    }
+    const actor = actorProducer(sequence);
+    const unregister = environment.sequencer.register('producer', actor.callback);
+    started.send({ type: 'open', projectId });
+    render(
+      <UnloadProvider sequencer={environment.sequencer}>
+        {registrations.map(({ site, stage, callback }) => (
+          <Registration key={site} stage={stage} callback={callback} />
+        ))}
+        <SessionsProvider actor={started}>
+          <span>app</span>
+        </SessionsProvider>
+      </UnloadProvider>,
+    );
+
+    await act(async () => {
+      desktopQuit.ask?.('quit-attempt');
+      await Promise.resolve();
+    });
+    expect(sequence).toContain('producer:actor:hidden:start');
+    for (const producer of registrations.filter(({ stage }) => stage === 'producer')) {
+      // oxlint-disable-next-line no-await-in-loop -- one release per step, in order, is the point
+      await act(async () => {
+        producer.release();
+        await Promise.resolve();
+      });
+    }
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(sequence).not.toContain('session-runtime:flush:close');
+    expect(started.getSnapshot().matches('ready')).toBe(true);
+    await act(async () => {
+      actor.release();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(desktopQuit.answers).toEqual(['quit-attempt:false']);
+    });
+    const closeFlush = sequence.indexOf('session-runtime:flush:close');
+    expect(sequence.indexOf('producer:actor:hidden:done')).toBeGreaterThan(-1);
+    expect(sequence.indexOf('producer:actor:hidden:done')).toBeLessThan(closeFlush);
+    unregister();
   });
 });

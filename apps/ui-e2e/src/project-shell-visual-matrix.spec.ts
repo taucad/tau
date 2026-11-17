@@ -96,7 +96,9 @@ async function expectLayout(width: (typeof widths)[number]): Promise<void> {
 
   const metrics = await target.evaluate(() => {
     const workspace = document.querySelector<HTMLElement>('[data-project-workspace]');
-    const splitView = workspace?.querySelector<HTMLElement>(':scope > .split-view');
+    /* The lanes' Allotment sits inside its resize owner and the active chat's `display: contents` wrapper; the
+     * first resize owner in document order is the lanes', ahead of any nested pane. */
+    const splitView = workspace?.querySelector<HTMLElement>('[data-resize-owner] > .split-view');
     const visiblePanes = splitView
       ? [
           ...splitView.querySelectorAll<HTMLElement>(':scope > .split-view-container > .split-view-view-visible'),

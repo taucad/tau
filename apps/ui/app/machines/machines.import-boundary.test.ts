@@ -32,6 +32,7 @@ describe('session machine import boundary', () => {
     expect(sessionMachines().toSorted()).toEqual([
       'chat-session.machine.ts',
       'project-session.machine.ts',
+      'session-file-check.machine.ts',
       'sessions.machine.ts',
     ]);
   });

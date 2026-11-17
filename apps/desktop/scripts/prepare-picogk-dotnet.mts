@@ -1054,11 +1054,11 @@ type RuntimeVariant = {
 
 /**
  * The `dotnet` dependency file tau-plugin.json pins for a target, or, for a target it does not pin yet, the one
- * tau-plugin.variants.json stages: Microsoft's runtime archive, by URL and sha512.
+ * tau-plugin.variants.json stages: Microsoft's runtime archive, by URL and a sha256 or sha512 of its bytes.
  */
 const pinnedRuntimeArchive = async (
   targetName: string,
-): Promise<{ integrity: string; sha512: string; url: string; name: string }> => {
+): Promise<{ integrity: string; algorithm: 'sha256' | 'sha512'; hex: string; url: string; name: string }> => {
   const { rid } = targets[targetName]!;
   const manifest = JSON.parse(await readFile(pluginManifestPath, 'utf8')) as {
     readonly dependencies: Readonly<Record<string, readonly RuntimeVariant[]>>;
@@ -1068,9 +1068,10 @@ const pinnedRuntimeArchive = async (
   const variant = manifest.dependencies['runtime']?.find(ofTarget) ?? [staged[targetName]].find(Boolean);
   const runtime = variant?.files.find(({ name }) => name === 'dotnet');
   const url = runtime?.origin.urls?.[0];
-  if (runtime === undefined || url === undefined || !runtime.integrity.startsWith('sha512-')) {
+  const algorithm = /^(?<algorithm>sha256|sha512)-/u.exec(runtime?.integrity ?? '')?.groups?.['algorithm'];
+  if (runtime === undefined || url === undefined || (algorithm !== 'sha256' && algorithm !== 'sha512')) {
     throw new Error(
-      `${pluginManifestPath} pins, and ${stagedVariantsPath} stages, no ${targetName} dotnet runtime archive by sha512.`,
+      `${pluginManifestPath} pins, and ${stagedVariantsPath} stages, no ${targetName} dotnet runtime archive by sha256 or sha512.`,
     );
   }
   const expectedUrl = `https://builds.dotnet.microsoft.com/dotnet/Runtime/${dotnetRuntimeVersion}/dotnet-runtime-${dotnetRuntimeVersion}-${rid}.tar.gz`;
@@ -1081,13 +1082,14 @@ const pinnedRuntimeArchive = async (
   }
   return {
     integrity: runtime.integrity,
-    sha512: Buffer.from(runtime.integrity.slice('sha512-'.length), 'base64').toString('hex'),
+    algorithm,
+    hex: Buffer.from(runtime.integrity.slice(`${algorithm}-`.length), 'base64').toString('hex'),
     url,
     name: basename(url),
   };
 };
 
-/** Cross-check the runtime pin against Microsoft's release metadata, which publishes each file's sha512. */
+/** Cross-check the pinned runtime archive against Microsoft's release metadata, which publishes each file's sha512. */
 const assertRuntimePinPublished = async (pin: { sha512: string; url: string }, rid: string): Promise<void> => {
   const response = await fetch('https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json');
   if (!response.ok) {
@@ -1265,13 +1267,14 @@ const prepareLayer = async (targetName: string): Promise<void> => {
   await rm(tree, { recursive: true, force: true });
 
   const runtime = await pinnedRuntimeArchive(targetName);
-  await assertRuntimePinPublished(runtime, target.rid);
   const runtimeArchive = await download({
-    algorithm: 'sha512',
-    expected: runtime.sha512,
+    algorithm: runtime.algorithm,
+    expected: runtime.hex,
     name: runtime.name,
     url: runtime.url,
   });
+  // A sha256 pin names the bytes the dependency hosts serve; the sha512 Microsoft publishes is checked on the same bytes.
+  await assertRuntimePinPublished({ sha512: await digest(runtimeArchive, 'sha512'), url: runtime.url }, target.rid);
   const runtimeSha256 = await digest(runtimeArchive);
   const seed = resolve(layerRoot, 'seed');
   await rm(seed, { recursive: true, force: true });

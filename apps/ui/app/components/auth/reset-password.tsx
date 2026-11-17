@@ -4,6 +4,7 @@ import { useAuth, useResetPassword } from '@better-auth-ui/react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { SyntheticEvent } from 'react';
+import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
 import { Button } from '@taucad/ui/components/button';
@@ -13,6 +14,8 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { cn } from '@taucad/ui/utils/cn';
 import { Label } from '@taucad/ui/components/label';
+import { passwordResetSignInState } from '#components/auth/sign-in.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 export type ResetPasswordProps = {
   className?: string;
@@ -28,10 +31,22 @@ export type ResetPasswordProps = {
 export function ResetPassword({ className }: ResetPasswordProps): React.JSX.Element {
   const { authClient, basePaths, emailAndPassword, localization, viewPaths, navigate, Link } = useAuth();
 
+  const routerNavigate = useNavigate();
+
   const { mutate: resetPassword, isPending } = useResetPassword(authClient, {
     onSuccess: () => {
-      toast.success(localization.auth.passwordResetSuccess);
-      navigate({ to: `${basePaths.auth}/${viewPaths.auth.signIn}` });
+      const signInPath = `${basePaths.auth}/${viewPaths.auth.signIn}`;
+
+      // The desktop shell owns its sign-in, so a toast is the only confirmation that survives the hand-off.
+      if (isDesktopTarget()) {
+        toast.success(localization.auth.passwordResetSuccess);
+        navigate({ to: signInPath });
+        return;
+      }
+
+      // In the browser the sign-in view shows a lasting notice instead of a toast that is gone before the form is read.
+      // Replace the spent reset link so Back does not return to it.
+      void routerNavigate(signInPath, { replace: true, state: passwordResetSignInState });
     },
   });
 

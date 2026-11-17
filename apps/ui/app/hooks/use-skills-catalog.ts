@@ -5,8 +5,9 @@ import type { ObservationSnapshot } from '@taucad/fs-client/observation-service'
 import { useObservation, useObservationValue } from '@taucad/fs-client/react/use-observation';
 import type { SkillMetadata } from '@taucad/chat';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
+import { titleFromSkillName } from '@taucad/agent-tools/skills';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { createSkillResolver, titleFromSkillName } from '#lib/skill-resolver.js';
+import { createLazySkillResolver } from '#lib/lazy-skill-resolver.js';
 
 export function skillMetadataToSlashCommand(skill: SkillMetadata): {
   id: string;
@@ -85,7 +86,7 @@ function catalogFor(tree: FileTreeService, readFile: Reader, content: Content): 
         // Both resolver selections acquire each file and directory once per refresh.
         const files = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
         const directories = new Map<string, ReturnType<FileTreeService['listDirectory']>>();
-        const resolver = createSkillResolver({
+        const resolver = createLazySkillResolver({
           readFile: async (path) => {
             let bytes = files.get(path);
             if (!bytes) {

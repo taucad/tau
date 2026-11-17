@@ -326,6 +326,27 @@ describe('approved record grammar', () => {
     });
   });
 
+  it('reads a view and a named layout an earlier Tau wrote with the retired post-processing toggle', () => {
+    const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
+    const view = workbenchRecords.view.read(
+      encode({ version: 1, entryPath: 'main.ts', display: { grid: false, postProcessing: true } }),
+    );
+    expect(view.status).toBe('current');
+    expect(view.status === 'current' ? view.record.display : undefined).not.toHaveProperty('postProcessing');
+    expect(view.status === 'current' ? view.record.display.grid : undefined).toBe(false);
+    const layout = workbenchRecords.namedLayout.read(
+      encode({ version: 1, views: [{ id: 'front', entryPath: 'main.ts', display: { postProcessing: false } }] }),
+    );
+    expect(layout.status).toBe('current');
+  });
+
+  it('refuses a view with an unknown display toggle', () => {
+    const view = workbenchRecords.view.read(
+      new TextEncoder().encode(JSON.stringify({ version: 1, entryPath: 'main.ts', display: { bloom: true } })),
+    );
+    expect(view).toMatchObject({ status: 'invalid-preserved', code: 'INVALID_RECORD' });
+  });
+
   it('preserves invalid, newer and untrusted bytes', () => {
     for (const raw of [
       new Uint8Array(65 * 1024),

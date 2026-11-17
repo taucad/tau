@@ -1,17 +1,16 @@
 import { Fragment, useId } from 'react';
-import type { DeviceRecord, MousePresetId, PersonProfile, ViewerPreferences } from '@taucad/preferences';
+import type { MousePresetId, OrbitStyleId, PersonProfile, ViewerPreferences } from '@taucad/preferences';
 import {
   effectiveGizmoStyle,
   effectivePreset,
   familiarProducts,
   gizmoStyleIds,
   mousePresetIds,
+  orbitStyleIds,
   suggestedPreset,
 } from '@taucad/preferences';
-import { resolveCameraMapping } from '@taucad/viewer/graphics/three/controls/camera-presets';
-import type { CameraMappingId } from '@taucad/viewer/graphics/three/controls/camera-presets';
+import type { CameraPresetId } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
-import { Switch } from '@taucad/ui/components/switch';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import {
   familiarFromText,
@@ -23,22 +22,23 @@ import {
 import type { GizmoChoiceId } from '#components/onboarding/setup-copy.js';
 import { gizmoChoice, legendBindings, presetReason } from '#components/onboarding/setup-model.js';
 import { SetupViewerPreview } from '#components/onboarding/setup-viewer-preview.js';
+import { orbitStyleCopy } from '#components/settings/viewer/viewer-settings-copy.js';
 import { resolveViewerCameraInput } from '#routes/w.$workspace.$project/use-viewer-camera-input.js';
 
 /** What step 3 reads and writes. */
 export type SetupViewerStepProps = Readonly<{
   profile: PersonProfile;
   viewer: ViewerPreferences;
-  device: DeviceRecord;
   onPresetChange: (preset: MousePresetId) => void;
   onGizmoChange: (choice: GizmoChoiceId) => void;
-  onTrackpadChange: (isTrackpad: boolean) => void;
+  onOrbitStyleChange: (orbitStyle: OrbitStyleId) => void;
 }>;
 
 const gizmoChoices: readonly GizmoChoiceId[] = [...gizmoStyleIds, 'none'];
 
 const isPresetId = (value: string): value is MousePresetId => (mousePresetIds as readonly string[]).includes(value);
 const isGizmoChoice = (value: string): value is GizmoChoiceId => (gizmoChoices as readonly string[]).includes(value);
+const isOrbitStyle = (value: string): value is OrbitStyleId => (orbitStyleIds as readonly string[]).includes(value);
 
 /**
  * The binding legend: orbit, pan and zoom as key caps rendered from the preset data, then the bindings every preset
@@ -51,7 +51,7 @@ export function BindingLegend({
   mapping,
   isGizmoShown,
 }: {
-  readonly mapping: CameraMappingId;
+  readonly mapping: CameraPresetId;
   readonly isGizmoShown: boolean;
 }): React.JSX.Element {
   const bindings = legendBindings(mapping);
@@ -96,9 +96,9 @@ export function BindingLegend({
 }
 
 /**
- * Step 3: the mouse preset and gizmo, preselected from the tool answer, the trackpad switch, the
- * binding legend and the preview. Choosing a preset stores `viewer.controls.preset`, a style `viewer.gizmo.style`,
- * None `viewDefaults['display.gizmo'] = false`, and the switch the device's `inputDevice`.
+ * Step 3: the mouse preset and gizmo, preselected from the tool answer, the orbit style (Turntable until chosen), the
+ * binding legend and the preview. Choosing a preset stores `viewer.controls.preset`, an orbit style
+ * `viewer.controls.orbitStyle`, a style `viewer.gizmo.style`, and None `viewDefaults['display.gizmo'] = false`.
  *
  * @param properties - The record and its writers.
  * @returns The step's content.
@@ -106,19 +106,18 @@ export function BindingLegend({
 export function SetupViewerStep({
   profile,
   viewer,
-  device,
   onPresetChange,
   onGizmoChange,
-  onTrackpadChange,
+  onOrbitStyleChange,
 }: SetupViewerStepProps): React.JSX.Element {
   const id = useId();
   const preset = effectivePreset(viewer, profile);
   const suggestion = suggestedPreset(profile.tool);
   const gizmo = gizmoChoice(viewer, profile);
-  const isTrackpad = device.inputDevice === 'trackpad';
-  const mapping = resolveCameraMapping({ preset, inputDevice: device.inputDevice });
+  const orbitStyle = viewer.controls.orbitStyle ?? 'turntable';
+  const mapping = preset;
   /* The preview moves as every open viewer will: the same resolution the project viewer uses. */
-  const navigation = resolveViewerCameraInput({ enabled: true, profile, viewer, device });
+  const navigation = resolveViewerCameraInput({ enabled: true, profile, viewer });
   return (
     <div className='grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]'>
       <div className='flex min-w-0 flex-col gap-5'>
@@ -151,19 +150,36 @@ export function SetupViewerStep({
             ))}
           </RadioGroup>
           <p className='text-xs text-muted-foreground' data-testid='setup-preset-reason'>
-            {isTrackpad ? viewerStepCopy.trackpadNote : null}
-            {!isTrackpad && preset === suggestion ? presetReason(profile.tool) : null}
-            {!isTrackpad && preset !== suggestion ? familiarFromText(familiarProducts(preset)) : null}
+            {preset === suggestion ? presetReason(profile.tool) : familiarFromText(familiarProducts(preset))}
           </p>
         </fieldset>
 
-        <label className='flex items-center justify-between gap-4'>
-          <span className='flex min-w-0 flex-col gap-0.5'>
-            <span className='text-sm font-medium'>{viewerStepCopy.trackpad}</span>
-            <span className='text-xs text-muted-foreground'>{viewerStepCopy.trackpadHint}</span>
+        <div className='flex min-w-0 flex-col gap-2'>
+          <span id={`${id}-orbit`} className='text-sm font-medium'>
+            {viewerStepCopy.orbit}
           </span>
-          <Switch checked={isTrackpad} onCheckedChange={onTrackpadChange} aria-label={viewerStepCopy.trackpad} />
-        </label>
+          <ToggleGroup
+            type='single'
+            variant='outline'
+            value={orbitStyle}
+            onValueChange={(value) => {
+              if (isOrbitStyle(value)) {
+                onOrbitStyleChange(value);
+              }
+            }}
+            aria-labelledby={`${id}-orbit`}
+            className='flex-wrap justify-start'
+          >
+            {orbitStyleIds.map((option) => (
+              <ToggleGroupItem key={option} value={option} className='h-8 text-xs'>
+                {orbitStyleCopy[option].name}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          <p className='text-xs text-muted-foreground' data-testid='setup-orbit-hint'>
+            {orbitStyleCopy[orbitStyle].hint}
+          </p>
+        </div>
 
         <div className='flex min-w-0 flex-col gap-2'>
           <span id={`${id}-gizmo`} className='text-sm font-medium'>

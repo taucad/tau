@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
+import type { StreamingMachine, MachineQuitDecision } from '@taucad/types/desktop';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -139,14 +139,14 @@ vi.mock('#main/error-reporting.js', () => ({
   rendererErrorReportingEnvironment: vi.fn(() => ({})),
 }));
 
-vi.mock('#tau/native-preparation.js', () => ({
+vi.mock('@taucad/desktop-services-host/native-preparation', () => ({
   createDesktopKernelPreparer: (options: unknown) => {
     state.nativePreparerOptions = options;
     return { prepare: state.nativePrepare, cancel: state.nativeCancel, dispose: async () => undefined };
   },
 }));
 
-vi.mock('#tau/native-store.js', () => ({
+vi.mock('@taucad/desktop-services-host/native-store', () => ({
   desktopNativeKernelIds: () => ['build123d'],
   startNativeStore: vi.fn(async (options: unknown) => {
     state.nativeStoreOptions = options;
@@ -238,6 +238,9 @@ const fakeWindow = {
   isDestroyed: vi.fn(() => false),
   isMinimized: vi.fn(() => false),
   isFullScreen: vi.fn(() => false),
+  getSize: vi.fn((): [number, number] => [1216, 859]),
+  getContentSize: vi.fn((): [number, number] => [1200, 800]),
+  setMinimumSize: vi.fn(),
   restore: vi.fn(),
   loadURL: vi.fn(async () => undefined),
   reload: vi.fn(),
@@ -444,6 +447,7 @@ vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => state.shellApplied),
   packagedEsbuildEnvironment: vi.fn(() => ({ ESBUILD_BINARY_PATH: '/staged/esbuild' })),
   bundledGitEnvironment: vi.fn(() => ({})),
+  bundledStoreGuardEnvironment: vi.fn(() => ({})),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
   })),
@@ -651,6 +655,52 @@ describe('desktop main compute owner', () => {
   );
 
   it(
+    'logs a quit that reached before-quit with no reason of its own as external',
+    async () => {
+      await bootstrap();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', { purpose: 'quit', reason: 'external' });
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'logs the session ending as the reason for the quit that follows it',
+    async () => {
+      await bootstrap();
+      const { powerMonitor } = await import('electron');
+      // `on` is overloaded per event, so its recorded calls are read untyped.
+      const calls: ReadonlyArray<readonly unknown[]> = vi.mocked(powerMonitor.on).mock.calls;
+      const shutdown = calls.findLast(([event]) => event === 'shutdown')?.[1];
+      expect(shutdown).toBeTypeOf('function');
+      (shutdown as () => void)();
+      state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
+      await vi.waitFor(() => {
+        expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', {
+          purpose: 'quit',
+          reason: 'system-shutdown',
+        });
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'logs an update restart as its own quit reason',
+    async () => {
+      await bootstrap();
+      await expect(state.prepareToRestart!()).resolves.toBe(true);
+      expect(state.log).toHaveBeenCalledWith('info', 'main.quit-requested', {
+        purpose: 'restart',
+        reason: 'update-install',
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'installer failure restores services before permitting another install',
     async () => {
       await bootstrap();
@@ -798,6 +848,34 @@ describe('desktop main compute owner', () => {
       fakeWindow.isFullScreen.mockReturnValue(false);
       leave?.();
       expect(fakeWindow.webContents.send).toHaveBeenLastCalledWith(windowFullscreenChannel, false);
+    },
+    bootMilliseconds,
+  );
+
+  /* T-A2.1 (D4.6): the floor is a 400 × 300 content area, so the minimum set on the frame adds the frame's own size,
+   * measured after creation and again whenever full screen changes the chrome. */
+  it(
+    'should hold the window to a 400 x 300 content floor through its frame, and measure again after full screen',
+    async () => {
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1216, 859]);
+      fakeWindow.getContentSize.mockReturnValue([1200, 800]);
+      await bootstrap();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(416, 359);
+
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1440, 900]);
+      fakeWindow.getContentSize.mockReturnValue([1440, 900]);
+      const enter = fakeWindow.on.mock.calls.findLast(([name]) => name === 'enter-full-screen')?.[1];
+      enter?.();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(400, 300);
+
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1216, 859]);
+      fakeWindow.getContentSize.mockReturnValue([1200, 800]);
+      const leave = fakeWindow.on.mock.calls.findLast(([name]) => name === 'leave-full-screen')?.[1];
+      leave?.();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(416, 359);
     },
     bootMilliseconds,
   );

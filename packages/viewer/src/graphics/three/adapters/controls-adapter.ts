@@ -23,13 +23,18 @@
  * camera. The controls are written for every change except the one this adapter's own `update` reported (the person's
  * gesture, which the controls already hold), unless that change also brought a new render frame or a new native camera.
  * A pose another sender reports with the source `input` (a restored or adopted view) is written like any other. For an
- * orthographic gesture the controls' own zoom is handed the presented zoom, since the rig presents the span through the
- * frustum and `camera-controls` forces its zoom on every update. Each
+ * orthographic gesture the controls are handed the presented zoom and camera-to-target distance, since the rig presents
+ * the span through the frustum, places the camera at the distance the camera derives per view, and `camera-controls`
+ * forces its own zoom and radius on every update. Each
  * write is stamped with the change's revision so the `update` it causes is an echo the camera ignores.
  *
  * Each frame, at `tickPriority` (after the canvas reports its surface and before the render), the adapter follows the
  * root's event source and steps the controls, unless they are disabled or the canvas's view cube holds its interaction
  * lock.
+ *
+ * Orbit style (roll Finding 10): in Tumble, after each step of a held orbit drag, the controls take the camera's screen
+ * up as their orbit axis (`applyCameraUp`, which keeps the view), so the drag never reaches a pole and turns through
+ * it. Switching to Turntable gives the camera the scene's up again through the camera actor (`setUpDirection`).
  */
 import type { RootState } from '@react-three/fiber';
 import type { Mesh } from 'three';
@@ -82,6 +87,14 @@ type FrameSubscribe = (
 export const tickPriority = -1;
 
 const upAxes = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const satisfies Record<string, CameraVector>;
+
+/** The `camera-controls` actions that orbit: a mouse drag, a one-finger drag and the two-finger rotate gestures. */
+const orbitActions: ReadonlySet<number> = new Set([
+  CameraControlsImpl.ACTION.ROTATE,
+  CameraControlsImpl.ACTION.TOUCH_ROTATE,
+  CameraControlsImpl.ACTION.TOUCH_DOLLY_ROTATE,
+  CameraControlsImpl.ACTION.TOUCH_ZOOM_ROTATE,
+]);
 
 /**
  * What a canvas gives its controls adapter. Every member is a host object or a host callback; the adapter keeps them in
@@ -322,6 +335,8 @@ export const createControlsAdapter = ({
     let observedZoom = 1;
     let held = false;
     let moved = false;
+    // Whether the last frame read the Tumble orbit style: a switch to Turntable straightens the camera's up.
+    let tumble = false;
     let published:
       | Readonly<{ camera: ThreeCamera; renderFrame: RenderFrame; up: CameraVector; near: number; far: number }>
       | undefined;
@@ -361,17 +376,26 @@ export const createControlsAdapter = ({
         } finally {
           echoRevision = undefined;
         }
-      } else if (nativeCamera instanceof OrthographicCamera && observedZoom !== nativeCamera.zoom) {
+      } else if (nativeCamera instanceof OrthographicCamera) {
         /*
-         * The rig presents an orthographic span through the frustum at zoom 1, but `camera-controls` keeps its own zoom
-         * and forces it on every update: hand it the presented zoom, or each update would shrink the span again.
+         * The rig presents an orthographic span through the frustum at zoom 1 and places the camera at a distance the
+         * camera derives per view (so the bounds stay in front of the clip planes it solved). `camera-controls` keeps its
+         * own zoom and radius and forces both on every update: hand it the presented zoom and distance, or each update
+         * would shrink the span again and move the camera off the planes. Read the distance before `update` rewrites the
+         * position; `dollyTo` sets only the radius, so a held pan or orbit continues.
          */
-        echoRevision = snapshot.revision;
-        try {
-          void controls.zoomTo(nativeCamera.zoom, false);
-          controls.update(0);
-        } finally {
-          echoRevision = undefined;
+        const distance = nativeCamera.position.distanceTo(
+          toThreeRenderPoint({ renderFrame: snapshot.renderFrame, pointMeters: snapshot.view.target }),
+        );
+        if (observedZoom !== nativeCamera.zoom || controls.distance !== distance) {
+          echoRevision = snapshot.revision;
+          try {
+            void controls.zoomTo(nativeCamera.zoom, false);
+            void controls.dollyTo(distance, false);
+            controls.update(0);
+          } finally {
+            echoRevision = undefined;
+          }
         }
       }
       for (const retarget of consumersRef.current) {
@@ -497,8 +521,17 @@ export const createControlsAdapter = ({
     const ticker = {
       current(state: RootState, delta: number): void {
         followSurface(state);
+        const wasTumble = tumble;
+        tumble = getCameraRouting?.()?.cameraInput.orbitStyle === 'tumble';
+        if (wasTumble && !tumble) {
+          camera.send({ type: 'setUpDirection', axis: getUpAxis() });
+        }
         if (controls.enabled && !isInteractionLocked()) {
           controls.update(delta);
+          if (tumble && held && orbitActions.has(controls.currentAction)) {
+            controls.applyCameraUp();
+            controls.update(0);
+          }
         }
       },
     };

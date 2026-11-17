@@ -1397,7 +1397,22 @@ describe('hostControlMessageSchema', () => {
         defaultModel: 'gpt-5.6-sol',
         thoughtLevel,
       },
-      { id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_TOO_OLD' },
+      {
+        id: 'grok',
+        displayName: 'Grok Build',
+        models: [],
+        configOptions: [
+          { type: 'boolean', id: 'auto_approve', name: 'Always approve', category: 'mode', currentValue: false },
+          {
+            type: 'select',
+            id: 'mode',
+            name: 'Mode',
+            currentValue: 'build',
+            options: [{ value: 'build', name: 'Build' }],
+          },
+        ],
+      },
+      { id: 'claude', displayName: 'Claude Code', models: [], refusal: 'CLI_TOO_OLD', fixCommand: 'claude update' },
     ];
 
     expect(
@@ -1434,6 +1449,25 @@ describe('hostControlMessageSchema', () => {
           agent: {
             workspaceRoot: '/home/tau',
             externalAgents: [{ id: 'codex', displayName: 'Codex', models: [], refusal: 'x'.repeat(65) }],
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      hostControlMessageSchema.safeParse({
+        ...ready,
+        capabilities: {
+          agent: {
+            workspaceRoot: '/home/tau',
+            externalAgents: [
+              {
+                id: 'claude',
+                displayName: 'Claude Code',
+                models: [],
+                refusal: 'CLI_NOT_FOUND',
+                fixCommand: 'x'.repeat(257),
+              },
+            ],
           },
         },
       }).success,

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -59,12 +60,13 @@ describe('packaged Terminal smoke', () => {
     /*
      * The Terminal reads the project's real git store, read-only, with the git the app bundles: `git status` answers
      * once Tau has created the store. The packaged bundle's own `bin` folder leads the launch's `PATH`; on Linux the
-     * shell runs that git, while a macOS login Zsh lets `/etc/zprofile` move the system folders ahead of it.
+     * shell runs that git, while a macOS login Zsh lets `/etc/zprofile` move the system folders ahead of it. The exit
+     * file is written last, so every file the row reads exists once it appears.
      */
     await expect.poll(() => existsSync(join(root, '.git', 'HEAD')), { timeout: 30_000 }).toBe(true);
     await typeTerminalCommand(
       session.page,
-      `git status --porcelain > git-status.txt 2>&1; printf '%s' "$?" > git-status-exit.txt; git --version > git-version.txt 2>&1; command -v git > git-path.txt; printf '%s' "$PATH" > git-search-path.txt`,
+      `git status --porcelain > git-status.txt 2>&1; statusCode=$?; git --version > git-version.txt 2>&1; command -v git > git-path.txt; printf '%s' "$PATH" > git-search-path.txt; printf '%s' "$statusCode" > git-status-exit.txt`,
     );
     await expectTerminalFile(root, 'git-status-exit.txt', '0');
     expect(await readFile(join(root, 'git-status.txt'), 'utf8')).not.toMatch(/fatal|error/iu);
@@ -77,5 +79,27 @@ describe('packaged Terminal smoke', () => {
       process.platform === 'linux' ? resolvedGit.endsWith(`${bundledBin}/git`) : resolvedGit !== '',
       resolvedGit,
     ).toBe(true);
+
+    /*
+     * The packaged app commits from the Terminal where it ships a writable store: macOS, and Linux x64 through the
+     * bundled store guard. Elsewhere the store stays read-only and the commit is refused. The identity is given on the
+     * command line so the row does not depend on the signed-in account.
+     */
+    const writable = process.platform === 'darwin' || (process.platform === 'linux' && process.arch === 'x64');
+    await typeTerminalCommand(
+      session.page,
+      `printf 'packaged\\n' > committed.txt && git add committed.txt && git -c user.name=Packaged -c user.email=packaged@users.noreply.tau.new commit --quiet -m 'Packaged commit' > git-commit.txt 2>&1; printf '%s' "$?" > git-commit-exit.txt`,
+    );
+    await expect.poll(() => existsSync(join(root, 'git-commit-exit.txt')), { timeout: 30_000 }).toBe(true);
+    const commitExit = await readFile(join(root, 'git-commit-exit.txt'), 'utf8');
+    const commitOutput = await readFile(join(root, 'git-commit.txt'), 'utf8');
+    const subjects = execFileSync('git', ['-C', root, 'log', '--format=%s'], { encoding: 'utf8' });
+    if (writable) {
+      expect(commitExit, commitOutput).toBe('0');
+      expect(subjects.split('\n')[0]).toBe('Packaged commit');
+    } else {
+      expect(commitExit, commitOutput).not.toBe('0');
+      expect(subjects).not.toContain('Packaged commit');
+    }
   });
 });

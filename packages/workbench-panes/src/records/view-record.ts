@@ -7,7 +7,6 @@
  * - {@link viewCameraOrientation}: the direction and up of a preset or look camera.
  * - {@link viewSettingsOf}: the live graphics owner's view fields besides its camera, as a record holds them.
  */
-import * as THREE from 'three';
 import { cameraPresetOrientations, lengthUnits, viewFieldValuesOf, workbenchRecords } from '@taucad/workbench';
 import type { ViewFieldValues, ViewSettings, WorkbenchView } from '@taucad/workbench';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
@@ -17,7 +16,7 @@ import type {
   PinnedMeasurement,
 } from '@taucad/viewer/graphics/graphics-settings';
 import type { SectionCut } from '@taucad/viewer/graphics/section-cuts';
-import { resolveCameraUp } from '@taucad/viewer/graphics/three/utils/camera-controls-adapter';
+import { resolveCameraUp } from '@taucad/camera';
 
 /**
  * Translate a portable view into the graphics owner's create-only seed.
@@ -42,7 +41,6 @@ export const graphicsSettingsForView = (
     enableGrid: shown['display.grid'],
     enableAxes: shown['display.axes'],
     enableMatcap: shown['display.matcap'],
-    enablePostProcessing: shown['display.postProcessing'],
     upDirection: shown.upDirection,
     cameraFovAngle: shown.fieldOfView,
     ...(record.camera.kind === 'pose' ? { cameraView: record.camera } : {}),
@@ -75,7 +73,6 @@ export const newViewRecord = (entryPath: string | null, settings?: GraphicsViewS
             grid: settings.enableGrid,
             axes: settings.enableAxes,
             matcap: settings.enableMatcap,
-            postProcessing: settings.enablePostProcessing,
           },
           ...(settings.cameraView ? { camera: { kind: 'pose', ...settings.cameraView } } : {}),
         }
@@ -108,12 +105,8 @@ export const viewCameraOrientation = (
           : record.upDirection === 'y'
             ? ([0, 1, 0] as const)
             : ([0, 0, 1] as const)));
-  const up = resolveCameraUp({
-    direction: new THREE.Vector3(...direction),
-    preferredUp: new THREE.Vector3(...preferred),
-    fallbackUp: new THREE.Vector3(0, 1, 0),
-  });
-  return { direction: [...direction], up: [up.x, up.y, up.z] };
+  const up = resolveCameraUp({ direction, preferredUp: preferred, fallbackUp: [0, 1, 0] });
+  return { direction: [...direction], up: [...up] };
 };
 
 /**
@@ -153,7 +146,6 @@ type GraphicsViewContext = Readonly<{
   enableGrid: boolean;
   enableAxes: boolean;
   enableMatcap: boolean;
-  enablePostProcessing: boolean;
   upDirection: 'x' | 'y' | 'z';
   displayUnits: Readonly<{ length: Readonly<{ symbol: string }> }>;
   isSectionViewActive: boolean;
@@ -182,7 +174,6 @@ export const viewSettingsOf = (context: GraphicsViewContext, fieldOfView: number
     grid: context.enableGrid,
     axes: context.enableAxes,
     matcap: context.enableMatcap,
-    postProcessing: context.enablePostProcessing,
   },
   grid: { unit: isLengthUnit(context.displayUnits.length.symbol) ? context.displayUnits.length.symbol : 'mm' },
   section: { active: context.isSectionViewActive, cuts: context.sectionCuts.map((cut) => toPersistedSectionCut(cut)) },

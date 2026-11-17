@@ -166,6 +166,13 @@ export type SessionsMachineEvent =
       readonly availability?: ProjectSessionAvailability;
     }
   | { readonly type: 'sessionClosed'; readonly projectId: string; readonly reason: ProjectSessionCloseReason }
+  /** A live session's editor focused `chatId` for the chat it was asked for (A6d); announced for focus. */
+  | {
+      readonly type: 'sessionChatFocused';
+      readonly projectId: string;
+      readonly requestedChatId?: string;
+      readonly chatId: string;
+    }
   | { readonly type: 'cancelPendingOpen' }
   | { readonly type: 'quit' }
   | { readonly type: 'quitAnyway' };
@@ -186,6 +193,7 @@ export const sessionsEventTypes = [
   'releaseMemory',
   'sessionState',
   'sessionClosed',
+  'sessionChatFocused',
   'cancelPendingOpen',
   'quit',
   'quitAnyway',
@@ -200,7 +208,14 @@ export type SessionsMachineEmitted =
    * The registry dropped a resumed open whose request's library epoch is stale, instead of spawning it. Focus
    * clears its open and sends it again from its fresh answer (spec-pf `PendingOpenDropped`).
    */
-  | { readonly type: 'pendingOpenDropped'; readonly projectId: string; readonly epoch: number };
+  | { readonly type: 'pendingOpenDropped'; readonly projectId: string; readonly epoch: number }
+  /** A live session's editor focused a chat for the chat it was asked for (A6d): focus shows it (I18). */
+  | {
+      readonly type: 'chatFocused';
+      readonly projectId: string;
+      readonly requestedChatId?: string;
+      readonly chatId: string;
+    };
 
 /** The app's sessions registry actor. @public */
 export type SessionsActorRef = ActorRefFrom<typeof sessionsMachine>;
@@ -282,10 +297,6 @@ const touchProject = (context: SessionsMachineContext, projectId: string): Parti
   touchOrder: { ...context.touchOrder, [projectId]: context.sequence + 1 },
 });
 
-/** The request carries a chat to forward to a live session: a chat id or a created chat id (R3-F1). */
-const carriesChat = (request: ProjectSessionOpenRequest | undefined): request is ProjectSessionOpenRequest =>
-  request?.chatId !== undefined || request?.createdChatId !== undefined;
-
 /**
  * The epoch of a waiting open whose request was not built at the library epoch the registry last heard of (A5c), or
  * `undefined` when the open stands.
@@ -342,7 +353,7 @@ export const sessionsMachine = setup({
   },
 }).createMachine({
   id: 'sessions',
-  version: '4',
+  version: '5',
   /* A fault no transition modelled is recorded and the registry keeps answering (MC-R12). */
   onError: ({ event }) => ({
     context: { fault: event.error instanceof Error ? event.error.message : 'sessions fault' },
@@ -415,6 +426,18 @@ export const sessionsMachine = setup({
         libraryEpoch: context.libraryEpoch === undefined ? event.epoch : Math.max(context.libraryEpoch, event.epoch),
       },
     }),
+    /* Only a live session's report is announced; one from a session the registry let go is stale (MC-R18). */
+    sessionChatFocused: ({ context, event }, enq) => {
+      if (context.refs[event.projectId] !== undefined) {
+        enq.emit({
+          type: 'chatFocused',
+          projectId: event.projectId,
+          chatId: event.chatId,
+          ...(event.requestedChatId === undefined ? {} : { requestedChatId: event.requestedChatId }),
+        });
+      }
+      return {};
+    },
     /* The child finished its own `closing`; only now is the slot free. */
     sessionClosed: ({ context, event }, enq) => {
       const ref = context.refs[event.projectId];
@@ -455,9 +478,10 @@ export const sessionsMachine = setup({
            * intent. A live project itself only needs a touch (I22). */
           const pendingOpen: SessionsPendingOpen = { projectId: event.projectId, request: event.request };
           if (guards.isLive(context, event.projectId)) {
-            /* A request with a chat reaches the session beside the touch (R3-F1). */
+            /* A request's chat reaches the session beside the touch (R3-F1), a request with none too: the route then
+             * names no chat, and the session answers with the one its editor shows (A6d, I2). */
             const ref = context.refs[event.projectId];
-            if (ref !== undefined && carriesChat(event.request)) {
+            if (ref !== undefined && event.request !== undefined) {
               enq.sendTo(ref, {
                 type: 'chatRequested',
                 chatId: event.request.chatId,

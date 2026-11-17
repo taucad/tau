@@ -2,7 +2,7 @@
 import { describe, expect } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { axeAudit, readPageSemantics } from '#support/page-audit.js';
+import { pageAxeViolations, readPageSemantics } from '#support/page-audit.js';
 import { flagTest, runsInFlagStates } from '#support/flag-state-test.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- event and person properties are analytics wire names. */
@@ -82,6 +82,46 @@ const openHome = async (): Promise<void> => {
   await target.expectVisible(selectors.getByRole('main'), 60_000);
 };
 
+/**
+ * Sign in an account created just now, as the browser sees it: a stand-in answers `get-session` with that account, the
+ * way `home-hydration.spec.ts` and `billing-usage-fixture.ts` answer it. Setup's offer reads only the loaded session and
+ * the device (`use-setup-offer.ts`); the onboarding record is stored on the device, so no API is needed. Other `/v1/`
+ * requests go to the network as before.
+ *
+ * @param name - The account's display name.
+ */
+const signInNewAccount = async (name: string): Promise<void> => {
+  const id = `onboarding-e2e-${globalThis.crypto.randomUUID()}`;
+  const account = { id, email: `${id}@e2e.tau`, name, createdAt: new Date().toISOString() };
+  await target.addInitScript((signedIn: typeof account) => {
+    const fetchFromNetwork = globalThis.fetch.bind(globalThis);
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const requestUrl = input instanceof Request ? input.url : input.toString();
+      if (new URL(requestUrl, location.href).pathname !== '/v1/auth/get-session') {
+        return fetchFromNetwork(input, init);
+      }
+      return Response.json({
+        session: {
+          id: `session-${signedIn.id}`,
+          userId: signedIn.id,
+          token: `token-${signedIn.id}`,
+          expiresAt: '2099-01-01T00:00:00.000Z',
+          createdAt: signedIn.createdAt,
+          updatedAt: signedIn.createdAt,
+        },
+        user: {
+          id: signedIn.id,
+          email: signedIn.email,
+          name: signedIn.name,
+          emailVerified: true,
+          createdAt: signedIn.createdAt,
+          updatedAt: signedIn.createdAt,
+        },
+      });
+    };
+  }, account);
+};
+
 const stepHeading = (name: string) => selectors.getByRole('heading', { level: 1, name });
 const continueButton = () => selectors.getByRole('button', { name: 'Continue', exact: true });
 
@@ -95,7 +135,7 @@ const openSetupFromHelp = async (): Promise<void> => {
 
 /**
  * Answer every step and finish: 3D printing; Blender, which suggests middle-drag orbit with Shift pan and axis balls;
- * then Right-drag orbit, the Axes gizmo and the trackpad switch, none of them the suggestion.
+ * then Right-drag orbit and the Axes gizmo, neither of them the suggestion.
  */
 const answerEveryStep = async (): Promise<void> => {
   await target.click(selectors.getByRole('checkbox', { name: /3D printing/u }));
@@ -108,7 +148,6 @@ const answerEveryStep = async (): Promise<void> => {
     selectors.getByRole('group', { name: 'Mouse controls' }).getByRole('radio', { name: /Right-drag orbit/u }),
   );
   await target.click(selectors.getByRole('radio', { name: 'Axes', exact: true }));
-  await target.click(selectors.getByRole('switch', { name: 'I use a trackpad' }));
   await target.click(continueButton());
   await target.expectVisible(stepHeading('Design, verify, build'));
   await target.click(selectors.getByRole('button', { name: 'Finish', exact: true }));
@@ -175,14 +214,13 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
       tour_wanted: true,
     });
 
-    // Other surfaces may set their own person properties; setup's six hold these values.
+    // Other surfaces may set their own person properties; setup's five hold these values.
     expect(await personProperties()).toMatchObject({
       setup_status: 'completed',
       goals: ['printing'],
       tool: 'blender',
       mouse_preset: 'right-orbit',
       gizmo_style: 'axes',
-      input_device: 'trackpad',
     });
     expect(await setupStatuses()).toStrictEqual(['offered', 'completed']);
   });
@@ -232,7 +270,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
     const findings: Record<string, unknown> = {};
     const audit = async (step: string): Promise<void> => {
       const semantics = await readPageSemantics();
-      const { violations } = await axeAudit();
+      const violations = await pageAxeViolations();
       findings[step] = { semantics, violations };
       expect.soft(violations, `${step}: axe violations`).toStrictEqual([]);
       expect.soft(semantics.headingOnes, `${step}: exactly one h1`).toHaveLength(1);
@@ -258,11 +296,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
 
 describe.runIf(runsInFlagStates(['all-on']))('setup auto-open with onboardingAutoOpen on', () => {
   flagTest('opens by itself once for a new account reaching home', async () => {
-    await target.authenticateTauTestUser({
-      email: `onboarding-setup-${globalThis.crypto.randomUUID()}@e2e.tau`,
-      name: 'Onboarding Setup E2E',
-      password: 'Tau-test-password-7!',
-    });
+    await signInNewAccount('Onboarding Setup E2E');
     await target.navigate('/');
     await target.expectUrl(/\/welcome\?entry=signup$/u, 60_000);
     await target.expectVisible(stepHeading('What do you want to make?'), 30_000);
@@ -279,11 +313,7 @@ describe.runIf(runsInFlagStates(['all-on']))('setup auto-open with onboardingAut
 
 describe.runIf(runsInFlagStates(['viewer-controls-onboarding']))('setup with onboardingAutoOpen off', () => {
   flagTest('does not open by itself; the invite on home opens it', async () => {
-    await target.authenticateTauTestUser({
-      email: `onboarding-invite-${globalThis.crypto.randomUUID()}@e2e.tau`,
-      name: 'Onboarding Invite E2E',
-      password: 'Tau-test-password-7!',
-    });
+    await signInNewAccount('Onboarding Invite E2E');
     await openHome();
     await target.expectVisible(selectors.getByTestId('setup-invite'), 60_000);
     await target.delay(2000);

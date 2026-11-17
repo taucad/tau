@@ -10,7 +10,7 @@
  * and `intent` as the pose of the store's edit that has not been written. The spec's `file.source` and
  * `intent.source` are the binding's own bookkeeping and are not compared.
  *
- * The field of view is one of the ten inheritable leaves (graphics charter ruling of 2026-11-12, amending D20, I6 and
+ * The field of view is one of the nine inheritable leaves (graphics charter ruling of 2026-11-12, amending D20, I6 and
  * I7 for them; onboarding blueprint Finding 6): view commands write it and the binding seeds the camera from its
  * resolution, so no edit of the binding carries the camera's field of view. An edit is therefore identified by its
  * pose and the field of view the camera shows, which is the record's own until a person changes it on the camera:

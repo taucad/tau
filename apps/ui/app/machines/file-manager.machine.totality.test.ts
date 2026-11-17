@@ -34,14 +34,15 @@ import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { fileManagerEventTypes, fileManagerIgnoredEvents, fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileManagerEvent } from '#machines/file-manager.machine.js';
 
-vi.mock('#machines/file-manager.worker.js?worker', () => ({
-  default: class MockWorker {
+vi.mock('#machines/file-manager-worker.js', () => {
+  class MockWorker {
     public terminate = vi.fn();
     public postMessage = vi.fn();
     public addEventListener = vi.fn();
     public removeEventListener = vi.fn();
-  },
-}));
+  }
+  return { createFileManagerWorker: () => new MockWorker() };
+});
 
 type Event<T extends FileManagerEvent['type']> = Extract<FileManagerEvent, { type: T }>;
 

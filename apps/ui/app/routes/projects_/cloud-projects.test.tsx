@@ -48,7 +48,9 @@ const { mockCreateProject, mockGetProjectFileSystemConfig, auth } = vi.hoisted((
 }));
 
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ createProject: mockCreateProject }) }));
-vi.mock('#filesystem/handle-store.js', () => ({ getProjectFileSystemConfig: mockGetProjectFileSystemConfig }));
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
+  getProjectFileSystemConfig: mockGetProjectFileSystemConfig,
+}));
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => auth.current }));
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
@@ -71,7 +73,8 @@ vi.stubGlobal(
 );
 
 const { toLibraryRows, useMaterializeCloudProjects } = await import('#routes/projects_/cloud-projects.js');
-const { materializeOnSignIn, materializedCloudProjects, tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
+const { materializeOnSignIn, materializedCloudProjects } = await import('#hooks/use-cloud-projects.js');
+const { tauCloudIntent } = await import('#lib/tau-cloud-intent.js');
 
 /* Every queued microtask and the lock's chain drain before a macrotask runs. */
 const settle = async (): Promise<void> =>

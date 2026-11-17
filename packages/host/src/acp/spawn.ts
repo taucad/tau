@@ -23,6 +23,7 @@ import { Readable, Writable } from 'node:stream';
 import { ndJsonStream } from '@agentclientprotocol/sdk';
 import type { Stream } from '@agentclientprotocol/sdk';
 
+import { resolveAcpAdapterExecutable } from '#acp/locate.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
 /**
@@ -139,8 +140,13 @@ export type SpawnedAcpAdapter = {
  * sidesteps exec bits, shebang resolution and Windows shims in one step.
  * Native ACP agents run their installed CLI directly, without a shell.
  *
+ * A CLI found at a declared fallback is located again first when its file is
+ * gone, because a vendor app bundle keeps it under a version directory that
+ * moves when the app updates (ACP agent policy rule 4).
+ *
  * @param options - Adapter, working directory, and optional wire tap.
  * @returns The child, its ACP stream, and a stderr tail.
+ * @throws An error with `code: 'CLI_NOT_FOUND'` when that CLI is no longer anywhere it is searched for.
  * @public
  */
 export const spawnAcpAdapter = (options: {
@@ -150,24 +156,25 @@ export const spawnAcpAdapter = (options: {
   readonly environment?: NodeJS.ProcessEnv | undefined;
   readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
 }): SpawnedAcpAdapter => {
-  const { adapter } = options;
-  const environment = acpAdapterEnvironment(options.environment ?? process.env, adapter);
-  if (adapter.modulePath === undefined) {
+  const base = options.environment ?? process.env;
+  const adapter = resolveAcpAdapterExecutable(options.adapter, { environment: base });
+  const environment = acpAdapterEnvironment(base, adapter);
+  const [command, args] =
+    adapter.modulePath === undefined
+      ? [adapter.executablePath ?? adapter.cli, [...adapter.args]]
+      : [process.execPath, [adapter.modulePath]];
+  if (command !== process.execPath) {
     delete environment['ELECTRON_RUN_AS_NODE'];
   }
-  const child = spawn(
-    adapter.modulePath === undefined ? (adapter.executablePath ?? adapter.cli) : process.execPath,
-    adapter.modulePath === undefined ? [...adapter.args] : [adapter.modulePath],
-    {
-      cwd: options.cwd,
-      env: environment,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      /* A group leader on POSIX, so one signal reaches every process it starts
-       * (EA-R7). It no longer shares the host's group, so a terminal's ^C no
-       * longer reaches it; it ends with its stdin instead (blueprint risk). */
-      detached: process.platform !== 'win32',
-    },
-  );
+  const child = spawn(command, args, {
+    cwd: options.cwd,
+    env: environment,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    /* A group leader on POSIX, so one signal reaches every process it starts
+     * (EA-R7). It no longer shares the host's group, so a terminal's ^C no
+     * longer reaches it; it ends with its stdin instead (blueprint risk). */
+    detached: process.platform !== 'win32',
+  });
   let stderr = '';
   child.on('error', (error) => {
     stderr = error.message;

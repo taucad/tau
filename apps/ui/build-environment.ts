@@ -1,6 +1,7 @@
 /**
- * Runtime telemetry's own build signal (`TAU_TELEMETRY_HOST=cloud`), independent of the billing gate above: a billing
- * rollback never silences telemetry, and a build without it composes a reporter only once signed in to its own API.
+ * The desktop renderer's runtime telemetry build signal (`TAU_TELEMETRY_HOST=cloud`, set literally by the release
+ * workflow), independent of the billing gate above. A desktop build without it composes a reporter only once signed in;
+ * web builds no longer read it, because their API's policy probe already gates them.
  */
 export const resolveTauTelemetryHostCloud = (value: string | undefined): boolean => value === 'cloud';
 

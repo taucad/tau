@@ -55,12 +55,16 @@ import { describeFault } from '#machines/machine-fault.js';
 export type CanvasSurface = Readonly<{ width: number; height: number; pixelRatio: number }>;
 
 /**
- * Why a renderer could not run: a WebGPU start or device failure (the viewer then remounts on WebGL) or any other
- * failure (the viewer's failure screen shows it).
+ * Why a renderer could not run: a WebGPU start or device failure (the viewer then remounts on WebGL), a browser that
+ * gives no WebGL 2 context (`context-unavailable`, the failure screen explains it), or any other failure (the viewer's
+ * failure screen shows it).
  *
  * @public
  */
-export type CanvasFailure = Readonly<{ kind: 'webgpu-initialization' | 'renderer'; message: string }>;
+export type CanvasFailure = Readonly<{
+  kind: 'webgpu-initialization' | 'context-unavailable' | 'renderer';
+  message: string;
+}>;
 
 /**
  * What the surface is: a Three canvas, or the placeholder that holds its place while the WebGPU probe answers. A

@@ -25,7 +25,7 @@ it('opens a closed Print pane and retains the exact machine/job intent', async (
     </MemoryRouter>,
   );
   await waitFor(() => {
-    expect(openPanel).toHaveBeenCalledExactlyOnceWith('print');
+    expect(openPanel).toHaveBeenCalledExactlyOnceWith('print', 'route');
   });
   expect(screen.getByRole('status')).toHaveTextContent('?machineHost=host&machine=mill&job=request&chat=chat-1');
 });

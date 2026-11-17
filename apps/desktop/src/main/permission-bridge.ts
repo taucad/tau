@@ -9,14 +9,14 @@
 
 import { isAbsolute } from 'node:path';
 
-import { canonicalPath } from '#main/project-roots.js';
-import { isPermissionChatId, isPermissionMode, permissionChannels } from '#shared/permission-channels.js';
+import { canonicalPath } from '@taucad/desktop-services-host/project-roots';
+import { isPermissionChatId, isPermissionMode, permissionChannels } from '@taucad/types/desktop';
 import type {
   DesktopPermissionMode,
   PermissionAnswerFrame,
   PermissionOperation,
   PermissionRequestFrame,
-} from '#shared/permission-channels.js';
+} from '@taucad/types/desktop';
 
 type InvokeEvent = Readonly<{ senderFrame: unknown }>;
 

@@ -18,6 +18,19 @@
         "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts apps/ui-e2e/src/support/github-identity.test.ts apps/ui-e2e/src/filesystem-scenarios/fixture.test.ts apps/ui-e2e/src/filesystem-scenarios/scenarios.test.ts --environment=node"
       }
     },
+    "test:e2e:queue": {
+      "executor": "nx:noop",
+      "dependsOn": [
+        "test:e2e:daemon-host",
+        "test:e2e:deploy-skew",
+        "test:e2e:development",
+        "test:e2e:filesystem-scenarios",
+        "test:e2e:non-isolated"
+      ],
+      "metadata": {
+        "description": "The merge-queue e2e ratchet: the suites of this project that passed two consecutive e2e-nightly runs. ci.yml's e2e-queue lane runs each one as its own job in the merge queue whenever this project is affected, and e2e-nightly.yml leaves every suite listed here out of its matrix. A suite joins by being added to dependsOn (a target of this project) once green on two consecutive nightlies, and never moves back. Running this target runs them all."
+      }
+    },
     "test:e2e": {
       "executor": "nx:run-commands",
       "dependsOn": [{ "projects": ["ui"], "target": "build:serve" }],
@@ -320,7 +333,7 @@
     "test:e2e:picogk": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "PicoGK as a clean browser consumer: the built app serving the staged package bundle, opening the shipped C# examples through the ordinary project route. PICOGK_BROWSER_ASSETS_ROOT must name a prepared bundle, which ui:build declares as an input, so this target never reuses a build made against another bundle. Its own PORT keeps it from reusing a server another e2e target started."
+        "description": "PicoGK as a clean browser consumer: the built app serving the staged package bundle, opening the shipped C# examples through the ordinary project route. PICOGK_BROWSER_ASSETS_ROOT must name a prepared bundle, which ui:build declares as an input, so this target never reuses a build made against another bundle. Its own PORT keeps it from reusing a server another e2e target started. TAU_E2E_PICOGK_TIER admits the spec, which every other tier excludes (vitest.config.ts) because none of them is given a bundle."
       },
       "options": {
         "cwd": "{workspaceRoot}",
@@ -331,6 +344,7 @@
         ],
         "env": {
           "PORT": "3019",
+          "TAU_E2E_PICOGK_TIER": "true",
           "TAU_E2E_UI_SNAPSHOT": "true",
           "TAU_CLOUD_ENABLED": "false",
           "TAU_API_URL": "http://localhost:4000",

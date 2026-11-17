@@ -242,6 +242,18 @@ export type BillingRecoveryNoticeTransport = {
 };
 
 /**
+ * Thrown by a transport when the account owner's address is one Resend suppresses (email bounce blueprint R10).
+ * The notice is parked at once instead of retried, is never marked delivered, and the operations worker raises
+ * a `billing.alert` naming the account. The grace period is unchanged (ruling E1).
+ */
+export class RecoveryNoticeUndeliverableError extends Error {
+  public constructor(public readonly accountId: string) {
+    super(`Recovery notice owner address for ${accountId} is undeliverable`);
+    this.name = 'RecoveryNoticeUndeliverableError';
+  }
+}
+
+/**
  * How many sends a recovery notice gets before it is parked for an operator. Retries wait one minute,
  * doubling after each failure, so the last attempt comes about eight and a half hours after the first.
  */
@@ -1992,12 +2004,19 @@ export class BillingPaymentsService {
   public async deliverRecoveryNotices(input: {
     readonly environment: FinancialEnvironment;
     readonly limit: number;
-  }): Promise<{ processed: string[]; pending: string[]; failed: string[]; abandoned: string[] }> {
+  }): Promise<{
+    processed: string[];
+    pending: string[];
+    failed: string[];
+    abandoned: string[];
+    undeliverable: Array<{ readonly notice: string; readonly accountId: string }>;
+  }> {
     const result = {
       processed: [] as string[],
       pending: [] as string[],
       failed: [] as string[],
       abandoned: [] as string[],
+      undeliverable: [] as Array<{ readonly notice: string; readonly accountId: string }>,
     };
     if (input.environment !== this.config.environment || input.limit < 1 || input.limit > 100) {
       throw new RangeError('Invalid notice recovery scope');
@@ -2071,7 +2090,35 @@ export class BillingPaymentsService {
           .returning({ id: billingRecoveryNotice.id });
         if (changed[0] === undefined) throw new Error('Stale recovery notice claim');
         result.processed.push(claim.id);
-      } catch {
+      } catch (error) {
+        if (error instanceof RecoveryNoticeUndeliverableError) {
+          /* Retrying cannot reach a suppressed address and every send costs sender reputation, so the notice is
+           * parked on its first attempt, pending and not delivered, for the operator to reach the customer another
+           * way. Setting `next_attempt_at` re-queues it once the address is deliverable again. */
+          const parked = await this.databaseService.database
+            .update(billingRecoveryNotice)
+            .set({
+              state: 'pending',
+              leaseUntil: null,
+              errorCode: 'owner_undeliverable',
+              nextAttemptAt: new Date('9999-12-31T00:00:00Z'),
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(billingRecoveryNotice.id, claim.id),
+                eq(billingRecoveryNotice.generation, claim.generation),
+                eq(billingRecoveryNotice.state, 'processing'),
+              ),
+            )
+            .returning({ id: billingRecoveryNotice.id });
+          if (parked[0] === undefined) {
+            result.failed.push(claim.id);
+          } else {
+            result.undeliverable.push({ notice: claim.id, accountId: claim.accountId });
+          }
+          continue;
+        }
         /* The claim already counted this attempt. A notice out of attempts stays pending but is parked, which
          * the outbox's state check allows, so an operator can re-queue it by setting `next_attempt_at`. */
         const abandoned = claim.attemptCount >= recoveryNoticeAttemptLimit;

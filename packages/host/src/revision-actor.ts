@@ -36,14 +36,14 @@ export type HostRevisionActorResolver = (input: HostRevisionActorInput) => Revis
 /**
  * The person a `setActor` request names, as the page's `revisionUserActor` builds it.
  *
- * Strict, so a request cannot smuggle an agent or a field the trailer does not know.
+ * Strict, so a request cannot smuggle an agent or a field the trailer does not
+ * know: a person has no address (I3), so a request that carries one is refused.
  */
 export const revisionUserActorSchema = z
   .object({
     kind: z.literal('user'),
     id: z.string().min(1),
     name: z.string().min(1).optional(),
-    email: z.string().min(1).optional(),
     anonymous: z.boolean().optional(),
   })
   .strict();

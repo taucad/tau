@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { writeBambuContainer } from '@taucad/slicer/container';
-import {
-  hasZipSignature,
-  readPrinterFile,
-  isPrinterFileName,
-  printerFileKind,
-  readGcodeSetting,
-} from '#components/printer/printer-file.js';
+import { readPrinterFile, readGcodeSetting } from '#components/printer/printer-file.js';
+import { hasZipSignature, isPrinterFileName, printerFileKind } from '#components/printer/printer-file-kind.js';
 import { loadPrinterProgram } from '#components/printer/printer-program.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 

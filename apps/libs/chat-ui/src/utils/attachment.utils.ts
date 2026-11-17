@@ -7,6 +7,14 @@
  * per-kind size caps; `#db/attachment-store.js` owns the bytes.
  */
 
+import {
+  attachmentExtensionOf,
+  attachmentExtensions,
+  attachmentMediaTypes,
+  isAttachmentMediaType,
+} from '@taucad/agent-host/wire';
+import type { AttachmentMediaType } from '@taucad/agent-host/wire';
+
 /** Images are sent to the model inline; documents are materialised per provider. */
 export type AttachmentKind = 'image' | 'document';
 
@@ -42,31 +50,15 @@ export type Attachment = {
   readonly filename?: string;
 };
 
-/**
- * The media types this wave stores, and the extension each one is written as.
- * A type outside this table is refused at ingest rather than mapped to a
- * generic extension.
- */
-const attachmentExtensions = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'image/gif': 'gif',
-  'application/pdf': 'pdf',
-} as const;
-
-/** A media type the attachment store accepts. */
-export type SupportedAttachmentMediaType = keyof typeof attachmentExtensions;
+/** A media type the attachment store accepts: one of `attachmentMedia` in `@taucad/agent-host/wire` (I2). */
+export type SupportedAttachmentMediaType = AttachmentMediaType;
 
 /** Every media type the attachment store accepts, for composer `accept` lists and validation. */
-export const supportedAttachmentMediaTypes = Object.keys(
-  attachmentExtensions,
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Object.keys widens the literal union to string
-) as readonly SupportedAttachmentMediaType[];
+export const supportedAttachmentMediaTypes: readonly SupportedAttachmentMediaType[] = attachmentMediaTypes;
 
-/** Whether the attachment store will accept bytes of this media type. */
-export const isSupportedAttachmentMediaType = (mediaType: string): mediaType is SupportedAttachmentMediaType =>
-  mediaType in attachmentExtensions;
+/** Whether the attachment store will accept bytes of this media type. A type outside the table is refused at ingest. */
+export const isSupportedAttachmentMediaType: (mediaType: string) => mediaType is SupportedAttachmentMediaType =
+  isAttachmentMediaType;
 
 /** `application/pdf` is the only document type in this wave; everything else stored is an image. */
 export const attachmentKind = (mediaType: string): AttachmentKind =>
@@ -85,7 +77,7 @@ export const attachmentFileName = (attachment: AttachmentName): string => {
   if (!isSupportedAttachmentMediaType(attachment.mediaType)) {
     throw new Error(`Unsupported attachment type: ${attachment.mediaType}`);
   }
-  return `${attachment.hash}.${attachmentExtensions[attachment.mediaType]}`;
+  return `${attachment.hash}.${attachmentExtensionOf(attachment.mediaType)}`;
 };
 
 /** The reference stored in a file part or log row, relative to the owning directory. */
@@ -101,8 +93,11 @@ export const attachmentCapBytes = (kind: AttachmentKind): number => (kind === 'i
 /** The prefix every attachment reference URL carries. */
 export const attachmentUrlPrefix = 'attachments/';
 /* GeoSpec report JSON is readable as an agent-produced reference; `put` still
- * accepts only the user attachment types above. */
-const attachmentFileNamePattern = /^[\da-f]{64}\.(?:jpg|png|webp|gif|pdf|json)$/;
+ * accepts only the stored attachment types. */
+const attachmentFileNamePattern = new RegExp(
+  `^[\\da-f]{64}\\.(?:${[...attachmentExtensions, 'json'].join('|')})$`,
+  'u',
+);
 
 /** Whether a URL is an attachment reference, as opposed to a `data:` URL or anything else. */
 export const isAttachmentUrl = (url: string): boolean =>

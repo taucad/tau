@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createActor, waitFor } from 'xstate';
+import { createActor, createCallbackLogic, waitFor } from 'xstate';
+import type {
+  WorkbenchAdapterEvent,
+  WorkbenchAdapterInput,
+  WorkbenchDockReady,
+} from '#workbench-records/workbench-adapter.js';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import { editorMachine } from '#machines/editor.machine.js';
@@ -1147,6 +1152,42 @@ describe('ready.operation.ensuringFocusedChat', () => {
     await waitFor(actor, (s) => s.context.focusedChatId === 'chat-after-retry');
     expect(actor.getSnapshot().context.focusedChatError).toBeUndefined();
     expect(actor.getSnapshot().matches({ ready: { operation: 'idle' } })).toBe(true);
+    actor.stop();
+  });
+});
+
+describe('dock adapters on a layout-less page (A8c)', () => {
+  // Share and preview have no workbench layout: the editor runs their workbench's adapter, which a Dockview hands over
+  // and takes back (I1, D4). A late release of a replaced mount stops nothing newer.
+  it('should run a Dockview adapter as a child until that Dockview releases it', () => {
+    const running = new Set<string>();
+    const workbenchAdapter = createCallbackLogic<WorkbenchAdapterEvent, WorkbenchAdapterInput>(({ input }) => {
+      running.add(input.api as unknown as string);
+      return () => {
+        running.delete(input.api as unknown as string);
+      };
+    });
+    const actor = createActor(editorMachine.provide({ actors: { workbenchAdapter } }), {
+      input: { projectId: 'dock-host', requestedChatId: undefined },
+    });
+    actor.start();
+    const ready = (dockId: string, api: string): void => {
+      actor.send({
+        type: 'dockReady',
+        adapter: 'workbench',
+        dockId,
+        api: api as unknown as WorkbenchDockReady['api'],
+        ports: 'ports' as unknown as WorkbenchDockReady['ports'],
+      });
+    };
+    ready('dock-1', 'api-1');
+    expect([...running]).toEqual(['api-1']);
+    ready('dock-2', 'api-2');
+    actor.send({ type: 'dockReleased', adapter: 'workbench', dockId: 'dock-1' });
+    expect([...running]).toEqual(['api-2']);
+    expect(JSON.stringify(actor.getSnapshot().context)).not.toContain('api-2');
+    actor.send({ type: 'dockReleased', adapter: 'workbench', dockId: 'dock-2' });
+    expect([...running]).toEqual([]);
     actor.stop();
   });
 });

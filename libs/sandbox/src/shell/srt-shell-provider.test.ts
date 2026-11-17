@@ -29,6 +29,7 @@ import type { ShellLaunch, ShellLaunchOutcome, ShellPipesProcess, ShellProcess }
 import {
   bindOwnPty,
   createSandboxShellProvider,
+  guardedVector,
   seatbeltReadDenies,
   shellSandboxCommand,
   shellSandboxProfile,
@@ -202,6 +203,106 @@ describe('createSandboxShellProvider admission', () => {
 
     expect(outcome).toMatchObject({ status: 'unsupported', requirement: 'network-isolation' });
   });
+
+  it('should refuse guarded stores on a pipe launch or without the store guard, before starting anything', async () => {
+    const root = fixtureRoot();
+    const store = join(root, '.git');
+    const guardedStores = { stores: [store], protect: ['config', 'hooks'] };
+    const filesystem = { readable: [], writable: [root], denied: [], guardedStores };
+    const pipes = await createSandboxShellProvider({ supervisor, storeGuardPath: '/opt/tau/tau-store-guard' }).launch(
+      launchOf({ arguments: ['-c', 'true'], filesystem }),
+    );
+    const unguarded = await createSandboxShellProvider({ supervisor }).launch(
+      launchOf({ arguments: ['-c', 'true'], filesystem, stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } } }),
+    );
+
+    for (const outcome of [pipes, unguarded]) {
+      expect(outcome).toStrictEqual({
+        status: 'unsupported',
+        requirement: 'filesystem-mask',
+        message: 'only a Linux Terminal launch with the store guard may write guarded stores.',
+      });
+    }
+  });
+
+  it.runIf(process.platform === 'linux')(
+    'should refuse a guarded store outside the writable roots, inside a denied path or with a policy name that is a path',
+    async () => {
+      const root = fixtureRoot();
+      const provider = createSandboxShellProvider({ supervisor, storeGuardPath: '/opt/tau/tau-store-guard' });
+      const terminal = { kind: 'terminal', size: { columns: 80, rows: 24 } } as const;
+      const cases = [
+        {
+          readable: [],
+          writable: [root],
+          denied: [],
+          guardedStores: { stores: ['/srv/other/.git'], protect: ['config'] },
+        },
+        {
+          readable: [],
+          writable: [root],
+          denied: [join(root, '.git')],
+          guardedStores: { stores: [join(root, '.git')], protect: ['config'] },
+        },
+        {
+          readable: [],
+          writable: [root],
+          denied: [],
+          guardedStores: { stores: [join(root, '.git')], protect: ['hooks/pre-commit'] },
+        },
+        { readable: [], writable: [root], denied: [], guardedStores: { stores: [root], protect: ['config'] } },
+      ];
+      for (const filesystem of cases) {
+        // oxlint-disable-next-line no-await-in-loop -- one refusal per case.
+        const outcome = await provider.launch(launchOf({ arguments: ['-c', 'true'], filesystem, stdio: terminal }));
+        expect(outcome, JSON.stringify(filesystem)).toMatchObject({
+          status: 'unsupported',
+          requirement: 'filesystem-mask',
+        });
+      }
+    },
+  );
+
+  it('should spawn an agent launch with the very vector the runtime built, whether or not a store guard is configured', () => {
+    const argv = ['/bin/sh', '-c', "exec /usr/bin/bwrap --die-with-parent -- /bin/bash -c 'git status'"] as const;
+    const agent = launchOf({ arguments: ['-c', 'git status'] });
+    const vectors = [{}, { storeGuardPath: '/opt/tau/tau-store-guard' }].map((options) =>
+      guardedVector(argv, agent, options),
+    );
+    expect(vectors[0]).toBe(argv);
+    expect(vectors[1]).toBe(argv);
+  });
+
+  it('should answer that no store guard can start without its path or with a path that is not an executable', async () => {
+    expect(await createSandboxShellProvider({ supervisor }).storeGuard?.()).toBe(false);
+    expect(
+      await createSandboxShellProvider({ supervisor, storeGuardPath: join(fixtureRoot(), 'absent') }).storeGuard?.(),
+    ).toBe(false);
+  });
+
+  it.runIf(process.platform === 'linux')(
+    'should check a failed store guard again only once its refusal has stood for the recheck interval',
+    async () => {
+      const reasons: unknown[] = [];
+      const listener = (message: unknown): void => {
+        reasons.push(message);
+      };
+      subscribe('taucad.native-process.shell.store-guard', listener);
+      try {
+        const storeGuardPath = join(fixtureRoot(), 'absent');
+        const held = createSandboxShellProvider({ supervisor, storeGuardPath, storeGuardRecheckMilliseconds: 60_000 });
+        expect(await held.storeGuard?.()).toBe(false);
+        expect(await held.storeGuard?.()).toBe(false);
+        expect(reasons).toHaveLength(1);
+        const rechecked = createSandboxShellProvider({ supervisor, storeGuardPath, storeGuardRecheckMilliseconds: 0 });
+        expect(await rechecked.storeGuard?.()).toBe(false);
+        expect(await rechecked.storeGuard?.()).toBe(false);
+        expect(reasons).toHaveLength(3);
+      } finally {
+        unsubscribe('taucad.native-process.shell.store-guard', listener);
+      }
+    },
+  );
 
   it('should reject an already aborted launch with the abort reason', async () => {
     const controller = new AbortController();
@@ -781,6 +882,34 @@ describe('shellSandboxProfile read-only roots', () => {
     );
     expect(profile.filesystem['denyRead']).not.toContain('/srv/project/.tau/chats');
     expect(profile.filesystem['denyRead']).not.toContain('/srv/project/exports');
+  });
+});
+
+describe('shellSandboxProfile guarded stores', () => {
+  it('should pin every ancestor of a nested guarded store on Linux, so it cannot be moved aside and replanted', () => {
+    const profile = shellSandboxProfile(
+      {
+        filesystem: {
+          readable: [],
+          writable: ['/srv/project'],
+          denied: [],
+          guardedStores: {
+            stores: ['/srv/project/.git', '/srv/project/vendor/lib/.git'],
+            protect: ['config', 'hooks'],
+          },
+        },
+        network: { domains: [] },
+      },
+      { home: '/home/person' },
+    ) as { filesystem: Record<string, string[]> };
+
+    expect(profile.filesystem['allowWrite']).toStrictEqual(
+      process.platform === 'linux'
+        ? ['/srv/project', '/srv/project/vendor', '/srv/project/vendor/lib']
+        : ['/srv/project'],
+    );
+    /* The store itself is the guard's mount, never denied or read-only here: the guard decides by name. */
+    expect(profile.filesystem['denyWrite']).not.toContain('/srv/project/vendor/lib/.git');
   });
 });
 

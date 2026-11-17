@@ -14,7 +14,7 @@ import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#m
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isBrowser: true,
 }));
 

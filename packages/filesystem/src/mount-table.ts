@@ -152,6 +152,89 @@ export type ProjectRootConfiguration = {
 };
 
 /**
+ * Where one configured root stands (blueprint D1). `available` is the only
+ * state whose routes mount; every other state is a status, never a rejection.
+ * @public
+ */
+export type RootState = 'available' | 'notFound' | 'permission' | 'unreachable' | 'conflict' | 'error';
+
+/**
+ * One configured root's published status. It carries a code and never a path
+ * or a message, so it can be reported as it is.
+ * @public
+ */
+export type RootStatus = {
+  /** `resolveStorageRootKey()`: `node:<path>`, `webaccess:<workspaceId>`, … */
+  readonly storageRootKey: string;
+  readonly backend: StorageRootConfig['backend'];
+  readonly state: RootState;
+  /** An errno or Tau code (`ENOENT`, `EACCES`, `AUTHORITY_ROOT_OVERLAP`, `ROOT_DEADLINE`); absent when available. */
+  readonly code?: string;
+};
+
+/**
+ * One configuration entry the authority skipped instead of rejecting the call.
+ * @public
+ */
+export type SkippedConfigurationEntry = {
+  readonly kind: 'root' | 'project' | 'checkout';
+  readonly reason:
+    | 'duplicate-root'
+    | 'invalid-project-id'
+    | 'duplicate-route'
+    | 'non-canonical-path'
+    | 'checkout-rule'
+    | 'duplicate-physical-route'
+    | 'root-unavailable'
+    | 'provider-unavailable';
+  readonly projectId?: string;
+  readonly storageRootKey?: string;
+};
+
+/**
+ * What `configureProjectRoots` resolves with: one status per configured root,
+ * in configuration order, and every entry it skipped.
+ * @public
+ */
+export type ProjectRootConfigurationResult = {
+  readonly roots: readonly RootStatus[];
+  readonly skipped: readonly SkippedConfigurationEntry[];
+};
+
+/** The code a configuration rejects with when Home itself cannot be staged or admitted. @public */
+export const homeRootUnavailableCode = 'HOME_ROOT_UNAVAILABLE';
+
+/** The code of a root that missed its admission deadline. @public */
+export const rootDeadlineCode = 'ROOT_DEADLINE';
+
+const rootStateByCode: ReadonlyMap<string, RootState> = new Map<string, RootState>([
+  ['ENOENT', 'notFound'],
+  ['ENOTDIR', 'notFound'],
+  ['EACCES', 'permission'],
+  ['EPERM', 'permission'],
+  [rootDeadlineCode, 'unreachable'],
+  ['ETIMEDOUT', 'unreachable'],
+  ['EIO', 'unreachable'],
+  ['ESTALE', 'unreachable'],
+  ['EHOSTDOWN', 'unreachable'],
+  ['AUTHORITY_ROOT_OVERLAP', 'conflict'],
+]);
+
+/**
+ * The state and code one admission failure maps to (blueprint D1's error
+ * mapping). The code is the error's own `code`, or its `name` when it has none.
+ *
+ * @param error - What the root's provider or admission threw.
+ * @returns The state and the code to publish; never the message.
+ * @public
+ */
+export function rootStateForError(error: unknown): { readonly state: RootState; readonly code: string } {
+  const { code, name } = (error ?? {}) as { code?: unknown; name?: unknown };
+  const resolved = typeof code === 'string' && code !== '' ? code : typeof name === 'string' ? name : 'Error';
+  return { state: rootStateByCode.get(resolved) ?? 'error', code: resolved };
+}
+
+/**
  * Stable locator for a discovered project directory. `relativeDirectory` is the
  * physical directory relative to the workspace root (`<slug>`), never the
  * logical `/projects/<projectId>` route.

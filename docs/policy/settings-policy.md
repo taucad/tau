@@ -3,7 +3,7 @@ title: 'Settings Policy'
 description: 'How Tau designs, words, organizes and co-locates settings: one registry entry and one row per setting, short user-facing copy, detail in tooltips, and a fixed section taxonomy.'
 status: active
 created: '2026-10-29'
-updated: '2026-11-13'
+updated: '2026-11-15'
 related:
   - docs/policy/ux-policy.md
   - docs/policy/ui-policy.md
@@ -11,7 +11,6 @@ related:
   - docs/policy/accessibility-policy.md
   - docs/policy/agent-observability-policy.md
   - docs/research/billing-redesign-blueprint.md
-  - docs/research/loading-states-ux-blueprint.md
 ---
 
 # Settings Policy
@@ -54,14 +53,16 @@ INCORRECT:
 
 Group related rows in one `SettingsGroup`: an optional sentence-case heading above one bordered card whose rows are divided by hairlines. In each row the title and description sit on the left and the control (switch, select, button) on the right. Do not nest cards, add per-row borders, or invent a bespoke layout for one setting.
 
-| Need                         | Use                                                               |
-| ---------------------------- | ----------------------------------------------------------------- |
-| On/off choice                | `Switch` with `aria-label` equal to the row title                 |
-| One of a few named options   | Select button (`ComboBoxResponsive`), `size='sm'`                 |
-| Opens a flow or another page | Outline `Button size='sm'` with a verb: Manage, Change, Connect   |
-| Destructive or plan-changing | `variant='destructive' size='sm'`, in its own group at the bottom |
-| List of things (repos, keys) | One row per item, the item's action as its control                |
-| Status or progress           | Row `children` under the title, `text-xs text-muted-foreground`   |
+| Need                         | Use                                                             |
+| ---------------------------- | --------------------------------------------------------------- |
+| On/off choice                | `Switch` with `aria-label` equal to the row title               |
+| One of a few named options   | `Select size='md'`, or an outline `Button` picker               |
+| Opens a flow or another page | Outline `Button` with a verb: Manage, Change                    |
+| Destructive or plan-changing | `variant='destructive'`, in its own group at the end            |
+| List of things (repos, keys) | One row per item, the item's action as its control              |
+| Status or progress           | Row `children` under the title, `text-xs text-muted-foreground` |
+
+Every field, select and button in a settings page is one size, 32 px: `Input`, `Select size='md'` and `Button` at its `default` size share that height, 14 px text and 16 px icons, and an icon-only button is `size='icon'`, the same 32 px square. Settings is a form read occasionally, so it takes the app's default control height rather than a denser one. A marker inside a select's value, such as Suggested, sits at its right edge beside the chevron.
 
 ### 3. Organize By the User's Question, Not By the Code Owner
 
@@ -75,7 +76,7 @@ Put each setting in the section a user would open to answer their question. Each
 | Repositories  | Which code can Tau read and write?    | GitHub repository connection, repository access, per-repository write permission     |
 | Billing       | What do I pay and what do I get?      | Plan, plan limits, credits, automatic reload, cancel plan                            |
 | Data controls | What does Tau collect, keep and use?  | Usage and diagnostics, improving the service, cookie preferences, close account      |
-| Viewer        | How do 3D views look and respond?     | Mouse controls, trackpad, zoom and orbit, gizmo style, personal view defaults        |
+| Viewer        | How do 3D views look and respond?     | Mouse controls, zoom and orbit, gizmo style, personal view defaults                  |
 | Compute       | Where does work run?                  | Compute reuse, remote hosts                                                          |
 | Models        | Which models can I use?               | Model availability                                                                   |
 | Agents        | How does the agent behave?            | Context the agent receives, tools, permissions, chat display                         |
@@ -135,19 +136,18 @@ Data controls hold one switch per question a user would ask ("may Tau use my cha
 
 Give every control an accessible name equal to the row title. Status text that changes after an action uses `role='status'`; errors use `role='alert'`. Tests query by role and name, so renaming a title is a test change, not a selector hunt.
 
-### 12. Load in Place
+### 12. Load as the Page's Shape
 
-Settings loads as [UI Policy](ui-policy.md) §5 Loading says: the page's frame and its groups in their final geometry, with real rows whenever they are known, the row's control visible and disabled with a reason while its value arrives, and `WaitIndicator` in the group's header slot after 1,000 ms. Never show a centred spinner, an empty card or a "Loading…" line in a settings page, and never draw a new skeleton.
+While a settings page or a group of rows loads, draw the rows that are about to appear. Use `SettingsPageSkeleton` for a whole page (the settings code or the session is still arriving), `SettingsRowsLoading` for rows arriving inside a group that is already on screen, and `Skeleton` bars sized to the control for a single value. Never show a centred spinner, an empty card or a "Loading…" line in a settings page. Keep one `role='status'` region that names the wait for screen readers.
 
-| Waiting for                                | Draw                                                                 |
-| ------------------------------------------ | -------------------------------------------------------------------- |
-| The settings code, or the session          | The settings frame: navigation and the section header                |
-| Rows of a list (repositories, connections) | The group's frame; remembered rows if any; the indicator in its slot |
-| One value inside a row that is shown       | The row and its control, disabled with a reason; the row stays       |
+| Waiting for                                | Draw                                                     |
+| ------------------------------------------ | -------------------------------------------------------- |
+| The settings code, or the session          | `SettingsPageSkeleton`                                   |
+| Rows of a list (repositories, connections) | `SettingsRowsLoading` with the expected number of rows   |
+| One value inside a row that is shown       | A `Skeleton` bar in place of the value; the row stays    |
+| A list with its own row shape (models)     | Rows of `Skeleton` in that shape, inside the list's card |
 
-`SettingsPageSkeleton`, `SettingsRowsLoading` and the remaining `Skeleton` rows are converted route by route when Settings is next recorded and audited; until then `loading-state.ratchet.node.test.ts` caps them at today's count, so they only go down.
-
-**Why**: settings pages each invented a loading treatment (spinner card, text line, nothing), and the skeleton that replaced them is a second change on screen. Converting without recordings would repeat the guess, so the cap holds them until each route is recorded ([loading states UX blueprint](../research/loading-states-ux-blueprint.md)).
+**Why**: settings pages each invented a loading treatment (spinner card, text line, nothing); the page jumped when data arrived. See [UI Policy](ui-policy.md) §5 Loading Placeholders.
 
 ## Anti-Patterns
 
@@ -165,7 +165,7 @@ Settings loads as [UI Policy](ui-policy.md) §5 Loading says: the page's frame a
 - [ ] Longer detail in `info`; legal text linked, not pasted
 - [ ] No release, ticket, internal or test vocabulary
 - [ ] Loading and error states keep the control visible and disabled with a reason
-- [ ] A loading page or list keeps its frame and draws no new skeleton, spinner or "Loading…" text; a wait past 1,000 ms shows `WaitIndicator`
+- [ ] A loading page or list draws layout-matching skeletons (`SettingsPageSkeleton`, `SettingsRowsLoading`), never a spinner or "Loading…" text
 - [ ] Destructive actions last, confirmed when irreversible, consequence stated truthfully
 - [ ] Unavailable settings filtered in the registry, not rendered dead
 

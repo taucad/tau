@@ -21,15 +21,24 @@ export function UserView({ className, isCompact = false, isPending, user }: User
   });
 
   const resolvedUser = user ?? session?.user;
+  /* While the session is unknown the row draws skeletons for the avatar and the name, at their final sizes. */
+  const isUnknown = !resolvedUser && (isPending ?? sessionPending);
 
-  if ((isPending ?? sessionPending) && !user) {
+  if (isUnknown) {
     return (
-      <div data-compact={isCompact} className={cn('group/user-view flex items-center gap-2', className)}>
-        <UserAvatar className='group-data-[compact=true]/user-view:size-4' isPending />
+      <div
+        data-compact={isCompact}
+        aria-busy='true'
+        className={cn('group/user-view flex items-center gap-2', className)}
+      >
+        <UserAvatar
+          className='group-data-[compact=true]/user-view:size-4 group-data-[compact=true]/user-view:text-[10px]'
+          isPending
+        />
 
         <div className='grid flex-1 gap-1 text-left text-sm group-data-[compact=true]/user-view:gap-0'>
-          <Skeleton className='h-4 w-24 group-data-[compact=true]/user-view:h-3' />
-          <Skeleton className='h-3 w-32 group-data-[compact=true]/user-view:hidden' />
+          <Skeleton aria-hidden className='h-4 w-24 group-data-[compact=true]/user-view:h-3' />
+          <Skeleton aria-hidden className='h-3 w-32 group-data-[compact=true]/user-view:hidden' />
         </div>
       </div>
     );

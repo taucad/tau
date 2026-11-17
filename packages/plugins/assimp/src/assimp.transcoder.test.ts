@@ -63,7 +63,7 @@ describe('assimp transcoder', () => {
     expect(resolved.edges.filter(({ from }) => from === 'glb')).toHaveLength(11);
     expect(resolved.edges.filter(({ from }) => from === 'gltf')).toHaveLength(11);
     for (const edge of resolved.edges) {
-      expect(edge.fidelity).toBe('mesh');
+      expect(edge).not.toHaveProperty('fidelity');
       expect(edge.optionsSchema).toBe(assimpEdgeSchemas[edge.to as keyof typeof assimpEdgeSchemas]);
       expect(edge.sourceOptions).toEqual({ coordinateSystem: 'y-up', unit: { length: 'meter' } });
     }

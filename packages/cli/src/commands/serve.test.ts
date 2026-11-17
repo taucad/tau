@@ -17,6 +17,7 @@ import {
   handOffTarget,
   parseAllowedOrigins,
   prepareStoreUi,
+  reportAgentReady,
   resolveServePort,
   serveHostLabels,
   serveNativeKernels,
@@ -402,6 +403,58 @@ describe('serveUiChoice', () => {
     expect(serveUiChoice('./tau-ui')).toEqual({ kind: 'directory', directory: './tau-ui' });
     expect(serveUiChoice(false)).toEqual({ kind: 'none' });
     expect(serveUiChoice('false')).toEqual({ kind: 'none' });
+  });
+});
+
+describe('reportAgentReady', () => {
+  const written = async (event: Parameters<typeof reportAgentReady>[0]): Promise<string> => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      reportAgentReady(event);
+      return stderr.mock.calls.map(([chunk]) => String(chunk)).join('');
+    } finally {
+      stderr.mockRestore();
+    }
+  };
+
+  it('should print a refused agent with its message and, on the next line, its fix command', async () => {
+    const output = await written({
+      type: 'agent',
+      state: 'ready',
+      url: 'http://127.0.0.1:7180/',
+      externalAgents: [
+        {
+          id: 'grok',
+          displayName: 'Grok',
+          models: [],
+          refusal: 'CLI_NOT_FOUND',
+          fixCommand: 'curl -fsSL https://x.ai/cli/install.sh | bash',
+        },
+      ],
+      externalAgentRefusals: [{ id: 'grok', code: 'CLI_NOT_FOUND', message: 'The grok CLI was not found on PATH.' }],
+    });
+
+    expect(output).toContain('External agent Grok is unavailable (CLI_NOT_FOUND): The grok CLI was not found on PATH.');
+    expect(output).toMatch(
+      /The grok CLI was not found on PATH\.\n.*Fix: curl -fsSL https:\/\/x\.ai\/cli\/install\.sh \| bash/u,
+    );
+  });
+
+  it('should print the message only for a refusal no command clears', async () => {
+    const output = await written({
+      type: 'agent',
+      state: 'ready',
+      url: 'http://127.0.0.1:7180/',
+      externalAgents: [{ id: 'codex', displayName: 'Codex', models: [], refusal: 'EXTERNAL_AGENT_UNAVAILABLE' }],
+      externalAgentRefusals: [
+        { id: 'codex', code: 'EXTERNAL_AGENT_UNAVAILABLE', message: 'codex --version did not answer within 10000 ms.' },
+      ],
+    });
+
+    expect(output).toContain(
+      'External agent Codex is unavailable (EXTERNAL_AGENT_UNAVAILABLE): codex --version did not answer within 10000 ms.',
+    );
+    expect(output).not.toContain('Fix:');
   });
 });
 

@@ -11,7 +11,9 @@
  *   a lane close and applies on the next attach (A0.3 row 1c, ruled a passing guard under D14).
  * - `unavailable`: the target cannot open (its file failed to open), or the device has no adapter for it.
  *
- * Settled entries are kept, so a re-sent id is answered from its first outcome and never applied again.
+ * A settled entry is retired to its outcome once no late answer can reach it ({@link retired}): the outcome is all a
+ * re-sent id needs to be answered from its first outcome and never applied again, so the open entries do not grow with
+ * every intent a live project's runtime has seen.
  *
  * @module
  */
@@ -68,6 +70,9 @@ export type PaneIntentOutcome = Readonly<{ outcome: 'applied' } | { outcome: 'dr
 /** The intents a layout holds, by id, in the order they were sent. */
 export type PaneIntents = Readonly<Record<string, PaneIntentEntry>>;
 
+/** The outcomes of the retired intents, by id. */
+export type PaneIntentOutcomes = Readonly<Record<string, PaneIntentOutcome>>;
+
 /** The adapter an intent applies through: a file opens in the workbench lane's editor. */
 export const intentAdapter = (target: PaneIntentTarget): LayoutAdapterId =>
   target.kind === 'file' ? 'workbench' : target.adapter;
@@ -97,11 +102,14 @@ export const openIntents = (intents: PaneIntents): readonly PaneIntentEntry[] =>
     .filter((entry) => isOpen(entry))
     .toSorted((left, right) => left.sent - right.sent);
 
-/** A newly sent intent, queued after every intent already held. */
-export const queued = (intents: PaneIntents, intent: PaneIntent): PaneIntents => ({
-  ...intents,
-  [intent.intentId]: { ...intent, sent: Object.keys(intents).length, state: 'queued' },
-});
+/** A newly sent intent, queued after every intent already held (retired ones no longer need an order). */
+export const queued = (intents: PaneIntents, intent: PaneIntent): PaneIntents => {
+  let sent = 0;
+  for (const entry of Object.values(intents)) {
+    sent = Math.max(sent, entry.sent + 1);
+  }
+  return { ...intents, [intent.intentId]: { ...intent, sent, state: 'queued' } };
+};
 
 /**
  * Replace one entry's state; an entry that is not open is never changed (a settled intent stays settled). An intent
@@ -141,4 +149,27 @@ export const settleWhere = (
     next = withState(next, entry.intentId, state);
   }
   return { intents: next, settled: settled.map((entry) => intentOf(next, entry.intentId)!) };
+};
+
+/**
+ * Retire each settled entry that no late answer can reach to its outcome: an applied intent, and a dropped one whose
+ * outstanding delivery was answered or can no longer be (I11 keeps the outcome, not the entry).
+ */
+export const retired = (
+  intents: PaneIntents,
+  outcomes: PaneIntentOutcomes,
+): Readonly<{ intents: PaneIntents; outcomes: PaneIntentOutcomes }> => {
+  const entries = Object.values(intents);
+  const done = (entry: PaneIntentEntry): boolean =>
+    !isOpen(entry) && !(entry.state === 'dropped' && entry.late !== undefined);
+  if (!entries.some((entry) => done(entry))) {
+    return { intents, outcomes };
+  }
+  return {
+    intents: Object.fromEntries(entries.filter((entry) => !done(entry)).map((entry) => [entry.intentId, entry])),
+    outcomes: {
+      ...outcomes,
+      ...Object.fromEntries(entries.filter((entry) => done(entry)).map((entry) => [entry.intentId, outcomeOf(entry)!])),
+    },
+  };
 };

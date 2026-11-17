@@ -110,7 +110,7 @@ export function SettingsInfo({
           <button
             type='button'
             aria-label={`About ${label.toLowerCase()}`}
-            className='inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:focus-outline'
+            className='inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:focus-outline'
           >
             <Info className='size-3.5' />
           </button>
@@ -216,7 +216,7 @@ export function SettingsRowSkeleton({
         <Skeleton className='h-3.5 w-32 max-w-full' />
         <Skeleton className='h-3 w-56 max-w-full' />
       </div>
-      {hasControl ? <Skeleton className='h-8 w-20 shrink-0' /> : undefined}
+      {hasControl ? <Skeleton className='h-7 w-20 shrink-0' /> : undefined}
     </div>
   );
 }

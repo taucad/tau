@@ -194,6 +194,11 @@ export class MetricsService {
     },
   );
 
+  public readonly emailEventsTotal = this.apiMeter.createCounter(TauMetrics.emailEventsTotal.name, {
+    description: TauMetrics.emailEventsTotal.description,
+    unit: TauMetrics.emailEventsTotal.unit,
+  });
+
   public readonly publicationFileRequestsTotal = this.apiMeter.createCounter(
     TauMetrics.publicationFileRequestsTotal.name,
     {

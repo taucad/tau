@@ -49,7 +49,10 @@ const publishChatState = (state: MockChatState): void => {
 };
 let locationState: { readonly focusChatComposer?: boolean } | undefined;
 let archiveOpen = false;
-vi.mock('react-router', () => ({ useLocation: () => ({ state: locationState }) }));
+vi.mock('react-router', () => ({
+  useLocation: () => ({ state: locationState }),
+  useParams: () => ({ workspace: 'home', project: 'one' }),
+}));
 vi.mock('#hooks/use-search-parameter.js', () => ({ useSearchParameter: () => [archiveOpen, vi.fn()] }));
 vi.mock('#routes/w.$workspace.$project/archived-chats.js', () => ({
   ArchivedChats: () => <section aria-label='Archived chats' />,
@@ -98,6 +101,8 @@ vi.mock('#hooks/use-chat.js', () => ({
       turnGroups: buildTurnGroups(messages),
       agentInvocations: '',
       transcript,
+      // No tray is remembered: these rows are about the transcript; the browser rows cover the trays (U10).
+      rememberedComposerTrays: [],
     });
   },
   useChatContext: () => ({ activeChatId: 'chat_test', persistenceActorRef: fakePersistenceActorRef }),
@@ -134,6 +139,7 @@ vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
 const capturedTextarea: {
   onSubmit?: ChatTextareaProperties['onSubmit'];
   className?: string;
+  handOff?: ChatTextareaProperties['handOff'];
   focus: ReturnType<typeof vi.fn<() => void>>;
 } = {
   focus: vi.fn<() => void>(),
@@ -144,8 +150,10 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
     readonly onSubmit?: ChatTextareaProperties['onSubmit'];
     readonly className?: string;
     readonly enableMobileCollapse?: boolean;
+    readonly handOff?: ChatTextareaProperties['handOff'];
   }): React.JSX.Element => {
     capturedTextarea.onSubmit = properties.onSubmit;
+    capturedTextarea.handOff = properties.handOff;
     capturedTextarea.className = properties.className;
     useImperativeHandle(properties.ref, () => ({ focus: capturedTextarea.focus }), []);
     return <div data-testid='chat-textarea' data-collapsible={properties.enableMobileCollapse === true} />;
@@ -154,8 +162,6 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
 
 // Queue behavior is covered by its view and session-store suites; this leaf fixture owns history composition.
 vi.mock('#components/chat/chat-message-queue.js', () => ({ ChatMessageQueue: () => null }));
-// The Auto transcript row reads the composer's kernel; its own suite covers it (chat-auto-kernel-row.test.tsx).
-vi.mock('#components/chat/chat-auto-kernel-row.js', () => ({ ChatAutoKernelRow: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
   ChatMessagePlanning: () => (
     <div role='status' aria-label='Current activity'>
@@ -241,6 +247,11 @@ vi.mock('@taucad/chat-ui/components/at-reference-context', () => ({
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ treeService: undefined }),
 }));
+/* The files hooks read the same services from files-ui's own context. */
+vi.mock('@taucad/files-ui/hooks/use-file-services', async () => {
+  const { useFileManager } = await import('#hooks/use-file-manager.js');
+  return { useFileServices: useFileManager, useOptionalFileServices: useFileManager };
+});
 
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({ chats: [] }),
@@ -378,6 +389,13 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(headers[0]).toHaveClass('gap-1');
     expect(headers[0]?.querySelector('[data-testid=chat-title-bar]')).not.toBeNull();
     expect(container.querySelector('.sticky')).toBeNull();
+  });
+
+  /* PL6: the composer adopts only the native input its own project's placeholder served. */
+  it("should adopt the composer hand-off scoped to the route's project", () => {
+    render(<ChatHistory />);
+
+    expect(capturedTextarea.handOff).toEqual({ surface: 'project-composer', scope: 'home/one' });
   });
 
   it('leaves the surface styling with ChatTextarea and caps the composer width', () => {
@@ -661,9 +679,9 @@ describe('ChatHistory — composer refocus', () => {
 });
 
 /**
- * The list's own container marks its transcript's load state: lane A12 renders `data-transcript-state` on the
+ * The list's own container marks its transcript's load state: A12 renders `data-transcript-state` on the
  * Virtuoso root (passed as a Virtuoso prop), or on its Scroller from the list's `context`. The mock renders both and
- * passes `context` to the Scroller and the empty placeholder, as Virtuoso does. It does not exist yet.
+ * passes `context` to the Scroller and the empty placeholder, as Virtuoso does.
  */
 const transcriptLoadingMarker = '[data-transcript-state="loading"]';
 /** The same marker once the list has left `loading` with the chat's turns. */
@@ -722,7 +740,7 @@ describe('ChatHistory — transcript load (I21)', () => {
     archiveOpen = false;
   });
 
-  it.fails('never shows the empty-chat state for a chat with history while its transcript loads (U7)', () => {
+  it('never shows the empty-chat state for a chat with history while its transcript loads (U7)', () => {
     const load = renderOverDeferredTranscript(history);
     const steps = [readFrame()];
     load.resolve();
@@ -754,7 +772,7 @@ describe('ChatHistory — transcript load (I21)', () => {
     expect(document.querySelector('[data-slot="panel-empty-state"]')).toBeInTheDocument();
   });
 
-  it.fails('has no commit with the list neither loading nor showing a turn, for a chat with history (U19)', () => {
+  it('has no commit with the list neither loading nor showing a turn, for a chat with history (U19)', () => {
     const load = renderOverDeferredTranscript(history);
     load.resolve();
 

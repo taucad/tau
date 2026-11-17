@@ -47,12 +47,18 @@ const startOfToday = (): number => {
 
 export const sortProjectChats = (chats: readonly ChatRecord[]): ChatRecord[] => [...chats].sort(compareChatsByRecency);
 
+/** What a chat list needs of its project. */
+type ChatListProject = Pick<ProjectListItem, 'id' | 'slugs'>;
+
+/** Skeleton rows drawn while a project's chats are first listed. */
+const skeletonChatRowCount = 3;
+
 export function ProjectChatList({
   project,
   isProjectActive,
   isExpanded = true,
 }: {
-  readonly project: ProjectListItem;
+  readonly project: ChatListProject;
   readonly isProjectActive: boolean;
   readonly isExpanded?: boolean;
 }): React.ReactNode {
@@ -60,13 +66,15 @@ export function ProjectChatList({
   const isOpening = useTauCloudIntent(project.id) === 'open';
   const isLoadingCloudChats = useProjectSidebarRow(project.id).sync?.chats === 'loading';
   const { updateChatName, deleteChat } = useChats(project.id, { enabled: false });
-  const chats = useMemo(
+  const listedChats = useMemo(
     () =>
       allChats.filter(
         (chat) => chat.deletedAt === undefined && chat.purgedAt === undefined && !isUnownedChatObservation(chat.id),
       ),
     [allChats],
   );
+  const isAwaitingChats = (isLoading || isOpening || isLoadingCloudChats) && listedChats.length === 0;
+  const chats = listedChats;
   const store = useChatSessionStore();
   // Metadata and ordering do not retire leases; only membership or the owning project/store does.
   const observations = useMemo(
@@ -94,13 +102,14 @@ export function ProjectChatList({
   const unreadKey = useSyncExternalStore(
     useCallback((listener: () => void) => store.subscribeUnread(listener), [store]),
     () =>
-      chats
+      listedChats
         .filter((chat) => store.isUnread(chat.id))
         .map((chat) => chat.id)
         .join(observedKeySeparator),
     () => '',
   );
-  const observedKey = [...new Set([...visibleChats.map((chat) => chat.id), ...unreadKey.split(observedKeySeparator)])]
+  const observedChats = visibleChats;
+  const observedKey = [...new Set([...observedChats.map((chat) => chat.id), ...unreadKey.split(observedKeySeparator)])]
     .filter((chatId) => chatId !== '' && !isUnownedChatObservation(chatId))
     .join(observedKeySeparator);
   useEffect(() => {
@@ -164,11 +173,12 @@ export function ProjectChatList({
      * project row never share a column. */
     <SidebarMenuSub
       id={listId}
+      aria-busy={isAwaitingChats ? true : undefined}
       className='mt-0.5 mr-0 ml-3.5 translate-x-0 gap-0.5 border-l border-sidebar-border py-0 pr-0 pl-1.5'
     >
-      {(isLoading || isOpening || isLoadingCloudChats) && chats.length === 0
-        ? Array.from({ length: 3 }, (_, index) => (
-            <SidebarMenuSubItem key={index} aria-hidden>
+      {isAwaitingChats
+        ? Array.from({ length: skeletonChatRowCount }, (_, index) => (
+            <SidebarMenuSubItem key={index} aria-hidden data-testid='project-chat-skeleton'>
               <SidebarRowSkeleton />
             </SidebarMenuSubItem>
           ))
@@ -247,7 +257,7 @@ function ProjectChatItem({
   onDelete,
 }: {
   readonly chat: ChatRecord;
-  readonly project: ProjectListItem;
+  readonly project: ChatListProject;
   readonly isActive: boolean;
   readonly isPending: boolean;
   readonly isEditing: boolean;

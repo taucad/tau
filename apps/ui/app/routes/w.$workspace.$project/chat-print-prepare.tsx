@@ -66,7 +66,7 @@ import {
   useCompiledConfigurationManifest,
 } from '#components/machines/machine-section.js';
 import type { ResolvedSchema } from '#components/machines/machine-section.js';
-import { operator } from '#hooks/use-machine-control.js';
+import { operator } from '#components/print/machine-operator.js';
 import {
   describePrintError,
   formatQuantity,
@@ -89,7 +89,10 @@ import {
 } from '#components/machines/machine-summary.js';
 import type { PlateFit } from '#components/machines/machine-summary.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
-import { bestRouteForActiveKernel, exportDocumentWithValidatedInput } from '#utils/export-formats.utils.js';
+import {
+  bestRouteForActiveKernel,
+  exportDocumentWithValidatedInput,
+} from '@taucad/files-ui/utils/export-formats.utils';
 
 /** The export target every print goes through (blueprint D3). */
 const gcodeContainerFormat: FileExtension = 'gcode.3mf';

@@ -25,7 +25,7 @@ vi.mock('#workbench-records/view-actions.js', () => ({
 }));
 
 const { ViewerProjectionPicker } = await import('#routes/w.$workspace.$project/chat-viewer-projection-picker.js');
-const { viewerPanelTitle } = await import('#routes/w.$workspace.$project/chat-viewer-dockview.js');
+const { viewerPanelTitle } = await import('#workbench-records/viewer-adapter.js');
 const renderPicker = (ui: React.ReactElement): ReturnType<typeof render> => render(ui, { wrapper: TooltipProvider });
 const cadActor = mock<ActorRefFrom<typeof cadMachine>>();
 const model = { id: 'model', title: '3D Model', mimeType: 'model/gltf-binary' } as const;

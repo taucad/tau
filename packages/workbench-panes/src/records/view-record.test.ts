@@ -20,7 +20,6 @@ describe('view-record', () => {
         grid: false,
         axes: true,
         matcap: true,
-        postProcessing: false,
       },
       camera: {
         kind: 'pose',
@@ -53,12 +52,12 @@ describe('view-record', () => {
     const view = record();
     const resolved = resolveViewSettings({
       tau: tauViewDefaults,
-      person: { 'display.grid': false, fieldOfView: 0, 'display.postProcessing': true },
+      person: { 'display.grid': false, fieldOfView: 0, 'display.matcap': true },
       view,
     }).values;
     expect(graphicsSettingsForView(view, resolved)).toMatchObject({
       enableGrid: false,
-      enablePostProcessing: true,
+      enableMatcap: true,
       cameraFovAngle: 0,
       upDirection: 'z',
     });
@@ -92,6 +91,27 @@ describe('view-record', () => {
         }),
       ),
     ).toBeUndefined();
+  });
+
+  it('should keep a saved Tumble pose rolled, and a named preset upright (TA5)', () => {
+    // A pose saved after a Tumble drag over the top: the view is upside down about the z up.
+    const tumbled = record({
+      camera: {
+        kind: 'pose',
+        frameId: 'tau:root',
+        target: [0, 0, 0],
+        direction: [1, 0, 0.2],
+        up: [-0.2, 0, -1],
+        verticalSpan: 1,
+        perspectiveZoom: 1,
+      },
+    });
+    expect(graphicsSettingsForView(tumbled).cameraView).toMatchObject({ up: [-0.2, 0, -1] });
+    for (const preset of ['front', 'top', 'isometric'] as const) {
+      const { up } = viewCameraOrientation(record({ camera: { kind: 'preset', preset }, upDirection: 'z' }))!;
+      // Upright: the up leans toward +z (straight along it unless the view looks down the z axis).
+      expect(up[2] >= 0 && Math.hypot(...up)).toBeCloseTo(1, 9);
+    }
   });
 
   it('should read back from the graphics owner the fields it was seeded with', () => {

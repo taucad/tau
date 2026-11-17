@@ -14,13 +14,14 @@ import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { PreviewWorkbenchLayout } from '#components/share/preview-workbench-layout.js';
 import { desktopTitlebarInset } from '#components/layout/page.js';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
-import { ProjectProvider, useProject } from '#hooks/use-project.js';
+import { ProjectProvider } from '#hooks/project-provider.js';
+import { useProject } from '#hooks/use-project.js';
 import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 import { ProjectExportAction } from '#routes/w.$workspace.$project/project-export-action.js';
-import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
+import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { ProjectSettingsDialog } from '#routes/w.$workspace.$project_.preview/project-settings-dialog.js';
 import { usePreviewProject } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
 import { PreviewPhoneTopBar } from '#routes/w.$workspace.$project_.preview/preview-phone-top-bar.js';
@@ -46,6 +47,7 @@ export function OwnedPreviewProviders({
             key={`${projectId}:${selection.key}`}
             projectId={projectId}
             profile='shared'
+            isStandalone
             previewParameterService={previewParameterService}
             kernelOptionsFactory={selection.kernelOptionsFactory}
           >

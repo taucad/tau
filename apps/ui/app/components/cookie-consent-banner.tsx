@@ -15,6 +15,10 @@ const subscribeNever = (): (() => void) => () => undefined;
 /** Do Not Track suppresses the offer, as on the website; it is read in the browser only, after hydration. */
 const readDoNotTrack = (): boolean => globalThis.navigator.doNotTrack === '1';
 const readDoNotTrackOnServer = (): boolean => false;
+/* OD8: the banner mounts after hydration, from the client's read of the decision, as a fixed overlay that shifts
+   nothing; the document itself carries no banner, so a visitor who declined never sees one. */
+const readIsHydrated = (): boolean => true;
+const readIsHydratedOnServer = (): boolean => false;
 
 /**
  * First-visit analytics offer for a web visitor with no recorded decision.
@@ -29,7 +33,8 @@ const readDoNotTrackOnServer = (): boolean => false;
 export function CookieConsentBanner(): React.JSX.Element | undefined {
   const consentStatus = useCookieConsent();
   const doNotTrack = useSyncExternalStore(subscribeNever, readDoNotTrack, readDoNotTrackOnServer);
-  const isShown = consentStatus === 'unknown' && !doNotTrack;
+  const isHydrated = useSyncExternalStore(subscribeNever, readIsHydrated, readIsHydratedOnServer);
+  const isShown = isHydrated && consentStatus === 'unknown' && !doNotTrack;
 
   useEffect(() => {
     if (!isShown) {

@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fc from 'fast-check';
-import { EventCoalescer, coalesceChangeEvents } from '#event-coalescer.js';
+import {
+  EventCoalescer,
+  coalesceChangeEvents,
+  overflowLossSignals,
+  pruneDirectorySummaries,
+} from '#event-coalescer.js';
 import { getEventOrigin, tagEventOrigin } from '#event-origin-registry.js';
+import { scopeEventToRoot } from '#scope-event-to-root.js';
 import type { PathChangeEvent } from '#types.js';
 
 const testBackend = 'memory';
@@ -38,6 +44,81 @@ describe('coalesceChangeEvents (pure)', () => {
           expect(actual).toEqual(expected);
         },
       ),
+    );
+  });
+
+  it('should leave every path a batch of file and directory writes, deletes, moves and copies touched in its final state', () => {
+    const presence = (sequence: readonly PathChangeEvent[]): Map<string, boolean> => {
+      const state = new Map<string, boolean>();
+      for (const event of sequence) {
+        switch (event.type) {
+          case 'fileRenamed':
+          case 'directoryRenamed': {
+            state.set(event.oldPath, false);
+            state.set(event.newPath, true);
+            break;
+          }
+          case 'fileCopied': {
+            state.set(event.targetPath, true);
+            break;
+          }
+          case 'fileWritten':
+          case 'directoryCreated': {
+            state.set(event.path, true);
+            break;
+          }
+          case 'fileDeleted':
+          case 'directoryDeleted': {
+            state.set(event.path, false);
+            break;
+          }
+          default: {
+            break;
+          }
+        }
+      }
+      return state;
+    };
+    const path = fc.constantFrom('/a', '/b', '/c', '/d/e');
+    const directory = fc.constantFrom('/x', '/y', '/z');
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.oneof(
+            path.map((at) => written(at)),
+            path.map((at) => deleted(at)),
+            fc.tuple(path, path).map(([from, to]) => renamed(from, to)),
+            fc.tuple(path, path).map(
+              ([from, to]): PathChangeEvent => ({
+                type: 'fileCopied',
+                sourcePath: from,
+                targetPath: to,
+                backend: testBackend,
+              }),
+            ),
+            directory.map((at): PathChangeEvent => ({ type: 'directoryCreated', path: at, backend: testBackend })),
+            directory.map((at): PathChangeEvent => ({ type: 'directoryDeleted', path: at, backend: testBackend })),
+            fc.tuple(directory, directory).map(
+              ([from, to]): PathChangeEvent => ({
+                type: 'directoryRenamed',
+                oldPath: from,
+                newPath: to,
+                backend: testBackend,
+              }),
+            ),
+          ),
+          { minLength: 1, maxLength: 40 },
+        ),
+        (events) => {
+          const valid = events.filter((event) =>
+            event.type === 'fileRenamed' || event.type === 'directoryRenamed'
+              ? event.oldPath !== event.newPath
+              : event.type !== 'fileCopied' || event.sourcePath !== event.targetPath,
+          );
+          expect(presence(coalesceChangeEvents(valid))).toEqual(presence(valid));
+        },
+      ),
+      { numRuns: 500 },
     );
   });
 
@@ -110,6 +191,49 @@ describe('coalesceChangeEvents (pure)', () => {
       return paths;
     });
     expect(allPaths).toContain('/b');
+  });
+
+  /*
+   * STO-25 SP2g: a revision write replaces a file in four facts — stage a
+   * sibling, move the file aside, publish the sibling over it, drop the backup.
+   * One window nets them to what an observer can tell: the staged copy moved
+   * onto the file, and the backup is gone.
+   */
+  it('should net a replacement’s four facts to the publish and the backup’s removal', () => {
+    const staged = '/p/.part.scad.tau-staged.1.tmp';
+    const backup = '/p/.part.scad.tau-backup.1.tmp';
+    const events = [written(staged), renamed('/p/part.scad', backup), renamed(staged, '/p/part.scad'), deleted(backup)];
+    expect(coalesceChangeEvents(events)).toEqual([renamed(staged, '/p/part.scad'), deleted(backup)]);
+  });
+
+  it('should keep a move away from a path nothing re-creates, and its arrival', () => {
+    expect(coalesceChangeEvents([renamed('/a', '/b'), written('/c')])).toEqual([renamed('/a', '/b'), written('/c')]);
+    expect(coalesceChangeEvents([renamed('/a', '/b'), written('/b')])).toEqual([renamed('/a', '/b'), written('/b')]);
+  });
+
+  it('should keep the arrival of a move whose source is written again', () => {
+    const events = [renamed('/a', '/b'), written('/a')];
+    expect(coalesceChangeEvents(events)).toEqual([written('/b'), written('/a')]);
+  });
+
+  it('should keep the final write to a path written, moved away and written again', () => {
+    const events = [written('/a'), renamed('/a', '/b'), written('/a')];
+    expect(coalesceChangeEvents(events)).toEqual([written('/b'), written('/a')]);
+  });
+
+  /* Review item 4: a copy onto a path is an arrival there, so a later delete of it is never folded into an earlier move. */
+  it('should keep the delete of a path a copy re-created after the path moved away', () => {
+    const copied: PathChangeEvent = { type: 'fileCopied', sourcePath: '/x', targetPath: '/a', backend: testBackend };
+    const events = [renamed('/a', '/b'), copied, deleted('/a')];
+    expect(coalesceChangeEvents(events)).toEqual([written('/b'), copied, deleted('/a')]);
+  });
+
+  it('should carry the origin of a move it nets to an arrival', () => {
+    const moved = renamed('/a', '/b');
+    tagEventOrigin(moved, 'port-1');
+    const [arrival] = coalesceChangeEvents([moved, written('/a')]);
+    expect(arrival).toEqual(written('/b'));
+    expect(getEventOrigin(arrival!)).toBe('port-1');
   });
 
   it('should deduplicate repeated writes to the same path', () => {
@@ -462,5 +586,110 @@ describe('EventCoalescer (timed)', () => {
 
       coalescer.dispose();
     });
+  });
+});
+
+/* STO-25 SP2g: an overflowed window becomes a reset of every directory it touched, never a silent drop (I5, I7). */
+describe('overflowLossSignals', () => {
+  it('should reset every directory a discarded fact left unknown, and nothing a copy only read', () => {
+    expect(
+      overflowLossSignals([
+        written('/p/a/one.scad'),
+        written('/p/a/two.scad'),
+        renamed('/p/a/two.scad', '/p/b/two.scad'),
+        { type: 'fileCopied', sourcePath: '/p/src/three.scad', targetPath: '/p/c/three.scad', backend: testBackend },
+        { type: 'directoryDeleted', path: '/p/gone', backend: testBackend },
+        { type: 'directoryRenamed', oldPath: '/p/d', newPath: '/q/d', backend: testBackend },
+      ]),
+    ).toEqual([
+      /* A removal or move is a fact the port's scoping needs as itself: above a root it resets that root. */
+      { type: 'directoryDeleted', path: '/p/gone', backend: testBackend },
+      { type: 'directoryRenamed', oldPath: '/p/d', newPath: '/q/d', backend: testBackend },
+      ...['/p/a', '/p/b', '/p/c', '/p', '/p/gone', '/p/d', '/q', '/q/d'].map(
+        (path): PathChangeEvent => ({ type: 'directoryChanged', path, backend: testBackend }),
+      ),
+    ]);
+  });
+
+  it('should re-list a removed directory the same window re-created or touched, never tell it gone', () => {
+    const signals = overflowLossSignals([
+      { type: 'directoryDeleted', path: '/p/x', backend: testBackend },
+      written('/p/x/a'),
+      { type: 'directoryRenamed', oldPath: '/p/y', newPath: '/p/z', backend: testBackend },
+      { type: 'directoryCreated', path: '/p/y', backend: testBackend },
+    ]);
+    expect(signals.map((event) => event.type)).not.toContain('directoryDeleted');
+    expect(signals.map((event) => event.type)).not.toContain('directoryRenamed');
+    expect(scopeEventToRoot(signals.find((event) => 'path' in event && event.path === '/p/x')!, '/p/x/deep')).toEqual({
+      type: 'directoryChanged',
+      path: '',
+      backend: testBackend,
+    });
+    expect(scopeEventToRoot(signals.find((event) => 'path' in event && event.path === '/p/z')!, '/p/z/deep')).toEqual({
+      type: 'directoryChanged',
+      path: '',
+      backend: testBackend,
+    });
+    /* The intent is the value's own: a copy across a realm or a later step still resets the port. */
+    expect(
+      scopeEventToRoot(
+        structuredClone(signals.find((event) => 'path' in event && event.path === '/p/x')!),
+        '/p/x/deep',
+      ),
+    ).toEqual({ type: 'directoryChanged', path: '', backend: testBackend });
+    /* An ordinary summary above a root still says only that its listing changed. */
+    expect(
+      scopeEventToRoot({ type: 'directoryChanged', path: '/p/x', backend: testBackend }, '/p/x/deep'),
+    ).toBeUndefined();
+  });
+
+  it('should keep a discarded backendChanged as its backend’s whole signal, and scope every other backend', () => {
+    expect(
+      overflowLossSignals([
+        written('/a/one.txt'),
+        { type: 'backendChanged', backend: testBackend },
+        { type: 'fileDeleted', path: '/b/two.txt', backend: 'opfs' },
+      ]),
+    ).toEqual([
+      { type: 'backendChanged', backend: testBackend },
+      { type: 'directoryChanged', path: '/b', backend: 'opfs' },
+    ]);
+  });
+});
+
+describe('pruneDirectorySummaries', () => {
+  const summary = (path: string, backend: PathChangeEvent['backend'] = testBackend): PathChangeEvent => ({
+    type: 'directoryChanged',
+    path,
+    backend,
+  });
+
+  it('should keep one summary per directory, at its last place', () => {
+    expect(pruneDirectorySummaries([summary('/a'), written('/a/x'), summary('/a')])).toEqual([
+      written('/a/x'),
+      summary('/a'),
+    ]);
+  });
+
+  it('should drop a summary a later summary of an ancestor covers', () => {
+    expect(
+      pruneDirectorySummaries([summary('a/b'), written('a/b/x'), summary('a'), summary('c'), summary('')]),
+    ).toEqual([written('a/b/x'), summary('')]);
+    expect(pruneDirectorySummaries([summary('/a/b'), summary('/')])).toEqual([summary('/')]);
+  });
+
+  it('should keep a summary no later ancestor covers, and one of another backend', () => {
+    const events = [summary('/a'), summary('/a/b'), summary('/ab'), summary('/a/c', 'opfs')];
+    expect(pruneDirectorySummaries([...events, summary('/', 'opfs')])).toEqual([
+      summary('/a'),
+      summary('/a/b'),
+      summary('/ab'),
+      summary('/', 'opfs'),
+    ]);
+  });
+
+  it('should return the same facts when no summary repeats or is covered', () => {
+    const events = [written('/a'), summary('/b'), deleted('/c')];
+    expect(pruneDirectorySummaries(events)).toBe(events);
   });
 });

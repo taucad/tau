@@ -39,7 +39,7 @@ const launch: { [K in keyof SyncedSections]: StoredSection<SyncedSections[K]> } 
   onboarding: {
     value: { version: 1, setup: { status: 'completed' }, tour: { wanted: true, seen: ['ask', 'look'] } },
   },
-  device: { value: { version: 1, inputDevice: 'trackpad', tourPaused: true } },
+  device: { value: { version: 1, inviteDismissed: true, tourPaused: true } },
 };
 
 const keysOf = (value: unknown): unknown =>

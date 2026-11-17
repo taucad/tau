@@ -26,6 +26,8 @@ import { apiRoot, moduleGraph, sourceFiles } from '#testing/module-graph.js';
 const cachedReadAllowlist: Readonly<Record<string, string>> = {
   'app/api/durable-events/durable-events.controller.ts#GET :streamId/events':
     'Long-poll of stream events; mints nothing (its 25 s admission window is part of the documented bound)',
+  'app/api/email-deliverability/email-deliverability.controller.ts#GET deliverability':
+    "Whether the caller's own address bounced, read from the database; the webhook verifier is only in the graph",
   'app/api/git/git-proxy.controller.ts#GET proxy':
     "Relays an upstream git host's bytes; the caller's own remote credential, no Tau-signed link",
   'app/api/git/git-proxy.controller.ts#GET lfs/:handle':

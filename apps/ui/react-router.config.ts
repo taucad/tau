@@ -19,7 +19,7 @@ const prerenderConcurrency = 4;
 
 /**
  * `getStaticPaths()` is not used: most routes here (`/projects`,
- * `/files`, `/usage`, `/settings_`, `/health/*`, `/action/set-theme`,
+ * `/files`, `/usage`, `/settings_`, `/health/*`, `/action/migrate-theme`,
  * `/api/*`, `/_index`) are auth-gated, runtime-only, or proxy endpoints that
  * would fail prerender. Each safelisted path below is one that genuinely has
  * no per-request work.
@@ -37,9 +37,13 @@ export default {
    * "optimized dependencies changed. reloading" full page reload: a cold dev server reloaded
    * open pages eight times during e2e-nightly's development tier (2026-11-12).
    * Worker entries, which no route reaches statically, are added in `vite.config.ts`.
+   *
+   * `v8_passThroughRequests` is React Router 8's behaviour (blueprint B4): loaders and actions get the request as
+   * sent, so a client navigation's `request.url` is `<path>.data?_routes=…`. Anything that means the page's own URL
+   * reads the `url` argument.
    */
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag name.
-  future: { unstable_optimizeDeps: true },
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
+  future: { unstable_optimizeDeps: true, v8_passThroughRequests: true, v8_middleware: true },
   /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.
    *
@@ -60,12 +64,20 @@ export default {
   routeDiscovery: { mode: 'initial' },
   /**
    * `buildEnd` is the only hook that runs after prerendering, so it is where
-   * the offline shell worker is generated from the emitted `/usage` document
-   * and the Vite build manifest (B5 R3). The desktop and daemon configs are
-   * separate files and never run this: both already boot from a packaged SPA
+   * the Home shell is moved off `/`'s static path to the file the marketing edge
+   * function rewrites to (progressive loading PL4, `scripts/place-static-shells.ts`),
+   * and where the offline shell worker is generated from the emitted `/usage`
+   * document and the Vite build manifest (B5 R3). The desktop and daemon configs
+   * are separate files and never run this: both already boot from a packaged SPA
    * index fallback.
    */
   async buildEnd({ reactRouterConfig }) {
+    const { placeEdgeShells } = await import('./scripts/place-static-shells');
+    for (const placed of placeEdgeShells(`${reactRouterConfig.buildDirectory}/client`)) {
+      console.log(
+        `Static shell: ${placed.from} -> ${placed.to}${placed.removed.map((file) => `, removed ${file}`).join('')}`,
+      );
+    }
     if (!tauCloudEnabled) {
       return;
     }

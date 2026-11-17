@@ -4,7 +4,6 @@ import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { useProjects } from '#hooks/use-projects.js';
-import { useProjectListShape } from '#hooks/use-project-list-shape.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useAppUiPreferences } from '#hooks/use-app-ui-preferences.js';
 import { projectChatUrl, projectUrl, projectUrlOr } from '#utils/project-url.utils.js';
@@ -44,7 +43,7 @@ import {
 } from '#components/nav/sidebar-row.js';
 import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
-import { useLiveProjectIds } from '#hooks/use-sessions.js';
+import { useLiveProjectIds, useProjectLiveness } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import {
@@ -59,62 +58,133 @@ import { NativeFileManagerIcon, useOpenProjectInFileManager } from '#hooks/use-n
 
 const projectsPerPage = 5;
 
-/** Rows reserved while a browser that has never listed its projects waits for its first listing. */
-const unknownShapeRowCount = 3;
+/** Skeleton rows drawn while the first listing is pending: one page, whatever the device has. */
+const skeletonRowCount = projectsPerPage;
 
-export const sortProjectsByActivity = (projects: readonly ProjectListItem[]): ProjectListItem[] =>
+/** What a sidebar project row draws: a listed project. */
+export type SidebarProject = Pick<ProjectListItem, 'id' | 'name' | 'lastActivityAt' | 'slugs'> &
+  Partial<Pick<ProjectListItem, 'locator'>>;
+
+export const sortProjectsByActivity = <Row extends Pick<ProjectListItem, 'id' | 'lastActivityAt'>>(
+  projects: readonly Row[],
+): Row[] =>
   [...projects].sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
+
+/** The project a reload opened, while its session has not yet gone live; `ended` once it has, or the page moved on. */
+type ReloadOpen = { readonly id: string; readonly pathname: string } | 'ended' | undefined;
+
+/**
+ * The projects the list draws as live: the live sessions, and on a reload the open project from the first listing
+ * until its session first goes live. A reload lists the rows, and only then does the open project's session go live;
+ * it would otherwise move above the rest at that point (U6). After that, once the page leaves that project, or when
+ * its session is closed, only the registry says what is live (R1/P46). A list mounted over an answered listing has no
+ * reload to wait for.
+ */
+const useShownLiveIds = ({
+  liveProjectIds,
+  listedProjects,
+  isAwaitingListing,
+  pathname,
+}: {
+  readonly liveProjectIds: readonly string[];
+  readonly listedProjects: readonly SidebarProject[];
+  readonly isAwaitingListing: boolean;
+  readonly pathname: string;
+}): ReadonlySet<string> => {
+  const [reloadOpen, setReloadOpen] = useState<ReloadOpen>(isAwaitingListing ? undefined : 'ended');
+  const openId = listedProjects.find(
+    (project) => project.slugs !== undefined && pathname === projectUrlOr(project.slugs),
+  )?.id;
+  /* A closed session is the registry's answer already (R1/P46). */
+  const isOpenClosed = useProjectLiveness(openId ?? '').closedReason !== undefined;
+  /* Render-time state adjustments, not effects: decided once, on the first listing, and ended once. */
+  if (reloadOpen === undefined && !isAwaitingListing) {
+    setReloadOpen(openId !== undefined && !isOpenClosed ? { id: openId, pathname } : 'ended');
+  }
+  const pendingId =
+    typeof reloadOpen === 'object' &&
+    reloadOpen.pathname === pathname &&
+    !liveProjectIds.includes(reloadOpen.id) &&
+    !isOpenClosed
+      ? reloadOpen.id
+      : undefined;
+  if (typeof reloadOpen === 'object' && pendingId === undefined) {
+    setReloadOpen('ended');
+  }
+  const shownOpenId =
+    pendingId ?? (reloadOpen === undefined && !isAwaitingListing && !isOpenClosed ? openId : undefined);
+  return useMemo(
+    () => new Set(shownOpenId === undefined ? liveProjectIds : [...liveProjectIds, shownOpenId]),
+    [liveProjectIds, shownOpenId],
+  );
+};
 
 export function ProjectNavigation({ className }: { readonly className?: string }): React.JSX.Element {
   const { projects, isLoading, error, deleteProject, duplicateProject, updateName } = useProjects();
   const { createChat } = useProjectManager();
   const { isProjectExpanded, setProjectDisclosure } = useAppUiPreferences();
   const queryClient = useQueryClient();
+  const chatSessions = useChatSessionStore();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const location = useLocation();
   const [editingProjectId, setEditingProjectId] = useState<string | undefined>();
   const [visibleCount, setVisibleCount] = useState(projectsPerPage);
   const liveProjectIds = useLiveProjectIds();
-  /* A29's temporal hiding: what is live now sits above what is not, and the
-   * rest keeps its recency order. */
-  const sortedProjects = useMemo(() => {
-    const live = new Set(liveProjectIds);
-    return sortProjectsByActivity(projects).sort(
-      (left, right) => Number(live.has(right.id)) - Number(live.has(left.id)),
-    );
-  }, [liveProjectIds, projects]);
-  const visibleProjects = sortedProjects.slice(0, visibleCount);
-  const earlierFromId = useMemo(() => {
-    const live = new Set(liveProjectIds);
-    return visibleProjects.some((entry) => live.has(entry.id))
-      ? visibleProjects.find((entry) => !live.has(entry.id))?.id
-      : undefined;
-  }, [liveProjectIds, visibleProjects]);
-  /* R5: until the worker lists, reserve the rows the last listing had (with its
-   * names once the client has them), and say "No projects yet" up front when it
-   * had none, so the listing only fills slots that are already there. */
-  const rememberedShape = useProjectListShape();
+  /* Until the first listing answers, the list draws one page of skeleton rows. */
   const isAwaitingListing = isLoading && projects.length === 0;
-  const placeholderCount = rememberedShape ? Math.min(rememberedShape.count, projectsPerPage) : unknownShapeRowCount;
-  const isKnownEmpty = isAwaitingListing ? rememberedShape?.count === 0 : !isLoading && !error && projects.length === 0;
+  const rows: readonly SidebarProject[] = projects;
+  /* A29's temporal hiding: what is live now sits above what is not, and the
+   * rest keeps its recency order. On a reload the open project counts as live
+   * from the first listing until its session goes live (U6). */
+  const shownLiveIds = useShownLiveIds({
+    liveProjectIds,
+    listedProjects: projects,
+    isAwaitingListing,
+    pathname: location.pathname,
+  });
+  const sortedProjects = useMemo(
+    () =>
+      sortProjectsByActivity(rows).sort(
+        (left, right) => Number(shownLiveIds.has(right.id)) - Number(shownLiveIds.has(left.id)),
+      ),
+    [shownLiveIds, rows],
+  );
+  const visibleProjects = sortedProjects.slice(0, visibleCount);
+  const earlierFromId = useMemo(
+    () =>
+      visibleProjects.some((entry) => shownLiveIds.has(entry.id))
+        ? visibleProjects.find((entry) => !shownLiveIds.has(entry.id))?.id
+        : undefined,
+    [shownLiveIds, visibleProjects],
+  );
+  const isKnownEmpty = !isLoading && !error && projects.length === 0;
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
 
   /* `isActive` gates the merge: the open project's parameters belong to its own
    * URL, so they travel with a chat switch but never onto another project. */
-  const handleCreateChat = async (project: ProjectListItem, isActive: boolean): Promise<void> => {
+  const handleCreateChat = async (project: SidebarProject, isActive: boolean): Promise<void> => {
     if (!project.slugs) {
       return;
     }
     const chat = await createChat(project.id, { name: 'New chat', messages: [] });
+    // Created empty here, so the lane shows its empty state at once rather than waiting for the log (I21).
+    chatSessions.noteCreatedEmpty(chat.id);
     void queryClient.invalidateQueries({ queryKey: ['chats', project.id] });
     await navigate(projectChatUrl(project.slugs, chat.id, isActive ? location.search : undefined), {
       state: { focusChatComposer: true },
     });
   };
 
-  const handleDuplicate = async (project: ProjectListItem): Promise<void> => {
-    const duplicate = await duplicateProject(project.id);
+  const handleDuplicate = async (project: SidebarProject): Promise<void> => {
+    let duplicate: Awaited<ReturnType<typeof duplicateProject>>;
+    try {
+      duplicate = await duplicateProject(project.id);
+    } catch (error) {
+      toast.error(`Could not duplicate ${project.name}`);
+      console.error('Error duplicating project:', error);
+      return;
+    }
     toast.success(`Duplicated ${project.name}`, {
       action: {
         label: 'Open',
@@ -134,21 +204,14 @@ export function ProjectNavigation({ className }: { readonly className?: string }
         {/* One row pitch throughout: projects, a project and its first chat, and
           chats between themselves all sit `gap-0.5` apart, so expanding or
           collapsing a project shifts nothing. */}
-        <SidebarMenu className='gap-0.5'>
+        <SidebarMenu className='gap-0.5' aria-busy={isAwaitingListing ? true : undefined}>
           {isAwaitingListing
-            ? Array.from({ length: placeholderCount }, (_, index) => (
+            ? Array.from({ length: skeletonRowCount }, (_, index) => (
                 <SidebarMenuItem key={index} aria-hidden data-testid='project-navigation-skeleton'>
                   <SidebarRowSkeleton />
                 </SidebarMenuItem>
               ))
             : null}
-          {/* D18: a failed refresh over a list already on screen shows nothing;
-            the last good list stays. */}
-          {error && projects.length === 0 ? (
-            <SidebarMenuItem>
-              <SidebarFailureRow what='projects' />
-            </SidebarMenuItem>
-          ) : null}
           {isKnownEmpty && liveProjectIds.length === 0 ? (
             <SidebarMenuItem>
               <div className='flex h-7 items-center px-2 text-xs text-muted-foreground'>No projects yet</div>
@@ -215,11 +278,11 @@ export function ProjectNavigation({ className }: { readonly className?: string }
               </Fragment>
             );
           })}
-          {isAwaitingListing && rememberedShape !== undefined && rememberedShape.count > projectsPerPage ? (
-            <SidebarMenuItem aria-hidden data-testid='project-navigation-skeleton'>
-              <SidebarMenuButton type='button' disabled tabIndex={-1} className={sidebarDisclosureButtonClass}>
-                Show more projects
-              </SidebarMenuButton>
+          {/* D18: a failed refresh over a list already on screen shows nothing;
+            the last good list stays. */}
+          {error && projects.length === 0 ? (
+            <SidebarMenuItem>
+              <SidebarFailureRow what='projects' />
             </SidebarMenuItem>
           ) : null}
           {visibleCount < sortedProjects.length ? (
@@ -258,7 +321,7 @@ function ProjectNavigationItem({
   onShare,
   onDelete,
 }: {
-  readonly project: ProjectListItem;
+  readonly project: SidebarProject;
   readonly isActive: boolean;
   readonly isPending: boolean;
   readonly isExpanded: boolean;

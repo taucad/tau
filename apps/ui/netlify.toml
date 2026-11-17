@@ -32,9 +32,9 @@ publish = "build/client"
 
 # The last step keeps the previous deploys' `/assets/*` in this one, so a page
 # loaded just before a deploy can still lazy-load its chunks (TAU-UI-6), and the
-# content-addressed runtime bundles (`/picogk-browser/<sha256>/`,
-# `/csharp-language/<sha256>/`, listed in their own `tau-served-runtimes.json` so a
-# rollback to an older build still deploys), so it can still start PicoGK or the C# service. It runs
+# content-addressed runtime bundle (`/csharp-language/<sha256>/`, listed in its own
+# `tau-served-runtimes.json` so a rollback to an older build still deploys), so it can
+# still start the C# service. It runs
 # after source-map injection, reads the live deploy's `tau-served-assets.json`
 # from `TAU_RETAIN_ASSETS_FROM` (set by `deploy-ui.yml`), verifies every byte
 # against it, and writes this deploy's index. Unset, it writes the index only.
@@ -74,6 +74,11 @@ TAU_WEBSOCKET_URL = "ws://localhost:4001"
 # Marketing site: `netlify/edge-functions/marketing.ts` proxies a full load of
 # `/` and the apps/www pages to the deploy named by the `MARKETING_ORIGIN` site
 # variable (set per site in tau-cloud). Unset, every request reaches the app.
+# A GET or HEAD of `/` with the `tau-entry=app` preference gets the prerendered
+# Home shell (progressive loading PL4): the edge function rewrites it to
+# `/__shell/home/index.html`, where the build moves the prerender of `/`
+# (scripts/place-static-shells.ts), and expires `tau_skew` on it. Nothing else
+# at `/`, and not `/_root.data`, changes delivery.
 
 # The docs site serves documentation at its root, so the old runtime-scoped
 # LLM indexes are replaced by its top-level ones rather than moving verbatim.
@@ -125,6 +130,40 @@ to = "https://docs.tau.new/llms.mdx/:splat"
 status = 301
 force = true
 
+# Static shells (progressive loading PL3). Every `/w/:workspace/:project` document is the
+# prerendered `build/client/w/__shell/__shell/index.html`, served by the CDN. Netlify runs
+# functions before redirects, so the React Router function excludes exactly these URLs
+# (`excludedPaths` in vite.config.ts); `.data` requests, `/preview` and every other `/w/…`
+# shape stay on it. The shell's headers are the static ones below and `_headers`, which
+# match a function document's (scripts/check-static-shells.mts). Generated from
+# app/lib/route-classes.ts; app/lib/route-classes.test.ts fails when this block drifts.
+# The edge cache serves the shell without the `Set-Cookie` below on a hit, so the edge function
+# netlify/edge-functions/static-shell.ts sets the same expiry on every shell response.
+# BEGIN static shell routing
+[[redirects]]
+from = "https://www.tau.new/w/*"
+to = "https://tau.new/w/:splat"
+status = 301
+force = true
+
+[[redirects]]
+from = "/w/:workspace/:project"
+to = "/w/__shell/__shell/index.html"
+status = 200
+force = false
+
+[[redirects]]
+from = "/w/:workspace/:project/"
+to = "/w/__shell/__shell/index.html"
+status = 200
+force = false
+
+[[headers]]
+for = "/w/*"
+[headers.values]
+Set-Cookie = "tau_skew=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax"
+# END static shell routing
+
 [[headers]]
 for = "/*"
 [headers.values]
@@ -143,14 +182,18 @@ Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(),
 Cross-Origin-Opener-Policy = "same-origin"
 Cross-Origin-Resource-Policy = "same-origin"
 Cross-Origin-Embedder-Policy = "require-corp"
-# JavaScript Profiling
-Document-Policy = "js-profiling"
+# Document-Policy (`js-profiling`) is not set here: like the CSP below it differs per site.
+# Function documents send it off the production origin only (OQ-P11), so the build writes it
+# into staging's `_headers` and never into production's
+# (scripts/write-content-security-policy-headers.mts).
 # Content Security Policy (CSP), report-only. It is not set here: this file is
 # shared by both sites, which both deploy the production context, so it cannot
 # name only one environment's hosts. Each build writes its site's policy into
 # `build/client/_headers` (scripts/write-content-security-policy-headers.mts),
 # and SSR documents send the same policy (app/lib/content-security-policy.server.ts);
 # Netlify custom headers do not apply to function responses.
+# Marketing pages (apps/www) send their own enforced policy, which names production
+# hosts; edge-functions/marketing.ts selects staging's for taucad.dev.
 # The site's TAU_FRONTEND_URL picks the policy:
 #   - https://tau.new (production; also served as taucad-prod-us.netlify.app):
 #     cdn.tau.new, files.tau.new, api.tau.new + wss, dependencies.tau.new and the
@@ -177,6 +220,7 @@ Reporting-Endpoints = 'default="/api/reports"'
 
 # The apex selects marketing or the app from a presentation cookie. Never reuse
 # one visitor's document for another, or restore stale HTML after switching.
+# The edge function also sets these on every answer at `/`, the Home shell included.
 [[headers]]
 for = "/"
 [headers.values]
@@ -191,14 +235,6 @@ for = "/assets/*"
 Cache-Control = "public, max-age=31536000, immutable"
 Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
 
-# PicoGK browser runtime, emitted under its receipt digest
-# (picogk-browser/<sha256>/), so every path is immutable like /assets/*.
-[[headers]]
-for = "/picogk-browser/*"
-[headers.values]
-Cache-Control = "public, max-age=31536000, immutable"
-Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
-
 # C# language service runtime, emitted under its manifest digest
 # (csharp-language/<sha256>/), so every path is immutable like /assets/*.
 [[headers]]
@@ -207,14 +243,60 @@ for = "/csharp-language/*"
 Cache-Control = "public, max-age=31536000, immutable"
 Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
 
+# Email assets. Transactional email templates (apps/libs/api-email templates/shared.ts)
+# load /wordmark.png and the Geist /fonts/*.woff2 from this origin. Webmail that
+# renders images in the reader's browser (Outlook on the web loads them directly
+# from tau.new) refuses a `same-origin` resource, so these paths allow any origin.
+# Fonts also need CORS for a cross-origin @font-face. Both are public, static and
+# credential-free; the site-wide isolation headers on documents are unchanged.
 [[headers]]
 for = "/fonts/*"
 [headers.values]
 Cache-Control = "public, max-age=2592000"
 Netlify-CDN-Cache-Control = "public, durable, max-age=2592000"
+Cross-Origin-Resource-Policy = "cross-origin"
+Access-Control-Allow-Origin = "*"
 
 [[headers]]
-for = "/*.svg"
+for = "/wordmark.png"
+[headers.values]
+Cross-Origin-Resource-Policy = "cross-origin"
+
+# Unhashed SVGs from public/ only. A site-wide `/*.svg` rule also matched the hashed
+# sprites under /assets/ and replaced their immutable year with one day (audit R17).
+[[headers]]
+for = "/avatar-circle.svg"
 [headers.values]
 Cache-Control = "public, max-age=86400"
 Netlify-CDN-Cache-Control = "public, durable, max-age=86400"
+
+[[headers]]
+for = "/avatar-square.svg"
+[headers.values]
+Cache-Control = "public, max-age=86400"
+Netlify-CDN-Cache-Control = "public, durable, max-age=86400"
+
+[[headers]]
+for = "/favicon.svg"
+[headers.values]
+Cache-Control = "public, max-age=86400"
+Netlify-CDN-Cache-Control = "public, durable, max-age=86400"
+
+[[headers]]
+for = "/placeholder.svg"
+[headers.values]
+Cache-Control = "public, max-age=86400"
+Netlify-CDN-Cache-Control = "public, durable, max-age=86400"
+
+[[headers]]
+for = "/wordmark.svg"
+[headers.values]
+Cache-Control = "public, max-age=86400"
+Netlify-CDN-Cache-Control = "public, durable, max-age=86400"
+
+# The web app manifest. Netlify serves an unknown `.webmanifest` as
+# application/octet-stream (audit R17).
+[[headers]]
+for = "/manifest.webmanifest"
+[headers.values]
+Content-Type = "application/manifest+json"

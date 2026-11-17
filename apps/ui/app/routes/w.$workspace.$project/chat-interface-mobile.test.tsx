@@ -5,8 +5,9 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
 import { mobileDrawerOpenSnapPoint } from '@taucad/ui-core/constants/editor.constants';
-import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { mobilePanelByWorkbenchPanel } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
+import { mobilePanelByWorkbenchPanel } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
+import { readPhoneFrameHint } from '#lib/frame-hint.js';
 
 const state = vi.hoisted(() => ({
   drawerOpen: false,
@@ -15,6 +16,7 @@ const state = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   flags: { machines: true, tauDebug: true },
   row: { attention: 0, conflicted: false, settings: 0, failed: 0 },
+  isEditorReady: true,
   // Vaul resets its snap point 500ms after a close; a previous test's reset must not land in this one.
   generation: 0,
 }));
@@ -42,11 +44,14 @@ vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
         state.listeners.add(listener);
         return () => state.listeners.delete(listener);
       },
-      () => `${state.activeTab}|${String(state.drawerOpen)}|${String(state.activeSnapPoint)}`,
+      () =>
+        `${state.activeTab}|${String(state.drawerOpen)}|${String(state.activeSnapPoint)}|${String(state.isEditorReady)}`,
     );
-    const [activeTab, drawerOpen] = snapshot.split('|');
+    const [activeTab, drawerOpen, , isEditorReady] = snapshot.split('|');
     const { generation } = state;
     return {
+      isEditorReady: isEditorReady === 'true',
+      isLayoutRestored: isEditorReady === 'true',
       activeTab,
       handleTabChange: selectSurface,
       drawerOpen: drawerOpen === 'true',
@@ -135,7 +140,9 @@ vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => ({
   ProjectManifestIssueBanner: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({
+  WorkspaceOpening: () => <span role='status' aria-label='Opening project' />,
+}));
 /* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
 
@@ -217,7 +224,9 @@ afterEach(() => {
   state.activeSnapPoint = 0.5;
   state.flags = { machines: true, tauDebug: true };
   state.row = { attention: 0, conflicted: false, settings: 0, failed: 0 };
+  state.isEditorReady = true;
   state.listeners.clear();
+  globalThis.history.replaceState(null, '', '/');
   state.generation += 1;
   vi.unstubAllGlobals();
   terminal.mounted.mockClear();
@@ -1056,5 +1065,180 @@ describe('ChatInterfaceMobile', () => {
     fireEvent.keyDown(grabber, { key: 'Home' });
     expect(state.activeSnapPoint).toBe(0.5);
     expect(screen.getByRole('region', { name: 'Agents' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * Records the sheet's first frame. A browser first styles the sheet with the attributes it was inserted with: Radix's
+ * Presence reads its style in an effect before vaul writes the sheet's detent inline, so a transition then runs from
+ * that first position. Flushing every effect under `act` would hide that frame from the DOM, but mutation records keep
+ * each attribute's value before its first change, so the frame is rebuilt from them.
+ */
+function watchSheetFrames(): { readonly firstFrame: () => string; readonly restingFrame: () => string } {
+  const records: MutationRecord[] = [];
+  const observer = new MutationObserver((batch) => {
+    records.push(...batch);
+  });
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeOldValue: true });
+  const sheet = (): HTMLElement => {
+    const element = document.querySelector<HTMLElement>('[data-vaul-drawer]');
+    if (!element) {
+      throw new Error('No sheet on screen');
+    }
+    return element;
+  };
+  return {
+    firstFrame(): string {
+      records.push(...observer.takeRecords());
+      observer.disconnect();
+      const element = sheet();
+      const inserted = records.findLastIndex((record) =>
+        [...record.addedNodes].some((node) => node === element || node.contains(element)),
+      );
+      const frame = element.cloneNode(false) as HTMLElement;
+      const restored = new Set<string>();
+      for (const record of records.slice(inserted + 1)) {
+        const name = record.attributeName;
+        if (record.target !== element || name === null || restored.has(name)) {
+          continue;
+        }
+        restored.add(name);
+        if (record.oldValue === null) {
+          frame.removeAttribute(name);
+        } else {
+          frame.setAttribute(name, record.oldValue);
+        }
+      }
+      element.parentElement!.append(frame);
+      const transform = sheetOffset(frame);
+      frame.remove();
+      return transform;
+    },
+    restingFrame: () => sheetOffset(sheet()),
+  };
+}
+
+/** The sheet's vertical offset as its styles paint it, with each `var()` read from its inline custom properties. */
+function sheetOffset(element: HTMLElement): string {
+  let { transform } = getComputedStyle(element);
+  for (let depth = 0; transform.includes('var('); depth++) {
+    if (depth > 10) {
+      throw new Error(`Unresolved transform: ${transform}`);
+    }
+    transform = transform.replace(
+      /var\((--[\w-]+)(?:,\s*([^()]*))?\)/u,
+      (_, name: string, fallback?: string) => element.style.getPropertyValue(name) || (fallback ?? ''),
+    );
+  }
+  const offset = /translate3d\(\s*0\s*,\s*([^,]+?)\s*,/u.exec(transform)?.[1];
+  if (offset === undefined) {
+    throw new Error(`No vertical offset in ${transform}`);
+  }
+  return offset;
+}
+
+describe('ChatInterfaceMobile on load', () => {
+  it('should paint the workspace in its final state with no fade-in (U9)', () => {
+    state.drawerOpen = true;
+    state.activeTab = 'chat';
+    renderShell();
+
+    const shell = screen.getByRole('button', { name: 'Viewer controls' }).parentElement!.parentElement!;
+    expect(shell.className).not.toMatch(/(?:^|\s)(?:animate-in|fade-in[\w-]*)(?:\s|$)/u);
+  });
+
+  it.each([
+    ['open as the workspace mounts', true],
+    ['restored from storage after the workspace mounts', false],
+  ])(
+    'should paint a sheet %s where it rests, with no slide up from below the screen (M3)',
+    async (_, isOpenAtMount) => {
+      const frames = watchSheetFrames();
+      state.drawerOpen = isOpenAtMount;
+      state.activeTab = isOpenAtMount ? 'chat' : 'viewer';
+      renderShell();
+      if (!isOpenAtMount) {
+        act(() => {
+          state.activeTab = 'chat';
+          state.drawerOpen = true;
+          notify();
+        });
+      }
+
+      await screen.findByRole('textbox', { name: 'Message' });
+      const resting = frames.restingFrame();
+      expect(resting).toMatch(/^\d+px$/u);
+      expect(frames.firstFrame()).toBe(resting);
+    },
+  );
+
+  it('should still slide up a sheet the person opens after it closes, keeping the typed draft until then (H-I2)', async () => {
+    state.drawerOpen = true;
+    state.activeTab = 'chat';
+    renderShell();
+    const composer = await screen.findByRole('textbox', { name: 'Message' });
+    fireEvent.change(composer, { target: { value: 'half-typed draft' } });
+
+    // Choosing the open surface leaves the restored sheet and its composer where they are.
+    fireEvent.click(
+      within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'Chat' }),
+    );
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBe(composer);
+    expect(composer).toHaveValue('half-typed draft');
+
+    act(() => {
+      selectSurface('viewer');
+    });
+    const frames = watchSheetFrames();
+    fireEvent.click(
+      within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'Chat' }),
+    );
+
+    await screen.findByRole('textbox', { name: 'Message' });
+    expect(frames.restingFrame()).toMatch(/^\d+px$/u);
+    expect(frames.firstFrame()).toBe('100%');
+  });
+
+  it('should slide up the first sheet the person opens from the model', async () => {
+    renderShell();
+    const frames = watchSheetFrames();
+    fireEvent.click(
+      within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'Chat' }),
+    );
+
+    await screen.findByRole('textbox', { name: 'Message' });
+    expect(frames.restingFrame()).toMatch(/^\d+px$/u);
+    expect(frames.firstFrame()).toBe('100%');
+  });
+
+  // A15c: the phone frame's hint and its hand-over to the live sheet.
+  it('should remember the surface for the next load once the editor state has loaded, not before', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    globalThis.localStorage.clear();
+    state.isEditorReady = false;
+    state.activeTab = 'chat';
+    state.drawerOpen = true;
+    const { container } = renderShell();
+    const workspace = (): Element => container.querySelector('[data-mobile-workspace]')!;
+
+    expect(readPhoneFrameHint('home/one')).toBeUndefined();
+    expect(workspace()).toHaveAttribute('data-mobile-workspace', 'opening');
+    /* Drawn at the default surface but not shown: the phone frame stands in until the stored layout is read. */
+    expect(workspace().className).toContain('data-[mobile-workspace=opening]:invisible');
+    /* Beside the hidden workspace, not in it, so assistive technology hears it. */
+    expect(workspace()).not.toContainElement(screen.getByRole('status', { name: 'Opening project' }));
+
+    act(() => {
+      state.isEditorReady = true;
+      notify();
+    });
+    expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'chat', snap: 0.5 });
+    expect(workspace()).toHaveAttribute('data-mobile-workspace', 'ready');
+    expect(screen.queryByRole('status', { name: 'Opening project' })).toBeNull();
+
+    act(() => {
+      selectSurface('editor');
+    });
+    expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'editor', snap: 1 });
   });
 });

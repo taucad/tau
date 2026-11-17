@@ -5,7 +5,8 @@ import type { ReactNode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectListItem } from '#types/project-library.types.js';
-import { CloudProjectUnavailableError, tauCloudIntent, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { CloudProjectUnavailableError, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
 import { toLibraryRows } from '#routes/projects_/cloud-projects.js';
@@ -46,7 +47,7 @@ const { mockCreateProject, mockToastInfo, useProjectsOptions, mockGetConfig } = 
   mockToastInfo: vi.fn<(message: string, options: { action: { label: string; onClick: () => void } }) => void>(),
   useProjectsOptions: [] as unknown[],
 }));
-vi.mock('#filesystem/handle-store.js', () => ({ getProjectFileSystemConfig: mockGetConfig }));
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({ getProjectFileSystemConfig: mockGetConfig }));
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: (options: unknown) => {
     useProjectsOptions.push(options);

@@ -119,8 +119,18 @@ export const createL2ToolRegistry = async (
   };
 };
 
-/** The entry-less manifest an L2 project starts from (blueprint D3): a name and no main. */
-const entryLessManifest = { $schema: 'https://tau.new/schemas/tau-v1.json', name: 'L2 task', assets: {} };
+/**
+ * The entry-less manifest an L2 project starts from (blueprint D3): a name and no main, with the empty description and
+ * tags the app's `createEntrylessProject` writes. Without them the manifest is invalid, and the host refuses its own
+ * adoption write.
+ */
+const entryLessManifest = {
+  $schema: 'https://tau.new/schemas/tau-v1.json',
+  name: 'L2 task',
+  description: '',
+  tags: [],
+  assets: {},
+};
 
 /**
  * A fresh entry-less project for one task.

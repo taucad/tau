@@ -65,6 +65,7 @@ import type {
   CloudRequestName,
   CloudStandInDelays,
   CloudStandInEndpoint,
+  CloudStandInFailures,
 } from './cloud-stand-ins.ts';
 import type { LinkedGithubFixture } from './linked-github-fixture.ts';
 import type { GatewayScriptTurn, GatewayScriptWalk, GatewayTurnCount } from './agent-host-gateway-script.ts';
@@ -170,6 +171,8 @@ const sessions = new Map<string, Session>();
 /** The cloud-build tier's stand-in API for one target context: how long each answer is held, and what was asked. */
 type CloudStandIns = {
   delays: CloudStandInDelays;
+  /** The HTTP status each endpoint answers with instead of its body, for the requests that arrive from now on. */
+  failures: CloudStandInFailures;
   readonly counts: Record<CloudRequestName, number>;
   /** The answers parked by a `'held'` delay, each given when the spec releases its endpoint. */
   readonly parked: Array<{ readonly endpoint: CloudStandInEndpoint; readonly release: (answer: boolean) => void }>;
@@ -933,6 +936,7 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
   }
   const standIns: CloudStandIns = {
     delays: { ...delays },
+    failures: {},
     counts: { session: 0, projects: 0, agents: 0, fileManagerWorker: 0 },
     parked: [],
   };
@@ -977,6 +981,8 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
         return;
       }
       standIns.counts[endpoint] += 1;
+      /* Read on arrival: a request held below answers as configured when it arrived, not when it is released. */
+      const failure = standIns.failures[endpoint];
       const delay = standIns.delays[endpoint] ?? 0;
       if (delay === 'held') {
         const answer = await new Promise<boolean>((resolve) => {
@@ -991,11 +997,19 @@ export const uiInstallCloudStandIns: BrowserCommand<[delays?: CloudStandInDelays
           setTimeout(resolve, delay);
         });
       }
-      await route.fulfill({
-        status: 200,
-        headers: { ...headers, 'content-type': 'application/json' },
-        body: JSON.stringify(cloudStandInBody(endpoint)),
-      });
+      await route.fulfill(
+        failure === undefined
+          ? {
+              status: 200,
+              headers: { ...headers, 'content-type': 'application/json' },
+              body: JSON.stringify(cloudStandInBody(endpoint)),
+            }
+          : {
+              status: failure,
+              headers: { ...headers, 'content-type': 'application/json' },
+              body: JSON.stringify({ error: 'stand-in failure' }),
+            },
+      );
     },
   );
 };
@@ -1007,6 +1021,18 @@ export const uiSetCloudStandInDelays: BrowserCommand<[delays: CloudStandInDelays
     throw new Error('The cloud stand-ins are not installed; call uiInstallCloudStandIns first.');
   }
   standIns.delays = { ...delays };
+};
+
+/** Answer each endpoint named in `failures` with that HTTP status, for the requests that arrive from now on. */
+export const uiSetCloudStandInFailures: BrowserCommand<[failures: CloudStandInFailures]> = (
+  commandContext,
+  failures,
+) => {
+  const standIns = cloudStandIns.get(sessionFor(commandContext).context);
+  if (!standIns) {
+    throw new Error('The cloud stand-ins are not installed; call uiInstallCloudStandIns first.');
+  }
+  standIns.failures = { ...failures };
 };
 
 /** Give every held answer for `endpoint` now, and answer its later requests at once. */
@@ -1342,7 +1368,15 @@ export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (
       };
       (globalThis as typeof globalThis & { _POSTHOG_REMOTE_CONFIG?: Record<string, unknown> })._POSTHOG_REMOTE_CONFIG =
         {
-          [key]: { config: { sessionRecording: { sampleRate: 1, minimumDurationMilliseconds: 0 } } },
+          /* PostHog's remote config always states `autocapture_opt_out`; posthog-js 1.438 keeps autocapture off
+           * while it is undefined (`Autocapture.isEnabled`), so a config without it captured no `$autocapture`. */
+          [key]: {
+            config: {
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- PostHog's remote config wire name.
+              autocapture_opt_out: false,
+              sessionRecording: { sampleRate: 1, minimumDurationMilliseconds: 0 },
+            },
+          },
         };
     },
     { key: apiKey },
@@ -1362,8 +1396,23 @@ export const uiInstallPostHogFixture: BrowserCommand<[apiKey: string]> = async (
     const body = request.postDataBuffer();
     if (body && (url.pathname.includes('/e/') || url.pathname.includes('/s/'))) {
       const decoded = body[0] === 31 && body[1] === 139 ? gunzipSync(body).toString('utf8') : body.toString('utf8');
-      const payload: unknown = JSON.parse(decoded);
-      const events: unknown[] = Array.isArray(payload) ? (payload as unknown[]) : [payload];
+      /* The PostHog client also posts form bodies (`data=<base64 JSON>`, `compression=base64`), notably from `sendBeacon` on unload. */
+      const formData = decoded.startsWith('data=') ? new URLSearchParams(decoded).get('data') : null;
+      const json = formData === null ? decoded : Buffer.from(formData, 'base64').toString('utf8');
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(json);
+      } catch {
+        // A body this fixture cannot read records no event; throwing here would reject the route handler and fail the suite.
+      }
+      /* PostHog posts one event, an array of them, or a batch envelope (`{ api_key, batch: [...] }`). */
+      const events: unknown[] = Array.isArray(payload)
+        ? (payload as unknown[])
+        : payload !== null && typeof payload === 'object' && 'batch' in payload && Array.isArray(payload.batch)
+          ? (payload.batch as unknown[])
+          : payload === null
+            ? []
+            : [payload];
       for (const event of events) {
         if (event !== null && typeof event === 'object' && 'event' in event && typeof event.event === 'string') {
           const compressed: string[] = [];
@@ -2184,6 +2233,150 @@ export const uiAddContextInitScript: BrowserCommand<[source: string, argument?: 
   await sessionFor(commandContext).context.addInitScript({
     content: `(${source})(${JSON.stringify(argument)})`,
   });
+};
+
+/** Each target context's requests that `uiDelayTargetRequests` held, by URL, in the order they were held. */
+const delayedTargetRequests = new WeakMap<object, string[]>();
+
+/**
+ * Each target context's open gate, shared by its holds until release: the requests held until
+ * `uiReleaseTargetRequests`, and whether it was released.
+ */
+const targetRequestGates = new WeakMap<object, { released: boolean; readonly waiting: Array<() => void> }>();
+
+/** A gate holds no request longer than this, so a row that fails before its release cannot leave the page hanging. */
+const gateCeilingMilliseconds = 30_000;
+
+/**
+ * Holds every request of the target context whose URL matches `pattern` before it goes on (A0.10: a slow chunk): for
+ * `milliseconds`, or with `'until-released'` until `uiReleaseTargetRequests` (at most 30 s), so a row's acts can be
+ * ordered before what the request starts rather than raced against a fixed time. Routing turns the context's HTTP
+ * cache off, so a reload fetches the chunk again and is held. The delay stays for the rest of the session.
+ */
+export const uiDelayTargetRequests: BrowserCommand<[pattern: string, milliseconds: number | 'until-released']> = async (
+  commandContext,
+  pattern,
+  milliseconds,
+) => {
+  const session = sessionFor(commandContext);
+  const held = delayedTargetRequests.get(session.context) ?? [];
+  delayedTargetRequests.set(session.context, held);
+  /* Holds until release share the context's open gate, so one release lets them all go on; after a release, a new
+     hold opens a new gate. */
+  const open = targetRequestGates.get(session.context);
+  const gate = open?.released === false ? open : { released: false, waiting: [] as Array<() => void> };
+  if (milliseconds === 'until-released') {
+    targetRequestGates.set(session.context, gate);
+  }
+  await session.context.route(new RegExp(pattern, 'u'), async (route) => {
+    held.push(route.request().url());
+    await new Promise<void>((resolve) => {
+      if (milliseconds !== 'until-released') {
+        setTimeout(resolve, milliseconds);
+        return;
+      }
+      if (gate.released) {
+        resolve();
+        return;
+      }
+      gate.waiting.push(resolve);
+      setTimeout(resolve, gateCeilingMilliseconds);
+    });
+    await route.fallback();
+  });
+};
+
+/** Lets every request `uiDelayTargetRequests(pattern, 'until-released')` holds go on, and the later ones through. */
+export const uiReleaseTargetRequests: BrowserCommand = async (commandContext) => {
+  const gate = targetRequestGates.get(sessionFor(commandContext).context);
+  if (gate === undefined) {
+    return;
+  }
+  gate.released = true;
+  for (const resolve of gate.waiting.splice(0)) {
+    resolve();
+  }
+};
+
+/** The URLs `uiDelayTargetRequests` held in the target context so far. */
+export const uiReadDelayedTargetRequests: BrowserCommand = async (commandContext) =>
+  delayedTargetRequests.get(sessionFor(commandContext).context) ?? [];
+
+/** What `uiOpenBeforeHydration` did on the served page, before its scripts had hydrated it. */
+export type TargetEarlyInput = {
+  /** The input was on screen before `hydrated` matched, within the wait. */
+  readonly found: boolean;
+  /** `hydrated` matched before the last act (screenshot, typing, Enter) was done: the acts did not all happen before hydration. */
+  readonly hydratedBeforeAct: boolean;
+  /** The input's box and a screenshot of it (base64 PNG) at first sight, when asked for. */
+  readonly box?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+  readonly before?: string;
+  /** The same box once `hydrated` matched and `settle` passed, when asked for. */
+  readonly after?: string;
+};
+
+/**
+ * A15 frame rows (F7, H-f, H-g): open `path` without waiting for its load, find `input` on the served page and act on
+ * it the moment it is visible, as a person typing at first paint would: type `text`, then press Enter, then type
+ * `afterEnter`. With `screenshots`, the input's box is captured at first sight and again after hydration (caret
+ * hidden), for a pixel comparison across adoption.
+ */
+export const uiOpenBeforeHydration: BrowserCommand<
+  [
+    request: {
+      readonly path: string;
+      readonly input: string;
+      readonly hydrated: string;
+      readonly text?: string;
+      readonly enter?: boolean;
+      readonly afterEnter?: string;
+      readonly screenshots?: boolean;
+      /** The box the screenshots clip to, when not the input's own. */
+      readonly region?: string;
+      readonly wait: number;
+      readonly settle: number;
+    },
+  ],
+  TargetEarlyInput
+> = async (commandContext, request) => {
+  const page = sessionFor(commandContext).primary;
+  await page.goto(new URL(request.path, testBaseURL).href, { waitUntil: 'commit' });
+  const input = page.locator(request.input).first();
+  const isHydrated = async (): Promise<boolean> =>
+    page.evaluate((selector) => document.querySelector(selector) !== null, request.hydrated);
+  const found = await input
+    .waitFor({ state: 'visible', timeout: request.wait })
+    .then(() => true)
+    .catch(() => false);
+  if (!found) {
+    return { found: false, hydratedBeforeAct: await isHydrated() };
+  }
+  const hydratedAtSight = await isHydrated();
+  const boxed = request.region === undefined ? input : page.locator(request.region).first();
+  const box = (await boxed.boundingBox()) ?? undefined;
+  const shot = async (clip: NonNullable<typeof box>): Promise<string> => {
+    const bytes = await page.screenshot({ clip, caret: 'hide' });
+    return bytes.toString('base64');
+  };
+  const before = request.screenshots && box ? await shot(box) : undefined;
+  if (request.text !== undefined) {
+    await input.focus();
+    await page.keyboard.type(request.text);
+  }
+  if (request.enter) {
+    await page.keyboard.press('Enter');
+  }
+  if (request.afterEnter !== undefined) {
+    await page.keyboard.type(request.afterEnter);
+  }
+  const hydratedBeforeAct = hydratedAtSight || (await isHydrated());
+  let after: string | undefined;
+  if (request.screenshots && box) {
+    await page.waitForSelector(request.hydrated, { timeout: 60_000 });
+    await page.waitForTimeout(request.settle);
+    after = await shot(box);
+  }
+  return { found, hydratedBeforeAct, box, before, after };
 };
 
 /** Cuts the context off from the network, so a cached shell is all a navigation can be served from. */
@@ -3750,6 +3943,7 @@ export const uiBrowserCommands = {
   uiIsCloudLoadTier,
   uiInstallCloudStandIns,
   uiSetCloudStandInDelays,
+  uiSetCloudStandInFailures,
   uiReleaseCloudStandIn,
   uiReadCloudRequestCounts,
   uiInstallPostHogFixture,
@@ -3775,6 +3969,10 @@ export const uiBrowserCommands = {
   uiReadTarget,
   uiReadAgentHostGatewayRequests,
   uiReadTauVertexOperations,
+  uiDelayTargetRequests,
+  uiReleaseTargetRequests,
+  uiReadDelayedTargetRequests,
+  uiOpenBeforeHydration,
   uiReleaseAgentHostGatewayFixture,
   uiReadTargetEvents,
   uiReloadTarget,

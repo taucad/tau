@@ -212,6 +212,10 @@ const config: KnipConfig = {
       // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
       entry: ['scripts/svg-sprite.d.ts'],
     },
+    'apps/libs/desktop-services-host': {
+      // Ambient `tauCloudBuildEnabled` and `tauDesktopHostBuild`, defined by the desktop's electron.vite.config.ts.
+      entry: ['src/build-environment.d.ts'],
+    },
     'apps/libs/api-lifecycle': {
       // The graceful-shutdown signal test spawns this fixture by path.
       entry: ['src/graceful-shutdown.signal-fixture.ts'],
@@ -224,9 +228,10 @@ const config: KnipConfig = {
         'src/**/*.test-d.ts',
         'src/main/index.ts',
         'src/preload/**/*.ts',
-        'src/tau/*.entry.ts',
+        // The utility-process entries (`kernel-host`, `services-host`, `geometry-host`) over desktop-services-host.
+        'src/utility/*.entry.ts',
         // Bundled and launched by the native authority-writer Electron test.
-        'src/tau/fixtures/authority-writer-electron*.fixture.ts',
+        'src/main/fixtures/authority-writer-electron*.fixture.ts',
         'scripts/*.mts',
         // `apps/desktop/macos/project.json` runs both with paths from the workspace root.
         'macos/scripts/*.mts',
@@ -247,6 +252,35 @@ const config: KnipConfig = {
         '@agentclientprotocol/codex-acp',
         '@anthropic-ai/sandbox-runtime',
         'nanoraster',
+        // Imported only by desktop-services-host, which the app bundles. The app is the bundle owner, so it
+        // declares them: electron-vite externalizes the app's dependencies and the packaging script copies
+        // them in. Dropping one inlines it into the bundle instead (fflate's own `require` then collides
+        // with the CommonJS shim, and the main process fails to load).
+        '@taucad/agent-observability',
+        '@taucad/agent-tools',
+        '@taucad/assimp',
+        '@taucad/brep',
+        '@taucad/build123d',
+        '@taucad/desktop-terminal',
+        '@taucad/esbuild',
+        '@taucad/events',
+        '@taucad/gltf',
+        '@taucad/image',
+        '@taucad/jscad',
+        '@taucad/manifold',
+        '@taucad/middleware',
+        '@taucad/opencascade',
+        '@taucad/openrscad',
+        '@taucad/picovoxel',
+        '@taucad/replicad',
+        '@taucad/rpc',
+        '@taucad/shell-service',
+        '@taucad/skills',
+        '@taucad/smlib',
+        '@taucad/smlibpy',
+        '@taucad/tscircuit',
+        '@taulabs/openrscad-engine',
+        'fflate',
         // The `shell-supervisor` input of electron.vite.config.ts is the sandbox's supervisor entry, by path.
         '@taucad/sandbox',
       ],

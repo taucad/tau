@@ -1,0 +1,34 @@
+{
+  "name": "desktop-services-host",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/desktop-services-host",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:app-lib", "layer:feature", "ci:shell", "ci:desktop"],
+  "targets": {
+    "test:authority-writer": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The services host's filesystem authority lifetime rows, run with the desktop's native Electron authority ownership rows by desktop:test:authority-writer."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run --config vitest.config.ts src/services-host.impl.test.ts --testNamePattern=\"filesystem authority lifetime\""
+      }
+    },
+    "test:terminal-conformance": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The desktop Terminal's real rows (W5: A09, A11, A14, A24): the services host's terminal concern frame and root allowlist over a transferred port into the real shell service, sandbox provider and the machine's own Bash in a PTY. macOS PTY rows are recorded unverified until the operator's own-pty run. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/libs/desktop-services-host",
+        "command": "../../../node_modules/.bin/vitest run --config vitest.config.ts src/services-host.terminal.conformance.test.ts",
+        "env": {
+          "TAU_SHELL_CONFORMANCE": "1"
+        }
+      }
+    }
+  }
+}

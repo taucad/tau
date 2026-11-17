@@ -12,16 +12,13 @@ import devtoolsJson from '@silvenon/vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
-import { defineConfig } from 'vite';
+import { defaultClientConditions, defaultServerConditions, defineConfig } from 'vite';
 import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
+import { moduleIdManifest } from '@taucad/vite/module-id-manifest';
 /* oxlint-disable eslint/no-restricted-imports -- Vite configuration lives outside the app alias root. */
-import {
-  resolveTauBuildRelease,
-  resolveTauCloudBuildEnabled,
-  resolveTauTelemetryHostCloud,
-} from './build-environment.js';
+import { resolveTauBuildRelease, resolveTauCloudBuildEnabled } from './build-environment.js';
 /* oxlint-enable eslint/no-restricted-imports */
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createCsharpLanguageAssets } from './csharp-language-assets.vite-plugin.js';
@@ -33,6 +30,10 @@ import { createPicogkBrowserAssets } from './picogk-browser-assets.vite-plugin.j
 import { createOpenscadLanguageAssets } from './openscad-language-assets.vite-plugin.js';
 // oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
 import { createAssetIntegrity } from './asset-integrity.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config lives outside app aliases.
+import { createServerOutputAssets } from './server-output-assets.vite-plugin.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite config cannot use app aliases.
+import { netlifyFunctionExcludedPaths } from './app/lib/route-classes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -87,6 +88,37 @@ export const uiSsrOptions = {
   noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js'],
   external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
 } as const satisfies UserConfig['ssr'];
+
+/**
+ * The build-target seam (charter D2), shared with `desktop/` and `serve/vite.config.ts`.
+ *
+ * One argument sets both halves so they cannot disagree: the app reads the
+ * `import.meta.env.TAU_TARGET` define (`app/lib/build-target.ts`), and the
+ * libraries, which may not read `import.meta.env`, resolve
+ * `@taucad/ui-core/lib/build-target` by the `tau-desktop` package condition.
+ * The web target adds no condition (its conditions are Vite's defaults, which
+ * the web config keeps by not setting them), so its libraries resolve the
+ * `default` (web) variant. Top-level `resolve` also governs the worker bundles.
+ *
+ * @param target - The host this bundle is built for.
+ * @returns The define entry and the client and server resolve conditions.
+ */
+export const uiBuildTarget = (
+  target: 'web' | 'desktop',
+): {
+  define: Record<string, string>;
+  resolve: { conditions: string[] };
+  ssrResolve: { conditions: string[] };
+} => {
+  // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
+  const define = { 'import.meta.env.TAU_TARGET': JSON.stringify(target) };
+  const conditions = target === 'desktop' ? ['tau-desktop'] : [];
+  return {
+    define,
+    resolve: { conditions: [...defaultClientConditions, ...conditions] },
+    ssrResolve: { conditions: [...defaultServerConditions, ...conditions] },
+  };
+};
 
 /**
  * Dependency-optimizer policy, mirrored by `desktop/vite.config.ts`.
@@ -160,6 +192,7 @@ const desktopSourceOverrides = new Map([
   ['#constants/ephemeral-kernel-options.js', '#constants/ephemeral-kernel-options.desktop.js'],
   ['#runtime/converter-client-options.js', '#runtime/converter-client-options.desktop.js'],
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
+  ['#services/attachment-image-backend.js', '#services/attachment-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
   ['#services/browser-geospec-worker.js', '#services/browser-geospec-worker.desktop.js'],
   ['#workers/measurement-exact.transport.js', '#workers/measurement-exact.transport.desktop.js'],
@@ -279,7 +312,9 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
       if (options.target !== 'desktop') {
         const forbidden = chunks
           .flatMap((chunk) => Object.keys(chunk.modules))
-          .find((moduleId) => /apps\/ui\/app\/.*\.desktop\.[jt]sx?(?:\?|$)/u.test(normalizeProvenancePath(moduleId)));
+          .find((moduleId) =>
+            /apps\/(?:ui\/app|libs\/[^/]+\/src)\/.*\.desktop\.[jt]sx?(?:\?|$)/u.test(normalizeProvenancePath(moduleId)),
+          );
         if (forbidden) {
           this.error(`Desktop-only implementation in web bundle: ${normalizeProvenancePath(forbidden)}`);
         }
@@ -405,12 +440,14 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
 export const createUiReactCompilerPlugin = (): Plugin => {
   const compilerPlugins = react({
     compiler: { target: '19', logDiagnostics: true },
-    // The ui-kit (UI wave A), chat-ui (UI wave B), project-workspace (UI wave C) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
+    // The ui-kit (UI wave A), chat-ui (UI wave B), project-workspace (UI wave C), files-ui and editor-ui (UI wave D) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
     include: [
       '**/apps/ui/app/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-kit/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/chat-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/project-workspace/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/files-ui/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/editor-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-core/src/**/*.{js,jsx,ts,tsx}',
     ],
     exclude: [
@@ -480,7 +517,10 @@ const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
   },
 });
 
-export default defineConfig(({ command, mode }) => {
+/** Where the web client build writes its module-id manifest (`@taucad/vite/module-id-manifest`). */
+const criticalModuleIdsPath = path.resolve(__dirname, 'build/client-module-ids.json');
+
+export default defineConfig(({ command, mode, isSsrBuild }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   // Deploys load the pinned host from the digest mirror; development and e2e serve a prepared bundle.
   const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT'], {
@@ -535,10 +575,11 @@ export default defineConfig(({ command, mode }) => {
       tauBuildDeployContext: JSON.stringify(buildDeployContext(process.env)),
       ...(isProductionBuild ? {} : buildIdDefine),
       tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
-      /* Telemetry's own Cloud-host signal, beside the billing gate and never derived from it; tests stub the module. */
-      tauTelemetryHostCloudBuild: JSON.stringify(
-        !isTest && resolveTauTelemetryHostCloud(process.env['TAU_TELEMETRY_HOST']),
-      ),
+      /*
+       * Every web build may report signed-out runtime telemetry; the deployment's own API policy probe is the only
+       * gate (unset means off), so a self-hosted UI reports only to an API its operator turned on. Tests stub the module.
+       */
+      tauTelemetryHostCloudBuild: JSON.stringify(!isTest),
       tauGeoSpecMtReceipts: JSON.stringify(mtAssets.receipts),
       tauPicogkBrowserAssets: picogkAssets.assets ? JSON.stringify(picogkAssets.assets) : 'undefined',
       tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
@@ -548,8 +589,7 @@ export default defineConfig(({ command, mode }) => {
        * exercise both branches with `vi.stubEnv('TAU_TARGET', …)` — a `define`
        * is a literal substitution `stubEnv` cannot reach.
        */
-      // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
-      ...(isTest ? {} : { 'import.meta.env.TAU_TARGET': '"web"' }),
+      ...(isTest ? {} : uiBuildTarget('web').define),
       /*
        * Whether a non-prerelease Tau Desktop exists to download (Q56, DSK-7): every "Get Tau Desktop" offer stays
        * hidden until the release build sets `TAU_DESKTOP_RELEASED=true`. Undefined under `mode === 'test'`.
@@ -592,8 +632,15 @@ export default defineConfig(({ command, mode }) => {
       }),
       // WASM `fetch` integrity and the asset receipt (charter D26): build only.
       createAssetIntegrity({ receipt: true }),
+      // Browser assets the server build emits belong to the client output only (RR0, RD8): server build only.
+      createServerOutputAssets({ clientDirectory: path.resolve(__dirname, 'build', 'client') }),
       ...(buildRelease === undefined ? [] : [createReleaseManifestPlugin(buildRelease)]),
       createSentryReleaseRecordPlugin(buildId),
+      /*
+       * Each client chunk's module ids and rendered bytes, beside the build and never published, so the critical
+       * budget check (`scripts/check-critical-budget.mts`) can attribute a route's interactive bytes to modules.
+       */
+      moduleIdManifest({ outFile: criticalModuleIdsPath, root: path.resolve(__dirname, '../..') }),
 
       /*
        * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm
@@ -611,8 +658,12 @@ export default defineConfig(({ command, mode }) => {
           [
             createUiReactCompilerPlugin(),
             reactRouter(),
-            // Netlify plugin is only needed for Netlify builds
-            ...(isNetlify ? [netlifyReactRouter()] : []),
+            /*
+             * Netlify plugin is only needed for Netlify builds. Its function is registered at `/*` with
+             * `preferStatic`, and Netlify runs functions before redirects, so a static shell's URLs are excluded
+             * here for `netlify.toml`'s 200 rewrite to reach them (`app/lib/route-classes.ts`).
+             */
+            ...(isNetlify ? [netlifyReactRouter({ excludedPaths: netlifyFunctionExcludedPaths() })] : []),
           ]),
       tailwindcss(),
       // RemixPWA(), // TODO: add PWA back after https://github.com/remix-pwa/monorepo/issues/284
@@ -689,6 +740,23 @@ export default defineConfig(({ command, mode }) => {
         return undefined;
       },
       target: 'es2022',
+      /*
+       * Chunk grouping (progressive loading PL5): every lucide icon in one chunk. Left to automatic chunking, each icon
+       * that two lazy chunks share became a chunk of its own (72 requests of Home's interactive tier, 95 of the
+       * project route's, a few hundred bytes each); together the icons are about 18 KB brotli. The client build only:
+       * the server build evaluates every icon anyway.
+       */
+      ...(isSsrBuild === true
+        ? {}
+        : {
+            rolldownOptions: {
+              output: {
+                codeSplitting: {
+                  groups: [{ name: 'icons', test: /[\\/]node_modules[\\/](?:.+[\\/])?lucide-react[\\/]/u }],
+                },
+              },
+            },
+          }),
       /*
        * The offline shell allowlist is generated from this manifest
        * (`scripts/generate-offline-shell.ts`), so hashed filenames are never

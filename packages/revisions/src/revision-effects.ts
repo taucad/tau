@@ -39,7 +39,8 @@ import {
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { createApplyTreeEffects, sweepTemporarySiblings as sweepApplyLitter } from '#apply-tree.js';
 import type { MaterializeTarget } from '#apply-tree.js';
-import { createLargeObjectFill, largeObjectPlaceholders } from '#large-object-fill.js';
+import { createLargeObjectFill, declaredPlaceholders, largeObjectPlaceholders } from '#large-object-fill.js';
+import type { AttributesReading } from '#workspace-config.js';
 import { readEntryClosure } from '#open/entry-closure.js';
 import type { EntryClosure } from '#open/entry-closure.js';
 import { createContentReads } from '#open/content-reads.js';
@@ -111,8 +112,15 @@ import type { AddCheckoutActorOutput, CheckoutsActors, ListCheckoutsActorOutput 
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
-import { cleanLargeObjects, largeObjectBasisOf, withOwedAttributes } from '#lfs.js';
+import {
+  cleanLargeObjects,
+  largeObjectBasisOf,
+  mayBeLfsPointerSize,
+  readLfsPointer,
+  withOwedAttributes,
+} from '#lfs.js';
 import type { LargeObjectBasis } from '#lfs.js';
+import { digestHex } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
 import { projectRevisionsMachine, selectRevisionStatus } from '#project-revisions.machine.js';
 import { publishMachine } from '#publish.machine.js';
@@ -154,6 +162,8 @@ import {
   generatedGitattributesPath,
   generatedIgnoreContent,
   generatedIgnorePath,
+  isAttributesPath,
+  largeObjectThresholdBytes,
   tauRevisionPolicy,
 } from '#workspace-config.js';
 import type {
@@ -194,6 +204,7 @@ import type {
   RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionGitOperation,
+  RevisionHead,
   RevisionLogEntry,
   RevisionPort,
   RevisionPushResult,
@@ -228,6 +239,18 @@ import type { TurnAttemptKey, TurnCutOf, TurnLease as TurnLeaseRecord } from '#t
 
 import type { RevisionActorsOptions, RevisionFileSystem, UseCheckoutFileSystem } from '#revision-effects.types.js';
 import { coveredByIgnoreListing } from '#git-ignore.js';
+import { revisionTreeFiles } from '#algorithms/revision-tree.js';
+import { parseTemporarySibling } from '#revision-temporary-sibling.js';
+import {
+  compareRecordMaximumFiles,
+  compareRecordOf,
+  compareRecordPath,
+  compareRulesText,
+  parseCompareRecord,
+  recordAnswers,
+  serializeCompareRecord,
+} from '#compare-record.js';
+import type { CompareObservation, CompareReading, CompareRecord } from '#compare-record.js';
 
 /** The head a listing was read under: the paths it tracks are never ignored. */
 type TrackedHead = Readonly<{ revisionId: string; tree: ImmutableRevisionTree }>;
@@ -748,6 +771,24 @@ const requestTitleOf = (request: string | undefined): string | undefined => {
 };
 /** Identity every revision this host records is committed under. */
 const hostAuthor = Object.freeze({ name: 'Tau', email: 'noreply@tau.new' });
+/* Whether a path is one of a capture's changed roots or lies under one; `''` is the whole tree. */
+const isUnderRoot = (path: string, roots: ReadonlySet<string>): boolean => {
+  if (roots.has('') || roots.has(path)) {
+    return true;
+  }
+  for (let at = path.indexOf('/'); at !== -1; at = path.indexOf('/', at + 1)) {
+    if (roots.has(path.slice(0, at))) {
+      return true;
+    }
+  }
+  return false;
+};
+/* How long a checkout's comparisons pause before the newest one's record is written (Tau #2013). */
+const keepComparisonDelayMilliseconds = 2000;
+const isMissingFile = (error: unknown): boolean => {
+  const { code, name } = (error ?? {}) as { code?: unknown; name?: unknown };
+  return code === 'ENOENT' || name === 'NotFoundError';
+};
 /**
  * How far back a pull looks to decide fast-forward from divergence.
  *
@@ -1077,6 +1118,38 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
   /* Captures begin in this order; `last` only moves forward along it. */
   let captureSequence = 0;
+  /*
+   * How each file of a captured tree was read: the index's stats of it and a
+   * clock reading, both taken before its bytes were, carried over from the tree
+   * a capture started from for the files it kept. A comparison's record keys on
+   * them (Tau #2013): stats taken after the read could name an edit the bytes
+   * never saw.
+   */
+  const readings = new WeakMap<ImmutableRevisionTree, ReadonlyMap<string, CompareReading>>();
+  const recordReadings = (
+    tree: ImmutableRevisionTree,
+    { at, stats }: Readonly<{ at: number; stats: readonly FileStatEntry[] | undefined }>,
+    kept?: Readonly<{ from: ImmutableRevisionTree; roots: ReadonlySet<string> }>,
+  ): void => {
+    const before = kept === undefined ? undefined : readings.get(kept.from);
+    const stated = new Map((stats ?? []).map((entry) => [entry.path, entry] as const));
+    const read = new Map<string, CompareReading>();
+    for (const path of revisionTreeFiles(tree).keys()) {
+      const reread = kept === undefined || isUnderRoot(path, kept.roots);
+      const stat = reread ? stated.get(path) : undefined;
+      const reading = reread
+        ? stat === undefined
+          ? undefined
+          : { readAt: at, size: stat.size, mtimeMs: stat.mtimeMs }
+        : before?.get(path);
+      if (reading === undefined) {
+        /* A file with no reading of its own: no record can key on this tree. */
+        return;
+      }
+      read.set(path, reading);
+    }
+    readings.set(tree, read);
+  };
   /* ponytail: one bound for `last` and `basis` each; above it a capture walks and reads the head, as before E1. */
   const heldTreeBytes = 256 * 1024 * 1024;
   const heldTree = (tree: ImmutableRevisionTree): ImmutableRevisionTree | undefined =>
@@ -1115,12 +1188,32 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   ): Promise<CheckoutCaptureTreeActorOutput> => {
     const memos = memosOf(input.checkoutId);
     let published: CheckoutMemos['comparing'];
-    const captured = (async () => {
+    const compared = (async (): Promise<Readonly<{ treeId: string; tree?: ImmutableRevisionTree }>> => {
       try {
-        return await captureCheckout(await placeOf(input.checkoutId), {
-          bypassMemo: false,
-          changed: { paths: input.changedPaths },
-          ...(signal === undefined ? {} : { signal }),
+        const place = await placeOf(input.checkoutId);
+        return await useFileSystem(place, async (rooted) => {
+          /* A session that has captured nothing yet asks the record an earlier one left first, and once it has
+           * answered, the index's changes since (Tau #2013). */
+          if (memos.last === undefined) {
+            const held = heldAnswers.get(place.id);
+            const treeId = await (
+              held === undefined ? recordedComparison(place, rooted) : answerAgain(place, rooted, held)
+            ).catch(() => undefined);
+            if (treeId !== undefined) {
+              return { treeId };
+            }
+            heldAnswers.delete(place.id);
+          }
+          const head = await headOf(place);
+          const tree = await captureOpened(place, rooted, {
+            bypassMemo: false,
+            changed: { paths: input.changedPaths },
+            ...(signal === undefined ? {} : { signal }),
+          });
+          const treeId = await checkoutTreeId(input.checkoutId, tree);
+          /* Evidence for the next session, never this comparison's outcome: kept off its path. */
+          keepSoon(place, { treeId, head, tree });
+          return { treeId, tree };
         });
       } finally {
         if (published !== undefined && memos.comparing === published) {
@@ -1128,12 +1221,313 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
       }
     })();
+    /* A comparison the record answered has no tree: a cut waiting on it captures its own. */
+    const captured = (async (): Promise<ImmutableRevisionTree> => {
+      const { tree } = await compared;
+      if (tree === undefined) {
+        throw new Error('This comparison was answered from its record and holds no tree.');
+      }
+      return tree;
+    })();
+    // oxlint-disable-next-line promise/prefer-await-to-then -- marks the rejection handled without awaiting it.
+    captured.catch(() => undefined);
     /* Published before the first await, so a cut asked on the next event finds it. */
     if (input.generation !== undefined) {
       published = { generation: input.generation, tree: captured };
       memos.comparing = published;
     }
-    return { treeId: await checkoutTreeId(input.checkoutId, await captured) };
+    const { treeId } = await compared;
+    return { treeId };
+  };
+
+  /*
+   * Tau #2013: what a session sees of one checkout without reading a file — its
+   * head, its ignore context and the Project Index's stats of every versioned
+   * path — or `undefined` where the stats cannot vouch for bytes: no index, a
+   * provider whose timestamps are not trustworthy, an ignore source with no
+   * context to compare (D5, closeout EQ7). `compare` runs the D5 compare first,
+   * so an edit no observer reported is in the stats.
+   */
+  const observeCheckout = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    compare: boolean,
+  ): Promise<CompareObservation | undefined> => {
+    const { compareIndex, statTree } = rooted;
+    if (rooted.capabilities.trustworthyMtime !== true || compareIndex === undefined || statTree === undefined) {
+      return undefined;
+    }
+    const rules = await compareRules();
+    if (rules === undefined) {
+      return undefined;
+    }
+    const ignores =
+      port.ignoredPaths === undefined ? '' : await port.ignoreContext?.(place.kind === 'live' ? undefined : place.root);
+    if (ignores === undefined) {
+      return undefined;
+    }
+    const head = await headOf(place);
+    if (compare) {
+      await compareIndex.call(rooted);
+    }
+    const stats = await statTree.call(rooted, '', { admits: versionedAdmits });
+    return { checkoutId: place.id, rules, head, ignores, stats };
+  };
+  /*
+   * What turns a checkout's files into a tree id beyond the files themselves:
+   * the registry that versions paths, the threshold that makes a file a large
+   * object, and the store's engine, format and attributes matching, beside
+   * Tau's own rules revision (`compareRulesRevision`). A record
+   * kept under other rules answers nothing. A host's own policy is opaque, so
+   * it keeps no record.
+   */
+  let registryRules: string | undefined;
+  const compareRules = async (): Promise<string | undefined> => {
+    if (policy !== tauRevisionPolicy.policy) {
+      return undefined;
+    }
+    const { engine, version, objectFormat, largeObjects, ignoreCase, keepsLargeObjectFiles } = await describePort();
+    registryRules ??= JSON.stringify([largeObjectThresholdBytes, tauRevisionPolicy.rows]);
+    const rules = compareRulesText([
+      registryRules,
+      engine,
+      version,
+      objectFormat,
+      largeObjects,
+      ignoreCase,
+      keepsLargeObjectFiles,
+    ]);
+    return digestHex('sha256', textEncoder.encode(rules));
+  };
+  /* Every path the registry versions, as a capture lists it: a reserved temporary sibling is none. */
+  const versionedAdmits = (path: string): boolean =>
+    policy.classify(path).versioned && parseTemporarySibling(path) === undefined;
+  /* The text each checkout's record was last written with, so an unchanged answer writes nothing. */
+  const keptComparisons = new Map<string, string>();
+  /*
+   * Keep a comparison's answer for the next session (Tau #2013): its tree id
+   * with the index's stats of every file it captured, as they stood before
+   * each was read. Kept only when everything the stats name is accounted for:
+   * each captured file has a reading and has not moved since, the head did not
+   * move under the capture, and every versioned path it left out is one the
+   * ignore rules leave out.
+   */
+  const keepComparison = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    compared: Readonly<{ treeId: string; head: string | undefined; tree: ImmutableRevisionTree }>,
+  ): Promise<void> => {
+    const path = compareRecordPath(place.id);
+    const read = readings.get(compared.tree);
+    if (path === undefined || read === undefined || read.size > compareRecordMaximumFiles) {
+      return;
+    }
+    const kept = await (async () => {
+      const now = await observeCheckout(place, rooted, false);
+      if (now === undefined || now.head !== compared.head || now.stats.length > compareRecordMaximumFiles) {
+        return undefined;
+      }
+      const left = now.stats.flatMap(({ path: statPath }) => (read.has(statPath) ? [] : [statPath]));
+      if (left.length > 0) {
+        const listing = new Set(
+          (await port.ignoredPaths?.(place.kind === 'live' ? undefined : place.root, left)) ?? [],
+        );
+        if (left.some((leftPath) => !coveredByIgnoreListing(listing, leftPath))) {
+          return undefined;
+        }
+      }
+      const modes =
+        rooted.getFileMode === undefined
+          ? undefined
+          : Object.fromEntries([...revisionTreeFiles(compared.tree)].map(([file, { mode }]) => [file, mode]));
+      return compareRecordOf(
+        {
+          treeId: compared.treeId,
+          checkoutId: now.checkoutId,
+          rules: now.rules,
+          head: now.head,
+          ignores: now.ignores,
+          modes,
+        },
+        now.stats,
+        read,
+      );
+    })();
+    if (kept === undefined) {
+      return;
+    }
+    const text = serializeCompareRecord(kept);
+    if (keptComparisons.get(place.id) === text) {
+      return;
+    }
+    await writeControlRecord(controlPlaneFiles(await recordsFileSystem()), path, text);
+    keptComparisons.set(place.id, text);
+  };
+  /*
+   * A comparison's record is written off its path (Tau #2013): the newest
+   * comparison of each checkout is kept once comparisons pause, and any still
+   * waiting when the actors settle is kept then. One keep runs at a time, so an
+   * older answer never lands over a newer one. Once the actors begin to settle
+   * no keep is scheduled: a comparison still in flight then leaves none, so
+   * nothing is written into a store its host has closed or removed.
+   */
+  let keepsClosed = false;
+  const pendingKeeps = new Map<
+    string,
+    Readonly<{ place: Checkout; compared: Parameters<typeof keepComparison>[2]; timer: ReturnType<typeof setTimeout> }>
+  >();
+  let keeping: Promise<void> = Promise.resolve();
+  const runKeep = (checkoutId: string): void => {
+    const pending = pendingKeeps.get(checkoutId);
+    if (pending === undefined) {
+      return;
+    }
+    clearTimeout(pending.timer);
+    pendingKeeps.delete(checkoutId);
+    const before = keeping;
+    // async-iife: bootstrap -- chained so keeps land in order; a keep that fails leaves the record as it was.
+    keeping = (async (): Promise<void> => {
+      await before;
+      try {
+        await useFileSystem(pending.place, async (rooted) => keepComparison(pending.place, rooted, pending.compared));
+      } catch {
+        /* Evidence for the next session only: a keep that fails costs that session a walk. */
+      }
+    })();
+  };
+  const keepSoon = (place: Checkout, compared: Parameters<typeof keepComparison>[2]): void => {
+    if (keepsClosed || compareRecordPath(place.id) === undefined || !readings.has(compared.tree)) {
+      return;
+    }
+    const previous = pendingKeeps.get(place.id);
+    if (previous !== undefined) {
+      clearTimeout(previous.timer);
+    }
+    const timer = setTimeout(() => {
+      runKeep(place.id);
+    }, keepComparisonDelayMilliseconds); // Bound: keepComparisonDelayMilliseconds.
+    /* A pending keep never holds a Node process open: the settle that closes it writes it. */
+    if (typeof timer === 'object' && 'unref' in timer) {
+      timer.unref();
+    }
+    pendingKeeps.set(place.id, { place, compared, timer });
+  };
+  /*
+   * A removed checkout's record goes with it: its held answer, its pending
+   * keep and its last text are forgotten, and the file is removed once any keep
+   * already running has landed, so nothing it answered outlives it.
+   */
+  const forgetComparison = async (checkoutId: string): Promise<void> => {
+    heldAnswers.delete(checkoutId);
+    const pending = pendingKeeps.get(checkoutId);
+    if (pending !== undefined) {
+      clearTimeout(pending.timer);
+      pendingKeeps.delete(checkoutId);
+    }
+    keptComparisons.delete(checkoutId);
+    const path = compareRecordPath(checkoutId);
+    if (path === undefined) {
+      return;
+    }
+    await keeping;
+    await controlPlaneFiles(await recordsFileSystem())
+      .unlink(path)
+      .catch((error: unknown) => {
+        if (!isMissingFile(error)) {
+          throw error;
+        }
+      });
+  };
+  const flushKeeps = async (): Promise<void> => {
+    for (const checkoutId of pendingKeeps.keys()) {
+      runKeep(checkoutId);
+    }
+    await keeping;
+  };
+  /*
+   * The tree id an earlier session's record answers for the files now, or
+   * `undefined` when anything it was answered over has moved: the comparison
+   * then reads the checkout (Tau #2013; I5).
+   */
+  const recordedComparison = async (place: Checkout, rooted: RevisionFileSystem): Promise<string | undefined> => {
+    const path = compareRecordPath(place.id);
+    if (path === undefined) {
+      return undefined;
+    }
+    const text = await readControlRecord(controlPlaneFiles(await recordsFileSystem()), path, {
+      accepts: (candidate) => parseCompareRecord(candidate) !== undefined,
+    });
+    const record = text === undefined ? undefined : parseCompareRecord(text);
+    if (record === undefined) {
+      return undefined;
+    }
+    /* Where the index stands before its compare, so a change the compare finds is named to the next comparison. */
+    const at = await rooted.changedSince?.(Number.MAX_SAFE_INTEGER).catch(() => undefined);
+    const now = await observeCheckout(place, rooted, true);
+    if (now === undefined || !recordAnswers(record, now) || !(await modesHold(rooted, record))) {
+      return undefined;
+    }
+    if (at !== undefined) {
+      heldAnswers.set(place.id, { record, epoch: at.epoch, generation: at.generation });
+    }
+    checkFill(place);
+    return record.treeId;
+  };
+  /* A mode change moves neither size nor timestamp, so where the provider reports modes each is asked again. */
+  const modesHold = async (rooted: RevisionFileSystem, record: CompareRecord): Promise<boolean> => {
+    const { getFileMode } = rooted;
+    if ((getFileMode === undefined) !== (record.modes === undefined)) {
+      return false;
+    }
+    if (getFileMode === undefined) {
+      return true;
+    }
+    const moved = await mapConcurrent(
+      Object.entries(record.modes ?? {}),
+      captureModeConcurrency,
+      async ([file, mode]) => {
+        const current = await getFileMode.call(rooted, file).catch(() => undefined);
+        return current !== mode;
+      },
+    );
+    return !moved.some(Boolean);
+  };
+  /*
+   * A record that answered, with where the index stood when it did: until the
+   * checkout is captured, a comparison whose index names no change since, under
+   * the same head and ignore rules, answers the same tree id, at the cost of an
+   * index compare, as a capture from the index would (Tau #2013).
+   */
+  const heldAnswers = new Map<string, Readonly<{ record: CompareRecord; epoch: string; generation: number }>>();
+  const answerAgain = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    held: Readonly<{ record: CompareRecord; epoch: string; generation: number }>,
+  ): Promise<string | undefined> => {
+    const { compareIndex, changedSince } = rooted;
+    if (compareIndex === undefined || changedSince === undefined) {
+      return undefined;
+    }
+    const compared = await compareIndex.call(rooted);
+    const changes = await changedSince.call(rooted, held.generation, { epoch: held.epoch, admits: versionedAdmits });
+    if (
+      changes.rescan === true ||
+      changes.entries.length > 0 ||
+      changes.removed.length > 0 ||
+      compared.racy.length > 0
+    ) {
+      return undefined;
+    }
+    const ignores =
+      port.ignoredPaths === undefined ? '' : await port.ignoreContext?.(place.kind === 'live' ? undefined : place.root);
+    if (ignores !== held.record.ignores || (await headOf(place)) !== held.record.head) {
+      return undefined;
+    }
+    if (!(await modesHold(rooted, held.record))) {
+      return undefined;
+    }
+    checkFill(place);
+    return held.record.treeId;
   };
 
   /* An effect timed as one worker span, whether it settles or fails. */
@@ -1232,11 +1626,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       /* A store that could not be created is reported where it was asked for,
        * never from the close that waits for it. */
     }
+    keepsClosed = true;
     await stopFills();
     while (activeOperations.size > 0) {
       // oxlint-disable-next-line no-await-in-loop -- operations may admit another tracked authority operation before settling.
       await Promise.allSettled(activeOperations);
     }
+    await flushKeeps();
     await loggedOperation;
   };
 
@@ -1283,6 +1679,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     })();
     return described;
   };
+  /* How the repository reads its attributes: every leg that decides a placeholder folds case as it does (D9). */
+  const attributesReading = async (): Promise<AttributesReading> => {
+    const descriptor = await describePort();
+    return { ignoreCase: descriptor.ignoreCase === true };
+  };
   const formatOf = async (): Promise<ObjectFormat> => {
     const descriptor = await describePort();
     return descriptor.objectFormat;
@@ -1298,6 +1699,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * The writer keeps the representation of every entry unchanged from the
    * cut's first parent (rule 13), so the prediction reads the same parent's
    * listing — blob ids only — and folds case exactly where the writer does.
+   * A change here that can move a tree id bumps `compareRulesRevision`.
    *
    * @param tree - The captured tree.
    * @param parent - The revision the cut would follow: the checkout's head.
@@ -1338,6 +1740,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return held;
   };
 
+  /* The project directory as a checkout, at the head it names: the one place a port without checkouts has. */
+  const liveCheckout = (head: RevisionHead | undefined): Checkout =>
+    Object.freeze<Checkout>({
+      id: 'live',
+      projectId,
+      root: `/projects/${projectId}`,
+      kind: 'live',
+      branch: head?.branch,
+      baseRevisionId: head?.head,
+    });
+
   /*
    * Every place this project's files are.
    *
@@ -1357,17 +1770,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (port.listCheckouts !== undefined && descriptor.checkouts) {
       return port.listCheckouts();
     }
-    const head = await port.readHead();
-    return [
-      Object.freeze<Checkout>({
-        id: 'live',
-        projectId,
-        root: `/projects/${projectId}`,
-        kind: 'live',
-        branch: head?.branch,
-        baseRevisionId: head?.head,
-      }),
-    ];
+    return [liveCheckout(await port.readHead())];
   };
 
   const placeOf = async (checkoutId: string): Promise<Checkout> => {
@@ -1748,6 +2151,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (leavesRecords !== true) {
         await recordedBlobOids(rooted, read, stats);
       }
+      recordReadings(captured, { at: observedAt, stats });
       return captured;
     };
     /* A feed the host promised complete names the paths without asking the index, so it wins
@@ -1845,26 +2249,41 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         return walk();
       }
       cursor = { epoch: changes.epoch, generation: changes.generation, observedAt };
-      return captureRevisionTree(rooted, {
+      const captured = await captureRevisionTree(rooted, {
         exclude,
         inheritedMode: (path) => basis?.mode(path),
         changedSince: { tree: last, paths: [...paths] },
         ...(signal === undefined ? {} : { signal }),
       });
+      recordReadings(captured, { at: observedAt, stats }, { from: last, roots: paths });
+      return captured;
     };
     /* A complete feed names the paths: only they are asked about, unless an ignore rule changed, which walks. */
     const fromFeed = async (from: ImmutableRevisionTree, named: readonly string[]): Promise<ImmutableRevisionTree> => {
+      const readAt = clock();
       const paths = [...new Set([...named, ...(await trackingMoved(from))])];
-      return (await askAgain(paths, new Set()))
-        ? /* `last` carries the modes it inherited, and a moved head empties
-           * the paths, so it is still the head's (I6). */
-          captureRevisionTree(rooted, {
-            exclude,
-            inheritedMode: (path) => from.mode(path),
-            changedSince: { tree: from, paths },
-            ...(signal === undefined ? {} : { signal }),
-          })
-        : walk();
+      if (!(await askAgain(paths, new Set()))) {
+        return walk();
+      }
+      const roots = new Set(paths);
+      /* The index's stats of the named paths alone, before their bytes: what a record keys their reading on. */
+      const above = new Set(
+        paths.flatMap((path) => [...path.matchAll(/\//gu)].map(({ index }) => path.slice(0, index))),
+      );
+      const stats = await rooted
+        .statTree?.('', {
+          admits: (path, kind) => isUnderRoot(path, roots) || (kind === 'dir' && above.has(path)),
+        })
+        .catch(() => undefined);
+      /* `last` carries the modes it inherited, and a moved head empties the paths, so it is still the head's (I6). */
+      const captured = await captureRevisionTree(rooted, {
+        exclude,
+        inheritedMode: (path) => from.mode(path),
+        changedSince: { tree: from, paths },
+        ...(signal === undefined ? {} : { signal }),
+      });
+      recordReadings(captured, { at: readAt, stats }, { from, roots });
+      return captured;
     };
     const tree =
       since === undefined || changed?.paths === undefined ? await fromIndex() : await fromFeed(since, changed.paths);
@@ -1913,46 +2332,92 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return tree;
   };
 
+  /* Checkouts whose placeholders this session has declared at least once (D9). */
+  const declaredCheckouts = new Set<string>();
+  type CheckoutCaptureOptions = Readonly<{
+    modeBasis?: ImmutableRevisionTree | undefined;
+    bypassMemo: boolean;
+    changed?: Readonly<{ paths: readonly string[] | undefined }>;
+    signal?: AbortSignal | undefined;
+    leavesRecords?: boolean | undefined;
+  }>;
   const captureCheckout = async (
     place: Checkout,
-    captureOptions: Readonly<{
-      modeBasis?: ImmutableRevisionTree | undefined;
-      bypassMemo: boolean;
-      changed?: Readonly<{ paths: readonly string[] | undefined }>;
-      signal?: AbortSignal | undefined;
-      leavesRecords?: boolean | undefined;
-    }>,
+    captureOptions: CheckoutCaptureOptions,
   ): Promise<ImmutableRevisionTree> =>
-    useFileSystem(place, async (rooted) => {
-      captureOptions.signal?.throwIfAborted();
-      await sweepTemporarySiblings(place, rooted);
-      /* The project directory, where an open writes placeholders; a pull resumes any other checkout's, and any
-       * checkout a failed tree write owes a check is checked again here (D10). */
-      checkFill(place);
-      const { modeBasis, bypassMemo, changed, signal, leavesRecords } = captureOptions;
-      const memos = memosOf(place.id);
-      const ignoreRoot = place.kind === 'live' ? undefined : place.root;
-      const ignores: CaptureIgnores | undefined =
-        port.ignoredPaths === undefined
-          ? undefined
-          : {
-              context: await port.ignoreContext?.(ignoreRoot),
-              list: async (paths) => port.ignoredPaths?.(ignoreRoot, paths),
-              head: async () => {
-                const head = await headOf(place);
-                const tree = head === undefined ? undefined : await headBasis(place, memos);
-                return head === undefined || tree === undefined ? undefined : { revisionId: head, tree };
-              },
-            };
-      return captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
-        memos,
-        bypassMemo,
-        signal,
-        leavesRecords,
-        ...(changed === undefined ? {} : { changed }),
-        ...(ignores === undefined ? {} : { ignores }),
-      });
+    useFileSystem(place, async (rooted) => captureOpened(place, rooted, captureOptions));
+  /*
+   * One capture over a checkout the caller already holds open. D9: this layer owns the checkout's placeholders, and
+   * making its view of the checkout said it will declare them: every other view holds a file the size of a pointer
+   * until it does (I7). A capture that ends without the first declaration, failed or stopped, lets go, so nothing
+   * waits on a word that will not come.
+   */
+  const captureOpened = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    captureOptions: CheckoutCaptureOptions,
+  ): Promise<ImmutableRevisionTree> => {
+    try {
+      return await captureDeclared(place, rooted, captureOptions);
+    } finally {
+      if (!declaredCheckouts.has(place.id)) {
+        rooted.releaseDeclaration?.();
+      }
+    }
+  };
+  const captureDeclared = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    captureOptions: CheckoutCaptureOptions,
+  ): Promise<ImmutableRevisionTree> => {
+    captureOptions.signal?.throwIfAborted();
+    await sweepTemporarySiblings(place, rooted);
+    /* The project directory, where an open writes placeholders; a pull resumes any other checkout's, and any
+     * checkout a failed tree write owes a check is checked again here (D10). */
+    checkFill(place);
+    const { modeBasis, bypassMemo, changed, signal, leavesRecords } = captureOptions;
+    const memos = memosOf(place.id);
+    const ignoreRoot = place.kind === 'live' ? undefined : place.root;
+    const ignores: CaptureIgnores | undefined =
+      port.ignoredPaths === undefined
+        ? undefined
+        : {
+            context: await port.ignoreContext?.(ignoreRoot),
+            list: async (paths) => port.ignoredPaths?.(ignoreRoot, paths),
+            head: async () => {
+              const head = await headOf(place);
+              const tree = head === undefined ? undefined : await headBasis(place, memos);
+              return head === undefined || tree === undefined ? undefined : { revisionId: head, tree };
+            },
+          };
+    /* Taken before it looks: a tree write that announces a newer tree meanwhile owns the next word (D10, I7). */
+    const basis = rooted.declarationBasis?.();
+    const tree = await captureFileSystem(rooted, async () => modeBasis ?? headBasis(place, memos), {
+      memos,
+      bypassMemo,
+      signal,
+      leavesRecords,
+      ...(changed === undefined ? {} : { changed }),
+      ...(ignores === undefined ? {} : { ignores }),
     });
+    /*
+     * D9: the placeholders' only writer says which they are, from the attributes it reads, every time it looks:
+     * after its own writes (an apply verifies by capturing), on open, at a pull and at each cut, which also
+     * catches a checkout edited from outside. Every other view answers a path by this mark alone.
+     */
+    try {
+      await rooted.declarePending?.(
+        declaredPlaceholders(tree, { reading: await attributesReading() }),
+        undefined,
+        basis === undefined ? undefined : { basis },
+      );
+      declaredCheckouts.add(place.id);
+    } catch (error) {
+      /* An index that cannot open answers no mark at all: the capture stands, and the next one declares again. */
+      console.warn('[revisions] the checkout index could not learn its placeholders', error);
+    }
+    return tree;
+  };
   /* The tree id of one checkout's capture, through that checkout's warm memo (E3). */
   const checkoutTreeId = async (checkoutId: string, tree: ImmutableRevisionTree): Promise<string> =>
     memosOf(checkoutId).treeIds.treeId(await recordedTree(tree, await recordingParentOf(checkoutId)), await formatOf());
@@ -1964,10 +2429,111 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* The versioned tree of one checkout: every path the registry versions. */
   const capture = async (place: Checkout, modeBasis?: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
     captureCheckout(place, { modeBasis, bypassMemo: false });
-  /* The same, for a fill's placeholder check: it warms the memo, and an import's one-shot record
-   * stays for the cut that builds the next revision, which reuses these bytes (D12). */
-  const captureForFill = async (place: Checkout): Promise<ImmutableRevisionTree> =>
-    captureCheckout(place, { bypassMemo: false, leavesRecords: true });
+  /*
+   * The placeholders a checkout holds, found from the Project Index's stats
+   * (D4, I3; Tau #2013): a pointer is a few lines of fixed form, so only a
+   * versioned file of a pointer's size is read, and the rest of the checkout is
+   * never read to answer the fill. The D5 compare runs first, so a pointer
+   * another program wrote is found. Ignored paths are left out, as a capture
+   * leaves them out. Every attributes file is read too: a pointer is a
+   * placeholder only where they track it (D9, the one rule a declaration
+   * uses). Without an index it captures the checkout, as before.
+   */
+  const placeholdersOf = async (
+    place: Checkout,
+    generation: number,
+  ): Promise<ReturnType<typeof largeObjectPlaceholders>> =>
+    useFileSystem(place, async (rooted) => {
+      const { compareIndex, statTree } = rooted;
+      if (compareIndex === undefined || statTree === undefined) {
+        return largeObjectPlaceholders(
+          await captureOpened(place, rooted, { bypassMemo: false, leavesRecords: true }),
+          await attributesReading(),
+        );
+      }
+      /*
+       * What it finds is every placeholder the checkout holds, by a capture's own rule: it declares them (D9). Only
+       * for the tree it read: a tree write that began meanwhile owns the next word, which its own capture gives, so
+       * this look never declares over it, here or in the index (`basis`; D10, I7).
+       */
+      const basis = rooted.declarationBasis?.();
+      try {
+        const found = await indexedPlaceholders(place, rooted, { compareIndex, statTree });
+        try {
+          if (generationOf(place.id) !== generation || runningTreeWrites.has(place.id)) {
+            return found;
+          }
+          await rooted.declarePending?.(
+            new Map(
+              [...found].map(
+                ([path, { oid, size, pointer }]) =>
+                  [path, { object: { oid, size }, pointerSize: pointer.byteLength }] as const,
+              ),
+            ),
+            undefined,
+            basis === undefined ? undefined : { basis },
+          );
+          declaredCheckouts.add(place.id);
+        } catch (error) {
+          /* An index that cannot open answers no mark at all: the fill stands, and the next look declares again. */
+          console.warn('[revisions] the checkout index could not learn its placeholders', error);
+        }
+        return found;
+      } finally {
+        if (!declaredCheckouts.has(place.id)) {
+          rooted.releaseDeclaration?.();
+        }
+      }
+    });
+  const readVersioned = async (
+    rooted: RevisionFileSystem,
+    paths: readonly string[],
+  ): Promise<Array<readonly [string, Uint8Array<ArrayBuffer>]>> => {
+    const read = await mapConcurrent(paths, captureModeConcurrency, async (path) => {
+      try {
+        return [path, await rooted.readFile(path)] as const;
+      } catch (error) {
+        /* Gone since the listing: a capture skips it too. */
+        if (isMissingFile(error)) {
+          return undefined;
+        }
+        throw error;
+      }
+    });
+    return read.flatMap((entry) => (entry === undefined ? [] : [entry]));
+  };
+  const indexedPlaceholders = async (
+    place: Checkout,
+    rooted: RevisionFileSystem,
+    { compareIndex, statTree }: Required<Pick<RevisionFileSystem, 'compareIndex' | 'statTree'>>,
+  ): Promise<ReturnType<typeof largeObjectPlaceholders>> => {
+    await compareIndex.call(rooted);
+    const stats = await statTree.call(rooted, '', { admits: versionedAdmits });
+    const candidates = await readVersioned(
+      rooted,
+      stats.flatMap(({ path, size }) => (mayBeLfsPointerSize(size) ? [path] : [])),
+    );
+    const pointers = candidates.filter(([, content]) => readLfsPointer(content) !== undefined);
+    if (pointers.length === 0) {
+      return new Map();
+    }
+    /* A pointer is a placeholder only where the attributes files track it: they are read too, as a capture reads them. */
+    const attributes = await readVersioned(
+      rooted,
+      stats.flatMap(({ path }) => (isAttributesPath(path) ? [path] : [])),
+    );
+    let entries = [...pointers, ...attributes];
+    if (port.ignoredPaths !== undefined) {
+      const listing = new Set(
+        (await port.ignoredPaths(
+          place.kind === 'live' ? undefined : place.root,
+          entries.map(([path]) => path),
+        )) ?? [],
+      );
+      entries = entries.filter(([path]) => !coveredByIgnoreListing(listing, path));
+    }
+    return largeObjectPlaceholders(new ImmutableRevisionTree(entries), await attributesReading());
+  };
 
   /**
    * The live checkout, asked of a store that already exists, without waiting
@@ -1981,15 +2547,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       const checkouts = await port.listCheckouts();
       return checkouts.find((candidate) => candidate.kind === 'live');
     }
-    const head = await port.readHead();
-    return Object.freeze<Checkout>({
-      id: 'live',
-      projectId,
-      root: `/projects/${projectId}`,
-      kind: 'live',
-      branch: head?.branch,
-      baseRevisionId: head?.head,
-    });
+    return liveCheckout(await port.readHead());
   };
 
   /**
@@ -2114,6 +2672,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     checkoutTreeId,
     temporarySibling,
     unlinkIfPresent,
+    attributesReading,
     prepareTarget: async (place, target, signal) => {
       const expected = target.get('tau.json');
       if (expected === undefined) {
@@ -2163,7 +2722,45 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               ),
           }),
     },
-    capture: captureForFill,
+    /* The fill's own look, and its closing one: the index's stats and the pointer-sized files, not a capture (D9). */
+    placeholders: async (place) => placeholdersOf(place, generationOf(place.id)),
+    /*
+     * One flush reads the paths it fills and the attributes on their way, never the checkout (#2010), by the rule a
+     * capture and the look read them: a path the registry does not version, or one Git ignores, is absent, so an
+     * ignored attributes file never decides a fill the look would decide otherwise (D9).
+     */
+    readPaths: async (place, paths) =>
+      useFileSystem(place, async (rooted) => {
+        const versioned = paths.filter((path) => versionedAdmits(path));
+        const ignored =
+          port.ignoredPaths === undefined || versioned.length === 0
+            ? undefined
+            : await port.ignoredPaths(place.kind === 'live' ? undefined : place.root, versioned);
+        const listing = new Set(ignored ?? []);
+        const admitted = versioned.filter((path) => !coveredByIgnoreListing(listing, path));
+        const read = await mapConcurrent(admitted, captureModeConcurrency, async (path) => {
+          const entry = await entryOf(rooted, path).catch((error: unknown) => {
+            /* Gone, or a folder where a file was: no placeholder, as a capture would not list it. */
+            if (isMissingFile(error) || (error as { code?: unknown } | undefined)?.code === 'EISDIR') {
+              return undefined;
+            }
+            throw error;
+          });
+          return entry === undefined ? undefined : ([path, entry] as const);
+        });
+        return new Map(read.flatMap((entry) => (entry === undefined ? [] : [entry])));
+      }),
+    /* What a flush filled is no placeholder now, said for those paths alone (D9). */
+    declareFilled: async (place, paths) =>
+      useFileSystem(place, async (rooted) => {
+        try {
+          await rooted.declarePending?.(new Map(), paths);
+        } catch (error) {
+          /* The write ended the marks itself; an index that cannot open answers no mark at all. */
+          console.warn('[revisions] the checkout index could not learn what a fill wrote', error);
+        }
+      }),
+    attributesReading,
     withCheckoutFence,
     materializeTree,
     /* A checkout over the host's store clones each object in place of writing its bytes (W11.3). */
@@ -2253,6 +2850,22 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     resumeTimers.add(timer);
     retryTimers.set(place.id, timer);
   };
+  /*
+   * D9: a look that failed before this session ever declared a checkout lets go of it, so no stat waits out the
+   * bound on a word that will not come; its reads still refuse an undeclared pointer (I7).
+   */
+  const releaseUndeclared = async (place: Checkout): Promise<void> => {
+    if (declaredCheckouts.has(place.id)) {
+      return;
+    }
+    try {
+      await useFileSystem(place, async (rooted) => {
+        rooted.releaseDeclaration?.();
+      });
+    } catch {
+      /* A checkout that cannot be opened holds nothing to let go of. */
+    }
+  };
   const checkFill = (place: Checkout): void => {
     if (fillsStopped || checkingFills.has(place.id) || answeredFills.get(place.id) === generationOf(place.id)) {
       return;
@@ -2265,8 +2878,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       // async-iife: bootstrap -- a background check; a fill's own failures are reported through `onLargeObjects`.
       void (async (): Promise<void> => {
         try {
+          /* The placeholders first: they declare the checkout, so a head that cannot be read holds nothing. */
+          const placeholders = await placeholdersOf(place, generation);
           const head = await headOf(place);
-          const placeholders = largeObjectPlaceholders(await captureForFill(place));
           if (fillsStopped || generationOf(place.id) !== generation) {
             return;
           }
@@ -2278,6 +2892,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             answeredFills.delete(place.id);
           }
           console.warn('[revisions] large-object placeholders could not be checked', error);
+          await releaseUndeclared(place);
           checkFillLater(place, generation);
         } finally {
           checkingFills.delete(place.id);
@@ -2333,6 +2948,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
     } catch (error) {
       console.warn('[revisions] checkouts could not be listed for their large objects', error);
+      /* The project directory is a checkout whatever the store answers: it is let go of, unless declared. */
+      await releaseUndeclared(liveCheckout(undefined));
     }
   })();
 
@@ -2430,7 +3047,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (fillsStopped) {
             return;
           }
-          const placeholders = largeObjectPlaceholders(tree ?? (await captureForFill(place)));
+          const placeholders =
+            tree === undefined
+              ? await placeholdersOf(place, writes ?? 0)
+              : largeObjectPlaceholders(tree, await attributesReading());
           if (treeWrites.get(place.id) !== writes) {
             return;
           }
@@ -2469,6 +3089,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* D9: reads that resolve a placeholder to its object, and `materialize` for a consumer that needs the file. */
   const contentReads = createContentReads({
     useFileSystem,
+    attributesReading,
     readStoredObject: async (pointer) => port.readLargeObject?.(pointer),
     /* No reader's signal: the transfer may be the fill's too, and only a close stops it (I10, S4). */
     fetchObject: async (pointer, onProgress) => {
@@ -2497,7 +3118,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }
       const generation = generationOf(place.id);
       /* Captured before the generation is answered: a capture that fails leaves the next check owed. */
-      const placeholders = largeObjectPlaceholders(await captureForFill(place));
+      const placeholders = await placeholdersOf(place, generation);
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- a close during the capture stops fills.
       if (fillsStopped || generationOf(place.id) !== generation) {
         return;
@@ -2540,6 +3161,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           capture: captureFresh,
           withCheckoutFence,
           materializeTree,
+          attributesReading,
           storeObject: async (pointer, content) => storeLargeObject.call(port, pointer, content),
           readStoredObject: async (pointer) => readLargeObject.call(port, pointer),
         });
@@ -2688,6 +3310,54 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   const evidenceRefName = 'refs/tau/evidence/exports';
+  /*
+   * The remote's evidence record this device has written to disk (SP2h review): one control record under `.git` per
+   * remote, holding its head or `""` for none. A projection's fetch moves the remote-tracking ref before it writes a
+   * file, and a projection can stop after that fetch (a failed apply beside it, a deadline, a close), so the tracking
+   * ref is no proof the exports landed. This record moves only once they have. A device with no record for a remote,
+   * as one an older build restored from, takes the tracking head it holds before the pull's records are fetched, once.
+   * Each remote's record is a whole file of its own, so two remotes written at once never read and rewrite each
+   * other's entry (SP2h final review), and a torn or corrupt one reads as absent for its remote alone.
+   */
+  /* `.` is escaped too, so one remote's `<record>.<uuid>.writing` siblings never begin with another's record name. */
+  const appliedEvidencePathOf = (remote: string): string =>
+    `.git/tau-applied-evidence-${encodeURIComponent(remote).replaceAll('.', '%2E')}.json`;
+  const wholeAppliedEvidence = jsonRecord(
+    (value) =>
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      typeof (value as { head?: unknown }).head === 'string',
+  );
+  const readAppliedEvidence = async (remote: string): Promise<string | undefined> => {
+    const text = await readControlRecord(controlPlaneFiles(await recordsFileSystem()), appliedEvidencePathOf(remote), {
+      accepts: wholeAppliedEvidence,
+    });
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `wholeAppliedEvidence` checked the shape.
+    return text !== undefined && wholeAppliedEvidence(text) ? (JSON.parse(text) as { head: string }).head : undefined;
+  };
+  const writeAppliedEvidence = async (remote: string, head: string): Promise<void> => {
+    await writeControlRecord(
+      controlPlaneFiles(await recordsFileSystem()),
+      appliedEvidencePathOf(remote),
+      `${JSON.stringify({ head })}\n`,
+    );
+  };
+  /*
+   * What this device has applied of a remote's evidence record before this pull: its applied entry, seeded once from
+   * the tracking head held before any record is fetched (an older build's trust, kept for migration only).
+   */
+  const appliedEvidenceBasis = async (
+    remote: string,
+    trackingHead: string | undefined,
+  ): Promise<string | undefined> => {
+    const applied = await readAppliedEvidence(remote);
+    if (applied !== undefined) {
+      return applied === '' ? undefined : applied;
+    }
+    await writeAppliedEvidence(remote, trackingHead ?? '');
+    return trackingHead;
+  };
   const candidateRefName = 'refs/tau/artifacts/geospec-candidates';
 
   /*
@@ -2762,27 +3432,46 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     path.startsWith('.tau/offloaded-tool-results/');
 
   /** A brand-new device learns the preference from the fetched project manifest. */
-  const fetchedProjectSyncsLargeExports = async (remote: string, branch: string): Promise<boolean> => {
+  /**
+   * Both `tau.json` toggles as one revision records them, read by that manifest's oid alone (R5): an empty checkout is
+   * exactly the cold open, where reading the whole tree read every blob and looked up every large object.
+   *
+   * @param revision - The revision.
+   * @returns Its toggles, with {@link projectSyncPreferences}' defaults for an unreadable manifest; `undefined` when
+   *   the revision holds none.
+   */
+  const revisionSyncPreferences = async (
+    revision: RevisionId,
+  ): Promise<Readonly<{ syncChats: boolean; syncLargeExports: boolean }> | undefined> => {
+    const tree = await port.readTree(revision, { largeObjects: 'local', paths: ['tau.json'] });
+    const manifest = tree?.get('tau.json');
+    if (manifest === undefined) {
+      return undefined;
+    }
+    try {
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a parsed manifest is `unknown` until read.
+      const record = JSON.parse(new TextDecoder().decode(manifest)) as Readonly<{
+        syncChats?: unknown;
+        syncLargeExports?: unknown;
+      }>;
+      return { syncChats: record.syncChats !== false, syncLargeExports: record.syncLargeExports === true };
+    } catch {
+      return { syncChats: true, syncLargeExports: false };
+    }
+  };
+
+  const fetchedProjectSyncsLargeExports = async (
+    remote: string,
+    branch: string,
+    preferencesOf: typeof revisionSyncPreferences,
+  ): Promise<boolean> => {
     const records = await recordsFileSystem();
     if (await records.exists('tau.json')) {
       return false;
     }
     const head = await port.readRef(remoteTrackingRef(remote, `refs/heads/${branch}`));
-    /* R5: the manifest alone. An empty checkout is exactly the cold open, where
-     * reading the whole tree read every blob and looked up every large object. */
-    const tree =
-      head === undefined ? undefined : await port.readTree(head, { largeObjects: 'local', paths: ['tau.json'] });
-    const manifest = tree?.get('tau.json');
-    if (manifest === undefined) {
-      return false;
-    }
-    try {
-      return (
-        (JSON.parse(new TextDecoder().decode(manifest)) as { syncLargeExports?: unknown }).syncLargeExports === true
-      );
-    } catch {
-      return false;
-    }
+    const preferences = head === undefined ? undefined : await preferencesOf(revisionId(head));
+    return preferences?.syncLargeExports === true;
   };
 
   /*
@@ -5172,6 +5861,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         }
         await port.removeCheckout(input.id);
         await noteRemovedCheckout(input.id, true);
+        /* Evidence for a checkout that is gone: a failure to remove it is never the removal's. */
+        await forgetComparison(input.id).catch(() => undefined);
         /* The bytes a closed checkout's captures could reuse describe a tree
          * this process can no longer reach (EQ7). */
         checkoutMemos.delete(input.id);
@@ -6097,15 +6788,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               taken = error;
               return undefined;
             });
-            /* A rename the remote refused because another device renamed the
-             * same version first: the remote's name wins (Revisions Policy
-             * rule 19), and it is never offered again under a refreshed lease. */
+            /* A version tag refused with a lost lease, with the lease this push
+             * held for it. Both ports say `leaseLost` for every command of an
+             * atomic push when any one ref moved, so the refusal alone never
+             * decides: only a tag the remote itself moved off that lease is a
+             * rename another device made first, and the remote's name wins
+             * (Revisions Policy rule 19, N3). */
             const lostRenames = (pushed?.refs ?? []).flatMap((entry) => {
               const number =
                 entry.status === 'rejected' && entry.reason === 'leaseLost'
                   ? versionNumberOfTag(entry.name)
                   : undefined;
-              return number === undefined ? [] : [number];
+              return number === undefined ? [] : [{ number, lease: leasedTags[entry.name] }];
             });
             let adopted: readonly SyncRefOutcome[] = [];
             if (
@@ -6125,7 +6819,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               const local = new Map(localTags.map((tag) => [tag.name, String(tag.head)] as const));
               /* A lost rename that now holds the remote's own tag has nothing left to offer. */
               adopted = lostRenames
-                .map((number) => versionTagRef(number))
+                .map(({ number }) => versionTagRef(number))
                 .filter((name) => local.has(name) && local.get(name) === leasedTags[name])
                 .map((name): SyncRefOutcome => Object.freeze({ name, status: 'upToDate', head: leasedTags[name] }));
               const settled = new Set([
@@ -6348,7 +7042,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           });
         }
         signal.throwIfAborted();
-        if (!syncLargeExports && (await fetchedProjectSyncsLargeExports(input.remote, input.branch))) {
+        /* One read of a fetched manifest per pull, whichever question asks it first. */
+        const fetchedPreferences = new Map<string, ReturnType<typeof revisionSyncPreferences>>();
+        const fetchedPreferencesOf = async (revision: RevisionId): ReturnType<typeof revisionSyncPreferences> => {
+          let read = fetchedPreferences.get(revision);
+          if (read === undefined) {
+            read = revisionSyncPreferences(revision);
+            fetchedPreferences.set(revision, read);
+          }
+          return read;
+        };
+        if (
+          !syncLargeExports &&
+          (await fetchedProjectSyncsLargeExports(input.remote, input.branch, fetchedPreferencesOf))
+        ) {
           syncLargeExports = true;
         }
 
@@ -6576,6 +7283,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const recordReferences = advertised.filter(
           (ref) => ref.name.startsWith(`${chatRefPrefix}/`) || (syncLargeExports && ref.name === evidenceRefName),
         );
+        /*
+         * Records write only unversioned paths, disjoint from the apply's, so a fast-forward lets them run while it
+         * writes (SP2h) — when the manifest it writes asks for chats as the checkout's does. A change of mind waits for
+         * the apply, and the manifest it lands decides, as before.
+         */
+        const applied =
+          integration === 'fastForward' && remoteHead !== undefined
+            ? await fetchedPreferencesOf(remoteHead)
+            : undefined;
+        const besideApply = integration === 'fastForward' && (applied?.syncChats ?? true) === syncChats;
         const pending = await readPendingQueue();
         return {
           leases,
@@ -6593,13 +7310,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             syncChats,
             syncLargeExports,
             pulledAt,
+            ...(besideApply ? { besideApply } : {}),
             priorEvidenceHead: pending.entries.some(
               (entry) => entry.operation === 'projection' && entry.ref === evidenceRefName,
             )
               ? undefined
-              : (trackingBefore.find(
-                  (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
-                )?.head ?? (await heldEvidenceHead(advertised.find((ref) => ref.name === evidenceRefName)?.head))),
+              : ((await appliedEvidenceBasis(
+                  input.remote,
+                  trackingBefore.find(
+                    (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
+                  )?.head,
+                )) ?? (await heldEvidenceHead(advertised.find((ref) => ref.name === evidenceRefName)?.head))),
           },
           ...(advanced.length === 0 ? {} : { advanced }),
           ...(merged.length === 0 ? {} : { merged }),
@@ -6609,7 +7330,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
 
       projectRecords: fromAuthorityPromise<SyncProjectRecordsActorOutput, SyncProjectRecordsActorInput>(
         timedEffect('records.project', async ({ input, signal }) => {
-          const { syncChats } = await projectSyncPreferences();
+          const preferences = input.besideApply === true ? input : await projectSyncPreferences();
+          const { syncChats } = preferences;
           const fetchReferences = input.fetchRefs.filter((ref) => syncChats || !ref.startsWith(`${chatRefPrefix}/`));
           const fetched =
             fetchReferences.length > 0
@@ -6666,7 +7388,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                     reason: error instanceof Error ? error.message : 'This chat could not be restored.',
                   };
                 } finally {
-                  if (written.length > 0 && !signal.aborted) {
+                  /* A chat written before a stop is on disk: it is announced, since a later pull finds it current
+                   * and announces nothing (SP2h review). */
+                  if (written.length > 0) {
                     options.onChatsProjected?.(written);
                   }
                 }
@@ -6685,8 +7409,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * record that *changed* — and what it must never do for one that did
            * not, which is how a device that had already restored an export, and
            * then edited it, had its own file replaced by the same remote bytes on
-           * the very next pull. The remote-tracking ref this host held before the
-           * fetch is exactly "what I have already applied".
+           * the very next pull. What this device has already applied is its
+           * applied-evidence record, which moves only once the record is on disk,
+           * or a record its own evidence ref already holds; never the tracking
+           * ref, which a projection's fetch moves before it writes anything
+           * (SP2h review), but for an older build's device's first pull.
            */
           const { priorEvidenceHead } = input;
           const fetchedEvidenceHead = fetchedEvidence?.head;
@@ -6700,6 +7427,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             recordTasks.push(async (): Promise<SyncRefOutcome> => {
               try {
                 await projectEvidence([fetchedEvidence], signal);
+                await writeAppliedEvidence(input.remote, fetchedEvidence.head);
                 return { name: evidenceRefName, status: 'upToDate', head: fetchedEvidence.head };
               } catch (error) {
                 return {
@@ -7290,6 +8018,21 @@ export const releaseUnplacedTurns = (actor: ProjectRevisionsActor): readonly str
 };
 
 /**
+ * What a close cut over every checkout came to (A7e, 22:19Z).
+ *
+ * - `recorded`: a checkout minted a revision, and every other one had nothing to save.
+ * - `nothingToRecord`: every checkout answered that its tree was unchanged.
+ * - `refused`: a checkout could not be cut. There was no checkout, a turn held one (and minting there would credit
+ *   the turn's work to the close), or one answered `nothingToSave` because another holder's lease or a git
+ *   operation was in the way. The bytes are still on disk for the next cut.
+ *
+ * A cut that failed or lost its compare-and-swap still rejects.
+ *
+ * @public
+ */
+export type CheckoutCutsOutcome = 'recorded' | 'nothingToRecord' | 'refused';
+
+/**
  * Record every checkout no turn holds, and wait for each one's answer.
  *
  * The close ruling (D6, rule 7): closing or quitting saves every dirty
@@ -7311,15 +8054,15 @@ export const releaseUnplacedTurns = (actor: ProjectRevisionsActor): readonly str
  * @param timeoutMilliseconds - One bound for all the cuts. `hidden` defaults to {@link closeCutMilliseconds}, because
  *   a frozen page answers nothing; `close` has none (B8, B3: each cut is answered by its request id, and the quit
  *   itself is bounded by its owner, B9).
- * @returns Once every cut has answered. Rejects with the first refusal (a failed cut, a
- *   lost compare-and-swap) once all have answered, or at the bound.
+ * @returns Once every cut has answered, what they came to ({@link CheckoutCutsOutcome}). Rejects with the first
+ *   refusal (a failed cut, a lost compare-and-swap) once all have answered, or at the bound.
  * @public
  */
 export const awaitCheckoutCuts = async (
   actor: ProjectRevisionsActor,
   trigger: 'hidden' | 'close',
   timeoutMilliseconds: number | undefined = trigger === 'hidden' ? closeCutMilliseconds : undefined,
-): Promise<void> => {
+): Promise<CheckoutCutsOutcome> => {
   const { checkouts, checkoutRefs, turnFacts } = actor.getSnapshot().context;
   const turnCheckouts = Object.values(turnFacts)
     .filter((fact) => !fact.settled && fact.abandoned !== true)
@@ -7333,6 +8076,11 @@ export const awaitCheckoutCuts = async (
         !turnCheckouts.some((id) => id === undefined || id === checkout.id),
     )
     .map((checkout) => checkout.id);
+  /* A checkout skipped for a turn, or none to cut at all, leaves bytes no cut here records. */
+  const skipped =
+    ids.length === 0 || ids.length < checkouts.filter((checkout) => checkoutRefs[checkout.id] !== undefined).length;
+  /* What each checkout answered when it did not refuse: minted, unchanged, or held off. */
+  const outcomes = new Map<string, CheckoutCutsOutcome>();
   /* Each answer settles to its refusal, or `undefined` when the checkout recorded or had nothing to record.
    * Keyed by the request id each cut mints, which every answer echoes (RM-R1, RM-R2). */
   const requests = new Map(ids.map((id) => [`${trigger}:${id}:${randomUuid()}`, id]));
@@ -7346,9 +8094,18 @@ export const awaitCheckoutCuts = async (
   };
   const subscriptions = [
     actor.on('revisionMinted', (event) => {
+      if (event.requestId !== undefined && requests.has(event.requestId)) {
+        outcomes.set(event.requestId, 'recorded');
+      }
       answer(event);
     }),
     actor.on('nothingToSave', (event) => {
+      if (event.requestId !== undefined && requests.has(event.requestId)) {
+        outcomes.set(
+          event.requestId,
+          event.heldBy === undefined && event.waitFor === undefined ? 'nothingToRecord' : 'refused',
+        );
+      }
       answer(event);
     }),
     actor.on('cutFailed', (event) => {
@@ -7379,6 +8136,11 @@ export const awaitCheckoutCuts = async (
     if (refused !== undefined) {
       throw new Error(refused);
     }
+    const answered = new Set(outcomes.values());
+    if (skipped || answered.has('refused')) {
+      return 'refused';
+    }
+    return answered.has('recorded') ? 'recorded' : 'nothingToRecord';
   } finally {
     clearTimeout(bound);
     for (const subscription of subscriptions) {

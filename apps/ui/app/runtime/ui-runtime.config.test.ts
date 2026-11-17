@@ -59,16 +59,13 @@ describe('createUiRuntimeConfig', () => {
     });
   });
 
-  it('routes runtime observability to the configured Tau API', async () => {
+  it('registers no legacy observability middleware: runtime telemetry is the page reporter, under consent (D-T8)', async () => {
     const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
       tauApiUrl: 'https://api.tau.test',
       tauWebSocketUrl: 'wss://api.tau.test',
     });
 
-    expect(resolvedRuntime.middleware[0]).toMatchObject({
-      id: 'observability',
-      options: { reportUrl: 'https://api.tau.test/v1/telemetry/ingest' },
-    });
+    expect(resolvedRuntime.middleware.map(({ id }) => id)).not.toContain('observability');
   });
 
   it('should hand the locked acquisition profile to the in-browser bundler', async () => {

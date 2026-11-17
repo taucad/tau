@@ -445,21 +445,19 @@ const edges = [
   {
     from: 'svg',
     to: 'png',
-    fidelity: 'mesh',
     optionsSchema: svgPngOptionsSchema,
   },
   {
     from: 'svg',
     to: 'webp',
-    fidelity: 'mesh',
     optionsSchema: svgWebpOptionsSchema,
   },
 ] as const;
 
 /** SVG-to-PNG runtime transcoder sharing the direct renderer implementation. @public */
 export const svgTranscoder = defineTranscoder({
-  id: 'svg-image',
-  name: 'SvgImageTranscoder',
+  id: 'svg',
+  name: 'SvgTranscoder',
   version: '1.0.0',
   implementationAssets: [
     { id: 'wasm:resvg', url: resvgWasmUrl, sha256: resvgSha256 },

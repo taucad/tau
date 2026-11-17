@@ -49,6 +49,11 @@ export type RevisionTrigger =
  * that produced it: the anonymity choice is applied when the revision is
  * written, and switching it later rewrites nothing.
  *
+ * It has no address (I3): every record carries it, and a record travels with
+ * every push and clone. The address a commit's git author line shows is derived
+ * from `id`, or given separately for a project linked to a forge
+ * (`RevisionCommitAuthor`), and is never part of this.
+ *
  * @public
  */
 export type RevisionUserActor = Readonly<{
@@ -56,8 +61,8 @@ export type RevisionUserActor = Readonly<{
   /** Stable id. `anon:<per-workspace hash>` when the person chose anonymity. */
   id: string;
   name?: string;
-  /** Omitted for an anonymous actor: it is the identifying half. */
-  email?: string;
+  /** No address, written out or spread in from an object that has one (I3). */
+  email?: never;
   anonymous?: boolean;
 }>;
 

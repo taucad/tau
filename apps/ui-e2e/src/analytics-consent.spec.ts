@@ -39,6 +39,21 @@ const eventCount = async (name: string): Promise<number> => {
   return summary.events.filter((event) => event === name).length;
 };
 const hasEvent = async (name: string): Promise<boolean> => (await eventCount(name)) > 0;
+/**
+ * The replay snapshots sent once a person has used the page.
+ *
+ * posthog-js 1.438 holds a new recording's buffer until the user interacts (`holding buffer:
+ * no_interaction_since_recording_started. nothing is uploaded until the user interacts with the page`), and only a
+ * trusted rrweb mouse, scroll, input or touch event releases it. A row that only navigates or clicks from script
+ * never uploads a snapshot, so each read first moves the mouse as a person would: the recording starts when the page
+ * is idle, so an interaction before it starts would not count.
+ */
+let pointerStep = 0;
+const snapshotsAfterInteraction = async (): Promise<number> => {
+  pointerStep += 1;
+  await target.mouseMove(16 + (pointerStep % 32), 16 + (pointerStep % 32));
+  return eventCount('$snapshot');
+};
 const sentinelPresent = async (sentinel: string): Promise<boolean> => {
   const summary = await target.readPostHogSummary([sentinel]);
   return summary.present[sentinel] === true;
@@ -150,6 +165,7 @@ test('redacts invitation credentials from decoded replay and autocapture transpo
     document.body.append(publicControl);
     const invitation = document.createElement('a');
     invitation.href = `/invitations/${invitationToken}`;
+    invitation.id = 'replay-invitation';
     invitation.textContent = 'Open invitation';
     invitation.addEventListener('click', (event) => {
       event.preventDefault();
@@ -158,11 +174,26 @@ test('redacts invitation credentials from decoded replay and autocapture transpo
     const input = document.createElement('input');
     input.value = `https://tau.new/invitations/${invitationToken}`;
     document.body.append(input);
+  }, token);
+  /* Admission initialises autocapture in deferred, time-sliced tasks (`__preview_deferred_init_extensions`), so a
+   * click made the moment consent lands can precede its listener: click until the click is captured. The history
+   * tracker behind `capture_pageview: 'history_change'` is started the same way, so the route changes follow it. */
+  await expect
+    .poll(
+      async () => {
+        await target.evaluate(() => {
+          document.querySelector<HTMLAnchorElement>('#replay-invitation')?.click();
+        });
+        return hasEvent('$autocapture');
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+  await target.evaluate((invitationToken: string) => {
     history.pushState({}, '', `/invitations/${invitationToken}`);
     history.pushState({}, '', `/auth/sign-in?redirectTo=%2Finvitations%2F${invitationToken}`);
-    invitation.click();
   }, token);
-  await expect.poll(async () => eventCount('$snapshot'), { timeout: 30_000 }).toBeGreaterThan(0);
+  await expect.poll(snapshotsAfterInteraction, { timeout: 30_000 }).toBeGreaterThan(0);
   const summary = await target.readPostHogSummary([token, 'Public replay control']);
   expect(summary.events).toContain('$snapshot');
   expect(summary.events).toContain('$autocapture');
@@ -184,7 +215,7 @@ test.each(['/invitations/Replay-Bearer-123', '/auth/sign-in?redirectTo=%2Finvita
       },
     ]);
     await target.navigate(path);
-    await expect.poll(async () => eventCount('$snapshot'), { timeout: 30_000 }).toBeGreaterThan(0);
+    await expect.poll(snapshotsAfterInteraction, { timeout: 30_000 }).toBeGreaterThan(0);
     const summary = await target.readPostHogSummary(['Replay-Bearer-123']);
     expect(summary.events).toContain('$snapshot');
     expect(summary.present['Replay-Bearer-123']).toBe(false);

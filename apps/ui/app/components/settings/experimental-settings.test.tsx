@@ -21,15 +21,35 @@ vi.mock('#flags/use-feature.js', () => ({
   useSetFeatureFlag: () => mockState.setFlag,
 }));
 
-vi.mock('#hooks/use-project.js', () => ({
-  useProject: () =>
-    mockState.graphics
-      ? {
-          mainEntryPath: 'main.py',
-          viewGraphics: new Map([['view', mockState.graphics]]),
-          viewEntryPaths: new Map([['view', 'main.py']]),
-        }
-      : undefined,
+/* A11: Settings reads the focused session's runtime (focus and the registry), not provider ancestry. */
+const noSubscription = { unsubscribe: () => undefined };
+const focusedRuntime = (graphics: ActorRefFrom<typeof graphicsMachine>): unknown => {
+  const projectSnapshot = { context: { mainEntryPath: 'main.py', viewGraphics: new Map([['view', graphics]]) } };
+  const projectRef = { getSnapshot: () => projectSnapshot, subscribe: () => noSubscription };
+  const actorSnapshot = { context: { projectRef } };
+  const viewRecords = { viewEntryPaths: new Map([['view', 'main.py']]) };
+  return {
+    runtime: {
+      actor: { getSnapshot: () => actorSnapshot, subscribe: () => noSubscription },
+    },
+    viewRecords: { subscribe: () => () => undefined, getSnapshot: () => viewRecords },
+  };
+};
+const runtimes = new WeakMap<WeakKey, unknown>();
+vi.mock('#runtime/project-runtime.js', () => ({
+  selectProjectRef: (snapshot: { context: { projectRef: unknown } }) => snapshot.context.projectRef,
+}));
+vi.mock('#routes/w.$workspace.$project/focused-project-view.session.js', () => ({
+  useFocusedProjectSession: () => {
+    const { graphics } = mockState;
+    if (graphics === undefined) {
+      return undefined;
+    }
+    if (!runtimes.has(graphics)) {
+      runtimes.set(graphics, focusedRuntime(graphics));
+    }
+    return { projectId: 'project-a', fileManagerRef: undefined, runtime: runtimes.get(graphics) };
+  },
 }));
 
 describe('ExperimentalSettings', () => {

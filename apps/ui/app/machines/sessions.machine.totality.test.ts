@@ -44,6 +44,7 @@ const samples: Samples = {
     { type: 'sessionState', projectId: 'a', state: 'closing', runs: 0, dirty: false, pushed: true, pending: 1 },
   ],
   sessionClosed: [{ type: 'sessionClosed', projectId: 'a', reason: 'user' }],
+  sessionChatFocused: [{ type: 'sessionChatFocused', projectId: 'a', requestedChatId: 'chat-1', chatId: 'chat-1' }],
   cancelPendingOpen: [{ type: 'cancelPendingOpen' }],
   quit: [{ type: 'quit' }],
   quitAnyway: [{ type: 'quitAnyway' }],

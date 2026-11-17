@@ -1,10 +1,9 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
-import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
-import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
+import { WorkspaceDirectoryPanel } from '@taucad/files-ui/components/filesystem/workspace-directory-panel';
 import {
   checkHandlePermission,
   getWorkspace,
@@ -12,20 +11,21 @@ import {
   listWorkspaces,
   requestHandlePermission,
   subscribeProjectRootConfigurationChanges,
-} from '#filesystem/handle-store.js';
-import type { Workspace } from '#filesystem/handle-store.js';
-import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
+import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
 import {
   isWorkspaceIdentityConflictError,
   workspaceIdentityConflictCopy,
 } from '@taucad/ui-core/filesystem/workspace-errors';
-import { directoryPicker, webAccessDirectoryPicker } from '#constants/browser.constants.js';
+import { directoryPicker, webAccessDirectoryPicker } from '@taucad/files-ui/constants/browser.constants';
 import type { WorkspaceDirectoryStatus } from '@taucad/ui-core/constants/workspace-directory-copy.constants';
 import { toast } from '@taucad/ui/components/sonner';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { Button } from '@taucad/ui/components/button';
 
 type WorkspaceRow = {
   workspace: Workspace;
@@ -326,7 +326,6 @@ export function WorkspaceConnections({
         title='Workspaces'
         action={
           <Button
-            size='sm'
             variant='outline'
             disabled={isAddingWorkspace || busyWorkspaceId !== undefined}
             onClick={handleAddWorkspace}
@@ -346,7 +345,6 @@ export function WorkspaceConnections({
             {workspaceConnection.phase === 'failed' ? (
               <Button
                 className='ml-auto'
-                size='sm'
                 variant='outline'
                 onClick={() => {
                   void handleRetryWorkspace();

@@ -19,6 +19,7 @@ vi.mock('react-router', () => ({
   useLocation: () => ({ search: '' }),
   useNavigate: () => vi.fn(),
   useNavigation: () => ({ location: undefined, state: 'idle' }),
+  useRouteLoaderData: () => undefined,
 }));
 vi.mock('#hooks/use-cloud-projects.js', () => ({
   useTauCloudIntent: () => undefined,

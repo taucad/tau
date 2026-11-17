@@ -72,7 +72,6 @@ describe('onboarding event names', () => {
         'viewer_gizmo_selected',
         'viewer_default_changed',
         'viewer_override_reset',
-        'home_suggestion_selected',
         'setup_answers_switch_changed',
         'setup_answers_cleared',
         'tour_started',
@@ -192,17 +191,6 @@ describe('surface emitters', () => {
       { level: 'view', field: 'fieldOfView' },
     ],
     [
-      'homeSuggestionSelected',
-      (t) => {
-        t.homeSuggestionSelected({
-          example_id: 'phone-stand',
-          goal_matched: true,
-        });
-      },
-      'home_suggestion_selected',
-      { example_id: 'phone-stand', goal_matched: true },
-    ],
-    [
       'setupAnswersSwitchChanged',
       (t) => {
         t.setupAnswersSwitchChanged({ enabled: false });
@@ -292,14 +280,14 @@ describe('surface emitters', () => {
 
   it('drops a key the event does not list, so a caller cannot add free text', () => {
     const { capture, telemetry } = build();
-    telemetry.homeSuggestionSelected({
-      example_id: 'phone-stand',
-      goal_matched: false,
+    telemetry.viewerOverrideReset({
+      level: 'view',
+      field: 'fieldOfView',
       text: 'A phone stand with an adjustable angle',
-    } as Parameters<OnboardingTelemetry['homeSuggestionSelected']>[0]);
-    expect(capture).toHaveBeenCalledWith('home_suggestion_selected', {
-      example_id: 'phone-stand',
-      goal_matched: false,
+    } as Parameters<OnboardingTelemetry['viewerOverrideReset']>[0]);
+    expect(capture).toHaveBeenCalledWith('viewer_override_reset', {
+      level: 'view',
+      field: 'fieldOfView',
     });
   });
 });

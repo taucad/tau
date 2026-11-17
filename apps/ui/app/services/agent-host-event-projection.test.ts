@@ -1652,80 +1652,86 @@ describe('external tool-call chunks', () => {
     },
   );
 
-  it.each(['codex', 'grok'])('keeps a normalized %s Tau MCP call on one dynamic SDK identity', async (agentId) => {
-    const blocks: AgentHostLiveBlocks = new Map();
-    const metadata = {
-      tauInternal: { kind: 'external-tool', origin: 'external', agentId, presentation: 'tau-mcp' },
-    } as const;
-    const [input] = chunksOf(
-      {
-        id: 'tau-mcp-input',
-        role: 'tool-input',
-        toolCallId: 'call-mcp',
-        toolName: 'screenshot',
-        call: {
-          toolCallId: 'vendor-call',
-          kind: 'execute',
-          ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
-          content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+  it.each(['codex', 'grok', 'claude'])(
+    'keeps a normalized %s Tau MCP call on one dynamic SDK identity',
+    async (agentId) => {
+      const blocks: AgentHostLiveBlocks = new Map();
+      /* Each adapter spells the native name its own way; durable Claude rows from
+       * before the host canonicalised it carry `mcp__tau__screenshot`. */
+      const nativeName = agentId === 'codex' ? 'screenshot' : agentId === 'claude' ? 'mcp__tau__screenshot' : undefined;
+      const metadata = {
+        tauInternal: { kind: 'external-tool', origin: 'external', agentId, presentation: 'tau-mcp' },
+      } as const;
+      const [input] = chunksOf(
+        {
+          id: 'tau-mcp-input',
+          role: 'tool-input',
+          toolCallId: 'call-mcp',
+          toolName: 'screenshot',
+          call: {
+            toolCallId: 'vendor-call',
+            kind: 'execute',
+            ...(nativeName === undefined ? {} : { nativeName }),
+            content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+          },
+          content: { targetFile: 'main.ts', mode: 'single' },
+          metadata,
         },
-        content: { targetFile: 'main.ts', mode: 'single' },
-        metadata,
-      },
-      blocks,
-    );
-    const [output] = chunksOf(
-      {
-        id: 'tau-mcp-output',
-        role: 'tool-output',
-        toolCallId: 'call-mcp',
-        toolName: 'screenshot',
-        content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
-        isError: false,
-        call: {
-          toolCallId: 'vendor-call',
-          kind: 'execute',
-          ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
+        blocks,
+      );
+      const [output] = chunksOf(
+        {
+          id: 'tau-mcp-output',
+          role: 'tool-output',
+          toolCallId: 'call-mcp',
+          toolName: 'screenshot',
+          content: { images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQ==' }] },
+          isError: false,
+          call: {
+            toolCallId: 'vendor-call',
+            kind: 'execute',
+            ...(nativeName === undefined ? {} : { nativeName }),
+          },
+          metadata,
         },
-        metadata,
-      },
-      blocks,
-    );
+        blocks,
+      );
 
-    expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
-    expect(input).toHaveProperty('dynamic', true);
-    expect(input).toMatchObject({
-      toolMetadata: { tau: { origin: 'external', agentId, presentation: 'tau-mcp' } },
-    });
-    expect(output).toMatchObject({ type: 'tool-output-available', output: { images: [{ view: 'isometric' }] } });
-    expect(output).toHaveProperty('dynamic', true);
-    let parts: MyUIMessage['parts'] = [];
-    const stream = new ReadableStream<UIMessageChunk>({
-      start(controller) {
-        controller.enqueue(input);
-        controller.enqueue(output);
-        controller.close();
-      },
-    });
-    for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
-      parts = message.parts;
-    }
-    expect(parts.filter((part) => part.type === 'dynamic-tool')).toHaveLength(1);
-    expect(parts.find((part) => part.type === 'dynamic-tool')).toMatchObject({
-      type: 'dynamic-tool',
-      state: 'output-available',
-      toolMetadata: {
-        tau: {
-          toolCallId: 'vendor-call',
-          origin: 'external',
-          agentId,
-          presentation: 'tau-mcp',
-          ...(agentId === 'codex' ? { nativeName: 'screenshot' } : {}),
-          content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+      expect(input).toMatchObject({ type: 'tool-input-available', toolName: 'screenshot' });
+      expect(input).toHaveProperty('dynamic', true);
+      expect(input).toMatchObject({
+        toolMetadata: { tau: { origin: 'external', agentId, presentation: 'tau-mcp' } },
+      });
+      expect(output).toMatchObject({ type: 'tool-output-available', output: { images: [{ view: 'isometric' }] } });
+      expect(output).toHaveProperty('dynamic', true);
+      let parts: MyUIMessage['parts'] = [];
+      const stream = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          controller.enqueue(input);
+          controller.enqueue(output);
+          controller.close();
         },
-      },
-    });
-  });
+      });
+      for await (const message of readUIMessageStream<MyUIMessage>({ stream })) {
+        parts = message.parts;
+      }
+      expect(parts.filter((part) => part.type === 'dynamic-tool')).toHaveLength(1);
+      expect(parts.find((part) => part.type === 'dynamic-tool')).toMatchObject({
+        type: 'dynamic-tool',
+        state: 'output-available',
+        toolMetadata: {
+          tau: {
+            toolCallId: 'vendor-call',
+            origin: 'external',
+            agentId,
+            presentation: 'tau-mcp',
+            nativeName: 'screenshot',
+            content: [{ type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'cHJldmlldw==' } }],
+          },
+        },
+      });
+    },
+  );
 });
 
 describe('external attribution', () => {

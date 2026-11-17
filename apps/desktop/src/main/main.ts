@@ -54,12 +54,10 @@ import {
   defaultConfigDirectory,
   defaultDependencyStore,
   discoverAcpAgents,
-  externalAgentDescriptors,
   keepAwakeWhileStreaming,
   projectCloseMilliseconds,
   projectReleaseMilliseconds,
 } from '@taucad/host';
-import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 
 import { appOrigin, appSchemePrivileges, registerAppProtocol } from '#main/app-protocol.js';
 import { createAuthService } from '#main/auth-service.js';
@@ -95,7 +93,7 @@ import {
   createProjectRootRegistry,
   kernelForkEnvAllowlist,
   sanitizeServicesContext,
-} from '#main/project-roots.js';
+} from '@taucad/desktop-services-host/project-roots';
 import { registerPermissionBridge } from '#main/permission-bridge.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
 import { registerTerminalRelay } from '#main/terminal-relay.js';
@@ -103,6 +101,7 @@ import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
   bundledGitEnvironment,
+  bundledStoreGuardEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -128,6 +127,7 @@ import {
   reportDesktopSignal,
   reportRevisionEngineFailure,
 } from '#main/error-reporting.js';
+import { createExternalAgentDiscovery } from '#main/external-agent-discovery.js';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
@@ -142,9 +142,9 @@ import {
   moveToApplications,
   offerMoveToApplications,
 } from '#main/app-location.js';
-import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
-import { createDesktopKernelPreparer } from '#tau/native-preparation.js';
-import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
+import { preparableNativeDeployments } from '@taucad/desktop-services-host/desktop-native-deployments';
+import { createDesktopKernelPreparer } from '@taucad/desktop-services-host/native-preparation';
+import { desktopNativeKernelIds, startNativeStore } from '@taucad/desktop-services-host/native-store';
 import {
   appIconThemeChannel,
   telemetryConsentChannel,
@@ -391,6 +391,10 @@ if (launchDeepLink !== undefined) {
   receiveDeepLink(launchDeepLink);
 }
 
+/** The smallest content area a window can be resized to (D4.6); the web sweep's smallest viewport is the same. */
+const minimumContentWidth = 400;
+const minimumContentHeight = 300;
+
 /* How far each quit wait outlasts the bound it awaits, so the inner reason lands first (rule 9). */
 const quitMarginMilliseconds = 3000;
 
@@ -543,9 +547,20 @@ process.on('unhandledRejection', (reason) => {
   console.error('[desktop] unhandledRejection', reason);
 });
 
+/**
+ * Why this process asked to quit, once it has: the shutdown log names it, so a quit is attributable. A quit that
+ * reaches `before-quit` with none was Electron's own: the Quit menu item or Cmd+Q, the Dock, an Apple Event from
+ * another process, or the session ending.
+ */
+let quitReason: string | undefined;
+const quitFor = (reason: string): void => {
+  quitReason ??= reason;
+  app.quit();
+};
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    app.quit();
+    quitFor('all-windows-closed');
   }
 });
 
@@ -571,6 +586,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const logDirectory = join(app.getPath('userData'), 'logs');
   /* The `git` this app records revisions with, when this build ships one (OQ3, C68). */
   const gitEnvironment = bundledGitEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
+  );
+  /* The store guard the Linux Terminal writes the project's git store through, when this build ships one (LP5). */
+  const storeGuardEnvironment = bundledStoreGuardEnvironment(
     app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
   );
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
@@ -1068,6 +1087,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
        */
       TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       ...desktopShellBwrapEnvironment(),
+      ...storeGuardEnvironment,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
@@ -1326,64 +1346,46 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * is not here, because it is per-connection and arrives with the port. */
   /* W4-ACP: which external agents *this machine* can actually start — the
    * pinned adapters that resolve beside this app, minus any whose CLI does not
-   * answer `--version`. Resolved here, once, because both halves need the same
+   * answer `--version`. Main resolves them because both halves need the same
    * answer: the utility builds launcher 2's port from the adapters, and the
-   * renderer draws one selector row per id out of the preload bootstrap. A
-   * machine with neither installed advertises nothing; it is never a refusal. */
-  /* Measured on an M-series host, 20 `--version` runs each: `claude` 10 ms warm
-   * / 89 ms cold, `codex` 10 ms warm / 13 ms cold. Both probes run together, so
-   * boot pays the slower one; 1.5 s is ~17x the worst observed and only bites a
-   * CLI that hangs, which is the case the timeout exists for.
+   * renderer draws one selector row per id from `externalAgentsChannel`. A
+   * machine with no CLI advertises nothing; it is never a refusal.
    *
-   * The *model* probe runs beside it on its own 15 s clock (V5 / EQ1 A): it
-   * opens a real vendor session, which can take over 5 s through a cold
-   * packaged app.asar adapter. A failure or timeout leaves the agent
-   * advertised with no model list; a logged-out CLI cannot remove the row. */
-  /**
-   * Discover the external agents and configure the host with them.
+   * The library probe budgets apply (blueprint D8): 10 s for `--version`, and
+   * the model probe beside it on its own 15 s clock (V5 / EQ1 A), which can
+   * take over 5 s through a cold packaged app.asar adapter. A shorter CLI budget
+   * reported a slow `codex --version` as not installed (F2) and bought nothing,
+   * because the window does not wait on discovery.
    *
-   * A discovery that rejects must not take the process with it: the page then
-   * sees no external agents, which is the same answer a machine with no CLI
-   * gives.
-   *
-   * @returns The descriptors, empty when discovery failed.
-   */
-  const discoverExternalAgents = async (): Promise<readonly ExternalAgentDescriptor[]> => {
-    const baseConfig = {
-      gatewayBaseUrl: desktopAgentGatewayBaseUrl(environment),
-      systemPrompt: desktopAgentSystemPrompt,
-      tauApiUrl: environment['TAU_API_URL']!,
-      tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
-    };
-    try {
-      const acp = await discoverAcpAgents({ resolveFrom: import.meta.url, probeTimeout: 1500 });
-      log.log('info', 'agent-host.external-agents', {
-        agents: acp.agents.map((adapter) => `${adapter.id}:${(adapter.models ?? []).length}`),
-        refused: acp.refused.map((refusal) => `${refusal.id}: ${refusal.code}`),
-      });
+   * A refusal is not kept for the life of the process (blueprint D9): the next
+   * listing at least 30 s after it re-probes only the refused profiles and
+   * re-posts the adapters, so a CLI the user installs or repairs appears
+   * without a restart. Each refusal is logged with its message, which holds
+   * local paths: this log is the local file and console only. */
+  const agentHostBaseConfig = {
+    gatewayBaseUrl: desktopAgentGatewayBaseUrl(environment),
+    systemPrompt: desktopAgentSystemPrompt,
+    tauApiUrl: environment['TAU_API_URL']!,
+    tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
+  };
+  const externalAgents = createExternalAgentDiscovery({
+    resolveFrom: import.meta.url,
+    discover: discoverAcpAgents,
+    configure(agents) {
+      // Optional CLI discovery cannot leave the project's history and gateway unconfigured.
       services.post({
         type: 'agentHost',
-        config: {
-          ...baseConfig,
-          externalAgents: acp.agents,
-        },
+        config: agents === undefined ? agentHostBaseConfig : { ...agentHostBaseConfig, externalAgents: agents },
       });
-      /* The one canonical descriptor (VSC1): the renderer draws its rows from this,
-       * the utility gets the adapters themselves, and neither builds its own idea
-       * of what an agent is called or which models it offers. */
-      return externalAgentDescriptors(acp);
-    } catch (error) {
-      log.log('error', 'agent-host.external-agents-failed', { message: String(error) });
-      // Optional CLI discovery cannot leave the project's history and gateway unconfigured.
-      services.post({ type: 'agentHost', config: baseConfig });
-      return [];
-    }
-  };
-  /* Not awaited here (D17): the window used to be unable to exist until this
-   * settled, because the descriptors were frozen into its `additionalArguments`.
-   * They are served over `externalAgentsChannel` instead, so a hanging CLI or a
-   * slow model probe delays no pixel. */
-  const externalAgents = discoverExternalAgents();
+    },
+    log,
+    now: Date.now,
+  });
+  /* Started here and not awaited (D17): the window used to be unable to exist
+   * until this settled, because the descriptors were frozen into its
+   * `additionalArguments`. They are served over `externalAgentsChannel`
+   * instead, so a hanging CLI or a slow model probe delays no pixel. */
+  void externalAgents.list();
 
   auth.onChange(() => {
     publishCredential();
@@ -1468,7 +1470,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     nativeKernels.cancel(kernel);
   });
 
-  ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
+  ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents.list() : []));
   /* Blueprint D12: the Print pane's Bambu Studio presets and settings. The
    * service parses every input; this guard keeps other senders out. */
   const bambuStudio = machinesEnabled
@@ -1872,8 +1874,26 @@ const bootstrapElectronApp = async (): Promise<void> => {
     const publishFullscreen = (): void => {
       window.webContents.send(windowFullscreenChannel, window.isFullScreen());
     };
-    window.on('enter-full-screen', publishFullscreen);
-    window.on('leave-full-screen', publishFullscreen);
+    /* D4.6: the floor is a 400 × 300 content area on every platform. Electron's minimum applies to the frame, so the
+     * frame's own size (title bar, menu bar, borders) is measured and added, after creation and whenever full screen
+     * changes the chrome. */
+    const holdContentFloor = (): void => {
+      const [frameWidth = 0, frameHeight = 0] = window.getSize();
+      const [contentWidth = 0, contentHeight = 0] = window.getContentSize();
+      window.setMinimumSize(
+        minimumContentWidth + Math.max(0, frameWidth - contentWidth),
+        minimumContentHeight + Math.max(0, frameHeight - contentHeight),
+      );
+    };
+    holdContentFloor();
+    window.on('enter-full-screen', () => {
+      publishFullscreen();
+      holdContentFloor();
+    });
+    window.on('leave-full-screen', () => {
+      publishFullscreen();
+      holdContentFloor();
+    });
     window.webContents.on('did-finish-load', publishFullscreen);
     /* Closing or reloading a window never asks: a page that holds its unload is let through, and a running Terminal
      * session ends with the page. */
@@ -2313,13 +2333,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const shutdown = createShutdownActor({ identity: randomUUID() }, { actors: { shutdownDriver } }).start();
   let shutdownPending: Promise<boolean> | undefined;
   let settleShutdown: ((settled: boolean) => void) | undefined;
-  const prepareToQuit = async (purpose: 'quit' | 'restart'): Promise<boolean> => {
+  const prepareToQuit = async (purpose: 'quit' | 'restart', reason: string): Promise<boolean> => {
     if (shutdownComplete) {
       return true;
     }
     if (shutdownPending) {
       return shutdown.getSnapshot().context.purpose === purpose ? shutdownPending : false;
     }
+    log.log('info', 'main.quit-requested', { purpose, reason });
     quitting = true;
     shutdownPending = new Promise<boolean>((resolve) => {
       settleShutdown = resolve;
@@ -2328,21 +2349,25 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return shutdownPending;
   };
   let pendingQuit: Promise<void> | undefined;
-  const quitWhenReady = async (): Promise<void> => {
+  const quitWhenReady = async (reason: string): Promise<void> => {
     try {
-      if (await prepareToQuit('quit')) {
+      if (await prepareToQuit('quit', reason)) {
         app.quit();
       }
     } finally {
       pendingQuit = undefined;
     }
   };
+  /* The session is ending (logout, restart or shutdown): the quit that follows is the system's, not the person's. */
+  powerMonitor.on('shutdown', () => {
+    quitReason ??= 'system-shutdown';
+  });
   app.on('before-quit', (event) => {
     if (shutdownComplete) {
       return;
     }
     event.preventDefault();
-    pendingQuit ??= quitWhenReady();
+    pendingQuit ??= quitWhenReady(quitReason ?? 'external');
   });
   let qualificationInstall = false;
   if (otaProbe !== undefined || routeQualification !== undefined) {
@@ -2388,7 +2413,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       committed = true;
     };
     try {
-      return (await prepareToQuit('restart')) && committed;
+      return (await prepareToQuit('restart', 'update-install')) && committed;
     } finally {
       installBeforeExit = undefined;
       installFailed = false;
@@ -2403,7 +2428,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     channel: desktopChannel,
     environment,
     autoUpdater,
-    prepareToRestart: async () => prepareToQuit('restart'),
+    prepareToRestart: async () => prepareToQuit('restart', 'update-install'),
     ...(otaProbe ? { candidateTag: otaProbe.candidateTag } : {}),
     ...(routeQualification?.candidateTag ? { candidateTag: routeQualification.candidateTag } : {}),
     ...(routeQualification?.expectedUpdate ? { expectedUpdate: routeQualification.expectedUpdate } : {}),
@@ -2534,6 +2559,7 @@ if (ownsSingleInstanceLock) {
     app.exit(1);
   });
 } else {
-  app.quit();
+  /* Another process holds this profile's single-instance lock, and has been handed this launch's arguments. */
+  quitFor('instance-lock-held');
 }
 /* oxlint-enable promise/prefer-await-to-then, unicorn/prefer-top-level-await */

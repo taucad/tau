@@ -12,13 +12,15 @@ const webgl = vi.hoisted(() => ({ isAvailable: true }));
 vi.mock('#components/onboarding/webgl-support.js', () => ({ canCreateWebGl: () => webgl.isAvailable }));
 // The live preview is its own chunk with the real viewer; `setup-viewer-preview.test.tsx` covers its loading.
 vi.mock('#components/onboarding/setup-live-preview.js', () => ({
-  default: () => <div data-testid='setup-live-preview' />,
+  default: ({ cameraInput }: { readonly cameraInput?: { orbitStyle?: string } }) => (
+    <div data-testid='setup-live-preview' data-orbit-style={cameraInput?.orbitStyle ?? 'turntable'} />
+  ),
 }));
 /* "Take it again" reads the project listing; these suites have no project. */
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects: [] }) }));
 
 const { default: WelcomeRoute } = await import('#routes/welcome/route.js');
-const { personRecordStores, deviceRecordStore } = await import('#preferences/person-record.store.js');
+const { personRecordStores } = await import('#preferences/person-record.store.js');
 const { SetupPreviewFallback } = await import('#components/onboarding/setup-preview-fallback.js');
 
 const renderViewerStep = (): void => {
@@ -74,16 +76,22 @@ describe('setup step 3', () => {
     expect(personRecordStores.viewer.read().gizmo.style).toBe('axes');
   });
 
-  it("stores the trackpad switch as the device's inputDevice and shows the trackpad legend", async () => {
+  it('asks how the view turns, Turntable first, and the preview turns as the choice does', async () => {
     const user = userEvent.setup();
     renderViewerStep();
+    const orbit = screen.getByRole('radiogroup', { name: 'How the view turns' });
+    expect(within(orbit).getByRole('radio', { name: 'Turntable' })).toBeChecked();
+    expect(await screen.findByTestId('setup-live-preview')).toHaveAttribute('data-orbit-style', 'turntable');
+    await user.click(within(orbit).getByRole('radio', { name: 'Tumble' }));
+    expect(personRecordStores.viewer.read().controls.orbitStyle).toBe('tumble');
+    expect(screen.getByTestId('setup-orbit-hint')).toHaveTextContent('turns freely over the top');
+    expect(screen.getByTestId('setup-live-preview')).toHaveAttribute('data-orbit-style', 'tumble');
+  });
+
+  it('offers no trackpad switch: the mouse preset is the only mapping', () => {
+    renderViewerStep();
     expect(screen.getByTestId('setup-legend-zoom')).toHaveTextContent('Scroll');
-    await user.click(screen.getByRole('switch', { name: 'I use a trackpad' }));
-    expect(deviceRecordStore.read().inputDevice).toBe('trackpad');
-    expect(screen.getByTestId('setup-legend-zoom')).toHaveTextContent('Pinch');
-    expect(screen.getByTestId('setup-legend-pan')).toHaveTextContent('Two-finger scroll');
-    await user.click(screen.getByRole('switch', { name: 'I use a trackpad' }));
-    expect(deviceRecordStore.read().inputDevice).toBe('mouse');
+    expect(screen.queryByRole('switch', { name: /trackpad/i })).not.toBeInTheDocument();
   });
 
   it('shows orbit, pan and zoom as key caps from the preset data', async () => {
@@ -109,7 +117,7 @@ describe('setup preview fallback', () => {
   });
 
   it.each(['context_lost', 'chunk_failed'] as const)('reports %s once with the diagram for the mapping', (reason) => {
-    const { rerender } = render(<SetupPreviewFallback mapping='trackpad' reason={reason} />);
+    const { rerender } = render(<SetupPreviewFallback mapping='right-orbit' reason={reason} />);
     rerender(<SetupPreviewFallback mapping='alt' reason={reason} />);
     expect(capture).toHaveBeenCalledTimes(1);
     expect(capture).toHaveBeenCalledWith('onboarding_preview_fallback_shown', { reason });

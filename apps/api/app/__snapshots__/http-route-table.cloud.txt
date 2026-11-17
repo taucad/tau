@@ -21,6 +21,7 @@ GET /billing/payment-actions | v1 | AuthGuard | required | BillingController.lis
 GET /billing/payment-actions/:actionId | v1 | AuthGuard | required | BillingController.getPaymentAction
 GET /billing/reload-consent | v1 | AuthGuard | required | BillingController.getReloadConsent
 GET /billing/usage | v1 | AuthGuard | required | BillingController.getUsage
+GET /email/deliverability | v1 | AuthGuard | required | EmailDeliverabilityController.getOwnDeliverability
 GET /git/:repo/info/refs | v1 | AuthGuard | required | GitController.infoRefs
 GET /git/lfs/:handle | v1 | AuthGuard | required | GitProxyController.relayGet
 GET /git/proxy | v1 | AuthGuard | required | GitProxyController.proxyGet
@@ -137,5 +138,6 @@ GET /v1/auth/*
 OPTIONS /v1/auth/*
 PATCH /v1/auth/*
 POST /v1/auth/*
+POST /v1/auth/resend/webhook
 POST /v1/auth/stripe/webhook
 PUT /v1/auth/*

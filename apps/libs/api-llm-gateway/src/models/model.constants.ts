@@ -925,7 +925,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       providerKind: 'tau-hosted',
       name: 'Gemini 4 Carbon',
       slug: 'gemini-4-carbon',
-      recommended: false,
+      recommended: true,
       description: 'Deep reasoning for long CAD sessions, complex part code, and large multi-file project edits.',
       provider: {
         id: 'vertexai',
@@ -956,144 +956,42 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         thinkingLevel: 'HIGH',
       },
     },
-    'gemini-3.1-pro': {
-      id: 'google-gemini-3.1-pro',
+    'gemini-4-hydrogen': {
+      enabled: true,
+      id: 'google-gemini-4-hydrogen',
       providerKind: 'tau-hosted',
-      name: 'Gemini 3.1 Pro',
-      slug: 'gemini-3.1-pro',
+      name: 'Gemini 4 Hydrogen',
+      slug: 'gemini-4-hydrogen',
       recommended: true,
       description:
-        "Google's flagship with sharpened 3D spatial reasoning and parallel tool streaming, excellent for complex modelling work.",
+        'Fast, low-cost Gemini 4 model for everyday CAD edits, agentic tool loops, and quick geometry iterations.',
       provider: {
         id: 'vertexai',
         name: 'Google',
       },
-      model: 'gemini-3.1-pro-preview-customtools',
+      model: 'gemini-4-hydrogen',
       support: {
-        reasoning: lowToHighReasoning,
+        tools: true,
+        toolChoice: false,
+        reasoning: lowToExtraHighReasoning,
         modalities: pdfInputModalities,
       },
       details: {
         family: 'gemini',
         families: ['gemini'],
-        contextWindow: 200_000,
-        maxTokens: 65_536,
-        knowledgeCutoff: '2025-01',
-        cost: {
-          inputTokens: 2,
-          outputTokens: 12,
-          cacheReadTokens: 0.2,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        temperature: 1,
-        thinkingLevel: 'HIGH',
-      },
-    },
-    'gemini-3.8-flash': {
-      id: 'google-gemini-3.8-flash',
-      providerKind: 'tau-hosted',
-      name: 'Gemini 3.8 Flash',
-      slug: 'gemini-3.8-flash',
-      recommended: true,
-      description:
-        "Google's fastest strong model for everyday CAD edits, agentic tool loops, and multi-step geometry reasoning.",
-      provider: {
-        id: 'vertexai',
-        name: 'Google',
-      },
-      model: 'gemini-3.8-flash',
-      support: {
-        reasoning: lowToHighReasoning,
-        modalities: pdfInputModalities,
-      },
-      details: {
-        family: 'gemini',
-        families: ['gemini'],
-        contextWindow: 200_000, // Provider supports 1,048,576 tokens; Tau caps the effective chat budget.
-        maxTokens: 65_536,
-        // Google's standard price; billing charges its promotional rate while that lasts.
+        contextWindow: 200_000, // Provider shares 1,048,576 tokens across input, thinking, and output.
+        maxTokens: 65_536, // Single-stream limit; longer output requires continuation support.
+        // Google's standard price; no promotion. Cache writes are billed only from January 12, 2027.
         cost: {
           inputTokens: 1.5,
           outputTokens: 7.5,
-          cacheReadTokens: 0.15,
+          cacheReadTokens: 0.075,
           cacheWriteTokens: 0,
         },
       },
       configuration: {
         streaming: true,
         // Google's own default for this model; it rejects MINIMAL outright.
-        thinkingLevel: 'HIGH',
-      },
-    },
-    'gemini-3.5-flash-lite': {
-      id: 'google-gemini-3.5-flash-lite',
-      providerKind: 'tau-hosted',
-      name: 'Gemini 3.5 Flash-Lite',
-      slug: 'gemini-3.5-flash-lite',
-      recommended: false,
-      description: 'Fast, low-cost multimodal model for lightweight CAD edits and high-throughput iterations.',
-      provider: {
-        id: 'vertexai',
-        name: 'Google',
-      },
-      model: 'gemini-3.5-flash-lite',
-      support: {
-        reasoning: lowToHighReasoning,
-        modalities: pdfInputModalities,
-      },
-      details: {
-        family: 'gemini',
-        families: ['gemini'],
-        contextWindow: 200_000,
-        maxTokens: 65_536,
-        knowledgeCutoff: '2025-01',
-        cost: {
-          inputTokens: 0.3,
-          outputTokens: 2.5,
-          cacheReadTokens: 0.03,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
-        thinkingLevel: 'HIGH',
-      },
-    },
-    'gemini-3.5-flash': {
-      id: 'google-gemini-3.5-flash',
-      providerKind: 'tau-hosted',
-      name: 'Gemini 3.5 Flash',
-      slug: 'gemini-3.5-flash',
-      recommended: false,
-      description:
-        'Frontier intelligence at Flash speed with sharpened agentic coding, ideal for rapid design iterations and small changes.',
-      provider: {
-        id: 'vertexai',
-        name: 'Google',
-      },
-      model: 'gemini-3.5-flash',
-      support: {
-        reasoning: lowToHighReasoning,
-        modalities: pdfInputModalities,
-      },
-      details: {
-        family: 'gemini',
-        families: ['gemini'],
-        contextWindow: 200_000,
-        maxTokens: 65_536,
-        knowledgeCutoff: '2025-01',
-        cost: {
-          inputTokens: 1.5,
-          outputTokens: 9,
-          cacheReadTokens: 0.15,
-          cacheWriteTokens: 0,
-        },
-      },
-      configuration: {
-        streaming: true,
         thinkingLevel: 'HIGH',
       },
     },

@@ -29,8 +29,8 @@ type Layout = Readonly<{
  * height in one step, but the sheet (and its grabber) slides there over a transition, so a box read mid-slide is not
  * the detent's.
  */
-const sheetSettled = async (grabber: Locator): Promise<void> =>
-  target.evaluateLocator(grabber, async (handle) => {
+const sheetSettled = async (inside: Locator): Promise<void> =>
+  target.evaluateLocator(inside, async (handle) => {
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -40,7 +40,7 @@ const sheetSettled = async (grabber: Locator): Promise<void> =>
     });
     const sheet = handle.closest('[data-slot=drawer-content]');
     if (!sheet) {
-      throw new Error('The grabber is not inside the sheet.');
+      throw new Error('The element is not inside a sheet.');
     }
     // A cancelled transition has settled too: a newer one replaced it or the sheet stopped moving.
     await Promise.all(sheet.getAnimations().map(async (animation) => animation.finished.catch(() => undefined)));
@@ -144,6 +144,8 @@ test.each([
   const drawer = selectors.getByRole('dialog', { name: 'Viewer settings' });
   await target.expectVisible(drawer);
   await target.expectCount(selectors.getByRole('menu'), 0);
+  // The drawer slides up from below the screen, so its box is the detent's only once the slide ends.
+  await sheetSettled(drawer);
   const box = await target.boundingBox(drawer);
   if (!box) {
     throw new Error('The settings drawer has no layout box.');
@@ -158,8 +160,12 @@ test.each([
   await target.expectVisible(drawer.getByRole('group', { name: 'Grid & units' }));
   await target.click(drawer.getByRole('button', { name: 'Back to Viewer settings' }), { touch: true });
   await target.expectVisible(drawer.getByRole('switch', { name: 'Grid', exact: true }));
-  const layout = await readLayout();
-  expect(layout.pageOverflow).toBeLessThanOrEqual(0);
+  // The modal drawer hides the stage from the accessibility tree, so the page's overflow is read through the drawer.
+  const pageOverflow = await target.evaluateLocator(
+    drawer,
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(pageOverflow).toBeLessThanOrEqual(0);
 
   await target.click(drawer.getByRole('button', { name: 'Close' }), { touch: true });
   await target.expectCount(drawer, 0);

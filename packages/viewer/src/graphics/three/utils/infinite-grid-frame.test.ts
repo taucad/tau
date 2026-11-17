@@ -7,6 +7,7 @@ import {
   infiniteGridFadeStartRatio,
   infiniteGridPresentationPlaneByUpDirection,
   infiniteGridProxyDistanceVisibleSpans,
+  resolveInfiniteGridCenter,
   resolveInfiniteGridFrame,
 } from '#graphics/three/utils/infinite-grid-frame.js';
 
@@ -85,7 +86,7 @@ describe('resolveInfiniteGridFrame', () => {
     ).toBe(planeOffset);
   });
 
-  it('expands the retained camera-local proxy and its radial fade with the visible physical span', () => {
+  it('expands the retained target-centred proxy and its radial fade with the visible physical span', () => {
     const near = resolveInfiniteGridFrame({
       axes: 'xyz',
       cameraVisibleSpanMeters: 1,
@@ -113,5 +114,43 @@ describe('resolveInfiniteGridFrame', () => {
     expect(far.gridDistance * infiniteGridFadeStartRatio).toBe(100);
     expect(far.gridDistance * infiniteGridFadeEndRatio).toBe(400);
     expect(near).not.toHaveProperty('proxyHalfExtent');
+  });
+});
+
+describe('resolveInfiniteGridCenter', () => {
+  const renderFrame: RenderFrame = { anchorFrameId: 'tau:root', originMeters: [1, 2, 3], metersPerRenderUnit: 0.001 };
+
+  it.each([
+    ['xyz', [9000, 18_000]],
+    ['xzy', [9000, 27_000]],
+    ['zyx', [27_000, 18_000]],
+  ] as const)('returns the target foot in the %s shader tangent order, in render units', (axes, center) => {
+    expect(resolveInfiniteGridCenter({ axes, renderFrame, targetMeters: [10, 20, 30] })).toEqual(center);
+  });
+
+  it('ignores the target height above the grid plane', () => {
+    const low = resolveInfiniteGridCenter({ axes: 'xyz', renderFrame, targetMeters: [10, 20, 0] });
+    const high = resolveInfiniteGridCenter({ axes: 'xyz', renderFrame, targetMeters: [10, 20, 500] });
+
+    expect(high).toEqual(low);
+  });
+
+  it('follows render-frame rebases and rescales', () => {
+    const targetMeters = [10, 20, 30] as const;
+
+    expect(
+      resolveInfiniteGridCenter({
+        axes: 'xyz',
+        renderFrame: { anchorFrameId: 'tau:root', originMeters: [10, 20, 0], metersPerRenderUnit: 0.001 },
+        targetMeters,
+      }),
+    ).toEqual([0, 0]);
+    expect(
+      resolveInfiniteGridCenter({
+        axes: 'xyz',
+        renderFrame: { anchorFrameId: 'tau:root', originMeters: [1, 2, 3], metersPerRenderUnit: 1 },
+        targetMeters,
+      }),
+    ).toEqual([9, 18]);
   });
 });

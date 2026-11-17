@@ -52,7 +52,6 @@ const viewArbitrary: Arbitrary<WorkbenchView> = record({
     grid: boolean(),
     axes: boolean(),
     matcap: boolean(),
-    postProcessing: boolean(),
   }),
   grid: record({ unit: constantFrom('mm', 'in') }),
   section: constant({ active: false, cuts: [] }),

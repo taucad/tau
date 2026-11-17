@@ -3,32 +3,45 @@
  * orchestration A0.2, inventory S1 to S7, S12, S26, S27 and S40).
  *
  * The registry is real (`createSessionsActor` on a `StepClock`), and so are the unload sequencer,
- * `LiveProjectSessions`, the binding, the persistence guard and `ProjectProvider` with its producer set.
- * Only the leaves are stand-ins: the project and editor actors (as `useActorRef` returns them), the
- * file manager, the revision client and the chat store. Each row renders under StrictMode, as the
- * app does in development.
+ * `LiveProjectSessions`, the binding and `ProjectProvider` with its lease and the
+ * runtime's producer set. Since A7b the registry carries the session wiring the app runtime composes: each
+ * session's `revisions` and `hostConnector` children run the real modules, and its presence reads focus and
+ * the page's visibility. Only the leaves are stand-ins: the project and editor actors (as the leased
+ * project runtime spawns them, since A6b; before it, as `useActorRef` returned them), the file manager,
+ * the revision client, focus, the choices and the chat store. Each row renders under StrictMode, as the app
+ * does in development.
  */
 
 import { StrictMode, createContext, useContext, useEffect, useSyncExternalStore } from 'react';
 import { act, render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createFakeEnvironmentHost, startEnvironmentHost } from '#runtime/environment.fixture.js';
+import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
 import { mock } from 'vitest-mock-extended';
 import type { Actor } from 'xstate';
 import { StepClock } from '@taucad/xstate-testing/clock';
 import type * as XstateReactModule from '@xstate/react';
 import type * as UseProjectModule from '#hooks/use-project.js';
+import type * as ProjectRuntimeModule from '#runtime/project-runtime.js';
+import type { ProjectRuntimeOptions } from '#runtime/project-runtime.js';
+import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
+import { createAppRuntime } from '#runtime/app-runtime.js';
 import type * as CloudProjectsModule from '#hooks/use-cloud-projects.js';
-import type * as SessionsStoreModule from '#services/sessions-store.js';
 import type { ParameterSetService } from '@taucad/ui-core/services/parameter-set-service';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
 import { projectSessionParkWindowMilliseconds } from '#machines/project-session.machine.js';
 import { SessionsProvider, useLiveProjectIds } from '#hooks/use-sessions.js';
 import { UnloadProvider, useFlushOnClose } from '#hooks/use-flush-on-close.js';
-import { createSessionsActor, forgetProjectRegions } from '#services/sessions-store.js';
-import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
-import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
+import { createSessionsActor, selectProjectSessionRuntime } from '#services/sessions-store.js';
+import type { SessionRuntimeOpener, SessionsObservable, SessionWiring } from '#services/sessions-store.js';
+import { revisionClients } from '#services/revision-client-registry.js';
+import { focusedProjectStandIn } from '#services/focused-project.fixture.js';
+import type { ProjectChoices } from '#runtime/choices.js';
+import { openSessionProjectRuntime, sessionProjectRuntimeOf } from '#runtime/project-runtime.session.js';
+import { openSessionFileManagerStandIn } from '#runtime/session-file-manager.fixture.js';
+import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 
 // ===========================================================================
 // Leaf stand-ins
@@ -70,7 +83,11 @@ const createFixtureActor = (
     return {
       status: 'active',
       context,
-      matches: (value) => active.has(typeof value === 'string' ? value : JSON.stringify(value)),
+      /* A parent state matches while any of its children does, as XState's `matches` answers. */
+      matches: (value) =>
+        value === 'ready'
+          ? active.has('ready') || [...active].some((state) => state.startsWith('{"ready":'))
+          : active.has(typeof value === 'string' ? value : JSON.stringify(value)),
     };
   };
   let snapshot = build();
@@ -120,13 +137,17 @@ type RevisionStatus = Readonly<{
   }>;
 }>;
 
-/** One project's revision client: the session's close cut and the focus long poll. */
+/** One project's revision client: the session's close cut, the focus long poll and what the lifecycle sends it. */
 type FixtureRevisionClient = Readonly<{
   focus: ReturnType<typeof vi.fn<(focused: boolean) => void>>;
   quiesce: ReturnType<typeof vi.fn<() => Promise<void>>>;
-  /* The lifecycle's open and close of the client: the I5 row watches these, which outlive the hook (A7b). */
+  /* The lifecycle's open and close of the client: the I5 row watches these, which outlive the binding (A7b). */
   open: ReturnType<typeof vi.fn<() => void>>;
   close: ReturnType<typeof vi.fn<() => void>>;
+  send: ReturnType<typeof vi.fn<(command: unknown) => void>>;
+  setUser: ReturnType<typeof vi.fn<(user: unknown) => Promise<void>>>;
+  setCredential: ReturnType<typeof vi.fn<(source: unknown) => Promise<boolean>>>;
+  saveRevision: ReturnType<typeof vi.fn<(trigger?: string) => Promise<void>>>;
   status: () => RevisionStatus;
   subscribe: (listener: () => void) => () => void;
   setStatus: (patch: Partial<RevisionStatus>) => void;
@@ -147,6 +168,10 @@ const createRevisionClient = (order: string[], projectId: string): FixtureRevisi
     }),
     open: vi.fn<() => void>(),
     close: vi.fn<() => void>(),
+    send: vi.fn<(command: unknown) => void>(),
+    setUser: vi.fn(async (_user: unknown) => undefined),
+    setCredential: vi.fn(async (_source: unknown) => true),
+    saveRevision: vi.fn(async (_trigger?: string) => undefined),
     status: () => status,
     subscribe: (listener) => {
       listeners.add(listener);
@@ -195,8 +220,9 @@ const fixtures = vi.hoisted(() => ({
   order: [] as string[],
   actors: new Map<string, unknown>(),
   revisionClients: new Map<string, unknown>(),
-  lifecycleMounts: [] as string[],
   fileManagers: new Map<string, unknown>(),
+  /** The file manager each project's session provider was last rendered with. */
+  providedFileManagers: new Map<string, unknown>(),
   retryManifestObservation: new Map<string, unknown>(),
   chatProducers: new Map<string, () => Promise<void>>(),
   /** The S40 rows give each project a second producer; other rows keep the one. */
@@ -268,6 +294,8 @@ type FixtureFileManager = Readonly<{
   watchRecordFile: undefined;
 }>;
 
+const fixtureWorker = { name: 'fixture-worker' } as unknown as Worker;
+
 const fileManagerOf = (projectId: string): FixtureFileManager => {
   const existing = fixtures.fileManagers.get(projectId) as FixtureFileManager | undefined;
   if (existing !== undefined) {
@@ -281,6 +309,8 @@ const fileManagerOf = (projectId: string): FixtureFileManager => {
     fileManagerRef: createFixtureActor(`fileManager:${projectId}`, {
       states: ['ready'],
       context: {
+        /* A7b: the session's `revisions` and `hostConnector` children start once the file manager has a worker. */
+        worker: fixtureWorker,
         rootDirectory: `/projects/${projectId}`,
         openFileSystemBridge: vi.fn((_root: string, _mode: string) => ({ bridge: 'first' })),
         openRevisionSessionPort: vi.fn((_kind: string, _projectId: string) => ({ port: 'revisions' })),
@@ -325,14 +355,76 @@ vi.mock('@xstate/react', async (importOriginal) => {
   const actual = await importOriginal<typeof XstateReactModule>();
   return {
     ...actual,
-    /* `ProjectProvider` builds its project and editor actors here; the rows read their stand-ins. */
+    /* A component that still builds an actor here gets its stand-in. */
     useActorRef: (logic: { readonly id: string }, options: { readonly input: { readonly projectId: string } }) =>
       actorFor(`${logic.id}:${options.input.projectId}`),
   };
 });
 
+/* `ProjectProvider` leases its project runtime, which spawns the project and editor actors (A6b): the stand-in
+ * runtime hands the rows' stand-ins to the provider and owns the real producer set. Its start is the editor's
+ * `load`, as the real root's entry is. The runtime's entries record child stands in for every record producer of a
+ * live project, focused or not: it registers in the producer set when the runtime starts and leaves it when the
+ * runtime stops (A9, S40). */
+vi.mock('#runtime/project-runtime.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectRuntimeModule>();
+  return {
+    ...actual,
+    createProjectRuntime: (options: ProjectRuntimeOptions) => {
+      const projectRef = actorFor(`project:${options.projectId}`);
+      const editorRef = actorFor(`editor:${options.projectId}`);
+      const snapshot = { status: 'active', context: { projectRef, editorRef, manifestObservationError: undefined } };
+      const producers = actual.createProjectRuntimeProducers();
+      const { projectId } = options;
+      const registrations: Array<() => void> = [];
+      const actor = {
+        getSnapshot: () => snapshot,
+        subscribe: () => ({ unsubscribe: () => undefined }),
+        send: () => undefined,
+        start: () => {
+          editorRef.send({ type: 'load' });
+          if (options.entriesRecord !== undefined) {
+            registrations.push(
+              producers.register(async () => {
+                fixtures.order.push(`producer:${projectId}`);
+                await fixtures.chatProducers.get(projectId)?.();
+              }),
+            );
+            /* A second member of the set, so the session's flush is seen walking every producer, not the first. */
+            if (fixtures.secondProducer) {
+              registrations.push(
+                producers.register(async () => {
+                  fixtures.order.push(`producer:${projectId}:second`);
+                  await fixtures.chatProducers.get(`${projectId}:second`)?.();
+                }),
+              );
+            }
+          }
+          return actor;
+        },
+        stop: () => {
+          for (const unregister of registrations.splice(0)) {
+            unregister();
+          }
+          return actor;
+        },
+      };
+      return {
+        actor,
+        parameterService: { get: () => parameterService, subscribe: () => () => undefined },
+        producers,
+      };
+    },
+  };
+});
+
 vi.mock('#hooks/use-file-manager.js', () => ({
-  HomeFileManagerProvider: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => {
+  SessionFileManagerProvider: ({
+    children,
+    projectId,
+    fileManagerRef,
+  }: React.PropsWithChildren<{ projectId: string; fileManagerRef: unknown }>) => {
+    fixtures.providedFileManagers.set(projectId, fileManagerRef);
     useEffect(() => {
       fixtures.order.push(`mount:${projectId}`);
       return () => {
@@ -375,20 +467,15 @@ vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 
 vi.mock('#hooks/use-revision-status.js', async () => {
   const { useProject } = await import('#hooks/use-project.js');
+  const { revisionClients } = await import('#services/revision-client-registry.js');
   return {
-    useRevisionClientLifecycle: () => {
-      const { projectId } = useProject();
-      useEffect(() => {
-        fixtures.lifecycleMounts.push(`mount:${projectId}`);
-        const client = revisionClientOf(projectId);
-        client.open();
-        return () => {
-          fixtures.lifecycleMounts.push(`close:${projectId}`);
-          client.close();
-        };
-      }, [projectId]);
-      return revisionClientOf(projectId);
+    /* The project's one client, in the real table the session's close reads it from (`peekRevisionClient`). */
+    getRevisionClient: ({ projectId, worker }: { readonly projectId: string; readonly worker: Worker }) => {
+      const client = revisionClientOf(projectId);
+      revisionClients.set(projectId, { client: client as never, worker });
+      return client;
     },
+    useRevisionClient: () => revisionClientOf(useProject().projectId),
     useRevisionClientStatus: (client: FixtureRevisionClient | undefined) =>
       useSyncExternalStore(
         (listener) => client?.subscribe(listener) ?? (() => undefined),
@@ -405,6 +492,15 @@ vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => chatSessions }));
 vi.mock('#hooks/use-models.js', () => ({
+  /* The app runtime's `choices` derives the default model with it (A6b). */
+  catalogDefaultModelId: () => undefined,
+  /* The session's connector resolves a chat's model against the catalog its choices hold (A7b). */
+  resolveCatalogModel: (id: string) => ({
+    id,
+    name: id,
+    isResolved: false,
+    provider: { id: 'unknown', name: 'Unknown' },
+  }),
   useModels: () => {
     const { model } = useSyncExternalStore(choiceStore.subscribe, choiceStore.get);
     return {
@@ -414,12 +510,9 @@ vi.mock('#hooks/use-models.js', () => ({
   },
 }));
 vi.mock('#hooks/use-kernel.js', () => ({
+  resolveRememberedKernel: () => ({ kernel: 'openscad' }),
   useKernel: () => ({ kernel: useSyncExternalStore(choiceStore.subscribe, choiceStore.get).kernel }),
 }));
-vi.mock('#services/sessions-store.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof SessionsStoreModule>();
-  return { ...actual, forgetProjectRegions: vi.fn(actual.forgetProjectRegions) };
-});
 vi.mock('#hooks/use-publish-cloud-project-preview.js', () => ({ usePublishCloudProjectPreview: () => undefined }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -444,7 +537,7 @@ vi.mock('#services/agent-host-client.js', () => ({
 vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   createDaemonAgentHostTransport: (dial: unknown) => ({ dial }),
 }));
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getProjectFileSystemConfig: async (projectId: string) => ({
     projectId,
@@ -465,38 +558,6 @@ vi.mock('#hooks/use-editor-document-session.js', () => ({
 }));
 vi.mock('#routes/w.$workspace.$project/workbench-record-host.js', () => ({ WorkbenchRecordHost: () => null }));
 vi.mock('#routes/w.$workspace.$project/view-settings-sync-host.js', () => ({ ViewSettingsSyncHost: () => null }));
-/*
- * The entries host stands in for every record host of a live project, focused or not: it registers one
- * producer in the project's producer set, as `entries-sync-host.tsx` does (S40).
- */
-vi.mock('#routes/w.$workspace.$project/entries-sync-host.js', async () => {
-  const { useProject } = await import('#hooks/use-project.js');
-  return {
-    EntriesSyncHost: () => {
-      const { projectId, registerWorkbenchRecordProducer } = useProject();
-      useEffect(
-        () =>
-          registerWorkbenchRecordProducer(async () => {
-            fixtures.order.push(`producer:${projectId}`);
-            await fixtures.chatProducers.get(projectId)?.();
-          }),
-        [projectId, registerWorkbenchRecordProducer],
-      );
-      /* A second member of the set, so the guard is seen walking every producer, not the first. */
-      useEffect(
-        () =>
-          fixtures.secondProducer
-            ? registerWorkbenchRecordProducer(async () => {
-                fixtures.order.push(`producer:${projectId}:second`);
-                await fixtures.chatProducers.get(`${projectId}:second`)?.();
-              })
-            : undefined,
-        [projectId, registerWorkbenchRecordProducer],
-      );
-      return null;
-    },
-  };
-});
 vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({ RevisionSaveShortcut: () => null }));
 vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
 vi.mock('#routes/w.$workspace.$project/workbench-checkout-root.js', () => ({ WorkbenchCheckoutRoot: () => null }));
@@ -529,8 +590,6 @@ async function stopProjectedRun(chatId: string): Promise<'stopped' | 'continuing
 
 const chatSessions = mock<ChatSessionStore>({
   setRevisionFacts: vi.fn(),
-  setProjectSession: vi.fn(),
-  setFocusedProject: vi.fn(),
   publishProjectHostConnector: vi.fn(() => unpublishConnector),
   getChatHostSettings: vi.fn(async () => undefined),
   cancelProjectedRun: vi.fn(stopProjectedRun),
@@ -539,6 +598,8 @@ const chatSessions = mock<ChatSessionStore>({
 });
 
 const { LiveProjectSessions } = await import('#routes/w.$workspace.$project/project-live-sessions.js');
+const sessionRevisionsModule = await import('#runtime/session-revisions.js');
+const hostConnectorModule = await import('#runtime/host-connector.js');
 
 // ===========================================================================
 // Harness
@@ -550,30 +611,37 @@ const projectB = 'proj_live_bbbbbbbbbbbbbbb';
 let visibility: DocumentVisibilityState = 'visible';
 let clock: StepClock;
 let registry: Actor<typeof sessionsMachine>;
-let queryClient: QueryClient;
-const flushRegistrations: Array<ProjectSessionFlushRegistration | undefined> = [];
 
-type Focus = Readonly<{ projectId: string; requestedChatId?: string; createdChatId?: string }> | undefined;
+/** The session runtime opener the app composes, over the rows' query cache and a local kernel. */
+const sessionRuntimeOpener = (client: QueryClient): SessionRuntimeOpener => ({
+  open: async (input) =>
+    openSessionProjectRuntime(input, {
+      library: mock(),
+      chatSessions: { noteCreatedEmpty: () => undefined },
+      queryClient: client,
+      choices: () => ({
+        computePlacement: { state: 'local' },
+        computeSelectionRevision: 0,
+        computeReuseMode: 'durable',
+        computeReuseRevision: 0,
+      }),
+      awaitServices: async () => Promise.withResolvers<never>().promise,
+      clock,
+    }),
+  onChoicesChanged: () => () => undefined,
+});
+let queryClient: QueryClient;
+/* The app runtime `ProjectProvider` leases its project runtime from; the rows' query client is its own (A6b). */
+let appRuntime: ReturnType<typeof createAppRuntime>;
+
+type Focus = Readonly<{ projectId: string }> | undefined;
 
 function Sessions({ focus }: { readonly focus: Focus }): React.JSX.Element {
   const liveProjectIds = useLiveProjectIds();
   return (
     <LiveProjectSessions
-      focused={
-        focus === undefined
-          ? undefined
-          : {
-              projectId: focus.projectId,
-              requestedChatId: focus.requestedChatId,
-              createdChatId: focus.createdChatId,
-              children: undefined,
-            }
-      }
+      focused={focus === undefined ? undefined : { projectId: focus.projectId }}
       liveProjectIds={liveProjectIds}
-      onFlushRegistration={(registration) => {
-        flushRegistrations.push(registration);
-      }}
-      retainedKernels={{}}
     />
   );
 }
@@ -589,17 +657,67 @@ function SessionStageProbe(): undefined {
   return undefined;
 }
 
-/** The app's root composition around the live sessions: unload sequencer, query client, registry. */
-const tree = (focus: Focus, mounted = true, sessionProbe = false): React.JSX.Element => (
-  <StrictMode>
-    <UnloadProvider>
-      {sessionProbe ? <SessionStageProbe /> : null}
-      <QueryClientProvider client={queryClient}>
-        <SessionsProvider actor={registry}>{mounted ? <Sessions focus={focus} /> : null}</SessionsProvider>
-      </QueryClientProvider>
-    </UnloadProvider>
-  </StrictMode>
-);
+/** The project focus is on, as the route's focus says it (A7b): what the sessions and the chat store hear. */
+const focusedProject = focusedProjectStandIn();
+
+/** The page's visibility as `environment` reports it: each `visibilitychange` is a report. */
+const documentVisible: SessionsObservable<boolean> = {
+  get: () => visibility === 'visible',
+  subscribe: (listener) => {
+    document.addEventListener('visibilitychange', listener);
+    return () => {
+      document.removeEventListener('visibilitychange', listener);
+    };
+  },
+};
+
+/** The session wiring the app runtime composes (A7b), over the rows' stand-ins. */
+const sessionWiring = (): SessionWiring => ({
+  /* Loaded with the suite, so a row's first open does not wait on the transform the app's chunk never needs. */
+  loadRevisions: async () => sessionRevisionsModule,
+  loadHostConnector: async () => hostConnectorModule,
+  /* `environment`'s sequencer, read when the child registers: the rows start it after the registry. */
+  registerCloseCut: (cut) => unloadEnvironment?.sequencer.register('session', cut) ?? (() => undefined),
+  /* A7c: each live session's producer-stage flush, on the same sequencer. */
+  registerProducer: (flush) => unloadEnvironment?.sequencer.register('producer', flush) ?? (() => undefined),
+  focusedProject,
+  documentVisible,
+  chatSessions,
+  choices: () => ({
+    computePlacement: { state: 'local' },
+    computeSelectionRevision: 0,
+    computeReuseMode: 'durable',
+    computeReuseRevision: 0,
+    defaultExecution: { kind: 'tau', model: choiceStore.get().model },
+    modelCatalog: { status: 'loading' },
+    modelPinning: true,
+    defaultKernel: choiceStore.get().kernel as ProjectChoices['defaultKernel'],
+    testingEnabled: true,
+  }),
+  rootSync: () => ({ syncProjectRoots: async () => undefined, close: () => undefined }),
+});
+
+/**
+ * The app's root composition around the live sessions: app runtime, unload sequencer, query client, registry. The
+ * route's focus moves with it, as the focus child moves it in the app.
+ */
+const tree = (focus: Focus, mounted = true, sessionProbe = false): React.JSX.Element => {
+  if (focusedProject.get() !== focus?.projectId) {
+    focusedProject.set(focus?.projectId);
+  }
+  return (
+    <StrictMode>
+      <AppRuntimeProvider runtime={appRuntime}>
+        <UnloadProvider sequencer={unloadEnvironment?.sequencer}>
+          {sessionProbe ? <SessionStageProbe /> : null}
+          <QueryClientProvider client={queryClient}>
+            <SessionsProvider actor={registry}>{mounted ? <Sessions focus={focus} /> : null}</SessionsProvider>
+          </QueryClientProvider>
+        </UnloadProvider>
+      </AppRuntimeProvider>
+    </StrictMode>
+  );
+};
 
 const flushTasks = async (): Promise<void> => {
   await act(async () => {
@@ -626,9 +744,17 @@ const closeThroughRegistry = async (projectIds: readonly string[]): Promise<void
 };
 
 /** Open projects through the registry, render the subtrees and let every region report. */
-const openAndRender = async (projectIds: readonly string[], focus: Focus): Promise<ReturnType<typeof render>> => {
+const openAndRender = async (
+  projectIds: readonly string[],
+  focus: Focus,
+  chat?: Readonly<{ chatId?: string; createdChatId?: string }>,
+): Promise<ReturnType<typeof render>> => {
   for (const projectId of projectIds) {
-    registry.send({ type: 'open', projectId });
+    registry.send({
+      type: 'open',
+      projectId,
+      ...(chat === undefined || projectId !== focus?.projectId ? {} : { request: { workspace: 'ws', ...chat } }),
+    });
   }
   const view = render(tree(focus));
   await flushTasks();
@@ -650,17 +776,36 @@ beforeEach(() => {
   visibility = 'visible';
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility });
   clock = new StepClock();
-  registry = createSessionsActor({ clock }).start();
+  fixtures.providedFileManagers.clear();
+  /* Each session opens a stand-in file manager, ready at once, so the provider is handed a real session's ref. */
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  /* A6d: each session's child builds its runtime through the real session module, over the stand-in project runtime. */
+  focusedProject.set(undefined);
+  revisionClients.clear();
+  registry = createSessionsActor({
+    clock,
+    /* The stand-in's lifecycle, over the project's fixture file manager, which the binding and the session's children
+     * read and a row moves. */
+    openFileManager: (id) => ({
+      ...openSessionFileManagerStandIn(id),
+      fileManagerRef: fileManagerOf(id).fileManagerRef as never,
+    }),
+    openRuntime: sessionRuntimeOpener(queryClient),
+    wiring: sessionWiring(),
+  }).start();
+  appRuntime = createAppRuntime({
+    clock,
+    environment: () => createFakeEnvironmentHost(),
+    idleFileManagers: true,
+    queryClient,
+  });
   fixtures.order.length = 0;
   fixtures.actors.clear();
   fixtures.revisionClients.clear();
-  fixtures.lifecycleMounts.length = 0;
   fixtures.fileManagers.clear();
   fixtures.retryManifestObservation.clear();
   fixtures.chatProducers.clear();
   fixtures.secondProducer = false;
-  flushRegistrations.length = 0;
   browserClientOptions.length = 0;
   browserLease.retained.length = 0;
   browserLease.released.length = 0;
@@ -670,18 +815,39 @@ beforeEach(() => {
 
 afterEach(() => {
   registry.stop();
+  appRuntime.stop();
   tauCloudIntent.set(projectA, undefined);
 });
 
 // ===========================================================================
-// ProjectSessionBinding: one row per relay (S1 to S7, S27), under StrictMode
+// The binding and, since A7b, the session's own children: one row per relay (S1 to S7, S27), under StrictMode
 // ===========================================================================
+
+/* D26: `environment` is the page's one unload listener; it drives the registrations these rows mount. */
+let unloadEnvironment: EnvironmentHostFixture | undefined;
+beforeEach(() => {
+  unloadEnvironment = startEnvironmentHost();
+});
+afterEach(() => {
+  unloadEnvironment?.stop();
+  unloadEnvironment = undefined;
+});
 
 describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
   it('should bring the session live once the views and runtime regions report ready (S7)', async () => {
     await openAndRender([projectA], { projectId: projectA });
 
     expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
+  });
+
+  it("should render the session subtree over the file manager its session's child opened (A6c)", async () => {
+    await openAndRender([projectA, projectB], { projectId: projectA });
+
+    const fileManagerOf = (projectId: string) => sessionOf(projectId)?.getSnapshot().context.fileManagerRef;
+    expect(fileManagerOf(projectA)).toBeDefined();
+    expect(fixtures.providedFileManagers.get(projectA)).toBe(fileManagerOf(projectA));
+    expect(fixtures.providedFileManagers.get(projectB)).toBe(fileManagerOf(projectB));
+    expect(fileManagerOf(projectA)).not.toBe(fileManagerOf(projectB));
   });
 
   it('should record a kernel refusal on the session and clear it when the kernel is back (S7)', async () => {
@@ -794,13 +960,14 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(browserLease).toEqual({ retained: [projectA], released: [projectA] });
   });
 
-  it("should forget the project's region reports when the registry closes it (S7)", async () => {
+  it("should stop the project's runtime when the registry closes it (S7, A6d)", async () => {
     await openAndRender([projectA], { projectId: projectA });
-    vi.mocked(forgetProjectRegions).mockClear();
+    const runtimeRef = selectProjectSessionRuntime(sessionOf(projectA)!.getSnapshot());
+    expect(runtimeRef === undefined ? undefined : sessionProjectRuntimeOf(runtimeRef)).toBeDefined();
 
     await closeThroughRegistry([projectA]);
 
-    expect(vi.mocked(forgetProjectRegions).mock.calls).toEqual([[projectA]]);
+    expect(sessionProjectRuntimeOf(runtimeRef!)).toBeUndefined();
   });
 
   it('should relay the revision facts to the session and to the chat store (S3)', async () => {
@@ -853,20 +1020,23 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(sentOf(`project:${projectB}`).at(-1)).toBe('resumeRuntime');
   });
 
-  it("should hand the route the focused project's leave flush, which flushes its producers and editor (S6)", async () => {
+  it("should flush the focused project's producers and editor when its session is asked for the leave flush (S6, A7c)", async () => {
     await openAndRender([projectA, projectB], { projectId: projectA });
-    const registration = flushRegistrations.findLast((entry) => entry !== undefined);
-    expect(registration?.projectId).toBe(projectA);
+    const session = sessionOf(projectA)!;
+    const settled: unknown[] = [];
+    session.on('flushSettled', (event) => settled.push(event));
     fixtures.order.length = 0;
 
-    await act(async () => {
-      await registration?.flush();
+    act(() => {
+      session.send({ type: 'flushAsked', requestId: 'leave:1', kind: 'leave' });
     });
+    await flushTasks();
 
     expect(fixtures.order).toEqual([`producer:${projectA}`, `editor:${projectA}:flushNow`]);
+    expect(settled).toEqual([{ type: 'flushSettled', projectId: projectA, requestId: 'leave:1', ok: true }]);
   });
 
-  it('should register the close services, so a close cancels, flushes producers, cuts and releases in order (S7)', async () => {
+  it("should close through the session's children in order: cancel, producers, stores, quiesce, runtime (S7, A7c)", async () => {
     await openAndRender([projectA], { projectId: projectA });
     act(() => {
       sessionOf(projectA)?.send({ type: 'projectedRunsChanged', runs: [], stoppableRuns: ['chat-1'] });
@@ -890,36 +1060,8 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(sessionOf(projectA)).toBeUndefined();
   });
 
-  it('should register each live session with the chat store and clear it when the registry closes it (S7)', async () => {
-    await openAndRender([projectA, projectB], { projectId: projectA });
-    const sessionA = sessionOf(projectA);
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls).toContainEqual([projectA, sessionA]);
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls).toContainEqual([projectB, sessionOf(projectB)]);
-    vi.mocked(chatSessions.setProjectSession).mockClear();
-
-    await closeThroughRegistry([projectA, projectB]);
-
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls).toEqual(
-      expect.arrayContaining([
-        [projectA, undefined],
-        [projectB, undefined],
-      ]),
-    );
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls.every(([, session]) => session === undefined)).toBe(
-      true,
-    );
-  });
-
-  it('should name only the focused project to the chat store, and clear it when focus leaves (S7)', async () => {
-    const view = await openAndRender([projectA, projectB], { projectId: projectA });
-    expect(vi.mocked(chatSessions.setFocusedProject).mock.calls.at(-1)).toEqual([projectA]);
-    expect(vi.mocked(chatSessions.setFocusedProject).mock.calls).not.toContainEqual([projectB]);
-
-    view.rerender(tree(undefined));
-    await flushTasks();
-
-    expect(vi.mocked(chatSessions.setFocusedProject).mock.calls.at(-1)).toEqual([undefined]);
-  });
+  /* A7c: the chat store follows the registry's live set through the app runtime, not the binding: the row lives in
+   * `app-runtime.wiring.test.tsx` ("should bind each live project's session to the chat store ..."). */
 
   it('should hold the revision long poll for the focused project only (S7)', async () => {
     const view = await openAndRender([projectA, projectB], { projectId: projectA });
@@ -970,11 +1112,11 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     expect(retrySpyOf(projectA)).toHaveBeenCalled();
   });
 
-  it('should mount one revision client lifecycle per live project and cut the close through it (S27)', async () => {
+  it('should open one revision client per live project from its session, and cut the close through it (S27, A7b)', async () => {
     await openAndRender([projectA, projectB], { projectId: projectA });
-    /* StrictMode mounts, unmounts and remounts every effect once. */
-    expect(fixtures.lifecycleMounts.filter((entry) => entry === `mount:${projectA}`)).toHaveLength(2);
-    expect(fixtures.lifecycleMounts.filter((entry) => entry === `mount:${projectB}`)).toHaveLength(2);
+    /* The session's `revisions` child opens it, not an effect: StrictMode's remount no longer reopens it. */
+    expect(revisionClientOf(projectA).open).toHaveBeenCalledOnce();
+    expect(revisionClientOf(projectB).open).toHaveBeenCalledOnce();
 
     await act(async () => {
       registry.send({ type: 'close', projectId: projectB, reason: 'user' });
@@ -984,7 +1126,8 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
 
     expect(revisionClientOf(projectB).quiesce).toHaveBeenCalledOnce();
     expect(revisionClientOf(projectA).quiesce).not.toHaveBeenCalled();
-    expect(fixtures.lifecycleMounts.at(-1)).toBe(`close:${projectB}`);
+    expect(revisionClientOf(projectB).close).toHaveBeenCalledOnce();
+    expect(revisionClientOf(projectA).close).not.toHaveBeenCalled();
   });
 });
 
@@ -1004,7 +1147,7 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(session?.getSnapshot().matches('live')).toBe(true);
   });
 
-  it.fails('I5: should still hear that the window hid after its binding unmounted', async () => {
+  it('I5: should still hear that the window hid after its binding unmounted', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
     view.rerender(tree({ projectId: projectA }, false));
     await flushTasks();
@@ -1014,7 +1157,7 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(sessionOf(projectA)?.getSnapshot().context.visible).toBe(false);
   });
 
-  it.fails('I5: should keep the host connector of a live session published after its binding unmounted', async () => {
+  it('I5: should keep the host connector of a live session published after its binding unmounted', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
     const withdrawnBefore = unpublishConnector.mock.calls.length;
 
@@ -1025,33 +1168,27 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(unpublishConnector.mock.calls.length - withdrawnBefore).toBe(0);
   });
 
-  it.fails("I5: should keep a live session's region reports after its binding unmounted", async () => {
+  /* A6d: the runtime region is the session's own child, so it no longer depends on the binding being mounted. */
+  it("I5: should keep a live session's runtime after its binding unmounted", async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
-    vi.mocked(forgetProjectRegions).mockClear();
+    const runtimeRef = selectProjectSessionRuntime(sessionOf(projectA)!.getSnapshot());
 
     view.rerender(tree({ projectId: projectA }, false));
     await flushTasks();
 
     expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
-    expect(vi.mocked(forgetProjectRegions).mock.calls).toEqual([]);
+    expect(sessionOf(projectA)?.getSnapshot().context.failures).toEqual({});
+    expect(sessionProjectRuntimeOf(runtimeRef!)).toBeDefined();
   });
 
-  it.fails('I5: should keep a live session registered with the chat store after its binding unmounted', async () => {
-    const view = await openAndRender([projectA], { projectId: projectA });
-    const session = sessionOf(projectA);
+  /* A0.2's red row "should keep a live session registered with the chat store after its binding unmounted" passes since
+   * A7c, where it moved: the app runtime binds each live session to the chat store from the registry's live set, with
+   * nothing mounted (`app-runtime.wiring.test.tsx`). */
 
-    view.rerender(tree({ projectId: projectA }, false));
-    await flushTasks();
-
-    expect(sessionOf(projectA)?.getSnapshot().matches('live')).toBe(true);
-    expect(vi.mocked(chatSessions.setProjectSession).mock.calls.findLast(([id]) => id === projectA)?.[1]).toBe(session);
-  });
-
-  /* A0.2 carried this row to A7a: the revision client a live session owns must outlive its binding (row S27). */
-  it.fails('I5: should keep the revision client of a live session open after its binding unmounted', async () => {
+  /* A0.2 carried this row to A7a; A7b made it pass: the session's `revisions` child owns the client (row S27). */
+  it('I5: should keep the revision client of a live session open after its binding unmounted', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
     const client = revisionClientOf(projectA);
-    /* StrictMode opens, closes and opens once more: the client is open when the row starts. */
     expect(client.open.mock.calls.length).toBeGreaterThan(client.close.mock.calls.length);
     const closesBefore = client.close.mock.calls.length;
 
@@ -1062,7 +1199,8 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
     expect(client.close.mock.calls.length - closesBefore).toBe(0);
   });
 
-  it.fails('I5, I6: should still flush its producers and take its close cut when it closes without a binding', async () => {
+  /* A0.2 carried this row red; A7c makes it pass: the session's close steps run over its own children (row S6). */
+  it('I5, I6: should still flush its producers and take its close cut when it closes without a binding', async () => {
     const view = await openAndRender([projectA], { projectId: projectA });
     view.rerender(tree({ projectId: projectA }, false));
     await flushTasks();
@@ -1086,7 +1224,7 @@ describe('a live session whose binding is not mounted (A0.2 item 7, I5)', () => 
 });
 
 // ===========================================================================
-// cancelRuns (D18), the chat request (S12) and the guard's walk (S40)
+// cancelRuns (D18), the chat request (S12) and the session's walk of the producer set (S40)
 // ===========================================================================
 
 describe('cancelRuns on close (A0.2 item 8, D18)', () => {
@@ -1140,15 +1278,26 @@ describe('cancelRuns on close (A0.2 item 8, D18)', () => {
 });
 
 describe("the chat request after open reaches the project's editor (A0.2 item 3, S12)", () => {
+  /* A6d: focus's `chatRequested` reaches the session, whose `project` child asks the editor; no prop carries it. */
+  const requestChat = async (projectId: string, chatId?: string, createdChatId?: string): Promise<void> => {
+    act(() => {
+      registry.send({
+        type: 'chatRequested',
+        projectId,
+        ...(chatId === undefined ? {} : { chatId }),
+        ...(createdChatId === undefined ? {} : { createdChatId }),
+      });
+    });
+    await flushTasks();
+  };
+
   it('should send an unknown chat as setRequestedChatId and a created chat as focusKnownChat', async () => {
-    const view = await openAndRender([projectA], { projectId: projectA, requestedChatId: 'chat-1' });
+    await openAndRender([projectA], { projectId: projectA }, { chatId: 'chat-1' });
     const editor = actorFor(`editor:${projectA}`);
     const send = vi.spyOn(editor, 'send');
 
-    view.rerender(tree({ projectId: projectA, requestedChatId: 'chat-2' }));
-    await flushTasks();
-    view.rerender(tree({ projectId: projectA, requestedChatId: 'chat-new', createdChatId: 'chat-new' }));
-    await flushTasks();
+    await requestChat(projectA, 'chat-2');
+    await requestChat(projectA, 'chat-new', 'chat-new');
 
     expect(send.mock.calls.map(([event]) => event)).toEqual([
       { type: 'setRequestedChatId', chatId: 'chat-2' },
@@ -1158,32 +1307,30 @@ describe("the chat request after open reaches the project's editor (A0.2 item 3,
 
   it('should send a listed chat as focusKnownChat', async () => {
     queryClient.setQueryData(['chats', projectA, { includeDeleted: false }], [{ id: 'chat-listed' }]);
-    const view = await openAndRender([projectA], { projectId: projectA, requestedChatId: 'chat-1' });
+    await openAndRender([projectA], { projectId: projectA }, { chatId: 'chat-1' });
     const send = vi.spyOn(actorFor(`editor:${projectA}`), 'send');
 
-    view.rerender(tree({ projectId: projectA, requestedChatId: 'chat-listed' }));
-    await flushTasks();
+    await requestChat(projectA, 'chat-listed');
 
     expect(send.mock.calls.map(([event]) => event)).toEqual([{ type: 'focusKnownChat', chatId: 'chat-listed' }]);
   });
 
-  it('should clear the request while the project is retained, and send the chat it regains focus with', async () => {
-    const view = await openAndRender([projectA, projectB], { projectId: projectA, requestedChatId: 'chat-1' });
+  it('should keep the request while the project is retained (D14), and send the chat it regains focus with', async () => {
+    const view = await openAndRender([projectA, projectB], { projectId: projectA }, { chatId: 'chat-1' });
     const send = vi.spyOn(actorFor(`editor:${projectA}`), 'send');
 
     view.rerender(tree({ projectId: projectB }));
     await flushTasks();
-    view.rerender(tree({ projectId: projectA, requestedChatId: 'chat-2' }));
-    await flushTasks();
+    view.rerender(tree({ projectId: projectA }));
+    await requestChat(projectA, 'chat-2');
 
-    expect(send.mock.calls.map(([event]) => event)).toEqual([
-      { type: 'setRequestedChatId', chatId: undefined },
-      { type: 'setRequestedChatId', chatId: 'chat-2' },
-    ]);
+    expect(send.mock.calls.map(([event]) => event)).toEqual([{ type: 'setRequestedChatId', chatId: 'chat-2' }]);
   });
 });
 
-describe("the persistence guard walks the project's producer set (A0.2 item 10, S40)", () => {
+/* A7c: the persistence guard is gone; each live session registers once at the producer stage, and its `project` child
+ * flushes the runtime's producer set and both stores for the unload, with nothing mounted (D26). */
+describe("each session's unload flush walks the project's producer set (A0.2 item 10, S40, A7c)", () => {
   beforeEach(() => {
     fixtures.secondProducer = true;
   });
@@ -1216,18 +1363,21 @@ describe("the persistence guard walks the project's producer set (A0.2 item 10, 
     await hide();
     expect(fixtures.order).toContain(`producer:${projectB}`);
     expect(fixtures.order).toContain(`producer:${projectB}:second`);
+    expect(fixtures.order).not.toContain(`project:${projectB}:flushNow`);
     expect(fixtures.order).not.toContain(`editor:${projectB}:flushNow`);
 
     first.resolve();
     await flushTasks();
+    expect(fixtures.order).not.toContain(`project:${projectB}:flushNow`);
     expect(fixtures.order).not.toContain(`editor:${projectB}:flushNow`);
 
     second.resolve();
     await flushTasks();
+    expect(fixtures.order).toContain(`project:${projectB}:flushNow`);
     expect(fixtures.order).toContain(`editor:${projectB}:flushNow`);
   });
 
-  it("should hold the session stage on hide until the guard's editor flush reaches storing idle (item 9)", async () => {
+  it("should hold the session stage on hide until the session's editor flush reaches storing idle (item 9)", async () => {
     registry.send({ type: 'open', projectId: projectA });
     render(tree({ projectId: projectA }, true, true));
     await flushTasks();

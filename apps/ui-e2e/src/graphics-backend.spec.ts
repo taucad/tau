@@ -68,7 +68,6 @@ type GraphicsTestBridgeWindow = Window & {
     }): void;
     setFovAngle(angle: number): void;
     setPresentation(presentation: Readonly<{ surfaces: boolean; lines: boolean }>): void;
-    setPostProcessingEnabled(enabled: boolean): void;
     setGridPresentationClipPolicy(policy: Readonly<{ far: boolean; near: boolean }>): void;
     getCamera(): {
       actorStatus: string;
@@ -604,7 +603,6 @@ async function driveEdgeOcclusionCamera({
       if (cameraFov === 0) {
         bridge.setFovAngle(0);
       }
-      bridge.setPostProcessingEnabled(false);
     },
     { cameraDistance: distance, cameraFov: fov },
   );
@@ -938,8 +936,6 @@ test.describe('Graphics backend regression guard', () => {
           throw new Error('Graphics e2e bridge is not installed.');
         }
 
-        bridge.setPostProcessingEnabled(false);
-
         bridge.setCamera({
           position: [0, -500, 0],
           target: [0, 0, 0],
@@ -968,10 +964,6 @@ test.describe('Graphics backend regression guard', () => {
       await target.navigate(`${edgeOcclusionFixturePath}&graphicsBackend=${backend}`);
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
-      await target.evaluate(() => {
-        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
-        bridge.setPostProcessingEnabled(false);
-      });
       await target.delay(250);
       const canvas = selectors.getByCss(previewCanvasSelector).first();
       const beforePixels = await target.screenshot(canvas);
@@ -1024,7 +1016,6 @@ test.describe('Graphics backend regression guard', () => {
       await target.evaluate((frame) => {
         const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
         bridge.setRenderFrame(frame);
-        bridge.setPostProcessingEnabled(true);
       }, before.frame);
       await target.delay(750);
       const beforeAoPixels = await target.screenshot(canvas);
@@ -1057,7 +1048,6 @@ test.describe('Graphics backend regression guard', () => {
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
         const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
-        bridge.setPostProcessingEnabled(false);
         bridge.setPresentation({ surfaces: false, lines: false });
         bridge.setCamera({ position: [1, -1, 0.7], target: [0, 0, 0], fov: 60, zoom: 1 });
       });
@@ -1168,7 +1158,6 @@ test.describe('Graphics backend regression guard', () => {
         await waitForGraphicsTestBridge();
         await target.evaluate(({ fov, position }) => {
           const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
-          bridge.setPostProcessingEnabled(false);
           bridge.setPresentation({ surfaces: false, lines: false });
           bridge.setCamera({ position, target: [0, 0, 0], fov, zoom: 1 });
           bridge.setGridPresentationClipPolicy({ far: true, near: true });
@@ -1278,7 +1267,6 @@ test.describe('Graphics backend regression guard', () => {
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
         const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-        bridge?.setPostProcessingEnabled(false);
         bridge?.resetCameraTransitionDiagnostics();
       });
 
@@ -1323,7 +1311,6 @@ test.describe('Graphics backend regression guard', () => {
       await waitForGraphicsTestBridge();
       await target.evaluate(() => {
         const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__;
-        bridge?.setPostProcessingEnabled(true);
         bridge?.resetCameraTransitionDiagnostics();
       });
 
@@ -1358,8 +1345,6 @@ test.describe('Graphics backend regression guard', () => {
         if (!bridge) {
           throw new Error('Graphics e2e bridge is not installed.');
         }
-
-        bridge.setPostProcessingEnabled(false);
 
         bridge.setCamera({
           position: [125, -180, 95],
@@ -1484,16 +1469,14 @@ test.describe('Graphics backend regression guard', () => {
                     ).__TAU_SECTION_VIEW_TEST__!.getCamera();
                     return { position: view.position, target: view.target };
                   });
-            for (const postProcessing of [false, true]) {
+            {
               await target.evaluate(
-                ({ enabled, view, configuration }) => {
+                ({ view, configuration }) => {
                   const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
-                  bridge.setPostProcessingEnabled(enabled);
                   bridge.setCamera({ ...view, fov: 60 });
                   bridge.setFovAngle(configuration.fov);
                 },
                 {
-                  enabled: postProcessing,
                   view: camera,
                   configuration: scenario,
                 },
@@ -1545,10 +1528,7 @@ test.describe('Graphics backend regression guard', () => {
                 expect(measurements.pixelRatio).toBe(scenario.dpr);
                 expect(measurements.width).toBe(measurements.cssWidth * scenario.dpr);
                 expect(measurements.height).toBe(measurements.cssHeight * scenario.dpr);
-                expect(
-                  idleFrames,
-                  `${fixture}/${scenario.id}/${backend}/ao=${postProcessing}/repeat=${repetition}`,
-                ).toBe(0);
+                expect(idleFrames, `${fixture}/${scenario.id}/${backend}/repeat=${repetition}`).toBe(0);
                 expect(measurements.submission).toHaveLength(120);
                 expect(measurements.completion).toHaveLength(120);
                 expect(measurements.drawCalls).toBeGreaterThan(0);
@@ -1566,7 +1546,6 @@ test.describe('Graphics backend regression guard', () => {
                 }
                 results.push({
                   repetition,
-                  postProcessing,
                   gpuTiming,
                   readyMilliseconds,
                   idleFrames,
@@ -1591,19 +1570,17 @@ test.describe('Graphics backend regression guard', () => {
               if (repetition === 0) {
                 await target.screenshot(
                   selectors.getByCss(previewCanvasSelector).first(),
-                  `benchmark-${fixture}-${scenario.id}-${backend}-${postProcessing}.png`,
+                  `benchmark-${fixture}-${scenario.id}-${backend}.png`,
                 );
               }
             }
           }
         }
         /* oxlint-enable no-await-in-loop -- sequential measurements end. */
-        for (const post of [false, true]) {
-          const gl = results.find((row) => row.backend === 'webgl' && row.postProcessing === post)!.triangles;
-          const gpu = results.find((row) => row.backend === 'webgpu' && row.postProcessing === post)!.triangles;
-          expect(gpu / gl, 'whole-scene workload equivalence').toBeGreaterThan(0.95);
-          expect(gpu / gl, 'whole-scene workload equivalence').toBeLessThan(1.05);
-        }
+        const gl = results.find((row) => row.backend === 'webgl')!.triangles;
+        const gpu = results.find((row) => row.backend === 'webgpu')!.triangles;
+        expect(gpu / gl, 'whole-scene workload equivalence').toBeGreaterThan(0.95);
+        expect(gpu / gl, 'whole-scene workload equivalence').toBeLessThan(1.05);
         expect(await webGpuValidationFailures(messageStart)).toEqual([]);
       });
     }
@@ -1624,41 +1601,33 @@ test.describe('Graphics backend regression guard', () => {
     expect(failures, `WebGPU validation errors leaked to the console:\n${failures.join('\n')}`).toEqual([]);
   });
 
-  test('grid, axes and model shading display the same on WebGL and WebGPU, with and without post-processing', async () => {
+  test('grid, axes and model shading display the same on WebGL and WebGPU', async () => {
     const samples: Record<string, OverlayBrightness> = {};
     const screenshots: Record<string, string> = {};
-    /* oxlint-disable no-await-in-loop -- each capture must observe the backend and post-processing state set before it. */
+    /* oxlint-disable no-await-in-loop -- each capture must observe the backend set before it. */
     for (const backend of ['webgl', 'webgpu'] as const satisfies readonly GraphicsBackend[]) {
       await target.navigate(`${birdhouseFixturePath}?graphicsBackend=${backend}`);
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
-      for (const postProcessing of [false, true]) {
-        await target.evaluate((enabled) => {
-          const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
-          bridge.setPostProcessingEnabled(enabled);
-          bridge.setCamera({
-            position: [0.12857841861747968, -0.12857841861747965, 0.15198383757294057],
-            target: [0, 0, 0.047],
-            fov: 60,
-          });
-        }, postProcessing);
-        await target.delay(750);
-        const label = `${backend}${postProcessing ? '-post' : ''}`;
-        const canvas = selectors.getByCss(previewCanvasSelector).first();
-        screenshots[label] = await target.screenshot(canvas, `overlay-brightness-${label}.png`);
-        samples[label] = await sampleOverlayBrightness(screenshots[label]);
-      }
       await target.evaluate(() => {
-        (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!.setPostProcessingEnabled(false);
+        const bridge = (globalThis as unknown as GraphicsTestBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        bridge.setCamera({
+          position: [0.12857841861747968, -0.12857841861747965, 0.15198383757294057],
+          target: [0, 0, 0.047],
+          fov: 60,
+        });
       });
+      await target.delay(750);
+      const canvas = selectors.getByCss(previewCanvasSelector).first();
+      screenshots[backend] = await target.screenshot(canvas, `overlay-brightness-${backend}.png`);
+      samples[backend] = await sampleOverlayBrightness(screenshots[backend]);
     }
     /* oxlint-enable no-await-in-loop -- sequential captures end. */
 
     // Dark-pixel counts are retained to expose edge loss that the average-luminance gate can miss.
     // The model's shading matches too. WebGPU once sampled the camera-rotated environment through
     // a flipped PMREM lookup and lit faces from the wrong side (mean 22.8, 42% differing); matched,
-    // edge anti-aliasing leaves about 3.7 and 4%. With post-processing on, the backends run
-    // different AO, so only the plain render is compared.
+    // edge anti-aliasing leaves about 3.7 and 4%.
     const modelDifference = await compareCentreLuminance(screenshots['webgl']!, screenshots['webgpu']!);
     expect(modelDifference.firstDarkPixels).toBeGreaterThan(1000);
     expect(

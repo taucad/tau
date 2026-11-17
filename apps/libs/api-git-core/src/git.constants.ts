@@ -335,6 +335,9 @@ export const versionNumberRefusals = {
   /** The ref is a version's, but what it names is not a version: not an annotated tag with a valid Tau-Tag record. */
   GIT_PUSH_VERSION_TAG_INVALID:
     'a version tag must be an annotated tag with its Tau-Tag record. Only Tau writes version tags at refs/tags/v<number>.',
+  /** The push re-points a backed-up version at another entry; a version keeps its entry (I6, Q13). */
+  GIT_PUSH_VERSION_MOVED:
+    'a backed-up version always names the entry it was made on. Renaming it keeps that entry; make a new version for another entry.',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- end of the refusal codes */
 
@@ -365,6 +368,10 @@ export type VersionNumberRefusal = keyof typeof versionNumberRefusals;
  *   `id`, or anything over a tag that is not a version. A rename keeps the id
  *   and passes, so a backed-up number never changes (I6).
  *
+ * A rename that names another object than the held tag does is
+ * `GIT_PUSH_VERSION_MOVED`: a version keeps its entry (I6, Q13). Git's own
+ * fast-forward rule would let it move to any later entry.
+ *
  * An object that cannot be read is `GIT_PUSH_RECORD_UNREADABLE`. A tag under
  * any other name is not a version and passes. Written without template
  * literals so it embeds in the hook's quoted heredoc unchanged.
@@ -391,6 +398,12 @@ try {
   }
   const trailerPrefix = 'Tau-Tag: ';
   const versionId = /^[0-9a-f]{32}$/;
+  /* The object a tag names: its first header line. */
+  const objectOf = (body) => {
+    const line = body.slice(0, body.indexOf('\n'));
+    return line.startsWith('object ') ? line.slice('object '.length) : null;
+  };
+  const objects = new Map();
   /* A version's id, or null for an object that is not a version. */
   const versionOf = (type, body) => {
     if (type !== 'tag') {
@@ -437,6 +450,7 @@ try {
       const body = batch.toString('utf8', end + 1, end + 1 + size);
       offset = end + 2 + size;
       versions.set(header[0], versionOf(header[1], body));
+      objects.set(header[0], header[1] === 'tag' ? objectOf(body) : null);
     }
   }
   const refused = [];
@@ -457,6 +471,8 @@ try {
       (zero.test(old) ? held.has(ref) : versions.get(old) === null || versions.get(old) !== versions.get(now))
     ) {
       refused.push(marker + ' — ' + ref + ' names V' + match[1] + ': ' + refusals.GIT_PUSH_VERSION_NUMBER_TAKEN);
+    } else if (!zero.test(old) && objects.get(old) !== objects.get(now)) {
+      refused.push('Tau: refused ' + ref + ' — ' + refusals.GIT_PUSH_VERSION_MOVED);
     }
   }
   if (refused.length > 0) {
@@ -707,6 +723,35 @@ carries_conflict() {
       '
 }
 
+# The two Node checks below, as functions that print their source. A here-document
+# inside \`$( … )\` is scanned as shell by bash 3.2, which is macOS's \`/bin/sh\`:
+# an apostrophe or parenthesis in the JavaScript ends the substitution early
+# ("unexpected EOF while looking for matching \`)'"), so the here-documents
+# live in function bodies and the substitutions only call them.
+authorship_check_source() {
+  cat <<'TAU_AUTHORSHIP_CHECK'
+${authorshipCheckScript}
+TAU_AUTHORSHIP_CHECK
+}
+
+version_check_source() {
+  cat <<'TAU_VERSION_CHECK'
+${versionNumberCheckScript}
+TAU_VERSION_CHECK
+}
+
+# The objects the version check reads: each non-zero id among the \`<old> <new> <ref>\`
+# words in \`$versions\`. A function, not a loop inside \`$( … )\`: bash 3.2 reads the
+# \`)\` that ends a \`case\` pattern there as the end of the substitution.
+version_object_ids() {
+  for word in $versions; do
+    case "$word" in
+      refs/*) ;;
+      *[!0]*) printf '%s\\n' "$word" ;;
+    esac
+  done
+}
+
 status=0
 arriving=''
 history=''
@@ -812,10 +857,7 @@ if [ -n "\${TAU_GIT_PUSHER:-}" ] && [ -n "$history" ]; then
   fi
   if [ -n "$commits" ]; then
     count=$(printf '%s\\n' "$commits" | wc -l | tr -d ' ')
-    authorship_check=$(cat <<'TAU_AUTHORSHIP_CHECK'
-${authorshipCheckScript}
-TAU_AUTHORSHIP_CHECK
-)
+    authorship_check=$(authorship_check_source)
     if ! printf '%s\\n' "$commits" | git cat-file --batch 2>/dev/null | "$TAU_GIT_NODE" -e "$authorship_check" "$count"; then
       echo "Tau: nothing was written." >&2
       exit 1
@@ -832,20 +874,13 @@ if [ -n "\${TAU_GIT_PUSHER:-}" ] && [ -n "$versions" ]; then
     echo "Tau: nothing was written." >&2
     exit 1
   fi
-  version_check=$(cat <<'TAU_VERSION_CHECK'
-${versionNumberCheckScript}
-TAU_VERSION_CHECK
-)
+  version_check=$(version_check_source)
   if ! held_tags=$(git for-each-ref --format='%(objectname) %(refname)' refs/tags/ 2>/dev/null); then
     echo "Tau: refused the push — ${authorshipRefusals.GIT_PUSH_RECORD_UNREADABLE}" >&2
     echo "Tau: nothing was written." >&2
     exit 1
   fi
-  version_objects=$(
-    for word in $versions; do
-      case "$word" in refs/*) ;; *[!0]*) printf '%s\n' "$word" ;; esac
-    done | sort -u
-  )
+  version_objects=$(version_object_ids | sort -u)
   if ! printf '%s\n' "$version_objects" | git cat-file --batch 2>/dev/null | "$TAU_GIT_NODE" -e "$version_check" "$versions" "$held_tags"; then
     echo "Tau: nothing was written." >&2
     exit 1

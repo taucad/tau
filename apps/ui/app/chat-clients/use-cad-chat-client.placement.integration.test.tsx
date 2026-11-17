@@ -177,7 +177,7 @@ vi.mock('@taucad/chat-ui/services/daemon-agent-host-client', () => ({
   // the mock keeps it so a test can prove the dial reaches the ladder.
   createDaemonAgentHostTransport: (dial: () => Promise<unknown>) => ({ dial }),
 }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectFileSystemConfig: async () => ({
     projectId: 'proj_test',
     backend: 'indexeddb',
@@ -197,8 +197,8 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
 }));
 /* ChatTurnHost composes a registration only once the project's revision root is connected (W8 TS-S5). */
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionClient: () => ({}) }));
-/* ChatTurnHost reads the usage-metrics preference through react-query; this scope has no query client. */
-vi.mock('#hooks/use-privacy-preferences.js', () => ({ usePrivacyPreferences: () => ({ preferences: undefined }) }));
+/* ChatTurnHost reads the telemetry consent through the session and react-query; this scope has neither. */
+vi.mock('#hooks/use-telemetry-consent.js', () => ({ useTelemetryConsent: () => ({ consent: 'unknown' }) }));
 
 const useCadAgentConfigMock = vi.mocked(useCadAgentConfig);
 const useActiveChatInstanceMock = vi.mocked(useActiveChatInstance);

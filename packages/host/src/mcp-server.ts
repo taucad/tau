@@ -347,6 +347,7 @@ const present = async (
           ...(verdict.lineageStatus === undefined ? {} : { lineageStatus: verdict.lineageStatus }),
           ...(verdict.projectRoot === undefined ? {} : { projectRoot: verdict.projectRoot }),
           ...(verdict.engine === undefined ? {} : { engine: verdict.engine }),
+          ...(verdict.manifestRefusal === undefined ? {} : { manifestRefusal: verdict.manifestRefusal }),
           failures,
           passes: [],
           omittedFailures: (verdict.omittedFailures ?? 0) + verdict.failures.length - failures.length,

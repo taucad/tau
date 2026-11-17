@@ -210,6 +210,48 @@ const sentEnvelope = (): { from: unknown; replyTo: unknown } => {
   return { from: payload.from, replyTo: payload.replyTo };
 };
 
+// R6 (email bounce blueprint): Resend echoes tags on every delivery event, so each send names its kind and environment.
+describe('EmailService Resend tags per template kind', () => {
+  beforeEach(() => {
+    sendMock.mockReset();
+    sendMock.mockResolvedValue({ data: { id: 'email_123' }, error: null });
+  });
+
+  it.each(templatesByKind)('tags $template.kind with its kind and the deployment environment', async ({ template }) => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable name
+    const service = createService('re_test_key', { BILLING_ENVIRONMENT: 'prod-us' });
+
+    await service.send({ to: 'user@example.com', template });
+
+    const [payload] = sendMock.mock.lastCall as [{ tags: unknown }];
+    expect(payload.tags).toStrictEqual([
+      { name: 'kind', value: template.kind },
+      { name: 'env', value: 'prod-us' },
+    ]);
+  });
+
+  it('tags the environment development when BILLING_ENVIRONMENT is unset', async () => {
+    const service = createService('re_test_key');
+
+    await service.sendMagicLink({
+      email: 'user@example.com',
+      url: 'https://tau.new/auth/magic-link/verify?token=t',
+    });
+
+    const [payload] = sendMock.mock.lastCall as [{ tags: unknown }];
+    expect(payload.tags).toStrictEqual([
+      { name: 'kind', value: 'magic-link' },
+      { name: 'env', value: 'development' },
+    ]);
+  });
+
+  it('only uses tag values Resend accepts (ASCII letters, numbers, underscores and dashes)', () => {
+    for (const { template } of templatesByKind) {
+      expect(template.kind).toMatch(/^[\w-]{1,256}$/u);
+    }
+  });
+});
+
 describe('EmailService sender per template kind', () => {
   beforeEach(() => {
     sendMock.mockReset();

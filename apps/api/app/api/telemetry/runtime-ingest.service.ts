@@ -11,6 +11,7 @@ import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PinoLogger } from 'nestjs-pino';
 import {
+  AttributeKey,
   RuntimeEntryName,
   absentLabel,
   admittedReleaseLimit,
@@ -43,6 +44,7 @@ import type {
   TelemetryPolicyAnswer,
 } from '@taucad/telemetry';
 import type { Environment } from '@taucad/api-core';
+import { MetricsService } from '@taucad/api-observability/metrics';
 import { PublicationRateLimiterService, RedisService } from '@taucad/api-redis';
 import { RuntimeMetricsService } from '#api/telemetry/runtime-metrics.service.js';
 
@@ -112,6 +114,20 @@ const releasePollTimeout = 5000;
 const uiReleasesKey = 'telemetry:releases:ui';
 const mergedOutcomes: ReadonlySet<string> = new Set(['superseded', 'cancelled', 'abandoned']);
 const principalSets = ['any', 'failed'] as const;
+/**
+ * Dual-write window (package "Dual-write window (after PR-9)", resolved Q14): the old `kernel.status` of a recorded
+ * outcome. An outcome absent here (superseded, cancelled, abandoned, refused, unknown, attention) writes nothing to
+ * the old instruments; dropping the merged outcomes is the semantic fix over the deleted UI middleware.
+ */
+const legacyKernelStatus: Readonly<Partial<Record<RuntimeOperationRecord['detail']['outcome'], 'success' | 'error'>>> =
+  {
+    succeeded: 'success',
+    issue: 'error',
+    failed: 'error',
+    'timed-out': 'error',
+    terminated: 'error',
+    discarded: 'error',
+  };
 const kernelSetIds = [...runtimeKernelIds, '_ALL'] as const;
 
 /**
@@ -157,6 +173,7 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
     private readonly redisService: RedisService,
     private readonly rateLimiter: PublicationRateLimiterService,
     private readonly runtimeMetrics: RuntimeMetricsService,
+    private readonly metrics: MetricsService,
   ) {
     this.mode = parseRuntimeTelemetryMode(this.configService.get('TAU_RUNTIME_TELEMETRY', { infer: true }));
     this.maxAge = this.configService.get('TAU_RUNTIME_TELEMETRY_MAX_AGE', { infer: true });
@@ -524,6 +541,9 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
       'tau.runtime.route': detail.route,
       'tau.runtime.cold': worker?.cold ?? false,
     });
+    if (population === 'signed-in') {
+      this.recordLegacyKernel(entry, seconds);
+    }
     if (detail.code !== undefined) {
       this.runtimeMetrics.count('runtimeOperationErrors', count, {
         'tau.runtime.operation': operation,
@@ -579,6 +599,33 @@ export class RuntimeIngestService implements OnModuleInit, OnModuleDestroy {
         key: context.key,
         requestId: context.requestId,
         now: context.now,
+      });
+    }
+  }
+
+  /**
+   * Dual-write window: a recorded signed-in `evaluate` or `render` also lands in `kernel.executions` and
+   * `kernel.execution.duration`, an `export` in `kernel.geometry.export.duration` with `export.format` `_OTHER`, each
+   * with only the old instruments' attributes and unit (seconds). Signed-in only, the population the old middleware
+   * reported, so the old series stay comparable across the window. Removed with the old instruments once the dashboards
+   * read `tau_runtime_*` and 14 days pass with no old-entry receipts.
+   *
+   * @param entry - The recorded operation.
+   * @param seconds - Its duration in seconds.
+   */
+  private recordLegacyKernel(entry: RuntimeOperationRecord, seconds: number): void {
+    const { operation, outcome } = entry.detail;
+    const status = legacyKernelStatus[outcome];
+    if (status === undefined) {
+      return;
+    }
+    if (operation === 'evaluate' || operation === 'render') {
+      this.metrics.kernelExecutions.add(1, { [AttributeKey.KERNEL_STATUS]: status });
+      this.metrics.kernelExecutionDuration.record(seconds, { [AttributeKey.KERNEL_STATUS]: status });
+    } else if (operation === 'export') {
+      this.metrics.kernelExportDuration.record(seconds, {
+        [AttributeKey.KERNEL_STATUS]: status,
+        [AttributeKey.EXPORT_FORMAT]: otherValue,
       });
     }
   }

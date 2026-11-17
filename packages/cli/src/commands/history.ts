@@ -21,7 +21,7 @@ import { join, resolve } from 'node:path';
 
 import { authApiOrigin, inspectSession, resolveAuthToken } from '#auth.js';
 import { createProjectRevisionPort, openProjectRevisions, readProjectId, requireRevisionToolchain } from '@taucad/host';
-import type { ProjectRevisionVerbs } from '@taucad/host';
+import type { ProjectRevisionVerbs, RevisionBackupOutcome } from '@taucad/host';
 import { defineCommand } from 'citty';
 
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
@@ -354,8 +354,74 @@ const readVersions = async (
   }));
 };
 
+/**
+ * The Tau account a session token belongs to, as a history entry records it (A1).
+ *
+ * The account id only: never the account's email, the OS login name or an
+ * environment address. A token the API does not accept, or an API that cannot
+ * be reached, names no account, and the host then records this device's
+ * pseudonym rather than guessing.
+ *
+ * @param apiBaseUrl - The API origin the token belongs to.
+ * @param apiToken - The session token.
+ * @returns The account, or `undefined` when the API does not confirm one.
+ */
+export const tokenRevisionActor = async (
+  apiBaseUrl: string,
+  apiToken: string,
+): Promise<RevisionUserActor | undefined> => {
+  try {
+    const session = await inspectSession(apiBaseUrl, apiToken);
+    return session === undefined ? undefined : { kind: 'user', id: session.user.id };
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The session a save or a version backs up to Tau Cloud with, and records its author as, when this terminal was given one.
+ *
+ * The same two values `tau publish` and `tau clone` are told (P40), but optional:
+ * a save or a version is recorded either way, and without them only a Git remote, or none,
+ * is backed up to, under this device's pseudonym (A1).
+ *
+ * @returns The API origin, token and its account, or nothing when no token is set.
+ */
+const optionalSession = async (): Promise<
+  Readonly<{ apiBaseUrl?: string; apiToken?: string; actor?: RevisionUserActor }>
+> => {
+  const apiBaseUrl = authApiOrigin();
+  const apiToken = await resolveAuthToken(apiBaseUrl);
+  if (!apiToken) {
+    return {};
+  }
+  const actor = await tokenRevisionActor(apiBaseUrl, apiToken);
+  return { apiBaseUrl, apiToken, ...(actor === undefined ? {} : { actor }) };
+};
+
+/** How a save's or a version's backup reads, after `Saved on main.` or `Created V2 · Lid at 4f2a91c.` */
+const backupSentences = {
+  backedUp: ' Backed up.',
+  noRemote: ' Saved on this device.',
+} as const;
+
+/**
+ * The sentence a backup ends a line with (K1).
+ *
+ * @param outcome - How the push after the write ended.
+ * @returns ` Backed up.`, ` Saved on this device.`, or what is still owed.
+ */
+const backupSentence = (outcome: RevisionBackupOutcome): string =>
+  outcome.backup === 'backedUp' || outcome.backup === 'noRemote'
+    ? backupSentences[outcome.backup]
+    : ` Not backed up: ${outcome.reason ?? 'the backup did not finish.'}`;
+
 const versionCreateCommand = defineCommand({
-  meta: { name: 'create', description: 'Create a version: a named, permanent point in history' },
+  meta: {
+    name: 'create',
+    description:
+      'Create a version: a named, permanent point in history, and back it up (set TAU_API_URL and TAU_AUTH_TOKEN to back up to Tau Cloud)',
+  },
   args: {
     ...projectArguments,
     name: { type: 'positional', description: 'Version name', required: true },
@@ -367,7 +433,7 @@ const versionCreateCommand = defineCommand({
     note: { type: 'string', description: 'Note stored with the version', required: false },
   },
   async run({ args }) {
-    const { revisions } = await open(args.project);
+    const { revisions } = await open(args.project, await optionalSession());
     try {
       let revisionId = args.entry;
       if (revisionId === undefined) {
@@ -380,15 +446,15 @@ const versionCreateCommand = defineCommand({
           exitCodes.refused,
         );
       }
-      const tag = await revisions.tag({
+      const { tag, ...backedUp } = await revisions.tag({
         name: args.name,
         revisionId,
         ...(args.note === undefined ? {} : { note: args.note }),
       });
       const label = `V${String(tag.number)} · ${tag.name}`;
       await (args.json
-        ? emit({ kind: 'version', ok: true, version: tag })
-        : writeStdout(`Created ${label} at ${shortId(revisionId)}.\n`));
+        ? emit({ kind: 'version', ok: true, version: tag, ...backedUp })
+        : writeStdout(`Created ${label} at ${shortId(revisionId)}.${backupSentence(backedUp)}\n`));
     } finally {
       await revisions.close();
     }
@@ -418,7 +484,7 @@ const versionListCommand = defineCommand({
 });
 
 const versionRenameCommand = defineCommand({
-  meta: { name: 'rename', description: 'Rename a version; it keeps its number' },
+  meta: { name: 'rename', description: 'Rename a version and back up the new name; it keeps its number' },
   args: {
     ...projectArguments,
     version: {
@@ -429,7 +495,7 @@ const versionRenameCommand = defineCommand({
     to: { type: 'positional', description: 'Its new name', required: true },
   },
   async run({ args }) {
-    const { revisions, workspaceRoot } = await open(args.project);
+    const { revisions, workspaceRoot } = await open(args.project, await optionalSession());
     try {
       const versions = await readVersions(workspaceRoot);
       const number = /^[Vv]?([1-9]\d*)$/u.exec(args.version)?.[1];
@@ -440,10 +506,14 @@ const versionRenameCommand = defineCommand({
         throw cliError('NO_VERSION', `This project has no version ${args.version}.`, exitCodes.refused);
       }
       /* A version is permanent (Q13): a rename rewrites its tag at the same ref, keeping its number and entry. */
-      const tag = await revisions.tag({ name: args.to, revisionId: version.revisionId, number: version.number });
+      const { tag, ...backedUp } = await revisions.tag({
+        name: args.to,
+        revisionId: version.revisionId,
+        number: version.number,
+      });
       await (args.json
-        ? emit({ kind: 'version', ok: true, version: tag, renamedFrom: version.name })
-        : writeStdout(`Renamed V${String(version.number)} to ${args.to}.\n`));
+        ? emit({ kind: 'version', ok: true, version: tag, renamedFrom: version.name, ...backedUp })
+        : writeStdout(`Renamed V${String(version.number)} to ${args.to}.${backupSentence(backedUp)}\n`));
     } finally {
       await revisions.close();
     }
@@ -628,57 +698,6 @@ const discardCommand = defineCommand({
   },
 });
 
-/**
- * The Tau account a session token belongs to, as a history entry records it (A1).
- *
- * The account id only: never the account's email, the OS login name or an
- * environment address. A token the API does not accept, or an API that cannot
- * be reached, names no account, and the host then records this device's
- * pseudonym rather than guessing.
- *
- * @param apiBaseUrl - The API origin the token belongs to.
- * @param apiToken - The session token.
- * @returns The account, or `undefined` when the API does not confirm one.
- */
-export const tokenRevisionActor = async (
-  apiBaseUrl: string,
-  apiToken: string,
-): Promise<RevisionUserActor | undefined> => {
-  try {
-    const session = await inspectSession(apiBaseUrl, apiToken);
-    return session === undefined ? undefined : { kind: 'user', id: session.user.id };
-  } catch {
-    return undefined;
-  }
-};
-
-/**
- * The session a save backs up to Tau Cloud with, and records its author as, when this terminal was given one.
- *
- * The same two values `tau publish` and `tau clone` are told (P40), but optional:
- * a save is recorded either way, and without them only a Git remote, or none,
- * is backed up to, under this device's pseudonym (A1).
- *
- * @returns The API origin, token and its account, or nothing when no token is set.
- */
-const optionalSession = async (): Promise<
-  Readonly<{ apiBaseUrl?: string; apiToken?: string; actor?: RevisionUserActor }>
-> => {
-  const apiBaseUrl = authApiOrigin();
-  const apiToken = await resolveAuthToken(apiBaseUrl);
-  if (!apiToken) {
-    return {};
-  }
-  const actor = await tokenRevisionActor(apiBaseUrl, apiToken);
-  return { apiBaseUrl, apiToken, ...(actor === undefined ? {} : { actor }) };
-};
-
-/** How a save's backup reads, after `Saved on main.` */
-const backupSentences = {
-  backedUp: ' Backed up.',
-  noRemote: ' Saved on this device.',
-} as const;
-
 const saveCommand = defineCommand({
   meta: {
     name: 'save',
@@ -708,11 +727,7 @@ const saveCommand = defineCommand({
       await writeStdout(
         outcome.status === 'unchanged'
           ? `Nothing new to save on ${outcome.line}.\n`
-          : `Saved on ${outcome.line}.${
-              outcome.backup === 'backedUp' || outcome.backup === 'noRemote'
-                ? backupSentences[outcome.backup]
-                : ` Not backed up: ${outcome.reason ?? 'the backup did not finish.'}`
-            }\n`,
+          : `Saved on ${outcome.line}.${backupSentence(outcome)}\n`,
       );
     } finally {
       await revisions.close();

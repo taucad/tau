@@ -229,16 +229,16 @@ defineRuntime({ plugins: [<alias>()] });
 
 The six host runtime definitions are intentional and ordered; do not add a kernel mechanically. For each applicable host, add the package dependency and package-named factory once. Record why a credentialed, native-only, converter-only, or otherwise incompatible kernel is omitted. Native kernels are ordinary entries: listing `smlibpy()`, `build123d()` or `picogk()` is the whole integration (section 3.8).
 
-| Host                                    | Runtime definition                                | Coverage test                                   | Dependency manifest                |
-| --------------------------------------- | ------------------------------------------------- | ----------------------------------------------- | ---------------------------------- |
-| UI editor                               | `apps/ui/app/runtime/ui-runtime.definition.ts`    | `apps/ui/app/runtime/ui-runtime.config.test.ts` | `apps/ui/package.json`             |
-| Desktop utility                         | `apps/desktop/src/tau/desktop-runtime.factory.ts` | `desktop-runtime.factory.test.ts`               | `apps/desktop/package.json`        |
-| CLI built-ins and GeoSpec `tauExporter` | `packages/cli/src/cli-runtime.ts`                 | `cli-runtime.test.ts`                           | `packages/cli/package.json`        |
-| Runtime integration fixtures            | `apps/runtime-e2e/src/runtime.definition.ts`      | `runtime.definition.test.ts`                    | `apps/runtime-e2e/package.json`    |
-| Checked-in example rendering            | `libs/tau-examples/scripts/runtime.ts`            | `libs/tau-examples/scripts/generation.test.ts`  | `libs/tau-examples/package.json`   |
-| Import/export converter                 | `apps/libs/converter/src/runtime.ts`              | `apps/libs/converter/src/runtime.test.ts`       | `apps/libs/converter/package.json` |
+| Host                                    | Runtime definition                                               | Coverage test                                   | Dependency manifest                |
+| --------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------- | ---------------------------------- |
+| UI editor                               | `apps/ui/app/runtime/ui-runtime.definition.ts`                   | `apps/ui/app/runtime/ui-runtime.config.test.ts` | `apps/ui/package.json`             |
+| Desktop utility                         | `apps/libs/desktop-services-host/src/desktop-runtime.factory.ts` | `desktop-runtime.factory.test.ts`               | `apps/desktop/package.json`        |
+| CLI built-ins and GeoSpec `tauExporter` | `packages/cli/src/cli-runtime.ts`                                | `cli-runtime.test.ts`                           | `packages/cli/package.json`        |
+| Runtime integration fixtures            | `apps/runtime-e2e/src/runtime.definition.ts`                     | `runtime.definition.test.ts`                    | `apps/runtime-e2e/package.json`    |
+| Checked-in example rendering            | `libs/tau-examples/scripts/runtime.ts`                           | `libs/tau-examples/scripts/generation.test.ts`  | `libs/tau-examples/package.json`   |
+| Import/export converter                 | `apps/libs/converter/src/runtime.ts`                             | `apps/libs/converter/src/runtime.test.ts`       | `apps/libs/converter/package.json` |
 
-Array order is kernel-selection precedence. Preserve it deliberately; each host's existing order assertions pin it. Every coverage test calls `assertKernelRosterCoverage` from `@taucad/runtime-testing/roster` against `kernelConfigurations`: a new catalog row fails each one until that host lists the kernel or adds an `omitted` reason. The desktop also keeps `apps/desktop/src/tau/desktop-native-deployments.ts`, the native packages it bundles closures for; a parity test holds it equal to the deployments its runtime lists. Review `apps/ui/vite.config.ts` `ssr.external` only when the package emits sibling SSR chunks; most kernel packages do not belong there.
+Array order is kernel-selection precedence. Preserve it deliberately; each host's existing order assertions pin it. Every coverage test calls `assertKernelRosterCoverage` from `@taucad/runtime-testing/roster` against `kernelConfigurations`: a new catalog row fails each one until that host lists the kernel or adds an `omitted` reason. The desktop also keeps `apps/libs/desktop-services-host/src/desktop-native-deployments.ts`, the native packages it bundles closures for; a parity test holds it equal to the deployments its runtime lists. Review `apps/ui/vite.config.ts` `ssr.external` only when the package emits sibling SSR chunks; most kernel packages do not belong there.
 
 ### 3.3 Catalog metadata
 

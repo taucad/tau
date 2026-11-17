@@ -49,9 +49,10 @@ export const placeChatOnNewBranch = async (name: string): Promise<void> => {
   await target.fill(selectors.getByLabelText('Branch name'), name);
   await target.click(selectors.getByRole('button', { name: 'Create branch' }));
   /* Making a branch leaves the files where they are, and *This branch* draws a branch with no entries of its own only
-   * while the files are on it (D2, f42cb91a2b): the new branch's chip, and its ⋮, show under *All branches*. */
+   * while the files are on it (D2, f42cb91a2b): the new branch's chip, and its ⋮, show under *All branches*. A
+   * single-choice Radix ToggleGroup is a `radiogroup` of `radio` items, never a `group`. */
   const allBranches = selectors
-    .getByRole('group', { name: 'Which branches to show' })
+    .getByRole('radiogroup', { name: 'Which branches to show' })
     .getByRole('radio', { name: 'All branches' });
   await target.click(allBranches, { timeout: 60_000 });
   await target.expectAttribute(allBranches, 'aria-checked', 'true');

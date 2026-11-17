@@ -1,5 +1,5 @@
 /* oxlint-disable new-cap -- NestJS's Logger is a class each host instantiates once */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readdir, rm, stat, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -20,6 +20,15 @@ import { repositoryByteCeiling } from '@taucad/api-object-storage/repository-byt
 import { decodeManifest } from '#store/manifest.js';
 import type { Manifest } from '#store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#store/port.js';
+
+/**
+ * The lease directories of the hosts alive in this process, by name under
+ * `tau-git-leases/<pid>/`. A boot sweep keeps these and removes every other
+ * entry: those are a dead run's, left behind under the same pid. One process
+ * may hold several hosts (the test suites build many), and one host's boot
+ * must never remove another's live directory.
+ */
+const liveHostDirectories = new Set<string>();
 
 /**
  * A process that builds repository leases on its own disk: admission by real
@@ -49,6 +58,20 @@ const processAlive = (pid: number): boolean => {
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+};
+
+/**
+ * A directory's entry names, or none when it does not exist yet.
+ *
+ * @param directory - The directory to list.
+ * @returns Its entry names.
+ */
+const readdirOrEmpty = async (directory: string): Promise<string[]> => {
+  try {
+    return await readdir(directory);
+  } catch {
+    return [];
   }
 };
 
@@ -162,7 +185,10 @@ export class GitLeaseHost {
    * admission figure is measured against — never a mounted volume, because
    * there is no longer one.
    */
-  readonly #leaseParent = path.join(tmpdir(), 'tau-git-leases', String(process.pid));
+  readonly #processDirectory = path.join(tmpdir(), 'tau-git-leases', String(process.pid));
+
+  /** This host's own directory inside {@link #processDirectory}, so a sibling host's boot sweep leaves it alone. */
+  readonly #leaseParent: string;
 
   /**
    * This process's lease reservations, process-local and deliberately so: they
@@ -212,6 +238,9 @@ export class GitLeaseHost {
     this.shutdown = args.shutdown;
     this.metrics = args.metrics;
     this.logger = new Logger(args.loggerName);
+    const hostDirectory = `host-${randomBytes(6).toString('hex')}`;
+    liveHostDirectories.add(hostDirectory);
+    this.#leaseParent = path.join(this.#processDirectory, hostDirectory);
     const fraction = Math.min(1, Math.max(0, args.packCacheFraction ?? 0));
     this.#packCache = fraction > 0 ? this.#createPackCache(fraction) : undefined;
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
@@ -563,35 +592,36 @@ export class GitLeaseHost {
    * pid is gone: two processes share one `tmpdir` locally and must never sweep
    * each other.
    *
-   * At boot it also removes this process's own directory. A Machine restarted
-   * in place usually starts under the same pid, so the dead run's directory
-   * looks alive to the sibling check forever; and at boot this process holds
-   * no lease yet, so whatever is there is the dead run's.
+   * At boot it also empties this process's own directory of everything that is
+   * not a live host's. A Machine restarted in place usually starts under the
+   * same pid, so the dead run's directory looks alive to the sibling check
+   * forever; whatever is there that no host of this run made is the dead run's.
+   * Hosts of this run are kept, because they may be mid-lease.
    *
    * ponytail: unthrottled — a `readdir` of a handful of names plus a signal-0
    * per name. Add a throttle if a machine ever hosts thousands of siblings.
    */
   private async sweepAbandonedLeases({ atBoot = false }: { readonly atBoot?: boolean } = {}): Promise<void> {
-    const root = path.dirname(this.#leaseParent);
-    let siblings: readonly string[];
-    try {
-      siblings = await readdir(root);
-    } catch {
-      /* Nothing has run on this machine yet. */
-      return;
+    const root = path.dirname(this.#processDirectory);
+    const siblings = await readdirOrEmpty(root);
+    const abandoned = siblings
+      .filter((name) => /^\d+$/u.test(name) && !processAlive(Number(name)))
+      .map((name) => path.join(root, name));
+    if (atBoot) {
+      for (const name of await readdirOrEmpty(this.#processDirectory)) {
+        if (!liveHostDirectories.has(name)) {
+          abandoned.push(path.join(this.#processDirectory, name));
+        }
+      }
     }
-    const abandoned = siblings.filter(
-      (name) => /^\d+$/u.test(name) && ((atBoot && Number(name) === process.pid) || !processAlive(Number(name))),
-    );
     if (abandoned.length === 0) {
       return;
     }
     let reclaimed = 0;
-    for (const name of abandoned) {
-      const held = path.join(root, name);
+    for (const held of abandoned) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- one dead process at a time; the list is tiny and the removal is I/O, not CPU
-        reclaimed += await directoryBytes(held);
+        reclaimed += await directoryBytes(held).catch(async () => stat(held).then(({ size }) => size));
         // oxlint-disable-next-line no-await-in-loop -- as above
         await rm(held, { recursive: true, force: true });
       } catch (error) {

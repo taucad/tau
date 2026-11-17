@@ -15,7 +15,7 @@ vi.mock('#hooks/use-project.js', () => ({
 vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => ({ whenServicesReady: async () => ({ treeService: { getEntry: mocks.getEntry } }) }),
 }));
-vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   desktopBridge: () => undefined,
 }));

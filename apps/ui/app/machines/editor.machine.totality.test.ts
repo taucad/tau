@@ -30,12 +30,17 @@
 import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import type { UnansweredEvent } from '@taucad/xstate-testing/paths';
 import { describe, expect, it } from 'vitest';
-import { matchesState } from 'xstate';
+import { createCallbackLogic, matchesState } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
 import type { AnyMachineSnapshot, StateValue } from 'xstate';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { editorEventTypes, editorIgnoredEvents, editorMachine } from '#machines/editor.machine.js';
+import type { WorkbenchDockReady } from '#workbench-records/workbench-adapter.js';
 import type { EditorStateContext, EditorStateEvent } from '#machines/editor.machine.js';
+
+/* A dock sample's handles: the totality run provides an adapter that touches neither. */
+const dockviewStub = 'dockview' as unknown as WorkbenchDockReady['api'];
+const portsStub = 'ports' as unknown as WorkbenchDockReady['ports'];
 
 /** One or more samples of every event type; the mapped type fails to compile when the union gains a type. */
 type Samples = { [T in EditorStateEvent['type']]: ReadonlyArray<Extract<EditorStateEvent, { type: T }>> };
@@ -75,6 +80,9 @@ const samples: Samples = {
   focusedChatEnsured: [{ type: 'focusedChatEnsured', focusedChatId: 'chat_1' }],
   focusedChatDeferred: [{ type: 'focusedChatDeferred' }],
   retryEnsureFocusedChat: [{ type: 'retryEnsureFocusedChat' }],
+  // A layout-less page's workbench adapter, answered at the root in every state (A8c).
+  dockReady: [{ type: 'dockReady', adapter: 'workbench', dockId: 'dock_1', api: dockviewStub, ports: portsStub }],
+  dockReleased: [{ type: 'dockReleased', adapter: 'workbench', dockId: 'dock_1' }],
 };
 
 /** Every effect settles only when the traversal delivers its built-in answer. */
@@ -90,6 +98,7 @@ const machine = editorMachine.provide({
     saveEditorStateActor: pending,
     materialiseOpenFileActor: pending,
     ensureFocusedChatActor: pending,
+    workbenchAdapter: createCallbackLogic(() => () => undefined),
   },
 });
 const events: readonly EditorStateEvent[] = Object.values(samples).flat();

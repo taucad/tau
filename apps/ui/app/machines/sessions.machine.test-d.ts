@@ -7,6 +7,6 @@ import type { SessionsMachineContext, SessionsMachineEmitted, SessionsPendingOpe
 expectTypeOf(sessionsMachine).toExtend<AnyStateMachine>();
 expectTypeOf<SessionsMachineContext['budget']>().toEqualTypeOf<number>();
 expectTypeOf<SessionsMachineEmitted['type']>().toEqualTypeOf<
-  'liveSetChanged' | 'budgetRefused' | 'quiesced' | 'pendingOpenDropped'
+  'liveSetChanged' | 'budgetRefused' | 'quiesced' | 'pendingOpenDropped' | 'chatFocused'
 >();
 expectTypeOf<SessionsMachineContext['pendingOpen']>().toEqualTypeOf<SessionsPendingOpen | undefined>();

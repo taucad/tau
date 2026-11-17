@@ -102,20 +102,16 @@ describe('revisionUserActor', () => {
     expect(actor).toStrictEqual({ kind: 'user', id: 'user-1', name: 'Lane Person' });
   });
 
-  it('authors a GitHub-linked project with the no-reply identity and keeps the Tau user id (D33)', () => {
+  it('names the Tau person alone, with no field for a linked project’s forge address (D33, I3)', () => {
     const person = { id: 'user-1', name: 'Lane Person' };
     const commitIdentity = githubNoreplyAuthor(42, 'lane');
 
-    expect(revisionUserActor({ workspace: 'studio', user: person, anonymous: false, commitIdentity })).toStrictEqual({
-      kind: 'user',
-      id: 'user-1',
-      name: 'lane',
-      email: '42+lane@users.noreply.github.com',
-    });
-    /* Anonymity still wins: no address of any kind is recorded. */
-    expect(
-      revisionUserActor({ workspace: 'studio', user: person, anonymous: true, commitIdentity }).email,
-    ).toBeUndefined();
+    /* The forge identity travels beside the actor (`setActor`'s `commitAuthor`), never in it. */
+    // @ts-expect-error -- I3: the actor builder takes no address.
+    const actor = revisionUserActor({ workspace: 'studio', user: person, anonymous: false, commitIdentity });
+
+    expect(actor).toStrictEqual({ kind: 'user', id: 'user-1', name: 'Lane Person' });
+    expect(JSON.stringify(actor)).not.toContain('noreply.github.com');
   });
 
   it('keeps one device id across reads', () => {

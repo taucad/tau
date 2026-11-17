@@ -34,7 +34,22 @@ export type ShellFilesystem = Readonly<{
   readOnly?: readonly string[] | undefined;
   denied: readonly string[];
   directories?: readonly string[] | undefined;
+  /**
+   * Git stores inside a writable root that the launch writes through a name guard ({@link ShellGuardedStores}).
+   * Only a `terminal` launch on a provider whose {@link ShellProvider.storeGuard} answers `true` may carry it; any
+   * other provider answers `unsupported: filesystem-mask`. Agent launches never set it.
+   */
+  guardedStores?: ShellGuardedStores | undefined;
 }>;
+
+/**
+ * Git stores the Terminal writes through the provider's store guard (Linux Terminal git parity blueprint, R2): each
+ * store is writable except `protect`, the store policy's top-level names, each with everything under it, which the
+ * guard refuses by name to create, replace, remove, link or modify. Nothing is written into the real store in their
+ * place. Each store is an absolute physical path inside a writable root.
+ * @public
+ */
+export type ShellGuardedStores = Readonly<{ stores: readonly string[]; protect: readonly string[] }>;
 
 /** Durable identity prepared before any command can run. @public */
 export type PreparedShell = Readonly<{ executionId: string }>;
@@ -224,4 +239,10 @@ export type ShellProvider = Readonly<{
   recover: (input: Readonly<{ executionIds: readonly string[] }>) => Promise<readonly ShellRecovery[]>;
   /** Erase a stopped execution's receipt after its private root is deleted and every other hold is released. */
   release: (input: PreparedShell) => Promise<void>;
+  /**
+   * Whether this provider can write a `terminal` launch's git stores through a name guard on this device
+   * ({@link ShellFilesystem.guardedStores}). Answered once per process and cached; absent means never. A host that
+   * hears `false` keeps those stores read-only.
+   */
+  storeGuard?: (() => Promise<boolean>) | undefined;
 }>;

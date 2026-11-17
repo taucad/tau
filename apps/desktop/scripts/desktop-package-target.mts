@@ -26,6 +26,8 @@ export type DesktopPackagePlan = Readonly<{
   branding: readonly string[];
   /** Whether `prepare-git.mts` can build this target's git payload. */
   gitPayloadSupported: boolean;
+  /** Whether the Terminal's git store guard (`libs/sandbox/store-guard`) ships for this target: Linux only. */
+  storeGuard: boolean;
 }>;
 
 export const desktopPackagePlans: Readonly<Record<DesktopPackageTarget, DesktopPackagePlan>> = {
@@ -38,6 +40,7 @@ export const desktopPackagePlans: Readonly<Record<DesktopPackageTarget, DesktopP
     icon: undefined,
     branding: ['icon.png', 'icon-dark.png'],
     gitPayloadSupported: true,
+    storeGuard: true,
   },
   'win32-x64': {
     target: 'win32-x64',
@@ -48,6 +51,7 @@ export const desktopPackagePlans: Readonly<Record<DesktopPackageTarget, DesktopP
     icon: 'icon.ico',
     branding: ['icon.png', 'icon-dark.png', 'icon.ico'],
     gitPayloadSupported: false,
+    storeGuard: false,
   },
 };
 
@@ -86,13 +90,13 @@ export const parseDesktopPackageArguments = (
 /**
  * What this package leaves out, one line each, for the script to print.
  * @param plan - The selected package.
- * @param present - Whether a prepared git payload exists for the target.
+ * @param present - Whether a prepared git payload and store guard exist for the target.
  * @returns Human-readable omissions; never empty, since GeoSpec native ships on macOS only. No native kernel closure is an
  *   omission: no package ships one, and the app downloads each on first use where its manifest declares the host.
  */
 export const desktopPackageOmissions = (
   plan: DesktopPackagePlan,
-  present: Readonly<{ git: boolean; gitResourceRoot: string }>,
+  present: Readonly<{ git: boolean; gitResourceRoot: string; storeGuard?: boolean; storeGuardRoot?: string }>,
 ): readonly string[] => [
   'GeoSpec native engine (geospec-engine): its npm package ships a native binding for darwin-arm64 only, ' +
     'so the geometry utility (AP242 measurement, native GeoSpec checks) cannot start in this package.',
@@ -103,7 +107,35 @@ export const desktopPackageOmissions = (
           ? `git payload: none at ${present.gitResourceRoot}; this package records with the machine's own git and git-lfs.`
           : "git payload: prepare-git builds git from kernel.org source, which is not how git ships on Windows; this package records with the machine's own git and git-lfs.",
       ]),
+  ...(!plan.storeGuard || present.storeGuard === true
+    ? []
+    : [
+        `store guard: none at ${present.storeGuardRoot ?? 'resources/store-guard'}; the Terminal opens each project's .git read-only.`,
+      ]),
 ];
+
+/**
+ * Why this package may not be assembled, when a Linux distribution archive would ship without the store guard.
+ *
+ * Without `tau-store-guard` the Linux Terminal falls back to a read-only `.git` (blueprint OD2), so a release that left
+ * it out would quietly take git writes away from every APT and AppImage install, which are both built from this
+ * archive (blueprint LP8). A development package (no `--archive`) still assembles and names the omission.
+ * @param plan - The selected package.
+ * @param archive - Whether a distribution archive is written.
+ * @param guard - Whether the staged guard is an executable file, and where it was looked for.
+ * @returns The refusal, or `undefined` when the package may be assembled.
+ */
+export const desktopStoreGuardRefusal = (
+  plan: DesktopPackagePlan,
+  archive: boolean,
+  guard: Readonly<{ executable: boolean; notice: boolean; storeGuardRoot: string }>,
+): string | undefined => {
+  if (!archive || !plan.storeGuard || (guard.executable && guard.notice)) {
+    return undefined;
+  }
+  const missing = [guard.executable ? [] : ['tau-store-guard'], guard.notice ? [] : ['NOTICE']].flat().join(' and ');
+  return `A ${plan.target} release package must ship the Terminal's store guard; ${missing} missing at ${guard.storeGuardRoot}. Run sandbox:build:store-guard with --resources first.`;
+};
 
 /**
  * Why this package may not be assembled, when a distribution archive would ship without the git payload.

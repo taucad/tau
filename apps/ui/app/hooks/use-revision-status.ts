@@ -10,10 +10,10 @@ import { revisionClients } from '#services/revision-client-registry.js';
  * the `isomorphic-git` port and the `.tau/runs` leases — lives in the worker.
  */
 
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { Topic } from '@taucad/events';
-import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { isDesktopTarget } from '@taucad/files-ui/filesystem/desktop-bridge';
 import type {
   GitRemoteCredential,
   PublishDraft,
@@ -26,7 +26,7 @@ import type {
   RevisionTag,
 } from '@taucad/revisions';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
-import type { EditorConflictOutcome } from '@taucad/revisions/revision-effects';
+import type { CheckoutCutsOutcome, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import type {
   RevisionToast,
   WorkerRevisionCommand,
@@ -38,19 +38,8 @@ import type {
 } from '#machines/file-manager.worker.revisions.js';
 import { isGithubRemoteUrl, tauRemoteUrl } from '@taucad/revisions';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
-import { useParams } from 'react-router';
-import {
-  getRevisionSessionUser,
-  revisionUserActor,
-  subscribeRevisionSessionUser,
-  useAnonymousRevisions,
-  useRevisionSalt,
-  useRevisionSessionUser,
-} from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
-import { deviceId } from '@taucad/ui-core/lib/device-id';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
@@ -61,7 +50,8 @@ import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { reportRevisionToast } from '#lib/revision-failure-reporting.js';
-import { holdTreeRefreshesWhileApplying } from '@taucad/ui-core/lib/tree-refresh-hold';
+import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
+import type { ReportingConsent } from '@taucad/telemetry/client';
 
 type ConnectionOperation = 'connect' | 'status' | 'open' | 'subscribe' | 'stream';
 
@@ -123,6 +113,12 @@ export const isRevisionGraph = (value: unknown): value is RevisionGraph =>
  * @param name - The branch being made.
  * @returns The branch and its checkout.
  */
+/* What a host's `saveRevision` answer says its cut came to (A7e); a host that answers nothing did not wait for it. */
+const saveOutcomeOf = (answer: unknown): CheckoutCutsOutcome => {
+  const outcome = isObject(answer) ? answer['outcome'] : undefined;
+  return outcome === 'recorded' || outcome === 'nothingToRecord' ? outcome : 'refused';
+};
+
 const branchCreatedOf = (answer: unknown, name: string): BranchCreated => {
   const { checkoutId, checkoutRoot } = (answer ?? {}) as { checkoutId?: unknown; checkoutRoot?: unknown };
   if (typeof checkoutId !== 'string' || typeof checkoutRoot !== 'string') {
@@ -451,7 +447,8 @@ export const createHostRevisionClient = (input: {
       return pulls !== false;
     },
     saveRevision: async (trigger) => {
-      await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+      const answer = await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+      return saveOutcomeOf(answer);
     },
     sessionChanged: async () => {
       await ask({ command: 'sessionChanged' });
@@ -1160,6 +1157,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
   let nextRequestId = 0;
   let connectionGeneration = 0;
   let channel: MessageChannel | undefined;
+  /** Stops telling the current port about consent changes (PR-7). */
+  let stopConsent: (() => void) | undefined;
   /* Frames posted before the route opens this client (D36). Connecting starts the
    * root and its opening fetch, so the connection waits for `open`, which the
    * lifecycle calls once the GitHub credential is minted and queued first. */
@@ -1226,6 +1225,14 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       command: 'remoteCredential',
       apiBaseUrl: requireClientEnvironmentUrl('TAU_API_URL'),
     } satisfies WorkerRevisionRequest);
+    /* PR-7 (AR-W6-02): the page's resolved consent, said on every new port and on every change, because the sync
+     * attempt reporter in the worker cannot resolve it. No page composition (SSR) says `unknown`, which sends nothing. */
+    const sayConsent = (consent: ReportingConsent): void => {
+      opened.port2.postMessage({ command: 'telemetryConsent', consent } satisfies WorkerRevisionRequest);
+    };
+    sayConsent(pageTelemetry()?.consent() ?? 'unknown');
+    stopConsent?.();
+    stopConsent = pageTelemetry()?.onConsentChange(sayConsent);
     channel = opened;
     return opened.port2;
   };
@@ -1356,7 +1363,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       return result.kind !== 'pulled' || result.pulls;
     },
     saveRevision: async (trigger) => {
-      await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+      const result = await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+      return result.kind === 'saved' ? result.outcome : 'refused';
     },
     sessionChanged: async () => {
       await ask({ command: 'sessionChanged' });
@@ -1401,6 +1409,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       const closing = channel;
       cancelPendingRequests();
       channel = undefined;
+      stopConsent?.();
+      stopConsent = undefined;
       connectionGeneration += 1;
       status = undefined;
       projectedChatIds.clear();
@@ -1440,6 +1450,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
         cancelPendingRequests();
         if (channel === closing) {
           channel = undefined;
+          stopConsent?.();
+          stopConsent = undefined;
           connectionGeneration += 1;
           status = undefined;
           projectedChatIds.clear();
@@ -1516,146 +1528,6 @@ export const useRevisionClient = (): RevisionClient | undefined => {
     () => (worker === undefined ? undefined : getRevisionClient({ projectId, worker })),
     [projectId, worker],
   );
-};
-
-/**
- * Own the live revision connection for this project.
- *
- * Mount exactly once in the retained project session. Other revision hooks are
- * passive consumers of {@link useRevisionClient}; they must not open, close or
- * register lifecycle work for the shared client.
- *
- * @returns The owned client, once the file-manager has a worker.
- * @public
- */
-export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
-  const { workspace } = useParams();
-  const sessionUser = useRevisionSessionUser();
-  const client = useRevisionClient();
-  const { projectId } = useProject();
-  const { fileManagerRef } = useFileManager();
-  const treeService = useSelector(fileManagerRef, (state) => state.context.treeService);
-  const treeRoot = useSelector(fileManagerRef, (state) => state.context.rootDirectory);
-  /* While an apply writes the tree's root, its file events would each re-list a directory the apply is still writing. */
-  useEffect(() => {
-    if (client === undefined || treeService === undefined) {
-      return;
-    }
-    return holdTreeRefreshesWhileApplying({ client, tree: treeService, root: treeRoot });
-  }, [client, treeService, treeRoot]);
-  /*
-   * A38's two-phase unload, through the one registry the document already has.
-   *
-   * `hidden` reaches this session stage only after the provider has awaited all
-   * producer flush acknowledgements. The checkout then takes the gated close
-   * cut and starts zero-debounce sync while the page can still work (W13, V18).
-   * The port stays open so the cut, mint, push and durable queue can settle.
-   *
-   * `pagehide` is synchronous and precomputed-only. It offers the serialized
-   * history-set POST prepared during `hidden`; it does not mint a revision or
-   * close the worker root, because release itself takes a fresh close cut.
-   */
-  useFlushOnClose(
-    async (phase) => {
-      if (client === undefined) {
-        return;
-      }
-      if (phase === 'hidden') {
-        /* Awaited (C16): posting and returning let `flushHidden` resolve in the
-         * same microtask, so `pagehide` offered the *previous* push's pack —
-         * or nothing. The far side bounds this at `syncQuiesceMilliseconds`. */
-        await client.saveRevision('close');
-        return;
-      }
-      /* Bounded at 64 KiB; refusal remains a durable *Not backed up* fact. */
-      client.send({ command: 'flushKeepalive' });
-    },
-    { stage: 'session' },
-  );
-  /*
-   * Who this document records as (S37, A26, EQ8).
-   *
-   * Sent on every change rather than captured at connect: signing in, signing
-   * out and turning anonymity on are all mid-session events, and what they
-   * change is the *next* revision. The anonymity decision is applied here,
-   * before anything is written, so no later change rewrites a recorded
-   * identity.
-   */
-  const anonymous = useAnonymousRevisions(workspace ?? '');
-  /* EQ10 (a): the pseudonym derives from the account's salt for this
-   * workspace, served by the API and never written to the tree; fetched on
-   * sign-in whatever the preference, so it is ready before anonymity is. */
-  const salt = useRevisionSalt({ workspace: workspace ?? '', userId: sessionUser?.id });
-  /*
-   * Which device this document is (W13, W17).
-   *
-   * Sent from the page because the id lives in `localStorage`, which the worker
-   * cannot read. Records name a random record device instead; this id decides
-   * whether chat refs are recorded at all — a worker never told writes none —
-   * and counts as own for a segment written before record devices existed.
-   */
-  useEffect(() => {
-    if (client === undefined) {
-      return;
-    }
-    client.send({ command: 'setDeviceId', deviceId: deviceId() });
-  }, [client]);
-  /*
-   * Open and close follow the project's client alone (audit R6).
-   *
-   * Who is signed in reaches the open client as an event: the session store's
-   * changes are relayed to `setUser`, which mints or withdraws the GitHub
-   * credential on the connection that is already up. A sign-in, a sign-out or
-   * a session refetch never closes the port or stops the root. A refetch or a
-   * new display name leaves D2's one-retry latch as it was; a real sign-in
-   * arms it once its own mint has answered. The open's own `setUser` runs first, so the credential
-   * frame is queued before the connection that starts the root (D36).
-   */
-  useEffect(() => {
-    if (client === undefined) {
-      return;
-    }
-    const closed = new AbortController();
-    const unsubscribeUser = subscribeRevisionSessionUser(() => {
-      // async-iife: bootstrap -- the credential reports through the frame it sends.
-      void client.setUser(getRevisionSessionUser());
-    });
-    // async-iife: bootstrap -- project cleanup retires the session-scoped credential request.
-    void (async (): Promise<void> => {
-      await client.setUser(getRevisionSessionUser());
-      if (!closed.signal.aborted) {
-        client.open();
-      }
-    })();
-    return () => {
-      closed.abort();
-      unsubscribeUser();
-      // async-iife: bootstrap -- a withdrawal sends its frame before it returns.
-      void client.setCredential({ kind: 'withdrawn', reason: 'Open this project in Tau to sync with GitHub.' });
-      client.close();
-    };
-  }, [client]);
-  useEffect(() => {
-    if (client === undefined) {
-      return;
-    }
-    const send = (): void => {
-      client.send({
-        command: 'setActor',
-        actor: revisionUserActor({
-          workspace: workspace ?? '',
-          user: sessionUser,
-          anonymous,
-          salt,
-          commitIdentity: githubProjectBinding.get(projectId)?.author,
-        }),
-      });
-    };
-    send();
-    /* Linking or unlinking GitHub changes who the next revision is authored as (D33). */
-    return githubProjectBinding.subscribe(send);
-  }, [client, projectId, workspace, sessionUser, anonymous, salt]);
-  return client;
 };
 
 /**
@@ -1972,7 +1844,9 @@ export const useRevisionCommands = (): RevisionCommands => {
           expiresAt: token.expiresAt,
         });
       },
-      saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => client?.saveRevision(trigger),
+      saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => {
+        await client?.saveRevision(trigger);
+      },
       tag: async (input) => client?.tag(input),
       publishProject: (tag?: string, revisionId?: string) => {
         /* The origin rides the command itself: it is how the worker names this

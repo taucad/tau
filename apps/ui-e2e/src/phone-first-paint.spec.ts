@@ -49,7 +49,8 @@ const recordLayout = (): void => {
     if (document.querySelector('[data-project-workspace]') !== null) {
       record.desktopShellMounted = true;
     }
-    if (document.querySelector('[data-testid="workspace-skeleton"]') !== null) {
+    /* From A15b the gates draw nothing over the persistent workspace frame; each marks the route busy instead. */
+    if (document.querySelector('[data-testid="workspace-opening"]') !== null) {
       record.skeletonSeen = true;
     }
   };
@@ -100,7 +101,7 @@ const waitForPhoneLayout = async (): Promise<void> => {
       const { __TAU_LAYOUT_RECORD__: record } = globalThis as typeof globalThis & {
         __TAU_LAYOUT_RECORD__: LayoutRecord;
       };
-      return record.mobileChunks.length > 0 && document.querySelector('[data-testid="workspace-skeleton"]') === null;
+      return record.mobileChunks.length > 0 && document.querySelector('[data-testid="workspace-opening"]') === null;
     },
     undefined,
     { timeout: 120_000 },
@@ -138,13 +139,20 @@ test('a phone never mounts or requests the desktop workbench on SSR, hydration o
   expect(desktop.workbenchDockviewChunks.length).toBeGreaterThan(0);
   expect(desktop.mobileChunks).toEqual([]);
 
-  /* The server render of a project URL is the skeleton, never a layout chosen without a viewport. */
+  /* The server render of a project URL is the workspace frame, never a layout chosen without a viewport. */
   const serverHtml = await target.evaluate(async (url) => {
     const response = await fetch(url);
     return response.text();
   }, projectUrl);
-  expect(serverHtml).toContain('data-testid="workspace-skeleton"');
-  expect(serverHtml).not.toContain('data-project-workspace');
+  expect(serverHtml).toContain('data-slot="workspace-frame"');
+  expect(serverHtml).toContain('data-testid="workspace-opening"');
+  /* No element carries the attribute. The frame's own class names the selector (`[data-project-workspace]_*`), so a
+     substring check would match the frame, not a workspace (programme control, 2026-11-16T14:02Z). */
+  const serverWorkspaces = await target.evaluate(
+    (html) => new DOMParser().parseFromString(html, 'text/html').querySelectorAll('[data-project-workspace]').length,
+    serverHtml,
+  );
+  expect(serverWorkspaces, 'the served HTML renders a project workspace element').toBe(0);
 
   /* Phone, SSR + hydration. */
   await target.setViewport({ width: 390, height: 844 });

@@ -75,7 +75,11 @@ test('defaults actions to arrows and persists the pointer-cursor opt-in', async 
   expect(await computedCursor(linkProbe)).toBe('pointer');
   const cookies = await target.cookies();
   expect(cookies.some(({ name }) => name === 'tau-pointer-cursors')).toBe(false);
-  expect(await target.evaluate(() => localStorage.getItem('tau-pointer-cursors'))).toBe('true');
+  expect(
+    await target.evaluate(
+      () => JSON.parse(localStorage.getItem('tau-client-facts') ?? '{}') as { pointerCursors?: boolean },
+    ),
+  ).toMatchObject({ pointerCursors: true });
 
   await target.reload();
   await target.expectAttribute(pointerSwitch, 'data-state', 'checked');
@@ -85,7 +89,11 @@ test('defaults actions to arrows and persists the pointer-cursor opt-in', async 
   await target.click(pointerSwitch);
   await expect.poll(async () => target.getAttribute(html, 'data-pointer-cursors')).toBeNull();
   await expect.poll(async () => computedCursor(themeButton)).toBe('default');
-  expect(await target.evaluate(() => localStorage.getItem('tau-pointer-cursors'))).toBe('false');
+  expect(
+    await target.evaluate(
+      () => JSON.parse(localStorage.getItem('tau-client-facts') ?? '{}') as { pointerCursors?: boolean },
+    ),
+  ).toMatchObject({ pointerCursors: false });
 
   await target.evaluateLocator(pointerSwitch, (element) => {
     element.setAttribute('disabled', '');
@@ -103,7 +111,16 @@ test('defaults actions to arrows and persists the pointer-cursor opt-in', async 
   ).toBe('col-resize');
 
   await target.navigate('/__e2e/project-navigation');
+  // The seeded project's name shows in the sidebar before the fixture navigates, so wait for the project route itself,
+  // then open the sidebar its links live in (the project shell keeps the person's sidebar state).
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
   await target.expectVisible(selectors.getByText('Project Navigation A', { exact: true }), 60_000);
+  const sidebarTrigger = selectors.getByCss('[data-slot="sidebar-trigger"]').first();
+  await target.expectVisible(sidebarTrigger);
+  if ((await target.getAttribute(sidebarTrigger, 'data-open')) !== 'true') {
+    await target.click(sidebarTrigger);
+  }
+  await target.expectAttribute(sidebarTrigger, 'data-open', 'true');
   expect(await visibleNonLinkPointers()).toEqual([]);
   const sidebarLinkCursors = await visibleSidebarLinkCursors();
   expect(sidebarLinkCursors.length).toBeGreaterThan(0);

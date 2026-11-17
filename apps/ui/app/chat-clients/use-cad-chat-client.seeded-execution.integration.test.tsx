@@ -11,7 +11,8 @@
  * `ChatSessionStore` over a chat row that carries both an `activeExecution`
  * and a pending startup request, and asserts on the one durable host command.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { render, waitFor } from '@testing-library/react';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js';
@@ -27,6 +28,10 @@ import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
 import { writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
+import { projectSessionsStandIn } from '#services/project-sessions.fixture.js';
+
+/** The live project sessions every store in this file follows, as the runtime hands it the registry's (A7c). */
+const liveSessions = projectSessionsStandIn();
 
 /** The Tau model the cookie holds — what the un-hydrated fallback rebuilds from. */
 const cookieModelId = 'openai-gpt-5.6-luna';
@@ -155,8 +160,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
  * `use-cad-chat-client.test.tsx`; this scope funds every turn. */
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
 vi.mock('#hooks/use-draft-image-error-toast.js', () => ({ useDraftImageErrorToast: () => undefined }));
-/* ChatTurnHost reads the usage-metrics preference through react-query; this scope has no query client. */
-vi.mock('#hooks/use-privacy-preferences.js', () => ({ usePrivacyPreferences: () => ({ preferences: undefined }) }));
+/* ChatTurnHost reads the telemetry consent through the session and react-query; this scope has neither. */
+vi.mock('#hooks/use-telemetry-consent.js', () => ({ useTelemetryConsent: () => ({ consent: 'unknown' }) }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   readRootedBridgeCapabilities: async () => ({ writable: true, durability: 'exclusive-append' }),
   waitForRootedBridgeOpener: async () => undefined,
@@ -209,7 +214,7 @@ const buildSeededRow = (activeExecution: CadAgentExecution | undefined): ChatEnt
 /** Mount the real provider + client over a row seeded with `activeExecution`. */
 const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined): Promise<HostCommand> => {
   const row = buildSeededRow(activeExecution);
-  const store = new ChatSessionStore();
+  const store = new ChatSessionStore({ projectSessions: liveSessions });
   const mutex = new KeyedMutex<string>();
   harness.store = store;
   store.setDependencies({
@@ -255,8 +260,7 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution | undefined
   const projectSession = createActor(projectSessionMachine, { input: { projectId: row.resourceId } });
   projectSession.start();
   harness.projectSession = projectSession;
-  store.setFocusedProject(row.resourceId);
-  store.setProjectSession(row.resourceId, projectSession);
+  liveSessions.set(row.resourceId, projectSession);
 
   function Client(): React.JSX.Element {
     useCadChatClient();
@@ -285,6 +289,12 @@ beforeEach(() => {
   harness.files.clear();
   resetChatTurnServices();
   vi.clearAllMocks();
+});
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
 });
 
 describe('seeded first turn execution', () => {

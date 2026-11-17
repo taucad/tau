@@ -16,7 +16,8 @@ export type ToolSuggestion = Readonly<{ preset: MousePresetId; gizmo: GizmoStyle
 /**
  * The suggestion for each tool answer: the preset and gizmo it starts from, and the products copy may name. The
  * "NX or Creo" answer names Creo alone: no Siemens page documents NX's mouse mapping. "KiCad or another ECAD tool"
- * names none, because Altium, which it also covers, orbits differently; "A slicer" names no product.
+ * names none, because Altium, which it also covers, orbits differently; "A slicer" names no product. Tinkercad's
+ * bindings are confirmed only by a secondary source and Unreal's Alt table not at all, so neither is named.
  *
  * @public
  */
@@ -26,13 +27,13 @@ export const toolSuggestions: Readonly<Record<ToolId, ToolSuggestion>> = Object.
   openscad: { preset: 'tau', gizmo: 'cube', names: ['OpenSCAD'] },
   slicer: { preset: 'tau', gizmo: 'cube', names: [] },
   kicad: { preset: 'tau', gizmo: 'cube', names: [] },
-  tinkercad: { preset: 'right-orbit', gizmo: 'cube', names: ['Tinkercad'] },
+  tinkercad: { preset: 'right-orbit', gizmo: 'cube', names: [] },
   onshape: { preset: 'right-orbit', gizmo: 'cube', names: ['Onshape'] },
   solidworks: { preset: 'middle-ctrl', gizmo: 'cube', names: ['SolidWorks'] },
   blender: { preset: 'middle-shift', gizmo: 'axis-balls', names: ['Blender'] },
   'nx-creo': { preset: 'middle-shift', gizmo: 'cube', names: ['Creo'] },
   fusion: { preset: 'shift-middle', gizmo: 'cube', names: ['Fusion', 'Inventor'] },
-  'game-engine': { preset: 'alt', gizmo: 'axis-balls', names: ['Maya', 'Unity', 'Unreal'] },
+  'game-engine': { preset: 'alt', gizmo: 'axis-balls', names: ['Maya', 'Unity'] },
 });
 
 /**

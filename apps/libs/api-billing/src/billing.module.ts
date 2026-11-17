@@ -14,7 +14,7 @@ import { BillingPaymentsService } from '#billing-payments.service.js';
 import { BillingRecoveryNoticeEmailTransport } from '#billing-recovery-notice.transport.js';
 import { createBillingStripeClient } from '#billing-stripe.js';
 import { resolveBillingCollection } from '#billing-collection.js';
-import { EmailModule, EmailService } from '@taucad/api-email';
+import { EmailDeliverabilityService, EmailModule, EmailService } from '@taucad/api-email';
 import { invocationEvidenceRecorderToken, LlmGatewayAuthGuard, ModelModule } from '@taucad/api-llm-gateway';
 import type { InvocationEvidenceRecorder } from '@taucad/api-llm-gateway';
 import type { ObservedSettlement } from '#observed-settlement.js';
@@ -247,7 +247,10 @@ const providerUpstreamFetch =
           policy,
           ledger,
           cash,
-          new BillingRecoveryNoticeEmailTransport(database, email, config.get('TAU_FRONTEND_URL', { infer: true })),
+          new BillingRecoveryNoticeEmailTransport(database, email, {
+            frontendURL: config.get('TAU_FRONTEND_URL', { infer: true }),
+            deliverability: new EmailDeliverabilityService(database),
+          }),
         );
       },
     },

@@ -12,7 +12,6 @@ const display = {
   grid: true,
   axes: true,
   matcap: false,
-  postProcessing: false,
 };
 const viewOf = (overrides: Partial<CaptureWorkbenchView> = {}): CaptureWorkbenchView => ({
   id: 'front-cut',

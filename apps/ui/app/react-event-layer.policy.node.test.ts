@@ -7,7 +7,8 @@
  * its line with it. The counter is `@taucad/oxlint/react-event-layer`.
  *
  * The graphics-scope rows the inventory names are held at zero since G12 (charter D17, I10): the record stores, the
- * project machine, the view settings host and the layout controller. The entries and workbench record hosts keep
+ * project machine and the layout controller; the view settings host was deleted in A7c, when the project runtime took
+ * its flush. The entries and workbench record hosts keep
  * their ceiling until the layout and navigation charter (R12), and the rest of the app keeps its ratchet.
  *
  * The three instruments, the section-view e2e bridge, the Onshape render profile route and the chat debug probes,
@@ -32,7 +33,6 @@ describe('React event layer ceiling', () => {
           new URL('components/geometry/debug/section-view-test-bridge.tsx', import.meta.url),
           new URL('machines/project.machine.ts', import.meta.url),
           new URL('routes/[__e2e].onshape-render-profile/route.tsx', import.meta.url),
-          new URL('routes/w.$workspace.$project/view-settings-sync-host.tsx', import.meta.url),
           new URL('routes/w.$workspace.$project/workbench-layout-controller.ts', import.meta.url),
           new URL('workbench-records/', import.meta.url),
         ],

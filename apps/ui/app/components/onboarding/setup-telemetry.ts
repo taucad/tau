@@ -4,14 +4,7 @@
  * and the desktop opt-out apply. No property carries free text: goals and tool are closed ids.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  DeviceRecord,
-  GizmoStyleId,
-  MousePresetId,
-  PersonProfile,
-  SetupStatus,
-  ViewerPreferences,
-} from '@taucad/preferences';
+import type { GizmoStyleId, MousePresetId, PersonProfile, SetupStatus, ViewerPreferences } from '@taucad/preferences';
 import { mergeOnboarding, suggestedGizmo, suggestedPreset } from '@taucad/preferences';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
@@ -21,8 +14,8 @@ import type { SetupEntry } from '#telemetry/onboarding-telemetry.js';
 import type { SetupStepId } from '#components/onboarding/setup-copy.js';
 import { isStepAnswered } from '#components/onboarding/setup-model.js';
 
-/** The person properties setup sets, by name in analytics. The viewer's three (mouse_preset, gizmo_style,
- * input_device) go through Settings → Viewer's `setViewerPersonProperties`. */
+/** The person properties setup sets, by name in analytics. The viewer's two (mouse_preset, gizmo_style) go
+ * through Settings → Viewer's `setViewerPersonProperties`. */
 export const setupPersonPropertyNames = {
   goals: 'goals',
   tool: 'tool',
@@ -42,7 +35,7 @@ const storedStatusAfter = (next: SetupStatus): SetupStatus =>
 /* eslint-disable @typescript-eslint/naming-convention -- event properties are analytics wire names. */
 
 /** What one setup record looks like to its events. */
-type SetupRecord = Readonly<{ profile: PersonProfile; viewer: ViewerPreferences; device: DeviceRecord }>;
+type SetupRecord = Readonly<{ profile: PersonProfile; viewer: ViewerPreferences }>;
 
 /** The emitters setup calls. */
 export type SetupTelemetry = Readonly<{
@@ -52,7 +45,6 @@ export type SetupTelemetry = Readonly<{
   presetSelected: (preset: MousePresetId, profile: PersonProfile) => void;
   gizmoSelected: (style: GizmoStyleId, profile: PersonProfile) => void;
   gizmoHidden: () => void;
-  inputDeviceChanged: (inputDevice: 'mouse' | 'trackpad') => void;
   profileChanged: (profile: PersonProfile) => void;
 }>;
 
@@ -116,9 +108,6 @@ export const useSetupTelemetry = (entry: SetupEntry): SetupTelemetry => {
       },
       gizmoHidden: () => {
         telemetry.viewerDefaultChanged({ level: 'person', field: 'display.gizmo' });
-      },
-      inputDeviceChanged: (inputDevice) => {
-        setViewerPersonProperties(analytics, { inputDevice });
       },
       profileChanged: (profile) => {
         setPerson({

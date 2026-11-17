@@ -3,13 +3,13 @@ import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
 
-import { Button } from '@taucad/ui/components/button';
 import { FieldError } from '@taucad/ui/components/field';
 import { Input } from '@taucad/ui/components/input';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { ChangeAvatar } from '#components/auth/settings/account/change-avatar.js';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { Button } from '@taucad/ui/components/button';
 
 export type UserProfileProps = {
   className?: string;
@@ -78,7 +78,7 @@ export function UserProfile({ className }: UserProfileProps): React.JSX.Element 
                   <Input className='invisible w-40 sm:w-56' />
                 </Skeleton>
               )}
-              <Button type='submit' size='sm' variant='outline' disabled={isPending || !session}>
+              <Button type='submit' variant='outline' disabled={isPending || !session}>
                 {isPending && <Spinner />}
                 Save
               </Button>

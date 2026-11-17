@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { mock } from 'vitest-mock-extended';
-import type { ProjectFileSystemConfig, Workspace, WorkspaceConnection } from '#filesystem/handle-store.js';
-import type { ConnectedWorkspace } from '#hooks/use-project-manager.js';
+import type { ProjectFileSystemConfig, Workspace, WorkspaceConnection } from '@taucad/files-ui/filesystem/handle-store';
+import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
 
-vi.mock('#filesystem/use-persistent-storage-status.js', () => ({ usePersistentStorageStatus: () => 'best-effort' }));
+vi.mock('@taucad/files-ui/filesystem/use-persistent-storage-status', () => ({
+  usePersistentStorageStatus: () => 'best-effort',
+}));
 
 type ToastSuccessOptions = {
   readonly action: { readonly label: string; readonly onClick: () => void | Promise<void> };
@@ -79,7 +81,7 @@ vi.mock('#utils/workspace-telemetry.utils.js', () => ({
   }),
 }));
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: true,
   directoryPicker: () => ({
     available: true,
@@ -98,7 +100,7 @@ vi.mock('#constants/browser.constants.js', () => ({
   }),
 }));
 
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   refreshPersistentStorageStatus: vi.fn(async () => undefined),
   checkHandlePermission: mockCheckHandlePermission,
   createWorkspace: mockCreateWorkspace,

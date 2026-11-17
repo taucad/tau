@@ -10,7 +10,7 @@ import {
   parameterStageForSettlement,
   resolveScopedProjectManifest,
   shouldDispatchParameterSettlement,
-} from '#hooks/use-project.js';
+} from '#runtime/project-runtime.helpers.js';
 
 const project = (name: string): Project =>
   createProjectFixture({

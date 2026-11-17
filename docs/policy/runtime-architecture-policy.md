@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-11-06'
+updated: '2026-11-16'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -21,6 +21,7 @@ related:
   - docs/research/language-kernel-selection-architecture.md
   - docs/research/native-language-kernel-process-blueprint.md
   - docs/research/kernel-realm-shared-state-blueprint.md
+  - docs/research/composer-image-format-support.md
 ---
 
 # Runtime Architecture Policy
@@ -463,7 +464,9 @@ Each kernel declares `views` and `exports` as keyed data and implements the same
 
 ### `defineTranscoder`
 
-Transcoders convert framework-produced artifacts after a source route materializes. They do not select or initialize kernels, and they consume artifact `files` rather than unresolved model `source` or an evaluation `entryPath`. Each `TranscoderEdge` declares one conversion capability through required `from`, `to`, and `fidelity` fields, with optional edge-specific options and content declarations; runtime route selection derives supported conversions from those edges.
+Transcoders convert artifact files, whether the framework produced them after a source route materializes or a caller owns them and passes them through `client.transcode`. They do not select or initialize kernels, and they consume artifact `files` rather than unresolved model `source` or an evaluation `entryPath`. Each `TranscoderEdge` declares one conversion capability through required `from` and `to` fields, with optional edge-specific options and content declarations; runtime route selection derives supported conversions from those edges. An edge declares no fidelity: the runtime derives each transcoded route's `fidelity` as `'brep'` only when both `from` and `to` are B-rep formats under `lookupExportFidelity`, and `'mesh'` otherwise, because exactness cannot increase along a route.
+
+**Why**: a declared value was redundant with the format names, meaningless for edges that carry no geometry, unread by `client.transcode`, and could misrank `bestRouteFor` when stated falsely.
 
 Image routes are the canonical example: a kernel exports glTF, then the selected image transcoder converts that artifact to PNG, JPEG, or WebP. Heavy transcoder backends such as Assimp, browser canvas renderers, native encoders, or WASM codecs belong to plugin packages. Load them inside the capability's `initialize(options, runtime)` and carry them in the returned context — the framework guarantees once-per-worker initialization — never per request, and never through module-level promise caches inside capability code (those are reserved for code outside a capability lifecycle).
 
@@ -524,7 +527,8 @@ Runtime package exports must not include legacy preset or concrete-capability ba
 
 ```text
 @taucad/assimp        → named plugin export plus assimpKernel and assimpTranscoder
-@taucad/image         → named plugin export plus imageTranscoder
+@taucad/image         → named plugin export plus renderTranscoder, svgTranscoder and rasterTranscoder; `/raster` exports encodeRasterImage
+@taucad/heif          → opt-in heifTranscoder (HEIC/HEIF → JPEG, PNG, WebP) over the LGPL-3.0 libheif-js dependency; encodes through `@taucad/image/raster`
 @taucad/middleware    → named plugin export plus individual middleware factories
 @taucad/opencascade   → browser/WASM-safe OpenCascade plugin toolkit
 @taucad/build123d     → Node-hosted Build123d kernel on python-kernel-core; `/native` deployment

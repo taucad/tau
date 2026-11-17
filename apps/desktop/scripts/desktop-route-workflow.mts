@@ -5,20 +5,49 @@ import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { desktopReleaseIdentity, parseDesktopArtifactManifest } from '#shared/desktop-release.js';
+import type { DesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Adjacent release workflow helpers share one explicit publication boundary. */
 import {
   desktopCandidateRoutes,
   desktopCatalogLanes,
   desktopLaneKeys,
+  desktopLaneManifestKey,
   desktopManifestDigest,
   desktopPublicationScopes,
 } from './desktop-route-publication.mjs';
+import type { DesktopPublicationScope } from './desktop-route-publication.mjs';
 import {
   requireDesktopInstallerPublicationEnabled,
   requireDesktopPublicationAuthority,
 } from './desktop-publication-authority.mjs';
 import { publishDesktopRoutes } from './publish-desktop-routes.mjs';
 /* oxlint-enable no-restricted-imports */
+/**
+ * Read one completed lane's immutable manifest. Each lane's manifest has its own key; a platform lane promoted before
+ * lane keys existed has it only at the shared key. Either is admitted only when it is exactly the manifest the lane's
+ * completion receipt recorded, so the fallback cannot substitute another platform's candidate.
+ */
+const readCompletedManifest = async (
+  download: (path: string) => Promise<string>,
+  completed: { tag: string; lane: DesktopPublicationScope; manifestSha256: string },
+): Promise<{ text: string; manifest: DesktopArtifactManifest }> => {
+  const { tag, lane, manifestSha256 } = completed;
+  const keys = [desktopLaneManifestKey(tag, lane), ...(lane === 'all' ? [] : [desktopLaneManifestKey(tag, 'all')])];
+  for (const key of keys) {
+    // oxlint-disable-next-line no-await-in-loop -- The lane key is preferred over the shared key.
+    const text = await download(
+      key
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/'),
+    ).catch(() => undefined);
+    const manifest = text === undefined ? undefined : parseDesktopArtifactManifest(JSON.parse(text));
+    if (text !== undefined && manifest && desktopManifestDigest(manifest) === manifestSha256 && manifest.tag === tag) {
+      return { text, manifest };
+    }
+  }
+  throw new Error('Completed manifest differs');
+};
 const main = async (): Promise<void> => {
   const channel = z.enum(['staging', 'production']).parse(process.env['CHANNEL']);
   const operation =
@@ -75,11 +104,11 @@ const main = async (): Promise<void> => {
         throw new Error('Completed channel differs');
       }
       // oxlint-disable-next-line no-await-in-loop -- Lanes are renewed in a fixed order.
-      const text = await download(`releases/${encodeURIComponent(tag)}/desktop-artifacts.json`);
-      const manifest = parseDesktopArtifactManifest(JSON.parse(text));
-      if (desktopManifestDigest(manifest) !== completed.manifestSha256 || manifest.tag !== tag) {
-        throw new Error('Completed manifest differs');
-      }
+      const { text, manifest } = await readCompletedManifest(download, {
+        tag,
+        lane,
+        manifestSha256: completed.manifestSha256,
+      });
       // oxlint-disable-next-line no-await-in-loop -- Lanes are renewed in a fixed order.
       await writeFile(resolve(directory, 'desktop-artifacts.json'), text);
       for (const route of ['windows-nsis', 'linux-appimage']) {

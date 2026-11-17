@@ -20,14 +20,16 @@ const expectedSuggestions: ReadonlyArray<readonly [ToolId, MousePresetId, GizmoS
   ['slicer', 'tau', 'cube', []],
   // KiCad is documented and matches P1, but the answer also covers Altium, which does not.
   ['kicad', 'tau', 'cube', []],
-  ['tinkercad', 'right-orbit', 'cube', ['Tinkercad']],
+  // Tinkercad's bindings are confirmed only by a secondary source, so the answer names no product.
+  ['tinkercad', 'right-orbit', 'cube', []],
   ['onshape', 'right-orbit', 'cube', ['Onshape']],
   ['solidworks', 'middle-ctrl', 'cube', ['SolidWorks']],
   ['blender', 'middle-shift', 'axis-balls', ['Blender']],
   // No Siemens page documents NX's mapping, so the shared answer names Creo alone.
   ['nx-creo', 'middle-shift', 'cube', ['Creo']],
   ['fusion', 'shift-middle', 'cube', ['Fusion', 'Inventor']],
-  ['game-engine', 'alt', 'axis-balls', ['Maya', 'Unity', 'Unreal']],
+  // Unreal's Alt table is not verified, so the shared answer names Maya and Unity alone.
+  ['game-engine', 'alt', 'axis-balls', ['Maya', 'Unity']],
 ];
 
 describe('the suggestion table', () => {
@@ -72,10 +74,10 @@ describe('effective preset and gizmo style', () => {
 describe('familiarProducts', () => {
   it('lists, per preset, the products its answers may name (camera research R13)', () => {
     expect(familiarProducts('tau')).toEqual(['OpenSCAD']);
-    expect(familiarProducts('right-orbit')).toEqual(['Tinkercad', 'Onshape']);
+    expect(familiarProducts('right-orbit')).toEqual(['Onshape']);
     expect(familiarProducts('middle-ctrl')).toEqual(['SolidWorks']);
     expect(familiarProducts('middle-shift')).toEqual(['Blender', 'Creo']);
     expect(familiarProducts('shift-middle')).toEqual(['Fusion', 'Inventor']);
-    expect(familiarProducts('alt')).toEqual(['Maya', 'Unity', 'Unreal']);
+    expect(familiarProducts('alt')).toEqual(['Maya', 'Unity']);
   });
 });

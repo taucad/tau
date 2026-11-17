@@ -4,7 +4,8 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '@taucad/api-database/schema';
-import { billingRecoveryNotice, user } from '@taucad/api-database/schema';
+import { billingRecoveryNotice, emailAddressState, user } from '@taucad/api-database/schema';
+import { EmailDeliverabilityService } from '@taucad/api-email';
 import { BillingCashService } from '#billing-cash.service.js';
 import { BillingPaymentsService, recoveryNoticeAttemptLimit } from '#billing-payments.service.js';
 import { BillingPolicyService } from '#billing-policy.service.js';
@@ -67,7 +68,13 @@ const payments = new BillingPaymentsService(
     stripeAccountId: 'acct_notice_native',
     livemode: false,
   }),
-  new BillingRecoveryNoticeEmailTransport({ database: workerDatabase }, email, 'https://tau.example'),
+  new BillingRecoveryNoticeEmailTransport({ database: workerDatabase }, email, {
+    frontendURL: 'https://tau.example',
+    // The worker reads the address-state mirror under its own role, through the column grant.
+    deliverability: new EmailDeliverabilityService({
+      database: workerDatabase,
+    }),
+  }),
 );
 
 const seedOwner = async (): Promise<{ readonly accountId: string; readonly email: string }> => {
@@ -205,5 +212,44 @@ describe('billing recovery notices from the operations worker', { concurrent: fa
     await payments.deliverRecoveryNotices({ environment: 'development', limit: 100 });
 
     expect(sends.filter((sent) => sent.email === owner.email)).toHaveLength(1);
+  });
+
+  // T9 (email bounce blueprint R10, ruling E1): park at once, never mark delivered, name the account.
+  it('should park a notice for an owner whose address bounced without sending or marking it delivered', async () => {
+    const owner = await seedOwner();
+    await database.insert(emailAddressState).values({
+      address: owner.email.toLowerCase(),
+      state: 'bounced',
+      originKind: 'verify-email',
+      originEvent: `msg_${randomUUID()}`,
+      since: new Date(),
+    });
+    const [id] = await queueNotices(owner.accountId, ['renewal_failed']);
+    if (id === undefined) {
+      throw new Error('Notice fixture missing');
+    }
+
+    const report = await payments.deliverRecoveryNotices({
+      environment: 'development',
+      limit: 100,
+    });
+
+    expect(report.undeliverable).toContainEqual({
+      notice: id,
+      accountId: owner.accountId,
+    });
+    expect(report.processed).not.toContain(id);
+    expect(report.failed).not.toContain(id);
+    const [row] = await noticeRows([id]);
+    expect(row).toMatchObject({
+      state: 'pending',
+      attemptCount: 1,
+      errorCode: 'owner_undeliverable',
+      leaseUntil: null,
+      deliveredAt: null,
+      deliveryReceipt: null,
+      nextAttemptAt: new Date('9999-12-31T00:00:00Z'),
+    });
+    expect(sends.filter((sent) => sent.email === owner.email)).toHaveLength(0);
   });
 });

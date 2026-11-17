@@ -43,7 +43,7 @@ vi.mock('#environment.config.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   requireClientEnvironmentUrl: () => 'https://api.test',
 }));
-vi.mock('#components/code/diff-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
   DiffViewer: ({
     originalContent,
     modifiedContent,
@@ -393,6 +393,27 @@ describe('RevisionRow', () => {
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('diff')).toHaveTextContent('a|b');
   });
+
+  /* A comparison that has not arrived draws two skeleton lines in its row's frame. */
+  it('draws skeleton lines while a comparison loads', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.comparisonRead = async () => Promise.withResolvers<never>().promise;
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+
+    const frame = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>('[aria-label="Comparison for bracket.scad"]');
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    expect(frame).toHaveAttribute('aria-busy', 'true');
+    expect(within(frame).getByTestId('comparison-skeleton')).toBeInTheDocument();
+    expect(frame.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(2);
+  });
+
+  /* Timing ladder: a shown indicator stays 500 ms. A comparison revealed at 1,000 ms that lands at 1,050 ms renders at
+     once, and its indicator finishes its time in the same slot until 1,500 ms. */
 
   it('restores an entry the files are not at, naming it in the button’s accessible name', async () => {
     const user = userEvent.setup();

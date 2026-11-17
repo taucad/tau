@@ -4,7 +4,7 @@ import {
   deleteProjectFileSystemConfig,
   getProjectRootConfigs,
   setProjectFileSystemConfig,
-} from '#filesystem/handle-store.js';
+} from '@taucad/files-ui/filesystem/handle-store';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import { createRuntimeClient } from '@taucad/runtime';

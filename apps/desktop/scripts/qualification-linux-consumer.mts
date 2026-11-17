@@ -91,6 +91,12 @@ const consumerResidue = async (home: string): Promise<string[]> => {
       found.push(join(home, '.config', name));
     }
   }
+  // The production dependency store (the per-user data root); staging keeps its store inside the profile above.
+  for (const name of await list(join(home, '.local/share'))) {
+    if (name === 'tau') {
+      found.push(join(home, '.local/share', name));
+    }
+  }
   for (const name of await list(join(home, '.local/share/applications'))) {
     if (/tau/iu.test(name)) {
       found.push(join(home, '.local/share/applications', name));

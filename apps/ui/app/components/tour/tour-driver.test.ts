@@ -210,6 +210,23 @@ describe('the tour driver', () => {
     stop();
   });
 
+  it('closes a replay from its own tip without starting another', () => {
+    const { tour, host, stop } = drive({ stored: { seen: ['ask'] }, wanted: true, paused: false });
+
+    tourSession.requestReplay();
+    tour.send({ type: 'next' });
+    tour.send({ type: 'replayClosed' });
+
+    expect(tourSession.read().isReplay).toBe(false);
+    expect(host.telemetry.tourStarted).toHaveBeenCalledTimes(1);
+    expect(host.telemetry.tourStarted).toHaveBeenCalledWith({ mode: 'replay' });
+    expect(host.telemetry.tourDismissed).toHaveBeenCalledTimes(1);
+    expect(host.telemetry.tourDismissed).toHaveBeenCalledWith({ mode: 'replay', step: 'look' });
+    expect(selectTourTip(tour.getSnapshot())?.mode).not.toBe('replay');
+    expect(tourSession.read().announcement).toBe('Tour closed. Take it any time from Help.');
+    stop();
+  });
+
   it('ends the session’s replay when the replay steps past its last tip', () => {
     const { tour, host, stop } = drive({
       stored: { seen: ['ask', 'look', 'adjust', 'verify', 'build'], ended: 'completed' },

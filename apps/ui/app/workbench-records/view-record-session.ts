@@ -12,7 +12,7 @@
  * - framing's entry and state become `framingChanged`;
  * - graphics' pinned measurements become `ownersChanged`, with the changed fields only;
  * - a change of the levels above the view (the person's defaults or this device's exceptions) becomes `levelsChanged`,
- *   so the ten inheritable leaves are seeded from their new resolution (onboarding blueprint, Finding 6);
+ *   so the nine inheritable leaves are seeded from their new resolution (onboarding blueprint, Finding 6);
  * - graphics' section quiet gate becomes `sectionEdited` and `sectionSettled`;
  * - the store's publications become `recordPublished`, with their origin and the patch an own write carried.
  *
@@ -33,6 +33,7 @@ import type { PersistedSectionView, PinnedMeasurement } from '@taucad/viewer/gra
 import type { GraphicsContext, graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { digestBytes } from '@taucad/ui-core/utils/crypto.utils';
 import type { ActorOptions, ActorRefFrom, AnyActorLogic, Subscription } from 'xstate';
+import { followOwedWrite } from '#workbench-records/owed-writes.js';
 import { confirmFlush } from '#workbench-records/record-health.js';
 import type { RecordHealth } from '#workbench-records/record-health.js';
 import { publishRecordIssue, recordIssueState } from '#workbench-records/record-issues.js';
@@ -204,7 +205,7 @@ export const sectionOf = (context: GraphicsContext): PersistedSectionView => ({
 });
 
 /**
- * The graphics-held owner values a view record keeps. The ten inheritable leaves are not among them: view commands
+ * The graphics-held owner values a view record keeps. The nine inheritable leaves are not among them: view commands
  * write those, and graphics only shows their resolution.
  */
 export const graphicsOwnersOf = (context: GraphicsContext): Omit<ViewOwners, 'camera'> => ({
@@ -484,8 +485,12 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
 
   // Graphics' pinned measurements and its section quiet gate.
   let owners = graphicsOwnersOf(selectGraphicsContext(graphics));
+  /* A7c (D26 as amended): a section inside the gate is the person's latest and not yet written, so the page owes it. */
+  const sectionOwes = followOwedWrite();
+  sectionOwes(selectSectionEditing(graphics));
   subscriptions.push(
     graphics.subscribe(({ context }) => {
+      sectionOwes(selectSectionEditing(graphics));
       const next = graphicsOwnersOf(context);
       const changed = changedOwners(owners, next);
       owners = next;
@@ -557,6 +562,7 @@ export function startViewRecordSession(input: ViewRecordSessionInput): () => voi
 
   return () => {
     settleEditedSection();
+    sectionOwes(false);
     stopped = true;
     for (const subscription of subscriptions) {
       if (typeof subscription === 'function') {

@@ -63,12 +63,38 @@ describe('prepareSectionWrite', () => {
   });
 
   it('starts from the empty section when nothing is stored', () => {
-    const write = prepareSectionWrite(deviceSection, undefined, { inputDevice: 'trackpad' });
+    const write = prepareSectionWrite(deviceSection, undefined, { tourPaused: true });
     expect(write).toEqual({
       status: 'write',
-      value: { version: 1, inputDevice: 'trackpad' },
-      raw: '{"value":{"version":1,"inputDevice":"trackpad"}}',
+      value: { version: 1, tourPaused: true },
+      raw: '{"value":{"version":1,"tourPaused":true}}',
     });
+  });
+
+  it('drops the retired trackpad key and keeps the rest of the device record', () => {
+    const stored = JSON.stringify({ value: { version: 1, inputDevice: 'trackpad', tourPaused: true } });
+    expect(readSection(deviceSection, stored).value).toEqual({ version: 1, tourPaused: true });
+    const write = prepareSectionWrite(deviceSection, stored, { inviteDismissed: true });
+    expect(write.status === 'write' && JSON.parse(write.raw)).toEqual({
+      value: { version: 1, tourPaused: true, inviteDismissed: true },
+    });
+  });
+
+  it('drops view defaults Settings no longer offers and keeps the rest of the viewer section', () => {
+    const stored = JSON.stringify({
+      value: {
+        version: 1,
+        controls: {},
+        gizmo: {},
+        viewDefaults: {
+          'display.surfaces': false,
+          'display.lines': false,
+          'display.postProcessing': true,
+          'display.grid': false,
+        },
+      },
+    });
+    expect(readSection(viewerPreferencesSection, stored).value.viewDefaults).toEqual({ 'display.grid': false });
   });
 
   it('keeps the synced half as it was', () => {
@@ -88,6 +114,18 @@ describe('prepareSectionWrite', () => {
       status: 'newer',
       value: { version: 1, controls: { invertZoom: true }, gizmo: {}, viewDefaults: {} },
     });
+  });
+
+  it('stores the orbit style and reads it back after a reload, refusing an unknown one', () => {
+    const write = prepareSectionWrite(viewerPreferencesSection, undefined, { controls: { orbitStyle: 'tumble' } });
+    expect(write.status).toBe('write');
+    const raw = write.status === 'write' ? write.raw : undefined;
+    expect(readSection(viewerPreferencesSection, raw).value.controls).toEqual({ orbitStyle: 'tumble' });
+    expect(() =>
+      prepareSectionWrite(viewerPreferencesSection, raw, {
+        controls: { orbitStyle: 'trackball' as unknown as 'tumble' },
+      }),
+    ).toThrow();
   });
 
   it('refuses a write that would store an invalid value', () => {

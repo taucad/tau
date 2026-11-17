@@ -3,9 +3,9 @@ import { FolderOpen, PanelsTopLeft } from 'lucide-react';
 import { resolveRootedPath } from '@taucad/utils/path';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
 import { toast } from '@taucad/ui/components/sonner';
-import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
-import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
+import type { DesktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { desktopWorkspaceRoot } from '#lib/agent-host-placement.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 
@@ -34,9 +34,10 @@ export type OpenProjectInFileManager = {
  * @returns The action, or `undefined` when this host or project has no native folder.
  */
 export function useOpenProjectInFileManager(
-  project: Pick<ProjectListItem, 'id' | 'name' | 'locator'>,
+  project: Pick<ProjectListItem, 'id' | 'name'> & Partial<Pick<ProjectListItem, 'locator'>>,
 ): OpenProjectInFileManager | undefined {
-  const directories = project.locator.backend === 'node' ? desktopBridge()?.directories : undefined;
+  /* A row the listing snapshot remembered has no locator until the listing names it (A13). */
+  const directories = project.locator?.backend === 'node' ? desktopBridge()?.directories : undefined;
   const [isOpening, setIsOpening] = useState(false);
   if (!directories) {
     return undefined;

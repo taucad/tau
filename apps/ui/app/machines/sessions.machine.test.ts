@@ -48,6 +48,9 @@ const harness = (options?: {
   const readyChild = (region: ProjectSessionRegion) =>
     createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
       sendBack({ type: 'childReady', region });
+      if (region === 'runtime') {
+        sendBack({ type: 'chatReady' });
+      }
       return () => undefined;
     });
   /* The compute child is this session's liveness probe: its cleanup runs when
@@ -58,32 +61,104 @@ const harness = (options?: {
     return () => stopped.push(input.projectId);
   });
 
+  /* The file manager stand-in hands the session a file manager, so the real `revisions` child slot is filled and
+   * the close's sync step runs through it. */
+  const fileManagerChild = createCallbackLogic<EventObject, { projectId: string }>(({ sendBack }) => {
+    sendBack({ type: 'childReady', region: 'views' });
+    sendBack({ type: 'fileManagerChanged', fileManagerRef: createActor(createCallbackLogic(() => undefined)) });
+    return () => undefined;
+  });
+  type Command = EventObject & Readonly<{ requestId: string; kind?: string }>;
+  /* The runtime stand-in answers the session's flush and close commands, as `runtimeRegionOn` does. */
+  const projectChild = createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack, receive }) => {
+    sendBack({ type: 'childReady', region: 'runtime' });
+    sendBack({ type: 'chatReady' });
+    receive((received) => {
+      const event = received as Command;
+      if (event.type === 'flushRuntime' && event.kind === 'close') {
+        closeSteps.push(`producers:${input.projectId}`);
+        // async-iife: bootstrap -- `receive` is synchronous; the child answers through `sendBack`.
+        void (async () => {
+          try {
+            await options?.producerFlush;
+            if (options?.flushRefuses === true) {
+              throw new Error('An editor conflict is being recorded');
+            }
+            sendBack({ type: 'runtimeFlushSettled', requestId: event.requestId });
+          } catch (error) {
+            sendBack({
+              type: 'runtimeFlushSettled',
+              requestId: event.requestId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        })();
+        return;
+      }
+      switch (event.type) {
+        case 'flushRuntime': {
+          sendBack({ type: 'runtimeFlushSettled', requestId: event.requestId });
+          break;
+        }
+        case 'closeParameters': {
+          sendBack({ type: 'parametersClosed', requestId: event.requestId });
+          break;
+        }
+        case 'closeRuntime': {
+          sendBack({ type: 'runtimeClosed', requestId: event.requestId });
+          break;
+        }
+        default: {
+          break;
+        }
+      }
+    });
+    return () => undefined;
+  });
+  /* The revisions stand-in reports its first file check settled (A14), and answers `quiesce` once the test's sync
+   * flush settles. */
+  const revisionsChild = createCallbackLogic<EventObject, { projectId: string }>(({ input, sendBack, receive }) => {
+    sendBack({ type: 'fileCheckChanged', settled: true, judged: true });
+    receive((received) => {
+      const event = received as Command;
+      if (event.type !== 'quiesce') {
+        return;
+      }
+      closeSteps.push(`flush:${input.projectId}`);
+      // async-iife: bootstrap -- `receive` is synchronous; the child answers through `sendBack`.
+      void (async () => {
+        try {
+          await (typeof options?.closeFlush === 'function' ? options.closeFlush() : options?.closeFlush);
+          if (options?.closeNever === true) {
+            await new Promise<void>(() => {
+              /* Never settles: the session that cannot finish closing. */
+            });
+          }
+          sendBack({ type: 'syncQuiesced', requestId: event.requestId });
+        } catch (error) {
+          sendBack({
+            type: 'syncQuiesced',
+            requestId: event.requestId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })();
+    });
+    return () => undefined;
+  });
+
   const projectSession = projectSessionMachine.provide({
     actors: {
       cancelRuns: fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async ({ input }) => {
         closeSteps.push(`cancel:${input.projectId}`);
       }),
-      flushProducers: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
-        closeSteps.push(`producers:${input.projectId}`);
-        await options?.producerFlush;
-        if (options?.flushRefuses === true) {
-          throw new Error('An editor conflict is being recorded');
-        }
-      }),
-      flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async ({ input }) => {
-        closeSteps.push(`flush:${input.projectId}`);
-        await (typeof options?.closeFlush === 'function' ? options.closeFlush() : options?.closeFlush);
-        if (options?.closeNever === true) {
-          await new Promise<void>(() => {
-            /* Never settles: the session that cannot finish closing. */
-          });
-        }
-      }),
       releaseAgentHost: fromSafeAsync<void, { projectId: string }>(async () => undefined),
-      fileManager: readyChild('views'),
-      project: readyChild('runtime'),
+      fileManager: fileManagerChild,
+      project: projectChild,
       agentHost: readyChild('agentHost'),
       compute: computeChild,
+      revisions: revisionsChild,
+      hostConnector: createCallbackLogic(() => undefined),
     },
   });
 
@@ -986,16 +1061,29 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
     actor.stop();
   });
 
-  it('should only touch a live project on an open whose request carries no chat', async () => {
+  it('should only touch a live project on an open with no request', async () => {
+    const { actor } = harness();
+    actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
+    await settle();
+
+    actor.send({ type: 'open', projectId: 'projA' });
+    await settle();
+
+    expect(sessionRequest(actor, 'projA')).toEqual(requestFor('projA', { chatId: 'chat-1' }));
+    actor.stop();
+  });
+
+  /* A6d (D14): the route of a chatless open names no chat, so the session hears it and answers with the chat its
+   * editor shows; before A6d the provider's prop carried that to the editor. */
+  it('should hand a live project the chat of an open whose request carries none, clearing its chat', async () => {
     const { actor } = harness();
     actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
     await settle();
 
     actor.send({ type: 'open', projectId: 'projA', request: { workspace: 'ws-projA' } });
-    actor.send({ type: 'open', projectId: 'projA' });
     await settle();
 
-    expect(sessionRequest(actor, 'projA')).toEqual(requestFor('projA', { chatId: 'chat-1' }));
+    expect(sessionRequest(actor, 'projA')).toMatchObject({ chatId: undefined, createdChatId: undefined });
     actor.stop();
   });
 

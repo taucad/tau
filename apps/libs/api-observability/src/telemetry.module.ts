@@ -8,6 +8,12 @@ import { startedOtelSdk } from '#otel-sdk.js';
 /** Milliseconds. */
 const shutdownTimeout = 5000;
 
+/**
+ * Milliseconds. How long to keep the metrics endpoint up after the app stops serving, on Fly only: longer than Fly's 15 s scrape
+ * interval, so the last increments are read before the process exits (R07, 2026-11-15). Within `kill_timeout` (120 s).
+ */
+export const finalScrapeWait = 20_000;
+
 @Global()
 @Module({
   providers: [TracerService, MetricsService],
@@ -20,6 +26,12 @@ export class TelemetryModule implements OnApplicationShutdown {
     const sdk = startedOtelSdk();
     if (sdk === undefined) {
       return;
+    }
+    if (process.env['FLY_MACHINE_ID'] !== undefined) {
+      this.logger.log(`Holding metrics for a final scrape (${finalScrapeWait} ms)...`);
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, finalScrapeWait).unref();
+      });
     }
     this.logger.log('Shutting down OTEL SDK...');
 

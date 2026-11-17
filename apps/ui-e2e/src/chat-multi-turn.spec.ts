@@ -623,8 +623,15 @@ test('shows the revision of a turn stopped after it changed files', async () => 
   const [chatId] = await openChat(writingTurn(reply('Reply one.', { gated: true })));
   await sendDraft('First plain message.');
   await target.expectVisible(selectors.getByText('Writing the proof.', { exact: true }).last(), 120_000);
+  /* The first call's text shows before its `create_file` runs, so a Stop there changed nothing and settles as plain
+   * Saved. The second call parks at its stream gate only after the tool has written the file. */
+  await target.waitForAgentHostGatewayGate({ kind: 'stream', turn: 'First plain message.' }, 120_000);
 
   await target.click(selectors.getByRole('button', { name: 'Stop' }).last());
+  /* Stop is a keyed host cancel that the host log confirms (`ChatSessionStore.stopRun`), a few hundred ms after the
+   * click. Releasing the parked stream before then let the reply finish first, so the run completed and the card read
+   * plain `Saved`. The stop's settlement says the cancel landed; the release after it must not reopen the run. */
+  await expectFinalizedTurns(chatId!, 1);
   await target.releaseAgentHostGatewayFixture();
 
   await target.expectText(selectors.getByRole('status', { name: 'Save status' }), /^Saved · stopped early$/u, 60_000);

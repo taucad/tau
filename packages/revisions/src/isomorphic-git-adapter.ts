@@ -2009,7 +2009,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         tree: treeId,
         parents: [...input.parents],
         /* A26: the person wrote it, Tau recorded it — git's own split. */
-        author: revisionAuthorSignature(input.provenance),
+        author: revisionAuthorSignature(input.provenance, input.commitAuthor),
         committer: revisionCommitterSignature(input.provenance),
         message: revisionCommitMessage(trailer),
         changeId: deriveChangeId(objectFormat, { treeId, parents: input.parents, trailer }),

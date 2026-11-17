@@ -11,7 +11,7 @@ import { useNativeKernelDownload } from '#hooks/use-native-kernel-download.js';
 
 const bridge = vi.hoisted(() => ({ current: undefined as DesktopNativeKernelBridge | undefined }));
 
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   desktopNativeKernels: () => bridge.current,
 }));
 

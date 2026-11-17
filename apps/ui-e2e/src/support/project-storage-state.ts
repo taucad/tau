@@ -330,17 +330,20 @@ export const readIndexedDbProjectEvidence = async (
           { once: true },
         );
       });
+    /* The provider keys each file by its root-relative path with a leading `/` (`toStoragePath` in
+     * packages/filesystem/src/backend/direct-idb-provider.ts); a project's base path is root-relative without one. */
+    const root = `/${basePath.replace(/^\/+/u, '')}`;
     try {
-      const manifestText = await readText(`${basePath}/tau.json`);
+      const manifestText = await readText(`${root}/tau.json`);
       if (!manifestText) {
         return undefined;
       }
       const manifest = JSON.parse(manifestText) as { assets: { main: { entryPath: string } } };
-      const sourceText = await readText(`${basePath}/${manifest.assets.main.entryPath}`);
+      const sourceText = await readText(`${root}/${manifest.assets.main.entryPath}`);
       if (sourceText === undefined) {
         throw new Error('IndexedDB Home project source is missing');
       }
-      const identityText = await readText(`${basePath}/.tau/project.json`);
+      const identityText = await readText(`${root}/.tau/project.json`);
       if (!identityText) {
         throw new Error('IndexedDB Home project identity is missing');
       }

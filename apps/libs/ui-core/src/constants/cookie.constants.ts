@@ -24,20 +24,12 @@ export const cookieName = {
   /* Layout */
   // Whether the sidebar is open.
   sidebarOp: 'sidebar-op',
-  // The last selected chat console size.
-  chatRsEditor: 'chat-rs-editor',
-  // Whether the chat interface is full height.
-  chatInterfaceFullHeight: 'chat-interface-full-height',
-  // Whether the chat interface is transparent.
-  chatInterfaceTransparent: 'chat-interface-transparent',
 
   /* CAD */
   // The last selected kernel.
   cadKernel: 'cad-kernel',
 
   /* Chat */
-  // Whether to enable web search in the chat.
-  chatWebSearch: 'chat-web-search',
   // The last execution used — any agent, with its model, level and config — carried onto new chats.
   chatExecution: 'chat-execution',
   // The last chosen Tau model.
@@ -108,10 +100,6 @@ export const cookieName = {
   // When this device first ran Tau, and which baseline onboarding events it has reported (telemetry marker, BD5).
   firstSeen: 'first-seen',
 
-  /* Docs */
-  // Whether the docs sidebar is open.
-  docsOpSidebar: 'docs-op-sidebar',
-
   /* Person record: device-only sections, each a `StoredSection` (`@taucad/preferences`). Never server-visible. */
   // What the person told setup: goals, last tool, languages.
   personProfile: 'person-profile',
@@ -129,10 +117,3 @@ export const cookieName = {
  * Union of all cookie names.
  */
 export type CookieName = ConstantRecord<typeof cookieName>;
-
-/**
- * Preferences that decide first-paint text or geometry. `localStorage` stays their client store; each is also
- * mirrored into a same-named first-party cookie so the server renders the visitor's value and hydration changes
- * nothing. Keep this list short: every entry rides every document request.
- */
-export const serverVisiblePreferences: readonly CookieName[] = [cookieName.chatModel, cookieName.chatEffort];

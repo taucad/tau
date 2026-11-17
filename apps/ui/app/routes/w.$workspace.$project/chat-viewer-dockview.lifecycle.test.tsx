@@ -6,7 +6,7 @@ import type { DockviewApi } from 'dockview-react';
 import { workbenchRecords } from '@taucad/workbench';
 import type { ViewerNode, WorkbenchView } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
-import { adoptViewerRecordNode } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
+import { adoptViewerRecordNode } from '#workbench-records/viewer-adapter.js';
 import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 

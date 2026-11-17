@@ -1,5 +1,170 @@
 # Changelog
 
+## 0.12.0 (2026-11-16)
+
+### Features
+
+- feat(ui): Restore generic loading skeletons and drop the project listing snapshot (#2307) (1c77d2d28)
+- feat(ui): Take the close cut a reload left owed on the next open (A7d) (#2272) (5e6ffc1ea)
+- feat(agent-observability): Label tool facts and report resumed runs (LW17, LU14) (#2205) (afdc792de)
+- feat(ui): Let the open wait for the first file check (A14) (#2246) (fa28ea576)
+- feat(ui): Render the app shell at one tree position on every route (A11) (#2244) (00b69eedb)
+- feat(ui): Confirm a password reset on sign-in and say a password change signs out other devices (#2267) (25fd262fb)
+
+### Fixes
+
+- fix(ui): Name the undeliverable address on Account, Security and Billing; count only stored Resend events in alerts (#2302) (174c11ff0)
+- fix(ui): Select staging API and downloads hosts in the marketing policy on taucad.dev (#2278) (65c29d135)
+- fix(host): Refresh Grok's model list from its \_x.ai/models/update push (#2277) (541ff9fb5)
+- fix(viewer): Stop clipping at 0° FOV, even out the grid and fix the hover highlight (#2003) (5b09a758a)
+- fix(revisions): Answer a warm reopen from a comparison record instead of re-reading the checkout (#2270) (067bb7a80)
+
+### Other changes
+
+- test(files-ui): Give the jsdom suite the app's no-op ResizeObserver (#2309) (893c5d096)
+- refactor(ui): Remove the Auto kernel transcript row (#2308) (eedcfc0d7)
+- refactor(runtime)!: Derive transcoded route fidelity from edge formats (#2301) (8447753cd)
+- ci(root): Run nightly-green e2e suites in the merge queue when affected (#2299) (084b1ad9c)
+- refactor(ui): Cut the files-ui library from the app (UI wave D) (#2298) (ca2b80fb8)
+
+## 0.11.0 (2026-11-15)
+
+### Features
+
+- feat(ui): Run each session's flushes and close over its real children (A7c) (#2245) (648a28cef)
+- feat(telemetry): Retire the legacy observability middleware and put every producer under the one consent rule (PR-7) (#2259) (8ba8f3552)
+- feat(api-email): Receive signed Resend delivery events (#2255) (665aeef9f)
+- feat(ui): Trim Settings → Viewer and size every settings control alike (#1983) (21c5bd82e)
+- feat(ui): Let the API policy alone gate signed-out runtime telemetry on the web (#2251) (54708a070)
+- feat(ui): Replace the session's runtime through replaceRuntime, after a flush (A6e) (#2241) (f9a1bd111)
+- feat(ui): Let each project session own its revisions, connector, presence and parking (A7b) (#2242) (8bf5ef7cd)
+- feat(ui): Send Server-Timing for the document's render, catalog and cold instance (LB0a) (#2235) (44cf81e52)
+- feat(ui): Build the project runtime as a lazy session child (A6d) (#2218) (eab9d6d98)
+- feat(ui): Say Tau Cloud's state in the Projects header and drop the last Home skeletons (A15g2) (#2217) (9611c6543)
+- feat(ui): Compose focus with the registry, library and route in the runtime (A5b) (#2209) (8015bb572)
+- feat(ui): Paint Home cards from the listing snapshot with no skeleton (A15g) (#2214) (7dcbabd2b)
+- feat(sandbox): Write the Linux Terminal's git store through a FUSE store guard (LP2, LP3, LP5, LP8) (#2187) (277277b3a)
+- feat(ui): run the viewer Dockview adapter as a runtime child actor and fix the M2 phone watermark (A8d) (#2213) (71175a269)
+- feat(ui): run the workbench Dockview adapter as a runtime child actor (A8c) (#2211) (fb5b95a53)
+- feat(ui): Move the workspace commands and root file facade into ProjectLibrary (A4b) (#2212) (f74574e2d)
+- feat(ui): serve the listing snapshot and the cloud listing state (A13) (#2164) (118205f8d)
+- feat(ui): Run the entries record session as a project runtime child (A9) (#2200) (2f317e890)
+- feat(ui): Move the project commands into ProjectLibrary (A4a) (#2207) (7d91d68be)
+- feat(ui): host the workbench layout in the project runtime and deliver pane intents through it (A8b) (#2202) (55295309e)
+- feat(ui): Run the library's discovery, recovery and access machines in ProjectLibrary (A3b) (#2203) (fbdd3621d)
+- feat(ui): Build the project file manager as a session child (A6c) (#2201) (63da51047)
+- feat(ui): report the chat transcript's load state and reserve the tray (A12) (#2177) (4933acd4c)
+- feat(ui): Add the focus machine and the project route-state selector (A5a) (#2117) (a772c957f)
+- feat(agent-observability): Let a tool fact carry its run's host, kernel and model labels (LW17) (#2199) (9e7a63ede)
+- feat(ui): Write tau.load measures on deployed pages, with no network export (LB0b) (#2120) (d50cbbd3e)
+- feat(ui): Lease the project runtime from the app runtime and own its producers (A6b) (#2181) (dcab0102b)
+
+### Fixes
+
+- fix(host): Refuse an ACP CLI probe that times out but exits cleanly (#2265) (0f06774c7)
+- fix(host): Make every ACP agent work from desktop-app and CLI installs (#2262) (7caef4598)
+- fix(ui): Skip the saved-preview backfill once the server is known to hold one (#2257) (0ae3f626c)
+- fix(ui): Give switches and the settings info button 24px pointer targets (#2258) (003d8f84e)
+- fix(ui): Cache hashed sprites for a year and serve the manifest as a manifest (LB6a) (#2248) (b7cf66626)
+- fix(ui): Probe a project's agent host for the log its own storage provides (#2253) (7b85e00a6)
+- fix(ui): Hold wait indicators 500 ms from the painted reveal, and keep the lint gutter's width (A15f2) (#2224) (8c224db31)
+- fix(ui): Keep measuring later project opens once a tab reaches the tau.load bound (#2243) (4e4e24dec)
+- fix(ui): Build the viewer's tab bar once on a project open (U16) (#2240) (16416027b)
+- fix(ui): Publish each esm.sh package's types without waiting behind wider imports (LB3b-f2) (#2239) (b25749cde)
+- fix(ui): Type wide esm.sh declaration packages such as lodash-es and date-fns (LB3b-f1) (#2238) (c535b9317)
+- fix(viewer): Adopt three-viewport-gizmo 2.3.0 and present Bottom views upright (#2234) (199d037db)
+- fix(ui): End a resumed attempt whose reopening and end fold in one read (#2229) (451eaccce)
+- fix(ui): Keep the route and the editor on the same chat after A6d (D21 rounds 1 and 2) (#2226) (13524411e)
+- fix(onboarding): FL4 follow-ups, and remove Home's suggestions row (#2198) (62c14dbc7)
+- fix(revisions): Keep a rename when only another ref of the atomic push moved (#2188) (d91fe9505)
+- fix(sandbox): Close the store guard's follow-up review nits (#2216) (ed5fc1389)
+- fix(shell-service): never admit a shell call whose signal aborted before the gate (E09) (#2215) (8352062ed)
+- fix(picogk): Pin the .NET runtime archives by sha256 for locked prepare (#2208) (47c0292ce)
+- fix(ui): Decide or hold Home's suggestions row on the server (H2) (#2180) (32bb3c794)
+- fix(revisions): Keep every address out of identity records (I3) (#2194) (a4e060aeb)
+- fix(ui): Keep a file pane's Files tree mounted while its file is re-read or gone (#2182) (739301dde)
+- fix(cli): Back up `tau version` tags and send origin from disk hosts (#2191) (02b06cae3)
+- fix(ui): Paint the phone sheet where it rests on load, with no slide or fade (#2114) (39205cc24)
+- fix(ui): Let webmail load the email wordmark and fonts cross-origin (#2192) (442a4573d)
+
+### Performance
+
+- perf(revisions): Read cold-open pack ranges past the HTTP cache (#2261) (cfeb76969)
+- perf(ui): Load the RPC handler stack and semver on demand (LB4d) (#2237) (3d4520907)
+- perf(ui): Acquire editor types in parallel, bounded, with no malformed @types path (LB3b) (#2113) (875074843)
+- perf(ui): Load compiled skill bodies on first use, not with the composer (LB4c) (#2118) (b2aed0809)
+
+### Other changes
+
+- test(sandbox): Give C05 a rebinding name the test owns instead of localtest.me (#2254) (3333a67d6)
+- chore(picogk): Pin the PicoGK browser host to manifest 93d4634b0a1b (#1791) (8d237f7db)
+- test(ui): Run each Vitest Browser config of test:e2e as its own Nx task (#2223) (e533150f9)
+- test(ui): Keep the ProjectFocus pr target within 3 minutes on CI (#2149) (e8a22553d)
+- build(ui): Stop retaining and pinning the PicoGK browser host (#2206) (27a370637)
+- refactor(desktop-services-host): extract the desktop utility hosts into an app library (DS-2) (#2005) (ade95913f)
+- test(viewer): Run each Vitest Browser config of test:e2e as its own Nx task (#2169) (b01ac3873)
+
+## 0.10.0 (2026-11-14)
+
+### Features
+
+- feat(ui): move the project library into a runtime-owned service (A2) (#2119) (7918b118e)
+- feat(ui): add the workbench layout machine and pane intents (A8a) (#2115) (d66b3c6a5)
+- feat(shell-service): one Terminal git store policy with remotes, branches and folded spellings (LP1, LP6) (#2124) (80c065da7)
+- feat(ui): Carry the open request through the sessions registry (A5c) (#2112) (674cf3173)
+- feat(taucad-ui): Add WaitIndicator, the loading timing ladder and the skeleton ratchet (A15a) (#2110) (a8d599ceb)
+- feat(viewer): open Viewer settings as a bottom drawer on phones (#2106) (069eb7f05)
+- feat(ui): Specify project focus with a ProjectFocus TLA+ family (#2041) (4e3ca8318)
+- feat(ui): Record replay text and redact sign-in tokens from URLs (#2020) (399cfa78c)
+- feat(ui): Add the file-manager host, rootFiles and leases (A1b) (#2062) (1e274f697)
+- feat(ui): add LayoutApply formal model (#2042) (03bd88827)
+- feat(shell-service): let the macOS Terminal commit, branch, stash and merge (TG5) (#2061) (255e24e5a)
+- feat(ui): Add the session revisions and host connector children (#2057) (7b177f95d)
+- feat(revisions): keep the person's staging and wait out their Git operations (TG4, TG7b) (#2058) (fe7b4dfa8)
+- feat(ui): Compose the app runtime root and start it after hydration (A1a) (#2049) (dbcb6b643)
+- feat(ui): Add the LibraryCatalog formal spec (#2045) (5508e5c3d)
+- feat(api-git-core): back up commits you make with git (TG3) (#2053) (9b2f1aa2a)
+- feat(ui): Add the project runtime factory and choices actor (#2048) (dd5eeedb8)
+- feat(desktop): Report Git LFS and revision-engine failures, and guard the Linux payload (TG7c) (#2047) (8a1f7dcb3)
+- feat(api-auth): Resolve sessions once per request through a single-flight resolver (#2027) (5617b2054)
+- feat(ui): Offer Undo on the Merged and Closed toasts (#2025) (56d89e740)
+- feat(viewer): move grid and kernel settings into viewer settings sub-views (#2022) (94841e892)
+
+### Fixes
+
+- fix(revisions): pin the engine's common dir, refuse planted commondir, warn on rebase exec (LP4, LP7) (#2148) (1abaf069d)
+- fix(three): Send a rig's clip policy and render frame before presenting them (#2144) (3ed9257d4)
+- fix(ui): Draw the AR glyph's letters as strokes instead of SVG text (#2137) (9aaa23910)
+- fix(ui): Do not report the requests a closed editor left in flight (#2133) (84aaf506a)
+- fix(ui): Let the composer's labels leave while the model name is still pending (#2131) (74b7462f3)
+- fix(ui): Mask unsent chat composer text in session replay (#2122) (e4ba7c096)
+- fix(ui): Keep a client navigation off the root loader (U23) (#2121) (839871327)
+- fix(ui): Start showcase loaders again on WebGL when a WebGPU canvas cannot present (#2098) (96078531b)
+- fix(ui): Clear a chat's legacy unread mark when the person views it (#2097) (68ccfcd70)
+- fix(revisions): Refuse a merge built on history an undo took back (#2111) (82fc8f4b5)
+- fix(ui): Answer a stalled shell navigation with the cached shell after 3,000 ms (#2116) (facb5c83b)
+- fix(ui): keep handed-back pane intents through a LayoutApply lane close (#2063) (7aef35a10)
+- fix(revisions): Back up past a v<n> tag that is not a version (#2107) (2c5a458e0)
+- fix(ui): Decide the desktop first run only from a completed project scan (#2093) (d86a53875)
+- fix(ui): List the dependency mount before its first install creates it (#2085) (7e439ad9d)
+- fix(ui): Name the History card a group so the phone sheet keeps one History landmark (#2078) (31b185620)
+- fix(ui): Keep the app mounted when the first billing owner signs in (#2028) (23e9ac1fa)
+- fix(agent-observability): Let a host claim the protection the API reads for the account (#2052) (475b2f403)
+- fix(shell-service): Let the Terminal read the real git store and run the bundled git and git-lfs (#2007) (52506ee4d)
+- fix(agent-tools): Keep test statuses and source revisions in a reduced test_model result (#2017) (7fe168ed2)
+- fix(agent-observability): Do not let a todo update after the last check hide task success (#2023) (89fa095c4)
+- fix(api): Remove only conflict lines through the audited ref verb (#2021) (d83a5354e)
+
+### Other changes
+
+- test(ui): Run the sized ProjectFocus configs on the pr tier in their own target (#2147) (9257031b2)
+- ci(formal): Run each TLA+ family in a parallel target of its own (#2092) (2cdaf1520)
+- test(host): probe the Linux store guard's launch shape on the shell rows (LP0) (#2108) (50a5e6308)
+- test(ui-e2e): Seed the stability circuit's projects with their entry file open (#2081) (f443311d2)
+- test(ui): pin chat loading defects U7, U19 and U10 as red rows (#2031) (7fd6f8e4a)
+- test(ui): Baseline event totality for the seven orchestration machines (#2035) (b28f640da)
+- test(ui): Widen the event-layer counter, add the ownership ratchet and the wide formal job (A0.6) (#2032) (11b943eae)
+
 ## 0.9.1 (2026-11-13)
 
 ### Fixes

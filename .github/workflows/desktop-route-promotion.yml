@@ -31,8 +31,6 @@ on:
       manifest-sha256:
         description: Reviewed canonical manifest digest (promotion only)
         type: string
-  schedule:
-    - cron: '17 3 * * *'
 
 permissions:
   contents: read
@@ -83,29 +81,29 @@ jobs:
   publication:
     needs: [candidate]
     # Each channel has its own repository gate, read before any environment is selected:
-    # a dispatch runs only for an enabled channel, and the nightly schedule renews only enabled channels.
+    # a dispatch runs only for an enabled channel. There is no schedule: APT metadata and update descriptors no
+    # longer expire, so renewal is a manual `renew-routes` dispatch only (for example after a key rotation).
     if: >-
-      github.ref == 'refs/heads/main' && (
-        (github.event_name == 'schedule' && (vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true' || vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true')) ||
-        (github.event_name == 'workflow_dispatch' && (
-          (inputs.channel == 'staging' && vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true') ||
-          (inputs.channel == 'production' && vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true'))))
+      github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && (
+        (inputs.channel == 'staging' && vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true') ||
+        (inputs.channel == 'production' && vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true'))
     strategy:
       fail-fast: false
       matrix:
-        channel: >-
-          ${{ github.event_name == 'schedule' && fromJSON(format('[{0}{1}{2}]',
-            vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true' && '"staging"' || '',
-            vars.DESKTOP_INSTALLER_PUBLICATION_STAGING == 'true' && vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true' && ',' || '',
-            vars.DESKTOP_INSTALLER_PUBLICATION_PRODUCTION == 'true' && '"production"' || '')) || fromJSON(format('["{0}"]', inputs.channel)) }}
+        channel: ${{ fromJSON(format('["{0}"]', inputs.channel)) }}
     # The same lock covers promotion, renewal and recovery, across all runs.
     concurrency:
       group: desktop-installer-publication-${{ matrix.channel }}
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # Renewal runs in `desktop-installer-renewal-<channel>`. A production promotion is the step that publishes
+    # to users, so it alone runs in the release-manager reviewed `desktop-promotion-production` (approvals audit R2);
+    # staging promotes in `desktop-installers-staging`. desktop-publication-authority.mts admits the same subjects.
     environment:
-      name: ${{ (github.event_name == 'schedule' || inputs.operation == 'renew-routes') && 'desktop-installer-renewal' || 'desktop-installers' }}-${{ matrix.channel }}
+      name: >-
+        ${{ inputs.operation == 'renew-routes' && format('desktop-installer-renewal-{0}', matrix.channel)
+        || (matrix.channel == 'production' && 'desktop-promotion-production' || 'desktop-installers-staging') }}
       deployment: false
     permissions:
       contents: read
@@ -129,7 +127,7 @@ jobs:
       TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate-run-id }}
       TAU_ROUTE_CI_RUN_ID: ${{ inputs.ci-run-id }}
       TAU_ROUTE_VM_RUN_ID: ${{ inputs.vm-run-id }}
-      # Scheduled renewal has no inputs and renews the completed catalog whatever scope promoted it.
+      # Renewal renews the completed catalog whatever scope promoted it.
       TAU_DESKTOP_QUALIFICATION_SCOPE: ${{ inputs.scope || 'all' }}
     steps:
       - name: Select requested channel
@@ -138,7 +136,7 @@ jobs:
           REQUESTED: ${{ inputs.channel }}
           CHANNEL: ${{ matrix.channel }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$REQUESTED" = "$CHANNEL" ]; then
+          if [ "$REQUESTED" = "$CHANNEL" ]; then
             echo 'run=true' >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

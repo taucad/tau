@@ -38,8 +38,8 @@ import {
  * The scripted turn writes the pyramid and calls `request_job`, which pauses the
  * run on its native approval interrupt (D5); the chat banner and the Print pane answer
  * the same ledger record, and accepting in the pane uploads and starts in one step
- * (canvas ruling 1). The X1C's plate attestation is the pane's alone: a chat Approve
- * continues the run but leaves the job waiting for the pane. The host hands the answer
+ * (canvas ruling 1). The X1C's plate attestation is the pane's alone: the chat banner
+ * offers only Review in the Print pane and Deny for a job (#653). The host hands the answer
  * to the machine ledger: an approval continues the run and tells the continued attempt
  * the answer; a denial ends the run cancelled, with no closing line.
  */
@@ -83,9 +83,13 @@ const chatApprovalOf = (page: Page): Locator => page.getByRole('region', { name:
 
 const escapeRegExp = (text: string): string => text.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
 
-/** The header's Machine select: the machine's name and its status, `Ready` while idle. */
-const machineStatus = async (page: Page): Promise<string> =>
-  (await page.getByRole('combobox', { name: 'Machine' }).textContent()) ?? '';
+/**
+ * The header's Machine select, the only place the pane names its machine since the Print pane recomposition
+ * (7630e34ef6 retired the per-machine `article` cards): the machine's name, then its status, `Ready` while idle.
+ */
+const machineSelectOf = (page: Page): Locator => page.getByRole('combobox', { name: 'Machine', exact: true });
+
+const machineStatus = async (page: Page): Promise<string> => (await machineSelectOf(page).textContent()) ?? '';
 
 /** The run block above the stages: `<program> · Running · layer 3 of 125 · 12 min left`. */
 const runText = async (page: Page): Promise<string> =>
@@ -167,6 +171,10 @@ const openPrintProject = async (
     env: { TAU_MACHINES_ENABLED: '1' },
   });
   const { page } = session;
+  /* The runs need the chat (prompt, banner) beside the Print pane. Under xvfb the window takes the 1280 px screen,
+   * which leaves the project workspace under `compactWorkspaceWidth` (1120 px) once the 224 px sidebar is open, and
+   * a compact workspace shows one lane beside the viewer: the Workbench stays hidden behind the chat. */
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await fixture.routeThrough(page);
   await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
   await expectSignedIn(page);
@@ -193,15 +201,27 @@ const openPrintProject = async (
   expect(await bound.textContent()).toMatch(/^Simulated X1C\s*Bambu Lab X1C · Simulated$/u);
   await page.keyboard.press('Escape');
 
-  await page.getByRole('button', { name: 'Print', exact: true }).click();
-  await expectVisible(page.getByRole('article', { name: new RegExp(`^${machineName}, `, 'u') }), 60_000);
+  /* A built project's Workbench holds its model, so no empty group offers its *Print* button; Print is the Workbench's
+   * *Open workbench tab* menu item (`WorkbenchLeftActions` in chat-workbench-dockview.tsx), offered with Machines on.
+   * While the lane is hidden its Dockview stays mounted at zero width under the top-right *Toggle Workbench lane*
+   * button, so the menu button resolves but every click lands on the toggle; open the lane first when it is closed. */
+  const workbenchToggle = page.getByRole('button', { name: 'Toggle Workbench lane', exact: true }).first();
+  if ((await workbenchToggle.getAttribute('aria-pressed')) !== 'true') {
+    await workbenchToggle.click();
+    await expect.poll(async () => workbenchToggle.getAttribute('aria-pressed'), { timeout: 60_000 }).toBe('true');
+  }
+  await page.getByRole('button', { name: 'Open workbench tab', exact: true }).first().click();
+  await page.getByRole('menuitem', { name: 'Print', exact: true }).click();
+  /* The pane selects the only bound machine (`useMachinesSelection` falls back to the first entry). */
+  await expectVisible(machineSelectOf(page), 60_000);
+  await expect.poll(async () => machineStatus(page), { timeout: 60_000 }).toMatch(new RegExp(`^${machineName}`, 'u'));
   return { page, root: join(session.homeRoot, slug) };
 };
 
 /**
  * Send the print prompt and wait for the paused approval on both surfaces.
  *
- * @returns The sliced file the request names, e.g. `main.gcode.3mf`.
+ * @returns The sliced file the request names, e.g. `model.gcode.3mf`.
  */
 const requestPyramidPrint = async (page: Page, root: string): Promise<string> => {
   const before = fixture!.gatewayRequests.length;
@@ -223,18 +243,24 @@ const requestPyramidPrint = async (page: Page, root: string): Promise<string> =>
   await expect.poll(async () => (await chatBanner.count()) + refusals(), { timeout: 180_000 }).toBeGreaterThan(0);
   /* H-6 witness: an agent-planned request must pass the machine's own submission schema. */
   expect(refusals()).toBe(0);
-  /* The X1C's attestation is the pane's alone, so the prompt itself sends the person there. */
+  /* The X1C's attestation is the pane's alone, so the prompt itself sends the person there. A simulator's prompt
+   * says so first (#444). */
   const prompt = new RegExp(
-    `Print (\\S+\\.gcode\\.3mf) on ${machineName}\\? \\d+ layers, about [^.]+\\. Accept it in the Print pane, confirming: The build plate is clear\\.`,
+    `Simulated: Print (\\S+\\.gcode\\.3mf) on ${machineName}\\? (?:\\d+ layers, )?about [^.]+\\. Accept it in the Print pane, confirming: The build plate is clear\\.`,
     'u',
   );
+  /* The compact permission banner (#627): requester, the prompt as its title, the File fact behind View request, the
+   * job's consequence, Debug's Request details where the build enables it, and, for a job, Review in the Print pane
+   * beside Deny: no Approve, since only the pane takes the plate attestation (#653). The layer count is stated only
+   * when the program's summary reads one. */
   const bannerText = (await chatBanner.textContent()) ?? '';
   expect(bannerText).toMatch(
     new RegExp(
-      `^Tau is waiting for approval${prompt.source}Approving lets Tau continue this turn; Tau does not ask again for each action it takes\\.ApproveDeny$`,
+      `^Tau · Permission${prompt.source}View requestReview the job and confirm the work area is clear in the Print pane\\.(?:Request details)?Review in the Print paneDeny$`,
       'u',
     ),
   );
+  await expectCount(chatBanner.getByRole('button', { name: 'Approve' }), 0);
   const fileName = prompt.exec(bannerText)![1]!;
   /* The pane card answers the same interrupt, in the tool's own words. */
   const paneCard = paneApprovalOf(page, fileName);
@@ -274,8 +300,12 @@ test('prints the chat pyramid on the simulated X1C only after Start in the pane'
     await paneCard.getByRole('checkbox', { name: 'The build plate is clear' }).click();
     await start.click();
 
-    /* The simulator heats first (bed 25 → 55 °C at 0.5 °C/s at demo speed 1), then prints on the wall clock. */
-    await expect.poll(async () => runText(page), { timeout: 180_000 }).toMatch(/· layer \d+ of \d+ · \d+ min left/u);
+    /* The simulator heats first, then prints on the wall clock. An agent's slice takes the machine's recommended
+     * temperatures (`machineSliceOptions`: 250 °C / 70 °C on Bambu), so the bed's 25 → 70 °C at 0.5 °C/s alone takes
+     * 90 s, and the run line reads `Heating the bed · layer 0 of 150` throughout: wait for the first printed layer. */
+    await expect
+      .poll(async () => runText(page), { timeout: 180_000 })
+      .toMatch(/· layer [1-9]\d* of \d+ · \d+ min left/u);
     await expect
       .poll(async () => latestRequestRow(page), { timeout: 60_000 })
       .toMatch(new RegExp(`^(?:Started|Running)${escapeRegExp(fileName)}by Tau agent`, 'u'));
@@ -340,7 +370,9 @@ test('prints the chat pyramid on the simulated X1C only after Start in the pane'
     expect(continued).toContainEqual(
       expect.stringContaining("The run paused for the person's approval, and they answered:"),
     );
-    expect(continued).toContainEqual(expect.stringContaining(`- approved: "Print ${fileName} on ${machineName}?`));
+    expect(continued).toContainEqual(
+      expect.stringContaining(`- approved: "Simulated: Print ${fileName} on ${machineName}?`),
+    );
     /* Revision cards can be unmounted; verify the live geometry and native file instead. */
     await expectCount(page.getByText(/ROOT_UNAVAILABLE/u), 0);
     await expectCount(page.getByText('File not found', { exact: true }), 0);
@@ -388,7 +420,9 @@ test.each([
     expect(others).toEqual([]);
     expect(request).toMatchObject({
       state: 'denied',
-      resolvedBy: { kind: 'user', label: 'Declined in chat' },
+      /* Either surface records the denial on the person's own machines session before answering the chat (R16), so
+       * the ledger names the person; the tool's own `Declined in chat` withdrawal applies only to a job still waiting. */
+      resolvedBy: { kind: 'user', label: 'You' },
     });
     /* Zero transfers: a denied job never took a transfer, an operation id or a receipt. */
     expect(
@@ -400,30 +434,27 @@ test.each([
   }
 });
 
-/* A chat Approve continues the run, but the plate attestation is the pane's alone: the job keeps waiting there. */
-test('approves the chat pyramid print in the chat banner and starts it only from the pane', async () => {
+/* The chat banner offers no Approve for a job (#653): its Review hands the decision to the Print pane, which alone takes
+ * the plate attestation. Nothing physical happens and the run stays paused until the pane starts the job. */
+test('reviews the chat pyramid print from the chat banner and starts it only from the pane', async () => {
   const script = { current: seedTurn };
-  const { page, root } = await openPrintProject('print-dry-run-chat-approve', script);
+  const { page, root } = await openPrintProject('print-dry-run-chat-review', script);
   script.current = printTurn;
   try {
     const fileName = await requestPyramidPrint(page, root);
     const paused = fixture!.gatewayRequests.length;
     /* The resumed attempt only needs to close; replaying the turn would repeat its tool calls. */
     script.current = [];
-    await chatApprovalOf(page).getByRole('button', { name: 'Approve' }).click();
-    await expectCount(chatApprovalOf(page), 0, 60_000);
-    await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }).last(), 300_000);
-    await waitForRunToSettle(page, 120_000);
-    /* The continued attempt was told the answer, and found the job still waiting for the pane. */
-    const continued = fixture!.gatewayRequests.slice(paused).map((request) => requestTexts(request));
-    expect(continued).toContainEqual(
-      expect.stringContaining("The run paused for the person's approval, and they answered:"),
-    );
-    expect(continued).toContainEqual(expect.stringContaining(`- approved: "Print ${fileName} on ${machineName}?`));
-    /* Nothing physical: the card stays, no longer answering the chat; the ledger row still waits; no Stop. */
+    await chatApprovalOf(page).getByRole('button', { name: 'Review in the Print pane', exact: true }).click();
+    await expect
+      .poll(async () => page.getByRole('tab', { name: 'Print', exact: true }).getAttribute('aria-selected'))
+      .toBe('true');
+    /* Reviewing answers nothing: the banner and the card still wait, the ledger row waits and the machine is idle. */
     const paneCard = paneApprovalOf(page, fileName);
     await expectVisible(paneCard);
-    await expectCount(paneCard.getByText('Answering here also answers the chat.', { exact: true }), 0);
+    await expectVisible(paneCard.getByText('Answering here also answers the chat.', { exact: true }));
+    await expectCount(chatApprovalOf(page), 1);
+    expect(fixture!.gatewayRequests.length).toBe(paused);
     expect(await latestRequestRow(page)).toMatch(
       new RegExp(`^Waiting for approval${escapeRegExp(fileName)}by Tau agent`, 'u'),
     );
@@ -436,13 +467,20 @@ test('approves the chat pyramid print in the chat banner and starts it only from
       ['transferOperationId', 'startOperationId', 'transferId', 'receipt'].filter((key) => key in waiting!),
     ).toEqual([]);
 
-    /* The pane takes the attestation and starts the job the chat could only approve. */
+    /* The pane takes the attestation, starts the job and answers the chat, which then continues to its close. */
     const start = paneCard.getByRole('button', { name: 'Start print' });
     expect(await start.isEnabled()).toBe(false);
     await paneCard.getByRole('checkbox', { name: 'The build plate is clear' }).click();
     await start.click();
     await expect.poll(async () => runText(page), { timeout: 180_000 }).toMatch(/· layer \d+ of \d+ · \d+ min left/u);
     expect(await stopButtonOf(page).isEnabled()).toBe(true);
+    await expectCount(chatApprovalOf(page), 0, 60_000);
+    /* The chat's own Stop is gone once the turn closes; the machine's Stop stays while the print runs, so
+     * `waitForRunToSettle` (the last `Stop` button) cannot tell here: the closing line and the gateway say it. */
+    await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }).last(), 300_000);
+    await expect
+      .poll(() => fixture!.gatewayRequests.slice(paused).map((request) => requestTexts(request)), { timeout: 60_000 })
+      .toContainEqual(expect.stringContaining(`- approved: "Simulated: Print ${fileName} on ${machineName}?`));
     const [accepted, ...rest] = await ledgerJobs(session!);
     expect(rest).toEqual([]);
     expect(accepted).toMatchObject({
@@ -450,7 +488,7 @@ test('approves the chat pyramid print in the chat banner and starts it only from
       attestations: [expect.objectContaining({ id: 'work-area-clear' })],
     });
   } catch (error) {
-    await session!.capture('print-dry-run-chat-approve');
+    await session!.capture('print-dry-run-chat-review');
     throw error;
   }
 });
@@ -463,8 +501,11 @@ test('slices, previews and starts a person-initiated print on the simulated X1C'
     await page.getByRole('button', { name: 'Slice and preview' }).click();
     const result = prepare.getByLabel('Slice result');
     await expectVisible(result, 120_000);
+    /* The result leads with its layers, time and filament; the file, part and plate fit sit under Details, whose
+     * rows are File, Time, Part, Toolpath, Plate and Sliced by. */
+    await result.getByRole('button', { name: /^Details/u }).click();
     const part =
-      /^(?:Sliced by .+?)?Filemain\.gcode\.3mfLayers\d+Time.+Filament.+Part([\d.]+) × ([\d.]+) × ([\d.]+) mmToolpath[\d .×]+ mm · every nozzle move, including the printer's start routineThe part fits the plate/u.exec(
+      /^The part fits the plate\. \d+ layers · .+Filemain\.gcode\.3mfTime.+Part([\d.]+) × ([\d.]+) × ([\d.]+) mmToolpath[\d .×]+ mm · every nozzle move, including the printer's start routinePlateThe part fits the plate/u.exec(
         (await result.textContent()) ?? '',
       );
     /* The seed model is a 20 mm cube: the Part row is the part, not the purge line and lifts around it. */

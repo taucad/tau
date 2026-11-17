@@ -89,6 +89,44 @@ export const axeAudit = async (
   );
 
 /**
+ * The app shell's two nodes that axe's `region` rule finds outside every landmark on each route the shell frames: the
+ * titlebar's Home wordmark and the keyboard separator between the sidebar and content panes. They are the shell's,
+ * not a page's, so {@link pageAxeViolations} leaves them out until the shell gives them a landmark; any other node
+ * outside one still fails.
+ */
+export const shellNodesOutsideLandmarks = [
+  'a[aria-label="Home"][href="/"]',
+  '#application-allotment > .sash-container',
+];
+
+/**
+ * Every axe violation in `selector` (the whole document by default), with the full sweep tags or only the named
+ * `rules`, less the shell's nodes outside a landmark ({@link shellNodesOutsideLandmarks}).
+ *
+ * @param options - The rules and root, as {@link axeAudit} takes them.
+ * @returns The page's own violations.
+ */
+export const pageAxeViolations = async (
+  options: { readonly rules?: readonly string[]; readonly selector?: string } = {},
+): Promise<readonly AxeNodeFinding[]> => {
+  const { violations } = await axeAudit(options);
+  const region = violations.find(({ id }) => id === 'region');
+  if (region === undefined) {
+    return violations;
+  }
+  const isShell = await target.evaluate(
+    ({ targets, shell }) =>
+      targets.map((selector) => document.querySelector(selector)?.matches(shell.join(', ')) === true),
+    { targets: region.nodes.map(({ target: node }) => node), shell: shellNodesOutsideLandmarks },
+  );
+  const nodes = region.nodes.filter((_, index) => !isShell[index]);
+  const others = violations.filter((violation) => violation !== region);
+  return nodes.length === 0
+    ? others
+    : [...others, { ...region, targets: nodes.slice(0, 5).map(({ target: node }) => node), nodes }];
+};
+
+/**
  * Serious and critical axe violations in `selector` (the whole document by
  * default), with the full sweep tags or only the named `rules`.
  */

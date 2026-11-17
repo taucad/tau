@@ -131,7 +131,6 @@ describe('handleCaptureImages', () => {
               grid: true,
               axes: true,
               matcap: false,
-              postProcessing: false,
             },
             section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 0.006, isFlipped: false }] },
           },
@@ -149,7 +148,7 @@ describe('handleCaptureImages', () => {
           entryPath: 'main.ts',
           fieldOfView: 35,
           upDirection: 'y',
-          display: { grid: false, postProcessing: true },
+          display: { grid: false, matcap: true },
         }),
       );
 
@@ -167,8 +166,7 @@ describe('handleCaptureImages', () => {
           gizmo: true,
           grid: false,
           axes: true,
-          matcap: false,
-          postProcessing: true,
+          matcap: true,
         },
       });
     });

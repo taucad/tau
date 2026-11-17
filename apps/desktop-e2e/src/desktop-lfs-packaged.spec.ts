@@ -93,7 +93,8 @@ const launchPackaged = async (): Promise<DesktopSession> => {
 
 /** The payload's `git` and `git-lfs` inside the packaged app, where `bundledGitEnvironment` resolves them. */
 const packagedPayload = async (launched: DesktopSession): Promise<Readonly<{ git: string; gitLfs: string }>> => {
-  const resources = await launched.application.evaluate(() => process.resourcesPath);
+  /* `globalThis`, not the imported `process`: Vitest rewrites an import binding, and the serialised callback runs in Electron. */
+  const resources = await launched.application.evaluate(() => globalThis.process.resourcesPath);
   const root = join(resources, 'git', `${process.platform}-${process.arch}`);
   return { git: join(root, 'bin', 'git'), gitLfs: join(root, 'libexec', 'git-core', 'git-lfs') };
 };

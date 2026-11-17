@@ -19,7 +19,7 @@ const manager = vi.hoisted(() => {
     },
   };
 });
-vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: manager.use }));
+vi.mock('#hooks/use-file-services.js', () => ({ useFileServices: manager.use }));
 const disposals: Array<() => void> = [];
 afterEach(() => {
   for (const dispose of disposals.splice(0)) {

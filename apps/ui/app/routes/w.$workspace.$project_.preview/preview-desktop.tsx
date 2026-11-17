@@ -21,7 +21,7 @@ import { PreviewFiles } from '#routes/w.$workspace.$project_.preview/preview-fil
 import { PreviewParameters } from '#routes/w.$workspace.$project_.preview/preview-parameters.js';
 import { usePreviewFileList } from '#routes/w.$workspace.$project_.preview/use-preview-file-list.js';
 import { useProjectUrl } from '#hooks/use-project-slug-route.js';
-import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
+import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 
 export const PreviewDesktop = memo(function (): React.JSX.Element {
   const navigate = useNavigate();

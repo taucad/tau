@@ -5,7 +5,7 @@ import { Badge } from '@taucad/ui/components/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useProject } from '#hooks/use-project.js';
-import { useFileTreeEntry } from '#hooks/use-file-tree.js';
+import { useFileTreeEntry } from '@taucad/files-ui/hooks/use-file-tree';
 import { fileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import type { FileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';

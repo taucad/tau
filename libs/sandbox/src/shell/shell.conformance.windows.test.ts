@@ -755,6 +755,40 @@ describe.runIf(enabled)('Windows shell conformance', () => {
    */
   const cacheConformance = conformanceWithin(330_000);
 
+  /**
+   * Context for a pipeline that could not find `Measure-Object`: one more launch of the same shell and environment that
+   * only reads and prints what decides whether `Microsoft.PowerShell.Utility` loads. It writes no file. It uses
+   * `[Console]` and .NET calls rather than Utility's own cmdlets, which are the ones missing.
+   */
+  const moduleDiagnostics = async (executablePath: string, overrides: Partial<ShellLaunch>): Promise<string> => {
+    const say = (expression: string): string =>
+      `try { [Console]::Out.WriteLine(${expression}) } catch { [Console]::Out.WriteLine('failed: ' + $_.Exception.Message) }`;
+    const script = [
+      "$ErrorActionPreference = 'Continue'",
+      say(`'language ' + $ExecutionContext.SessionState.LanguageMode`),
+      say(`'version ' + $PSVersionTable.PSVersion`),
+      say(`'PSModulePath ' + $env:PSModulePath`),
+      say(`'TEMP ' + $env:TEMP + ' exists ' + [System.IO.Directory]::Exists($env:TEMP)`),
+      say(`'root exists ' + [System.IO.Directory]::Exists($env:SystemDrive + '\\')`),
+      `foreach ($m in (Get-Module -ListAvailable Microsoft.PowerShell.Utility)) { [Console]::Out.WriteLine('available ' + $m.Name + ' ' + $m.Version + ' ' + $m.Path) }`,
+      `foreach ($m in (Get-Module)) { [Console]::Out.WriteLine('loaded ' + $m.Name + ' ' + $m.Path) }`,
+      `$psd1 = [System.IO.Path]::Combine($PSHOME, 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1')`,
+      say(`'psd1 ' + $psd1 + ' exists ' + [System.IO.File]::Exists($psd1)`),
+      say(`'psd1 bytes ' + [System.IO.File]::ReadAllBytes($psd1).Length`),
+      `$gac = [System.IO.Path]::Combine($env:SystemRoot, 'Microsoft.NET\\assembly\\GAC_MSIL\\Microsoft.PowerShell.Commands.Utility')`,
+      say(`'gac ' + $gac + ' exists ' + [System.IO.Directory]::Exists($gac)`),
+      `try { $assembly = [System.Reflection.Assembly]::Load('Microsoft.PowerShell.Commands.Utility, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35'); [Console]::Out.WriteLine('assembly ' + $assembly.Location) } catch { [Console]::Out.WriteLine('assembly ' + $_.Exception.ToString()) }`,
+      `try { Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop; [Console]::Out.WriteLine('import ok') } catch { [Console]::Out.WriteLine('import ' + $_.FullyQualifiedErrorId + ' ' + $_.Exception.ToString()) }`,
+      `foreach ($e in $Error) { [Console]::Out.WriteLine('error ' + $e.FullyQualifiedErrorId + ' ' + $e.Exception.ToString()) }`,
+    ].join('\n');
+    try {
+      const result = await run(script, { executablePath, ...overrides });
+      return `[module diagnostics, exit ${String(result.exitCode)}]\n${result.stdout.trim()}\n${result.stderr.trim()}`;
+    } catch (error) {
+      return `[module diagnostics failed] ${error instanceof Error ? error.message : String(error)}`;
+    }
+  };
+
   /** T02: the language cases in a session's launch, decided by comparing stdout and the exit status outside the sandbox. */
   const grammar = async (executablePath: string, label: string): Promise<void> => {
     const grant = await moduleCacheOf(executablePath, label);
@@ -773,7 +807,12 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     expect(hereString.stdout.trim()).toBe('line1\nline2');
     const pipeline = await of("'a b c' -split ' ' | Measure-Object | ForEach-Object Count");
 
-    expect(pipeline.stdout.trim()).toBe('3');
+    expect(
+      pipeline.stdout.trim(),
+      pipeline.stdout.trim() === '3'
+        ? pipeline.stderr
+        : `${pipeline.stderr}\n${await moduleDiagnostics(executablePath, session(grant))}`,
+    ).toBe('3');
     const subexpression = await of('Write-Output "val=$(2 + 3)"');
 
     expect(subexpression.stdout.trim()).toBe('val=5');
@@ -810,7 +849,14 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       environment: { ...baseEnvironment(), PSModulePath: serviceModulePath(executablePath) },
     });
 
-    expect(cold.stdout.trim(), cold.stderr).toBe('3');
+    expect(
+      cold.stdout.trim(),
+      cold.stdout.trim() === '3'
+        ? cold.stderr
+        : `${cold.stderr}\n${await moduleDiagnostics(executablePath, {
+            environment: { ...baseEnvironment(), PSModulePath: serviceModulePath(executablePath) },
+          })}`,
+    ).toBe('3');
     const grant = await moduleCacheOf(executablePath, label);
     const modules = join(root, `module-probe-${label}`);
     mkdirSync(join(modules, 'TauConformanceProbe'), { recursive: true });

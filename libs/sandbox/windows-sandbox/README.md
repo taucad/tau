@@ -176,10 +176,7 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
     keeps its flags (and, under that journal's writable root, its label) for that journal to restore; every other
     object gets its journaled flags and label back and is read back. Either exit order ends with every path exactly
     as before both (NW02, NW03).
-  - **Window station.** Each launch adds ACEs for its capability and package SIDs and removes exactly those, by
-    deleting them from the DACL as read (`DeleteAce`), so every other ACE keeps its bytes and order. It never adds or
-    removes one for the runner's logon SID: that is the person's, which the station already admits, and removing it
-    would leave every later process of the person's unable to initialise `user32` (`STATUS_DLL_INIT_FAILED`).
+  - **Window station.** No launch changes it ("Desktop"), so concurrent launches share nothing there.
     Unrestored journals are found through the person's ledger, `%LOCALAPPDATA%\Tau\windows-sandbox\live`: one file per
     launch naming its journal, written after the journal is fsynced and before any ACL changes, removed once the
     journal is restored. A launch may not grant a path holding the ledger or another unrestored journal, and its own
@@ -238,14 +235,13 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
 - **Desktop.** The launcher creates the shell's private desktop on its window station. The runner cannot: as
   `TauSandbox` it may not change `WinSta0`, and both the spike and Codex create the desktop here too. The desktop's
   protected DACL admits the person and, as participants, `TauSandbox`, the launch's capability SID and its package SID.
-  The desktop carries a Low label (`S:(ML;;NW;;;LW)`) so the Low-integrity shell can attach to it. The launcher adds one
-  session ACE for each of the launch's capability and package SIDs to the shared window station when the person may
-  change its DACL (best-effort: the ACE only widens access), and removes exactly the ACEs naming those SIDs at
-  teardown ("Sessions"), so a concurrent launch's and the person's stay. Because teardown never writes an original
-  back, the grant must change nothing else: it appends the ACEs to the current ones copied byte for byte (never
-  `SetEntriesInAclW`, which rebuilds the whole DACL), keeps the descriptor's control flags, and reads the result back,
-  writing the original back if anything else changed. Chromium's GPU process opens the station through the person's
-  ACEs; the conformance suite's `restrictedChild` check starts a child like it after every row.
+  The desktop carries a Low label (`S:(ML;;NW;;;LW)`) so the Low-integrity shell can attach to it. The window station
+  is never changed, as in Codex: it already admits every pass of the shell (the runner holds the person's logon SID,
+  and the AppContainer pass is admitted as `ALL APPLICATION PACKAGES`). An earlier design appended an ACE for each of
+  the launch's capability and package SIDs while the launch ran; with those ACEs present, a restricted child of the
+  person's (Chromium's GPU process) failed to initialise `user32` (`STATUS_DLL_INIT_FAILED`), so a live native worker
+  crashed Tau's GPU process. The conformance suite's `restrictedChild` check starts a child like it after every row
+  and, in NW02-NW04, while the workers are live.
 - **Cleanup.** The AppContainer leaves no durable state once its registration is deleted (above). There is no firewall
   or loopback exemption and no permanent kernel object. The account's own profile is account-level state, created by
   `setup` and deleted by `revoke`. The named-object directory and its links are temporary objects that go away with the
@@ -419,7 +415,7 @@ its stderr, sent at any time, also before `ready`), which `launch` never forward
 JSON lines, streamed on write and on restore so memory stays bounded however large the granted trees are:
 
 ```text
-{"kind":"header","version":6,"capabilitySid":"S-1-5-21-…","accountSid":"S-1-5-21-…","groupSid":"S-1-5-21-…","packageSid":"S-1-15-2-…","packageName":"tau.sandbox.…","launcherPid":1234,"windowStation":{"sessionId":1,"name":"WinSta0"}}
+{"kind":"header","version":7,"capabilitySid":"S-1-5-21-…","accountSid":"S-1-5-21-…","groupSid":"S-1-5-21-…","packageSid":"S-1-15-2-…","packageName":"tau.sandbox.…","launcherPid":1234}
 {"kind":"root","path":"C:\\…\\home","sddl":"O:S-1-5-21-…G:S-1-5-21-…D:(A;OICI;FA;;;SY)…S:(ML;…)","fileId":"<volume serial>:<file index>","labeled":true,"account":true}
 {"kind":"child","path":"C:\\…\\home\\a.txt","sddl":"O:…G:…D:AI(A;ID;FA;;;SY)…","fileId":"…"}
 {"kind":"end","roots":1,"children":1}
@@ -438,8 +434,7 @@ logon SID, which is the person's, 5 denied the package only) are refused; they o
 `restore --journal <path>` refuses a journal whose launcher is still running, takes the descriptor lock, removes the
 launch's ACEs (and the account's and the group's, where no other journal grants or denies the same root) from the roots with propagation (children first, and the label too on a writable root no other journal's
 writable root covers), then settles every journaled object and root as "ACL lifecycle" says (the DACL flags with
-`WRITE_DAC`, the label with `WRITE_OWNER` only where it differs), removes the launch's window-station ACEs when it runs
-in the journaled session, deletes the journal, unregisters it from the ledger and prints `{"restored":true}`. A missing
+`WRITE_DAC`, the label with `WRITE_OWNER` only where it differs), deletes the journal, unregisters it from the ledger and prints `{"restored":true}`. A missing
 journal, or one cut short before its `end` line, is success. On any unconfirmed entry it prints the failures (the first
 few and a count), keeps the journal and exits 1. It is idempotent.
 

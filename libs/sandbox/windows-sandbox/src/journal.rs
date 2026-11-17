@@ -22,17 +22,9 @@ use std::path::Path;
 
 /// Version 6 grants the first pass to the shared sandbox account and denies the shared sandbox group and the launch's
 /// package, records which roots are writable and which name the account or the group, and restores by SID (concurrent
-/// launches, README "Sessions"). Older journals are refused: versions 2 to 5 shipped only on unmerged branches, behind
-/// `TAU_WINDOWS_SHELL_SANDBOX`.
-pub const JOURNAL_VERSION: u32 = 6;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WindowStationEntry {
-    /// The Terminal Services session whose window station this is; a restore from another session skips it.
-    pub session_id: u32,
-    pub name: String,
-}
+/// launches, README "Sessions"). Version 7 drops the window station, which no launch changes any more. Older journals
+/// are refused: versions 2 to 6 shipped only on unmerged branches, behind `TAU_WINDOWS_SHELL_SANDBOX`.
+pub const JOURNAL_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -53,8 +45,6 @@ pub struct Header {
     /// launch's runner or by `revoke`.
     pub package_name: String,
     pub launcher_pid: u32,
-    #[serde(default)]
-    pub window_station: Option<WindowStationEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -236,7 +226,6 @@ mod tests {
             package_sid: "S-1-15-2-1-2-3-4-5-6-7".into(),
             package_name: "tau.sandbox.000000010000000200000003ffffffff".into(),
             launcher_pid: 77,
-            window_station: Some(WindowStationEntry { session_id: 1, name: "WinSta0".into() }),
         }
     }
 
@@ -344,10 +333,10 @@ mod tests {
             [lines[0], lines[0], lines[5]].join("\n"),
             // unknown field
             [lines[0].replace("\"launcherPid\"", "\"extra\":1,\"launcherPid\"").as_str(), lines[5]].join("\n"),
-            // an earlier version (5 had no group SID)
-            [lines[0].replace("\"version\":6", "\"version\":5").as_str(), lines[5]].join("\n"),
+            // an earlier version (6 named the window station)
+            [lines[0].replace("\"version\":7", "\"version\":6").as_str(), lines[5]].join("\n"),
             // a later version
-            [lines[0].replace("\"version\":6", "\"version\":7").as_str(), lines[5]].join("\n"),
+            [lines[0].replace("\"version\":7", "\"version\":8").as_str(), lines[5]].join("\n"),
             // a header without the group SID
             [lines[0].replace("\"groupSid\":\"S-1-5-21-9-9-9-1006\",", "").as_str(), lines[5]].join("\n"),
             // a version 4 header, with the runner's logon SID in place of the account

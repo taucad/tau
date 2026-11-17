@@ -121,9 +121,17 @@ describe('AcceptInvitation', () => {
       },
     ]);
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'https://api.test/v1/invitations/tok_abcdef',
-      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+      'https://api.test/v1/invitations/accept',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ token: 'tok_abcdef' }),
+      }),
     );
+    /* No request line carries the token: access logs record paths, not bodies. */
+    for (const [url] of vi.mocked(globalThis.fetch).mock.calls) {
+      expect(String(url)).not.toContain('tok_abcdef');
+    }
     expect(mockCreateProject).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'proj_shared00000000000000', files: {} }),
     );

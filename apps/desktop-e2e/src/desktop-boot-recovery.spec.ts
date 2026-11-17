@@ -249,3 +249,90 @@ describe('desktop boot recovery (T-R12.12)', () => {
     expect(existsSync(join(userData, 'boot-health.json'))).toBe(true);
   }, 600_000);
 });
+
+/** Replace main's message boxes with a stub that records each one and answers with `response`. */
+const stubMessageBoxes = async (application: ElectronApplication, response: number): Promise<void> => {
+  await application.evaluate(({ dialog }, answer) => {
+    const test = globalThis as typeof globalThis & { __boxes?: Array<{ message: string; buttons: string[] }> };
+    test.__boxes = [];
+    const record = async (...args: unknown[]): Promise<{ response: number; checkboxChecked: boolean }> => {
+      const options = (args.length > 1 ? args[1] : args[0]) as { message: string; buttons?: string[] };
+      test.__boxes!.push({ message: options.message, buttons: [...(options.buttons ?? [])] });
+      return { response: answer, checkboxChecked: false };
+    };
+    dialog.showMessageBox = record as typeof dialog.showMessageBox;
+  }, response);
+};
+
+const messageBoxes = async (application: ElectronApplication): Promise<Array<{ message: string; buttons: string[] }>> =>
+  application.evaluate(
+    () => (globalThis as typeof globalThis & { __boxes?: Array<{ message: string; buttons: string[] }> }).__boxes ?? [],
+  );
+
+const crashRenderer = async (application: ElectronApplication): Promise<void> => {
+  await application.evaluate(({ webContents }) => {
+    webContents
+      .getAllWebContents()
+      .find((contents) => contents.getURL().startsWith('app://tau/'))
+      ?.forcefullyCrashRenderer();
+  });
+};
+
+describe('desktop renderer reload policy and hang rule (T-B11.2, T-B24.2)', () => {
+  it('(T-B11.2) reloads once, then lands on Home with a notice, then opens the recovery window', async () => {
+    const userData = await profile();
+    const application = await launch(userData);
+    const page = await appPage(application);
+    await expect.poll(async () => lastStage(userData), { timeout: 120_000 }).toBe('home-ready');
+    await stubMessageBoxes(application, 0);
+    await page.evaluate(() => {
+      globalThis.location.assign('/files');
+    });
+    await page.waitForURL((url) => url.pathname === '/files', { waitUntil: 'load', timeout: 120_000 });
+
+    /* First death: the same address again. */
+    await crashRenderer(application);
+    await page.waitForURL((url) => url.pathname === '/files', { waitUntil: 'load', timeout: 120_000 });
+    expect(await messageBoxes(application)).toEqual([]);
+
+    /* Second within 60 s: Home, with a notice naming what was closed. */
+    await crashRenderer(application);
+    await page.waitForURL((url) => url.pathname === '/', { waitUntil: 'load', timeout: 120_000 });
+    await expect
+      .poll(async () => (await messageBoxes(application)).map((box) => box.message))
+      .toEqual([expect.stringMatching(/closed/iu)]);
+
+    /* Third within 5 minutes: no more reloads, the recovery window instead. */
+    await crashRenderer(application);
+    await recoveryPage(application);
+    const log = await readFile(join(userData, 'logs', 'desktop.log'), 'utf8');
+    expect(log).toContain('main.renderer-reload');
+    expect(log).toMatch(/main\.renderer-reload.*"step":"stop"/u);
+  }, 600_000);
+
+  it('(T-B24.2) offers Wait, Reload and Restart in Safe Mode to a page blocked for 40 s, and Reload restores it', async () => {
+    const userData = await profile();
+    const application = await launch(userData);
+    const page = await appPage(application);
+    await expect.poll(async () => lastStage(userData), { timeout: 120_000 }).toBe('home-ready');
+    /* Reload. */
+    await stubMessageBoxes(application, 1);
+    void page
+      .evaluate(() => {
+        const until = Date.now() + 40_000;
+        while (Date.now() < until) {
+          // Block the page's main thread.
+        }
+      })
+      .catch(() => undefined);
+
+    await expect
+      .poll(async () => (await messageBoxes(application)).map((box) => box.buttons), { timeout: 90_000 })
+      .toEqual([['Wait', 'Reload', 'Restart in Safe Mode']]);
+    const restored = await application.firstWindow();
+    await restored.waitForURL((url) => url.protocol === 'app:', { waitUntil: 'load', timeout: 120_000 });
+    expect(await restored.evaluate(() => document.readyState)).toBe('complete');
+    const log = await readFile(join(userData, 'logs', 'desktop.log'), 'utf8');
+    expect(log).toContain('renderer.hang-offered');
+  }, 600_000);
+});

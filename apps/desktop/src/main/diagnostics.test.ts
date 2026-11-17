@@ -286,6 +286,142 @@ describe('forwarders', () => {
     expect(report.mock.calls[0]?.[0]).toMatchObject({ message: 'Renderer unresponsive', tags: { hang_seconds: '9' } });
   });
 
+  describe('the hang rule (T-B24.1)', () => {
+    type Timer = { readonly callback: () => void; readonly at: number };
+    const setup = (
+      response: number | ((options: { readonly signal?: AbortSignal }) => Promise<{ response: number }>) = 0,
+    ) => {
+      const handlers = new Map<string, () => void>();
+      const log = { filePath: '', log: vi.fn() };
+      const report = vi.fn();
+      const reload = vi.fn();
+      const restartInSafeMode = vi.fn();
+      const showMessageBox = vi.fn(
+        typeof response === 'function' ? response : async () => Promise.resolve({ response }),
+      );
+      let now = 0;
+      const timers = new Set<Timer>();
+      watchRendererHangs(
+        {
+          on: (event: string, listener: () => void) => {
+            handlers.set(event, listener);
+          },
+        },
+        log,
+        {
+          report,
+          now: () => now,
+          hangRule: {
+            setTimeout: (callback, milliseconds) => {
+              const timer = { callback, at: now + milliseconds };
+              timers.add(timer);
+              return timer;
+            },
+            clearTimeout: (handle) => {
+              timers.delete(handle as Timer);
+            },
+            showMessageBox,
+            reload,
+            restartInSafeMode,
+          },
+        },
+      );
+      const advance = async (milliseconds: number): Promise<void> => {
+        now += milliseconds;
+        for (const timer of [...timers]) {
+          if (timer.at <= now) {
+            timers.delete(timer);
+            timer.callback();
+          }
+        }
+        await Promise.resolve();
+        await Promise.resolve();
+      };
+      return { handlers, log, report, reload, restartInSafeMode, showMessageBox, advance, timers };
+    };
+
+    it('should report an ongoing hang at 30 s and offer Wait, Reload and Restart in Safe Mode', async () => {
+      const { handlers, report, showMessageBox, advance } = setup();
+      handlers.get('unresponsive')?.();
+      await advance(29_999);
+      expect(showMessageBox).not.toHaveBeenCalled();
+
+      await advance(1);
+
+      expect(report).toHaveBeenCalledOnce();
+      expect(report.mock.calls[0]?.[0]).toMatchObject({
+        level: 'error',
+        fingerprint: ['desktop-renderer-hang'],
+        tags: { hang_seconds: '30', ongoing: 'true' },
+      });
+      expect(showMessageBox).toHaveBeenCalledOnce();
+      expect(showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: ['Wait', 'Reload', 'Restart in Safe Mode'],
+        cancelId: 0,
+      });
+    });
+
+    it('should show nothing for a page that answers before 30 s', async () => {
+      const { handlers, report, showMessageBox, advance, timers } = setup();
+      handlers.get('unresponsive')?.();
+      await advance(20_000);
+      handlers.get('responsive')?.();
+      await advance(60_000);
+
+      expect(showMessageBox).not.toHaveBeenCalled();
+      expect(timers.size).toBe(0);
+      /* The ended hang is still reported as before, without `ongoing`. */
+      expect(report).toHaveBeenCalledOnce();
+      expect(report.mock.calls[0]?.[0]).toMatchObject({ tags: { hang_seconds: '20' } });
+    });
+
+    it('should reload or restart in safe mode as chosen', async () => {
+      const reloading = setup(1);
+      reloading.handlers.get('unresponsive')?.();
+      await reloading.advance(30_000);
+      expect(reloading.reload).toHaveBeenCalledOnce();
+      expect(reloading.restartInSafeMode).not.toHaveBeenCalled();
+
+      const restarting = setup(2);
+      restarting.handlers.get('unresponsive')?.();
+      await restarting.advance(30_000);
+      expect(restarting.restartInSafeMode).toHaveBeenCalledOnce();
+      expect(restarting.reload).not.toHaveBeenCalled();
+    });
+
+    it('should ask again after another 30 s when the person waits and the page still hangs, reporting once', async () => {
+      const { handlers, report, showMessageBox, advance } = setup(0);
+      handlers.get('unresponsive')?.();
+      await advance(30_000);
+      await advance(30_000);
+
+      expect(showMessageBox).toHaveBeenCalledTimes(2);
+      expect(report).toHaveBeenCalledOnce();
+    });
+
+    it('should close the choice when the page answers while it is showing', async () => {
+      let signal: AbortSignal | undefined;
+      const { handlers, advance, timers } = setup(
+        async (options) =>
+          new Promise<{ response: number }>((resolve) => {
+            ({ signal } = options);
+            signal?.addEventListener('abort', () => {
+              resolve({ response: 0 });
+            });
+          }),
+      );
+      handlers.get('unresponsive')?.();
+      await advance(30_000);
+      expect(signal?.aborted).toBe(false);
+
+      handlers.get('responsive')?.();
+      await advance(0);
+
+      expect(signal?.aborted).toBe(true);
+      expect(timers.size).toBe(0);
+    });
+  });
+
   it('should collapse a renderer console message repeated back-to-back', () => {
     const handlers = new Map<string, (...args: unknown[]) => void>();
     const log = { filePath: '', log: vi.fn() };

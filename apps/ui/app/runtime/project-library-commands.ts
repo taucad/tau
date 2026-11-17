@@ -266,12 +266,6 @@ export type ProjectLibraryChatSessions = Pick<
   'noteCreatedEmpty' | 'observedChatIdsOf' | 'getProjection' | 'getProjectClosePlan'
 >;
 
-/** A chat as a refusal names it: its name, else its id. */
-const chatLabelOf = (chats: readonly Chat[], chatId: string): string => {
-  const name = chats.find((chat) => chat.id === chatId)?.name;
-  return name === undefined || name.length === 0 ? `Chat ${chatId}` : `The chat "${name}"`;
-};
-
 /** What the commands take from the library: its binding, worker, discovery, journal and listing. */
 export type ProjectCommandsHost = Readonly<{
   facade: () => Promise<ProjectLibraryFileManager>;
@@ -750,34 +744,13 @@ export class ProjectCommands {
     if (chats.length === 0) {
       return { lost: () => false, release: () => undefined };
     }
-    const [{ leaseChatLogs }, { unsettledLogRun }] = await Promise.all([
-      import('@taucad/agent-host/browser'),
-      import('@taucad/agent-host'),
-    ]);
-    const lease = await leaseChatLogs({ projectId, chatIds: chats.map((chat) => chat.id) });
-    if (lease.status === 'led-elsewhere') {
-      throw new Error(
-        `${chatLabelOf(chats, lease.chatId)} is open in another tab or window. Close the project there before deleting it.`,
-      );
-    }
-    try {
-      for (const chat of chats) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- one log at a time, so a refusal names its chat.
-        const bytes = await this.#host.readChats(async (source) => source.readChatLog(chat.id, projectId), projectId, {
-          retry: false,
-        });
-        const run = unsettledLogRun(bytes);
-        if (run !== undefined) {
-          throw new Error(
-            `${chatLabelOf(chats, chat.id)} has a run that has not ended (${run.state}). Open the project and stop it, or wait for it to settle, before deleting.`,
-          );
-        }
-      }
-    } catch (error) {
-      lease.release();
-      throw error;
-    }
-    return lease;
+    const { leaseSettledChatLogs } = await import('#runtime/project-library-chat-logs.js');
+    return leaseSettledChatLogs({
+      projectId,
+      chats,
+      readLog: async (chatId) =>
+        this.#host.readChats(async (source) => source.readChatLog(chatId, projectId), projectId, { retry: false }),
+    });
   };
 
   /**

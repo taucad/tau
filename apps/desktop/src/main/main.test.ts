@@ -120,6 +120,7 @@ const state = vi.hoisted(() => ({
   prepareToInstall: undefined as DesktopUpdaterOptions['prepareToInstall'],
   /* Lets a case hold ACP discovery open while the window boots (D17). */
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
+  acpDiscoveryCalls: 0,
   bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
   log: vi.fn(),
   updateMenuItems: [{ label: 'About Tau' }] as UpdateMenuItem[],
@@ -389,7 +390,10 @@ vi.mock('@taucad/host', async (importOriginal) => {
   return {
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
     defaultDependencyStore: vi.fn(() => join(state.userData, 'store')),
-    discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
+    discoverAcpAgents: vi.fn(async () => {
+      state.acpDiscoveryCalls += 1;
+      return state.acpDiscovery ?? { agents: [], refused: [] };
+    }),
     externalAgentDescriptors: vi.fn(() => []),
     keepAwakeWhileStreaming,
     projectCloseMilliseconds,
@@ -548,6 +552,7 @@ afterEach(async () => {
   state.flushReports.mockImplementation(async () => true);
   getWindows.mockReturnValue([fakeWindow]);
   state.acpDiscovery = undefined;
+  state.acpDiscoveryCalls = 0;
   state.ready = undefined;
   state.shellApplied = undefined;
   state.authRestored = undefined;
@@ -2733,11 +2738,10 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       expect(await bootstrapArgument()).toEqual(expect.objectContaining({ safeMode: { reason: 'requested' } }));
       const { removeStaleQuickLookSessions } = await import('#main/quick-look.js');
       const { installBrowserHost } = await import('#main/browser-host.js');
-      const { discoverAcpAgents } = await import('@taucad/host');
       const { createBambuStudioService } = await import('#main/bambu-studio-service.js');
       expect(removeStaleQuickLookSessions).not.toHaveBeenCalled();
       expect(installBrowserHost).not.toHaveBeenCalled();
-      expect(discoverAcpAgents).not.toHaveBeenCalled();
+      expect(state.acpDiscoveryCalls).toBe(0);
       expect(createBambuStudioService).not.toHaveBeenCalled();
       expect(state.utilityEnvironmentAdditions.some((additions) => 'TAU_DESKTOP_MACHINES_DIR' in additions)).toBe(
         false,

@@ -6,8 +6,12 @@ import type * as ChatInterfaceMobileModule from '#routes/w.$workspace.$project/c
  *
  * A layout renders only once the project's session is live and focus has settled on it, so its chunk graph (the
  * desktop shell is the open's largest: the viewer, the dockview workbench and the composer) used to start downloading
- * and evaluating only then, after the session's own start. Asked for as the open begins, it loads beside the session
- * and the render finds it in the module map.
+ * and evaluating only then, after the session's own start. Warmed as soon as the session module (whose graph holds
+ * this module) has loaded, it loads while the session starts and the render finds it in the module map.
+ *
+ * It lives in the session module's graph, never in the app runtime's: the bundler writes each layout's preload list
+ * (its whole chunk graph) beside the `import()` that names it, so this module keeps those lists out of the runtime's
+ * chunk and the shell's critical graph unchanged (G3).
  *
  * Each layout has one import in flight at a time, shared by both callers: a failure is one failure (one chunk-error
  * report, one recovery), seen by the warm-up and by the render alike. A failed import is forgotten, so the next

@@ -40,7 +40,7 @@ describe('warmWorkspaceLayout', () => {
 
   it('should request only the desktop shell at a desktop viewport', async () => {
     stubViewport(false);
-    const { warmWorkspaceLayout } = await import('#lib/workspace-layout-warmup.js');
+    const { warmWorkspaceLayout } = await import('#routes/w.$workspace.$project/chat-interface-layouts.js');
 
     warmWorkspaceLayout();
 
@@ -51,7 +51,7 @@ describe('warmWorkspaceLayout', () => {
 
   it('should request only the phone shell at a phone viewport', async () => {
     stubViewport(true);
-    const { warmWorkspaceLayout } = await import('#lib/workspace-layout-warmup.js');
+    const { warmWorkspaceLayout } = await import('#routes/w.$workspace.$project/chat-interface-layouts.js');
 
     warmWorkspaceLayout();
 
@@ -62,7 +62,7 @@ describe('warmWorkspaceLayout', () => {
 
   it('should request nothing where no viewport is measured', async () => {
     stubViewport(undefined);
-    const { warmWorkspaceLayout } = await import('#lib/workspace-layout-warmup.js');
+    const { warmWorkspaceLayout } = await import('#routes/w.$workspace.$project/chat-interface-layouts.js');
 
     warmWorkspaceLayout();
     await new Promise((resolve) => {
@@ -74,7 +74,7 @@ describe('warmWorkspaceLayout', () => {
 
   it('should warm nothing and never throw when the viewport cannot be measured', async () => {
     vi.stubGlobal('matchMedia', () => undefined);
-    const { warmWorkspaceLayout } = await import('#lib/workspace-layout-warmup.js');
+    const { warmWorkspaceLayout } = await import('#routes/w.$workspace.$project/chat-interface-layouts.js');
     expect(() => {
       warmWorkspaceLayout();
     }).not.toThrow();
@@ -93,7 +93,8 @@ describe('warmWorkspaceLayout', () => {
 
   it('should share one import between the warm-up and the render', async () => {
     stubViewport(false);
-    const { loadChatInterfaceDesktop, warmWorkspaceLayout } = await import('#lib/workspace-layout-warmup.js');
+    const { loadChatInterfaceDesktop, warmWorkspaceLayout } =
+      await import('#routes/w.$workspace.$project/chat-interface-layouts.js');
 
     warmWorkspaceLayout();
     const render = loadChatInterfaceDesktop();
@@ -111,7 +112,8 @@ describe('warmWorkspaceLayout', () => {
     vi.doMock('#routes/w.$workspace.$project/chat-interface-desktop.js', importLayout);
     const unhandled = vi.fn();
     process.on('unhandledRejection', unhandled);
-    const { loadChatInterfaceDesktop, warmWorkspaceLayout } = await import('#lib/workspace-layout-warmup.js');
+    const { loadChatInterfaceDesktop, warmWorkspaceLayout } =
+      await import('#routes/w.$workspace.$project/chat-interface-layouts.js');
 
     try {
       warmWorkspaceLayout();

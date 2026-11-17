@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * STO-25 SP5: the real runtime's open asks for the layout its viewport will mount as focus starts opening the project,
- * while focus still waits on the session module, so the layout's chunk graph no longer starts loading only once the
- * project is live and its route shows the editor.
+ * STO-25 SP5: the real runtime's open asks for the layout its viewport will mount as soon as the session module has
+ * loaded, before the session is live and focus settles on it, so the layout's chunk graph no longer starts loading only
+ * once the route shows the editor.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAppRuntime, selectRuntimeFocus } from '#runtime/app-runtime.js';
@@ -23,7 +23,9 @@ vi.mock('#routes/w.$workspace.$project/project-live-sessions.js', async () => {
   await new Promise<void>((resolve) => {
     chunks.settleShell = resolve;
   });
-  return { LiveProjectSessions: () => null, ProjectChatRoute: () => null };
+  /* The real warm-up the session module exports, over the layouts mocked below. */
+  const { warmWorkspaceLayout } = await import('#routes/w.$workspace.$project/chat-interface-layouts.js');
+  return { LiveProjectSessions: () => null, ProjectChatRoute: () => null, warmWorkspaceLayout };
 });
 vi.mock('#routes/w.$workspace.$project/chat-interface-desktop.js', () => {
   chunks.requested.push('desktop');
@@ -39,7 +41,7 @@ afterEach(() => {
 });
 
 describe('the open warms the workspace layout beside the session module', () => {
-  it('should request the desktop shell while focus still waits on the session module', async () => {
+  it('should request the desktop shell once the session module loads, before focus settles', async () => {
     vi.stubGlobal(
       'matchMedia',
       vi.fn((query: string) => ({
@@ -62,17 +64,18 @@ describe('the open warms the workspace layout beside the session module', () => 
     });
 
     await vi.waitFor(() => {
-      expect(chunks.requested).toContain('desktop');
+      expect(chunks.requested).toEqual(['shell']);
     });
-    /* Nothing has rendered a layout: focus is still loading the session module, so no route state is the editor yet. */
+    /* Focus waits on the session module alone: no layout is asked for before it, none is held behind it. */
     expect(focus.getSnapshot().context.module).toBe('loading');
-    expect(focus.getSnapshot().hasTag('focused')).toBe(false);
-    expect(chunks.requested).not.toContain('mobile');
 
     chunks.settleShell?.();
     await vi.waitFor(() => {
-      expect(focus.getSnapshot().context.module).toBe('loaded');
+      expect(chunks.requested).toEqual(['shell', 'desktop']);
     });
+    expect(focus.getSnapshot().context.module).toBe('loaded');
+    /* Nothing has rendered a layout: no session is live, so focus has not settled and no route shows the editor. */
+    expect(focus.getSnapshot().hasTag('focused')).toBe(false);
     runtime.stop();
   });
 
@@ -99,9 +102,11 @@ describe('the open warms the workspace layout beside the session module', () => 
     });
 
     /* The shell import is shared from the first row, already settled: the open reaches it all the same. */
-    chunks.settleShell?.();
     await vi.waitFor(() => {
       expect(focus.getSnapshot().context.module).toBe('loaded');
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
     });
     expect(chunks.requested).toEqual([]);
     runtime.stop();

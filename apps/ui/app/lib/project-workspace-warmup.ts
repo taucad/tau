@@ -1,5 +1,4 @@
 import type * as ProjectWorkspace from '#routes/w.$workspace.$project/project-live-sessions.js';
-import { warmWorkspaceLayout } from '#lib/workspace-layout-warmup.js';
 
 type ProjectWorkspaceModule = typeof ProjectWorkspace;
 
@@ -50,17 +49,25 @@ export const loadProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
 };
 
 /**
- * The session module focus waits for as it opens a project, with the layout that project will mount once live warmed
- * beside it (STO-25 SP5): the layout's chunk graph then loads while the session starts instead of after it. A link's
- * intent warms only the shell ({@link warmProjectWorkspace}); the layout is asked for once a project is being opened.
+ * The session module focus waits for as it opens a project; once it has loaded, the layout that project will mount once
+ * live is warmed through it (STO-25 SP5), so the layout's chunk graph loads while the session starts instead of after
+ * it. The warm-up is the session module's own export, so this module, which the app runtime imports, names no layout
+ * and carries none of their preload lists (G3). A link's intent warms only the shell ({@link warmProjectWorkspace}).
  *
  * @returns The workspace shell import, as {@link loadProjectWorkspace} shares it.
  */
 // oxlint-disable-next-line @typescript-eslint/promise-function-async -- the shared tagged promise itself, as `loadProjectWorkspace` returns it.
 export const openProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
-  /* The shell first: focus waits on it, and nothing the hint does may stand in its way. */
   const shell = loadProjectWorkspace();
-  warmWorkspaceLayout();
+  // async-iife: bootstrap -- a hint after the shell; focus waits on the shell alone and the route reports its failure.
+  void (async () => {
+    try {
+      const workspace = await shell;
+      workspace.warmWorkspaceLayout();
+    } catch {
+      // A failed shell is the route's to report; the warm-up itself never throws.
+    }
+  })();
   return shell;
 };
 

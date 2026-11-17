@@ -112,7 +112,12 @@ const admissionGate = () => {
   cleanups.push(() => {
     gate.resolve(() => undefined);
   });
-  return { open: () => gate.resolve(() => undefined), wait: async () => gate.promise };
+  return {
+    open: (): void => {
+      gate.resolve(() => undefined);
+    },
+    wait: async () => gate.promise,
+  };
 };
 
 /** The host directory one node provider serves. */
@@ -563,7 +568,8 @@ describe('WorkspaceFileService root isolation', () => {
     });
     await turns(50);
     await vi.advanceTimersByTimeAsync(5000);
-    expect((await first).roots[1]?.state).toBe('unreachable');
+    const firstResult = await first;
+    expect(firstResult.roots[1]?.state).toBe('unreachable');
 
     /* The next configuration moves the project to another root and holds on Home's provider for its checkout. */
     const getProvider = providerRegistry.getProvider.bind(providerRegistry);

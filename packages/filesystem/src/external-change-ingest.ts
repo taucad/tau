@@ -148,6 +148,7 @@ export class ExternalChangeIngest {
   private readonly _probeWaiters: Array<() => void> = [];
   private _activeProbes = 0;
   private _batchDepth = 0;
+  private _disposed = false;
   private _stagedRoots: readonly StagedDiscoveryRoot[] = [];
 
   /**
@@ -205,6 +206,7 @@ export class ExternalChangeIngest {
 
   /** Release every observed root's native subscription. */
   public dispose(): void {
+    this._disposed = true;
     this._stagedRoots = [];
     this._rootStatuses.clear();
     this._rootErrors.clear();
@@ -442,6 +444,12 @@ export class ExternalChangeIngest {
         await this._acquireProbeSlot();
       }
       try {
+        /* A probe queued behind the slots outlives the configuration that asked
+         * for it: it admits nothing once the authority is disposed or the root
+         * is no longer staged, since nothing would release what it opened. */
+        if (this._disposed || !this._stagedRoots.some((root) => root.storageRootKey === storageRootKey)) {
+          return;
+        }
         await this._admitRoot(staged);
         this._rootErrors.delete(storageRootKey);
         this._setRootStatus(staged, { state: 'available' });

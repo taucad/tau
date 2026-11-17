@@ -129,6 +129,28 @@ const canonicalProviderPath = (path: string): string | undefined => {
   }
 };
 
+/** Split staged routes into those that pass and those that fail one test, keeping order. */
+const partition = (
+  entries: readonly StagedRouteMount[],
+  test: (entry: StagedRouteMount) => boolean,
+): [StagedRouteMount[], StagedRouteMount[]] => {
+  const passing: StagedRouteMount[] = [];
+  const failing: StagedRouteMount[] = [];
+  for (const entry of entries) {
+    (test(entry) ? passing : failing).push(entry);
+  }
+  return [passing, failing];
+};
+
+/** A route prefix's authority spelling, or `undefined` when the path rules refuse it (a NUL, for one). */
+const canonicalRoute = (prefix: string): string | undefined => {
+  try {
+    return resolveAuthorityPath(prefix);
+  } catch {
+    return undefined;
+  }
+};
+
 /** Raised when a logical project route is used before an exact locator is bound. @public */
 export class UnboundProjectRouteError extends Error {
   public readonly projectId: string;
@@ -212,12 +234,11 @@ export class WorkspaceFileService {
   private _discoveryRoots: readonly ResolvedDiscoveryRoot[] = [];
   /** Every root the last configuration named, in its order. */
   private _rootEntries: readonly ConfiguredRootEntry[] = [];
-  /** The routes the last configuration staged, mounted or not, and those whose provider rejected. */
+  /** The routes the last configuration staged, mounted or not. */
   private _stagedRoutes: {
     readonly projects: readonly StagedRouteMount[];
     readonly checkouts: readonly StagedRouteMount[];
-    readonly providerFailures: ReadonlySet<string>;
-  } = { projects: [], checkouts: [], providerFailures: new Set() };
+  } = { projects: [], checkouts: [] };
   private readonly _rootStatusListeners = new Set<(roots: readonly RootStatus[]) => void>();
   private _publishedRootFingerprint = '[]';
   private readonly _pipeline: MutationPipeline;
@@ -290,7 +311,18 @@ export class WorkspaceFileService {
       pipeline: this._pipeline,
       projectIndexes: this._projectIndexes,
       discoveryRoots: () => this._discoveryRoots,
-      rootState: (storageRootKey) => this._externalChanges.rootState(storageRootKey),
+      /* A non-Home root reads `pending` until its admission settles: discovery
+       * never resolves the provider of a root still under its deadline (D1). */
+      rootState: (storageRootKey) => {
+        const state = this._externalChanges.rootState(storageRootKey);
+        if (
+          storageRootKey === this._discoveryRoots[0]?.storageRootKey ||
+          (state !== undefined && state !== 'available')
+        ) {
+          return state;
+        }
+        return this._externalChanges.isProbePending(storageRootKey) ? 'pending' : (state ?? 'pending');
+      },
       revokeProjectRoute: (path, notifyPeers) => {
         this._revokeProjectRoute(path, notifyPeers);
       },
@@ -309,7 +341,7 @@ export class WorkspaceFileService {
        * and the new statuses are published (blueprint D1). */
       onRootStatusChange: () => {
         // async-iife: bootstrap -- a late admission arrives on the ingest's own settlement, not a caller's.
-        void this._attachLateRoots();
+        void this._enqueueTopologyFollowUp(async () => this._attachLateRoots());
       },
     });
     this._remoteChanges = new RemoteChanges({
@@ -1482,6 +1514,27 @@ export class WorkspaceFileService {
   }
 
   /** Run one topology change after every earlier one, keeping the queue live after a rejection. */
+  /**
+   * Run topology work that follows a configuration, such as a late admission
+   * attaching its routes, in the same order as configurations, so it never
+   * acts on a staged topology another configuration is replacing. It leaves
+   * the last configuration's outcome as it was, and never rejects.
+   */
+  private async _enqueueTopologyFollowUp(operation: () => Promise<void>): Promise<void> {
+    const predecessor = this._projectConfigurationTail;
+    const applyInOrder = async (): Promise<void> => {
+      await predecessor;
+      try {
+        await operation();
+      } catch (error) {
+        console.error('[filesystem] Attaching a late root failed.', error);
+      }
+    };
+    const scheduled = applyInOrder();
+    this._projectConfigurationTail = scheduled;
+    return scheduled;
+  }
+
   private async _enqueueTopology<T>(operation: () => Promise<T>): Promise<T> {
     const predecessor = this._projectConfigurationTail;
     const applyInOrder = async (): Promise<T> => {
@@ -1515,20 +1568,25 @@ export class WorkspaceFileService {
 
     await this._externalChanges.evictReplacedRoots(stagedRoots);
 
-    /* Routes install before their roots settle, as they always did, so Home's
-     * routes answer while the other roots are still being admitted; a route
-     * whose root is still being probed waits for that probe instead. */
+    /* Home's routes, and the routes of roots already admitted, install before
+     * the roots settle, so they answer while the other roots are admitted. Any
+     * other route waits for its root's admission, which runs under the
+     * deadline: no provider of a root still being admitted is awaited here, so
+     * one that never settles cannot hold Home (D1). Its provider outcome is
+     * still recorded, to name a route skipped for it. */
     const providerFailures = new Set<string>();
-    const installable = (entry: StagedRouteMount): boolean =>
-      !this._externalChanges.isProbePending(entry.storageRootKey);
-    const projectInstall = await this._installRouteMounts(
-      stagedInputs.filter((entry) => installable(entry)),
-      providerFailures,
-    );
-    const checkoutInstall = await this._installRouteMounts(
-      stagedCheckoutInputs.filter((entry) => installable(entry)),
-      providerFailures,
-    );
+    /* Roots after Home are the ones admitted under the deadline; a route on a
+     * storage root no discovery root names has no admission to wait for. */
+    const admittedLater = new Set(stagedRoots.slice(1).map((root) => root.storageRootKey));
+    const installsNow = (entry: StagedRouteMount): boolean =>
+      !admittedLater.has(entry.storageRootKey) ||
+      (this._externalChanges.rootState(entry.storageRootKey) === 'available' &&
+        !this._externalChanges.isProbePending(entry.storageRootKey));
+    const [immediateProjects, deferredProjects] = partition(stagedInputs, installsNow);
+    const [immediateCheckouts, deferredCheckouts] = partition(stagedCheckoutInputs, installsNow);
+    this._recordProviderFailures([...deferredProjects, ...deferredCheckouts], providerFailures);
+    const projectInstall = await this._installRouteMounts(immediateProjects, providerFailures);
+    const checkoutInstall = await this._installRouteMounts(immediateCheckouts, providerFailures);
     const changed = [
       ...projectInstall.changed,
       ...checkoutInstall.changed,
@@ -1548,7 +1606,7 @@ export class WorkspaceFileService {
     }
     this._discoveryRoots = stagedRoots;
     this._rootEntries = rootEntries;
-    this._stagedRoutes = { projects: stagedInputs, checkouts: stagedCheckoutInputs, providerFailures };
+    this._stagedRoutes = { projects: stagedInputs, checkouts: stagedCheckoutInputs };
     if (changed.length > 0) {
       this._resetTopologyState(changed);
     }
@@ -1556,6 +1614,9 @@ export class WorkspaceFileService {
     await this._reconcileRouteMounts();
     for (const { kind, prefix, config, storageRootKey } of [...stagedInputs, ...stagedCheckoutInputs]) {
       const state = this._externalChanges.rootState(storageRootKey);
+      if (this._projectRoutes.has(prefix) || this._checkoutRoutes.has(prefix)) {
+        continue;
+      }
       if (providerFailures.has(prefix)) {
         skipped.push(
           skippedRoute({ kind, reason: 'provider-unavailable', storageRootKey, projectId: config.projectId }),
@@ -1692,7 +1753,12 @@ export class WorkspaceFileService {
         continue;
       }
       const prefix = checkoutRoute(config.checkoutId);
-      if (resolveAuthorityPath(prefix) !== prefix || stagedPrefixes.has(prefix)) {
+      const canonicalPrefix = canonicalRoute(prefix);
+      if (canonicalPrefix === undefined) {
+        skip('checkout-rule');
+        continue;
+      }
+      if (canonicalPrefix !== prefix || stagedPrefixes.has(prefix)) {
         skip('duplicate-route');
         continue;
       }
@@ -1788,6 +1854,28 @@ export class WorkspaceFileService {
     return { changed, mounted };
   }
 
+  /**
+   * Note, without waiting, the routes whose provider rejects: their roots are
+   * admitted under the deadline, and a provider that never settles is never
+   * awaited here.
+   *
+   * @param staged - Routes whose roots are still being admitted.
+   * @param providerFailures - Prefixes whose provider rejected; extended in place when one does.
+   */
+  private _recordProviderFailures(staged: readonly StagedRouteMount[], providerFailures: Set<string>): void {
+    for (const entry of staged) {
+      const record = async (): Promise<void> => {
+        try {
+          await this._registry.getProvider(entry.scope);
+        } catch {
+          providerFailures.add(entry.prefix);
+        }
+      };
+      // async-iife: bootstrap -- the configuration reads the outcome after its roots settle; it never waits on it.
+      void record();
+    }
+  }
+
   /** Mount one staged route on its provider unless an identical mount is already there. */
   private _mountRoute(entry: StagedRouteMount, provider: FileSystemProvider): boolean {
     const { prefix, config, storageRootKey, providerBasePath } = entry;
@@ -1846,10 +1934,11 @@ export class WorkspaceFileService {
     ] as const) {
       for (const entry of entries) {
         const provider = this._registry.getOwnedProvider(entry.storageRootKey);
+        /* A provider that failed earlier is no exclusion: a root admitted since
+         * owns a working provider again, and its routes mount. */
         if (
           provider === undefined ||
           live.has(entry.prefix) ||
-          this._stagedRoutes.providerFailures.has(entry.prefix) ||
           this._externalChanges.rootState(entry.storageRootKey) !== 'available'
         ) {
           continue;
@@ -1874,7 +1963,10 @@ export class WorkspaceFileService {
   ): Promise<void> {
     try {
       const resolved = await provider;
-      if (live.has(entry.prefix) && this._mountRoute(entry, resolved)) {
+      /* The staged entry must still own its prefix: a configuration that
+       * replaced the topology meanwhile owns the route now. */
+      const stillStaged = this._stagedRoutes.projects.includes(entry) || this._stagedRoutes.checkouts.includes(entry);
+      if (stillStaged && live.has(entry.prefix) && this._mountRoute(entry, resolved)) {
         changed.push(entry.prefix);
       }
     } catch {

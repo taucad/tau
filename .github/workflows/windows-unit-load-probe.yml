@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - claude/win-l2-load-probe-2
+      - claude/win-l2-load-probe-3
 
 permissions:
   contents: read
@@ -23,8 +24,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        workers: ['default']
-        rep: [1, 2, 3]
+        workers: ['default', '2']
+        rep: [1, 2, 3, 4, 5, 6]
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -102,14 +103,14 @@ jobs:
           if [ "$WORKERS" = default ]; then
             pnpm nx run revisions:test --outputStyle=static -- --reporter=verbose --reporter="$GITHUB_WORKSPACE/tools/probe/timing-reporter.mjs" | tee "$RUNNER_TEMP/probe/test.log" || true
           else
-            pnpm nx run revisions:test --outputStyle=static -- --maxWorkers="$WORKERS" | tee "$RUNNER_TEMP/probe/test.log" || true
+            pnpm nx run revisions:test --outputStyle=static -- --maxWorkers="$WORKERS" --reporter=verbose --reporter="$GITHUB_WORKSPACE/tools/probe/timing-reporter.mjs" | tee "$RUNNER_TEMP/probe/test.log" || true
           fi
           echo "wall seconds: $(( $(date +%s) - start ))" | tee -a "$RUNNER_TEMP/probe/test.log"
 
       - name: Stop sampler
         if: always()
         shell: pwsh
-        run: Get-Process typeperf -ErrorAction SilentlyContinue | Stop-Process -Force
+        run: Get-Process typeperf -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Get-CimInstance Win32_Process -Filter "Name='pwsh.exe'" | Where-Object { $_.CommandLine -like '*sampler.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
       - name: Upload probe evidence

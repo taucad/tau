@@ -3635,9 +3635,15 @@ importers:
       '@codemirror/autocomplete':
         specifier: 'catalog:'
         version: 6.20.4
+      '@codemirror/commands':
+        specifier: 'catalog:'
+        version: 6.11.1
       '@codemirror/language':
         specifier: 'catalog:'
         version: 6.13.1
+      '@codemirror/lint':
+        specifier: 'catalog:'
+        version: 6.9.7
       '@codemirror/search':
         specifier: 'catalog:'
         version: 6.7.2
@@ -3647,6 +3653,12 @@ importers:
       '@codemirror/view':
         specifier: 'catalog:'
         version: 6.43.15
+      '@taucad/api-extractor':
+        specifier: workspace:*
+        version: link:../../../libs/api-extractor
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../../../libs/events
       '@taucad/grammars':
         specifier: workspace:*
         version: link:../../../libs/grammars
@@ -3656,6 +3668,12 @@ importers:
       '@taucad/ui-core':
         specifier: workspace:*
         version: link:../ui-core
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
+      '@vscode/codicons':
+        specifier: 'catalog:'
+        version: 0.0.46-24
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -3680,13 +3698,25 @@ importers:
       unified:
         specifier: 'catalog:'
         version: 11.0.5
+      vscode-uri:
+        specifier: 'catalog:'
+        version: 3.1.0
     devDependencies:
+      '@lezer/highlight':
+        specifier: 'catalog:'
+        version: 1.2.5
+      '@taucad/kcl-wasm-lib':
+        specifier: 'catalog:'
+        version: 0.1.192
       '@testing-library/jest-dom':
         specifier: 'catalog:'
         version: 6.6.3
       '@testing-library/react':
         specifier: 'catalog:'
         version: 16.3.2(@testing-library/dom@10.4.2)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@testing-library/user-event':
+        specifier: ^14.6.1
+        version: 14.6.7(@testing-library/dom@10.4.2)
       react:
         specifier: 'catalog:'
         version: 19.3.1
@@ -4703,9 +4733,6 @@ importers:
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
         version: 0.11.0-beta.5
-      '@vscode/codicons':
-        specifier: 'catalog:'
-        version: 0.0.46-24
       better-auth:
         specifier: 'catalog:'
         version: 1.7.7(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.3)(kysely@0.29.6)(pg@8.23.1)(postgres@3.4.9))(next@16.4.0(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(sass@1.105.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@4.1.11)

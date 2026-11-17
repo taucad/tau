@@ -408,16 +408,19 @@ export const concurrentWorkersConformance = async (
   context: NativeWorkerContext,
   order: 'first-ends-first' | 'second-ends-first',
 ): Promise<void> => {
-  const { sddlOf } = context;
+  const { sddlOf, workerProbe } = context;
   const row = order === 'first-ends-first' ? 'nw02' : 'nw03';
   const setup = concurrencySetup(context, row);
   const madeA = setup.folders('a');
   const madeB = setup.folders('b');
   const before = sddlOf(setup.watched);
+  const session = personSession(workerProbe);
   const a = await setup.start('a', madeA);
   const b = await setup.start('b', madeB);
   await setup.isolated(a, b);
   await setup.isolated(b, a);
+  /* Live launches leave the person's session alone too: Tau's GPU process restarts while its workers run. */
+  assert.deepEqual(personSession(workerProbe), session);
 
   const [ending, staying] = order === 'first-ends-first' ? [a, b] : [b, a];
   const [endingMade, stayingMade] = order === 'first-ends-first' ? [madeA, madeB] : [madeB, madeA];
@@ -452,14 +455,16 @@ export const concurrentWorkersConformance = async (
  * @param context - The suite's root, helper, probe and outside observers.
  */
 export const crashRecoveryConformance = async (context: NativeWorkerContext): Promise<void> => {
-  const { helperPath, recordHelperDiagnostic, sddlOf } = context;
+  const { helperPath, recordHelperDiagnostic, sddlOf, workerProbe } = context;
   const setup = concurrencySetup(context, 'nw04');
   const madeLive = setup.folders('live');
   const madeDead = setup.folders('dead');
   const before = sddlOf(setup.watched);
+  const session = personSession(workerProbe);
   const live = await setup.start('live', madeLive);
   const dead = await setup.start('dead', madeDead);
   await setup.isolated(dead, live);
+  assert.deepEqual(personSession(workerProbe), session);
 
   dead.session.kill();
   await dead.session.closed;
@@ -482,6 +487,8 @@ export const crashRecoveryConformance = async (context: NativeWorkerContext): Pr
   assert.equal(existsSync(dead.journal), false);
   const deadPaths = [madeDead.own, madeDead.secret, madeDead.artifacts];
   assert.deepEqual(sddlOf(deadPaths), Object.fromEntries(deadPaths.map((path) => [path, before[path]])));
+  /* A launch killed with its launcher leaves nothing in the person's session either, before or after its restore. */
+  assert.deepEqual(personSession(workerProbe), session);
   assertMatches(
     await setup.ask(live, [
       { op: 'read', path: setup.data },
@@ -539,6 +546,14 @@ export type PersonSession = Readonly<{
   /** Whether the process could create a window on that desktop. */
   window: boolean;
   windowError?: string | undefined;
+  /**
+   * What a Chromium-style child makes of the session: started by the person under a restricted, Low-integrity token
+   * in a job, on an alternate desktop the person created on the station, it creates a window and exits `0x00000000`.
+   * `stage` names the step that failed otherwise.
+   */
+  restrictedChild: Readonly<{ stage: string; exitCode?: string; error?: string }>;
+  /** The person's temporary folder and its DACL and mandatory label, as SDDL. */
+  temporaryFolder: Readonly<{ path: string; sddl: string }>;
   /** Each fixed volume's root folder and its DACL, as SDDL: `setup` grants the volume capability there; no launch may. */
   volumes: Readonly<Record<string, string>>;
 }>;

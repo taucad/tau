@@ -30,6 +30,7 @@ const counter = setup({
 });
 
 describe('guardActors', () => {
+  // Expected-failure: intended, the row proves guardActors fails a test that leaves a dead letter
   it.fails('should fail a test that leaves a dead letter untaken', () => {
     const guard = guardActors();
     const actor = createActor(counter, { inspect: guard.inspect }).start();

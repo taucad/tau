@@ -5,7 +5,6 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use super::acl::{self, Exact};
-use super::desktop::{WindowStation, current_session};
 use super::exclusive;
 use super::ledger;
 use crate::journal::{self, Entry, Header};
@@ -67,7 +66,6 @@ fn coverage(header: &Header, ours: &HashSet<String>, failures: &mut Sample) -> C
 ///    SIDs. Where no other unrestored journal covers it, it gets its journaled control flags back, and, under a
 ///    writable root of this launch's that no other journal's writable root covers, its journaled label, and is
 ///    read back. Where one does, those are that journal's to restore, from the same original (`overlap.rs`).
-/// 3. The window station loses the ACEs naming the launch's SIDs, when this runs in the journaled session.
 ///
 /// A journal without its `end` line was cut short before any ACL changed: there is nothing to restore. The
 /// package's registration (`container.rs`) lives in the sandbox account's profile, which the person cannot change:
@@ -141,24 +139,7 @@ pub fn restore_journal(path: &Path) -> Vec<String> {
         "tau-windows-sandbox: restored {rewritten} descriptor(s) beyond their ACEs; {replaced} journaled object(s) were \
          replaced during the launch; {deferred} left to the other unrestored launch(es) covering them"
     );
-    restore_station(&summary.header, &own, &mut failures);
     failures.messages()
-}
-
-fn restore_station(header: &Header, own: &[String], failures: &mut Sample) {
-    let Some(station) = &header.window_station else { return };
-    match current_session() {
-        Ok(session) if session == station.session_id => {
-            if let Err(err) = WindowStation::open_current().and_then(|ws| ws.revoke(own)) {
-                failures.note(format!("window station {}: {err}", station.name));
-            }
-        }
-        Ok(_) => failures.note(format!(
-            "window station {} belongs to session {}; run restore from that session",
-            station.name, station.session_id
-        )),
-        Err(err) => failures.note(format!("window station: {err}")),
-    }
 }
 
 /// `restore --journal <path>`: idempotent. A missing journal means there is nothing left to restore.

@@ -19,8 +19,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { createSocket } from 'node:dgram';
-import type { Socket as DatagramSocket } from 'node:dgram';
 import {
   copyFileSync,
   existsSync,
@@ -33,8 +31,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { connect, createServer } from 'node:net';
-import type { AddressInfo, Server } from 'node:net';
+import { connect } from 'node:net';
 import { arch, homedir, networkInterfaces, platform, release, tmpdir, version } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,6 +57,7 @@ import {
 } from '#shell/windows-native-worker.fixture.js';
 import type { NativeWorkerContext, PersonSession } from '#shell/windows-native-worker.fixture.js';
 import { atomicWrite, pipeObserverScript } from '#shell/windows-conformance-scripts.fixture.js';
+import { tcpCanary, tcpControl, udpCanary, udpControl } from '#shell/windows-conformance-network.fixture.js';
 import { createWindowsShellProvider } from '#shell/windows-shell-provider.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
@@ -282,57 +280,6 @@ const interfaceAddress = (): string | undefined =>
     .flat()
     .find((entry) => entry?.family === 'IPv4' && !entry.internal)?.address;
 
-/** A TCP listener outside the sandbox on one address that counts every connection it ever sees. */
-const tcpCanary = async (address: string): Promise<{ server: Server; port: number; connections: () => number }> => {
-  let connections = 0;
-  const server = createServer((socket) => {
-    connections += 1;
-    socket.end('HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n');
-  });
-  await new Promise<void>((resolve) => {
-    server.listen(0, address, resolve);
-  });
-  const { port } = server.address() as AddressInfo;
-  return { server, port, connections: () => connections };
-};
-
-/** A UDP socket outside the sandbox on one address that counts every datagram it receives. */
-const udpCanary = async (
-  address: string,
-): Promise<{ socket: DatagramSocket; port: number; datagrams: () => number }> => {
-  let datagrams = 0;
-  const socket = createSocket('udp4');
-  socket.on('message', () => {
-    datagrams += 1;
-  });
-  await new Promise<void>((resolve) => {
-    socket.bind(0, address, resolve);
-  });
-  return { socket, port: socket.address().port, datagrams: () => datagrams };
-};
-
-const tcpControl = async (address: string, port: number): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const socket = connect({ host: address, port }, () => {
-      socket.end();
-      resolve();
-    });
-    socket.on('error', reject);
-  });
-
-const udpControl = async (address: string, port: number): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const socket = createSocket('udp4');
-    socket.send(Buffer.from('control'), port, address, (error) => {
-      socket.close();
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    });
-  });
-
 const waitUntil = async (condition: () => boolean, milliseconds: number): Promise<boolean> => {
   for (const deadline = Date.now() + milliseconds; !condition(); ) {
     if (Date.now() > deadline) {
@@ -533,6 +480,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       throw new Error('the Windows sandbox is not set up on this machine; run the helper `setup --for-user` elevated.');
     }
     sessionBefore = personSession(workerProbe);
+    /* Chromium's GPU process needs exactly this; a session that refuses it before any row is not a baseline. */
+    expect(sessionBefore.restrictedChild).toStrictEqual({ stage: 'exit', exitCode: '0x00000000' });
     observations['session'] = sessionBefore;
     proxyPorts = Array.isArray(helperStatus['proxyPorts']) ? (helperStatus['proxyPorts'] as number[]) : [];
     const resolved = await resolveShellExecutable({ platform: 'win32', environment: process.env });
@@ -608,7 +557,9 @@ describe.runIf(enabled)('Windows shell conformance', () => {
   });
 
   /* Every row ends with the person's session as it began: the same window-station, desktop and volume-root DACLs (as
-     `setup` left them), and a new process of theirs that starts and creates a window. */
+     `setup` left them), a new process of theirs that starts and creates a window, and a Chromium-style restricted,
+     Low-integrity child of theirs on an alternate desktop that starts and creates one too. NW02-NW04 also check it
+     while their workers are live. */
   afterEach(() => {
     expect(personSession(workerProbe)).toStrictEqual(sessionBefore);
   });
@@ -639,6 +590,51 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     'status, quick and full, reads the install record with no SystemDrive, SystemRoot, windir, ProgramData or ALLUSERSPROFILE',
     async () => {
       statusWithoutSystemEnvironment(shell.path, helperPath, helperStatus['accountSid']);
+    },
+  );
+
+  conformance(
+    'W10',
+    "a journal kept in denied app data under the person's profile on the system drive: the launch runs, the shell cannot read it, and it is restored",
+    async () => {
+      /* Tau's desktop keeps custody in Electron's userData (under the profile, on the system drive) and denies it whole. */
+      const appData = mkdtempSync(join(homedir(), 'AppData', 'Local', 'tau-conformance-appdata-'));
+      try {
+        expect(appData.slice(0, 2).toUpperCase()).toBe((process.env['SystemDrive'] ?? 'C:').toUpperCase());
+        const custody = join(appData, 'shell-custody');
+        mkdirSync(custody);
+        const kept = join(appData, 'kept.txt');
+        writeFileSync(kept, 'APP-DATA\n');
+        const before = sddlOf([appData, custody]);
+        const through = createWindowsShellProvider({
+          helperPath,
+          custody: { directory: custody, sessionDirectory: join(custodyRoot, 'sessions') },
+        });
+        const filesystem = defaultFilesystem();
+        const process_ = await start(
+          launchOf(
+            `[Console]::Write('ran;'); try { [void][IO.File]::ReadAllText(${quote(kept)}); [Console]::Write('read') } catch { [Console]::Write('denied') }`,
+            { filesystem: { ...filesystem, denied: [...filesystem.denied, appData] } },
+          ),
+          through,
+        );
+        if (process_.kind !== 'pipes') {
+          throw new Error('expected a pipes launch');
+        }
+        const [stdout, stderr, exit] = await Promise.all([
+          text(process_.stdout),
+          text(process_.stderr),
+          process_.exited,
+        ]);
+
+        expect(exit, stderr).toStrictEqual({ exitCode: 0 });
+        expect(stdout).toBe('ran;denied');
+        /* The journal is gone once restored, and the denied root reads back as it was. */
+        expect(readdirSync(custody).filter((name) => name.endsWith('.acl.json'))).toStrictEqual([]);
+        expect(sddlOf([appData, custody])).toStrictEqual(before);
+      } finally {
+        rmSync(appData, { recursive: true, force: true });
+      }
     },
   );
 

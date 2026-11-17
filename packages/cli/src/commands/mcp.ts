@@ -34,7 +34,7 @@ import { childEnvironment } from '#child-environment.js';
 import type { ComputeStoreHost } from '#compute-store.js';
 import { exitNow } from '#exit-now.js';
 import { installedVersion } from '#installed-version.js';
-import { exitCodeFor } from '#output.js';
+import { exitCodeFor, reserveStdout } from '#output.js';
 import { resolveProjectRoot } from '#project-root.js';
 import { cliRuntimeTelemetry } from '#runtime-telemetry.js';
 import type * as NativeKernels from '#native-kernels.js';
@@ -205,18 +205,12 @@ export const mcpCommand = defineCommand({
       /* Stdout belongs to the protocol. The transport keeps the original writer;
        * any other write — a kernel's console.log, Emscripten glue, a worker's
        * forwarded stdout — goes to stderr instead of corrupting the stream. */
-      const protocolWrite = process.stdout.write.bind(process.stdout);
+      const protocolWrite = reserveStdout();
       const stdout = new Writable({
         write: (chunk: Uint8Array<ArrayBuffer>, _encoding, callback) => {
           protocolWrite(chunk, callback);
         },
       });
-      process.stdout.write = process.stderr.write.bind(process.stderr);
-      /* A worker's stdout is piped into process.stdout; once stderr is full, the pipe waits for stdout's 'drain'. */
-      process.stderr.on('drain', () => process.stdout.emit('drain'));
-      console.log = console.error;
-      console.info = console.error;
-      console.debug = console.error;
 
       const stopped = Promise.withResolvers<void>();
       const stop = (): void => {

@@ -578,15 +578,23 @@ describe('an event log with other devices’ segments (XD1)', () => {
 
   /*
    * Round 28: a read that never returns (a hung network mount) holds one of the few threads every file read in this
-   * process shares. Each refresh used to start a read of its own, so a few resends behind one hung read took every
-   * thread. A refresh now shares the read in flight, or the one read queued behind it.
+   * process shares, so a few resends behind one hung read took every thread. A refresh now shares the read in flight,
+   * or the one read queued behind it.
+   *
+   * Tau #1098, item 2: the queued read waited on the hung read for good, so the chat refused every start until it was
+   * reopened. The queued read now begins once the segment bound has passed since the read it waits on began, and at
+   * most two reads are ever outstanding.
    */
   describe('while a segment read never returns', () => {
-    it('should start one read however many refreshes ask, and one more for them all once it ends', async () => {
+    const hangingStorage = (): Readonly<{
+      storage: Parameters<typeof createEventLogAppender>[0];
+      reads: Array<PromiseWithResolvers<readonly ChatLogSegment[]>>;
+    }> => {
       const { storage } = memoryEventLogStorage(bytesOf(phoneTurn));
       const reads: Array<PromiseWithResolvers<readonly ChatLogSegment[]>> = [];
-      const log = await createEventLogAppender(
-        {
+      return {
+        reads,
+        storage: {
           ...storage,
           segments: async () => {
             const read = Promise.withResolvers<readonly ChatLogSegment[]>();
@@ -594,22 +602,70 @@ describe('an event log with other devices’ segments (XD1)', () => {
             return read.promise;
           },
         },
-        { now: () => clock.now, segmentReadMilliseconds: 5 },
-      );
-      expect(reads).toHaveLength(1);
+      };
+    };
+    const pause = async (milliseconds: number): Promise<void> =>
+      new Promise((resolve) => {
+        setTimeout(resolve, milliseconds);
+      });
+
+    it('should share one read among refreshes while the read in flight is within the bound', async () => {
+      const { storage, reads } = hangingStorage();
+      const opening = createEventLogAppender(storage, { now: () => clock.now, segmentReadMilliseconds: 60_000 });
+      await expect.poll(() => reads.length).toBe(1);
+      reads[0]?.resolve([]);
+      const log = await opening;
 
       const refreshes = Array.from({ length: 5 }, async () => log.refresh?.());
-      await new Promise((resolve) => {
-        setTimeout(resolve, 20);
-      });
-      expect(reads).toHaveLength(1);
+      await pause(20);
+      expect(reads).toHaveLength(2);
 
-      reads[0]?.resolve([]);
+      reads[1]?.resolve([]);
+      await expect.poll(() => reads.length).toBe(3);
+      reads[2]?.resolve([segment('device-desktop', desktopTurn)]);
+      await Promise.all(refreshes);
+
+      expect(reads).toHaveLength(3);
+      expect(ids(await log.messages())).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0']);
+    });
+
+    it('should begin the queued read once the bound has passed, and land it while the first read still hangs', async () => {
+      const { storage, reads } = hangingStorage();
+      const log = await createEventLogAppender(storage, { now: () => clock.now, segmentReadMilliseconds: 5 });
+      expect(reads).toHaveLength(1);
+      await expect(log.foreignRuns?.()).rejects.toMatchObject({ code: 'SEGMENTS_UNREADABLE' });
+
+      const refreshes = Array.from({ length: 5 }, async () => log.refresh?.());
       await expect.poll(() => reads.length).toBe(2);
       reads[1]?.resolve([segment('device-desktop', desktopTurn)]);
       await Promise.all(refreshes);
 
+      await expect(log.foreignRuns?.()).resolves.toEqual(expect.any(Array));
+      expect(ids(await log.messages())).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0']);
+      /* The hung read ends at last, older than the read that landed: dropped, so the history never steps back. */
+      reads[0]?.resolve([]);
+      await pause(10);
+      expect(ids(await log.messages())).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0']);
+    });
+
+    it('should keep at most two reads outstanding however long both hang', async () => {
+      const { storage, reads } = hangingStorage();
+      const log = await createEventLogAppender(storage, { now: () => clock.now, segmentReadMilliseconds: 5 });
+
+      const refreshes = Array.from({ length: 5 }, async () => log.refresh?.());
+      await expect.poll(() => reads.length).toBe(2);
+      const later = Array.from({ length: 5 }, async () => log.refresh?.());
+      await pause(40);
       expect(reads).toHaveLength(2);
+
+      /* Either read ending frees the slot the waiting refreshes share. */
+      reads[0]?.resolve([]);
+      await expect.poll(() => reads.length).toBe(3);
+      reads[1]?.resolve([]);
+      reads[2]?.resolve([segment('device-desktop', desktopTurn)]);
+      await Promise.all([...refreshes, ...later]);
+
+      expect(reads).toHaveLength(3);
       expect(ids(await log.messages())).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0']);
     });
   });

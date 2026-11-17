@@ -32,22 +32,26 @@ const exportGlb = async (root: string, hostState: string): Promise<{ geometry: s
       },
     }),
   });
-  const document = client.open({ source: { path: 'test-exports/box.ts' }, watch: false });
   try {
-    const result = await document.export('glb');
-    if (!result.success) {
-      throw new Error(`export failed: ${result.issues.map((issue) => issue.message).join('; ')}`);
+    const document = client.open({ source: { path: 'test-exports/box.ts' }, watch: false });
+    let geometry: string;
+    try {
+      const result = await document.export('glb');
+      if (!result.success) {
+        throw new Error(`export failed: ${result.issues.map((issue) => issue.message).join('; ')}`);
+      }
+      geometry = digest(result.files[0].bytes);
+    } finally {
+      document.close();
+      // Delivery precedes publication (tau #1009): the result publishes when the worker is idle,
+      // and teardown drains what is still queued, so the store is read after shutdown.
+      await client.shutdown();
     }
     const control = await engine.control({ workspace });
     const { entries } = await control.inspect({});
-    return { geometry: digest(result.files[0].bytes), entries };
+    return { geometry, entries };
   } finally {
-    try {
-      document.close();
-      await client.shutdown();
-    } finally {
-      await engine.dispose();
-    }
+    await engine.dispose();
   }
 };
 

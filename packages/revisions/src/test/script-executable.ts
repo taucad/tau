@@ -46,7 +46,9 @@ const compiler = (): string =>
  * The launcher's source, with its interpreter baked in.
  *
  * `MSYS_NO_PATHCONV` keeps `bash` from rewriting arguments that look like POSIX
- * paths (`core.hooksPath=/dev/null`) before the script hands them to `git`.
+ * paths (`core.hooksPath=/dev/null`) before the script hands them to `git`, and
+ * `MSYS=noglob` from expanding a refspec or pathspec's `*` against the disk
+ * while it splits the command line.
  *
  * @param interpreter - Absolute path of Git for Windows' `bash.exe`, or of Node.js.
  * @param extension - The script beside the launcher, `.sh` or `.cjs`.
@@ -68,6 +70,7 @@ static class Launcher {
     start.UseShellExecute = false;
     start.EnvironmentVariables["MSYS_NO_PATHCONV"] = "1";
     start.EnvironmentVariables["MSYS2_ARG_CONV_EXCL"] = "*";
+    start.EnvironmentVariables["MSYS"] = "noglob";
     using (Process child = Process.Start(start)) {
       child.WaitForExit();
       return child.ExitCode;

@@ -89,6 +89,8 @@ import { machineChannelProtocolVersion, withMachineCode } from '@taucad/runtime/
 import type { MachineArtifactReference, MachineBindingOutcome } from '@taucad/runtime/machine';
 import type { HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import { gitCommandActivity } from '@taucad/revisions/node';
+import type { GitActivityEvent } from '@taucad/revisions/node';
 import { packageVersion } from '@taucad/runtime/metadata';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
 import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/utility';
@@ -464,6 +466,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         `[services] ${level === undefined ? '' : `${level} `}${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`,
       );
     });
+  /* W8 diagnostics: each Git process of this realm that ran a second or longer, and each store open with the Git it
+   * ran, as `services.git-command` and `services.git-phase` lines. Subcommands, phases and milliseconds only. */
+  const stopGitActivity = gitCommandActivity.observe((event: GitActivityEvent) => {
+    log(`git-${event.type}`, event);
+  });
   const {
     agentHostReleased,
     authorityDirectory,
@@ -1250,6 +1257,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       syncTelemetryConsent: () => telemetryConsent,
       /* B1: every revision this host records names the desktop app as its leg. */
       via: 'desktop',
+      /* W8 diagnostics: each turn admission's phases and the Git it waited on, ids and milliseconds only. */
+      admissionTimed: (timing) => {
+        log('turn-admission-timed', timing);
+      },
       tauCredential: () => {
         const token = authToken;
         return token === undefined ? undefined : { apiBaseUrl: config.tauApiUrl, authorization: `Bearer ${token}` };
@@ -2032,6 +2043,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     dispose() {
       disposed = true;
       quiescing = true;
+      stopGitActivity();
       const gracefulSettlement = quiescence;
       const runtimeDisposers = [...runtimeFileSystemDisposers];
       runtimeFileSystemDisposers.clear();

@@ -3560,14 +3560,24 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         for (const store of stores.values()) {
           store.heartbeat?.cancel();
         }
-        await registry.close();
-        await Promise.allSettled([...deferredLogCloses.values()].map(async ({ done }) => done.promise));
-        await drainApprovalScans();
+        /* The logs are dropped whatever the steps before them threw: a writer left open holds the chat's lock for
+         * the process's life, and every later host for the chat is refused `WRITER_LOCKED`. */
+        let failure: { readonly error: unknown } | undefined;
+        try {
+          await registry.close();
+          await Promise.allSettled([...deferredLogCloses.values()].map(async ({ done }) => done.promise));
+          await drainApprovalScans();
+        } catch (error) {
+          failure = { error };
+        }
         for (const store of stores.values()) {
           wake(store);
         }
         await Promise.allSettled([...stores.keys()].map(async (chatId) => closeExternalChat(chatId)));
         await Promise.allSettled([...stores.keys()].map(async (chatId) => serial(chatId, async () => dropLog(chatId))));
+        if (failure !== undefined) {
+          throw failure.error;
+        }
       })();
       const attempt = closing;
       try {

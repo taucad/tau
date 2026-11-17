@@ -460,7 +460,7 @@ describe('app state ownership ratchet', () => {
     expect(manifest.components.files).toContain('apps/ui/app/runtime/app-runtime-provider.tsx');
   });
 
-  it('should hold the GitHub renewal factory, the one module start a component calls, to its one caller (A10 debt)', () => {
+  it('should hold the GitHub renewal factory, the one long-lived module start a component reaches, to its one caller (A10 debt)', () => {
     const appRoot = fileURLToPath(new URL('.', import.meta.url));
     const callers: string[] = [];
     const visit = (directory: string): void => {

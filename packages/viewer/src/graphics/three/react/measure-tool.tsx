@@ -124,9 +124,9 @@ const supportSampleCount = 16;
 function featureSupports(
   feature: MeshFeature,
   world: THREE.Vector3,
-  object: THREE.Object3D & { geometry: THREE.BufferGeometry },
-  camera: THREE.Camera,
+  view: Readonly<{ object: THREE.Object3D & { geometry: THREE.BufferGeometry }; camera: THREE.Camera }>,
 ): THREE.Vector3[] {
+  const { object, camera } = view;
   if (feature.kind === 'body' || feature.kind === 'circle') {
     const { points } = feature;
     if (points.length <= supportSampleCount) {
@@ -699,7 +699,7 @@ export function MeasureTool(): React.JSX.Element {
         ): boolean => {
           const supportPoints =
             kind === 'center' || kind === 'centroid' || kind === 'body'
-              ? featureSupports(feature, world, mesh, camera)
+              ? featureSupports(feature, world, { object: mesh, camera })
               : [world];
           return supportPoints.some((support) => {
             if (isKept && !isKept(support)) {
@@ -1293,7 +1293,7 @@ export function MeasureTool(): React.JSX.Element {
           checked++;
           const supportPoints =
             target.kind === 'center' || target.kind === 'centroid' || target.kind === 'body'
-              ? featureSupports(target.feature, target.position, mesh, camera)
+              ? featureSupports(target.feature, target.position, { object: mesh, camera })
               : [target.position];
           let waitFor: Promise<void> | undefined;
           const visible = supportPoints.some((support) => {

@@ -12,7 +12,7 @@ import { applyFatLineSegments } from '#graphics/three/materials/gltf-edges.js';
 import { MeasureTool, describeMeasurementTarget } from '#graphics/three/react/measure-tool.jsx';
 import * as measurementFeatures from '#graphics/three/utils/measurement-features.js';
 import { getMeshMeasurementFeatures } from '#graphics/three/utils/measurement-features.js';
-import type { EdgeFeature, MeasurementTarget } from '#graphics/three/utils/measurement-features.js';
+import type { BodyFeature, EdgeFeature, MeasurementTarget } from '#graphics/three/utils/measurement-features.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
 import type { MeasurementFeatureWorkerClient } from '#graphics/three/utils/measurement-features-worker-client.js';
 
@@ -523,7 +523,7 @@ describe('MeasureTool', () => {
       ...Array.from({ length: 100 }, (_, index) => new THREE.Vector3(-0.9 + (index % 10) * 0.2, -0.9, -1)),
       new THREE.Vector3(0.5, 0.5, 1),
     ];
-    const body = { id: 'body:0', kind: 'body' as const, evidence: 'mesh' as const, points, bounds: new THREE.Box3() };
+    const body: BodyFeature = { id: 'body:0', kind: 'body', evidence: 'mesh', points, bounds: new THREE.Box3() };
     vi.spyOn(measurementFeatures, 'listMeasurementTargets').mockReturnValue([
       { ...seed, id: 'body:0', kind: 'body', feature: body, featureId: body.id, position: new THREE.Vector3() },
     ]);

@@ -1,6 +1,6 @@
 import { RouterContextProvider } from 'react-router';
 import { describe, expect, it } from 'vitest';
-import { settingsSectionSchema } from '#hooks/use-settings-dialog.js';
+import { settingsSectionSchema } from '@taucad/settings-ui/components/settings/settings-section';
 import { loader } from '#routes/settings_.$/route.js';
 
 const redirectFor = (splat: string, search = ''): string | undefined => {

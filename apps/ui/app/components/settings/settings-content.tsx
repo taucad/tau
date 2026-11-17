@@ -14,11 +14,23 @@ import { RemoteComputeSettings } from '#components/settings/remote-compute-setti
 import { ComputeReuseSettings } from '#components/settings/compute-reuse-settings.js';
 import { MachinesSettings } from '#components/settings/machines-settings.js';
 import { ViewerSettings } from '#components/settings/viewer/viewer-settings.js';
-import type { SettingsSection } from '#hooks/use-settings-dialog.js';
-import { SettingsItem } from '#components/settings/settings-item.js';
+import type { SettingsSection } from '@taucad/settings-ui/components/settings/settings-section';
+import { SettingsItem } from '@taucad/settings-ui/components/settings/settings-item';
+import { DeploymentSettingsProvider } from '#components/settings/deployment-settings-provider.js';
 
-/** Keep authenticated sections behind their existing gate and mount only the active section. */
+/**
+ * Keep authenticated sections behind their existing gate and mount only the active section. Its settings render
+ * only when this deployment offers them, so the section receives the gated catalogue.
+ */
 export function SettingsContent({ section }: { readonly section: SettingsSection }): React.JSX.Element {
+  return (
+    <DeploymentSettingsProvider>
+      <SectionContent section={section} />
+    </DeploymentSettingsProvider>
+  );
+}
+
+function SectionContent({ section }: { readonly section: SettingsSection }): React.JSX.Element {
   switch (section) {
     case 'browser': {
       return (

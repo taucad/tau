@@ -227,7 +227,7 @@ describe('useOpenCloudProject', () => {
 
     await act(async () => result.current.open({ id: trashed.id, name: 'Old Hinge', role: 'owner' }));
 
-    expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: true });
+    expect(useProjectsOptions.at(-1)).toEqual({ scope: 'all' });
     expect(mockCreateProject).not.toHaveBeenCalled();
     expect(result.current.location.pathname).toBe('/projects');
     expect(mockToastInfo).toHaveBeenCalledOnce();

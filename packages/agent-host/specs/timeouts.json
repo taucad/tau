@@ -751,6 +751,14 @@
       "owner": "W8"
     },
     {
+      "id": "W30-LEASE",
+      "bound": "Chat-log lease wait for each chat's leadership lock, 5 s by default (chatLogLeaseWaitMilliseconds): a session that just closed releases its locks in that time; on expiry the lease is refused with the chat another process leads, so the delete it guards does not run",
+      "site": "packages/agent-host/src/browser.ts",
+      "token": "AbortSignal.timeout(waitMilliseconds)",
+      "class": "Liveness",
+      "owner": "W30 project lifecycle"
+    },
+    {
       "id": "D13",
       "bound": "Chat name generation request, 10 s (found by the AbortSignal.timeout match)",
       "site": "apps/ui/app/chat-clients/_internal/name-generator-client.ts",

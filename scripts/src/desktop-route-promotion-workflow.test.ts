@@ -20,7 +20,10 @@ type Job = {
   environment: { name: string };
   env: Record<string, string>;
 };
-const workflow = load(readFileSync(join(root, workflowPath), 'utf8')) as { jobs: { publication: Job } };
+const workflow = load(readFileSync(join(root, workflowPath), 'utf8')) as {
+  on: Record<string, unknown>;
+  jobs: { publication: Job };
+};
 const job = workflow.jobs.publication;
 
 type Value = string | boolean | number | undefined | Value[] | { [key: string]: Value };
@@ -183,6 +186,11 @@ const everyRun: Run[] = [
 ];
 
 describe('desktop installer publication channel gates', () => {
+  // APT metadata and update descriptors no longer expire, so nothing renews them on a timer.
+  it('should have no scheduled renewal', () => {
+    expect(Object.keys(workflow.on)).toEqual(['workflow_dispatch']);
+  });
+
   it('should request no environment while both channel gates are off', () => {
     for (const gates of [{}, { staging: 'false', production: 'false' }, { staging: 'yes' }]) {
       for (const run of everyRun) {
@@ -193,7 +201,7 @@ describe('desktop installer publication channel gates', () => {
 
   it('should never select a production environment when only staging is enabled', () => {
     for (const gates of [{ staging: 'true' }, { staging: 'true', production: 'false' }]) {
-      expect(environments({ event: 'schedule' }, gates)).toEqual(['desktop-installer-renewal-staging']);
+      expect(environments({ event: 'schedule' }, gates)).toEqual([]);
       expect(
         environments({ event: 'workflow_dispatch', channel: 'staging', operation: 'promote-routes' }, gates),
       ).toEqual(['desktop-installers-staging']);
@@ -207,19 +215,14 @@ describe('desktop installer publication channel gates', () => {
   });
 
   it('should scope each channel to its own gate', () => {
-    expect(environments({ event: 'schedule' }, { production: 'true' })).toEqual([
-      'desktop-installer-renewal-production',
-    ]);
+    expect(environments({ event: 'schedule' }, { production: 'true' })).toEqual([]);
     expect(
       environments(
         { event: 'workflow_dispatch', channel: 'staging', operation: 'promote-routes' },
         { production: 'true' },
       ),
     ).toEqual([]);
-    expect(environments({ event: 'schedule' }, { staging: 'true', production: 'true' })).toEqual([
-      'desktop-installer-renewal-staging',
-      'desktop-installer-renewal-production',
-    ]);
+    expect(environments({ event: 'schedule' }, { staging: 'true', production: 'true' })).toEqual([]);
     expect(
       environments(
         { event: 'workflow_dispatch', channel: 'production', operation: 'promote-routes' },

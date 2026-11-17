@@ -49,7 +49,7 @@ import {
  * quad is extruded (Divergence 5). Larger than one viewport so caps and coverage at the edge keep
  * their full footprint; small enough that every vertex stays well inside any rasterizer's range.
  */
-export const LINE_CLIP_GUARD_BAND = 2;
+export const lineClipGuardBand = 2;
 
 /**
  * A named varying that every vertex of a primitive writes with the same value, read unchanged by the
@@ -133,7 +133,7 @@ export const compositeOverViewportSrgb = (rgb: unknown, alpha: unknown, viewport
  * both standard and reversed depth buffers.
  *
  * **Divergence 5 — guard-band clip and flat segment varyings.** The screen-space quad is extruded
- * from the segment after it is cut to {@link LINE_CLIP_GUARD_BAND} viewports in clip space, and the
+ * from the segment after it is cut to {@link lineClipGuardBand} viewports in clip space, and the
  * analytic-coverage segment varyings are flat. Upstream extrudes from the raw endpoints, so a
  * 50 000-unit axis or a near-trimmed endpoint put vertices hundreds of viewports away, which a
  * fixed-point rasterizer (SwiftShader) drops, and long thin quads made the interpolated "constant"
@@ -343,8 +343,8 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
           ['y', -1],
         ] as const) {
           // Inside the guard band where guard * w - sign * axis >= 0.
-          const inStart = clipStart.w.mul(LINE_CLIP_GUARD_BAND).sub(clipStart[axis].mul(sign));
-          const inEnd = clipEnd.w.mul(LINE_CLIP_GUARD_BAND).sub(clipEnd[axis].mul(sign));
+          const inStart = clipStart.w.mul(lineClipGuardBand).sub(clipStart[axis].mul(sign));
+          const inEnd = clipEnd.w.mul(lineClipGuardBand).sub(clipEnd[axis].mul(sign));
           If(inStart.lessThan(0.0).and(inEnd.lessThan(0.0)), () => {
             segmentEnter.assign(1.0);
             segmentExit.assign(0.0);

@@ -33,6 +33,7 @@ import type { NodeFsPort } from '#backend/node/port.js';
 import { nodeFsProtocolVersion, nodeFsResultSchemas } from '#backend/node/protocol.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import parcelWatcher from '@parcel/watcher';
+import { answeringWatchProbes } from '#testing/answering-watch-probes.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 
@@ -780,10 +781,12 @@ describe('node filesystem client/host round trip', () => {
     const replacement = Promise.withResolvers<{ unsubscribe(): Promise<void> }>();
     const lateClose = vi.fn(async () => undefined);
     let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
-    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
-      onEvents = callback;
-      return subscribe.mock.calls.length === 1 ? { unsubscribe: async () => undefined } : replacement.promise;
-    });
+    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(
+      answeringWatchProbes(async (_directory, callback) => {
+        onEvents = callback;
+        return subscribe.mock.calls.length === 1 ? { unsubscribe: async () => undefined } : replacement.promise;
+      }),
+    );
     try {
       const frame = await rawRequest(port1, {
         id: 45,

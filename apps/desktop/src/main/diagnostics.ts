@@ -16,7 +16,12 @@ import { join } from 'node:path';
 import { prettyFactory } from 'pino-pretty';
 
 import type { RegisterElectronRuntimeMainOptions } from '@taucad/runtime/electron/main';
-import { appLoadFailureSignal, rendererGoneSignal, rendererHangSignal } from '#main/desktop-signals.js';
+import {
+  appLoadFailureSignal,
+  rendererGoneSignal,
+  rendererHangOngoingSignal,
+  rendererHangSignal,
+} from '#main/desktop-signals.js';
 import type { DesktopSignal } from '#main/desktop-signals.js';
 
 /** One line's severity. Nothing here is user-facing; it is all operator text. */
@@ -329,7 +334,7 @@ type ObservableEmitter = {
  * @param webContents - The window's web contents.
  * @param log - Diagnostics sink.
  * @param handlers - Handlers for what the forwarder sees.
- * @param handlers.recover - Optional recovery to run after an unexpected renderer exit.
+ * @param handlers.recover - Optional recovery to run after an unexpected renderer exit, given its reason (B11).
  * @param handlers.report - Sends a failure signal to Sentry (SB11); the default sends nothing.
  * @returns Nothing.
  */
@@ -340,7 +345,7 @@ export const forwardRendererDiagnostics = (
     recover,
     report = () => undefined,
   }: {
-    readonly recover?: () => void;
+    readonly recover?: (reason: string) => void;
     readonly report?: (signal: DesktopSignal | undefined) => void;
   } = {},
 ): void => {
@@ -354,7 +359,7 @@ export const forwardRendererDiagnostics = (
     report(rendererGoneSignal(details));
     const reason = typeof details === 'object' && details !== null && 'reason' in details ? details.reason : undefined;
     if (reason !== 'clean-exit') {
-      recover?.();
+      recover?.(typeof reason === 'string' ? reason : 'unknown');
     }
   });
   /* A renderer stuck in an error-boundary loop repeats one line at render speed.
@@ -381,16 +386,55 @@ export const forwardRendererDiagnostics = (
   });
 };
 
+/** Milliseconds a renderer may stay unresponsive before the hang rule reports it and offers a choice (B24). */
+export const rendererHangOfferMilliseconds = 30_000;
+
+/** The hang rule's choices, in button order; the first is also what closing the box means. */
+export const rendererHangButtons = ['Wait', 'Reload', 'Restart in Safe Mode'] as const;
+
+/** The message box the hang rule shows: Electron's `dialog.showMessageBox` options this module sets. */
+export type RendererHangMessageBox = {
+  readonly type: 'warning';
+  readonly title: string;
+  readonly message: string;
+  readonly detail: string;
+  readonly buttons: string[];
+  readonly defaultId: number;
+  readonly cancelId: number;
+  readonly noLink: boolean;
+  /** Closes the box, as Wait, when the page answers first. */
+  readonly signal: AbortSignal;
+};
+
+/** What the hang rule acts through. */
+export type RendererHangRule = {
+  readonly setTimeout: (callback: () => void, milliseconds: number) => unknown;
+  readonly clearTimeout: (handle: unknown) => void;
+  /** Show the native choice; resolves with the index of the chosen button. */
+  readonly showMessageBox: (options: RendererHangMessageBox) => Promise<{ readonly response: number }>;
+  /** End the hung renderer, so nothing waits on it; not a death for the reload policy. */
+  readonly endHungPage: () => void;
+  /** Load the page again, after {@link RendererHangRule.endHungPage}. */
+  readonly reload: () => void;
+  /** Quit through the quit owner and start again in safe mode. */
+  readonly restartInSafeMode: () => void;
+};
+
 /**
  * Watch a window for renderer hangs: log each one when it starts and ends, and report one that lasted longer than
  * five seconds, with its duration, once it ends (SB11). A hang that ends in the renderer's exit is reported by that
  * exit instead.
  *
- * @param window - The browser window (`unresponsive` and `responsive` are window events).
+ * With a hang rule (B24), a hang that reaches 30 s is reported while it lasts, and the person gets a native choice:
+ * Wait, Reload or Restart in Safe Mode. Wait asks again after another 30 s if the page still hangs. A page that
+ * answers first, before or while the choice shows, closes it.
+ *
+ * @param window - The browser window (`unresponsive`, `responsive` and `closed` are window events).
  * @param log - Diagnostics sink.
  * @param handlers - Where signals go.
  * @param handlers.report - Sends a failure signal to Sentry.
  * @param handlers.now - The clock, for tests.
+ * @param handlers.hangRule - The timers, the native choice and its two actions; without it, hangs are only reported.
  * @returns Nothing.
  */
 export const watchRendererHangs = (
@@ -399,23 +443,127 @@ export const watchRendererHangs = (
   {
     report,
     now = Date.now,
-  }: { readonly report: (signal: DesktopSignal | undefined) => void; readonly now?: () => number },
+    hangRule,
+  }: {
+    readonly report: (signal: DesktopSignal | undefined) => void;
+    readonly now?: () => number;
+    readonly hangRule?: RendererHangRule;
+  },
 ): void => {
   let since: number | undefined;
+  let offerTimer: unknown;
+  let offering: AbortController | undefined;
+  let reportedOngoing = false;
+  /* Read through a function: the hang can end while the choice is showing. */
+  const hanging = (): boolean => since !== undefined;
+
+  const stopOffer = (): void => {
+    if (offerTimer !== undefined) {
+      hangRule?.clearTimeout(offerTimer);
+      offerTimer = undefined;
+    }
+    offering?.abort();
+    offering = undefined;
+  };
+
+  const arm = (rule: RendererHangRule): void => {
+    offerTimer = rule.setTimeout(() => {
+      void offer(rule);
+    }, rendererHangOfferMilliseconds);
+  };
+
+  const offer = async (rule: RendererHangRule): Promise<void> => {
+    offerTimer = undefined;
+    if (since === undefined || offering !== undefined) {
+      return;
+    }
+    const duration = now() - since;
+    log.log('warn', 'renderer.hang-offered', { milliseconds: duration });
+    if (!reportedOngoing) {
+      reportedOngoing = true;
+      report(rendererHangOngoingSignal(duration));
+    }
+    const controller = new AbortController();
+    offering = controller;
+    let response = 0;
+    try {
+      ({ response } = await rule.showMessageBox({
+        type: 'warning',
+        title: 'Tau',
+        message: 'Tau is not responding',
+        detail:
+          `The page has not answered for ${String(Math.round(duration / 1000))} seconds. You can wait for it, reload it ` +
+          '(unsaved changes on this page may be lost), or restart Tau in safe mode.',
+        buttons: [...rendererHangButtons],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+        signal: controller.signal,
+      }));
+    } catch (error) {
+      log.log('error', 'renderer.hang-offer-failed', error);
+    }
+    if (offering === controller) {
+      offering = undefined;
+    }
+    if (controller.signal.aborted) {
+      return;
+    }
+    const choice = rendererHangButtons[response] ?? 'Wait';
+    log.log('info', 'renderer.hang-choice', { choice });
+    if (choice === 'Reload') {
+      rule.endHungPage();
+      rule.reload();
+    } else if (choice === 'Restart in Safe Mode') {
+      /* A hung page cannot answer the quit owner, which would wait its whole bound: end it first (D0). */
+      rule.endHungPage();
+      rule.restartInSafeMode();
+    } else if (hanging()) {
+      arm(rule);
+    }
+  };
+
   window.on('unresponsive', () => {
-    since ??= now();
     log.log('warn', 'renderer.unresponsive');
+    if (since !== undefined) {
+      return;
+    }
+    since = now();
+    reportedOngoing = false;
+    if (hangRule !== undefined) {
+      arm(hangRule);
+    }
   });
   window.on('responsive', () => {
     if (since === undefined) {
       return;
     }
+    stopOffer();
     const duration = now() - since;
     since = undefined;
     log.log('info', 'renderer.responsive', { milliseconds: duration });
     report(rendererHangSignal(duration));
   });
+  window.on('closed', () => {
+    stopOffer();
+    since = undefined;
+  });
 };
+
+/**
+ * The windows the quit owner asks to save: not one whose renderer was ended as hung, nor one that has crashed, since
+ * neither can answer and the wait would run to its bound.
+ *
+ * @param windows - The app's windows.
+ * @param ended - Web contents ids whose hung renderer main ended.
+ * @returns The windows to ask.
+ */
+export const pagesThatCanSave = <
+  Window extends { readonly webContents: { readonly id: number; isCrashed(): boolean } },
+>(
+  windows: readonly Window[],
+  ended: ReadonlySet<number>,
+): Window[] => windows.filter((window) => !ended.has(window.webContents.id) && !window.webContents.isCrashed());
 
 /**
  * Forward one utility process's exit into the log.

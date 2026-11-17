@@ -65,6 +65,36 @@ export const rendererHangSignal = (duration: number): DesktopSignal | undefined 
         contexts: { hang: { milliseconds: Math.round(duration) } },
       };
 
+/**
+ * The event for a renderer hang that has not ended, sent when the hang rule offers its choice (B24). Same fingerprint
+ * as the ended one, so both land on one issue.
+ *
+ * @param duration - Milliseconds the window has been unresponsive so far.
+ * @returns The signal.
+ */
+export const rendererHangOngoingSignal = (duration: number): DesktopSignal => ({
+  message: 'Renderer unresponsive',
+  level: 'error',
+  fingerprint: ['desktop-renderer-hang'],
+  tags: { hang_seconds: String(Math.round(duration / 1000)), ongoing: 'true' },
+  contexts: { hang: { milliseconds: Math.round(duration) } },
+});
+
+/**
+ * The event for one step of the renderer reload policy (B11).
+ *
+ * @param step - What main did: `reload`, `home` or `stop`.
+ * @param reason - Electron's `render-process-gone` reason.
+ * @param count - Deaths within the last five minutes.
+ * @returns The signal.
+ */
+export const rendererReloadPolicySignal = (step: string, reason: string, count: number): DesktopSignal => ({
+  message: `Renderer reload policy: ${step}`,
+  level: 'error',
+  fingerprint: ['desktop-renderer-reload-policy', step],
+  tags: { step, reason, count: String(count) },
+});
+
 /** Chromium's `ERR_ABORTED`: a load replaced by another, not a failure. */
 const abortedLoad = -3;
 

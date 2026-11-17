@@ -66,6 +66,7 @@ import { createAuthService } from '#main/auth-service.js';
 import {
   createDiagnosticsLog,
   forwardRendererDiagnostics,
+  pagesThatCanSave,
   forwardUtilityDiagnostics,
   kernelUtilityDiagnostics,
   watchRendererHangs,
@@ -130,10 +131,12 @@ import {
   safeModeSignal,
   optionalStepFailedSignal,
   probeLeftoverIgnoredSignal,
+  rendererReloadPolicySignal,
   storeQuarantinedSignal,
   updateBlockedSignal,
   updaterFailureSignal,
 } from '#main/desktop-signals.js';
+import { closedPageName, createRendererReloadPolicy } from '#main/renderer-reload-policy.js';
 import type { BootstrapStep, DesktopSignal, OptionalBootstrapStep } from '#main/desktop-signals.js';
 import {
   addTroubleshootingMenu,
@@ -640,6 +643,8 @@ export const quitRendererMilliseconds =
 
 /* Set while a recovery restart runs in a launch whose page never mounted: the quit owner then asks no page (D0). */
 let restartWithoutPage = false;
+/* Web contents whose hung renderer main ended (B24): the quit owner does not wait on them. */
+const endedHungPages = new Set<number>();
 
 /**
  * Ask every window's sessions registry to close its projects, and wait.
@@ -654,7 +659,10 @@ const askRendererToQuiesce = async (
   boundMilliseconds: number,
   attemptId: string,
 ): Promise<'quiesced' | 'forced' | 'timeout' | 'no-window'> => {
-  const windows = appWindows().filter((window) => !window.isDestroyed());
+  const windows = pagesThatCanSave(
+    appWindows().filter((window) => !window.isDestroyed()),
+    endedHungPages,
+  );
   /* A recovery restart in a launch that never reached `shell-mounted` has no page with anything to save, and a hung
    * page (B24) would hold it for the whole bound (D0). */
   if (windows.length === 0 || restartWithoutPage) {
@@ -2414,16 +2422,101 @@ const bootstrapElectronApp = async (): Promise<void> => {
       quickLookControllers.get(window.id)?.dispose();
       quickLookControllers.delete(window.id);
     });
+    /* B11: reload once, send a second death within 60 s Home with a notice, and hand a third within 5 minutes to the
+     * recovery window (D0). A hung page the hang rule ended is not a death. */
+    const reloadPolicy = createRendererReloadPolicy({ now: () => performance.now() });
+    let pageTitle: string | undefined;
+    window.webContents.on('page-title-updated', (_event, title) => {
+      pageTitle = title;
+    });
+    let endingHungPage = false;
+    const contentsId = window.webContents.id;
+    window.webContents.on('did-finish-load', () => {
+      endedHungPages.delete(contentsId);
+    });
+    window.once('closed', () => {
+      endedHungPages.delete(contentsId);
+    });
+    const openHomeAfterDeaths = async (closed: string): Promise<void> => {
+      try {
+        await window.loadURL(rendererUrl('/'));
+      } catch (error) {
+        log.log('error', 'main.renderer-home-failed', error);
+      }
+      if (window.isDestroyed()) {
+        return;
+      }
+      try {
+        await dialog.showMessageBox(window, {
+          type: 'warning',
+          title: 'Tau',
+          message: `${closed} was closed`,
+          detail: 'The page stopped working twice within a minute, so Tau opened Home instead.',
+          buttons: ['OK'],
+          noLink: true,
+        });
+      } catch (error) {
+        log.log('error', 'main.renderer-home-notice-failed', error);
+      }
+    };
     forwardRendererDiagnostics(window.webContents, log, {
-      recover: () => {
+      recover: (reason) => {
         noteRendererGone();
-        if (!quitting && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-          window.webContents.reload();
+        if (endingHungPage) {
+          endingHungPage = false;
+          return;
         }
+        if (quitting || window.isDestroyed() || window.webContents.isDestroyed()) {
+          return;
+        }
+        const decision = reloadPolicy.gone(reason);
+        if (decision === undefined) {
+          return;
+        }
+        const { step, count } = decision;
+        log.log('warn', 'main.renderer-reload', { step, reason, count });
+        reportDesktopSignal(rendererReloadPolicySignal(step, reason, count));
+        if (step === 'reload') {
+          window.webContents.reload();
+          return;
+        }
+        if (step === 'stop') {
+          recoveryHooks?.openRecovery('renderer-deaths');
+          return;
+        }
+        void openHomeAfterDeaths(closedPageName(window.webContents.getURL(), pageTitle));
       },
       report: reportDesktopSignal,
     });
-    watchRendererHangs(window, log, { report: reportDesktopSignal });
+    watchRendererHangs(window, log, {
+      report: reportDesktopSignal,
+      /* B24: at 30 s, report the hang and offer Wait, Reload or Restart in Safe Mode (D0). */
+      hangRule: {
+        setTimeout: (offerHangChoice, milliseconds) => setTimeout(offerHangChoice, milliseconds),
+        clearTimeout: (handle) => {
+          clearTimeout(handle as ReturnType<typeof setTimeout>);
+        },
+        showMessageBox: async (options) => dialog.showMessageBox(window, options),
+        endHungPage: () => {
+          if (window.isDestroyed() || window.webContents.isDestroyed()) {
+            return;
+          }
+          /* A hung renderer can neither reload itself nor answer the quit owner: end it. Its exit is no death. */
+          endingHungPage = true;
+          endedHungPages.add(window.webContents.id);
+          window.webContents.forcefullyCrashRenderer();
+        },
+        reload: () => {
+          if (quitting || window.isDestroyed() || window.webContents.isDestroyed()) {
+            return;
+          }
+          window.webContents.reload();
+        },
+        restartInSafeMode: () => {
+          void recoveryHooks?.restartInSafeMode();
+        },
+      },
+    });
 
     /* Deny every new window and every in-window navigation away from the app,
      * sending real links to the user's browser instead. `will-redirect` is

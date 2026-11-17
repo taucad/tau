@@ -429,6 +429,7 @@ vi.mock('#main/diagnostics.js', () => ({
   forwardRendererDiagnostics: vi.fn(),
   forwardUtilityDiagnostics: vi.fn(),
   kernelUtilityDiagnostics: vi.fn(() => ({})),
+  pagesThatCanSave: vi.fn((windows: readonly unknown[]) => [...windows]),
   watchRendererHangs: vi.fn(),
 }));
 vi.mock('#main/environment.js', async (importOriginal) => ({

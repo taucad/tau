@@ -407,7 +407,9 @@ export type RendererHangRule = {
   readonly clearTimeout: (handle: unknown) => void;
   /** Show the native choice; resolves with the index of the chosen button. */
   readonly showMessageBox: (options: RendererHangMessageBox) => Promise<{ readonly response: number }>;
-  /** Reload the hung page. */
+  /** End the hung renderer, so nothing waits on it; not a death for the reload policy. */
+  readonly endHungPage: () => void;
+  /** Load the page again, after {@link RendererHangRule.endHungPage}. */
   readonly reload: () => void;
   /** Quit through the quit owner and start again in safe mode. */
   readonly restartInSafeMode: () => void;
@@ -505,8 +507,11 @@ export const watchRendererHangs = (
     const choice = rendererHangButtons[response] ?? 'Wait';
     log.log('info', 'renderer.hang-choice', { choice });
     if (choice === 'Reload') {
+      rule.endHungPage();
       rule.reload();
     } else if (choice === 'Restart in Safe Mode') {
+      /* A hung page cannot answer the quit owner, which would wait its whole bound: end it first (D0). */
+      rule.endHungPage();
       rule.restartInSafeMode();
     } else if (hanging()) {
       arm(rule);
@@ -539,6 +544,21 @@ export const watchRendererHangs = (
     since = undefined;
   });
 };
+
+/**
+ * The windows the quit owner asks to save: not one whose renderer was ended as hung, nor one that has crashed, since
+ * neither can answer and the wait would run to its bound.
+ *
+ * @param windows - The app's windows.
+ * @param ended - Web contents ids whose hung renderer main ended.
+ * @returns The windows to ask.
+ */
+export const pagesThatCanSave = <
+  Window extends { readonly webContents: { readonly id: number; isCrashed(): boolean } },
+>(
+  windows: readonly Window[],
+  ended: ReadonlySet<number>,
+): Window[] => windows.filter((window) => !ended.has(window.webContents.id) && !window.webContents.isCrashed());
 
 /**
  * Forward one utility process's exit into the log.

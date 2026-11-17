@@ -271,6 +271,44 @@ describe('file-manager host composition', () => {
     return { host, ref, rootFiles };
   };
 
+  /* T-B31.1: a Home read that never settles (a database open with no event) must not hold the start forever. */
+  it.each([
+    { target: 'web', deadlineBackend: undefined, state: 'failed', backend: undefined },
+    { target: 'desktop', deadlineBackend: 'node', state: 'resolved', backend: 'node' },
+  ] as const)(
+    'should settle a Home read that never answers at 20 000 ms on the $target target',
+    async ({ deadlineBackend, state, backend }) => {
+      const host = createFileManagerHost({
+        analytics: noAnalytics,
+        loadHomeBackend: async () => Promise.withResolvers<HomeStorageBackend>().promise,
+        deadlineBackend,
+      });
+      const clock = new StepClock();
+      const rootFiles = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/', backendResolution: 'pending', shouldInitializeOnStart: false },
+      }).start();
+      const ref = createActor(host.logic, { input: { rootFiles }, clock }).start();
+      stops.push(() => {
+        ref.stop();
+        rootFiles.stop();
+      });
+
+      clock.advance(19_999);
+      await flush();
+      expect(ref.getSnapshot().value).toBe('resolving');
+      clock.advance(1);
+      await flush();
+
+      expect(ref.getSnapshot().value).toBe(state);
+      expect(selectHomeBackend(ref.getSnapshot())).toBe(backend);
+      if (state === 'failed') {
+        expect(selectHomeBackendFailure(ref.getSnapshot())).toMatch(/did not answer/u);
+      } else {
+        expect(rootFiles.getSnapshot().context.backendType).toBe('node');
+      }
+    },
+  );
+
   it('should build an actor for Home with the resolved backend as input', async () => {
     const { host, ref } = composeHost(Promise.resolve('opfs'));
     await flush();

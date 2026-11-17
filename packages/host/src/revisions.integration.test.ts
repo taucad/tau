@@ -10,7 +10,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile, unlink } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -445,6 +445,23 @@ const writeBundledGit = async (path: string, git: string, lfsDirectory: string):
  * invisible — the app opened, files edited, and no revision ever appeared. The
  * host now says so once, by name, when the project opens.
  */
+/**
+ * Whether this host's temporary disk keeps a file's executable bit. NTFS has none: Windows' `chmod` sets only
+ * the read-only flag, so a checkout file there cannot gain one.
+ */
+const diskKeepsExecutableBit = await (async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tau-host-mode-'));
+  try {
+    const file = join(directory, 'probe');
+    await writeFile(file, '');
+    await chmod(file, 0o755);
+    const { mode } = await stat(file);
+    return Math.floor(mode / 0o100) % 2 === 1;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+})();
+
 describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
   it('reports the missing binaries once, and records with the executables it is given', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-toolchain-'));
@@ -687,7 +704,19 @@ for (const row of ports) {
       await writeFile(join(held.workspaceRoot, 'main.ts'), original);
       await chmod(join(held.workspaceRoot, 'main.ts'), 0o755);
       const compared4 = await held.revisions.channel.request(request);
-      expect(compared4.result).toMatchObject({ notices: ['executable-added'] });
+      if (diskKeepsExecutableBit) {
+        expect(compared4.result).toMatchObject({ notices: ['executable-added'] });
+      } else {
+        // NTFS keeps no executable bit: chmod sets only the read-only flag, so the
+        // checkout file still matches the revision, bytes and mode.
+        expect(compared4.result).toEqual({
+          original: 'export const size = 2;\n',
+          modified: 'export const size = 2;\n',
+          kind: 'text',
+          change: 'unchanged',
+          notices: [],
+        });
+      }
       await writeFile(join(held.workspaceRoot, 'main.ts'), new Uint8Array([0x80]));
       const compared5 = await held.revisions.channel.request(request);
       expect(compared5.result).toMatchObject({ kind: 'unsupported' });

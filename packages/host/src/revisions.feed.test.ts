@@ -121,6 +121,13 @@ describe('the disk host’s change feed (E1)', () => {
   it('should re-read only the written file, and record a write the watcher had not reported yet', async () => {
     const host = await open();
     await host.save();
+    /* The first save writes some fifty objects into the watched `.git`. On Windows that burst overflows the
+     * watcher's buffer, which libuv reports as a change with no file name (run 44010131728: three `change:null`
+     * after the first save's cookie), so the next save rightly reads everything. A one-file save consumes that
+     * loss and writes too little to overflow, leaving the feed exact for the row's write. */
+    await writeFile(join(host.workspaceRoot, 'f6.txt'), 'edited\n');
+    await host.save();
+    reported.length = 0;
 
     await writeFile(join(host.workspaceRoot, 'f7.txt'), 'edited\n');
     host.reads.length = 0;

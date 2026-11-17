@@ -243,7 +243,9 @@ describe('an approval nobody answers', () => {
     if (samePath) {
       const log = join(restarted.workspaceRoot, '.tau', 'chats', chatId, 'events.jsonl');
       const copied = await readFile(log, 'utf8');
-      await writeFile(log, copied.replaceAll(first.workspaceRoot, restarted.workspaceRoot));
+      /* The log is JSON lines, which escape a Windows path's backslashes. */
+      const escaped = (path: string): string => JSON.stringify(path).slice(1, -1);
+      await writeFile(log, copied.replaceAll(escaped(first.workspaceRoot), escaped(restarted.workspaceRoot)));
     }
     /* `attach` is a read (RH-R1), but a paused external run with no driver is an orphan (M1's `isOrphaned`): the
      * attach asks leadership to claim, and the claim's rehydration settles it (W7 RA-S14, RH-R9). */

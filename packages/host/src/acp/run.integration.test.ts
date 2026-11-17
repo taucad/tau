@@ -3202,7 +3202,8 @@ describe('external turns through the revision port', () => {
    */
   const openedCwd = (frames: readonly AcpWireFrame[]): string | undefined => {
     const frame = frames.findLast((entry) => entry.frame.includes('"method":"session/new"'))?.frame;
-    return frame === undefined ? undefined : /"cwd":"([^"]*)"/u.exec(frame)?.[1];
+    /* Parsed, not matched: JSON escapes a Windows path's backslashes. */
+    return frame === undefined ? undefined : (JSON.parse(frame) as { params?: { cwd?: string } }).params?.cwd;
   };
 
   /**

@@ -158,8 +158,8 @@ describe('createDiagnosticsLog', () => {
     const folder = dirname(first.filePath);
     expect(folder).not.toBe(dirname(second.filePath));
     expect(lstatSync(folder).isSymbolicLink()).toBe(false);
-    expect(lstatSync(folder).mode & 0o777).toBe(0o700);
-    expect(statSync(first.filePath).mode & 0o777).toBe(0o600);
+    expect(lstatSync(folder).mode % 0o1000).toBe(0o700);
+    expect(statSync(first.filePath).mode % 0o1000).toBe(0o600);
   });
 
   it('never throws when the log cannot be written', () => {

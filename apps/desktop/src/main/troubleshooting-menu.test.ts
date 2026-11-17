@@ -126,7 +126,7 @@ describe('diagnosticsReport', () => {
     );
     const report = diagnosticsReport(summary, join(directory, 'desktop.log'), '/home/tester');
     expect(report).not.toMatch(/Jane|Public/u);
-    expect(report).toContain('opened ~\\Tau and ~/AppData and ~\\x');
+    expect(report).toContain(String.raw`opened ~\Tau and ~/AppData and ~\x`);
   });
 
   it('should still describe the build when the log cannot be read', () => {

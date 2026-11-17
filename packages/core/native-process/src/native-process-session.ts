@@ -198,6 +198,12 @@ export const processEnvironment = (artifactPath: string): NodeJS.ProcessEnv => {
   environment['TEMP'] = artifactPath;
   environment['TMP'] = artifactPath;
   if (process.platform === 'win32') {
+    // Windows programs find the home and per-user folders through these, not HOME: Python's `Path.home()` reads
+    // USERPROFILE and fails without it (ezdxf resolves its config folder at import). Point them all at the artifact
+    // folder, as HOME is, so a worker never looks for the person's own profile, which its AppContainer cannot read.
+    environment['USERPROFILE'] = artifactPath;
+    environment['APPDATA'] = artifactPath;
+    environment['LOCALAPPDATA'] = artifactPath;
     if (process.env['SystemRoot']) {
       environment['SystemRoot'] = process.env['SystemRoot'];
     }

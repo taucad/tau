@@ -9,16 +9,9 @@ type SectionCapCompleteness = {
   perLoopSourceCount: number;
 };
 
-type SectionViewBridge = {
-  setSectionCuts(
-    cuts: ReadonlyArray<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>,
-  ): void;
-  getSectionCapCompleteness(): SectionCapCompleteness | undefined;
-};
-
 const readCompleteness = async (): Promise<SectionCapCompleteness | undefined> =>
   target.evaluate(() => {
-    const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge }).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -32,7 +25,7 @@ test('repaired involute gear produces a complete section snapshot', async () => 
   await target.expectGeometryFramed();
 
   await target.evaluate(() => {
-    const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge }).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }

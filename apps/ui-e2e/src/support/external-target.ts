@@ -7,6 +7,7 @@ import type { ProjectionFixtureProof, ProjectionDirectoryReceipt } from '#suppor
 import type { GatewayScriptTurn, GatewayTurnCount } from '#support/agent-host-gateway-script.js';
 import type { LinkedGithubFixtureDescription, LinkedGithubFixtureState } from '#support/linked-github-fixture.js';
 import type { FlagStateName } from '#support/flag-state.js';
+import type { SectionViewTestPresentedTier } from '@taucad/app/test-bridges/section-view';
 
 /** The GitHub-linked project's far side, as a spec names it (R15). */
 export type TargetLinkedGithub = LinkedGithubFixtureDescription;
@@ -675,20 +676,70 @@ export const qualifyWebGpu = (profile = currentWebGpuProfile()): Promise<TargetW
  */
 export const presentedGraphicsBackend = (requested: 'webgl' | 'webgpu'): 'webgl' | 'webgpu' =>
   requested === 'webgpu' && currentWebGpuProfile() === 'software' ? 'webgl' : requested;
-export const expectGraphicsBackend = async (backend: 'webgl' | 'webgpu'): Promise<void> => {
-  await expect
-    .poll(() =>
-      evaluate(() =>
-        (
-          globalThis as typeof globalThis & {
-            __TAU_SECTION_VIEW_TEST__?: {
-              getGraphicsBackend(): 'webgl' | 'webgpu';
-            };
+/** How long a viewport may take to present a canvas incarnation, a WebGL remount after a WebGPU canvas loss included. */
+const presentationTimeout = 10_000;
+/**
+ * The render tier the viewport's current canvas incarnation presents on, once it has presented. The section-view bridge
+ * answers for its own incarnation, and a WebGPU canvas the browser destroys remounts on WebGL with a new bridge, so the
+ * page waits, within {@link presentationTimeout}, for an incarnation that has presented and still draws. Playwright's
+ * `waitForFunction` takes a returned promise as an answer without awaiting it, so the wait runs in the page.
+ *
+ * @param backend - When given, wait for an incarnation that presents on this backend, as a fallback remount does.
+ * @returns The tier and its renderer generation.
+ */
+export const presentedRenderTier = async (backend?: 'webgl' | 'webgpu'): Promise<SectionViewTestPresentedTier> => {
+  const presented = await evaluate(
+    async ({ expected, timeout }) => {
+      const deadline = performance.now() + timeout;
+      const nextFrame = async (): Promise<void> =>
+        new Promise((resolve) => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      while (performance.now() < deadline) {
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
+        const presentation = bridge
+          ? Promise.race([
+              bridge.whenPresented(),
+              new Promise<undefined>((resolve) => {
+                setTimeout(resolve, Math.max(0, deadline - performance.now()));
+              }),
+            ])
+          : undefined;
+        // oxlint-disable-next-line no-await-in-loop -- Each incarnation is awaited in turn until one presents and holds.
+        const current = await presentation;
+        if (current && (expected === null || current.tier.backend === expected)) {
+          return current;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- A replaced or missing bridge is looked up again next frame.
+        await nextFrame();
+      }
+      return undefined;
+    },
+    { expected: backend ?? null, timeout: presentationTimeout },
+  );
+  if (!presented) {
+    const observed = await evaluate(() => {
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
+      return bridge
+        ? {
+            backend: bridge.getGraphicsBackend(),
+            rendererGeneration: bridge.getRendererGeneration(),
+            fallbackReason: bridge.getWebGpuFallbackReason(),
           }
-        ).__TAU_SECTION_VIEW_TEST__?.getGraphicsBackend(),
-      ),
-    )
-    .toBe(backend);
+        : 'no section-view bridge is mounted';
+    });
+    throw new Error(
+      `No viewport canvas presented${backend ? ` on ${backend}` : ''} within ${presentationTimeout} ms; the page answers ${JSON.stringify(observed)}`,
+    );
+  }
+  return presented;
+};
+export const expectGraphicsBackend = async (backend: 'webgl' | 'webgpu'): Promise<SectionViewTestPresentedTier> => {
+  const presented = await presentedRenderTier(backend);
+  expect(presented.tier.backend).toBe(backend);
+  return presented;
 };
 /**
  * Expect a viewport canvas that asked for `requested` to present on {@link presentedGraphicsBackend}. Where that is
@@ -697,64 +748,49 @@ export const expectGraphicsBackend = async (backend: 'webgl' | 'webgpu'): Promis
  */
 export const expectPresentedGraphicsBackend = async (requested: 'webgl' | 'webgpu'): Promise<void> => {
   const presented = presentedGraphicsBackend(requested);
-  await expectGraphicsBackend(presented);
+  const { tier } = await expectGraphicsBackend(presented);
   if (presented !== requested) {
-    const reason = await evaluate(() =>
-      (
-        globalThis as typeof globalThis & {
-          __TAU_SECTION_VIEW_TEST__?: { getWebGpuFallbackReason(): string | undefined };
-        }
-      ).__TAU_SECTION_VIEW_TEST__?.getWebGpuFallbackReason(),
-    );
-    expect(reason, 'WebGPU fell back to WebGL for an unexpected reason').toBe('canvas-loss');
+    expect(tier.fallbackReason, 'WebGPU fell back to WebGL for an unexpected reason').toBe('canvas-loss');
   }
 };
-/** The graphics test bridge's renderer generation: it changes whenever the viewport's renderer is replaced. */
-export const rendererGeneration = async (): Promise<number | undefined> =>
-  evaluate(() =>
-    (
-      globalThis as typeof globalThis & {
-        __TAU_SECTION_VIEW_TEST__?: { getRendererGeneration(): number };
-      }
-    ).__TAU_SECTION_VIEW_TEST__?.getRendererGeneration(),
-  );
+/** The presented viewport's renderer generation: it changes whenever the viewport's renderer is replaced. */
+export const rendererGeneration = async (): Promise<number> => (await presentedRenderTier()).rendererGeneration;
+/**
+ * Every mounted viewport has presented and framed its geometry. Each bridge answers for its own canvas incarnation, so
+ * a bridge whose canvas has not presented yet keeps the wait open.
+ */
 export const expectGeometryFramed = async (): Promise<void> => {
   try {
     await expect
       .poll(
-        () =>
-          evaluate(() => {
-            const bridges = (
-              globalThis as typeof globalThis & {
-                __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{
-                  isGeometryFramed(): boolean;
-                }>;
-              }
-            ).__TAU_SECTION_VIEW_TEST_BRIDGES__;
-            return Boolean(bridges && bridges.length > 0 && bridges.every((bridge) => bridge.isGeometryFramed()));
+        async () =>
+          evaluate(async () => {
+            const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__;
+            if (!bridges || bridges.length === 0) {
+              return false;
+            }
+            // A bridge whose canvas has not presented keeps the wait open; one that never will answers `undefined`.
+            const presented = await Promise.race([
+              Promise.all(bridges.map(async (bridge) => bridge.whenPresented())),
+              new Promise<undefined>((resolve) => {
+                setTimeout(resolve, 1000);
+              }),
+            ]);
+            return Boolean(presented?.every(Boolean)) && bridges.every((bridge) => bridge.isGeometryFramed());
           }),
         { timeout: 60_000 },
       )
       .toBe(true);
   } catch (error) {
     const [diagnostics, targetEvents] = await Promise.all([
-      evaluate(() => {
-        const bridges = (
-          globalThis as typeof globalThis & {
-            __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{
-              getCamera(): { actorError?: string; actorStatus: string };
-              getGraphicsBackend(): 'webgl' | 'webgpu';
-              isGeometryFramed(): boolean;
-            }>;
-          }
-        ).__TAU_SECTION_VIEW_TEST_BRIDGES__;
-        return bridges?.map((bridge) => ({
+      evaluate(() =>
+        globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.map((bridge) => ({
           actorError: bridge.getCamera().actorError,
           actorStatus: bridge.getCamera().actorStatus,
           backend: bridge.getGraphicsBackend(),
           isGeometryFramed: bridge.isGeometryFramed(),
-        }));
-      }),
+        })),
+      ),
       events(),
     ]);
     throw new Error(`Geometry did not reach a framed camera state: ${JSON.stringify({ diagnostics, targetEvents })}`, {

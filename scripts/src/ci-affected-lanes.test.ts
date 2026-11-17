@@ -735,8 +735,12 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     expect(lane?.uses).toBeDefined();
     const rest = condition.replace(" && github.event_name == 'merge_group'", '');
     expect(rest).not.toMatch(/\|\||\bgithub\.(?:ref|ref_name|event_name|base_ref|head_ref)\b/u);
+    // The required gate and the fail-fast jobs run no lane (ci-fail-fast.test.ts).
     for (const [name, definition] of Object.entries(ci.jobs)) {
-      if ((definition.if ?? '').includes("github.event_name == 'merge_group'")) {
+      if (
+        !/^(?:affected|fail-fast-.*)$/u.test(name) &&
+        (definition.if ?? '').includes("github.event_name == 'merge_group'")
+      ) {
         expect(definition.uses, name).toBeDefined();
       }
     }

@@ -44,6 +44,19 @@ export const archiveDownloads = {
 export const desktopDownloads = { ...macDownloads, ...archiveDownloads };
 
 /**
+ * Platforms not yet qualified on a real device. The page marks each of their entries beta, both the static archive
+ * links and the installer catalog's routes; dropping a platform here removes its badge everywhere.
+ */
+const betaPlatforms: ReadonlySet<string> = new Set(['windows', 'linux', 'linuxPortable']);
+
+/**
+ * @param platform - A desktop platform or installer catalog route platform.
+ * @returns Whether its download entries are marked beta.
+ */
+export const isBetaPlatform = (platform: keyof typeof desktopDownloads | 'linuxPortable'): boolean =>
+  betaPlatforms.has(platform);
+
+/**
  * @param platform - A desktop platform.
  * @returns Whether the platform links a channel archive without the installer catalog.
  */

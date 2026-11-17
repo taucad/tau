@@ -9,6 +9,7 @@ import {
   desktopDownloadHref,
   desktopDownloadLabel,
   desktopFileLabel,
+  isBetaPlatform,
 } from '#www/downloads.js';
 import { sourceUrl } from '#www/content.js';
 import { out, down, intro } from '#www/page-components.js';
@@ -125,15 +126,18 @@ export const content = (): React.JSX.Element => (
             </div>
             {(['windows', 'linux'] as const).map((platform) => (
               <div key={platform}>
-                <SiteLink
-                  className='text-link'
-                  href={desktopDownloadHref(platform)}
-                  data-download-platform={platform}
-                  data-event='download'
-                  data-placement='download'
-                  // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
-                  dangerouslySetInnerHTML={downloadLabel(platform)}
-                />
+                <div className='download-title'>
+                  <SiteLink
+                    className='text-link'
+                    href={desktopDownloadHref(platform)}
+                    data-download-platform={platform}
+                    data-event='download'
+                    data-placement='download'
+                    // oxlint-disable-next-line react/no-danger -- Only checked-in brand SVGs and product constants form this markup.
+                    dangerouslySetInnerHTML={downloadLabel(platform)}
+                  />
+                  {isBetaPlatform(platform) ? <Badge variant='secondary'>Beta</Badge> : undefined}
+                </div>
                 <p className='fine' data-download-detail={platform}>
                   {archiveDownloads[platform].detail}
                 </p>

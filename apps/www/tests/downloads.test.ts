@@ -7,6 +7,7 @@ import {
   desktopDownloads,
   desktopFileLabel,
   isArchivePlatform,
+  isBetaPlatform,
 } from '#www/downloads.js';
 
 import { projection } from '#www/download-catalog.fixture.js';
@@ -25,6 +26,15 @@ describe('qualified desktop download catalog', () => {
     expect(isArchivePlatform('macIntel')).toBe(false);
     expect(isArchivePlatform('linux')).toBe(true);
     expect(desktopDownloadHref('linux')).toBe('https://downloads.tau.new/latest/Tau-linux-x64.tar.gz');
+  });
+  it('marks every Windows and Linux route beta until it is qualified on a real device, and no Mac route', () => {
+    expect(select(projection())!.map(({ platform }) => [platform, isBetaPlatform(platform)])).toEqual([
+      ['mac', false],
+      ['macIntel', false],
+      ['windows', true],
+      ['linux', true],
+      ['linuxPortable', true],
+    ]);
   });
   it('selects immutable installer links with retained archives and truthful update ownership', () => {
     const catalog = select(projection())!;

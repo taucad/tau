@@ -27,7 +27,7 @@ import type { Agent, Client, SessionConfigOption, SessionUpdate, StopReason } fr
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { AgentChannelAdmissionConfig } from '@taucad/agent-host/wire';
 import type { AgentLogEvent, ExternalAgentTurn, JsonValue, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
-import { reduceEventLog } from '@taucad/agent-host';
+import { parseLogEvent, reduceEventLog } from '@taucad/agent-host';
 import { parseQuestionsFile, serializeAnswersFile } from '@taucad/chat';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
@@ -2639,6 +2639,11 @@ describe('restoring a session a cold start lost', () => {
         textOfMessage(event.message).includes('could not restore'),
     );
     expect(notes).toHaveLength(1);
+    /* The note is a durable row like any other: the log refuses one its schema does not admit. */
+    const envelope = { version: 1, leaderEpoch: 'epoch', recordedAt: 'now', runId: 'run-lost' };
+    for (const [sequence, event] of appended.entries()) {
+      expect(() => parseLogEvent({ ...event, ...envelope, sequence })).not.toThrow();
+    }
   }, 30_000);
 });
 

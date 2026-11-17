@@ -13,18 +13,18 @@ import { idPrefix } from '@taucad/types/constants';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { selectWorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import type { PreparedWorkspaceCatalog, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
-import { directoryPicker } from '#constants/browser.constants.js';
-import type { DirectoryPick } from '#constants/browser.constants.js';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
+import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
 import {
   getWorkspaceMetadata,
   requestHandlePermission,
   repairWorkspaceBindings as repairStoredWorkspaceBindings,
   setProjectFileSystemConfig,
-} from '#filesystem/handle-store.js';
-import type { Workspace, WorkspaceBindingRepairResult } from '#filesystem/handle-store.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import type { Workspace, WorkspaceBindingRepairResult } from '@taucad/files-ui/filesystem/handle-store';
 import { deriveWorkspaceBindingRepairs, routeConfigFor } from '#runtime/project-library-storage.js';
 import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import type { Actor, SnapshotFrom } from 'xstate';
 
 /** A connected workspace folder: the row, how many projects it holds, and whether this connection minted it. @public */

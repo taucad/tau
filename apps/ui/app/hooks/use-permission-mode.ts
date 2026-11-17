@@ -6,8 +6,8 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { desktopPermissions } from '#filesystem/desktop-permissions.js';
-import type { PermissionChat, PermissionMode } from '#filesystem/desktop-permissions.js';
+import { desktopPermissions } from '@taucad/files-ui/filesystem/desktop-permissions';
+import type { PermissionChat, PermissionMode } from '@taucad/files-ui/filesystem/desktop-permissions';
 import { desktopWorkspaceRoot } from '#lib/agent-host-placement.js';
 
 const permissionKeys = {

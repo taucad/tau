@@ -1,9 +1,9 @@
 import { useCallback } from 'react';
-import { getWorkspace, requestHandlePermission } from '#filesystem/handle-store.js';
+import { getWorkspace, requestHandlePermission } from '@taucad/files-ui/filesystem/handle-store';
 import { isWorkspaceDirectoryRequiredError } from '@taucad/ui-core/filesystem/workspace-errors';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { projectCreationLocationErrorCopy } from '#utils/project-creation-location.utils.js';
+import { projectCreationLocationErrorCopy } from '@taucad/files-ui/utils/project-creation-location.utils';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { toast } from '@taucad/ui/components/sonner';
 

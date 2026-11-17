@@ -7,6 +7,7 @@ import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interfac
 import { mobileDrawerOpenSnapPoint } from '@taucad/ui-core/constants/editor.constants';
 import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
 import { mobilePanelByWorkbenchPanel } from '#routes/w.$workspace.$project/project-workspace-context.panels.js';
+import { readPhoneFrameHint } from '#lib/frame-hint.js';
 
 const state = vi.hoisted(() => ({
   drawerOpen: false,
@@ -15,6 +16,7 @@ const state = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   flags: { machines: true, tauDebug: true },
   row: { attention: 0, conflicted: false, settings: 0, failed: 0 },
+  isEditorReady: true,
   // Vaul resets its snap point 500ms after a close; a previous test's reset must not land in this one.
   generation: 0,
 }));
@@ -42,11 +44,14 @@ vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
         state.listeners.add(listener);
         return () => state.listeners.delete(listener);
       },
-      () => `${state.activeTab}|${String(state.drawerOpen)}|${String(state.activeSnapPoint)}`,
+      () =>
+        `${state.activeTab}|${String(state.drawerOpen)}|${String(state.activeSnapPoint)}|${String(state.isEditorReady)}`,
     );
-    const [activeTab, drawerOpen] = snapshot.split('|');
+    const [activeTab, drawerOpen, , isEditorReady] = snapshot.split('|');
     const { generation } = state;
     return {
+      isEditorReady: isEditorReady === 'true',
+      isLayoutRestored: isEditorReady === 'true',
       activeTab,
       handleTabChange: selectSurface,
       drawerOpen: drawerOpen === 'true',
@@ -135,7 +140,9 @@ vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => ({
   ProjectManifestIssueBanner: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({
+  WorkspaceOpening: () => <span role='status' aria-label='Opening project' />,
+}));
 /* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
 
@@ -217,7 +224,9 @@ afterEach(() => {
   state.activeSnapPoint = 0.5;
   state.flags = { machines: true, tauDebug: true };
   state.row = { attention: 0, conflicted: false, settings: 0, failed: 0 };
+  state.isEditorReady = true;
   state.listeners.clear();
+  globalThis.history.replaceState(null, '', '/');
   state.generation += 1;
   vi.unstubAllGlobals();
   terminal.mounted.mockClear();
@@ -1200,5 +1209,36 @@ describe('ChatInterfaceMobile on load', () => {
     await screen.findByRole('textbox', { name: 'Message' });
     expect(frames.restingFrame()).toMatch(/^\d+px$/u);
     expect(frames.firstFrame()).toBe('100%');
+  });
+
+  // A15c: the phone frame's hint and its hand-over to the live sheet.
+  it('should remember the surface for the next load once the editor state has loaded, not before', () => {
+    globalThis.history.replaceState(null, '', '/w/home/one');
+    globalThis.localStorage.clear();
+    state.isEditorReady = false;
+    state.activeTab = 'chat';
+    state.drawerOpen = true;
+    const { container } = renderShell();
+    const workspace = (): Element => container.querySelector('[data-mobile-workspace]')!;
+
+    expect(readPhoneFrameHint('home/one')).toBeUndefined();
+    expect(workspace()).toHaveAttribute('data-mobile-workspace', 'opening');
+    /* Drawn at the default surface but not shown: the phone frame stands in until the stored layout is read. */
+    expect(workspace().className).toContain('data-[mobile-workspace=opening]:invisible');
+    /* Beside the hidden workspace, not in it, so assistive technology hears it. */
+    expect(workspace()).not.toContainElement(screen.getByRole('status', { name: 'Opening project' }));
+
+    act(() => {
+      state.isEditorReady = true;
+      notify();
+    });
+    expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'chat', snap: 0.5 });
+    expect(workspace()).toHaveAttribute('data-mobile-workspace', 'ready');
+    expect(screen.queryByRole('status', { name: 'Opening project' })).toBeNull();
+
+    act(() => {
+      selectSurface('editor');
+    });
+    expect(readPhoneFrameHint('home/one')).toEqual({ tab: 'editor', snap: 1 });
   });
 });

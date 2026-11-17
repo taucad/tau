@@ -30,7 +30,7 @@ import {
   githubErrorMessage,
 } from '#lib/github-connections.js';
 import { authClient } from '#lib/auth-client.js';
-import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { isDesktopTarget } from '@taucad/files-ui/filesystem/desktop-bridge';
 import type {
   GithubBranch,
   GithubConnection,

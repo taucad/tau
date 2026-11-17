@@ -116,6 +116,18 @@ describe('prepareSectionWrite', () => {
     });
   });
 
+  it('stores the orbit style and reads it back after a reload, refusing an unknown one', () => {
+    const write = prepareSectionWrite(viewerPreferencesSection, undefined, { controls: { orbitStyle: 'tumble' } });
+    expect(write.status).toBe('write');
+    const raw = write.status === 'write' ? write.raw : undefined;
+    expect(readSection(viewerPreferencesSection, raw).value.controls).toEqual({ orbitStyle: 'tumble' });
+    expect(() =>
+      prepareSectionWrite(viewerPreferencesSection, raw, {
+        controls: { orbitStyle: 'trackball' as unknown as 'tumble' },
+      }),
+    ).toThrow();
+  });
+
   it('refuses a write that would store an invalid value', () => {
     expect(() =>
       prepareSectionWrite(viewerPreferencesSection, undefined, { viewDefaults: { fieldOfView: 120 } }),

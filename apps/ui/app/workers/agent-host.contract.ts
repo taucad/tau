@@ -17,7 +17,7 @@ import {
 } from '@taucad/agent-host/wire';
 import type { AgentWireHello } from '@taucad/agent-host/wire';
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
-import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type { PageTelemetryContext } from '#telemetry/page-telemetry.js';
 import { z } from 'zod';

@@ -11,8 +11,8 @@ export type ViewerCameraInputProps = Readonly<{ cameraInput?: CameraInput; gizmo
 
 /**
  * The person's camera input and gizmo style: the stored preset, else the suggestion for the tool answer (never
- * stored, so a changed answer still moves it, C9); the three toggles as stored, absent
- * where unset so the viewer applies its built-in values; and the stored gizmo style, else the suggestion. With the
+ * stored, so a changed answer still moves it, C9); the three toggles and the orbit style as stored, absent
+ * where unset so the viewer applies its built-in values (Turntable for the orbit style); and the stored gizmo style, else the suggestion. With the
  * `viewerControls` flag off, nothing, so the viewer keeps today's bindings and cube.
  *
  * @param input - Whether `viewerControls` is on, and the person record.
@@ -30,13 +30,14 @@ export const resolveViewerCameraInput = ({
   if (!enabled) {
     return {};
   }
-  const { zoomToCursor, orbitAboutCursor, invertZoom } = viewer.controls;
+  const { zoomToCursor, orbitAboutCursor, invertZoom, orbitStyle } = viewer.controls;
   return {
     cameraInput: {
       preset: effectivePreset(viewer, profile),
       ...(zoomToCursor === undefined ? {} : { zoomToCursor }),
       ...(orbitAboutCursor === undefined ? {} : { orbitAboutCursor }),
       ...(invertZoom === undefined ? {} : { invertZoom }),
+      ...(orbitStyle === undefined ? {} : { orbitStyle }),
     },
     gizmoStyle: effectiveGizmoStyle(viewer, profile),
   };

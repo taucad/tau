@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
 import type { EventObject } from 'xstate';
-import type { HomeStorageBackend } from '#filesystem/handle-store.js';
+import type { HomeStorageBackend } from '@taucad/files-ui/filesystem/handle-store';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 

@@ -2,7 +2,7 @@ import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelConfiguration, KernelEntry, KernelId } from '@taucad/types/constants';
 import type { KernelRoutingProfile } from '@taucad/chat/prompts';
 import { picogkBrowserAssets } from '#runtime/picogk-browser-assets.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 
 /** Product offerings executable by the active runtime host. */
 export const availableKernelConfigurations = (): readonly KernelEntry[] => {

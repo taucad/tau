@@ -1,7 +1,12 @@
 import { isFeatureEnabled } from '#flags/feature-flags.js';
-import { useOpenedLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
+import {
+  useCloudOpenPending,
+  useFilePaneAvailability,
+  useOpenedLargeObjectPending,
+  useProjectAvailability,
+} from '#hooks/use-project-availability.js';
+import { kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
-import { BrowserPane } from '#components/browser/browser-pane.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
 import { connectBrowserWorkbench } from '#components/browser/browser-workbench.js';
 import { selectDockAdapter } from '#workbench-records/workbench-adapter.js';
@@ -14,7 +19,9 @@ import type { BrowserPanelParameters } from '#components/browser/browser-workben
 import {
   createContext,
   Fragment,
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -73,7 +80,7 @@ import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewSplitAction } from '#components/panes/dockview-split-action.js';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { isPrinterFileName } from '#components/printer/printer-file.js';
+import { isPrinterFileName } from '#components/printer/printer-file-kind.js';
 import { WorkbenchTabContextMenu } from '#components/panes/editor-tab-context-menu.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
 import { DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
@@ -82,7 +89,7 @@ import { getEditorLanguage } from '#lib/editor-languages.js';
 import { ChatEditorTooLargeWarning } from '@taucad/project-workspace/components/chat-editor-too-large-warning';
 import { ChatEditorErrorPlaceholder } from '@taucad/project-workspace/components/chat-editor-error-placeholder';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useFileContent } from '#hooks/use-file-content.js';
+import { useFileContent, useFreshContent } from '#hooks/use-file-content.js';
 import type { FileContentSelection } from '#hooks/use-file-content.js';
 import { useVirtualDeclarationContent } from '#hooks/use-virtual-declaration-content.js';
 import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
@@ -94,32 +101,19 @@ import { requestEditorNavigation } from '#lib/editor-navigation-service.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitStart } from '#hooks/use-wait-start.js';
-import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
+import { EditorPanePlaceholder } from '@taucad/editor-ui/components/code/editor-pane-placeholder';
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { useFeature } from '#flags/use-feature.js';
 import { fileViewerRouter } from '#routes/w.$workspace.$project/file-viewers/built-in-viewers.js';
 import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
-import { ParametersPanelBody } from '#routes/w.$workspace.$project/chat-parameters.js';
-import { KinematicsPanelBody } from '#routes/w.$workspace.$project/chat-kinematics.js';
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 import { EditorSymbolPathProvider } from '#routes/w.$workspace.$project/editor-symbol-path.js';
-import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
-import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
-import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
+import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
 import { useReportHistoryPaneShown } from '#routes/w.$workspace.$project/revision-pane-requests.js';
-import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
-import { JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';
-import { PrintPanelBody } from '#routes/w.$workspace.$project/chat-print.js';
-import { ConverterPanelBody } from '#routes/w.$workspace.$project/chat-converter.js';
-import { DetailsPanelBody } from '#routes/w.$workspace.$project/chat-details.js';
-import { TelemetryPanelContent } from '#routes/w.$workspace.$project/chat-kernel.js';
-import { ChatConsole } from '#routes/w.$workspace.$project/chat-console.js';
-import { ProjectTerminalPane } from '#components/terminal/terminal-pane.js';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
 import { WorkbenchToggleSlot } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import {
   projectWorkspaceKeyCombinations,
@@ -154,6 +148,69 @@ import type {
   ResolvedFileViewer,
 } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 import { useTourAnchor } from '#components/tour/tour-anchors.js';
+
+/*
+ * Each Workbench pane's body is its own chunk, loaded when its pane first mounts (progressive loading PL5), as the
+ * phone's sheets already load theirs: the project route's interactive tier carries the dock's frame and its file
+ * tree, never the explorer's part visuals (three.js), the print preparation (the agent-tool registry), the
+ * configuration forms, the exporter or the debug panes. A body draws inside its pane's frame when it arrives.
+ */
+const BrowserPane = lazy(async () => {
+  const module = await import('#components/browser/browser-pane.js');
+  return { default: module.BrowserPane };
+});
+const ParametersPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-parameters.js');
+  return { default: module.ParametersPanelBody };
+});
+const KinematicsPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-kinematics.js');
+  return { default: module.KinematicsPanelBody };
+});
+const ModelPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-explorer.js');
+  return { default: module.ModelPanelBody };
+});
+const RevisionsPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-revisions.js');
+  return { default: module.RevisionsPanelBody };
+});
+const AgentsPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-agents.js');
+  return { default: module.AgentsPanelBody };
+});
+const JobsPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-jobs.js');
+  return { default: module.JobsPanelBody };
+});
+const PrintPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-print.js');
+  return { default: module.PrintPanelBody };
+});
+const ConverterPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-converter.js');
+  return { default: module.ConverterPanelBody };
+});
+const DetailsPanelBody = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-details.js');
+  return { default: module.DetailsPanelBody };
+});
+const TelemetryPanelContent = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-kernel.js');
+  return { default: module.TelemetryPanelContent };
+});
+const ChatConsole = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/chat-console.js');
+  return { default: module.ChatConsole };
+});
+const ProjectTerminalPane = lazy(async () => {
+  const module = await import('#components/terminal/terminal-pane.js');
+  return { default: module.ProjectTerminalPane };
+});
+const ProjectShareWorkbenchPanel = lazy(async () => {
+  const module = await import('#routes/w.$workspace.$project/project-share-action.js');
+  return { default: module.ProjectShareWorkbenchPanel };
+});
 
 const reportEditorSaveFailure = async (completion: Promise<void>, path: string): Promise<void> => {
   try {
@@ -274,27 +331,52 @@ function EditorPanel(properties: IDockviewPanelProps<EditorPanelParameters>): Re
   );
 }
 
+/** A lazy pane body inside its pane: the pane's frame shows until the body's chunk is in. */
+function PaneBody({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return <Suspense fallback={null}>{children}</Suspense>;
+}
+
 function BrowserWorkbenchPanel({ params }: IDockviewPanelProps<BrowserPanelParameters>): React.JSX.Element {
-  return <BrowserPane tabId={params.browserTabId} />;
+  return (
+    <PaneBody>
+      <BrowserPane tabId={params.browserTabId} />
+    </PaneBody>
+  );
 }
 
 function ParametersWorkbenchPanel(): React.JSX.Element {
-  return <ParametersPanelBody />;
+  return (
+    <PaneBody>
+      <ParametersPanelBody />
+    </PaneBody>
+  );
 }
 
 function KinematicsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
-  return <KinematicsPanelBody panelApi={api} />;
+  return (
+    <PaneBody>
+      <KinematicsPanelBody panelApi={api} />
+    </PaneBody>
+  );
 }
 
 function ModelWorkbenchPanel(): React.JSX.Element {
-  return <ModelPanelBody />;
+  return (
+    <PaneBody>
+      <ModelPanelBody />
+    </PaneBody>
+  );
 }
 
 function RevisionsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const { projectId } = useProject();
   /* The toolbar chip reads as pressed while History is on screen (C2). */
   useReportHistoryPaneShown(projectId, useWorkbenchPanelShown(api));
-  return <RevisionsPanelBody />;
+  return (
+    <PaneBody>
+      <RevisionsPanelBody />
+    </PaneBody>
+  );
 }
 
 /** Dockview retains hidden panels; their transcript queries wait until this panel and lane are shown. */
@@ -319,38 +401,64 @@ function useWorkbenchPanelShown(panelApi: IDockviewPanelProps['api']): boolean {
 
 function AgentsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const isShown = useWorkbenchPanelShown(api);
-  return <AgentsPanelBody enableHistory={isShown} />;
+  return (
+    <PaneBody>
+      <AgentsPanelBody enableHistory={isShown} />
+    </PaneBody>
+  );
 }
 
 function JobsWorkbenchPanel(): React.JSX.Element {
-  return <JobsPanelBody />;
+  return (
+    <PaneBody>
+      <JobsPanelBody />
+    </PaneBody>
+  );
 }
 
 export function PrintWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const isShown = useWorkbenchPanelShown(api);
-  return <PrintPanelBody isShown={isShown} />;
+  return (
+    <PaneBody>
+      <PrintPanelBody isShown={isShown} />
+    </PaneBody>
+  );
 }
 
 export function ExportWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
   const isShown = useWorkbenchPanelShown(api);
-  return <ConverterPanelBody downloadOnly={profile === 'shared'} isShown={isShown} />;
+  return (
+    <PaneBody>
+      <ConverterPanelBody downloadOnly={profile === 'shared'} isShown={isShown} />
+    </PaneBody>
+  );
 }
 
 function ShareWorkbenchPanel(): React.JSX.Element {
-  return <ProjectShareWorkbenchPanel />;
+  return (
+    <PaneBody>
+      <ProjectShareWorkbenchPanel />
+    </PaneBody>
+  );
 }
 
 function DetailsWorkbenchPanel({ api }: IDockviewPanelProps): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
   const isShown = useWorkbenchPanelShown(api);
-  return <DetailsPanelBody readOnly={profile === 'shared'} enableHistory={isShown} />;
+  return (
+    <PaneBody>
+      <DetailsPanelBody readOnly={profile === 'shared'} enableHistory={isShown} />
+    </PaneBody>
+  );
 }
 
 function TelemetryWorkbenchPanel(): React.JSX.Element {
   const enabled = useFeature('tauDebug');
   return enabled ? (
-    <TelemetryPanelContent />
+    <PaneBody>
+      <TelemetryPanelContent />
+    </PaneBody>
   ) : (
     <p className='p-4 text-muted-foreground'>Kernel diagnostics require debug mode.</p>
   );
@@ -358,13 +466,23 @@ function TelemetryWorkbenchPanel(): React.JSX.Element {
 
 function ConsoleWorkbenchPanel(): React.JSX.Element {
   const enabled = useFeature('tauDebug');
-  return enabled ? <ChatConsole /> : <p className='p-4 text-muted-foreground'>Console requires debug mode.</p>;
+  return enabled ? (
+    <PaneBody>
+      <ChatConsole />
+    </PaneBody>
+  ) : (
+    <p className='p-4 text-muted-foreground'>Console requires debug mode.</p>
+  );
 }
 
 /* Closing the Terminal's tab unmounts the pane, which ends its session. */
 function TerminalWorkbenchPanel(): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
-  return <ProjectTerminalPane profile={profile} />;
+  return (
+    <PaneBody>
+      <ProjectTerminalPane profile={profile} />
+    </PaneBody>
+  );
 }
 
 type WorkbenchSurface = {
@@ -1411,7 +1529,32 @@ export const FileEditor = memo(function ({
   // gate — there is no local "force open" state because the override is
   // expressed by re-resolving with `forceText` / `sizeLimit` options.
   const virtualDeclaration = useVirtualDeclarationContent(documentSession, filePath);
-  const fileContent = useFileContent(virtualDeclaration === undefined ? filePath : undefined);
+  /* A first view (STO-25): the entry closure's pane opens once the closure lands. Any other file may still hold the
+     previous revision's bytes, or be absent, until the open's apply lands it (D9: an unlanded path is what is on disk),
+     so its pane waits on its own file, and "File not found" for every authored file (I7). Nothing is read while the
+     pane waits, and once its gate opens it shows only a read begun after that: the change that replaced what an
+     earlier reader cached reaches the page late (I7). */
+  const absence = useProjectAvailability('absence');
+  const gate = useFilePaneAvailability(filePath, kernelClosure(mainEntryPath).includes(filePath));
+  const fresh = useFreshContent(
+    virtualDeclaration === undefined ? filePath : undefined,
+    gate === 'ready',
+    useCloudOpenPending(),
+  );
+  const availability = gate === 'ready' && fresh.state !== 'open' ? 'waiting' : gate;
+  const fileContent = useFileContent(
+    virtualDeclaration === undefined && availability === 'ready' ? filePath : undefined,
+    { retainValue: !fresh.readAfresh },
+  );
+  /* The open itself showed only the fresh read (I7); once the pane's own observation is ready, last good bytes
+   * outlive a later transient failure as for any other pane. */
+  const { readAfresh, settled: freshSettled, state: freshState } = fresh;
+  const observedReady = fileContent.observation.status === 'ready';
+  useEffect(() => {
+    if (readAfresh && freshState === 'open' && observedReady) {
+      freshSettled();
+    }
+  }, [freshSettled, freshState, observedReady, readAfresh]);
   // A declaration held in memory has nothing to observe on disk, so it is always current.
   const result = useMemo(
     (): FileContentSelection =>
@@ -1534,7 +1677,6 @@ export const FileEditor = memo(function ({
   let body: ReactNode;
   let resolvedViewer: ResolvedFileViewer | undefined;
   let viewerRequest: Omit<FileViewerRenderRequest, 'renderPane'> | undefined;
-  const availability = useProjectAvailability();
   /* One wait per pane, owned here and not by the placeholder, which is replaced when the text arrives: it runs until
      the file's text is on screen (the placeholder shows it as soon as it is read). A sync or a large object shows its
      own notice instead. */
@@ -1567,8 +1709,8 @@ export const FileEditor = memo(function ({
       break;
     }
     case 'orphaned': {
-      if (availability !== 'ready') {
-        body = <ProjectSyncPlaceholder state={availability} />;
+      if (absence !== 'ready') {
+        body = <ProjectSyncPlaceholder state={absence} />;
         break;
       }
       body = (
@@ -1711,6 +1853,24 @@ export const FileEditor = memo(function ({
     </FileWorkbenchPane>
   );
 
+  if (fresh.state === 'failed') {
+    /* The fresh read failed: say so and offer it again, never the content held before (I7). */
+    return (
+      <div className='flex h-full flex-col bg-background'>
+        <div className='min-h-0 flex-1'>
+          <ChatEditorErrorPlaceholder cause={fresh.cause} />
+        </div>
+        <div className='flex justify-center pb-4'>
+          <Button variant='outline' size='sm' onClick={fresh.retry}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  if (availability === 'waiting') {
+    return <EditorPanePlaceholder label={`Waiting for ${name}`} />;
+  }
   if (availability !== 'ready') {
     return <ProjectSyncPlaceholder state={availability} />;
   }

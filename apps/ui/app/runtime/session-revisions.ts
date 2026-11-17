@@ -41,6 +41,7 @@ import { randomUuid } from '@taucad/utils/id';
 import type { ActorRefFrom, CallbackActorLogic, EventObject } from 'xstate';
 import type { CheckoutRootConfig } from '@taucad/filesystem';
 import type { RevisionStatusProjection } from '@taucad/revisions';
+import type { CheckoutCutsOutcome } from '@taucad/revisions/revision-effects';
 import { deviceId } from '@taucad/ui-core/lib/device-id';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { holdTreeRefreshesWhileApplying } from '@taucad/ui-core/lib/tree-refresh-hold';
@@ -55,11 +56,18 @@ import {
   subscribeRevisionSessionUser,
 } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
-import { isRecordingEditorConflict, subscribeEditorConflictRecords } from '#lib/editor-document-session.js';
-import { getProjectRootConfigs, setCheckoutRootConfigs } from '#filesystem/handle-store.js';
+import {
+  isOwingEditorText,
+  isRecordingEditorConflict,
+  setEditorTextScope,
+  subscribeEditorConflictRecords,
+  subscribeOwedEditorText,
+} from '#lib/editor-document-session.js';
+import type { EditorTextScope } from '#lib/editor-document-session.js';
+import { getProjectRootConfigs, setCheckoutRootConfigs } from '@taucad/files-ui/filesystem/handle-store';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
-import { isFileCheckSettled } from '#hooks/use-project-availability.js';
-import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
+import { chatsOpen, isFileCheckSettled } from '#hooks/use-project-availability.js';
+import { canOpenCloudProject, tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { FlushPhase } from '#runtime/environment.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
@@ -129,6 +137,18 @@ export type SessionRevisionsCloseDebtPort = Readonly<{
 export type SessionRevisionsCloudOpenPort = Readonly<{
   get: (projectId: string) => boolean;
   subscribe: (listener: () => void) => () => void;
+  /** Whether this account may continue the project's open (SP2h); absent, it may. */
+  canOpen?: (projectId: string) => boolean;
+}>;
+
+/**
+ * Owed editor text (A7e): where the child publishes whose text a project's editor records and replays, whether any is
+ * still owed (a record stored, or a replay running), and its changes. The owed close cut waits on it.
+ */
+export type SessionRevisionsEditorTextPort = Readonly<{
+  setScope: (projectId: string, scope: EditorTextScope | undefined) => void;
+  owing: (projectId: string) => boolean;
+  subscribe: (listener: () => void) => () => void;
 }>;
 
 /** What the session's composition supplies: the parts of the ports that are not module stores. */
@@ -149,6 +169,8 @@ export type SessionRevisionsPorts = SessionRevisionsWiring &
     recording: SessionRevisionsRecordingPort;
     /** Close cuts owed across documents (A7d). */
     closeDebt: SessionRevisionsCloseDebtPort;
+    /** Editor text owed across documents, which an owed close cut waits for (A7e). */
+    editorText: SessionRevisionsEditorTextPort;
     /** Whether a Tau Cloud open is still owed (A14): the file check then defers to the open's own placeholder. */
     cloudOpen: SessionRevisionsCloudOpenPort;
     /** Where a failure in a teardown goes, so the session is not faulted by a cleanup (D23). */
@@ -206,6 +228,10 @@ const runIsolated = (steps: ReadonlyArray<(() => void) | undefined>, reportFault
 
 /** The `localStorage` key prefix of an owed close cut; the workspace, the project and the person follow it. */
 export const closeDebtStorageKeyPrefix = 'tau-revision-close-owed:';
+/** At most this many owed close cuts are kept: a write past it drops the oldest (A7e, 22:19Z). */
+export const closeDebtLimit = 64;
+/** An owed close cut older than this is dropped when it is read: its bytes went into a later cut long since. */
+export const closeDebtMaxAgeMilliseconds = 30 * 24 * 60 * 60 * 1000;
 
 const closeDebtStorageKey = ({ workspace, projectId, actorId }: SessionRevisionsCloseDebtKey): string =>
   `${closeDebtStorageKeyPrefix}${JSON.stringify([workspace, projectId, actorId])}`;
@@ -227,6 +253,36 @@ const closeDebtOf = (stored: string | undefined): SessionRevisionsCloseDebt | un
   return isRecord(parsed) && typeof parsed['token'] === 'string' ? { token: parsed['token'] } : undefined;
 };
 
+/* When a stored record was written; a record from before the bound carries none and counts as oldest. */
+const closeDebtAt = (stored: string | undefined): number | undefined => {
+  try {
+    const parsed: unknown = stored === undefined ? undefined : JSON.parse(stored);
+    return isRecord(parsed) && typeof parsed['at'] === 'number' ? parsed['at'] : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/* Keep the store within its limit, oldest first. */
+const boundCloseDebts = (storage: Storage): void => {
+  const keys: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith(closeDebtStorageKeyPrefix) === true) {
+      keys.push(key);
+    }
+  }
+  if (keys.length <= closeDebtLimit) {
+    return;
+  }
+  const byAge = keys
+    .map((key) => ({ key, at: closeDebtAt(storage.getItem(key) ?? undefined) ?? 0 }))
+    .sort((left, right) => left.at - right.at);
+  for (const { key } of byAge.slice(0, keys.length - closeDebtLimit)) {
+    storage.removeItem(key);
+  }
+};
+
 /**
  * Owed close cuts in this browser's `localStorage` (A7d): it outlives the document, its writes are synchronous, and
  * every tab of the origin reads the same records. Storage that refuses (a private window, a full quota) owes nothing.
@@ -236,14 +292,22 @@ const closeDebtOf = (stored: string | undefined): SessionRevisionsCloseDebt | un
 export const sessionRevisionsCloseDebt: SessionRevisionsCloseDebtPort = {
   read: (key) => {
     try {
-      return closeDebtOf(globalThis.localStorage.getItem(closeDebtStorageKey(key)) ?? undefined);
+      const storageKey = closeDebtStorageKey(key);
+      const stored = globalThis.localStorage.getItem(storageKey) ?? undefined;
+      const at = closeDebtAt(stored);
+      if (at !== undefined && Date.now() - at > closeDebtMaxAgeMilliseconds) {
+        globalThis.localStorage.removeItem(storageKey);
+        return undefined;
+      }
+      return closeDebtOf(stored);
     } catch {
       return undefined;
     }
   },
   write: (key, debt) => {
     try {
-      globalThis.localStorage.setItem(closeDebtStorageKey(key), JSON.stringify(debt));
+      globalThis.localStorage.setItem(closeDebtStorageKey(key), JSON.stringify({ ...debt, at: Date.now() }));
+      boundCloseDebts(globalThis.localStorage);
     } catch {
       /* Nothing to keep it in: the next cut still records what is on disk. */
     }
@@ -277,7 +341,12 @@ export const createSessionRevisionsPorts = (
   salt: { get: getRevisionSalt, subscribe: subscribeRevisionSalt, request: requestRevisionSalt },
   recording: { get: isRecordingEditorConflict, subscribe: subscribeEditorConflictRecords },
   closeDebt: sessionRevisionsCloseDebt,
-  cloudOpen: { get: (projectId) => tauCloudIntent.get(projectId) === 'open', subscribe: tauCloudIntent.subscribe },
+  editorText: { setScope: setEditorTextScope, owing: isOwingEditorText, subscribe: subscribeOwedEditorText },
+  cloudOpen: {
+    get: (projectId) => tauCloudIntent.get(projectId) === 'open',
+    subscribe: tauCloudIntent.subscribe,
+    canOpen: canOpenCloudProject,
+  },
 });
 
 /**
@@ -396,6 +465,18 @@ export const sessionRevisionsCallback =
         actor,
         ...(commitAuthor === undefined ? {} : { commitAuthor }),
       });
+      /*
+       * A7e: the project's editor records and replays its owed text as this person, in this workspace. Published
+       * after the actor is sent: the change wakes the owed close cut, which must be cut as this person.
+       */
+      runIsolated(
+        [
+          () => {
+            ports.editorText.setScope(projectId, workspace === '' ? undefined : { workspace, actorId: actor.id });
+          },
+        ],
+        ports.reportFault,
+      );
       /* A7d: the person may now be one who owes a close cut here. */
       payDebt();
     };
@@ -480,8 +561,9 @@ export const sessionRevisionsCallback =
     const relayFacts = (): void => {
       const status = client?.status();
       relayFileCheck(status);
-      const ready = status?.sync.chats === 'ready';
-      /* S1: the session's `project` child retries a deferred focused chat once the chats arrive. */
+      /* S1: the session's `project` child retries a deferred focused chat once the chats arrive and may open: during a
+       * Tau Cloud open they land beside the apply (SP2h), and a retry before their surface opens would defer again. */
+      const ready = chatsOpen(status, ports.cloudOpen.get(projectId), ports.cloudOpen.canOpen?.(projectId) ?? true);
       if (ready !== chatsReady) {
         chatsReady = ready;
         sendBack({ type: 'revisionChatsChanged', ready });
@@ -570,6 +652,9 @@ export const sessionRevisionsCallback =
      * answers (`registrySettled`), with no checkout. */
     const hasCheckoutToCut = (status: RevisionStatusProjection | undefined): boolean =>
       status?.registrySettled === true && status.checkoutId !== undefined;
+    /* A7e (22:19Z): what a cut must have come to for an owed close cut to be settled by it. */
+    const settlesDebt = (outcome: CheckoutCutsOutcome | undefined): boolean =>
+      outcome === 'recorded' || outcome === 'nothingToRecord';
 
     /*
      * A7d (I6, S26): the close cut an earlier document owed. It is asked for as soon as the client records as the
@@ -586,6 +671,11 @@ export const sessionRevisionsCallback =
       if (target === undefined || actorId === undefined || !hasCheckoutToCut(target.status())) {
         return;
       }
+      /* A7e (21:08Z condition 4): owed editor text is replayed first, and a conflict record ends first, so the close
+       * cut holds them. Both signals ask again when they change. */
+      if (ports.editorText.owing(projectId) || ports.recording.get(projectId)) {
+        return;
+      }
       if (debtsLookedFor.has(actorId)) {
         return;
       }
@@ -598,7 +688,10 @@ export const sessionRevisionsCallback =
       // async-iife: bootstrap -- the cut's answer settles the record.
       void (async (): Promise<void> => {
         try {
-          await target.saveRevision('close');
+          /* Only a cut that recorded, or found nothing to record, settles the debt (22:19Z); a refused one keeps it. */
+          if (!settlesDebt(await target.saveRevision('close'))) {
+            return;
+          }
         } catch {
           /* The connection closed first: the debt stays for the next open. */
           return;
@@ -688,8 +781,8 @@ export const sessionRevisionsCallback =
         /* A root with no checkout to cut (its registry has not answered, or answered with none) records nothing:
          * the debt stays for the next open. */
         const canRecord = hasCheckoutToCut(current.status());
-        await current.saveRevision('close');
-        if (owedToken !== undefined && canRecord) {
+        const outcome = await current.saveRevision('close');
+        if (owedToken !== undefined && canRecord && settlesDebt(outcome)) {
           ports.closeDebt.clear(owedToken.key, owedToken.token);
         }
         return;
@@ -742,6 +835,7 @@ export const sessionRevisionsCallback =
     let unsubscribeFocus: (() => void) | undefined;
     let unsubscribeRecording: (() => void) | undefined;
     let unsubscribeCloudOpen: (() => void) | undefined;
+    let unsubscribeEditorText: (() => void) | undefined;
     const stop = (): void => {
       stopped = true;
       if (checkoutLive !== undefined) {
@@ -756,8 +850,12 @@ export const sessionRevisionsCallback =
           unsubscribeFocus,
           unsubscribeRecording,
           unsubscribeCloudOpen,
+          unsubscribeEditorText,
           unregisterCut,
           releaseClient,
+          () => {
+            ports.editorText.setScope(projectId, undefined);
+          },
         ],
         ports.reportFault,
       );
@@ -791,6 +889,8 @@ export const sessionRevisionsCallback =
         salt = saltOf();
         requestSalt();
         sendActorIfChanged();
+        /* Whether this account may open the project, and so whether its chats may (SP2h), follows the user. */
+        relayFacts();
       });
       unsubscribeAnonymity = ports.anonymity.subscribe(() => {
         anonymous = ports.anonymity.get(workspace);
@@ -817,9 +917,12 @@ export const sessionRevisionsCallback =
         }
         recording = next;
         relayFacts();
+        payDebt();
       });
+      unsubscribeEditorText = ports.editorText.subscribe(payDebt);
+      /* The open's end changes the file check and whether the chats may open (SP2h); the rest dedupes on the status. */
       unsubscribeCloudOpen = ports.cloudOpen.subscribe(() => {
-        relayFileCheck(client?.status());
+        relayFacts();
       });
     } catch (error) {
       stop();

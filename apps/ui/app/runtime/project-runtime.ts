@@ -56,6 +56,7 @@ import { peekRevisionClient } from '#services/revision-client-registry.js';
 import {
   createProjectManifestChangeObserver,
   ensureFocusedChatForProject,
+  mayCreateChat,
   parameterStageForSettlement,
   resolveScopedProjectManifest,
   shouldDispatchParameterSettlement,
@@ -1047,13 +1048,12 @@ export function createProjectRuntime(options: ProjectRuntimeOptions): ProjectRun
           requestedChatId: input.requestedChatId,
           persistedChatId: input.persistedChatId,
           worker: library,
-          canCreateChat: () => {
-            const status = peekRevisionClient(input.projectId)?.status();
-            if (isCloudProjectPending(input.projectId) && status?.sync.hasAppliedRemote !== true) {
-              return false;
-            }
-            return status?.remote.kind !== 'tau' || status.sync.chats === 'ready';
-          },
+          canCreateChat: () =>
+            mayCreateChat(
+              peekRevisionClient(input.projectId)?.status(),
+              isCloudProjectPending(input.projectId),
+              canOpenCloudProject(input.projectId),
+            ),
           onCreatedChat: (chatId) => {
             chatSessions?.noteCreatedEmpty(chatId);
             void library.invalidateChatListing(input.projectId);

@@ -12,6 +12,7 @@
     "geospec-mt-assets.vite-plugin.ts",
     "openscad-language-assets.vite-plugin.ts",
     "asset-integrity.vite-plugin.ts",
+    "server-output-assets.vite-plugin.ts",
     "geospec-mt-assets-cache-key.ts",
     "csharp-language-assets.vite-plugin.ts",
     "csharp-language-assets-cache-key.ts",

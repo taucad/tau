@@ -66,7 +66,7 @@ import {
   useCompiledConfigurationManifest,
 } from '#components/machines/machine-section.js';
 import type { ResolvedSchema } from '#components/machines/machine-section.js';
-import { operator } from '#hooks/use-machine-control.js';
+import { operator } from '#components/print/machine-operator.js';
 import {
   describePrintError,
   formatQuantity,

@@ -18,7 +18,7 @@ import type {
 } from '@taucad/agent-host/wire';
 import { randomUuid } from '@taucad/utils/id';
 import { readBuildRelease } from '#lib/build-identity.js';
-import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type {
   AgentHostAdmissionConfig,

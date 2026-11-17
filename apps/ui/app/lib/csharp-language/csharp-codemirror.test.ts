@@ -11,14 +11,14 @@ import type * as LSP from 'vscode-languageserver-protocol';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { FileEntry, FileStatEntry } from '@taucad/types';
-import { goToDefinitionAt } from '#components/code/editor-definition.js';
+import { goToDefinitionAt } from '@taucad/editor-ui/components/code/editor-definition';
 import {
   formatDocument,
   languageFeatureNavigation,
   quickFix,
   renameSymbol,
   triggerParameterHints,
-} from '#components/code/editor-language-features.js';
+} from '@taucad/editor-ui/components/code/editor-language-features';
 import { EditorDocument } from '#lib/editor-document.js';
 import { EditorDocumentSession } from '#lib/editor-document-session.js';
 import type { TextChange } from '#lib/editor-document.js';
@@ -420,6 +420,7 @@ function workspaceFor(files: Readonly<Record<string, string>>) {
   const stored = new Map(Object.entries(files).map(([path, text]) => [path, encoder.encode(text)]));
   const contentService = mock<FileContentService>();
   contentService.addEditorSaveFlusher.mockReturnValue(() => undefined);
+  contentService.retain.mockReturnValue(() => undefined);
   contentService.resolve.mockImplementation(async (path) => ({ kind: 'text', content: stored.get(path)! }));
   contentService.saveEditor.mockImplementation(async (path, content) => {
     stored.set(path, content);

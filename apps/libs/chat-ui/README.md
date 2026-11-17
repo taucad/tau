@@ -8,17 +8,17 @@ Cut from `apps/ui/app` in UI wave B (CI decomposition blueprint, Part 3 P2 row B
 
 One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` routes, components and hooks, and the UI feature libraries cut from it (`project-workspace`, …).
 
-| Subpath                         | Contents                                                                                                                                                              |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `./components/<name>`           | Chat tool cards, labels and text, activity groups, context chips, message surface, queue view, typed-question field, composer skeleton and styling, paste handling    |
-| `./components/tiptap/<name>`    | Composer editor, context and slash-command suggestions, drop handling, submit-on-enter, fuzzy matching                                                                |
-| `./chat-clients/<name>`         | `turn-intent`; `_internal/*` browser-placement transport and snapshot context (app chat clients only)                                                                 |
-| `./services/<name>`             | `agent-host-event-projection`, `agent-host-transport`, `daemon-agent-host-client`, `rpc-ledger`                                                                       |
-| `./db/<name>`                   | `attachment-store`, `composer-record-store`, `chat-message-queue-store`, `chat-placements`                                                                            |
-| `./utils/<name>`                | Chat errors and error cards, attachments, at-references, chat execution and new-chat execution, recency, model groups, activity cues, tool-output summaries, resizing |
-| `./hooks/<name>`                | `resize-image.actor`, name-generator agent configs                                                                                                                    |
-| `./types/chat-sidebar.types`    | Sidebar activity types                                                                                                                                                |
-| `./utils/attachment.test-utils` | Test-only attachment fixtures for app suites                                                                                                                          |
+| Subpath                         | Contents                                                                                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `./components/<name>`           | Chat tool cards, labels and text, activity groups, context chips, message surface, queue view, typed-question field, composer skeleton and styling, paste handling |
+| `./components/tiptap/<name>`    | Composer editor, context and slash-command suggestions, drop handling, submit-on-enter, fuzzy matching                                                             |
+| `./chat-clients/<name>`         | `turn-intent`; `_internal/*` browser-placement transport and snapshot context (app chat clients only)                                                              |
+| `./services/<name>`             | `agent-host-event-projection`, `agent-host-transport`, `daemon-agent-host-client`, `rpc-ledger`                                                                    |
+| `./db/<name>`                   | `attachment-store`, `composer-record-store`, `chat-message-queue-store`, `chat-placements`                                                                         |
+| `./utils/<name>`                | Chat errors and error cards, attachments, at-references, chat execution and new-chat execution, recency, model groups, activity cues, tool-output summaries        |
+| `./hooks/<name>`                | Name-generator agent configs                                                                                                                                       |
+| `./types/chat-sidebar.types`    | Sidebar activity types                                                                                                                                             |
+| `./utils/attachment.test-utils` | Test-only attachment fixtures for app suites                                                                                                                       |
 
 ## Formal model
 

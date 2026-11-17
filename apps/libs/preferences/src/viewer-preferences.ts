@@ -17,6 +17,20 @@ export const mousePresetIds = ['tau', 'right-orbit', 'middle-ctrl', 'middle-shif
 export type MousePresetId = (typeof mousePresetIds)[number];
 
 /**
+ * The orbit styles: Turntable keeps the world up and stops at the poles; Tumble turns freely through them and rolls.
+ *
+ * @public
+ */
+export const orbitStyleIds = ['turntable', 'tumble'] as const;
+
+/**
+ * One of {@link orbitStyleIds}.
+ *
+ * @public
+ */
+export type OrbitStyleId = (typeof orbitStyleIds)[number];
+
+/**
  * The gizmo styles. "None" is not a style: it is `viewDefaults['display.gizmo'] = false`.
  *
  * @public
@@ -78,6 +92,8 @@ export const viewerPreferencesSchema = z.strictObject({
     orbitAboutCursor: z.boolean().optional(),
     /** Absent: off. */
     invertZoom: z.boolean().optional(),
+    /** Absent: Turntable. */
+    orbitStyle: z.enum(orbitStyleIds).optional(),
   }),
   gizmo: z.strictObject({
     /** Absent: follow the tool answer. */

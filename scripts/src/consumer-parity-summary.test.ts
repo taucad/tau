@@ -297,4 +297,25 @@ describe('consumerParity', () => {
     ]);
     expect(consumers.flatMap(({ oracles }) => oracles).filter(({ kind }) => kind === 'missing')).toEqual([]);
   });
+
+  it('should read the merge-queue-only ci.yml lanes from merge_group runs on any ref', () => {
+    // A `main` push reuses the queue verdict and skips these lanes (DC-16), and Q-2 moved the darwin rows into
+    // `ci.yml`, so a `main`-scoped oracle would find no run that ran them.
+    const queueOnly = consumers
+      .flatMap(({ oracles }) => oracles)
+      .filter(
+        (oracle) =>
+          oracle.kind === 'job' &&
+          (oracle.job === 'CLI end-to-end (' || oracle.job === 'Native darwin / Native kernels on darwin-arm64'),
+      );
+    expect(queueOnly).toHaveLength(8);
+    for (const oracle of queueOnly) {
+      expect(oracle).toMatchObject({ workflow: 'ci.yml', scope: 'any', event: 'merge_group' });
+    }
+    expect(
+      consumers
+        .flatMap(({ oracles }) => oracles)
+        .some((oracle) => oracle.kind === 'job' && oracle.workflow === 'native-darwin.yml'),
+    ).toBe(false);
+  });
 });

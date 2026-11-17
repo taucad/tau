@@ -1,0 +1,90 @@
+/**
+ * Smallest well-formed headers of each image format, for tests that label bytes.
+ *
+ * Each one is a header that `probeImage` reads as a 48×32 image; none carries
+ * pixel data, which nothing here decodes.
+ */
+
+/**
+ * The byte values of an ASCII string.
+ *
+ * @param text - ASCII text.
+ * @returns One byte per character.
+ */
+const ascii = (text: string): number[] => [...text].map((character) => character.codePointAt(0) ?? 0);
+
+/** Header-only byte strings, one per format. */
+export const imageBytes = {
+  jpeg: new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x20, 0x00, 0x30, 0x03, 0x01, 0x22, 0x00]),
+  png: new Uint8Array([
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+    0x00,
+    0x00,
+    0x00,
+    0x0d,
+    ...ascii('IHDR'),
+    0x00,
+    0x00,
+    0x00,
+    0x30,
+    0x00,
+    0x00,
+    0x00,
+    0x20,
+    0x08,
+    0x02,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+    0x00,
+  ]),
+  webp: new Uint8Array([
+    ...ascii('RIFF'),
+    0x1a,
+    0x00,
+    0x00,
+    0x00,
+    ...ascii('WEBPVP8L'),
+    0x0d,
+    0x00,
+    0x00,
+    0x00,
+    0x2f,
+    // 14 bits width-1 (47), 14 bits height-1 (31), no alpha.
+    0x2f,
+    0xc0,
+    0x07,
+    0x00,
+  ]),
+  gif: new Uint8Array([...ascii('GIF89a'), 0x30, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x3b]),
+  bmp: new Uint8Array([
+    ...ascii('BM'),
+    ...Array.from({ length: 12 }, () => 0),
+    0x28,
+    0x00,
+    0x00,
+    0x00,
+    0x30,
+    0x00,
+    0x00,
+    0x00,
+    0x20,
+    0x00,
+    0x00,
+    0x00,
+    0x01,
+    0x00,
+    0x18,
+    0x00,
+  ]),
+} as const;

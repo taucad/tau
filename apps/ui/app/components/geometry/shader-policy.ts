@@ -20,8 +20,7 @@ export const shaderSites = [
     id: 'viewport-control-history',
     modules: [
       'packages/viewer/src/graphics/three/controls/section-plane-picker.ts',
-      'packages/viewer/src/graphics/three/controls/viewport-gizmo-cube-surface.ts',
-      'packages/viewer/src/graphics/three/controls/viewport-gizmo-cube-axes.ts',
+      'packages/viewer/src/graphics/three/controls/viewport-gizmo-styles.ts',
     ],
     authoring: ['tsl'],
     backends: ['webgpu'],

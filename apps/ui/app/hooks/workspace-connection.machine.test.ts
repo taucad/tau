@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, waitFor } from 'xstate';
-import type { DirectoryPick } from '#constants/browser.constants.js';
-import type { Workspace } from '#filesystem/handle-store.js';
+import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 
 const workspace: Workspace = {

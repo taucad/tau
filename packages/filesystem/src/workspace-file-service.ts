@@ -61,7 +61,7 @@ import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPa
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields } from '#content-metadata.js';
 import { archive } from '#content-ops/archive.js';
-import { pendingObjectOf, readThroughPending } from '#pending-content.js';
+import { asMarkedRow, readAsMarked } from '#pending-content.js';
 import type { PendingObjectSource } from '#pending-content.js';
 import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#project-routes.js';
 
@@ -392,7 +392,7 @@ export class WorkspaceFileService {
    */
   public async stat(path: string): Promise<FileStat> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    return provider.stat(resolvedPath);
+    return this._asMarked(path, await provider.stat(resolvedPath), async () => provider.readFile(resolvedPath));
   }
 
   /**
@@ -403,7 +403,7 @@ export class WorkspaceFileService {
    */
   public async lstat(path: string): Promise<FileStat> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    return provider.lstat(resolvedPath);
+    return this._asMarked(path, await provider.lstat(resolvedPath), async () => provider.readFile(resolvedPath));
   }
 
   /**
@@ -1325,9 +1325,32 @@ export class WorkspaceFileService {
     this._eventBus.dispose();
   }
 
+  /* A row as a rooted view's stat answers it: settled as its mount's marks say, a pending entry as its object (D9). */
+  private async _asMarked(
+    path: string,
+    row: FileStat,
+    read: () => Promise<Uint8Array<ArrayBuffer>>,
+  ): Promise<FileStat> {
+    if (row.type !== 'file') {
+      return row;
+    }
+    const canonicalPath = resolveAuthorityPath(path);
+    const root = this._mountTable.resolve(canonicalPath).entry?.prefix ?? canonicalPath;
+    return asMarkedRow(
+      row,
+      await this._projectIndexes.settleMarks({
+        root,
+        authorityPath: canonicalPath,
+        size: row.size,
+        mtimeMs: row.mtimeMs,
+        bytes: async () => read().catch(() => undefined),
+      }),
+    );
+  }
+
   /**
-   * Read one file's bytes, through to its object when it is a pending entry (D9). The pointer is marked pending
-   * unless a write landed after the read began (I7).
+   * Read one file's bytes, through to its object when it is a pending entry (D9), as a rooted view reads it (see
+   * `readAsMarked`).
    *
    * @param canonicalPath - Absolute authority path.
    * @param resolved - The provider and path it resolves to.
@@ -1339,26 +1362,26 @@ export class WorkspaceFileService {
     resolved: Readonly<{ provider: FileSystemProvider; path: string }>,
     options?: Readonly<{ signal?: AbortSignal | undefined; scope?: WorkspaceScope | undefined }>,
   ): Promise<Uint8Array<ArrayBuffer>> {
-    const generation = this._projectIndexes.generationAt(canonicalPath);
-    const read = await resolved.provider.readFile(resolved.path);
-    const object = pendingObjectOf(read);
-    if (object === undefined) {
-      return read;
-    }
-    this._projectIndexes.markPending(canonicalPath, object, { size: read.byteLength, generation });
+    const bytes = await resolved.provider.readFile(resolved.path);
     /* The source answers by mount, as a rooted view's read asks it. */
     const root = options?.scope === undefined ? this._mountTable.resolve(canonicalPath).entry?.prefix : undefined;
     const local = root === undefined ? canonicalPath : canonicalPath.slice(root === '/' ? 1 : root.length + 1);
-    const signal = options?.signal;
-    return readThroughPending(
-      this._pendingSource,
-      { authorityPath: canonicalPath, root: root ?? canonicalPath, path: local, object },
-      {
-        pointer: read,
-        ...(signal === undefined ? {} : { signal }),
-        stallMilliseconds: this._pendingStallMilliseconds,
+    return readAsMarked(this._projectIndexes, this._pendingSource, {
+      authorityPath: canonicalPath,
+      root: root ?? canonicalPath,
+      path: local,
+      bytes,
+      mtimeMs: async () => {
+        try {
+          const head = await resolved.provider.stat(resolved.path);
+          return head.mtimeMs;
+        } catch {
+          return undefined;
+        }
       },
-    );
+      signal: options?.signal,
+      stallMilliseconds: this._pendingStallMilliseconds,
+    });
   }
 
   private async _configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void> {

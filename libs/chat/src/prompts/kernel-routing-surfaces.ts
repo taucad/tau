@@ -1,6 +1,11 @@
 import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
-import { kernelChoiceCondition, renderKernelRoutingCard, renderKernelRoutingDigest } from '#prompts/kernel-routing.js';
+import {
+  entryAdoptionSentence,
+  kernelChoiceCondition,
+  renderKernelRoutingCard,
+  renderKernelRoutingDigest,
+} from '#prompts/kernel-routing.js';
 import type { KernelRoutingProfile } from '#prompts/kernel-routing.js';
 
 /*
@@ -42,7 +47,7 @@ export const renderPluginKernelsSection = (): string =>
   [
     kernelChoiceCondition,
     renderKernelRoutingCard(pluginKernelProfile),
-    "After choosing, load that kernel's skill before writing model code; a kernel whose skill is none has no skill in this plugin.",
+    `After choosing, load that kernel's skill before writing model code; a kernel whose skill is none has no skill in this plugin. ${entryAdoptionSentence}`,
   ].join('\n\n');
 
 /**

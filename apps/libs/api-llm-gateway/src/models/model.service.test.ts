@@ -29,10 +29,7 @@ const cappedModelIds = [
   'openai-gpt-5.5',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
-  'google-gemini-3.1-pro',
-  'google-gemini-3.8-flash',
-  'google-gemini-3.5-flash-lite',
-  'google-gemini-3.5-flash',
+  'google-gemini-4-hydrogen',
   'together-kimi-k3.1-pro',
   'together-glm-5.3',
   'together-glm-5.3-flash',
@@ -66,10 +63,7 @@ const pdfInputModelIds = [
   'openai-gpt-5.5',
   'google-gemini-4-argon',
   'google-gemini-4-carbon',
-  'google-gemini-3.1-pro',
-  'google-gemini-3.8-flash',
-  'google-gemini-3.5-flash-lite',
-  'google-gemini-3.5-flash',
+  'google-gemini-4-hydrogen',
 ];
 
 const getCloudCatalogEntries = () => Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
@@ -204,6 +198,7 @@ describe('modelList', () => {
         'anthropic-claude-sonnet-5.5',
         'openai-gpt-6.1-terra',
         'openai-gpt-6-astra',
+        'google-gemini-4-hydrogen',
       ]);
       expect(
         getCloudCatalogEntries()
@@ -214,14 +209,7 @@ describe('modelList', () => {
   });
 
   it('should offer PDF input on every Gemini catalog model', () => {
-    const geminiModelIds = [
-      'google-gemini-4-argon',
-      'google-gemini-4-carbon',
-      'google-gemini-3.1-pro',
-      'google-gemini-3.8-flash',
-      'google-gemini-3.5-flash-lite',
-      'google-gemini-3.5-flash',
-    ];
+    const geminiModelIds = ['google-gemini-4-argon', 'google-gemini-4-carbon', 'google-gemini-4-hydrogen'];
 
     for (const id of geminiModelIds) {
       const model = getCloudCatalogEntries().find((entry) => entry.id === id);
@@ -420,36 +408,24 @@ describe('ModelService', () => {
     expect(modelList.openai['gpt-6-astra']?.recommended).toBe(true);
   });
 
-  it.each(['gemini-4-argon', 'gemini-4-carbon'])(
-    'should list %s with image and PDF input and selectable reasoning',
-    async (model) => {
-      const listedModels = await createModelService().getModels();
-      const entry = listedModels.find((listed) => listed.id === `google-${model}`);
+  it.each([
+    ['gemini-4-argon', ['low', 'medium', 'high']],
+    ['gemini-4-carbon', ['low', 'medium', 'high']],
+    ['gemini-4-hydrogen', ['low', 'medium', 'high', 'xhigh']],
+  ])('should list %s with image and PDF input and selectable reasoning', async (model, levels) => {
+    const listedModels = await createModelService().getModels();
+    const entry = listedModels.find((listed) => listed.id === `google-${model}`);
 
-      expect(entry).toMatchObject({
-        model,
-        provider: { id: 'vertexai', name: 'Google' },
-        support: {
-          tools: true,
-          toolChoice: false,
-          modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
-          reasoning: { levels: ['low', 'medium', 'high'] },
-        },
-      });
-    },
-  );
-
-  it('recommends Gemini 3.8 Flash instead of the Gemini 3.5 models', async () => {
-    const service = createModelService();
-    const listedModels = await service.getModels();
-    const listedModelIds = listedModels.map((model) => model.id);
-    const newModelIds = ['google-gemini-3.8-flash', 'google-gemini-3.5-flash-lite'];
-
-    expect(listedModelIds).toEqual(expect.arrayContaining([...newModelIds, 'google-gemini-3.5-flash']));
-    expect(modelList.vertexai['gemini-3.7-flash']).toBeUndefined();
-    expect(modelList.vertexai['gemini-3.8-flash']?.recommended).toBe(true);
-    expect(modelList.vertexai['gemini-3.5-flash-lite']?.recommended).toBe(false);
-    expect(modelList.vertexai['gemini-3.5-flash']?.recommended).toBe(false);
+    expect(entry).toMatchObject({
+      model,
+      provider: { id: 'vertexai', name: 'Google' },
+      support: {
+        tools: true,
+        toolChoice: false,
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
+        reasoning: { levels },
+      },
+    });
   });
 
   it('lists GLM 5.3 as an enabled text-only tool-capable model', async () => {

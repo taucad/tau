@@ -1,7 +1,7 @@
 import { setup, types } from 'xstate';
-import type { DirectoryPick } from '#constants/browser.constants.js';
-import { hostPathName } from '#filesystem/desktop-bridge.js';
-import type { Workspace } from '#filesystem/handle-store.js';
+import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
+import { hostPathName } from '@taucad/files-ui/filesystem/desktop-bridge';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 

@@ -13,7 +13,7 @@ import { revisionClients } from '#services/revision-client-registry.js';
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { Topic } from '@taucad/events';
-import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { isDesktopTarget } from '@taucad/files-ui/filesystem/desktop-bridge';
 import type {
   GitRemoteCredential,
   PublishDraft,
@@ -26,7 +26,7 @@ import type {
   RevisionTag,
 } from '@taucad/revisions';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
-import type { EditorConflictOutcome } from '@taucad/revisions/revision-effects';
+import type { CheckoutCutsOutcome, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import type {
   RevisionToast,
   WorkerRevisionCommand,
@@ -113,6 +113,12 @@ export const isRevisionGraph = (value: unknown): value is RevisionGraph =>
  * @param name - The branch being made.
  * @returns The branch and its checkout.
  */
+/* What a host's `saveRevision` answer says its cut came to (A7e); a host that answers nothing did not wait for it. */
+const saveOutcomeOf = (answer: unknown): CheckoutCutsOutcome => {
+  const outcome = isObject(answer) ? answer['outcome'] : undefined;
+  return outcome === 'recorded' || outcome === 'nothingToRecord' ? outcome : 'refused';
+};
+
 const branchCreatedOf = (answer: unknown, name: string): BranchCreated => {
   const { checkoutId, checkoutRoot } = (answer ?? {}) as { checkoutId?: unknown; checkoutRoot?: unknown };
   if (typeof checkoutId !== 'string' || typeof checkoutRoot !== 'string') {
@@ -441,7 +447,8 @@ export const createHostRevisionClient = (input: {
       return pulls !== false;
     },
     saveRevision: async (trigger) => {
-      await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+      const answer = await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+      return saveOutcomeOf(answer);
     },
     sessionChanged: async () => {
       await ask({ command: 'sessionChanged' });
@@ -1356,7 +1363,8 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       return result.kind !== 'pulled' || result.pulls;
     },
     saveRevision: async (trigger) => {
-      await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+      const result = await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+      return result.kind === 'saved' ? result.outcome : 'refused';
     },
     sessionChanged: async () => {
       await ask({ command: 'sessionChanged' });
@@ -1836,7 +1844,9 @@ export const useRevisionCommands = (): RevisionCommands => {
           expiresAt: token.expiresAt,
         });
       },
-      saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => client?.saveRevision(trigger),
+      saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => {
+        await client?.saveRevision(trigger);
+      },
       tag: async (input) => client?.tag(input),
       publishProject: (tag?: string, revisionId?: string) => {
         /* The origin rides the command itself: it is how the worker names this

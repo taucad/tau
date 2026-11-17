@@ -103,6 +103,29 @@ describe('createRelayedFileSystemProvider', () => {
     expect(statTree).toHaveBeenCalledWith('', undefined);
   });
 
+  /*
+   * A tree write's entry it has yet to land is listed for the person as arriving, but it is not on disk: the agent
+   * could not read it, so its grep and glob never see it (I7).
+   */
+  it('should leave out of statTree a row a tree write has yet to land', async () => {
+    const rows = [
+      { path: 'main.ts', name: 'main.ts', type: 'file', size: 1, mtimeMs: 1 },
+      { path: 'lib/gear.ts', name: 'gear.ts', type: 'file', size: 300, mtimeMs: 0, pending: true, arriving: true },
+      { path: 'models/part.step', name: 'part.step', type: 'file', size: 9, mtimeMs: 1, pending: true },
+    ];
+    const bridge = new Proxy(
+      { hello: { payload: { state: 'ready', capabilities: {} } }, statTree: vi.fn(async () => rows) } as Record<
+        PropertyKey,
+        unknown
+      >,
+      { get: (target, property) => target[property] ?? vi.fn() },
+    ) as unknown as RelayedBridge;
+
+    const listed = await createRelayedFileSystemProvider(bridge).statTree('');
+
+    expect(listed.map((row) => row.path)).toEqual(['main.ts', 'models/part.step']);
+  });
+
   /* A bridge whose far end holds no index: the agent's search walks instead. */
   it('should refuse statTree and facts as unsupported where the bridge serves no index', async () => {
     const unknown = (method: string) =>

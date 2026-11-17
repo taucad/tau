@@ -1,6 +1,15 @@
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
 import { ChatComposerStaticBar } from '#components/chat/chat-composer-static-bar.js';
-import { useNewProjectComposer } from '#components/chat/use-new-project-composer.js';
+import { prefetchNewProjectComposer, useNewProjectComposer } from '#components/chat/use-new-project-composer.js';
+
+/*
+ * In a browser, the rich composer's chunk is requested as soon as Home's module evaluates, which is before hydration:
+ * it downloads beside the entry's work instead of after the composer's host mounts. A failure here is the hook's to
+ * retry and report.
+ */
+if (typeof document !== 'undefined') {
+  prefetchNewProjectComposer();
+}
 
 /** The marker after Home's composer that first paint waits for (`rel=expect`). */
 export const homeComposerEndId = 'home-composer-end';

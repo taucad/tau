@@ -25,7 +25,7 @@ import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { Project, ProjectManifest } from '@taucad/types';
 import { serializeStartRecord, startRecordPath } from '@taucad/revisions';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
-import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
@@ -330,7 +330,7 @@ const mockRepairWorkspaceBindings = vi.fn(async () => ({
 }));
 
 const mockRequestHomeStoragePersistence = vi.fn(async () => undefined);
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   requestHomeStoragePersistence: mockRequestHomeStoragePersistence,
   createWorkspace: mockCreateWorkspaceConnection,
   createNodeWorkspace: mockCreateNodeWorkspace,
@@ -354,7 +354,7 @@ vi.mock('#filesystem/handle-store.js', () => ({
   repairWorkspaceBindings: mockRepairWorkspaceBindings,
 }));
 
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   isDesktopTarget: false,
   desktopBridge: () => undefined,
   hostPathName: (path: string) => /[^/\\]+(?=[/\\]*$)/.exec(path)?.[0] ?? path,
@@ -367,7 +367,7 @@ vi.mock('#filesystem/desktop-bridge.js', () => ({
 let mockIsFileSystemAccessSupported = false;
 /** Which pick the host's directory picker produces; `node` is the desktop dialog. */
 let mockPickerBackend: 'webaccess' | 'node' = 'webaccess';
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   get isFileSystemAccessSupported() {
     return mockIsFileSystemAccessSupported;
   },
@@ -3931,6 +3931,12 @@ describe('useProjectManager.createProject', () => {
   it.each([
     { generatedName: 'New Project', expectedName: 'New Project', outputKind: 'generic output' },
     { generatedName: '   ', expectedName: 'New Project', outputKind: 'blank output' },
+    {
+      // Staging: 8 images and a prompt asking for one short line each, answered one title per line (226 code units).
+      generatedName: `${'Red Square With TAU 42 Horizontal\n'.repeat(6)}Red Square With TAU 42`,
+      expectedName: 'Red Square With TAU 42 Horizontal',
+      outputKind: 'one title per line past the manifest limit',
+    },
   ])('should create with $expectedName when naming returns $outputKind', async ({ generatedName, expectedName }) => {
     mockGenerateProjectName.mockResolvedValueOnce(generatedName);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });

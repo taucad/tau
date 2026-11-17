@@ -19,7 +19,7 @@ vi.mock('#utils/workspace-telemetry.utils.js', async (importOriginal) => ({
   useWorkspaceTelemetry: () => ({}),
 }));
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({}) }));
-vi.mock('#filesystem/handle-store.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listWorkspaces: async () => [
     { workspaceId: 'first', name: 'Workshop' },

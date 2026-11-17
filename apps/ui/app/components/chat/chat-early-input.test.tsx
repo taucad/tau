@@ -4,6 +4,7 @@ import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
 import type { EarlyChatInput, EarlyChatInputBarState } from '#components/chat/chat-early-input.js';
+import type { HandOffElement } from '#components/hand-off/hand-off.js';
 import { hasUsedPageSince } from '#components/onboarding/home-interaction.js';
 import {
   chatComposerEditorTextClassName,
@@ -48,7 +49,7 @@ describe('Home early input', () => {
     document.body.append(container);
     const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
     input.value = text;
-    Object.assign(input, { tauEarlyDraft: { edited, composing: false } });
+    Object.assign(input, { tauHandOff: { edited, composing: false, submitQueued: false, acceptedAt: undefined } });
     input.setSelectionRange(1, text.length, 'backward');
     if (focused) {
       input.focus();
@@ -68,6 +69,8 @@ describe('Home early input', () => {
         start: Math.min(1, text.length),
         end: text.length,
         direction: 'backward',
+        scrollTop: 0,
+        submitQueued: false,
       });
       expect(send.mock.calls).toEqual(edited ? [[{ type: 'setDraftText', text, adoptedEdit: true }]] : []);
       expect(onRecoverableError).not.toHaveBeenCalled();
@@ -93,9 +96,11 @@ describe('Home early input', () => {
     container.innerHTML = renderToString(content);
     document.body.append(container);
     const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
-    const state = { edited: true, composing: true };
-    Object.assign(input, { tauEarlyDraft: state });
+    const state = { edited: true, composing: true, submitQueued: false, acceptedAt: undefined };
+    Object.assign(input, { tauHandOff: state });
     input.value = 'に';
+    /* A composition is open only in the input that holds focus. */
+    input.focus();
     const root = hydrateRoot(container, content);
     try {
       await act(async () => {
@@ -132,7 +137,9 @@ describe('Home early input', () => {
     container.innerHTML = renderToString(content(false));
     document.body.append(container);
     const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
-    Object.assign(input, { tauEarlyDraft: { edited: false, composing: false } });
+    Object.assign(input, {
+      tauHandOff: { edited: false, composing: false, submitQueued: false, acceptedAt: undefined },
+    });
     const root = hydrateRoot(container, content(false));
     try {
       await act(async () => {
@@ -145,7 +152,9 @@ describe('Home early input', () => {
       expect(send).not.toHaveBeenCalled();
       await act(async () => {
         input.value = 'Typed before the composer arrived';
-        Object.assign(input, { tauEarlyDraft: { edited: true, composing: false } });
+        Object.assign(input, {
+          tauHandOff: { edited: true, composing: false, submitQueued: false, acceptedAt: undefined },
+        });
         input.dispatchEvent(new InputEvent('input', { bubbles: true }));
       });
       expect(input.value).toBe('Typed before the composer arrived');
@@ -249,12 +258,10 @@ describe('Home early input', () => {
       expect(script.parentElement?.lastElementChild).toBe(script);
       expect(script.parentElement).toContainElement(bar as HTMLElement);
       runEarlyScript(container);
-      const input = within(container).getByRole<HTMLTextAreaElement & { tauEarlyDraft?: { edited: boolean } }>(
-        'textbox',
-      );
-      expect(input.tauEarlyDraft).toEqual({ edited: false, composing: false });
+      const input = within(container).getByRole<HandOffElement>('textbox');
+      expect(input.tauHandOff).toEqual({ edited: false, composing: false, submitQueued: false, acceptedAt: undefined });
       input.dispatchEvent(new InputEvent('input', { bubbles: true }));
-      expect(input.tauEarlyDraft?.edited).toBe(true);
+      expect(input.tauHandOff?.edited).toBe(true);
     } finally {
       container.remove();
     }

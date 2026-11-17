@@ -1,6 +1,6 @@
 {
   "name": "@taucad/app",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -54,6 +54,7 @@
     "@taucad/consent": "workspace:*",
     "@taucad/converter": "workspace:*",
     "@taucad/csharp-language": "workspace:*",
+    "@taucad/editor-ui": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/files-ui": "workspace:*",
@@ -61,6 +62,7 @@
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/fs-client": "workspace:*",
     "@taucad/gltf": "workspace:*",
+    "@taucad/heif": "workspace:*",
     "@taucad/grammars": "workspace:*",
     "@taucad/image": "workspace:*",
     "@taucad/jscad": "workspace:*",

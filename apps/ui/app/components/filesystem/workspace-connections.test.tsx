@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
-import type { Workspace } from '#filesystem/handle-store.js';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
 import { toast } from '@taucad/ui/components/sonner';
 
@@ -28,11 +28,11 @@ const workspace = {
   lastConnectedAt: 1,
 };
 const directories = { list: async () => [...state.paths], disconnect: state.disconnect };
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   desktopBridge: () => ({ directories }),
   nodeHomeRoot: state.homeRoot,
 }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   listWorkspaces: state.listWorkspaces,
   getWorkspace: async () => undefined,
   listProjectsForWorkspace: async () => [],
@@ -43,7 +43,9 @@ vi.mock('#filesystem/handle-store.js', () => ({
     };
   },
 }));
-vi.mock('#constants/browser.constants.js', () => ({ directoryPicker: () => ({ available: true, backend: 'node' }) }));
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
+  directoryPicker: () => ({ available: true, backend: 'node' }),
+}));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ workspace: { disposeStorageRoot: state.dispose, syncProjectRoots: state.sync } }),
 }));

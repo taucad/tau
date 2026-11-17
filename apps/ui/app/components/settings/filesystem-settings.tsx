@@ -4,8 +4,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SettingsGroup, SettingsItem, SettingsRow } from '#components/settings/settings-item.js';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
 import { BrowserStorageStatus } from '#components/settings/browser-storage-status.js';
-import { usePersistentStorageStatus } from '#filesystem/use-persistent-storage-status.js';
-import type { Workspace } from '#filesystem/handle-store.js';
+import { usePersistentStorageStatus } from '@taucad/files-ui/filesystem/use-persistent-storage-status';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { materializeOnSignIn, useMaterializeOnSignInLocation } from '#hooks/use-cloud-projects.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';

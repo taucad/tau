@@ -7,6 +7,9 @@ import {
   isDigestPrecondition,
   isEventGloballyVisible,
   isWorkspaceMutationError,
+  overflowLossSignals,
+  deliveryMessage,
+  scopeEventToRoot,
   policyAtRoot,
   RootedFileSystemError,
 } from '@taucad/filesystem';
@@ -20,6 +23,7 @@ import type {
   ChangeSet,
   ChangeSetWatchRequest,
   FileStat,
+  LossSignal,
   AuthorityCheckedFileWrite,
   CheckedFileWriteResult,
   MkdirOptions,
@@ -58,7 +62,7 @@ import type {
   FileSystemBridgeWorkspaceService,
 } from '#filesystem-bridge-protocol.js';
 import { nextFileSystemBridgeConnectionId, timeFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
-import { bindFileSystemLongCall, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
+import { bindFileSystemLongCall, withBoundedReadFile, withHostContentCalls } from '#filesystem-bridge-host-calls.js';
 import type { HostContentCallOptions } from '#filesystem-bridge-host-calls.js';
 import type { ComputeEventSource } from '#filesystem-bridge-compute-events.js';
 import { recordFileSystemBridgeCrossing } from '#filesystem-bridge-crossings.js';
@@ -270,83 +274,6 @@ const fileSystemCallTimeout = (method: string): BridgeCallTimeout | undefined =>
 
 /** `readMany`'s wire rows as the map its callers hold. */
 const readManyResult = (rows: ReadManyWireRows): ReadManyResult => new Map(rows);
-
-/** One authority path in a scoped port's own namespace, or `undefined` when it is outside that root. */
-const relativeToRoot = (root: string, path: string): string | undefined => {
-  if (root === '/') {
-    return path === '/' ? '' : path.startsWith('/') ? path.slice(1) : undefined;
-  }
-  if (path === root) {
-    return '';
-  }
-  return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : undefined;
-};
-
-/**
- * One authority path as a scoped port's own view spells it, or `undefined` when
- * that view does not serve it.
- *
- * A path the view hides is as absent from it as one outside the root, which is
- * what makes the degradations below the view's own answer rather than a second
- * policy: hidden is inherited, so a hidden ancestor hides its descendants (PP2).
- */
-const visibleRelativeToRoot = (
-  root: string,
-  path: string,
-  hidden?: (relativePath: string) => boolean,
-): string | undefined => {
-  const relative = relativeToRoot(root, path);
-  return relative === undefined || hidden?.(relative) === true ? undefined : relative;
-};
-
-/**
- * One change event as a scoped port sees it, or `undefined` when nothing in it
- * touches that port's root.
- *
- * A move with one end outside the root — or hidden from it — is not a move to
- * that port: it is a disappearance or an arrival, exactly as a rooted view's own
- * watch reports it (`WorkspaceFileService.createRootedFileSystem`).
- */
-const scopeEventToRoot = (
-  event: PathChangeEvent,
-  root: string,
-  hidden?: (relativePath: string) => boolean,
-): PathChangeEvent | undefined => {
-  if (event.type === 'backendChanged') {
-    return event;
-  }
-  if ('path' in event) {
-    const path = visibleRelativeToRoot(root, event.path, hidden);
-    return path === undefined ? undefined : { ...event, path };
-  }
-  const directory = event.type === 'directoryRenamed' || event.type === 'directoryCopied';
-  const [fromPath, toPath] =
-    'oldPath' in event ? ([event.oldPath, event.newPath] as const) : ([event.sourcePath, event.targetPath] as const);
-  const from = visibleRelativeToRoot(root, fromPath, hidden);
-  const to = visibleRelativeToRoot(root, toPath, hidden);
-  if (from !== undefined && to !== undefined) {
-    return 'oldPath' in event
-      ? { ...event, oldPath: from, newPath: to }
-      : { ...event, sourcePath: from, targetPath: to };
-  }
-  if (to !== undefined) {
-    return directory
-      ? {
-          type: 'directoryCreated',
-          path: to,
-          backend: event.backend,
-          ...(event.target ? { target: event.target } : {}),
-        }
-      : { type: 'fileWritten', path: to, backend: event.backend, ...(event.target ? { target: event.target } : {}) };
-  }
-  if (from !== undefined && 'oldPath' in event) {
-    return directory
-      ? { type: 'directoryDeleted', path: from, backend: event.backend }
-      : { type: 'fileDeleted', path: from, backend: event.backend };
-  }
-  /* A copy whose target left the root changed nothing inside it. */
-  return undefined;
-};
 
 const asFileSystemBridgePort = (port: MessagePort): FileSystemBridgePort => port as FileSystemBridgePort;
 
@@ -1228,9 +1155,9 @@ function exposeFileSystemHandlers(
    * fact itself when there is one and as a `changeSet` envelope otherwise, so
    * a peer does one unit of work per changeset instead of one per path.
    */
-  const deliverToHandles = (events: PathChangeEvent[]): void => {
-    const perPort = new Map<MessagePort, PathChangeEvent[]>();
-    const factsFor = (port: MessagePort): PathChangeEvent[] => {
+  const deliverToHandles = (events: readonly LossSignal[]): void => {
+    const perPort = new Map<MessagePort, LossSignal[]>();
+    const factsFor = (port: MessagePort): LossSignal[] => {
       let facts = perPort.get(port);
       if (facts === undefined) {
         facts = [];
@@ -1271,8 +1198,7 @@ function exposeFileSystemHandlers(
       }
     }
     for (const [recipientPort, facts] of perPort) {
-      const message: ChangeEvent = facts.length === 1 ? facts[0]! : { type: 'changeSet', entries: facts };
-      serverHandles.get(recipientPort)?.emit('fileChanged', message);
+      serverHandles.get(recipientPort)?.emit('fileChanged', deliveryMessage(facts));
     }
   };
 
@@ -1282,13 +1208,7 @@ function exposeFileSystemHandlers(
       deliverToHandles,
       options.uiCoalescingWindow ?? defaultUiCoalescingWindow,
       (discarded) => {
-        const affectedBackends = new Set(discarded.map((event) => event.backend));
-        deliverToHandles(
-          [...affectedBackends].map((backend) => ({
-            type: 'backendChanged',
-            backend,
-          })),
-        );
+        deliverToHandles(overflowLossSignals(discarded));
       },
     );
   }
@@ -1406,7 +1326,9 @@ function exposeFileSystemHandlers(
     const { portHandlers, unavailableError } =
       requestedRoot === undefined
         ? {
-            portHandlers: withChangeSetWatch(bindMutationContextForPort(handlers, mutationContext)),
+            portHandlers: withChangeSetWatch(
+              withBoundedReadFile(bindMutationContextForPort(handlers, mutationContext)),
+            ),
             unavailableError: undefined,
           }
         : serveRootedPort(port, event.data, mutationContext);

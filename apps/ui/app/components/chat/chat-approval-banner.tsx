@@ -10,10 +10,12 @@ import { ChatPermissionRequest } from '#components/chat/chat-permission-request.
 import { ChatLoginAffordance } from '#components/chat/chat-login-affordance.js';
 import { answerDeny, pendingMachineActionOf, recordMachineAction } from '#components/print/machine-action-approval.js';
 import { useMachinesFacet } from '#hooks/use-machines.js';
-import { operator } from '#hooks/use-machine-control.js';
+import { operator } from '#components/print/machine-operator.js';
 import type { MachineClient } from '@taucad/runtime/machine';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
+import { selectOpenApprovals } from '#machines/chat-projection.logic.js';
+import type { OpenApproval } from '#machines/chat-projection.logic.js';
 
 /** One unresolved interrupt, located in the transcript that projected it. @public */
 export type PendingAgentHostApproval = AgentHostApproval & {
@@ -81,6 +83,35 @@ export const pendingAgentHostApprovals = (messages: readonly MyUIMessage[]): rea
     );
   }
   return pending;
+};
+
+const noOpenApprovals: readonly OpenApproval[] = [];
+
+/**
+ * Every interrupt the chat is paused on: the transcript's, then any open one the host log holds that the transcript
+ * does not show.
+ *
+ * The ledger is what pauses the run and what an answer is checked against, so an open interrupt is never hidden by a
+ * transcript that failed to rebuild or has not caught up: its card is drawn from the request the log recorded.
+ *
+ * @param messages - The chat's live message list.
+ * @param open - The current run's open approvals, from {@link selectOpenApprovals}.
+ * @returns The pending interrupts, the transcript's first.
+ * @public
+ */
+export const pendingApprovals = (
+  messages: readonly MyUIMessage[],
+  open: readonly OpenApproval[],
+): readonly PendingAgentHostApproval[] => {
+  const transcript = pendingAgentHostApprovals(messages);
+  const shown = new Set(transcript.map((approval) => approval.interruptId));
+  const unshown = open.filter(({ approval }) => !shown.has(approval.interruptId));
+  return unshown.length === 0
+    ? transcript
+    : [
+        ...transcript,
+        ...unshown.map(({ runId, approval }) => ({ ...approval, messageId: runId, approvalId: approval.interruptId })),
+      ];
 };
 
 /**
@@ -223,8 +254,11 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   const workspace = useProjectWorkspace({ enableNoContext: true });
   const activeExecution = useChatSelector((state) => state.activeExecution);
   const messages = useChatSelector((state) => state.messages);
+  const open = useChatSelector((state) =>
+    state.projection === undefined ? noOpenApprovals : selectOpenApprovals(state.projection),
+  );
   // A paused run has exactly one unresolved interrupt: it stopped on it.
-  const approval = pendingAgentHostApprovals(messages)[0];
+  const approval = pendingApprovals(messages, open)[0];
   const login = currentRunLogin(messages);
   if (login) {
     /* Not a decision: nothing here is approved or denied, so the banner hands

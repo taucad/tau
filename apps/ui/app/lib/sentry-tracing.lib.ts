@@ -1,6 +1,6 @@
 import * as Sentry from '@sentry/react';
 import type { Event } from '@sentry/react';
-import { readRouteId } from '#lib/sentry-context.lib.js';
+import { onRoutePublished, readRoutePattern, readRouteId } from '#lib/sentry-context.lib.js';
 import { redactUrlCredentials } from '@taucad/ui-core/lib/url-credential.lib';
 import { scrubUrl } from '#lib/sentry-event.lib.js';
 
@@ -54,10 +54,7 @@ export const tracePropagationTargets = (apiUrl: string | undefined): RegExp[] =>
   }
 };
 
-/** The router React Router's `HydratedRouter` publishes, as far as span naming reads it. */
-type PublishedRouter = { readonly subscribe?: (listener: () => void) => () => void };
-
-/** Name the current page load or navigation after the route that rendered it. */
+/** Name the current page load or navigation after the route that rendered it, and tag its pattern. */
 const nameActiveRootSpan = (): void => {
   const routeId = readRouteId();
   const active = Sentry.getActiveSpan();
@@ -67,31 +64,18 @@ const nameActiveRootSpan = (): void => {
   const root = Sentry.getRootSpan(active);
   root.updateName(routeId);
   root.setAttribute(Sentry.SEMANTIC_ATTRIBUTE_SENTRY_SOURCE, 'route');
+  root.setAttribute('route.pattern', readRoutePattern());
 };
 
-/** How often, and how many times, to look for the router before giving up (the SDK can load first). */
-const routerPollMilliseconds = 100;
-const routerPollAttempts = 50;
-
 /**
- * Keep transaction names on route ids: once now, and again on every router state change, which is
- * when a navigation's matches settle.
+ * Keep transaction names on route ids: once now, and again each time the page renders another route (the root
+ * layout publishes its matches, React Router 8 migration RR7). Reads no private router global.
  *
- * @param attempt - Internal: how many times the router has been looked for.
+ * @returns A function that stops it.
  */
-export const nameSpansByRoute = (attempt = 0): void => {
-  const router = (globalThis.window as (Window & { __reactRouterDataRouter?: PublishedRouter }) | undefined)
-    ?.__reactRouterDataRouter;
-  if (router?.subscribe === undefined) {
-    if (attempt < routerPollAttempts) {
-      setTimeout(() => {
-        nameSpansByRoute(attempt + 1);
-      }, routerPollMilliseconds);
-    }
-    return;
-  }
+export const nameSpansByRoute = (): (() => void) => {
   nameActiveRootSpan();
-  router.subscribe(nameActiveRootSpan);
+  return onRoutePublished(nameActiveRootSpan);
 };
 
 /** A query string or fragment inside free text: up to the next space, quote, bracket or parenthesis. */

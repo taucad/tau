@@ -75,4 +75,35 @@ describe('the open warms the workspace layout beside the session module', () => 
     });
     runtime.stop();
   });
+
+  it('should still load the session module when the viewport cannot be measured', async () => {
+    chunks.requested.length = 0;
+    /* Only the layout's query goes unanswered; the runtime's own queries are answered as usual. */
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) =>
+        query === '(max-width: 767px)'
+          ? undefined
+          : { matches: false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+      ),
+    );
+    const host = createFakeEnvironmentHost();
+    const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
+    const { focus } = selectRuntimeFocus(runtime);
+
+    focus.send({
+      type: 'routeRequested',
+      requestId: 'route:2',
+      slugs: { workspaceSlug: 'w', projectSlug: 'b' },
+      projectId: 'proj_b',
+    });
+
+    /* The shell import is shared from the first row, already settled: the open reaches it all the same. */
+    chunks.settleShell?.();
+    await vi.waitFor(() => {
+      expect(focus.getSnapshot().context.module).toBe('loaded');
+    });
+    expect(chunks.requested).toEqual([]);
+    runtime.stop();
+  });
 });

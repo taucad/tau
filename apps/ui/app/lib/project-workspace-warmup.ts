@@ -58,8 +58,10 @@ export const loadProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
  */
 // oxlint-disable-next-line @typescript-eslint/promise-function-async -- the shared tagged promise itself, as `loadProjectWorkspace` returns it.
 export const openProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
+  /* The shell first: focus waits on it, and nothing the hint does may stand in its way. */
+  const shell = loadProjectWorkspace();
   warmWorkspaceLayout();
-  return loadProjectWorkspace();
+  return shell;
 };
 
 /** Start the workspace shell import when a project link shows intent or a project route mounts. */

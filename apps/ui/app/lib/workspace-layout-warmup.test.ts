@@ -72,23 +72,60 @@ describe('warmWorkspaceLayout', () => {
     expect(requested).toEqual([]);
   });
 
-  it('should leave a failed warm-up to the render, which imports again and sees the failure itself', async () => {
+  it('should warm nothing and never throw when the viewport cannot be measured', async () => {
+    vi.stubGlobal('matchMedia', () => undefined);
+    const { warmWorkspaceLayout } = await import('#lib/workspace-layout-warmup.js');
+    expect(() => {
+      warmWorkspaceLayout();
+    }).not.toThrow();
+
+    vi.stubGlobal('matchMedia', () => {
+      throw new Error('no viewport');
+    });
+    expect(() => {
+      warmWorkspaceLayout();
+    }).not.toThrow();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(requested).toEqual([]);
+  });
+
+  it('should share one import between the warm-up and the render', async () => {
     stubViewport(false);
-    vi.doMock('#routes/w.$workspace.$project/chat-interface-desktop.js', () => {
-      requested.push('desktop');
+    const { loadChatInterfaceDesktop, warmWorkspaceLayout } = await import('#lib/workspace-layout-warmup.js');
+
+    warmWorkspaceLayout();
+    const render = loadChatInterfaceDesktop();
+
+    expect(loadChatInterfaceDesktop()).toBe(render);
+    await render;
+    expect(requested).toEqual(['desktop']);
+  });
+
+  it('should hand the warm-up and the render one failure, and import afresh after it', async () => {
+    stubViewport(false);
+    const importLayout = vi.fn(async () => {
       throw new Error('chunk unavailable');
     });
+    vi.doMock('#routes/w.$workspace.$project/chat-interface-desktop.js', importLayout);
     const unhandled = vi.fn();
     process.on('unhandledRejection', unhandled);
     const { loadChatInterfaceDesktop, warmWorkspaceLayout } = await import('#lib/workspace-layout-warmup.js');
 
     try {
       warmWorkspaceLayout();
-      await vi.waitFor(() => {
-        expect(requested).toEqual(['desktop']);
-      });
+      const render = loadChatInterfaceDesktop();
+      await expect(render).rejects.toThrow();
+      expect(importLayout).toHaveBeenCalledOnce();
 
-      await expect(loadChatInterfaceDesktop()).rejects.toThrow();
+      /* The failed import is forgotten: the next caller, a retry, gets a new import rather than the old failure. */
+      const retry = loadChatInterfaceDesktop();
+      expect(retry).not.toBe(render);
+      await expect(retry).rejects.toThrow();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
       expect(unhandled).not.toHaveBeenCalled();
     } finally {
       process.off('unhandledRejection', unhandled);

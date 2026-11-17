@@ -69,7 +69,7 @@ describe('openProjectWorkspace', () => {
       });
 
       const load = openProjectWorkspace();
-      /* The open's layout is asked for while the shell it shares is still in flight. */
+      /* The open's layout is asked for while the shell is still in flight. */
       expect(order).toEqual(['shell requested', 'layout']);
 
       settleShell?.();

@@ -785,7 +785,7 @@ describe('HeadlessImageService debug telemetry', () => {
         records.push({ name, detail });
       },
     }));
-    const { HeadlessImageService: isolatedService } = await import('#services/headless-image.service.js');
+    const isolated = await import('#services/headless-image.service.js');
     const imageClient = createMockRuntimeClient<typeof imageRuntime>();
     let emitTelemetry: ((batch: { entries: unknown[] }) => void) | undefined;
     vi.mocked(imageClient.on).mockImplementation(((event: string, handler: (batch: { entries: unknown[] }) => void) => {
@@ -795,7 +795,7 @@ describe('HeadlessImageService debug telemetry', () => {
       return () => undefined;
     }) as unknown as typeof imageClient.on);
     vi.mocked(imageClient.transcode).mockResolvedValue({ success: true, data: files(), issues: [] });
-    const service = new isolatedService({
+    const service = new isolated.HeadlessImageService({
       debug: true,
       createImageClient: vi.fn().mockResolvedValue(imageClient),
       isGpuAvailable: () => true,

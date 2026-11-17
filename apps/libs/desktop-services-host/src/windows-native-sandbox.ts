@@ -31,7 +31,10 @@ export const installDesktopWindowsNativeSandbox = (
   configureWindowsNativeSandbox({
     helperPath: sandbox.helperPath,
     journalDirectory: sandbox.journalDirectory,
-    installed: async () => (await readWindowsSandboxStatus(sandbox.helperPath, { environment })).installed,
+    installed: async () => {
+      const status = await readWindowsSandboxStatus(sandbox.helperPath, { environment });
+      return status.installed;
+    },
     setup: options.setup,
   });
 };

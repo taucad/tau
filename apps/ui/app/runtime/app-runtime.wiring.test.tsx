@@ -177,7 +177,7 @@ describe('round 13: the runtime hands focus its route and flush ports', () => {
     const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
     const { focus } = selectRuntimeFocus(runtime);
     const { ports } = focus.getSnapshot().context;
-    ports.registry.send({ type: 'open', requestId: 'open:1', projectId: 'proj_a' });
+    ports.registry.send({ type: 'open', requestId: 'open:1', projectId: 'proj_a', request: { workspace: '' } });
     const session = selectSessionsRegistry(runtime.getSnapshot()).getSnapshot().context.refs['proj_a'];
     const settled: unknown[] = [];
     session?.on('flushSettled', (event) => settled.push(event));
@@ -208,7 +208,7 @@ describe('round 13: the runtime hands focus its route and flush ports', () => {
     const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
     const { focus } = selectRuntimeFocus(runtime);
     const { ports } = focus.getSnapshot().context;
-    ports.registry.send({ type: 'open', requestId: 'open:1', projectId: 'proj_a' });
+    ports.registry.send({ type: 'open', requestId: 'open:1', projectId: 'proj_a', request: { workspace: '' } });
     expect(selectSessionsRegistry(runtime.getSnapshot()).getSnapshot().context.refs['proj_a']).toBeDefined();
     runtime.stop();
   });

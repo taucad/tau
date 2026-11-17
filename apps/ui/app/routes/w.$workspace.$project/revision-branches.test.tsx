@@ -64,7 +64,7 @@ vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({
   clearTurnOutcome: vi.fn(),
 }));
 vi.mock('#routes/w.$workspace.$project/revision-ref-removal.js', () => ({ requestRefRemoval: vi.fn() }));
-vi.mock('#components/code/diff-viewer.js', () => ({ DiffViewer: () => null }));
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({ DiffViewer: () => null }));
 vi.mock('#routes/w.$workspace.$project/revision-conflict-editor.js', () => ({ RevisionConflictEditor: () => null }));
 
 const line = 'conflicts/main/device-b';

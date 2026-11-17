@@ -1,9 +1,9 @@
-import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
-import { definitionProvider } from '#components/code/editor-definition.js';
-import { renderEditorDocumentation } from '#components/code/editor-documentation.js';
-import type { DocumentationLinkHandler } from '#components/code/editor-documentation.js';
-import { languageFeatures, promptRename } from '#components/code/editor-language-features.js';
-import type { EditorSignature } from '#components/code/editor-language-features.js';
+import { completionTypeFromLsp } from '@taucad/editor-ui/components/code/editor-completion-icon';
+import { definitionProvider } from '@taucad/editor-ui/components/code/editor-definition';
+import { renderEditorDocumentation } from '@taucad/editor-ui/components/code/editor-documentation';
+import type { DocumentationLinkHandler } from '@taucad/editor-ui/components/code/editor-documentation';
+import { languageFeatures, promptRename } from '@taucad/editor-ui/components/code/editor-language-features';
+import type { EditorSignature } from '@taucad/editor-ui/components/code/editor-language-features';
 import { autocompletion } from '@codemirror/autocomplete';
 import type { Completion, CompletionSource } from '@codemirror/autocomplete';
 import { StateEffect, StateField } from '@codemirror/state';

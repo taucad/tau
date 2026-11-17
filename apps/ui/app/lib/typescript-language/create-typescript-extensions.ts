@@ -1,5 +1,5 @@
-import { definitionProvider } from '#components/code/editor-definition.js';
-import { languageFeatures, promptRename } from '#components/code/editor-language-features.js';
+import { definitionProvider } from '@taucad/editor-ui/components/code/editor-definition';
+import { languageFeatures, promptRename } from '@taucad/editor-ui/components/code/editor-language-features';
 import { startAfterLineBreaks } from '#components/code/editor-lint.js';
 import type {
   CallHierarchyDirection,
@@ -7,11 +7,11 @@ import type {
   EditorOccurrence,
   EditorSignature,
   EditorSymbol,
-} from '#components/code/editor-language-features.js';
+} from '@taucad/editor-ui/components/code/editor-language-features';
 import {
   renderTypeScriptDocumentation,
   typeScriptDocumentationMarkdown,
-} from '#components/code/editor-documentation.js';
+} from '@taucad/editor-ui/components/code/editor-documentation';
 import type ts from 'typescript';
 import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion, CompletionSource } from '@codemirror/autocomplete';

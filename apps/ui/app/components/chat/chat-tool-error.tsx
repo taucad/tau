@@ -16,7 +16,7 @@ import {
 } from '@taucad/chat-ui/components/chat-tool-card';
 import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
-import { CodeBlockContent, Pre } from '#components/code/code-block.js';
+import { CodeBlockContent, Pre } from '@taucad/editor-ui/components/code/code-block';
 
 /** Verb used when {@link parseToolErrorText} cannot parse the error payload. */
 const unparseableErrorVerb = 'Attempted';

@@ -1078,5 +1078,15 @@
     "file": "tools/workspace-plugin/src/generators/plugin/generator.test.ts",
     "target": "packages/plugins/image",
     "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
+    "target": "apps/desktop/scripts/fetch-desktop-installer-candidate.mts",
+    "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
+  },
+  {
+    "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
+    "target": "apps/desktop/scripts/desktop-receipt-provenance.mts",
+    "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
   }
 ]

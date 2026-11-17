@@ -30,7 +30,7 @@ const inventorySchema = z.strictObject({
   schemaVersion: z.literal(1),
   channel: z.enum(['production', 'staging']),
   issuedAt: z.iso.datetime(),
-  validUntil: z.iso.datetime(),
+  validUntil: z.iso.datetime().optional(),
   signingFingerprint: z.string(),
   packages: z.array(
     z.strictObject({

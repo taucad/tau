@@ -3,8 +3,8 @@ import { StateEffect } from '@codemirror/state';
 import { showTooltip } from '@codemirror/view';
 import { openLintPanel, setDiagnostics } from '@codemirror/lint';
 import { gotoLine, openSearchPanel } from '@codemirror/search';
-import { definitionProvider } from '#components/code/editor-definition.js';
-import { renderTypeScriptDocumentation } from '#components/code/editor-documentation.js';
+import { definitionProvider } from '@taucad/editor-ui/components/code/editor-definition';
+import { renderTypeScriptDocumentation } from '@taucad/editor-ui/components/code/editor-documentation';
 import '#styles/global.css';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -18,8 +18,8 @@ import {
   startCompletion,
 } from '@codemirror/autocomplete';
 import { CodeEditor } from '#components/code/code-editor.client.js';
-import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
-import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
+import { EditorPanePlaceholder } from '@taucad/editor-ui/components/code/editor-pane-placeholder';
+import { jsonDepthHighlighting } from '@taucad/editor-ui/components/code/json-depth-highlighting';
 import { EditorDocument } from '#lib/editor-document.js';
 import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
 import type { EditorDiagnostic } from '#lib/editor-diagnostics.js';
@@ -28,7 +28,7 @@ import { EditorDocumentSession, maxBackgroundDocuments } from '#lib/editor-docum
 import { clearEditorNavigation, registerEditorView, requestEditorNavigation } from '#lib/editor-navigation-service.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { EditorNavigationTarget } from '#lib/editor-language-environment.js';
-import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
+import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
 import { Theme, ThemeProvider } from '#hooks/use-theme.js';
 import type { EditorView } from '@codemirror/view';
 

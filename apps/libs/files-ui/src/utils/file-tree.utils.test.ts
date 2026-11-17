@@ -7,7 +7,7 @@ import {
   isEditorSystemArtifactPath,
   isPathFolder,
   sortChildrenFoldersFirst,
-} from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
+} from '#utils/file-tree.utils.js';
 
 // ===================================================================
 // Factories

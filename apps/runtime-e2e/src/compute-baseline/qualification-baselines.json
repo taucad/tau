@@ -1,5 +1,5 @@
 {
-  "campaign": "2026-11-17 on main 4bb39c3d: seven-model campaign plus the retained-operand fixture run",
+  "campaign": "2026-11-17 on main 4bb39c3d: seven-model campaign plus the retained-operand fixture run; bench-vise re-pinned on main 6c8deb84 after its example source changed (#2448)",
   "host": "Intel(R) Xeon(R) Processor @ 2.30GHz",
   "models": {
     "gridfinity-box": {
@@ -1472,61 +1472,61 @@
         "matrix": [
           {
             "token": "base",
-            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88",
-            "triangles": 37384
+            "sha256": "68f40bf766bbaf7a6ab662b55c290549313ce87fce6a477dbd999b86cf0136fe",
+            "triangles": 37760
           },
           {
             "token": "A",
-            "sha256": "b9ebf58a0b8af38cc5db2b4f58952fdc521e14aadacae606e56358377f2bf39e",
-            "triangles": 37132
+            "sha256": "f0bb1519dc917066d52dabb73123639abb077d2d917e780704e7fa3457af6e5c",
+            "triangles": 37404
           },
           {
             "token": "base",
-            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88",
-            "triangles": 37384
+            "sha256": "68f40bf766bbaf7a6ab662b55c290549313ce87fce6a477dbd999b86cf0136fe",
+            "triangles": 37760
           },
           {
             "token": "B",
-            "sha256": "07709fc4f08a68f37100ab5456ffb537c2f840cfe0053c53a3f13d185b6bbd64",
-            "triangles": 37508
+            "sha256": "fcf62c4b6b1267dee614b168c7e950f760591df737086585151512c78746ca8c",
+            "triangles": 37884
           },
           {
             "token": "base",
-            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88",
-            "triangles": 37384
+            "sha256": "68f40bf766bbaf7a6ab662b55c290549313ce87fce6a477dbd999b86cf0136fe",
+            "triangles": 37760
           },
           {
             "token": "comment",
-            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88",
-            "triangles": 37384
+            "sha256": "68f40bf766bbaf7a6ab662b55c290549313ce87fce6a477dbd999b86cf0136fe",
+            "triangles": 37760
           },
           {
             "token": "literal",
-            "sha256": "fc2fe303236ffe91bbb036bd08151ffafde0f6342584760b26af872617594e2c",
-            "triangles": 37384
+            "sha256": "aa3d28682e0541f703fca3c823179367dee9ca0b20e793341cb6c597f3790a88",
+            "triangles": 37760
           },
           {
             "token": "original",
-            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88",
-            "triangles": 37384
+            "sha256": "68f40bf766bbaf7a6ab662b55c290549313ce87fce6a477dbd999b86cf0136fe",
+            "triangles": 37760
           }
         ],
         "scrub": [
           {
             "phase": "open",
-            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88"
+            "sha256": "68f40bf766bbaf7a6ab662b55c290549313ce87fce6a477dbd999b86cf0136fe"
           },
           {
             "phase": "scrub",
-            "sha256": "12319beb5ff5c5286ec05442e91b5a63bad33d3d557ae924fce59caf7ef5e8fa"
+            "sha256": "e929e846b20c8a4cb3aee733e4ce8950c051502c3a6339ea250b83b34121da8f"
           },
           {
             "phase": "revisit",
-            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88"
+            "sha256": "68f40bf766bbaf7a6ab662b55c290549313ce87fce6a477dbd999b86cf0136fe"
           },
           {
             "phase": "rested-transient",
-            "sha256": "3d7c152346da1b1e6879980c136185dbfcbdf2bdf5ff3c1d89d20e5c042aa2ad"
+            "sha256": "63631ceda291eae6ecbf90f50f89e5f3c153625d379b9dc075bd2d21ae5d260b"
           }
         ]
       },
@@ -1756,8 +1756,7 @@
               "storeWrites": 0
             }
           ]
-        },
-        "durable": {}
+        }
       }
     },
     "planetary-gear-system": {

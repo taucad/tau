@@ -1,6 +1,7 @@
 // Tier-2 scenarios of the preparation host (W2 oracle, T1): a real store on disk, in-test archives and a hermetic
 // registry `fetch`. The global `fetch` is replaced by a tripwire, so no scenario can reach the network.
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { createServer, get } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -290,6 +291,28 @@ describe('createPreparationHost', () => {
       expect(seen[0]?.root.startsWith(join(store, 'tmp'))).toBe(true);
       expect(seen[0]?.files).toEqual(receipt.files.filter(({ path }) => path !== bytecode).map(({ path }) => path));
       expect(events.some(({ state }) => state.status === 'preparing' && state.phase === 'sealing')).toBe(true);
+    });
+
+    it("should hand the seal step an empty scratch directory in the store's staging area, outside the closure, and remove it", async () => {
+      const seen: Array<{ readonly root: string; readonly scratch: string; readonly empty: boolean }> = [];
+      const { store, host } = await scenario({
+        seal: async ({ root, scratch }) => {
+          const entries = await readdir(scratch);
+          seen.push({ root, scratch, empty: entries.length === 0 });
+          await writeFile(join(scratch, 'work.txt'), 'temporary');
+          return undefined;
+        },
+      });
+
+      const receipt = readyReceipt(await prepare(host));
+
+      expect(seen).toHaveLength(1);
+      const [{ root, scratch, empty }] = seen as [(typeof seen)[number]];
+      expect(empty).toBe(true);
+      expect(scratch.startsWith(join(store, 'tmp'))).toBe(true);
+      expect(relative(root, scratch).startsWith('..')).toBe(true);
+      expect(existsSync(scratch)).toBe(false);
+      expect(receipt.files.some(({ path }) => path.endsWith('work.txt'))).toBe(false);
     });
 
     it("should end blocked with the seal step's refusal, seal nothing and keep the verified blobs", async () => {

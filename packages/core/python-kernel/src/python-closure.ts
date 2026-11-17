@@ -1,5 +1,4 @@
 import { copyFile, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 
 import { runInNativeSandbox } from '@taucad/native-process-core';
@@ -206,15 +205,17 @@ const assertOnlyBytecodeAdded = async (input: SealClosureInput): Promise<void> =
  * `sys.path` and does not import `site`, so nothing else of the closure is read.
  *
  * @param root - The closure root.
+ * @param scratch - The seal step's real scratch directory, which holds the folder.
  * @param kernelId - The kernel, for the folder's name.
  * @returns The staged interpreter and its folder, which the caller removes.
  */
 const stageWindowsCompiler = async (
   root: string,
+  scratch: string,
   kernelId: string,
 ): Promise<{ readonly executablePath: string; readonly directory: string }> => {
   const prefix = join(root, 'python');
-  const directory = await mkdtemp(join(await realpath(tmpdir()), `tau-${kernelId}-compile-`));
+  const directory = await mkdtemp(join(scratch, `tau-${kernelId}-compile-`));
   const entries = await readdir(prefix);
   const staged = entries.filter((name) => name === 'python.exe' || /\.dll$/iu.test(name));
   await Promise.all(staged.map(async (name) => copyFile(join(prefix, name), join(directory, name))));
@@ -248,6 +249,7 @@ export const createPythonSeal =
   async (input: SealClosureInput): Promise<SealClosureRefusal | undefined> => {
     const { kernelId, kernelName } = options.worker;
     const root = await realpath(input.root);
+    const scratch = await realpath(input.scratch);
     const interpreter = pythonInterpreterPath(platform);
     const python = join(root, ...interpreter.split('/'));
     // The sandbox runs the interpreter only with the digest the host verified (always required on Windows).
@@ -266,7 +268,7 @@ export const createPythonSeal =
       // (python-build-standalone's three `encodings` files), which a seal step may not rewrite.
       const shipped = shippedBytecodeSources(input.files);
       const dataTrees = interpreterDataTrees(platform);
-      const compiler = platform === 'win32' ? await stageWindowsCompiler(root, kernelId) : undefined;
+      const compiler = platform === 'win32' ? await stageWindowsCompiler(root, scratch, kernelId) : undefined;
       const compiled = await run({
         executablePath: compiler?.executablePath ?? python,
         executableSha256,
@@ -314,15 +316,15 @@ export const createPythonSeal =
     // The closure must load on this host before it is sealed: a missing system library (OCP links libGL.so.1 and
     // libX11.so.6 on Linux) is a typed refusal that names it, never a crash at the first model (X6, X14).
     const statement = `import ${options.selfTestImports.join(', ')}`;
-    const scratch = await mkdtemp(join(await realpath(tmpdir()), `tau-${kernelId}-seal-`));
+    const selfTest = await mkdtemp(join(scratch, `tau-${kernelId}-seal-`));
     try {
       const imported = await run({
         executablePath: python,
         executableSha256,
         arguments: ['-I', '-B', '-c', statement],
         readablePaths: [root],
-        writablePath: scratch,
-        workingDirectory: scratch,
+        writablePath: selfTest,
+        workingDirectory: selfTest,
         commandId: `${kernelName} self-test#${input.dependency}`,
         signal: input.signal,
       });
@@ -343,6 +345,6 @@ export const createPythonSeal =
         `The ${input.package} closure does not import on this host (${statement} exited ${String(imported.exitCode ?? imported.signal)}): ${tailOf(imported.stderr)}`,
       );
     } finally {
-      await rm(scratch, { recursive: true, force: true });
+      await rm(selfTest, { recursive: true, force: true });
     }
   };

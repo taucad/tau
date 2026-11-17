@@ -586,6 +586,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           dependency: receipt.dependency,
           target: receipt.target,
           root: receipt.root,
+          staging,
           files: receipt.files.filter((row) => row.dependencyFile !== undefined),
           signal,
         });
@@ -934,6 +935,7 @@ export const createPreparationHost = (options: CreatePreparationHostOptions): Pr
           dependency: item.dependency,
           target: item.variant.target,
           root: join(attemptStaging, item.key),
+          staging: attemptStaging,
           files: unpacked,
           signal,
         });

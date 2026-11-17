@@ -4,6 +4,9 @@
  * Live operation tier (audit R6, R7) against the real Replicad library and OpenCASCADE: keying, occurrence,
  * alias hits, reusable failures, generation decay and the entry cap, finder closures, and the off path (I2).
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as replicad from 'replicad';
 import type { OperationRequest, Shape3D } from 'replicad';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -365,6 +368,137 @@ describe('live operation tier', () => {
 
       expect(compute).toHaveBeenCalledTimes(2);
       expect(tier.stats()).toMatchObject({ opaque: 1, opaqueReasons: { 'makeOpaque: untracked Opaque': 1 } });
+      tier.dispose();
+    });
+  });
+
+  describe('review fixes', () => {
+    it('should delete the receiver of a consuming operation on a hit, as the operation does', async () => {
+      const tier = tierWith();
+      const extruded = () => {
+        const sketch = replicad.drawRectangle(10, 20).sketchOnPlane() as InstanceType<typeof replicad.Sketch>;
+        return { sketch, solid: sketch.extrude(5) };
+      };
+      const deleted = (sketch: InstanceType<typeof replicad.Sketch>): boolean => {
+        try {
+          // oxlint-disable-next-line new-cap -- OCCT exposes callable C++ PascalCase methods.
+          return sketch.wire.wrapped.IsNull();
+        } catch {
+          return true;
+        }
+      };
+      const reference = extruded();
+      await build(tier, extruded);
+
+      const hit = await build(tier, extruded);
+
+      expect(tier.stats().hits).toBeGreaterThan(0);
+      expect(deleted(hit.sketch)).toBe(deleted(reference.sketch));
+      expect(deleted(hit.sketch)).toBe(true);
+      tier.dispose();
+    });
+
+    it('should key a text operation by the font object the family names when it runs', async () => {
+      const fonts = fileURLToPath(new URL('../../node_modules/geist/dist/fonts', import.meta.url));
+      const bytes = (path: string): ArrayBuffer => {
+        const buffer = readFileSync(join(fonts, path));
+        return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+      };
+      const titled = async (bold: boolean) => {
+        // What user code does: a parameter chooses which font one family name holds.
+        await replicad.loadFont(
+          bytes(bold ? 'geist-mono/GeistMono-Bold.ttf' : 'geist-sans/Geist-Regular.ttf'),
+          'title',
+          true,
+        );
+        return replicad
+          .sketchText('Tau', { fontFamily: 'title', fontSize: 10 } as unknown as Parameters<
+            typeof replicad.sketchText
+          >[1])
+          .extrude(2);
+      };
+      const reference = { regular: brep(await titled(false)), bold: brep(await titled(true)) };
+      const tier = tierWith();
+
+      const results: string[] = [];
+      for (const bold of [false, true, false]) {
+        const end = installOperationTier(library, tier);
+        try {
+          results.push(brep(await titled(bold)));
+        } finally {
+          end('delivered');
+        }
+      }
+
+      expect(reference.regular).not.toBe(reference.bold);
+      expect(results).toStrictEqual([reference.regular, reference.bold, reference.regular]);
+      tier.dispose();
+    });
+
+    it('should build with the tier an element whose owner user code consumed first', async () => {
+      const model = () => {
+        const box = replicad.makeBaseBox(10, 10, 10);
+        const face = box.faces[5]!;
+        // `translate` consumes `box` before the face is first used as an argument.
+        const placed = box.translate([20, 0, 0]);
+        const peg = replicad.drawCircle(2).sketchOnFace(face, 'original').extrude(3);
+        return [brep(placed), brep(peg)];
+      };
+      const reference = model();
+      const tier = tierWith();
+
+      expect(await build(tier, model)).toStrictEqual(reference);
+      expect(await build(tier, model)).toStrictEqual(reference);
+      tier.dispose();
+    });
+
+    it('should not record a finder callback that reads the shape it is given', async () => {
+      const tier = tierWith();
+      const bottom = () => replicad.makeBaseBox(40, 30, 20).fillet(2, (edges) => edges.inPlane('XY', 0));
+      const shapeReading = () =>
+        replicad
+          .makeBaseBox(40, 30, 20)
+          .fillet(2, (edges, shape: unknown) => edges.inPlane('XY', shape === undefined ? 0 : 20));
+      const reference = brep(shapeReading());
+      await build(tier, bottom);
+
+      const result = await build(tier, shapeReading);
+
+      expect(reference).not.toBe(brep(bottom()));
+      expect(brep(result)).toBe(reference);
+      tier.dispose();
+    });
+
+    it('should never evict, at its cap, an entry a kept entry was made from', async () => {
+      const model = () => {
+        const base = replicad.makeBaseBox(10, 10, 10);
+        const moved = base.clone().translate([20, 0, 0]);
+        // oxlint-disable-next-line new-cap -- OCCT exposes callable C++ PascalCase methods.
+        return { base, moved, shared: moved.wrapped.IsPartner(base.wrapped) };
+      };
+      const reference = model().shared;
+      const tier = tierWith({ entryCap: 1 });
+      await build(tier, model);
+
+      const rebuilt = await build(tier, model);
+
+      // At a cap of one the tier keeps the box, which the translated alias was made from, and drops the alias.
+      expect(tier.stats()).toMatchObject({ hits: 1, misses: 1, entries: 1 });
+      expect(reference).toBe(true);
+      expect(rebuilt.shared).toBe(reference);
+      tier.dispose();
+    });
+
+    it('should key plain-object arguments with keys that cannot collide', async () => {
+      const tier = tierWith();
+      const compute = vi.fn(() => replicad.makeBaseBox(1, 1, 1));
+      const call = (options: Record<string, unknown>) => () =>
+        tier.cache.operation({ op: 'makeOptions', effect: 'pure', receiver: undefined, args: [options], compute });
+
+      await build(tier, call({ 'a:1,b': 2 }));
+      await build(tier, call({ a: 1, b: 2 }));
+
+      expect(compute).toHaveBeenCalledTimes(2);
       tier.dispose();
     });
   });

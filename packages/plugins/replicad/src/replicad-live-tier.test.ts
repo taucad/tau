@@ -11,6 +11,8 @@ import { asKnownArtifact, createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
+import { geometryCache } from '@taucad/middleware';
+import * as replicad from 'replicad';
 import { replicadKernel } from '#replicad.kernel.js';
 
 const renderTimeout = 300_000;
@@ -93,11 +95,16 @@ const inSequence = async <Item, Result>(
   return results;
 };
 
-/** One client over one fixture; `build` renders a parameter set and digests what it delivers. */
-const session = (source: string, arm: Arm, lifecycle: Lifecycle) => {
+/**
+ * One client over one fixture; `build` renders a parameter set (after an optional source edit) and digests what it
+ * delivers. `cached` composes the production build cache, which publishes native-handle snapshots.
+ */
+const session = (input: { source: string; arm: Arm; lifecycle?: Lifecycle; cached?: boolean }) => {
+  const { source, arm, lifecycle = 'live' } = input;
   const runtime = defineRuntime({
     kernels: [replicadKernel({ wasm: 'single', ...(arm.computeReuse === false ? { computeReuse: false } : {}) })],
     bundlers: [esbuildBundler()],
+    ...(input.cached === true ? { middleware: [geometryCache()] } : {}),
   });
   const client = createRuntimeClient({
     transport: inProcessTransport({
@@ -140,7 +147,7 @@ const session = (source: string, arm: Arm, lifecycle: Lifecycle) => {
   };
 
   return {
-    async build(parameters: ParameterSet, step = false): Promise<Delivered> {
+    async build(parameters: ParameterSet, step = false, stage?: Readonly<Record<string, string>>): Promise<Delivered> {
       if (lifecycle === 'fresh') {
         const document = client.open({ source: { path: 'main.ts' }, parameters, watch: false });
         const view = document.view('model');
@@ -152,7 +159,7 @@ const session = (source: string, arm: Arm, lifecycle: Lifecycle) => {
         }
       }
       if (live) {
-        await live.document.update({ parameters });
+        await live.document.update(stage ? { stage, parameters } : { parameters });
       } else {
         const document = client.open({ source: { path: 'main.ts' }, parameters, watch: false });
         live = { document, view: document.view('model') };
@@ -174,7 +181,7 @@ const buildAll = async (input: {
   readonly lifecycle?: Lifecycle;
   readonly step?: boolean;
 }): Promise<Delivered[]> => {
-  const opened = session(input.source, input.arm, input.lifecycle ?? 'live');
+  const opened = session(input);
   try {
     return await inSequence(input.steps, async (parameters) => opened.build(parameters, input.step));
   } finally {
@@ -216,7 +223,7 @@ const expectHistoryIndependence = async (source: string, sets: readonly Paramete
   const next = random(seed);
   const histories = Array.from({ length: 10 }, () => Array.from({ length: 6 }, () => Math.floor(next() * sets.length)));
   await inSequence(histories, async (history) => {
-    const opened = session(source, tierOn, 'live');
+    const opened = session({ source, arm: tierOn });
     try {
       const delivered = await inSequence(history, async (index) =>
         opened.build(sets[index]!, index === history.at(-1)),
@@ -343,4 +350,97 @@ describe('replicad live tier', () => {
     },
     renderTimeout,
   );
+  describe('build key and snapshots', () => {
+    it(
+      'should answer a comment-only edit from the scene table and run user code for a real edit',
+      async () => {
+        const calls = probe();
+        const opened = session({ source: bracket, arm: tierOn });
+        try {
+          const first = await opened.build(sets[0]!);
+          const commented = await opened.build(sets[0]!, false, {
+            'main.ts': `// A comment the bundler drops.\n${bracket.replace('const boss', '\n\n    const boss')}`,
+          });
+          const before = calls.calls;
+          const edited = await opened.build(sets[0]!, false, {
+            'main.ts': bracket.replace('p.size / 2, p.size,', 'p.size / 2, p.size + 1,'),
+          });
+
+          expect(commented).toStrictEqual(first);
+          expect(before).toBe(1);
+          expect(calls.calls).toBe(2);
+          expect(edited).not.toStrictEqual(first);
+        } finally {
+          await opened.close();
+        }
+      },
+      renderTimeout,
+    );
+
+    /** Digests of the native-handle snapshots the build cache writes while each step settles. */
+    const snapshotsOf = async (arm: Arm, steps: ReadonlyArray<{ parameters: ParameterSet; comment: string }>) => {
+      type Fs = { readFile: (path: string) => Uint8Array<ArrayBuffer> };
+      const written: string[][] = [];
+      let current: string[] = [];
+      const restore: Array<() => void> = [];
+      const watch = (): void => {
+        // The realm's OpenCASCADE instance exists once the first build ran; snapshots are written through its MEMFS.
+        const fs = (replicad.getOC() as unknown as { FS: Fs }).FS;
+        if (restore.length > 0) {
+          return;
+        }
+        const { readFile } = fs;
+        fs.readFile = (path: string) => {
+          const bytes = readFile.call(fs, path);
+          if (path.includes('tau_replicad_native_handle')) {
+            current.push(sha(bytes));
+          }
+          return bytes;
+        };
+        restore.push(() => {
+          fs.readFile = readFile;
+        });
+      };
+      const opened = session({ source: retainedOperand, arm, cached: true });
+      try {
+        for (const { parameters, comment } of steps) {
+          await opened.build(parameters, false, { 'main.ts': `${comment}\n${retainedOperand}` });
+          watch();
+          current = [];
+          // The build cache publishes when the worker is idle.
+          await new Promise((resolve) => {
+            setTimeout(resolve, 1500);
+          });
+          written.push(current);
+        }
+      } finally {
+        for (const undo of restore) {
+          undo();
+        }
+        await opened.close();
+      }
+      return written;
+    };
+
+    it(
+      'should publish no native-handle snapshot for a build made with the tier, a scene-table revisit included',
+      async () => {
+        const plain = { finished: false, height: 12 };
+        const finished = { finished: true, height: 12 };
+        const [reference] = await snapshotsOf(tierOff, [{ parameters: plain, comment: '' }]);
+
+        // No hit; a hit whose destructive cut reaches the plate's shared shapes; a comment edit the build cache
+        // misses and the scene table answers.
+        const written = await snapshotsOf(tierOn, [
+          { parameters: plain, comment: '' },
+          { parameters: finished, comment: '' },
+          { parameters: plain, comment: '// a comment' },
+        ]);
+
+        expect(reference).toHaveLength(1);
+        expect(written).toStrictEqual([[], [], []]);
+      },
+      renderTimeout,
+    );
+  });
 });

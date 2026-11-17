@@ -6962,6 +6962,9 @@ importers:
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../esbuild
+      '@taucad/middleware':
+        specifier: workspace:*
+        version: link:../middleware
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime

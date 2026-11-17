@@ -25,8 +25,9 @@ type ReplicadLibrary = typeof ReplicadModule;
 type Retained =
   | { readonly kind: 'value'; readonly value: unknown }
   | { readonly kind: 'failure'; readonly error: unknown };
-type Entry = { readonly retained: Retained; generation: number };
-type Frame = { partial: string; pending: boolean; stepKey?: string };
+/** A kept lineage: what it retains, the build that last used it, and the entries whose results it was made from. */
+type Entry = { readonly retained: Retained; generation: number; readonly parents: ReadonlySet<string> };
+type Frame = { partial: string; pending: boolean; stepKey?: string; parents: Set<string> };
 type ElementGroup = {
   readonly ownerId: string;
   readonly kind: string;
@@ -35,9 +36,18 @@ type ElementGroup = {
   resolved?: readonly number[] | false;
 };
 
+/** A finder callback as the library calls it: the finder, then the shape it searches. */
+type FinderCallback = (finder: unknown, shape: unknown) => unknown;
+
 /** Sentinel for a callback argument the library keys after it ran (a step). */
 const callbackArgument = Symbol('callback');
 type Canonical = string | typeof callbackArgument | undefined;
+
+/** The entry key an identity starts with: a lineage token and its occurrence (`t1f@2` in `t1f@2[0].wire`). */
+const entryOfId = /^t[\da-z]+(?:@\d+)?/u;
+
+/** Text operations read the font registered under a family name, which `loadFont(..., true)` can replace. */
+const fontOperations = new Set(['drawText', 'sketchText', 'textBlueprints']);
 
 /** Strings above this length are keyed by digest, so a large import never becomes a key. */
 const longStringLength = 256;
@@ -166,6 +176,12 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
   const ids = new WeakMap<WeakKey, string>();
   const elementOf = new WeakMap<WeakKey, { readonly group: ElementGroup; readonly index: number }>();
   const entries = new Map<string, Entry>();
+  /** Live entries made from each entry. An entry with live dependents is never evicted alone (see `evict`). */
+  const dependents = new Map<string, Set<string>>();
+  /** Entries the arguments of the call being keyed refer to. */
+  let referenced = new Set<string>();
+  const fontIds = new WeakMap<WeakKey, string>();
+  let fontSequence = 0;
   const lineages = new Map<string, string>();
   const occurrences = new Map<string, number>();
   const frames: Frame[] = [];
@@ -189,7 +205,14 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
       return undefined;
     }
     const { group } = element;
-    group.resolved ??= internal(() => group.ordinals()) ?? false;
+    if (group.resolved === undefined) {
+      try {
+        group.resolved = internal(() => group.ordinals()) ?? false;
+      } catch {
+        // The owner was consumed (deleted) before the element was first keyed: the element has no identity.
+        group.resolved = false;
+      }
+    }
     if (group.resolved === false) {
       return undefined;
     }
@@ -286,23 +309,49 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
     });
   };
 
-  /** Removes an entry from the table before deleting what it owns, so nothing is deleted twice. */
+  /**
+   * Removes an entry from the table before deleting what it owns, so nothing is deleted twice. Results share
+   * native sub-shapes with the results they were made from, so an entry with live dependents stays: evicting it
+   * alone would let a recomputed parent meet kept dependents that share nothing with it, which reuse off never does.
+   */
+  const evictable = (key: string): boolean => (dependents.get(key)?.size ?? 0) === 0;
   const evict = (key: string, entry: Entry): void => {
     entries.delete(key);
+    dependents.delete(key);
+    for (const parent of entry.parents) {
+      dependents.get(parent)?.delete(key);
+    }
     release(entry);
   };
 
+  /** Evicts least recently used entries without live dependents until the table is within its cap. */
   const evictToCap = (): void => {
-    for (const [key, entry] of entries) {
-      if (entries.size <= entryCap) {
+    while (entries.size > entryCap) {
+      let evicted = false;
+      for (const [key, entry] of entries) {
+        if (evictable(key)) {
+          evict(key, entry);
+          evicted = true;
+          break;
+        }
+      }
+      if (!evicted) {
         return;
       }
-      evict(key, entry);
     }
   };
 
-  const admit = (key: string, retained: Retained): void => {
-    entries.set(key, { retained, generation });
+  const admit = (key: string, retained: Retained, parents: ReadonlySet<string>): void => {
+    const kept = new Set([...parents].filter((parent) => entries.has(parent) && parent !== key));
+    entries.set(key, { retained, generation, parents: kept });
+    for (const parent of kept) {
+      let children = dependents.get(parent);
+      if (!children) {
+        children = new Set();
+        dependents.set(parent, children);
+      }
+      children.add(key);
+    }
     evictToCap();
   };
 
@@ -314,10 +363,26 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
     return `bytes:${value.constructor.name}:${sha256BytesSync(bytes)}`;
   };
 
-  /** Clauses a declarative finder callback records against a recording finder, or undefined when it is not declarative. */
-  const recordFinder = (callback: (finder: unknown) => unknown): string | undefined => {
+  /**
+   * Clauses a declarative finder callback records against a recording finder, or undefined when it is not declarative.
+   *
+   * Recording runs the callback once more than the library does, so it assumes the callback is pure: it only
+   * calls clauses on the finder it is given. A callback that reads the shape the library passes as its second
+   * argument, calls a predicate (`when`), throws or returns something else is not recorded; the library's step
+   * keys its selection after it ran instead.
+   */
+  const recordFinder = (callback: FinderCallback): string | undefined => {
     let declarative = true as boolean;
-    const record = (run: (finder: unknown) => unknown): unknown[] | undefined => {
+    const reads = (): never => {
+      declarative = false;
+      throw new TypeError('A recorded finder callback read its shape.');
+    };
+    // Any use of the shape argument makes the callback impure for recording.
+    const shape = new Proxy(
+      {},
+      { get: reads, has: reads, ownKeys: reads, getPrototypeOf: reads, apply: reads, set: reads },
+    );
+    const record = (run: FinderCallback): unknown[] | undefined => {
       const log: unknown[] = [];
       const recorder: Record<string, unknown> = new Proxy(
         {},
@@ -340,7 +405,7 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
               return (argument: unknown) => {
                 const list: unknown[] = Array.isArray(argument) ? argument : [argument];
                 const nested = list.map((entry) =>
-                  typeof entry === 'function' ? record(entry as (finder: unknown) => unknown) : undefined,
+                  typeof entry === 'function' ? record(entry as FinderCallback) : undefined,
                 );
                 if (nested.includes(undefined)) {
                   declarative = false;
@@ -357,7 +422,7 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
       );
       let returned: unknown;
       try {
-        returned = internal(() => run(recorder));
+        returned = internal(() => run(recorder, shape));
       } catch {
         declarative = false;
         return undefined;
@@ -392,7 +457,7 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
       }
       case 'function': {
         if (finder) {
-          const recorded = recordFinder(value as (finder: unknown) => unknown);
+          const recorded = recordFinder(value as FinderCallback);
           if (recorded !== undefined) {
             return `rec${recorded}`;
           }
@@ -412,6 +477,10 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
     }
     const id = idOf(value);
     if (id !== undefined) {
+      const entry = entryOfId.exec(id)?.[0];
+      if (entry !== undefined) {
+        referenced.add(entry);
+      }
       return `#${id}`;
     }
     if (ArrayBuffer.isView(value)) {
@@ -448,7 +517,7 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
           }
           return undefined;
         }
-        parts.push(`${key}:${part}`);
+        parts.push(`${JSON.stringify(key)}:${part}`);
       }
       return `{${parts.join(',')}}`;
     }
@@ -476,10 +545,10 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
   // ---------------------------------------------------------------- hits and misses
 
   const keyed = <T>(
-    key: string,
+    lineage: { readonly key: string; readonly parents: ReadonlySet<string>; readonly deterministicErrors?: boolean },
     request: { compute(): T; consume?(): void },
-    deterministicErrors: boolean | undefined,
   ): T => {
+    const { key, parents, deterministicErrors } = lineage;
     stats.keyed += 1;
     const entry = entries.get(key);
     if (entry) {
@@ -509,21 +578,43 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
           // The tier holds its own reference to the native exception until eviction.
           internal(() => exceptionRefcount().incrementExceptionRefcount?.(error));
         }
-        admit(key, { kind: 'failure', error });
+        admit(key, { kind: 'failure', error }, parents);
         stats.failuresStored += 1;
       }
       throw error;
     }
     assign(result, key);
     if (cacheable(result)) {
-      admit(key, { kind: 'value', value: internal(() => cloneValue(result)) });
+      admit(key, { kind: 'value', value: internal(() => cloneValue(result)) }, parents);
       stats.stored += 1;
     }
     return result;
   };
 
+  /** Identity of the font a text operation reads, by object: the family name alone does not describe it. */
+  const fontPart = (request: OperationRequest<unknown>): string | undefined => {
+    const options = request.args[1];
+    const named =
+      options !== null && typeof options === 'object' ? (options as { fontFamily?: unknown }).fontFamily : undefined;
+    const family = typeof named === 'string' ? named : 'default';
+    // The library falls back to its default font when the family is not registered.
+    const font = internal(
+      () => (library.getFont(family) as WeakKey | undefined) ?? (library.getFont() as WeakKey | undefined),
+    );
+    if (font === undefined) {
+      return undefined;
+    }
+    let id = fontIds.get(font);
+    if (id === undefined) {
+      id = `f${(fontSequence++).toString(36)}`;
+      fontIds.set(font, id);
+    }
+    return `font:${id}`;
+  };
+
   const operationIn = <T>(frame: Frame, request: OperationRequest<T>): T => {
     stats.calls += 1;
+    referenced = frame.parents;
     let opaque: string | undefined;
     let receiverId = '';
     const { receiver } = request;
@@ -542,6 +633,10 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
         opaque = `receiver ${String((receiver as { constructor?: { name?: string } }).constructor?.name ?? '?')}`;
       } else {
         receiverId = id;
+        const entry = entryOfId.exec(id)?.[0];
+        if (entry !== undefined) {
+          frame.parents.add(entry);
+        }
       }
     }
     let pending = false;
@@ -559,6 +654,14 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
           break;
         }
         parts.push(part);
+      }
+    }
+    if (opaque === undefined && fontOperations.has(request.op)) {
+      const font = fontPart(request);
+      if (font === undefined) {
+        opaque = 'no font';
+      } else {
+        parts.push(font);
       }
     }
     if (opaque !== undefined) {
@@ -604,7 +707,7 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
       }
       return result;
     }
-    return keyed(key, request, request.deterministicErrors);
+    return keyed({ key, parents: frame.parents, deterministicErrors: request.deterministicErrors }, request);
   };
 
   const cache: OperationCache = {
@@ -613,7 +716,7 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
         return request.compute();
       }
       // One frame per operation: a step belongs to the innermost one.
-      const frame: Frame = { partial: '', pending: false };
+      const frame: Frame = { partial: '', pending: false, parents: new Set() };
       frames.push(frame);
       try {
         return operationIn(frame, request);
@@ -626,6 +729,7 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
       if (!active || !frame?.pending || frame.stepKey !== undefined) {
         return request.compute();
       }
+      referenced = frame.parents;
       const values = request.values();
       const parts: string[] = [];
       let opaque = values === undefined ? 'selection not in receiver' : undefined;
@@ -643,7 +747,7 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
       }
       const key = intern(`${frame.partial}>${request.op}|${parts.join(',')}`);
       frame.stepKey = key;
-      return keyed(key, request, request.deterministicErrors);
+      return keyed({ key, parents: frame.parents, deterministicErrors: request.deterministicErrors }, request);
     },
     // oxlint-disable-next-line eslint/max-params -- the seam's `OperationCache.elements` contract
     elements(owner, kind, elements, ordinals): void {
@@ -680,12 +784,24 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
       if (outcome === 'delivered') {
         generation += 1;
         const oldest = generation - decayGenerations;
-        // Entries are in least-recently-used order, so the unused ones are at the front.
+        // Entries are in least-recently-used order, so the unused ones are at the front. Dependents go before the
+        // entries they were made from; one still used by a kept dependent stays.
+        const unused: string[] = [];
         for (const [key, entry] of entries) {
           if (entry.generation >= oldest) {
             break;
           }
-          evict(key, entry);
+          unused.push(key);
+        }
+        for (let progress = true; progress; ) {
+          progress = false;
+          for (const key of unused.toReversed()) {
+            const entry = entries.get(key);
+            if (entry && evictable(key)) {
+              evict(key, entry);
+              progress = true;
+            }
+          }
         }
       }
       evictToCap();
@@ -702,6 +818,7 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
       for (const [key, entry] of entries) {
         evict(key, entry);
       }
+      dependents.clear();
       lineages.clear();
     },
   };

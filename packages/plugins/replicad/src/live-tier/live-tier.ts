@@ -182,6 +182,10 @@ const tierStackFrames = 16;
  * Install a document's operation tier for one build's user code. The returned function removes it, so
  * rendering, export and snapshot calls never pass through the cache. Installing and removing are synchronous
  * and add no frame to the user code's stack.
+ *
+ * The cache and the raised `Error.stackTraceLimit` stay installed across the user code's awaits. That is sound
+ * because a kernel worker runs one operation at a time: its cooperative-abort context is process-global for the
+ * same reason, so nothing else calls Replicad until the build ends and this function's result is called.
  * @param library - The Replicad library the user code imports.
  * @param tier - The document's operation tier.
  * @returns Removes the tier and ends the build with its outcome.

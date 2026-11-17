@@ -271,7 +271,7 @@ type ReplicadContext = {
 /** What one build delivers: the native handle and the offers derived from it. */
 type BuiltModel = { handle: NativeHandle; issues?: KernelIssue[] } & ReturnType<typeof offersFor>;
 
-/** Handles of builds whose user code reused live-tier results (see `serializeHandle`). */
+/** Handles of builds delivered with the live tier installed, and of scene-table revisits (see `serializeHandle`). */
 const tierBuiltHandles = new WeakSet<NativeHandle>();
 
 type ReplicadLibrary = typeof ReplicadModule;
@@ -715,7 +715,11 @@ export const replicadKernel = defineKernel({
       // R16: a build key already seen returns its scene without running any user code.
       const revisited = documentTier?.scenes.lookup(bundleResult.code, parameters);
       if (revisited) {
-        return tracedStep(tracer, 'replicad.scene-table-hit', () => aliasBuiltModel(revisited));
+        return tracedStep(tracer, 'replicad.scene-table-hit', () => {
+          const delivered = aliasBuiltModel(revisited);
+          tierBuiltHandles.add(delivered.handle);
+          return delivered;
+        });
       }
 
       const buildGeometry = named('Object.createGeometry', async () => {
@@ -830,7 +834,9 @@ export const replicadKernel = defineKernel({
       });
 
       const built = await buildGeometry();
-      if (documentTier && documentTier.operations.stats().hits > 0) {
+      if (documentTier) {
+        // Fail closed (catalogue N7): any build delivered with a tier installed shares native shapes with tier
+        // entries that a later build's destructive boolean may change in place, so it has no exact snapshot.
         tierBuiltHandles.add(built.handle);
       }
       documentTier?.scenes.admit(bundleResult.code, parameters, aliasBuiltModel(built));
@@ -1171,10 +1177,10 @@ export const replicadKernel = defineKernel({
 
   serializeHandle({ handle }, runtime, context) {
     if (tierBuiltHandles.has(handle)) {
-      // Catalogue N7: a destructive boolean may have added parametric curves to a retained operand in place,
-      // so a build that reused live-tier results can write a B-rep that differs from reuse off. Its snapshot
-      // would be published as byte-exact, so it is not written; the durable cache keeps builds without reuse.
-      throw new Error('A Replicad build that reused live-tier results has no exact native-handle snapshot.');
+      // Catalogue N7: a destructive boolean may add parametric curves in place to native shapes a tier entry
+      // shares with this build, so its B-rep can differ from reuse off. A snapshot is published as byte-exact, so
+      // none is written: the refusal comes before any native work, and the durable cache keeps reuse-off builds.
+      throw new Error('A Replicad build made with the live tier has no exact native-handle snapshot.');
     }
     return tracedStep(runtime.tracer, 'create.serializeNativeHandle', () =>
       serializeReplicadHandle(handle, context.replicadLibrary),

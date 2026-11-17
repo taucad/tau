@@ -198,6 +198,7 @@ jobs:
           Set-Content -Path $topScript -Value @'
           param([string]$Out)
           $last = @{}
+          $roles = @{}
           while ($true) {
             $now = Get-Date
             $rows = foreach ($p in Get-Process -ErrorAction SilentlyContinue) {
@@ -207,6 +208,14 @@ jobs:
               [pscustomobject]@{ Name = $p.ProcessName; Id = $p.Id; Seconds = [math]::Round($delta, 2) }
             }
             $top = $rows | Sort-Object Seconds -Descending | Select-Object -First 10
+            # Chromium's process role (gpu-process, renderer, utility), read once per process from its command line.
+            foreach ($row in $top) {
+              if (-not $roles.ContainsKey($row.Id)) {
+                $line = (Get-CimInstance Win32_Process -Filter "ProcessId = $($row.Id)" -ErrorAction SilentlyContinue).CommandLine
+                $roles[$row.Id] = if ($line -match '--type=([a-z-]+)') { $Matches[1] } elseif ($line -match '--utility-sub-type=([\w.]+)') { $Matches[1] } else { '' }
+              }
+              if ($roles[$row.Id]) { $row.Name = '{0}:{1}' -f $row.Name, $roles[$row.Id] }
+            }
             '{0:o} {1}' -f $now, (($top | ForEach-Object { '{0}[{1}]={2}' -f $_.Name, $_.Id, $_.Seconds }) -join ' ') |
               Add-Content -Path $Out
             Start-Sleep -Seconds 5
@@ -223,6 +232,10 @@ jobs:
         working-directory: apps/desktop-e2e
         env:
           TAU_E2E_SERVICES: host
+          # Trace screenshots come from a screencast: the GPU process composites and encodes frames continuously, and
+          # on this GPU-less runner (WARP) that held about 3 of its 4 cores through the Build123d test's opening
+          # minutes (run 44088812001), slowing every git process the app ran. Snapshots stay on for failure evidence.
+          TAU_E2E_TRACE_SCREENSHOTS: 'false'
           # Each launch's user data (and its dependency store) lives under the temporary folder. The runner's own
           # (C:\Users\RUNNER~1\AppData\Local\Temp) leaves too little of Windows' 259-character library path for
           # Build123d's closure, so use the runner's short temp folder.

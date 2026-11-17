@@ -536,6 +536,13 @@ export const launchDesktopApp = async (options: {
         key.startsWith('TAU_E2E_') && key.endsWith('_MANUAL') && value !== undefined && value !== 'false',
     );
   const snapshots = manual || configuredSnapshots !== 'false';
+  /* Trace screenshots come from a screencast, which has the compositor produce and encode frames continuously. On a
+   * host with no GPU (Windows' WARP, SwiftShader) that work runs on the CPU, so such a job can turn them off. */
+  const configuredScreenshots = process.env['TAU_E2E_TRACE_SCREENSHOTS'];
+  if (configuredScreenshots !== undefined && configuredScreenshots !== 'true' && configuredScreenshots !== 'false') {
+    throw new Error('TAU_E2E_TRACE_SCREENSHOTS must be true or false.');
+  }
+  const screenshots = manual || configuredScreenshots !== 'false';
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
   const runFlagState = process.env[flagStateVariable] ? resolveFlagState(process.env[flagStateVariable]) : undefined;
   const flagState = options.flagState ?? runFlagState;
@@ -858,9 +865,9 @@ export const launchDesktopApp = async (options: {
       }
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
-    console.info('DESKTOP TRACE OPTIONS', JSON.stringify({ screenshots: true, snapshots, manual }));
+    console.info('DESKTOP TRACE OPTIONS', JSON.stringify({ screenshots, snapshots, manual }));
     recordStartupPhase('tracing.before');
-    await page.context().tracing.start({ screenshots: true, snapshots });
+    await page.context().tracing.start({ screenshots, snapshots });
     recordStartupPhase('tracing.after', page.url());
   } catch (error) {
     void disposeNavigation();

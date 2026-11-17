@@ -9,7 +9,6 @@ import { getBoundingBoxFromInspect, getInspectReport, validateGlbData } from '@t
 
 import { authenticatePackagedDesktop, desktopDescendants, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { desktopE2ECompletedArtifact } from '#support/config.js';
 import { expectFirstNativeRender } from '#support/prepared-kernels.js';
 import {
   gatewayFixtureFinalText,
@@ -571,7 +570,8 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
   const account = tauTestAccount('replicad-preview');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
-  session = await launchDesktopApp({ token });
+  /* The package, as in the other tests here: the CSP under test is the one the packaged app serves. */
+  session = await launchDesktopApp({ token, packaged: true });
   const { page } = session;
   const rendererErrors: string[] = [];
   page.on('console', (message) => {
@@ -583,9 +583,7 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    if (desktopE2ECompletedArtifact) {
-      await authenticatePackagedDesktop(session, token);
-    }
+    await authenticatePackagedDesktop(session, token);
     await expectSignedIn(page);
     await selectKernel(page, 'Replicad');
     await connectPickedFolder(session);

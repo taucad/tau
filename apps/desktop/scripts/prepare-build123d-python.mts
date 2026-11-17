@@ -89,9 +89,6 @@ const parseArguments = (): { readonly targets: string[]; readonly seed?: string 
  */
 const produceSeed = (targets: readonly string[], seed: string): void => {
   for (const target of targets) {
-    if (target.startsWith('win32-')) {
-      throw new Error(`Build123d's tau-plugin.json declares no ${target} variant yet.`);
-    }
     const key = target.startsWith('linux-') ? `${target}-glibc` : target;
     execFileSync(
       process.execPath,

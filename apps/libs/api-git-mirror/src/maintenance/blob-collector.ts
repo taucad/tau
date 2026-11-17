@@ -2,7 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import type { DatabaseType } from '@taucad/api-database';
 import { blobRef } from '@taucad/api-database/schema';
 import type { ObjectStorageService } from '@taucad/api-object-storage';
-import { blobKeyFromSha256Hex } from '@taucad/api-object-storage/sha256';
+import { servedBlobKeys } from '@taucad/api-object-storage/sha256';
 import { assertSingletonProcessGroup } from '#maintenance/singleton.js';
 
 /**
@@ -108,7 +108,9 @@ export const collectZeroCountBlobs = async (args: BlobCollectionArguments): Prom
       .where(and(inArray(blobRef.sha256, planned), eq(blobRef.refcount, 0)))
       .returning({ sha256: blobRef.sha256, sizeBytes: blobRef.sizeBytes });
 
-    const deletable = rows.map((row) => blobKeyFromSha256Hex(row.sha256));
+    /* The row counts the digest, whichever way each reference serves it, so
+       every served key of a digest goes with it (#2008). */
+    const deletable = rows.flatMap((row) => servedBlobKeys(row.sha256));
     if (deletable.length > 0) {
       // A blob's tier follows its publication's visibility, and a delete of a key
       // that is not there is not an error, so both tiers are swept. Inside the

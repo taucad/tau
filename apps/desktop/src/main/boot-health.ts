@@ -322,14 +322,20 @@ export const startBootHealth = (input: {
   readonly launchId: string;
   readonly writeFile?: WriteFile;
 }): BootHealth => {
-  const begun = beginLaunch({ ...input, previous: readBootHealth(input.path) });
+  let begun = beginLaunch({ ...input, previous: readBootHealth(input.path) });
   let { ledger } = begun;
   let record = ledger.last!;
-  const persist = (): void => {
+  const persist = (): boolean => {
     ledger = { ...ledger, last: record };
-    writeBootHealth(input.path, ledger, input.writeFile);
+    return writeBootHealth(input.path, ledger, input.writeFile);
   };
-  persist();
+  if (!persist()) {
+    /* A ledger this launch cannot write would never record it reaching home-ready, so it must not cause safe mode:
+     * the launch decides as for an empty ledger, and only an explicit `--safe-mode` still applies. */
+    begun = beginLaunch({ ...input, previous: undefined });
+    ({ ledger } = begun);
+    record = ledger.last!;
+  }
   return {
     mode: begun.mode,
     unhealthyCount: ledger.unhealthyCount,

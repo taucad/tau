@@ -1661,11 +1661,14 @@ describe('desktop main compute owner', () => {
 describe('desktop main admission gates', () => {
   const bootMilliseconds = 30_000;
 
+  /* T-R11.2 (D7): only a locked release owns `Tau Staging`. A staging build that honours overrides and is started
+   * without `--user-data-dir` uses `Tau Staging Dev`, so a development or test run can never default into the
+   * installed app's profile. */
   it.each([
-    { overrides: true, explicitProfile: true, usesChannelProfile: false },
-    { overrides: true, explicitProfile: false, usesChannelProfile: true },
-    { overrides: false, explicitProfile: true, usesChannelProfile: true },
-    { overrides: false, explicitProfile: false, usesChannelProfile: true },
+    { overrides: true, explicitProfile: true, profile: undefined },
+    { overrides: true, explicitProfile: false, profile: 'Tau Staging Dev' },
+    { overrides: false, explicitProfile: true, profile: 'Tau Staging' },
+    { overrides: false, explicitProfile: false, profile: 'Tau Staging' },
   ])(
     'should isolate a staging profile according to $overrides/$explicitProfile',
     async (options) => {
@@ -1680,10 +1683,10 @@ describe('desktop main admission gates', () => {
       );
       await import('#main/main.js');
       const profileCall = app.setPath.mock.calls.find(([name]) => name === 'userData');
-      if (options.usesChannelProfile) {
-        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', 'Tau Staging')]);
-      } else {
+      if (options.profile === undefined) {
         expect(profileCall).toBeUndefined();
+      } else {
+        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', options.profile)]);
       }
       expect(app.setPath).toHaveBeenCalledWith('sessionData', state.userData);
     },
@@ -2893,12 +2896,12 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       fakeWindow.loadURL.mockRejectedValueOnce(Object.assign(new Error('ERR_FILE_NOT_FOUND'), { errno: -6 }));
       await booted();
       const { BrowserWindow } = await import('electron');
+      const partitions = (): unknown[] =>
+        vi.mocked(BrowserWindow).mock.calls.map(([options]) => options?.webPreferences?.partition);
+      /* Counted by partition, not by position: a slow host may create the app's windows at other times. */
       await vi.waitFor(() => {
-        expect(vi.mocked(BrowserWindow).mock.calls).toHaveLength(2);
+        expect(partitions().filter((partition) => partition === 'tau-recovery')).toHaveLength(1);
       });
-      expect(vi.mocked(BrowserWindow).mock.calls[1]![0]).toEqual(
-        expect.objectContaining({ webPreferences: expect.objectContaining({ partition: 'tau-recovery' }) as unknown }),
-      );
       expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
       expect(signals('desktop-recovery-shown')).toEqual([
         expect.objectContaining({ tags: { surface: 'window', trigger: 'load-failed' } }),

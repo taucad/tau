@@ -7,7 +7,7 @@ name: E2E nightly
 # summary ends with the W22 consumer parity table. Each
 # night they run against the head of `main`, with the GeoSpec engine installed from
 # npm at the workspace's `geospec-engine` catalog pin. A failure here is a red
-# nightly, never a merge gate. A suite that passes two consecutive nightlies moves to ci.yml's
+# nightly, never a merge gate. A suite that passes five consecutive nightlies moves to ci.yml's
 # merge-queue lane for good (`test:e2e:queue`, the end-to-end ratchet) and leaves this matrix.
 # `workflow_dispatch` takes an optional commit to run against instead, and `flag_state` runs the
 # browser and desktop suites with every page opened in one of the four onboarding flag states
@@ -82,7 +82,7 @@ jobs:
           # `--shard=<index>/<count>` to the target, which forwards it to its test runner.
           suites='[]'
           # The end-to-end ratchet (operator ruling 2026-11-15): a suite listed in its project's
-          # `test:e2e:queue` `dependsOn` passed two consecutive nightlies and runs in ci.yml's merge-queue
+          # `test:e2e:queue` `dependsOn` passed five consecutive nightlies (two before 2026-11-17) and runs in ci.yml's merge-queue
           # lane (`e2e-queue`) whenever its project is affected, so it is not run here. It never moves back.
           pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null
           ratcheted=$(jq -c '[.graph.nodes[] | .name as $project | .data.targets["test:e2e:queue"].dependsOn // [] | .[]

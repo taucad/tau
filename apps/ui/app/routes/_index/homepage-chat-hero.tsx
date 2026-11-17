@@ -15,30 +15,34 @@ import { Loader } from '@taucad/ui/components/loader';
  */
 export function HomepageChatHero({ composer }: { readonly composer?: React.ReactNode } = {}): React.JSX.Element {
   return (
-    <div className='container mx-auto px-4 py-6 pb-12 md:px-6 md:pt-32'>
-      <div className='mx-auto max-w-3xl space-y-6 md:space-y-8'>
-        <div className='mb-12 text-center'>
-          <Heading level={1} variant='display' className='mx-auto max-w-[16ch] text-balance md:max-w-[20ch]'>
-            What do you want to build?
-          </Heading>
-        </div>
+    /* Everything above the project grid takes files for the composer (`useChatDropZone`); only this attribute is in
+     * Home's bundle, the listeners come with the composer. */
+    <div data-chat-drop-zone='' className='relative'>
+      <div className='container mx-auto px-4 py-6 pb-12 md:px-6 md:pt-32'>
+        <div className='mx-auto max-w-3xl space-y-6 md:space-y-8'>
+          <div className='mb-12 text-center'>
+            <Heading level={1} variant='display' className='mx-auto max-w-[16ch] text-balance md:max-w-[20ch]'>
+              What do you want to build?
+            </Heading>
+          </div>
 
-        <HomeNewProjectComposerProvider>{composer ?? <HomeChatComposer />}</HomeNewProjectComposerProvider>
-        <div className='mx-auto my-6 flex w-20 items-center justify-center'>
-          <Separator />
-          <div className='mx-4 text-sm text-muted-foreground'>or</div>
-          <Separator />
-        </div>
-        <div className='flex justify-center'>
-          {/* A plain secondary action beside the composer, not a second call to action (R15). */}
-          <NavLink to='/projects/new' className={buttonVariants({ variant: 'outline' })}>
-            {({ isPending }) => (
-              <span aria-busy={isPending} className='flex items-center gap-2'>
-                {isPending ? <Loader /> : null}
-                Build from code
-              </span>
-            )}
-          </NavLink>
+          <HomeNewProjectComposerProvider>{composer ?? <HomeChatComposer />}</HomeNewProjectComposerProvider>
+          <div className='mx-auto my-6 flex w-20 items-center justify-center'>
+            <Separator />
+            <div className='mx-4 text-sm text-muted-foreground'>or</div>
+            <Separator />
+          </div>
+          <div className='flex justify-center'>
+            {/* A plain secondary action beside the composer, not a second call to action (R15). */}
+            <NavLink to='/projects/new' className={buttonVariants({ variant: 'outline' })}>
+              {({ isPending }) => (
+                <span aria-busy={isPending} className='flex items-center gap-2'>
+                  {isPending ? <Loader /> : null}
+                  Build from code
+                </span>
+              )}
+            </NavLink>
+          </div>
         </div>
       </div>
     </div>

@@ -9,7 +9,7 @@
  * and, in development, on the console.
  */
 
-import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, mkdtempSync, openSync, renameSync, statSync } from 'node:fs';
 import { appendFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,8 +51,12 @@ export type DiagnosticsLogOptions = {
 const defaultMaxBytes = 5 * 1024 * 1024;
 /** Rotated generations kept beside `desktop.log`: `desktop.1.log` (newest) to `desktop.3.log` (D6). */
 export const rotatedLogGenerations = 3;
-/** Where the log goes when its own directory cannot be created (a full, read-only or permission-broken profile). */
-const fallbackLogDirectory = (): string => join(tmpdir(), `tau-desktop-logs-${String(process.getuid?.() ?? 'user')}`);
+/* Where the log goes when its own file cannot be opened (a full, read-only or permission-broken profile): a fresh
+ * folder only this account can enter (0700), so no other account can plant a link at a name it guessed in advance. */
+const fallbackLogDirectory = (): string => mkdtempSync(join(tmpdir(), 'tau-desktop-logs-'));
+/* Log files are readable by their owner only (0600); the mode applies when an append creates the file. */
+const logFileMode = 0o600;
+const appendOptions = { mode: logFileMode } as const;
 /* Coalescing window for queued records, and the queue size that writes at once:
  * a renderer console loop or a chatty kernel then costs one append per window
  * rather than a stat and an append per line on main's event loop. */
@@ -122,19 +126,20 @@ const abbreviateHashes = (message: string | undefined): string | undefined =>
 export const createDiagnosticsLog = (options: DiagnosticsLogOptions): DiagnosticsFileLog => {
   const maxBytes = options.maxBytes ?? defaultMaxBytes;
   /* Opening the log is the first thing main does that can fail on a broken profile, and the log is what explains
-   * that failure (B18): a directory that cannot be created moves the log under the system's temporary folder. */
+   * that failure (B18): a directory that cannot be created, or a log file that cannot be opened for append, moves
+   * the log under the system's temporary folder. */
   const directory = ((): string => {
     try {
       mkdirSync(options.directory, { recursive: true });
+      closeSync(openSync(join(options.directory, 'desktop.log'), 'a', logFileMode));
       return options.directory;
     } catch {
-      const fallback = fallbackLogDirectory();
       try {
-        mkdirSync(fallback, { recursive: true });
+        return fallbackLogDirectory();
       } catch {
         /* Every write below is already guarded: a log with nowhere to go is silent, never fatal. */
+        return options.directory;
       }
-      return fallback;
     }
   })();
   const filePath = join(directory, 'desktop.log');
@@ -197,7 +202,7 @@ export const createDiagnosticsLog = (options: DiagnosticsLogOptions): Diagnostic
     }
     try {
       rotate();
-      appendFileSync(filePath, text);
+      appendFileSync(filePath, text, appendOptions);
     } catch {
       /* A log that cannot be written must not take the app down. */
     }
@@ -207,7 +212,7 @@ export const createDiagnosticsLog = (options: DiagnosticsLogOptions): Diagnostic
     await previous;
     try {
       await rotateAsync();
-      await appendFile(filePath, text);
+      await appendFile(filePath, text, appendOptions);
     } catch {
       /* A log that cannot be written must not take the app down. */
     }

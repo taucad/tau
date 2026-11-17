@@ -2,7 +2,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-import { EditorDocumentSession } from '#lib/editor-document-session.js';
+import { EditorDocumentSession } from '@taucad/editor-ui/lib/editor-document-session';
 import { applyEditorWorkspaceEdits } from '#lib/editor-workspace-edits.js';
 
 function fixture() {

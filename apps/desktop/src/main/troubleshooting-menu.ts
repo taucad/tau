@@ -141,7 +141,11 @@ export const scrubHomePaths = (text: string, home: string): string => {
       scrubbed = scrubbed.replaceAll(new RegExp(escapeRegExp(spelling), 'giu'), '~');
     }
   }
-  return scrubbed.replaceAll(/(?:[a-z]:)?[\\/](?:users|home)[\\/][^\\/:'"\s]+/giu, '~');
+  /* A Windows account name (behind a drive letter or a backslash) may hold spaces, so it runs to the next separator;
+   * a POSIX one cannot, so it ends at whitespace. */
+  return scrubbed
+    .replaceAll(/(?:[a-z]:[\\/]|\\)users[\\/][^\\/:'"\r\n]+/giu, '~')
+    .replaceAll(/[\\/](?:users|home)[\\/][^\\/:'"\s]+/giu, '~');
 };
 
 /* The last bytes of a file, read synchronously: the report is built in a menu click, from a file main itself owns. */

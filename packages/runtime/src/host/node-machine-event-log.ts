@@ -63,11 +63,14 @@ const openLogFile = async (directoryPath: string, fileName: string): Promise<Fil
     return open(join(directoryPath, fileName), constants.O_APPEND | constants.O_NOFOLLOW | constants.O_RDWR);
   }
   try {
-    const directory = await open(directoryPath, constants.O_RDONLY);
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
+    /* Windows refuses `fsync` on a directory handle (EPERM); NTFS journals the create, so only POSIX syncs it. */
+    if (process.platform !== 'win32') {
+      const directory = await open(directoryPath, constants.O_RDONLY);
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
     }
   } catch (error) {
     await file.close().catch(() => undefined);

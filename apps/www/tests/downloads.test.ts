@@ -7,6 +7,7 @@ import {
   desktopDownloads,
   desktopFileLabel,
   isArchivePlatform,
+  isBetaPlatform,
 } from '#www/downloads.js';
 
 import { projection } from '#www/download-catalog.fixture.js';
@@ -25,6 +26,15 @@ describe('qualified desktop download catalog', () => {
     expect(isArchivePlatform('macIntel')).toBe(false);
     expect(isArchivePlatform('linux')).toBe(true);
     expect(desktopDownloadHref('linux')).toBe('https://downloads.tau.new/latest/Tau-linux-x64.tar.gz');
+  });
+  it('marks every Windows and Linux route beta until it is qualified on a real device, and no Mac route', () => {
+    expect(select(projection())!.map(({ platform }) => [platform, isBetaPlatform(platform)])).toEqual([
+      ['mac', false],
+      ['macIntel', false],
+      ['windows', true],
+      ['linux', true],
+      ['linuxPortable', true],
+    ]);
   });
   it('selects immutable installer links with retained archives and truthful update ownership', () => {
     const catalog = select(projection())!;
@@ -178,22 +188,35 @@ describe('qualified desktop download catalog', () => {
     expect(
       select(projection())!.every((choice) => choice.cleanHost === 'passed' && !choice.detail.includes('pending')),
     ).toBe(true);
-    // Production admits pending clean-host acceptance only on the Mac routes, and says so on each.
+    // Production admits pending clean-host acceptance only on the Mac and beta Windows routes, and says so on each.
     for (const index of value.routes.keys()) {
       const production = projection();
       production.routes[index]!.qualification = { ci: true, vm: 'pending', trust: 'release' };
-      if (production.routes[index]!.route === 'macos-zip') {
+      const { route } = production.routes[index]!;
+      if (route === 'macos-zip' || route === 'windows-nsis') {
         const admitted = select(production)!;
         expect(admitted.filter((choice) => choice.cleanHost === 'pending')).toHaveLength(1);
         expect(admitted.find((choice) => choice.cleanHost === 'pending')?.detail).toContain(
-          'clean-Mac install testing pending',
+          route === 'windows-nsis' ? 'clean-Windows install testing pending' : 'clean-Mac install testing pending',
         );
       } else {
         expect(() => select(production)).toThrow(/release qualification/u);
       }
     }
-    // Staging admits it only on Mac routes, and only as the exact `pending` marker with release CI evidence.
-    for (const index of [2, 3, 4]) {
+    // Staging admits the beta Windows route as pending too (operator ruling 2026-11-17T08:27Z).
+    const windowsPending = {
+      ...value.routes[2]!,
+      qualification: { ci: true, vm: 'pending', trust: 'release' },
+    };
+    expect(
+      createDesktopDownloadCatalog({
+        enabled: true,
+        channel: 'staging',
+        qualification: staging([windowsPending]),
+      })!.map((choice) => [choice.platform, choice.cleanHost, choice.detail]),
+    ).toEqual([['windows', 'pending', 'Windows x64 · per-user installer · clean-Windows install testing pending']]);
+    // Linux never: only the exact `pending` marker on Mac and Windows routes, with release CI evidence.
+    for (const index of [3, 4]) {
       const route = { ...value.routes[index]!, qualification: { ci: true, vm: 'pending', trust: 'release' } };
       expect(() =>
         createDesktopDownloadCatalog({ enabled: true, channel: 'staging', qualification: staging([route]) }),
@@ -238,6 +261,7 @@ describe('composed per-platform desktop download catalog', () => {
   };
   const mac = () => platformCatalog(({ route, target }) => route === 'macos-zip' && target === 'darwin-arm64');
   const linux = () => platformCatalog(({ target }) => target === 'linux-x64');
+  const windows = () => platformCatalog(({ target }) => target === 'win32-x64');
   const composed = (platforms: unknown[]) => ({ schemaVersion: 2, channel: 'production', promoted: true, platforms });
 
   it('admits a production Linux platform alone, then Mac and Linux from different tags', () => {
@@ -262,6 +286,21 @@ describe('composed per-platform desktop download catalog', () => {
     expect(both[1]?.alternatives.some(({ href }) => href.includes('desktop%400.3.0'))).toBe(true);
   });
 
+  it('admits a production Windows platform alone and beside Mac and Linux', () => {
+    expect(select(composed([{ lane: 'windows', catalog: windows() }]))?.map(({ platform }) => platform)).toEqual([
+      'windows',
+    ]);
+    const all = select(
+      composed([
+        { lane: 'macos', catalog: mac() },
+        { lane: 'windows', catalog: windows() },
+        { lane: 'linux', catalog: linux() },
+      ]),
+    )!;
+    expect(all.map(({ platform }) => platform)).toEqual(['mac', 'windows', 'linux', 'linuxPortable']);
+    expect(all[1]?.href).toBe('https://downloads.tau.new/releases/desktop%400.2.0/Tau-win32-x64.exe');
+  });
+
   it('refuses a partial, mislabelled, duplicated or other-channel platform', () => {
     const appImageOnly = platformCatalog(({ route }) => route === 'linux-appimage');
     for (const document of [
@@ -270,6 +309,9 @@ describe('composed per-platform desktop download catalog', () => {
       composed([{ lane: 'macos', catalog: linux() }]),
       composed([{ lane: 'linux', catalog: projection() }]),
       composed([{ lane: 'windows', catalog: projection() }]),
+      composed([{ lane: 'windows', catalog: linux() }]),
+      composed([{ lane: 'linux', catalog: windows() }]),
+      composed([{ lane: '__proto__', catalog: windows() }]),
       composed([
         { lane: 'linux', catalog: linux() },
         { lane: 'linux', catalog: linux() },

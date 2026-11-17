@@ -143,13 +143,15 @@ const itemsOf = (store: ResettableStore, options: ApplyResetsOptions): Array<rea
  */
 export const applyPendingResets = (options: ApplyResetsOptions): ResetResult[] => {
   const stores = readPendingResets(options.userData);
-  /* One attempt whatever the result: removed before anything moves, so a start that dies mid-way does not retry. */
+  /* One attempt whatever the result: removed before anything moves, so a start that dies mid-way does not retry.
+   * A request that cannot be removed would run again at every start, so it runs at none. */
   try {
     if (existsSync(pendingPath(options.userData))) {
       unlinkSync(pendingPath(options.userData));
     }
   } catch (error) {
     options.log('warn', 'main.pending-resets-unremovable', { errno: errnoOf(error) });
+    return [];
   }
   const quarantine = join(recoveryDirectory(options.userData), options.stamp);
   const results: ResetResult[] = [];

@@ -25,6 +25,7 @@ import {
   desktopLaneKeys,
   desktopLaneManifestKey,
   desktopManifestDigest,
+  desktopPlatformLanes,
   desktopPublicationScopes,
   verifyDesktopRouteDescriptor,
 } from './desktop-route-publication.mjs';
@@ -543,7 +544,8 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
     if (lane !== scope) {
       throw new Error('A promotion writes only its own scope lane');
     }
-    // An omitted VM run is admitted only for Mac-only scope (either channel), and the catalog then says `vm: 'pending'`.
+    // An omitted VM run is admitted only for Mac-only or Windows-only scope (either channel), and the catalog then says
+    // `vm: 'pending'`.
     const vmRun = process.env['TAU_ROUTE_VM_RUN_ID'];
     const receipts = await fetchDesktopQualifiedReceipts(manifest, root, {
       ci: required('TAU_ROUTE_CI_RUN_ID'),
@@ -564,7 +566,7 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
     // A platform lane composes its catalog with every other platform's completed catalog, each read back exactly as
     // that platform's own completion receipt recorded it; the all-platform lane keeps its single catalog.
     const others = await Promise.all(
-      (['macos', 'linux'] as const)
+      desktopPlatformLanes
         .filter((other) => other !== lane)
         .map(async (other) => [other, await readCompletedPlatformCatalog(store, other)] as const),
     );

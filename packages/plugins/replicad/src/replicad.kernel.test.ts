@@ -3480,11 +3480,12 @@ describe('OC API Call Tracing', () => {
       prototypeCount: 1,
       instanceCount: 3,
       eligibleInstanceCount: 3,
-      missedContentHashGroups: 0,
     });
+    // Detection reads partner keys only: no BRep content hash reaches telemetry.
+    expect(detectSpan.detail).not.toHaveProperty('missedContentHashGroups');
     expect(faceSpans).toHaveLength(1);
+    expect(faceSpans[0]!.detail).not.toHaveProperty('prototypeHash');
     expect(faceSpans[0]!.detail).toMatchObject({
-      prototypeHash: expect.stringMatching(/^[\da-f]{64}$/),
       partnerKey: expect.any(String),
       instanceCount: 3,
       shapeNames: 'shaft-0,shaft-1,shaft-2',

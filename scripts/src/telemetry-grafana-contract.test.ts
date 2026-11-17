@@ -1019,7 +1019,7 @@ describe('Runtime observability dashboards and rules (T13, T32)', () => {
     expect(new Set(uids.map(([, uid]) => uid)).size).toBe(uids.length);
   });
 
-  it('should add the info rules and the heartbeat paused until Tau Cloud routes them (PR-5a)', () => {
+  it('should pause the info rules and the heartbeat locally; Tau Cloud overrides pausing', () => {
     const unpaused = rulesIn(grafanaRoot)
       .filter(({ rule }) => rule.labels?.['severity'] === 'info' && rule.labels['package'] === 'runtime-observability')
       .filter(({ rule }) => rule.isPaused !== true)

@@ -13,8 +13,8 @@ import type { Parameter } from '@taucad/kcl-wasm-lib/bindings/Parameter';
 import type { LspFileManager } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
 import { kclUriToWorkspacePath } from '#lib/kcl-language/kcl-register-paths.js';
-import { indexKclProgram } from '#lib/kcl-language/kcl-bindings.js';
-import type { KclIndex } from '#lib/kcl-language/kcl-bindings.js';
+import { indexKclProgram } from '@taucad/editor-ui/lib/kcl-language/kcl-bindings';
+import type { KclIndex } from '@taucad/editor-ui/lib/kcl-language/kcl-bindings';
 
 const log = createKclLogger('Symbol Service');
 

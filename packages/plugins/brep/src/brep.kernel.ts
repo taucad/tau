@@ -1,18 +1,15 @@
-// oxlint-disable-next-line typescript/triple-slash-reference -- occt-import-js ships no declarations; this is the backend import seam.
-/// <reference path='./types/occt-import-js.d.ts' />
 import {
   coordinateSystemSchema,
   createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
   unitSchema,
-  withoutEmscriptenProcessListeners,
 } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
 import { createImportFileInventory, normalizeGltfGeometryNames, transformGltfExportBytes } from '@taucad/geometry-core';
 
-import { OcctLoader } from '#occt-loader.js';
-import type { OcctImportJs } from '#occt-loader.js';
+import { loadOcctBackend, meshOcctFile } from '#occt.js';
+import type { OcctBackend } from '#occt.js';
 
 const glbOptionsSchema = coordinateSystemSchema
   .extend(unitSchema.shape)
@@ -22,24 +19,6 @@ const glbOptionsSchema = coordinateSystemSchema
   .strict();
 const basename = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
 const extension = (path: string): string => path.slice(path.lastIndexOf('.') + 1).toLowerCase();
-
-/** The occt-import-js module: the loader's import API plus Emscripten's view over its linear memory. */
-type OcctBackend = OcctImportJs & { readonly HEAPU8: Uint8Array<ArrayBuffer> };
-
-const loadBackend = async (): Promise<OcctBackend> => {
-  const { default: factory } = await import('occt-import-js');
-  return withoutEmscriptenProcessListeners(async () =>
-    factory({
-      print() {
-        /* Empty. */
-      },
-      printErr() {
-        /* Empty. */
-      },
-      locateFile: () => new URL('wasm/occt-import-js.wasm', import.meta.url).href,
-    }),
-  );
-};
 
 /** BRep-family import kernel. @public */
 export const brepKernel = defineKernel({
@@ -53,7 +32,7 @@ export const brepKernel = defineKernel({
   },
 
   async initialize() {
-    return { occt: await loadBackend() };
+    return { occt: await loadOcctBackend() };
   },
 
   async resolve({ entryPath }, { filesystem }) {
@@ -79,9 +58,11 @@ export const brepKernel = defineKernel({
 
   async evaluate({ entryPath }, { filesystem }, context: { occt: OcctBackend }) {
     const inventory = await createImportFileInventory(filesystem, entryPath);
-    const glb = await new OcctLoader(context.occt)
-      .initialize({ format: extension(entryPath) })
-      .load([{ name: basename(entryPath), bytes: inventory.entryBytes }]);
+    const glb = await meshOcctFile(context.occt, {
+      name: basename(entryPath),
+      bytes: inventory.entryBytes,
+      format: extension(entryPath),
+    });
     const normalized = await normalizeGltfGeometryNames(glb, {
       format: 'glb',
       rewriteLegacyGeneratedShapeNames: true,

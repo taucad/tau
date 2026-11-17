@@ -33,12 +33,14 @@ export type ProjectOpenPhase =
   | 'composer.mount'
   | 'editor.runtime'
   | 'editor.mount'
+  | 'viewer.chunk'
   | 'viewer.mount'
   | 'viewer.renderer'
   | 'viewer.firstFrame'
   | 'viewer.gizmo'
   | 'canvas.2d'
-  | 'frame.long';
+  | 'frame.long'
+  | 'kernel.worker';
 
 /**
  * Who acquired a `canvas.2d` context; the viewer tags its own. An untagged context inside `viewer.gizmo` belongs to
@@ -140,12 +142,14 @@ const phaseNames = new Set<ProjectOpenPhase>([
   'composer.mount',
   'editor.runtime',
   'editor.mount',
+  'viewer.chunk',
   'viewer.mount',
   'viewer.renderer',
   'viewer.firstFrame',
   'viewer.gizmo',
   'canvas.2d',
   'frame.long',
+  'kernel.worker',
 ]);
 const sources: ReadonlySet<string> = new Set<ProjectOpenSource>([
   'gizmo.face',

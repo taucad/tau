@@ -43,7 +43,7 @@ import {
   systemPreferences,
   utilityProcess,
 } from 'electron';
-import type { IpcMainEvent, IpcMainInvokeEvent, WebContents } from 'electron';
+import type { IpcMainEvent, IpcMainInvokeEvent, MessageBoxOptions, WebContents } from 'electron';
 import { nativeSandboxBwrapVariable } from '@taucad/native-process-core';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { createZooProxyTokenSource } from '@taucad/zoo/proxy';
@@ -1706,13 +1706,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
     if (await overlapsDirectory(directory, authorityDirectory)) {
       log.log('warn', 'dialog.directory-refused', { reason: 'authority-overlap' });
       const window = BrowserWindow.fromWebContents(event.sender);
-      const refusal = {
+      const refusal: MessageBoxOptions = {
         type: 'warning',
         message: 'Tau can’t use this folder',
         detail:
           "This folder contains Tau's own data, or is inside it. Choose a folder that holds only your projects, such as a folder inside Documents.",
         buttons: ['OK'],
-      } as const;
+      };
       await (window ? dialog.showMessageBox(window, refusal) : dialog.showMessageBox(refusal));
       return undefined;
     }

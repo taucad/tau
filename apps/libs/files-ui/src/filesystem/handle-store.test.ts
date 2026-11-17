@@ -1670,7 +1670,8 @@ describe('removeWorkspace', () => {
 
     const writes = transaction.mock.calls.filter(([, mode]) => mode === 'readwrite');
     expect(writes).toHaveLength(1);
-    const stores: string[] = [writes[0]![0]].flat();
+    const scope = writes[0]![0];
+    const stores = typeof scope === 'string' ? [scope] : [...scope];
     expect(stores.toSorted((left, right) => left.localeCompare(right))).toEqual(['configs', 'handles', 'workspaces']);
     transaction.mockRestore();
     expect(await rawReadWorkspace(removed.workspaceId)).toBeUndefined();

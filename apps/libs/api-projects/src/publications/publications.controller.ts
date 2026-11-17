@@ -126,7 +126,7 @@ export class PublicationsController {
         return undefined;
       }
 
-      const file = await this.publicationsService.openPublicationFile(resolved.sha256Hex, resolved.path);
+      const file = await this.publicationsService.openPublicationFile(resolved.sha256Hex, resolved.path, resolved.key);
       this.metrics.publicationFileRequestsTotal.add(1, { outcome: 'served' });
 
       return new StreamableFile(file.body, {

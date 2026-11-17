@@ -239,6 +239,7 @@ export const gizmoCopy: Readonly<Record<GizmoChoiceId, Readonly<{ name: string; 
 export const viewerStepCopy = {
   mouseControls: 'Mouse controls',
   gizmo: 'Orientation gizmo',
+  orbit: 'How the view turns',
   pickAnother: 'Pick another if it is closer to what you know',
   legendLabel: 'How to move the view',
   legendAlways: 'Always',

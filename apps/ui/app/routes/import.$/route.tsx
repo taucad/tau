@@ -56,7 +56,7 @@ import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { largeObjectThresholdBytes, RevisionPortError } from '@taucad/revisions';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -75,7 +75,6 @@ import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {
   title: 'Import',
-  enableOverflowY: true,
 };
 
 const readSplatPath = (params: Record<string, string | undefined>): string => params['*'] ?? '';

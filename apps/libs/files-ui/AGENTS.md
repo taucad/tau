@@ -47,7 +47,7 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 
 - Layer `feature`: never import `apps/ui` (`#components/*`, `#hooks/*`, `#lib/*`, `#routes/*`, `#environment.config`). A module moves here only when everything it imports, tests included, is already a package or an app-lib.
 - App services arrive by injection (context, factory argument or worker init message), never by import: `createWorkspaceTelemetry({ analytics, reportFailure })` is bound in `apps/ui/app/utils/workspace-telemetry.utils.ts`.
-- Never read `import.meta.env`, `window.ENV` or the app's build-time globals. `handle-store`, `desktop-bridge` and the file-manager worker need the build target as a compile-time constant (ruling C1), so they stay in `apps/ui` until a library-level compile-time seam lands.
+- Read the build target from `@taucad/ui-core/lib/build-target` (a `tau-desktop` condition); tests `vi.mock` it.
 - Lib-internal imports use `#<path>.js`; `package.json` maps `#*` to `./src/*`, and TypeScript and Vite resolve `.js` to the `.ts`/`.tsx` source.
 - `filesystem/home-opfs-probe.ts` starts `home-opfs-probe.worker.ts` with `new Worker(new URL(...))`; `apps/ui/vite.config.ts` admits it through its `../libs/*/src/**/*.worker.ts` optimizer entry.
 - `apps/ui/vite.config.ts` applies the React Compiler to `src/**`, and `apps/ui/app/styles/global.css` scans it with `@source`, as when these files lived in `apps/ui/app`.

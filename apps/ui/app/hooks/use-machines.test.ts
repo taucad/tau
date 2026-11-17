@@ -16,7 +16,7 @@ import {
 
 const state = vi.hoisted(() => ({ bridge: undefined as unknown, enabled: true }));
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => state.enabled }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => state.bridge }));
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({ desktopBridge: () => state.bridge }));
 
 const snapshot: MachineDirectorySnapshot = {
   cursor: { hostId: 'host', authorityId: 'authority', generation: 'g1', position: 0, revision: 0 },

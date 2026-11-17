@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { setDesktopAppIconTheme } from '#filesystem/desktop-bridge.js';
+import { setDesktopAppIconTheme } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { clientFactsScript, readClientFacts, subscribeClientFacts, writeClientFacts } from '#lib/client-facts.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- Preserve the existing enum-style public API with erasable object syntax. */

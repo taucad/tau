@@ -46,7 +46,7 @@ describe('HEIC attachment sources', () => {
     const accept = (isIos: boolean) =>
       attachmentAccept({ images: true, documents: true, transcodeSources: attachmentTranscodeSources, isIos });
 
-    expect(accept(false)).toContain('image/heic,.heic,.heif');
+    expect(accept(false).split(',')).toEqual(expect.arrayContaining(['image/heic', 'image/heif', '.heic', '.heif']));
     expect(accept(true)).not.toContain('heic');
     expect(accept(true)).not.toContain('heif');
   });

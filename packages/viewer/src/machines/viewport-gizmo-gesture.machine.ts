@@ -3,18 +3,19 @@
  *
  * ```text
  * viewportGizmoGesture: idle ──gizmoPressed──▶ pressed ──after(idleStart)──▶ idle
- *                       pressed ──gizmoTurned──▶ turning ──gizmoReleased──▶ idle
+ *                       idle, pressed ──gizmoTurned(drag)──▶ turning ──gizmoReleased──▶ idle
  *                       pressed ──gizmoReleased──▶ idle
  * tags: pressed, turning → interactionLocked
  * context: environment, upDirection
  * ```
  *
- * - **idle**: no press on the cube is held. A turn reported here (a face click's animation, or a drag that began after
- *   the idle-start window) moves the camera, which the adapter reports to it, and locks nothing.
+ * - **idle**: no press on the cube is held. A turn reported here moves the camera, which the adapter reports to it. A
+ *   flight (a face click, a key, a navigation button, an API turn) locks nothing; a drag that began after the
+ *   idle-start window takes the lock, keyed on the turn's `cause`.
  * - **pressed**: the cube took a press and nothing has turned yet. The canvas's controls are disabled and do not step
  *   (`interactionLocked`), and the model's hover stands aside. A press that has not turned the camera by the end of the
  *   idle-start window is given back.
- * - **turning**: the press is dragging the camera. It stays locked until the cube reports the release.
+ * - **turning**: the press is dragging the camera (`cause` `drag`). It stays locked until the cube reports the release.
  *
  * The DOM adapter, a callback actor invoked here as `adapter`, owns everything a host holds: the `ViewportGizmo`, its
  * listeners, its render subscription, the plane picker it draws, the controls it disables and the camera it reports
@@ -34,6 +35,7 @@
  */
 
 import { createCallbackLogic, setup, types } from 'xstate';
+import type { GizmoCause } from 'three-viewport-gizmo';
 import type { ActorRefFrom, CallbackActorLogic, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import { eventSchemas } from '#machines/machine-schemas.js';
 import { describeFault } from '#machines/machine-fault.js';
@@ -106,10 +108,10 @@ export type ViewportGizmoCommand =
  * @public
  */
 export type ViewportGizmoAdapterEvent =
-  /** The cube took a press (its `start`). */
+  /** The cube took a press (its `press`), whether or not a turn follows. */
   | { type: 'gizmoPressed' }
-  /** The cube turned the camera (its `change`): a drag step or a face click's animation frame. */
-  | { type: 'gizmoTurned' }
+  /** The cube turned the camera (its `change`): a drag step, or a flight frame of a click, key, button or API turn. */
+  | { type: 'gizmoTurned'; cause: GizmoCause }
   /** The cube's press or animation ended (its `end`). */
   | { type: 'gizmoReleased' };
 
@@ -222,6 +224,21 @@ const lockedTurn = (
   return { target: 'turning' };
 };
 
+/** A drag holds the lock wherever it began; a flight's frames lock nothing. */
+const dragTurn = (
+  args: Readonly<{ children: ViewportGizmoGestureChildren; event: ViewportGizmoGestureEvent }>,
+  enq: ViewportGizmoGestureEnqueue,
+  lockFirst: boolean,
+): Readonly<{ target?: 'turning' }> => {
+  if (args.event.type !== 'gizmoTurned' || args.event.cause !== 'drag') {
+    return {};
+  }
+  if (lockFirst) {
+    command(args.children, enq, { type: 'lockTaken' });
+  }
+  return lockedTurn(args, enq);
+};
+
 const viewportGizmoGestureMachineDefinition = setup({
   actors: viewportGizmoGestureActors,
   delays: { idleStart: viewportGizmoIdleStartMilliseconds },
@@ -251,13 +268,14 @@ const viewportGizmoGestureMachineDefinition = setup({
     idle: {
       on: {
         gizmoPressed: (args, enq) => takeLock(args, enq),
+        gizmoTurned: (args, enq) => dragTurn(args, enq, true),
       },
     },
     pressed: {
       tags: ['interactionLocked'],
       after: { idleStart: (args, enq) => releaseLock(args, enq) },
       on: {
-        gizmoTurned: (args, enq) => lockedTurn(args, enq),
+        gizmoTurned: (args, enq) => dragTurn(args, enq, false),
         gizmoReleased: (args, enq) => releaseLock(args, enq),
       },
     },
@@ -303,15 +321,12 @@ const viewportGizmoGestureMachineDefinition = setup({
 /**
  * The `[state, eventType]` pairs {@link viewportGizmoGestureMachine} leaves unanswered (MC-R17).
  *
- * - A turn while idle is a face click's animation or a drag after the idle-start window: the adapter already reported
- *   its pose to the camera, and nothing is locked.
  * - A release while idle ends an animation or a press the idle-start window already gave back.
  * - A second press of a held one is the cube's own re-delivery; the cube takes no press while it animates.
  *
  * @public
  */
 export const viewportGizmoGestureIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
-  ['idle', 'gizmoTurned'],
   ['idle', 'gizmoReleased'],
   ['pressed', 'gizmoPressed'],
   ['turning', 'gizmoPressed'],

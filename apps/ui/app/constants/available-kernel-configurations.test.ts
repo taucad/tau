@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { availableKernelConfigurations, routingKernelProfile } from '#constants/available-kernel-configurations.js';
 import { picogkBrowserAssets } from '#runtime/picogk-browser-assets.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 
 vi.mock('#runtime/picogk-browser-assets.js', () => ({ picogkBrowserAssets: vi.fn() }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: vi.fn() }));
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({ desktopBridge: vi.fn() }));
 afterEach(() => {
   vi.resetAllMocks();
 });

@@ -563,7 +563,7 @@ describe('controls adapter', () => {
 
     // The cube takes a press and turns the camera: its gesture holds the lock.
     report?.({ type: 'gizmoPressed' });
-    report?.({ type: 'gizmoTurned' });
+    report?.({ type: 'gizmoTurned', cause: 'drag' });
     expect(locked()).toBe(true);
     const { revision } = harness.camera.getSnapshot().context;
     ticker.current(harness.state, 1 / 60);
@@ -629,7 +629,7 @@ describe('controls adapter', () => {
     });
     harness.graphics.send({ type: 'viewportGizmoAttached', gizmoId: 'cube', adapter });
     report?.({ type: 'gizmoPressed' });
-    report?.({ type: 'gizmoTurned' });
+    report?.({ type: 'gizmoTurned', cause: 'drag' });
     expect(selectGraphicsViewportGizmoLocked(harness.graphics.getSnapshot())).toBe(true);
     harness.graphics.send(step);
     controls.update(0);

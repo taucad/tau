@@ -8,7 +8,7 @@ const { listing } = vi.hoisted(() => ({
   listing: { pending: [] as Array<(value: unknown) => void> },
 }));
 
-vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => ({ firstRun: true }) }));
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({ desktopBridge: () => ({ firstRun: true }) }));
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
     projectListingQuery: {

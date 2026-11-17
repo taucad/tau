@@ -27,6 +27,7 @@ import { rootMiddleware } from '#lib/root-middleware.server.js';
 import { shellDocumentFile, shellSkewCookie, staticShellClasses } from '#lib/route-classes.js';
 import { skewProtectionCookieName } from '#lib/skew-protection.server.js';
 import { contentSecurityPolicyHeaders } from '#scripts/write-content-security-policy-headers.mts';
+import { sampleUrl } from '#scripts/check-static-shells.mts';
 
 const uiRoot = resolve(import.meta.dirname, '../..');
 const toml = readFileSync(join(uiRoot, 'netlify.toml'), 'utf8');
@@ -133,13 +134,14 @@ const serveDocument = async (request: Request, context: EntryContext): Promise<R
  * server module chooses its CSP once, from `TAU_FRONTEND_URL` when it loads, so for another site the CSP is the one
  * that module computes for it ({@link siteContentSecurityPolicy}); every other header is chosen per request.
  */
-const functionDocumentHeaders = async (frontendUrl: string, token?: string): Promise<Headers> => {
+const functionDocumentHeaders = async (
+  frontendUrl: string,
+  token?: string,
+  path = '/w/home/bracket-v2',
+): Promise<Headers> => {
   vi.stubEnv('NETLIFY_SKEW_PROTECTION_TOKEN', token ?? '');
   const context = { staticHandlerContext: { matches: [{ route: { id: 'root' } }] } } as unknown as EntryContext;
-  const response = await serveDocument(
-    new Request(new URL('/w/home/bracket-v2', frontendUrl), { method: 'HEAD' }),
-    context,
-  );
+  const response = await serveDocument(new Request(new URL(path, frontendUrl), { method: 'HEAD' }), context);
   const headers = new Headers(response.headers);
   headers.set('Content-Security-Policy-Report-Only', siteContentSecurityPolicy(frontendUrl));
   return headers;
@@ -171,11 +173,11 @@ describe.each([
   { site: 'production', frontendUrl: 'https://tau.new' },
   { site: 'staging', frontendUrl: 'https://taucad.dev' },
   { site: 'a self-hosted or local site', frontendUrl: 'http://localhost:3000' },
-])('the project shell on $site', ({ frontendUrl }) => {
+])('the static shells on $site', ({ frontendUrl }) => {
   it.each(staticShellClasses)('should carry the $label function document headers', async (shell) => {
-    const ssr = pick(await functionDocumentHeaders(frontendUrl));
+    const ssr = pick(await functionDocumentHeaders(frontendUrl, undefined, sampleUrl(shell)));
     const headersFile = builtHeadersFile(frontendUrl);
-    const requested = pick(staticHeaders('/w/home/bracket-v2', headersFile));
+    const requested = pick(staticHeaders(sampleUrl(shell), headersFile));
     const shellFile = pick(staticHeaders(`/${shellDocumentFile(shell)}`, headersFile));
 
     expect(ssr['Cross-Origin-Opener-Policy']).toBe('same-origin');
@@ -202,6 +204,8 @@ describe('production shell headers', () => {
     );
     const shell = staticHeaders('/w/home/bracket-v2', builtHeadersFile('https://tau.new'));
     expect(shell.get('set-cookie')).toBe(shellSkewCookie(skewProtectionCookieName));
+    // The Home shell gets its expiry from the marketing edge function, which alone serves it (PL4).
+    expect(staticHeaders('/', builtHeadersFile('https://tau.new')).has('set-cookie')).toBe(false);
     // No other static path expires it: the offline shell and the assets leave a tab's pin alone.
     for (const path of ['/usage', '/assets/route-Dq3Xc9.js', '/manifest.webmanifest']) {
       expect(staticHeaders(path, builtHeadersFile('https://tau.new')).has('set-cookie'), path).toBe(false);

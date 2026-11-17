@@ -169,6 +169,9 @@ export const initializeInstallerCatalog = async (signal: AbortSignal): Promise<v
         for (const entry of document.querySelectorAll<HTMLElement>(`[data-mac-route="${diskImage.platform}"]`)) {
           entry.hidden = entry.dataset['macHero'] !== undefined && host !== 'mac';
         }
+        for (const entry of document.querySelectorAll<HTMLElement>(`[data-beta-route="${diskImage.platform}"]`)) {
+          entry.hidden = true;
+        }
       }
       for (const link of document.querySelectorAll<HTMLAnchorElement>(
         `a[data-download-platform="${choice.platform}"]`,

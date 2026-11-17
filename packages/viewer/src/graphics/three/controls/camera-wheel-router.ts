@@ -77,7 +77,15 @@ export const resolvePinchRatio = ({
 };
 
 /**
- * How the person navigates the viewer: their mouse preset and the three toggles. Every
+ * How an orbit drag turns the view: Turntable keeps the world up (the view stops at the poles); Tumble turns freely
+ * through them, rolling the view as it goes.
+ *
+ * @public
+ */
+export type OrbitStyle = 'turntable' | 'tumble';
+
+/**
+ * How the person navigates the viewer: their mouse preset, orbit style and the three toggles. Every
  * field is optional; an absent one takes its built-in value.
  *
  * @public
@@ -91,6 +99,8 @@ export type CameraInput = Readonly<{
   orbitAboutCursor?: boolean;
   /** Whether the wheel and pinch zoom in the opposite direction. Absent: off. */
   invertZoom?: boolean;
+  /** How an orbit drag turns the view. Absent: Turntable. */
+  orbitStyle?: OrbitStyle;
 }>;
 
 /**

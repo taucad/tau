@@ -15,11 +15,14 @@ import { describe, expect, it } from 'vitest';
 import { metaConfig } from '#constants/meta.constants.js';
 import {
   classesOwningRoute,
+  edgeShellClasses,
   routeClassOfRouteId,
   isStaticShellPath,
   netlifyFunctionExcludedPaths,
   netlifyShellRedirects,
+  prerenderedFiles,
   renderNetlifyShellRouting,
+  rewriteShellClasses,
   routeClasses,
   shellDocumentFile,
   shellSentinel,
@@ -30,9 +33,14 @@ import {
 import { skewProtectionCookie, skewProtectionCookieName } from '#lib/skew-protection.server.js';
 import { listSitemapPaths, listStaticPrerenderPaths } from '#lib/static-paths.js';
 /* oxlint-disable eslint/no-restricted-imports -- Netlify bundles every file in edge-functions/, outside the app alias root. */
-import { config as marketingEdge } from '../../netlify/edge-functions/marketing.js';
+import {
+  homeShellDocument,
+  config as marketingEdge,
+  shellSkewCookie as marketingShellSkewCookie,
+} from '../../netlify/edge-functions/marketing.js';
 import { config as marketingEventsEdge } from '../../netlify/edge-functions/marketing-events.js';
 import { config as posthogEdge } from '../../netlify/edge-functions/posthog.js';
+import { config as staticShellEdge, shellSkewCookieExpiry } from '../../netlify/edge-functions/static-shell.js';
 /* oxlint-enable eslint/no-restricted-imports */
 
 const appRoot = resolve(import.meta.dirname, '..');
@@ -105,6 +113,7 @@ const route = (href: string): Routed => {
 
 const projectClass = staticShellClasses.find((routeClass) => routeClass.id === 'project');
 const projectShell = projectClass === undefined ? '' : `/${shellDocumentFile(projectClass)}`;
+const homeClass = staticShellClasses.find((routeClass) => routeClass.id === 'home');
 
 describe('route-class registry', () => {
   it('should give every route module exactly one class', () => {
@@ -132,9 +141,10 @@ describe('route-class registry', () => {
   it.each(staticShellClasses)('should serve the $label shell from one route whose pattern is its match', (shell) => {
     expect(shell.routes).toHaveLength(1);
     const [entry] = shell.routes;
-    // `flatRoutes`: dots separate segments, `$name` is a parameter.
+    // `flatRoutes`: dots separate segments, `$name` is a parameter, `_index` is the parent's index route.
     const pattern = `/${(entry ?? '')
       .split('.')
+      .filter((segment) => segment !== '_index')
       .map((segment) => segment.replace(/^\$/u, ':'))
       .join('/')}`;
     expect(pattern).toBe(shell.match);
@@ -239,7 +249,7 @@ describe('static-shell routing on Netlify (PL3)', () => {
     }
   });
 
-  it('should keep the shell URLs out of every edge function', () => {
+  it('should keep the shell URLs out of every edge function but the static shell one', () => {
     const shellUrls = ['/w/home/bracket-v2', '/w/home/bracket-v2/', '/w/__shell/__shell'];
     const edgePaths = [marketingEdge.path, marketingEventsEdge.path, posthogEdge.path].flat();
     for (const edgePath of edgePaths) {
@@ -248,6 +258,62 @@ describe('static-shell routing on Netlify (PL3)', () => {
         expect(pattern.test({ pathname }), `${edgePath} would run before ${pathname}`).toBe(false);
       }
     }
+  });
+
+  it('should run the static shell edge function on exactly the URLs the function excludes', () => {
+    expect(staticShellEdge.path).toStrictEqual(netlifyFunctionExcludedPaths());
+    // `@netlify/edge-bundler` compiles an edge path as `getRoutes` does an excluded one: with an optional trailing slash.
+    const runsEdge = (pathname: string): boolean =>
+      staticShellEdge.path.some((path) => {
+        const pattern = new URLPattern({ pathname: path });
+        return (
+          pattern.test({ pathname }) || (pathname.endsWith('/') && pattern.test({ pathname: pathname.slice(0, -1) }))
+        );
+      });
+    const shapes = [
+      '/w/home/bracket-v2',
+      '/w/home/bracket-v2/',
+      '/w/__shell/__shell',
+      '/w/home/bracket-v2.data',
+      '/w/home/bracket-v2/preview',
+      '/w/home/bracket-v2/preview.data',
+      '/w/home',
+      '/w/a//',
+      '/',
+    ];
+    for (const pathname of shapes) {
+      expect(runsEdge(pathname), pathname).toBe(staticShellFor(pathname) !== undefined);
+    }
+  });
+});
+
+describe('the Home shell behind the marketing edge function (PL4)', () => {
+  it('should be the static shell of the index route, prerendered at `/`', () => {
+    expect(homeClass).toMatchObject({ delivery: 'static-shell', via: 'edge', match: '/', shellPath: '/' });
+    expect(classesOwningRoute('_index').map((routeClass) => routeClass.id)).toStrictEqual(['home']);
+    expect(isStaticShellPath('/')).toBe(true);
+  });
+
+  it('should be the file the marketing edge function rewrites `/` to', () => {
+    expect(homeClass === undefined ? undefined : `/${shellDocumentFile(homeClass)}`).toBe(homeShellDocument);
+    expect(marketingEdge.path).toContain('/');
+  });
+
+  it("should expire the skew cookie as the project shell's static header does", () => {
+    expect(marketingShellSkewCookie).toBe(shellSkewCookie(skewProtectionCookieName));
+  });
+
+  it('should add no function exclusion, rewrite or header rule: the edge function alone chooses it', () => {
+    expect(netlifyFunctionExcludedPaths()).toHaveLength(rewriteShellClasses.length);
+    for (const rule of netlifyShellRedirects(metaConfig.appDomain)) {
+      expect(redirectMatches(rule.from, new URL('https://tau.new/')), rule.from).toBe(false);
+      expect(redirectMatches(rule.from, new URL('https://www.tau.new/')), rule.from).toBe(false);
+    }
+    // `/`, `/_root.data` and `/?…` reach the function as before whenever the edge function passes them on.
+    for (const href of ['/', '/?app', '/_root.data', '/_root.data?_routes=root,routes/_index', '/index.html']) {
+      expect(route(href), href).toStrictEqual({ kind: 'function' });
+    }
+    expect(staticShellFor('/')).toBeUndefined();
   });
 });
 
@@ -265,9 +331,27 @@ describe('generated Netlify configuration', () => {
   });
 
   it('should rewrite to the file the prerender pass writes', () => {
-    for (const shell of staticShellClasses) {
+    expect(rewriteShellClasses.length).toBeGreaterThan(0);
+    for (const shell of rewriteShellClasses) {
       expect(shellDocumentFile(shell)).toBe(`${shell.shellPath.slice(1)}/index.html`);
+      expect(shellDocumentFile(shell)).toBe(prerenderedFiles(shell.shellPath).document);
     }
+  });
+
+  it("should serve an edge shell from a file of its own, away from its URL's static path", () => {
+    expect(edgeShellClasses.map((shell) => shell.id)).toStrictEqual(['home']);
+    for (const shell of edgeShellClasses) {
+      expect(shellDocumentFile(shell)).toBe(`${shellSentinel}/${shell.id}/index.html`);
+      expect(shellDocumentFile(shell)).not.toBe(prerenderedFiles(shell.shellPath).document);
+    }
+  });
+
+  it('should name the files the React Router prerender writes for a path', () => {
+    expect(prerenderedFiles('/')).toStrictEqual({ document: 'index.html', data: ['_root.data', '_.data'] });
+    expect(prerenderedFiles('/w/__shell/__shell')).toStrictEqual({
+      document: 'w/__shell/__shell/index.html',
+      data: ['w/__shell/__shell.data'],
+    });
   });
 });
 
@@ -297,6 +381,10 @@ describe('skew protection on a shell response', () => {
     );
     // `netlify.toml` header rules do not apply to function responses, so `.data` and `/preview` keep their pin.
     expect(route('/w/home/bracket-v2.data')).toStrictEqual({ kind: 'function' });
+  });
+
+  it('should expire it from the edge function too, since the edge cache serves the file without the header rule', () => {
+    expect(shellSkewCookieExpiry).toBe(shellSkewCookie(skewProtectionCookieName));
   });
 });
 

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { attachmentIntakeMaxBytes, mayHoldAttachment, readAttachmentFile } from '#utils/attachment-intake.js';
 
@@ -26,6 +28,26 @@ const bmp = (() => {
   view.setUint16(28, 24, true);
   return bytes;
 })();
+
+/** A 32×48, 8-bit Photoshop header: a format Tau recognises but neither stores nor converts. */
+const psd = (() => {
+  const bytes = new Uint8Array(26);
+  const view = new DataView(bytes.buffer);
+  bytes.set(new TextEncoder().encode('8BPS'));
+  view.setUint16(4, 1);
+  view.setUint16(12, 3);
+  view.setUint32(14, 32);
+  view.setUint32(18, 48);
+  view.setUint16(22, 8);
+  return bytes;
+})();
+
+/** A real 1200×800 HEIC photo, as an iPhone writes it. */
+const heic = new Uint8Array(
+  readFileSync(path.join(import.meta.dirname, '../../../../../libs/utils/src/image-probe.fixtures/small.heic')),
+);
+
+const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]);
 
 const base64 = (bytes: Uint8Array<ArrayBuffer>): string => Buffer.from(bytes).toString('base64');
 
@@ -120,8 +142,50 @@ describe('attachment-intake', () => {
     });
   });
 
+  describe('a generic declared type', () => {
+    it('should admit a HEIC typed application/octet-stream for conversion, labelled from its bytes', async () => {
+      await expect(
+        readAttachmentFile(fileOf(heic, 'IMG_0001.HEIC', 'application/octet-stream'), { transcodeSources: ['heic'] }),
+      ).resolves.toEqual({
+        outcome: 'admitted',
+        kind: 'image',
+        mediaType: 'image/heic',
+        source: `data:image/heic;base64,${base64(heic)}`,
+      });
+    });
+
+    it('should admit a JPEG typed application/octet-stream under image/jpeg', async () => {
+      await expect(readAttachmentFile(fileOf(jpeg, 'small.jpg', 'application/octet-stream'))).resolves.toMatchObject({
+        outcome: 'admitted',
+        mediaType: 'image/jpeg',
+      });
+    });
+
+    it('should refuse a PSD typed application/octet-stream by its format, as an untyped one is', async () => {
+      const expected = { outcome: 'refused', reason: 'unsupported-format', format: 'psd' };
+
+      await expect(readAttachmentFile(fileOf(psd, 'layout.psd', 'application/octet-stream'))).resolves.toEqual(
+        expected,
+      );
+      await expect(readAttachmentFile(fileOf(psd, 'layout.psd', ''))).resolves.toEqual(expected);
+    });
+
+    it.each([
+      ['a ZIP', 'models.zip', zip],
+      ['text', 'notes.txt', new TextEncoder().encode('just some notes')],
+    ])('should read %s typed application/octet-stream and refuse it as not an image', async (_, name, bytes) => {
+      const file = fileOf(bytes, name, 'application/octet-stream');
+
+      await expect(readAttachmentFile(file, { transcodeSources: ['heic'] })).resolves.toEqual({
+        outcome: 'refused',
+        reason: 'not-an-image',
+      });
+      expect(file.arrayBuffer).toHaveBeenCalledOnce();
+    });
+  });
+
   describe('mayHoldAttachment', () => {
-    it('should accept stored types, any image type and an unknown type, and nothing else', () => {
+    it('should accept stored types, any image type and an unknown or generic type, and nothing else', () => {
       expect(
         [
           'image/jpeg',
@@ -130,11 +194,13 @@ describe('attachment-intake', () => {
           'image/jpg',
           'image/pjpeg',
           '',
+          'application/octet-stream',
+          'binary/octet-stream',
           'image/heic',
           'text/plain',
           'application/zip',
         ].map((type) => mayHoldAttachment(type)),
-      ).toEqual([true, true, true, true, true, true, true, false, false]);
+      ).toEqual([true, true, true, true, true, true, true, true, true, false, false]);
     });
   });
 });

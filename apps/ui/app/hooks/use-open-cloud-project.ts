@@ -6,7 +6,7 @@
  * predicate as a value — a heavy import here would be a heavy import there.
  */
 
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useProjectManager } from '#hooks/use-project-manager.js';

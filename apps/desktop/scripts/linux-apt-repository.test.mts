@@ -85,7 +85,9 @@ const main = async (): Promise<void> => {
   const release = await readFile(join(firstDirectory, 'dists/stable/Release'), 'utf8');
   assert.match(release, /Origin: Tau\nLabel: TauProduction\nSuite: stable\nCodename: stable/u);
   assert.match(release, /Acquire-By-Hash: yes/u);
-  assert.equal(Date.parse(first.inventory.validUntil) - Date.parse(first.inventory.issuedAt), 7 * 24 * 60 * 60 * 1000);
+  // APT metadata no longer expires: no Valid-Until in Release and no validUntil in the signed inventory.
+  assert.doesNotMatch(release, /Valid-Until/u);
+  assert.equal(first.inventory.validUntil, undefined);
   const aptUpdate = async (directory: string, expectedKey = keyring): Promise<string> => {
     const state = await mkdtemp(join(root, 'apt-'));
     await chmod(state, 0o755);
@@ -204,14 +206,15 @@ const main = async (): Promise<void> => {
     }),
     /symlink/u,
   );
-  const expiredDirectory = join(root, 'expired');
+  // Without Valid-Until, apt still accepts a repository signed long ago.
+  const oldDirectory = join(root, 'old');
   await buildLinuxAptRepository({
     ...common,
-    issuedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
-    outputDirectory: expiredDirectory,
+    issuedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+    outputDirectory: oldDirectory,
     packages: firstPackages,
   });
-  await assert.rejects(aptUpdate(expiredDirectory), /expired/u);
+  await aptUpdate(oldDirectory);
   const wrongHome = join(root, 'wrong-keys');
   await mkdir(wrongHome, { mode: 0o700 });
   command('gpg', [

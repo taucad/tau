@@ -171,14 +171,14 @@ const mockGetHomeStorageBackend = vi.fn<() => Promise<'indexeddb' | 'opfs' | 'no
 
 const mockNodeFsConnect = vi.fn(async () => new MessageChannel().port1);
 let mockDesktopBridge: unknown;
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   isDesktopTarget: true,
   desktopBridge: () => mockDesktopBridge,
   hostPathName: (path: string) => path,
   nodeHomeRoot: () => '/userData/home',
 }));
 
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
   getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getWorkspace: async (...args: unknown[]) => mockGetWorkspace(...(args as [string])),

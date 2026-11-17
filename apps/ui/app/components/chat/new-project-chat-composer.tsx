@@ -12,6 +12,7 @@ import { useProjectCreationLocation } from '#hooks/use-project-creation-location
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { projectUrl } from '#utils/project-url.utils.js';
+import { reportProjectCreationFailure } from '#lib/project-creation-failure-reporting.js';
 
 type NewProjectChatComposerProperties = {
   readonly enableAutoFocus?: boolean;
@@ -130,6 +131,7 @@ export function NewProjectChatComposer({
           return;
         }
         console.error('Failed to create project:', error);
+        reportProjectCreationFailure(error);
         toast.error('Failed to create project');
       }
     },

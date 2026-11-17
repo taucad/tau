@@ -1,4 +1,4 @@
-import { definitionLinkMarkdown } from '#components/code/editor-documentation.js';
+import { definitionLinkMarkdown } from '@taucad/editor-ui/components/code/editor-documentation';
 import { URI, Utils } from 'vscode-uri';
 import type { KclValueView } from '@taucad/kcl-wasm-lib/bindings/KclValueView';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';

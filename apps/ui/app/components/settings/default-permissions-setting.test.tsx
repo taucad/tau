@@ -4,10 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { bypassConfirmation, promptInjectionDisclosure } from '#components/chat/permission-mode-copy.js';
 import { DefaultPermissionsSetting } from '#components/settings/default-permissions-setting.js';
-import type { DesktopPermissions, PermissionMode } from '#filesystem/desktop-permissions.js';
+import type { DesktopPermissions, PermissionMode } from '@taucad/files-ui/filesystem/desktop-permissions';
 
 const bridge = vi.hoisted(() => ({ current: undefined as DesktopPermissions | undefined }));
-vi.mock('#filesystem/desktop-permissions.js', () => ({ desktopPermissions: () => bridge.current }));
+vi.mock('@taucad/files-ui/filesystem/desktop-permissions', () => ({ desktopPermissions: () => bridge.current }));
 
 let stored: PermissionMode = 'ask';
 const setDefaultMode = vi.fn(async (mode: PermissionMode, _confirmed: boolean) => {

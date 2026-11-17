@@ -1,7 +1,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
-import { gizmoStyleIds as preferenceGizmoIds, mousePresetIds } from '@taucad/preferences';
-import type { GizmoStyleId as PreferenceGizmoId, MousePresetId } from '@taucad/preferences';
+import { gizmoStyleIds as preferenceGizmoIds, mousePresetIds, orbitStyleIds } from '@taucad/preferences';
+import type { GizmoStyleId as PreferenceGizmoId, MousePresetId, OrbitStyleId } from '@taucad/preferences';
+import type { OrbitStyle } from '@taucad/viewer/graphics/three/controls/camera-wheel-router';
 import { cameraPresetIds } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import type { CameraPresetId } from '@taucad/viewer/graphics/three/controls/camera-presets';
 import { gizmoStyleIds as viewerGizmoIds } from '@taucad/viewer/graphics/three/controls/viewport-gizmo-styles';
@@ -26,6 +27,8 @@ describe('the preset and gizmo enums', () => {
     expectTypeOf<ViewerGizmoId>().toEqualTypeOf<PreferenceGizmoId>();
     expect([...cameraPresetIds]).toEqual([...mousePresetIds]);
     expect([...viewerGizmoIds]).toEqual([...preferenceGizmoIds]);
+    expectTypeOf<OrbitStyle>().toEqualTypeOf<OrbitStyleId>();
+    expect([...orbitStyleIds]).toEqual(['turntable', 'tumble']);
   });
 });
 
@@ -75,6 +78,15 @@ describe('useViewerCameraInput (C9)', () => {
       orbitAboutCursor: true,
       invertZoom: true,
     });
+  });
+
+  it('passes the stored orbit style, and none while unset so the viewer keeps Turntable', () => {
+    const { person, input } = renderRecords();
+    expect(input.result.current.cameraInput).not.toHaveProperty('orbitStyle');
+    act(() => {
+      person.result.current.writeViewer({ controls: { orbitStyle: 'tumble' } });
+    });
+    expect(input.result.current.cameraInput).toEqual({ preset: 'tau', orbitStyle: 'tumble' });
   });
 
   it("passes nothing with viewerControls off, so the viewer keeps today's bindings", () => {

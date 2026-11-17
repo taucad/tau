@@ -5,8 +5,14 @@ import { describe, expect, it } from 'vitest';
 const packageRoot = path.join(import.meta.dirname, '..');
 const sourceRoot = path.join(packageRoot, 'src');
 const packageJson = JSON.parse(readFileSync(path.join(packageRoot, 'package.json'), 'utf8')) as {
-  exports: Record<string, string>;
+  exports: Record<string, string | Record<string, string>>;
 };
+
+/**
+ * `<name>.web.ts` and `<name>.desktop.ts` are one subpath resolved by the
+ * `tau-desktop` package condition; `default` is the web variant.
+ */
+const buildTargetVariant = /\.(?:web|desktop)\.ts$/u;
 
 const moduleFiles = (directory: string): string[] =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -24,15 +30,27 @@ describe('package exports', () => {
       moduleFiles(sourceRoot)
         .map((file) => path.relative(packageRoot, file).split(path.sep).join('/'))
         .toSorted()
-        .map((file) => [`./${file.slice('src/'.length).replace(/\.tsx?$/u, '')}`, `./${file}`]),
+        .map((file): [string, string | Record<string, string>] => {
+          if (buildTargetVariant.test(file)) {
+            const base = file.replace(buildTargetVariant, '');
+            return [
+              `./${base.slice('src/'.length)}`,
+              { 'tau-desktop': `./${base}.desktop.ts`, default: `./${base}.web.ts` },
+            ];
+          }
+          return [`./${file.slice('src/'.length).replace(/\.tsx?$/u, '')}`, `./${file}`];
+        }),
     );
 
     expect(packageJson.exports).toEqual({ ...moduleExports, './package.json': './package.json' });
-    expect(Object.keys(moduleExports)).toHaveLength(93);
+    expect(Object.keys(moduleExports)).toHaveLength(95);
   });
 
   it('points every export at a file that exists', () => {
-    for (const target of Object.values(packageJson.exports)) {
+    const targets = Object.values(packageJson.exports).flatMap((entry): string[] =>
+      typeof entry === 'string' ? [entry] : Object.values(entry),
+    );
+    for (const target of targets) {
       expect(existsSync(path.join(packageRoot, target)), target).toBe(true);
     }
   });

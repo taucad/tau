@@ -12,7 +12,7 @@ import { tauTelemetryHostCloud } from '#cloud/telemetry-host.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import { metaConfig } from '#constants/meta.constants.js';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { store } from '#hooks/use-cookie.js';
 import { readBuildRelease } from '#lib/build-identity.js';
 import { isDesktopTarget } from '#lib/build-target.js';

@@ -1434,8 +1434,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.16(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
       three-viewport-gizmo:
-        specifier: npm:@taulabs/three-viewport-gizmo@2.3.0
-        version: '@taulabs/three-viewport-gizmo@2.3.0(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
+        specifier: npm:@taulabs/three-viewport-gizmo@3.0.0-beta.0
+        version: '@taulabs/three-viewport-gizmo@3.0.0-beta.0(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -3629,11 +3629,87 @@ importers:
         specifier: workspace:*
         version: link:../../../libs/sandbox
 
+  apps/libs/editor-ui:
+    dependencies:
+      '@codemirror/autocomplete':
+        specifier: 'catalog:'
+        version: 6.20.4
+      '@codemirror/language':
+        specifier: 'catalog:'
+        version: 6.13.1
+      '@codemirror/search':
+        specifier: 'catalog:'
+        version: 6.7.2
+      '@codemirror/state':
+        specifier: 'catalog:'
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: 'catalog:'
+        version: 6.43.15
+      '@taucad/grammars':
+        specifier: workspace:*
+        version: link:../../../libs/grammars
+      '@taucad/ui':
+        specifier: workspace:*
+        version: link:../../../packages/ui
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
+      class-variance-authority:
+        specifier: 'catalog:'
+        version: 0.7.1
+      clsx:
+        specifier: 'catalog:'
+        version: 2.1.1
+      diff:
+        specifier: ^8.0.4
+        version: 8.0.4
+      rehype-sanitize:
+        specifier: 'catalog:'
+        version: 6.0.0
+      rehype-stringify:
+        specifier: 'catalog:'
+        version: 10.0.1
+      remark-parse:
+        specifier: 'catalog:'
+        version: 11.0.0
+      remark-rehype:
+        specifier: 'catalog:'
+        version: 11.1.2
+      unified:
+        specifier: 'catalog:'
+        version: 11.0.5
+    devDependencies:
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.6.3
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.2)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.1(react@19.3.1)
+
   apps/libs/files-ui:
     dependencies:
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:../../../packages/agent-host
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../../../libs/events
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../../packages/filesystem
       '@taucad/fs-client':
         specifier: workspace:*
         version: link:../fs-client
+      '@taucad/slicer':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/slicer
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
@@ -3671,6 +3747,9 @@ importers:
       '@testing-library/user-event':
         specifier: ^14.6.1
         version: 14.6.7(@testing-library/dom@10.4.2)
+      fake-indexeddb:
+        specifier: 'catalog:'
+        version: 6.2.5
       react:
         specifier: 'catalog:'
         version: 19.3.1
@@ -3680,6 +3759,9 @@ importers:
       vitest-mock-extended:
         specifier: 'catalog:'
         version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   apps/libs/fs-client:
     dependencies:
@@ -4442,6 +4524,9 @@ importers:
       '@taucad/csharp-language':
         specifier: workspace:*
         version: link:../libs/csharp-language
+      '@taucad/editor-ui':
+        specifier: workspace:*
+        version: link:../libs/editor-ui
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
@@ -7614,8 +7699,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.16(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
       three-viewport-gizmo:
-        specifier: npm:@taulabs/three-viewport-gizmo@2.3.0
-        version: '@taulabs/three-viewport-gizmo@2.3.0(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
+        specifier: npm:@taulabs/three-viewport-gizmo@3.0.0-beta.0
+        version: '@taulabs/three-viewport-gizmo@3.0.0-beta.0(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))'
     devDependencies:
       '@react-three/fiber':
         specifier: 9.8.2
@@ -7756,6 +7841,9 @@ importers:
       '@rjsf/utils':
         specifier: 6.11.0
         version: 6.11.0(react@19.3.1)
+      '@taucad/camera':
+        specifier: workspace:*
+        version: link:../camera
       '@taucad/kinematics':
         specifier: workspace:*
         version: link:../kinematics
@@ -15558,10 +15646,15 @@ packages:
   '@taulabs/replicad@1.1.0-taulabs.1':
     resolution: {integrity: sha512-lyCe6PKiZ1BIVQ0NZShUsJQxmfQc1jZyx15WXcGMivzCBWuZQwFqFw38DqaKBz8xRC2Ir8tECGjpeiTVLiSMCA==}
 
-  '@taulabs/three-viewport-gizmo@2.3.0':
-    resolution: {integrity: sha512-cmnXtxaB+LPnYwo/YUyeyQX+bLF7ZmT/DVKUbvr19j/39uRdJt4KBWHLAHrZRahUZQDycMtL5jaGU1mGMgHTBA==}
+  '@taulabs/three-viewport-gizmo@3.0.0-beta.0':
+    resolution: {integrity: sha512-jUC5lI2tGov3RtgHOOCqHP7QLkwUz3UbyPitv9TYz0Ka05EdCfKeMjq1VGH3yEJvXmr2y23M6RM4omA1ame4ZQ==}
+    engines: {node: '>=20'}
     peerDependencies:
-      three: '>=0.162.0 <1.0.0'
+      camera-controls: ^3.0.0
+      three: '>=0.167.0 <1.0.0'
+    peerDependenciesMeta:
+      camera-controls:
+        optional: true
 
   '@testing-library/dom@10.4.2':
     resolution: {integrity: sha512-yzr2S9HyAIdhz2/6qHgbs665Q7PKVcDF05vsOlHPxG1mo36gKVesdYVeDLnXgfjJ03CrKRk08knc6+E/9m8v2Q==}
@@ -36382,9 +36475,11 @@ snapshots:
       flatbush: 4.6.2
       opentype.js: 1.3.4
 
-  '@taulabs/three-viewport-gizmo@2.3.0(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))':
+  '@taulabs/three-viewport-gizmo@3.0.0-beta.0(camera-controls@3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)))(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))':
     dependencies:
       three: 0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c)
+    optionalDependencies:
+      camera-controls: 3.1.2(three@0.184.0(patch_hash=177b2ad31337fcafc2b754a1538e06439924675c865cd0019fde3885cda7ae6c))
 
   '@testing-library/dom@10.4.2':
     dependencies:

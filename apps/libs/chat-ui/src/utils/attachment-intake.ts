@@ -16,8 +16,23 @@ import type { ImageFormat } from '@taucad/utils/image-probe';
 /** The largest file intake reads; larger files are refused before any byte is read. */
 export const attachmentIntakeMaxBytes = 64 * 1024 * 1024;
 
-/** Declared types that browsers and pickers give JPEG files besides `image/jpeg`; `''` is "unknown". */
-const looseDeclaredTypes: ReadonlySet<string> = new Set(['image/jpg', 'image/pjpeg', '']);
+/**
+ * Declared types that say nothing about what a file holds: none at all, or a generic binary type. Some browsers and
+ * pickers type a `.heic` photo or a `.psd` as `application/octet-stream`, so these are read and their bytes decide,
+ * exactly as for an empty type.
+ */
+const unknownDeclaredTypes: ReadonlySet<string> = new Set(['', 'application/octet-stream', 'binary/octet-stream']);
+
+/** Declared types that browsers and pickers give JPEG files besides `image/jpeg`. */
+const jpegAliasDeclaredTypes: ReadonlySet<string> = new Set(['image/jpg', 'image/pjpeg']);
+
+/**
+ * Whether a declared type says nothing about what the file holds, so only its bytes can.
+ *
+ * @param declaredType - The file's `type`, as the browser reports it.
+ * @returns `true` for an empty type or a generic binary type such as `application/octet-stream`.
+ */
+export const isUnknownDeclaredType = (declaredType: string): boolean => unknownDeclaredTypes.has(declaredType);
 
 /**
  * Whether a file declared with this type may hold an attachment, and so is worth reading.
@@ -26,10 +41,13 @@ const looseDeclaredTypes: ReadonlySet<string> = new Set(['image/jpg', 'image/pjp
  * converted when the host has an edge for it.
  *
  * @param declaredType - The file's `type`, as the browser reports it.
- * @returns `true` for a stored media type, any image type, a JPEG alias, or an unknown (empty) type.
+ * @returns `true` for a stored media type, any image type, a JPEG alias, or an unknown or generic type.
  */
 export const mayHoldAttachment = (declaredType: string): boolean =>
-  isAttachmentMediaType(declaredType) || declaredType.startsWith('image/') || looseDeclaredTypes.has(declaredType);
+  isAttachmentMediaType(declaredType) ||
+  declaredType.startsWith('image/') ||
+  jpegAliasDeclaredTypes.has(declaredType) ||
+  isUnknownDeclaredType(declaredType);
 
 /**
  * What the composer hands the draft: an image as a `data:` URL whose media
@@ -113,7 +131,8 @@ const refused = (reason: AttachmentIntakeRefusalReason, format?: ImageFormat): A
  * Read one picked, dropped or pasted file and label it from its bytes.
  *
  * A declared type that cannot hold an attachment (`text/plain`, `application/zip`) and a file over
- * {@link attachmentIntakeMaxBytes} are refused without reading. Otherwise the whole file is read once and labelled
+ * {@link attachmentIntakeMaxBytes} are refused without reading; an empty or generic type
+ * (`application/octet-stream`) is read like any other. Otherwise the whole file is read once and labelled
  * from its bytes (I1):
  *
  * - bytes of a stored type are admitted under it: a WebP named `.jpg` as `image/webp`, a JPEG typed `''` as

@@ -1,5 +1,5 @@
 import { ObservabilityHarnessHydrationProbe } from '#lib/observability-harness-hydration.js';
-import { onDesktopMachineNavigation } from '#filesystem/desktop-bridge.js';
+import { onDesktopMachineNavigation } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { installLoopbackHandOff } from '#lib/agent-host-placement.js';
 import type { ComponentType, ReactNode } from 'react';
 import {

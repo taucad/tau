@@ -143,6 +143,17 @@ describe('local project-open performance recorder', () => {
     expect(JSON.stringify(measure.mock.calls)).not.toContain('/private/project/source.ts');
   });
 
+  /* PL5: the deferred tier's starts, so a harness can place them against the useful mark. */
+  it('should measure when the viewer chunk loads and when a kernel worker starts', () => {
+    const measure = stubTiming();
+    const recorder = createProjectOpenPerformance(localConfig());
+
+    recorder.record('viewer.chunk', { start: 10, end: 30, outcome: 'ok' });
+    recorder.record('kernel.worker', { start: 31, end: 31, outcome: 'ok' });
+
+    expect(measure.mock.calls.map(([name]) => name)).toEqual(['tau.load.viewer.chunk', 'tau.load.kernel.worker']);
+  });
+
   it('should give the page one recorder, inert outside a browser page without an injection', () => {
     const measure = stubTiming();
 

@@ -9,6 +9,7 @@ const createProperties = (title = 'main.scad', params?: Record<string, unknown>)
   const containerApi = Object.create(null) as DockviewApi;
   const api = {
     title,
+    group: { id: 'left' },
     close: vi.fn(),
     setActive: vi.fn(),
     onDidTitleChange: vi.fn(() => ({ dispose: vi.fn() })),

@@ -558,7 +558,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
 
   /* Every row ends with the person's session as it began: the same window-station, desktop and volume-root DACLs (as
      `setup` left them), a new process of theirs that starts and creates a window, and a Chromium-style restricted,
-     Low-integrity child of theirs on an alternate desktop that starts and creates one too. */
+     Low-integrity child of theirs on an alternate desktop that starts and creates one too. NW02-NW04 also check it
+     while their workers are live. */
   afterEach(() => {
     expect(personSession(workerProbe)).toStrictEqual(sessionBefore);
   });

@@ -46,7 +46,7 @@ describe('preflight', () => {
 
   it.each([
     ['is not on PATH', { code: 'ENOENT' }, 'was not found on PATH'],
-    ['fails to run, as a missing npm.cmd does under cmd.exe', { status: 1 }, 'did not run'],
+    ['fails to run', { status: 1 }, 'did not run'],
   ])('should exit 4 when npm %s, saying which', (_case, fields, reason) => {
     const npm = (): string => {
       throw Object.assign(new Error('spawnSync npm failed'), fields);

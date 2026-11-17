@@ -854,6 +854,52 @@ describe('createServicesHost — filesystem authority lifetime', () => {
     }
   });
 
+  it('serves a root by the spelling main admitted before that spelling is canonicalised', async () => {
+    /* Windows' 8.3 names (`RUNNER~1`) and macOS's `/var` are admitted spellings whose realpath differs; the
+     * background `realpath` (D8) can still be running when the first request names the root as admitted. */
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-spelling-'));
+    const physical = join(sandbox, 'physical');
+    const alias = join(sandbox, 'alias');
+    const root = join(alias, 'project');
+    await Promise.all([mkdir(join(physical, 'project'), { recursive: true }), mkdir(join(sandbox, 'authority'))]);
+    await symlink(physical, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    await writeFile(join(root, 'value.txt'), 'old');
+    const { promises } = await import('node:fs');
+    const canonicalised = Promise.withResolvers<void>();
+    const realpath = promises.realpath.bind(promises);
+    /* Only the admitted root's background canonicalisation, its first `realpath`, is held back. */
+    let held = false;
+    vi.spyOn(promises, 'realpath').mockImplementation((async (path: string, options?: never) => {
+      if (path === root && !held) {
+        held = true;
+        await canonicalised.promise;
+      }
+      return realpath(path, options);
+    }) as typeof promises.realpath);
+    const host = createServicesHost({ authorityDirectory: join(sandbox, 'authority'), log: vi.fn() });
+    const ports = new MessageChannel();
+    host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [ports.port2 as unknown as UtilityPort]));
+    const channel = new NodeFsChannel(toNodeFsPort(ports.port1 as unknown as UtilityPort));
+    try {
+      expect(held).toBe(true);
+      await expect(new NodeFsProviderClient(channel, root).readFile('value.txt')).resolves.toEqual(
+        new TextEncoder().encode('old'),
+      );
+      /* A spelling main never admitted is still refused while the admitted one is unsettled. */
+      await expect(
+        new NodeFsProviderClient(channel, join(physical, 'project')).readFile('value.txt'),
+      ).rejects.toMatchObject({ code: 'EACCES' });
+    } finally {
+      canonicalised.resolve();
+      channel.close();
+      await host.quiesce();
+      host.dispose();
+      ports.port2.close();
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it('returns OS writer ownership when an actual MessageChannel client disconnects', async () => {
     const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-detach-'));
     const root = join(sandbox, 'project');

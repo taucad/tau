@@ -691,16 +691,26 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (!isAbsolute(root)) {
       return false;
     }
-    const candidate = canonicalPath(root);
     /* Descendants are admitted because projects live inside Home
      * (`userData/home/<project>`); the `sep` suffix keeps `…/home-evil` from
      * matching `…/home`. */
-    const within = (trusted: string): boolean => candidate === trusted || candidate.startsWith(trusted + sep);
-    /* A root is matched by the spelling main published and, once its background
-     * `realpath` settles, by its canonical spelling. No root is canonicalised on
-     * a request's path: a hung mount would hold this event loop (blueprint D8). */
+    const within = (candidate: string, trusted: string): boolean =>
+      candidate === trusted || candidate.startsWith(trusted + sep);
+    /* A request that names a root as main admitted it is admitted as named,
+     * whether or not that spelling's background `realpath` has settled: an
+     * admitted spelling that is not canonical (Windows' 8.3 `RUNNER~1`, macOS's
+     * `/var`) must not be refused for the race. */
+    const named = resolve(root);
+    if ([...trustedRoots.keys()].some((stored) => within(named, stored))) {
+      return true;
+    }
+    /* Any other spelling is matched physically: against the spelling main
+     * published and, once its background `realpath` settles, its canonical
+     * spelling. No admitted root is canonicalised on a request's path: a hung
+     * mount would hold this event loop (blueprint D8). */
+    const candidate = canonicalPath(root);
     for (const [stored, entry] of trustedRoots) {
-      if (within(stored) || (entry.canonical !== undefined && within(entry.canonical))) {
+      if (within(candidate, stored) || (entry.canonical !== undefined && within(candidate, entry.canonical))) {
         return true;
       }
     }

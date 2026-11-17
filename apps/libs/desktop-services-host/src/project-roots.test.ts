@@ -15,6 +15,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createKernelForkResolver, createProjectRootRegistry, sanitizeServicesContext } from '#project-roots.js';
+
 /* Lets a case make one root's canonicalisation hang-equivalent (it throws) without touching the others. */
 const realpathOverride = vi.hoisted(() => ({ refuse: undefined as undefined | ((path: string) => boolean) }));
 vi.mock('node:fs', async (importOriginal) => {
@@ -35,8 +37,6 @@ vi.mock('node:fs', async (importOriginal) => {
 afterEach(() => {
   realpathOverride.refuse = undefined;
 });
-
-import { createKernelForkResolver, createProjectRootRegistry, sanitizeServicesContext } from '#project-roots.js';
 
 const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
 

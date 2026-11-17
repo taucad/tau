@@ -1,5 +1,7 @@
 /**
- * `/invitations/:token` inside the desktop shell — where `tau://invitations/<token>` lands (R4).
+ * `/invitations/:token` wherever no server answers it: the desktop shell, where
+ * `tau://invitations/<token>` lands (R4), and the `tau serve` daemon's SPA
+ * build (`apps/ui/serve/app/routes.ts`).
  *
  * The web module at this path is a server `loader` that moves the token out of
  * the address into a cookie and redirects (#2290); SPA mode admits no `loader`,

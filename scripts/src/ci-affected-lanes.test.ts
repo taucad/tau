@@ -1382,7 +1382,7 @@ describe('plan lane selection', () => {
   });
 
   it('should run the compute qualification lane only when a measured project is affected or a qualification path changed', () => {
-    // runtime-e2e is affected through almost any dependency; a measured project (the Replicad plugin here) keeps it.
+    // The runtime-e2e project is affected through almost any dependency; a measured project (the Replicad plugin) keeps it.
     for (const event of ['merge_group', 'pull_request']) {
       const measured = plan(event, {
         affected: ['replicad', 'runtime-e2e'],

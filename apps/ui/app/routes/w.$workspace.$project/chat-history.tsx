@@ -289,90 +289,94 @@ const ExpandedChatHistory = memo(function ({
               />
             )}
           >
-            {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
-            {/* The one header row: name, rename in place, chat menu, close. */}
-            <FloatingPanelContentHeader className='gap-1'>
-              <ChatTitleBar
-                closeButton={
-                  <FloatingPanelClose
-                    label='Close Chat'
-                    icon={XIcon}
-                    tooltipContent={(isOpen) => (
-                      <div className='flex items-center gap-2'>
-                        {isOpen ? 'Close' : 'Open'} Chat
-                        <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
-                      </div>
-                    )}
-                  />
-                }
-              />
-            </FloatingPanelContentHeader>
-
-            {/* Main chat content area */}
-            <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
-              <Virtuoso
-                ref={virtuosoRef}
-                data={groups}
-                context={transcript}
-                initialTopMostItemIndex={initialChatTurn}
-                itemContent={renderItem}
-                computeItemKey={computeItemKey}
-                scrollerRef={followLatestOutput.scrollerRef}
-                followOutput={followLatestOutput.followOutput}
-                /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
-                 * follows it only once it is measured, so render a little past the foot. Without this a turn sent
-                 * from a short viewport (the phone sheet at half) is never followed, and its reply or failure stays
-                 * folded away below (I5). */
-                increaseViewportBy={appendedTurnOverscan}
-                totalListHeightChanged={followLatestOutput.totalListHeightChanged}
-                className='mt-1 min-h-0 min-w-0 flex-1'
-                atBottomStateChange={handleAtBottomStateChange}
-                components={virtuosoComponents}
-              />
-            </AtReferenceProvider>
-            {/*
-          A refusal on an empty chat has to land somewhere (I12, W19-b).
-
-          `ChatError` rides the last `TurnGroup`, and a submit that fails before
-          the user message is appended — the durable workspace refusing the
-          turn — leaves no group for it to ride. The person then saw nothing at
-          all: their text still in the composer, no row, no banner. One banner
-          at a time: while there are turns, the group above owns it.
-        */}
-            {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
-            {/* Chat input area. The agent's task list and its questions share one
-              tray directly above the composer; the task list is keyed by chat so
-              its fold never carries across chats (D8, agent questions D8). */}
-            <div
-              ref={composerAnchor}
-              role='region'
-              aria-label='Chat composer'
-              className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
-            >
-              <ScrollDownButton
-                hasContent={messageIds.length > 0}
-                isVisible={!atBottom}
-                onScrollToBottom={scrollToBottom}
-              />
-              <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
-              <div className={cn(chatComposerTrayClassName, reservedTrayClassName)}>
-                <ChatTodoList
-                  key={activeChatId}
-                  reserveHeight={reservesTaskList}
-                  isTranscriptLoading={transcript === 'loading'}
+            {/* The whole pane takes files and Tau drags for its composer (`useChatDropZone`): dropping on the
+                transcript attaches exactly what dropping on the composer does. */}
+            <div data-chat-drop-zone='' className='relative flex min-h-0 flex-1 flex-col'>
+              {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
+              {/* The one header row: name, rename in place, chat menu, close. */}
+              <FloatingPanelContentHeader className='gap-1'>
+                <ChatTitleBar
+                  closeButton={
+                    <FloatingPanelClose
+                      label='Close Chat'
+                      icon={XIcon}
+                      tooltipContent={(isOpen) => (
+                        <div className='flex items-center gap-2'>
+                          {isOpen ? 'Close' : 'Open'} Chat
+                          <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
+                        </div>
+                      )}
+                    />
+                  }
                 />
-                <ChatMessageQueue key={`${activeChatId}:messages`} />
-                <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
+              </FloatingPanelContentHeader>
+
+              {/* Main chat content area */}
+              <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
+                <Virtuoso
+                  ref={virtuosoRef}
+                  data={groups}
+                  context={transcript}
+                  initialTopMostItemIndex={initialChatTurn}
+                  itemContent={renderItem}
+                  computeItemKey={computeItemKey}
+                  scrollerRef={followLatestOutput.scrollerRef}
+                  followOutput={followLatestOutput.followOutput}
+                  /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
+                   * follows it only once it is measured, so render a little past the foot. Without this a turn sent
+                   * from a short viewport (the phone sheet at half) is never followed, and its reply or failure stays
+                   * folded away below (I5). */
+                  increaseViewportBy={appendedTurnOverscan}
+                  totalListHeightChanged={followLatestOutput.totalListHeightChanged}
+                  className='mt-1 min-h-0 min-w-0 flex-1'
+                  atBottomStateChange={handleAtBottomStateChange}
+                  components={virtuosoComponents}
+                />
+              </AtReferenceProvider>
+              {/*
+            A refusal on an empty chat has to land somewhere (I12, W19-b).
+
+            `ChatError` rides the last `TurnGroup`, and a submit that fails before
+            the user message is appended — the durable workspace refusing the
+            turn — leaves no group for it to ride. The person then saw nothing at
+            all: their text still in the composer, no row, no banner. One banner
+            at a time: while there are turns, the group above owns it.
+          */}
+              {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
+              {/* Chat input area. The agent's task list and its questions share one
+                tray directly above the composer; the task list is keyed by chat so
+                its fold never carries across chats (D8, agent questions D8). */}
+              <div
+                ref={composerAnchor}
+                role='region'
+                aria-label='Chat composer'
+                className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
+              >
+                <ScrollDownButton
+                  hasContent={messageIds.length > 0}
+                  isVisible={!atBottom}
+                  onScrollToBottom={scrollToBottom}
+                />
+                <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
+                <div className={cn(chatComposerTrayClassName, reservedTrayClassName)}>
+                  <ChatTodoList
+                    key={activeChatId}
+                    reserveHeight={reservesTaskList}
+                    isTranscriptLoading={transcript === 'loading'}
+                  />
+                  <ChatMessageQueue key={`${activeChatId}:messages`} />
+                  <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
+                </div>
+                <ChatTextarea
+                  ref={chatTextareaRef}
+                  enableMobileCollapse={isMobile}
+                  mode='main'
+                  enableAutoFocus={false}
+                  /* The workspace frame served this composer's native input; adopt it at the reveal (PL6). */
+                  handOff={composerHandOff}
+                  onSubmit={onSubmit}
+                />
               </div>
-              <ChatTextarea
-                ref={chatTextareaRef}
-                enableMobileCollapse={isMobile}
-                mode='main'
-                enableAutoFocus={false}
-                /* The workspace frame served this composer's native input; adopt it at the reveal (PL6). */
-                handOff={composerHandOff}
-                onSubmit={onSubmit}
-              />
             </div>
           </FloatingPanelContent>
         </FloatingPanel>

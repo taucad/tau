@@ -8,7 +8,11 @@ import type { DesktopAcceptanceReceipt } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Share the installed runner's trusted source admission and the publication gate's exact Mac-only candidate shape. */
 import { desktopCandidateRoutes } from './desktop-route-publication.mjs';
 import { fetchInstallerCandidate } from './fetch-desktop-installer-candidate.mjs';
-import { usesQualificationBinding, createQualificationBinding } from './qualification-binding.mjs';
+import {
+  createQualificationBinding,
+  qualificationBindingScopes,
+  usesQualificationBinding,
+} from './qualification-binding.mjs';
 import { assertQualificationSource } from './qualification-candidates.mjs';
 /* oxlint-enable no-restricted-imports */
 
@@ -103,20 +107,17 @@ export const collectQualificationRows = (
   if (manifest.sourceCommit !== request.sourceCommit || manifest.channel !== request.channel) {
     throw new Error('Final candidate differs from workflow source/channel');
   }
-  // D-H5: production evidence is per platform, so only the Mac and Linux platform scopes produce it; Windows stays
-  // staging qualification-only.
-  if (request.scope === 'windows' && manifest.channel !== 'staging') {
-    throw new Error('Windows evidence is staging qualification only');
-  }
   if (request.kind === 'vm' && !['macos', 'windows', 'linux'].includes(request.scope)) {
     throw new Error('Clean-host receipts come only from a Mac-, Windows- or Linux-scoped producer');
   }
-  if (request.scope === 'windows' && request.kind !== 'vm') {
-    throw new Error('Windows scope requires consumer VM evidence');
-  }
-  if (request.scope === 'macos' || (request.scope === 'linux' && manifest.channel === 'production')) {
-    // The final candidate must be exactly the platform candidate that publication will later admit. Staging Linux
-    // progress may still be read from the Linux rows of a full candidate.
+  // D-H5: production evidence is per platform. A Mac or Windows platform candidate, and any production Linux one, must
+  // be exactly that platform's candidate; staging Linux progress may still be read from a full candidate's Linux rows.
+  if (
+    request.scope === 'macos' ||
+    request.scope === 'windows' ||
+    (request.scope === 'linux' && manifest.channel === 'production')
+  ) {
+    // The final candidate must be exactly the platform candidate that publication will later admit.
     desktopCandidateRoutes(manifest, request.scope);
   }
   const selectedRows = scopeRows(request.scope);
@@ -235,7 +236,7 @@ const main = async (): Promise<void> => {
     const binding = createQualificationBinding({
       manifest: candidate,
       candidate: candidateProvenance,
-      scope: z.enum(['macos', 'linux']).parse(scope),
+      scope: z.enum(qualificationBindingScopes).parse(scope),
       kind,
       workflowCommit: required('GITHUB_SHA'),
       runId: Number(required('GITHUB_RUN_ID')),

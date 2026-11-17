@@ -25,7 +25,10 @@ const composerSelector = '[aria-label="Ask Tau to build anything..."]';
  * over `locator.waitFor` and `expect.poll` cover everything the specs assert.
  */
 export const expectVisible = async (locator: Locator, timeout = 30_000): Promise<void> => {
-  await locator.first().waitFor({ state: 'visible', timeout });
+  // A match that is on screen, not merely the first in the DOM: the workspace keeps hidden, inert copies of its labels
+  // mounted (the phone tab bar frame drawn from first paint, #2348), so `Parameters` or `Files` first resolves to a
+  // `display: none` span while the desktop pane that shows the same label is visible.
+  await locator.filter({ visible: true }).first().waitFor({ state: 'visible', timeout });
 };
 
 /** Assert a locator settles on an exact match count. */

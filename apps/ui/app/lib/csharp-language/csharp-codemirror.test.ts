@@ -19,10 +19,10 @@ import {
   renameSymbol,
   triggerParameterHints,
 } from '@taucad/editor-ui/components/code/editor-language-features';
-import { EditorDocument } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import { EditorDocumentSession } from '#lib/editor-document-session.js';
-import type { TextChange } from '#lib/editor-document.js';
-import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
+import type { TextChange } from '@taucad/editor-ui/lib/editor-document';
+import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import {
   acquireCsharpLanguage,

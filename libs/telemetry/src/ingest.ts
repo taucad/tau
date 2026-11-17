@@ -7,8 +7,6 @@ import { llmGatewayProviders, promptCacheOutcomes } from '#llm-gateway-vocabular
  */
 /* eslint-disable @typescript-eslint/naming-convention -- OTEL constant enum uses UPPER_SNAKE_CASE */
 export const IngestEntryName = {
-  KERNEL_CREATE_GEOMETRY: 'observability.createGeometry',
-  KERNEL_EXPORT_GEOMETRY: 'observability.exportGeometry',
   AGENT_SESSION: 'agent.session',
   AGENT_TURN: 'agent.turn',
   SYNC_ATTEMPT: 'observability.syncAttempt',
@@ -20,27 +18,16 @@ export const IngestEntryName = {
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- end OTEL constants block */
 
-const kernelCreateGeometryEntrySchema = z.object({
-  name: z.literal(IngestEntryName.KERNEL_CREATE_GEOMETRY),
-  duration: z.number().nonnegative(),
-  /* Strict: the client keeps its error message locally and sends only `status`; free text is refused. */
-  detail: z
-    .strictObject({
-      status: z.string().optional(),
-    })
-    .optional(),
-});
+/**
+ * Entry names the API no longer records: the old kernel instruments' entries, superseded by `runtime.operation`. The
+ * ingest body still admits them by name, so a stale client's batch is not refused for one retired entry, and the API
+ * drops them unrecorded.
+ * @public
+ */
+export const retiredIngestEntryNames = ['observability.createGeometry', 'observability.exportGeometry'] as const;
 
-const kernelExportGeometryEntrySchema = z.object({
-  name: z.literal(IngestEntryName.KERNEL_EXPORT_GEOMETRY),
-  duration: z.number().nonnegative(),
-  detail: z
-    .strictObject({
-      status: z.string().optional(),
-      exportFormat: z.string().optional(),
-    })
-    .optional(),
-});
+/** A retired entry as the ingest body admits it: its name only; anything else it carries is stripped, never read. @public */
+export const retiredIngestEntrySchema = z.object({ name: z.enum(retiredIngestEntryNames) });
 
 /* Agent usage (W36-C). Every string is a bounded label: ids and codes are shape-checked, the rest are enums. */
 
@@ -510,8 +497,6 @@ const kernelFirstOutcomeEntrySchema = z.object({
  * @public
  */
 export const clientMetricEntrySchema = z.discriminatedUnion('name', [
-  kernelCreateGeometryEntrySchema,
-  kernelExportGeometryEntrySchema,
   agentSessionEntrySchema,
   agentTurnEntrySchema,
   syncAttemptEntrySchema,

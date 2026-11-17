@@ -1011,7 +1011,10 @@ describe('createProjectHost', () => {
 
     expect(afterDevice).toBe(beforeDevice);
     expect(await segmentDevices(options.workspaceRoot)).toEqual([afterDevice]);
-  });
+    /* Two hosts and a fresh import of the whole host module graph. On the hosted windows-2025 runner this row took
+     * 3,284, 3,759, 4,019, 4,291, 2,849 and 9,198 ms in six runs of this lane (the last 44027233976), against 1.3 s
+     * on Linux, so the 5 s default failed it, and its late cleanup then broke the next row. */
+  }, 20_000);
 
   /* RH-A22: the desktop built its registry without parameter actors, so it offered no parameter tools. */
   it('should give the desktop project host parameter tools', async () => {

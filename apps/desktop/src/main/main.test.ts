@@ -2341,6 +2341,7 @@ describe('desktop main machine store', () => {
 
 /* eslint-enable @typescript-eslint/naming-convention -- End environment fixtures. */
 
+/* eslint-disable @typescript-eslint/naming-convention -- Electron exports keep their names; Sentry tags are snake_case. */
 describe('desktop main boot hardening (WP5)', () => {
   const bootMilliseconds = 30_000;
 
@@ -2371,11 +2372,17 @@ describe('desktop main boot hardening (WP5)', () => {
     async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       try {
-        fakeWindow.loadURL.mockReturnValueOnce(new Promise<undefined>(() => undefined));
+        fakeWindow.loadURL.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
         await boot();
-        await vi.waitFor(() => {
-          expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
-        });
+        /* `vi.waitFor` advances fake timers while it polls, which would spend the deadline under test. */
+        const giveUpAt = Date.now() + 20_000;
+        while (Date.now() < giveUpAt && fakeWindow.loadURL.mock.calls.length === 0) {
+          // oxlint-disable-next-line no-await-in-loop -- yield to bootstrap without touching the faked clock
+          await new Promise((resolve) => {
+            setImmediate(resolve);
+          });
+        }
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
         const { Menu } = await import('electron');
         expect(state.prepareToRestart).toBeDefined();
         expect(state.installedUpdateMenuItems.map((item) => item.label)).toContain('Check for Updates…');
@@ -2398,7 +2405,7 @@ describe('desktop main boot hardening (WP5)', () => {
   it(
     'should show the window as soon as it is ready to show (T-B17.2)',
     async () => {
-      fakeWindow.loadURL.mockReturnValueOnce(new Promise<undefined>(() => undefined));
+      fakeWindow.loadURL.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
       await boot();
       await vi.waitFor(() => {
         expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
@@ -2437,7 +2444,11 @@ describe('desktop main boot hardening (WP5)', () => {
       expect(signals('desktop-bootstrap-failed')).toEqual([
         expect.objectContaining({ tags: { step: 'home-directory', errno: 'EACCES' } }),
       ]);
-      expect(state.log).toHaveBeenCalledWith('error', 'main.bootstrap-failed', expect.objectContaining({ step: 'home-directory' }));
+      expect(state.log).toHaveBeenCalledWith(
+        'error',
+        'main.bootstrap-failed',
+        expect.objectContaining({ step: 'home-directory' }),
+      );
       expect(fakeWindow.loadURL).not.toHaveBeenCalled();
     },
     bootMilliseconds,
@@ -2448,7 +2459,9 @@ describe('desktop main boot hardening (WP5)', () => {
     async () => {
       await booted();
       const added = (event: 'uncaughtException' | 'unhandledRejection', original: ReadonlySet<unknown>) =>
-        process.listeners(event).filter((listener) => !original.has(listener)) as Array<(...args: unknown[]) => void>;
+        (process.listeners(event as 'uncaughtException') as unknown[]).filter(
+          (listener) => !original.has(listener),
+        ) as Array<(...args: unknown[]) => void>;
       const exception = new TypeError('late fault');
       const rejection = new RangeError('late rejection');
       for (const listener of added('uncaughtException', originalUncaught)) {
@@ -2521,7 +2534,7 @@ describe('desktop main boot hardening (WP5)', () => {
         await writeFile(join(userData, 'route-qualification.state.json'), '{}');
       });
       expect(signals('desktop-probe-leftover-ignored')).toEqual([
-        expect.objectContaining({ tags: expect.objectContaining({ probe: 'route-qualification' }) }),
+        expect.objectContaining({ tags: { probe: 'route-qualification', error_name: 'Error' } }),
       ]);
     },
     bootMilliseconds,
@@ -2534,7 +2547,7 @@ describe('desktop main boot hardening (WP5)', () => {
         await writeFile(join(userData, 'ota-probe.pending.json'), 'not json');
       });
       expect(signals('desktop-probe-leftover-ignored')).toEqual([
-        expect.objectContaining({ tags: expect.objectContaining({ probe: 'ota' }) }),
+        expect.objectContaining({ tags: { probe: 'ota', error_name: 'Error' } }),
       ]);
     },
     bootMilliseconds,
@@ -2548,8 +2561,8 @@ describe('desktop main boot hardening (WP5)', () => {
       await booted();
       const signIn = state.handlers.get('tau:auth:sign-in')!;
       const pending = signIn({ senderFrame: {} });
-      await new Promise((settle) => {
-        setTimeout(settle, 20);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
       });
       expect(state.authSignIn).not.toHaveBeenCalled();
       restore.resolve();
@@ -2572,14 +2585,12 @@ describe('desktop main boot hardening (WP5)', () => {
         ]);
       });
       const { clipboard, shell } = await import('electron');
-      troubleshooting()
-        .find((item) => item.label === 'Show Logs')!
-        .click!();
+      troubleshooting().find((item) => item.label === 'Show Logs')!.click!();
       expect(shell.showItemInFolder).toHaveBeenCalledWith(join(state.userData, 'logs', 'desktop.log'));
-      troubleshooting()
-        .find((item) => item.label === 'Copy Diagnostics')!
-        .click!();
-      expect(clipboard.writeText).toHaveBeenCalledOnce();
+      troubleshooting().find((item) => item.label === 'Copy Diagnostics')!.click!();
+      await vi.waitFor(() => {
+        expect(clipboard.writeText).toHaveBeenCalledOnce();
+      });
       const text = vi.mocked(clipboard.writeText).mock.calls[0]![0];
       expect(text).toContain('Version: test');
       expect(text).not.toContain(homedir());
@@ -2587,3 +2598,4 @@ describe('desktop main boot hardening (WP5)', () => {
     bootMilliseconds,
   );
 });
+/* eslint-enable @typescript-eslint/naming-convention -- End WP5 boot hardening rows. */

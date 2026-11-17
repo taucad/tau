@@ -31,13 +31,15 @@ const summary: DiagnosticsSummary = {
   grantedFolders: 3,
 };
 
-type FakeItem = MenuItemConstructorOptions & { submenu?: { items: FakeItem[]; append: (item: FakeItem) => void } };
-const fakeSubmenu = (items: FakeItem[] = []): NonNullable<FakeItem['submenu']> => ({
+type FakeItem = Readonly<{ label?: string; role?: string; type?: string; submenu?: unknown }>;
+type FakeSubmenu = { readonly items: FakeItem[]; append: (item: FakeItem) => void };
+const fakeSubmenu = (items: FakeItem[] = []): FakeSubmenu => ({
   items,
   append(item) {
     items.push(item);
   },
 });
+const asItem = (options: MenuItemConstructorOptions): FakeItem => options;
 const actions = () => ({
   restartInSafeMode: vi.fn(),
   showLogs: vi.fn(),
@@ -47,14 +49,16 @@ const actions = () => ({
 
 describe('Help → Troubleshooting', () => {
   it('should add its four items under the Help menu, after a separator', () => {
-    const help: FakeItem = { role: 'help', label: 'Help', submenu: fakeSubmenu([{ label: 'Learn More' }]) };
-    const menu = { items: [{ label: 'Tau' } as FakeItem, help], append: vi.fn() };
+    const submenu = fakeSubmenu([{ label: 'Learn More' }]);
+    const help: FakeItem = { role: 'help', label: 'Help', submenu };
+    const tau: FakeItem = { label: 'Tau' };
+    const menu = { items: [tau, help], append: vi.fn() };
     const handlers = actions();
-    expect(addTroubleshootingMenu(menu, (options) => options as FakeItem, handlers)).toBe(true);
-    const added = help.submenu!.items.slice(1);
+    expect(addTroubleshootingMenu(menu, asItem, handlers)).toBe(true);
+    const added = submenu.items.slice(1);
     expect(added[0]).toMatchObject({ type: 'separator' });
     expect(added[1]?.label).toBe(troubleshootingMenuLabel);
-    const entries = added[1]!.submenu as unknown as MenuItemConstructorOptions[];
+    const entries = added[1]!.submenu as MenuItemConstructorOptions[];
     expect(entries.map((entry) => entry.label)).toEqual([
       'Restart in Safe Mode',
       'Show Logs',
@@ -62,7 +66,7 @@ describe('Help → Troubleshooting', () => {
       'Check for Updates…',
     ]);
     for (const entry of entries) {
-      entry.click?.(undefined as never, undefined, undefined as never);
+      (entry.click as (() => void) | undefined)?.();
     }
     expect(handlers.restartInSafeMode).toHaveBeenCalledOnce();
     expect(handlers.showLogs).toHaveBeenCalledOnce();
@@ -72,8 +76,9 @@ describe('Help → Troubleshooting', () => {
   });
 
   it('should add a Help menu when the application menu has none', () => {
-    const menu = { items: [{ label: 'File' } as FakeItem], append: vi.fn() };
-    expect(addTroubleshootingMenu(menu, (options) => options as FakeItem, actions())).toBe(true);
+    const file: FakeItem = { label: 'File' };
+    const menu = { items: [file], append: vi.fn() };
+    expect(addTroubleshootingMenu(menu, asItem, actions())).toBe(true);
     expect(menu.append).toHaveBeenCalledOnce();
     const help = menu.append.mock.calls[0]?.[0] as MenuItemConstructorOptions;
     expect(help.role).toBe('help');
@@ -81,7 +86,7 @@ describe('Help → Troubleshooting', () => {
   });
 
   it('should report that nothing was installed when there is no application menu', () => {
-    expect(addTroubleshootingMenu(null, (options) => options as FakeItem, actions())).toBe(false);
+    expect(addTroubleshootingMenu(undefined, asItem, actions())).toBe(false);
   });
 });
 

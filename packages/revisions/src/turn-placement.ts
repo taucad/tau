@@ -146,6 +146,71 @@ export type TurnPlacementPortOptions<Tools> = Readonly<{
    * {@link checkoutOpenMilliseconds}.
    */
   checkoutOpenBound?: number | undefined;
+  /**
+   * Report each admission's timing once it is answered (W8 diagnostics), counting the activity sources given. A
+   * report that throws is dropped; it never changes the answer.
+   */
+  admissionTiming?:
+    | Readonly<{
+        activity?: Readonly<Partial<Record<TurnAdmissionActivitySource, TurnAdmissionActivityMeter>>>;
+        report: (timing: TurnAdmissionTiming) => void;
+      }>
+    | undefined;
+}>;
+
+/**
+ * What an admission's timing counts besides its own phases: the Git processes and the filesystem bridge calls that
+ * finished while it ran. Each source is a meter its host already times (`gitCommandActivity` from
+ * `@taucad/revisions/node`, `fileSystemBridgeActivity` from `@taucad/fs-bridge`).
+ *
+ * @public
+ */
+export type TurnAdmissionActivitySource = 'git' | 'bridge';
+
+/**
+ * What finished of one activity source while an admission ran. Durations are in milliseconds.
+ *
+ * @public
+ */
+export type TurnAdmissionActivity = Readonly<{ count: number; totalMilliseconds: number; longestMilliseconds: number }>;
+
+/**
+ * A meter an admission opens a window on: `gitCommandActivity`, `fileSystemBridgeActivity`, or a host's own. One
+ * with `during` is also told that the admission is the span its work runs in, which `gitCommandActivity` names on
+ * each slow Git process.
+ *
+ * @public
+ */
+export type TurnAdmissionActivityMeter = Readonly<{
+  open: () => Readonly<{ close: () => TurnAdmissionActivity }>;
+  during?: <Result>(phase: 'admission', run: () => Promise<Result>) => Promise<Result>;
+}>;
+
+/**
+ * One admission's timing, reported when the placement answers it (W8 diagnostics). Ids and milliseconds only: no
+ * path, content or message. A phase the admission did not reach is absent.
+ *
+ * @public
+ */
+export type TurnAdmissionTiming = Readonly<{
+  requestId: string;
+  chatId: string;
+  turnId: string;
+  runId: string;
+  attempt: number;
+  /** How the admission was answered; `failed` when it threw. */
+  status: 'applied' | 'replayed' | 'refused' | 'failed';
+  /** The refusal's code, when refused. */
+  code?: string;
+  /** The placed checkout's id, when placed. */
+  checkoutId?: string;
+  totalMilliseconds: number;
+  phases: Readonly<
+    Partial<Record<'heldElsewhere' | 'recordedCheckout' | 'placeIntent' | 'settle' | 'admitTurn' | 'grant', number>>
+  >;
+  activity: Readonly<Partial<Record<TurnAdmissionActivitySource, TurnAdmissionActivity>>>;
+  /** The longest single Git process or bridge call while it ran, when any finished. */
+  longest?: Readonly<{ source: TurnAdmissionActivitySource; milliseconds: number }>;
 }>;
 
 /**
@@ -155,6 +220,69 @@ export type TurnPlacementPortOptions<Tools> = Readonly<{
  * @public
  */
 export const checkoutOpenMilliseconds = 30_000;
+
+type AdmitInput = Parameters<TurnPlacementAdapter<unknown>['admit']>[0];
+type AdmitAnswer<Tools> = Awaited<ReturnType<TurnPlacementAdapter<Tools>['admit']>>;
+type AdmissionPhases = { -readonly [Phase in keyof TurnAdmissionTiming['phases']]: number };
+
+/* Run one admission phase, recording its milliseconds. */
+const timed = async <Result>(
+  phases: AdmissionPhases,
+  phase: keyof AdmissionPhases,
+  run: () => Promise<Result>,
+): Promise<Result> => {
+  const start = performance.now();
+  try {
+    return await run();
+  } finally {
+    phases[phase] = performance.now() - start;
+  }
+};
+
+/* Answer one admission while counting its phases and the activity it waited on, then report them (W8 diagnostics). */
+const timedAdmission = async <Tools>(
+  timing: NonNullable<TurnPlacementPortOptions<Tools>['admissionTiming']>,
+  input: AdmitInput,
+  admitAttempt: (input: AdmitInput, phases: AdmissionPhases) => Promise<AdmitAnswer<Tools>>,
+): Promise<AdmitAnswer<Tools>> => {
+  const windows = Object.entries(timing.activity ?? {}).map(
+    ([source, meter]) => [source as TurnAdmissionActivitySource, meter.open()] as const,
+  );
+  const phases: AdmissionPhases = {};
+  const start = performance.now();
+  let answer: AdmitAnswer<Tools> | undefined;
+  const attempt = async (): Promise<AdmitAnswer<Tools>> => admitAttempt(input, phases);
+  const scoped = Object.values(timing.activity ?? {}).find((meter) => meter.during !== undefined);
+  try {
+    answer = await (scoped?.during === undefined ? attempt() : scoped.during('admission', attempt));
+    return answer;
+  } finally {
+    const totalMilliseconds = performance.now() - start;
+    const activity: Partial<Record<TurnAdmissionActivitySource, TurnAdmissionActivity>> = {};
+    let longest: { source: TurnAdmissionActivitySource; milliseconds: number } | undefined;
+    for (const [source, window] of windows) {
+      const totals = window.close();
+      activity[source] = totals;
+      if (totals.count > 0 && totals.longestMilliseconds > (longest?.milliseconds ?? -1)) {
+        longest = { source, milliseconds: totals.longestMilliseconds };
+      }
+    }
+    try {
+      timing.report({
+        requestId: input.requestId,
+        ...input.key,
+        status: answer?.status ?? 'failed',
+        ...(answer?.status === 'refused' ? { code: answer.code } : { checkoutId: answer?.placement.checkoutId }),
+        totalMilliseconds,
+        phases,
+        activity,
+        ...(longest && { longest }),
+      });
+    } catch {
+      /* A diagnostic sink that fails never changes an admission's answer. */
+    }
+  }
+};
 
 /** A root answer the adapter waits on, per attempt. */
 type Heard =
@@ -862,78 +990,90 @@ export const createTurnPlacementPort = <Tools>(
     return { ...placement, tools: granted };
   };
 
-  return {
-    admit: async ({ requestId, key, checkoutId, request }) => {
-      if (fenced) {
-        return fencedAnswer(requestId);
-      }
-      const id = attemptIdOf(key);
-      const before = actor.getSnapshot().context;
-      /* TS-R2: an attempt the root already holds is answered by that attempt; no second base is minted. */
-      const replay = tools.has(id) || before.turnFacts[id] !== undefined;
-      if (!replay && (await heldByAnotherRoot(key))) {
-        watchHolder(key);
-        return refused({
-          requestId,
-          code: 'TURN_ALREADY_LEASED',
-          message: admitMessage('TURN_ALREADY_LEASED', '', ''),
-        });
-      }
-      /* TS-R12: the person's choice, else the chat record's checkout; the root falls back to the live one. A replay
-       * (TS-R2) does no placement work: the root answers it from the attempt it already holds. */
-      const intended = replay ? undefined : (checkoutId ?? (await recordedCheckout(key.chatId)));
-      const placed = replay ? { checkoutId: undefined } : await placeIntent(key, intended);
-      if (isFenced()) {
-        return fencedAnswer(requestId);
-      }
-      if ('refused' in placed) {
-        return refused({
-          requestId,
-          code: placed.code,
-          message: admitMessage(placed.code, intended ?? '', placed.refused),
-        });
-      }
-      const intent = placed.checkoutId;
-      if (!replay) {
-        await options.settle?.();
-      }
-      const heard = listen(key, (event) => (event.type === 'placed' || event.type === 'refused' ? event : undefined));
-      actor.send({
-        type: 'admitTurn',
-        key,
-        ...(intent === undefined ? {} : { checkoutId: intent }),
-        ...(request === undefined ? {} : { request }),
+  const admitAttempt = async (
+    { requestId, key, checkoutId, request }: AdmitInput,
+    phases: AdmissionPhases,
+  ): Promise<AdmitAnswer<Tools>> => {
+    if (fenced) {
+      return fencedAnswer(requestId);
+    }
+    const id = attemptIdOf(key);
+    const before = actor.getSnapshot().context;
+    /* TS-R2: an attempt the root already holds is answered by that attempt; no second base is minted. */
+    const replay = tools.has(id) || before.turnFacts[id] !== undefined;
+    if (!replay && (await timed(phases, 'heldElsewhere', async () => heldByAnotherRoot(key)))) {
+      watchHolder(key);
+      return refused({
+        requestId,
+        code: 'TURN_ALREADY_LEASED',
+        message: admitMessage('TURN_ALREADY_LEASED', '', ''),
       });
-      const event = await heard.answer;
-      if (event.type === 'fenced') {
-        return fencedAnswer(requestId);
-      }
-      if (event.type === 'refused') {
-        const code = admitCodeOf(event.code, intent);
-        return refused({
-          requestId,
-          code,
-          message: admitMessage(code, intent ?? 'live', event.reason),
-          ...(event.code === undefined ? {} : { details: { cause: event.code } }),
-        });
-      }
-      const placement = await grant(key, event);
-      if (isFenced()) {
-        return fencedAnswer(requestId);
-      }
-      if ('unplaced' in placement) {
-        return refused({
-          requestId,
-          code: 'CHECKOUT_UNKNOWN',
-          message: admitMessage('CHECKOUT_UNKNOWN', 'live', ''),
-          /* The attempt's row names the base it minted before it was released (D10). */
-          ...(placement.unplaced === undefined ? {} : { details: { revisionId: placement.unplaced } }),
-        });
-      }
-      /* XD3: the admission row is durable before M1 places the attempt, so sync records it in the chat's ref now and
-       * another device refuses a second run before this one streams; the host's heartbeats keep it current (`publish`). */
-      recordsChanged();
-      return { requestId, status: replay ? 'replayed' : 'applied', placement };
+    }
+    /* TS-R12: the person's choice, else the chat record's checkout; the root falls back to the live one. A replay
+     * (TS-R2) does no placement work: the root answers it from the attempt it already holds. */
+    const intended = replay
+      ? undefined
+      : (checkoutId ?? (await timed(phases, 'recordedCheckout', async () => recordedCheckout(key.chatId))));
+    const placed = replay
+      ? { checkoutId: undefined }
+      : await timed(phases, 'placeIntent', async () => placeIntent(key, intended));
+    if (isFenced()) {
+      return fencedAnswer(requestId);
+    }
+    if ('refused' in placed) {
+      return refused({
+        requestId,
+        code: placed.code,
+        message: admitMessage(placed.code, intended ?? '', placed.refused),
+      });
+    }
+    const intent = placed.checkoutId;
+    if (!replay) {
+      await timed(phases, 'settle', async () => options.settle?.());
+    }
+    const heard = listen(key, (event) => (event.type === 'placed' || event.type === 'refused' ? event : undefined));
+    actor.send({
+      type: 'admitTurn',
+      key,
+      ...(intent === undefined ? {} : { checkoutId: intent }),
+      ...(request === undefined ? {} : { request }),
+    });
+    const event = await timed(phases, 'admitTurn', async () => heard.answer);
+    if (event.type === 'fenced') {
+      return fencedAnswer(requestId);
+    }
+    if (event.type === 'refused') {
+      const code = admitCodeOf(event.code, intent);
+      return refused({
+        requestId,
+        code,
+        message: admitMessage(code, intent ?? 'live', event.reason),
+        ...(event.code === undefined ? {} : { details: { cause: event.code } }),
+      });
+    }
+    const placement = await timed(phases, 'grant', async () => grant(key, event));
+    if (isFenced()) {
+      return fencedAnswer(requestId);
+    }
+    if ('unplaced' in placement) {
+      return refused({
+        requestId,
+        code: 'CHECKOUT_UNKNOWN',
+        message: admitMessage('CHECKOUT_UNKNOWN', 'live', ''),
+        /* The attempt's row names the base it minted before it was released (D10). */
+        ...(placement.unplaced === undefined ? {} : { details: { revisionId: placement.unplaced } }),
+      });
+    }
+    /* XD3: the admission row is durable before M1 places the attempt, so sync records it in the chat's ref now and
+     * another device refuses a second run before this one streams; the host's heartbeats keep it current (`publish`). */
+    recordsChanged();
+    return { requestId, status: replay ? 'replayed' : 'applied', placement };
+  };
+
+  return {
+    admit: async (input) => {
+      const timing = options.admissionTiming;
+      return timing === undefined ? admitAttempt(input, {}) : timedAdmission(timing, input, admitAttempt);
     },
 
     complete: async ({ requestId, key, cut }) => {

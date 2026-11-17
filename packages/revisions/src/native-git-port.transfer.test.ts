@@ -13,6 +13,7 @@ import {
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { recordedBy } from '#test/identity.js';
+import { writeNodeExecutable } from '#test/script-executable.js';
 
 /* Tau's block, so a cut adds a line for each file over the threshold (D16). */
 const tauAttributes = [generatedGitattributesPath, generatedGitattributesContent(undefined)] as const;
@@ -26,13 +27,11 @@ const transferFixture = async (operation: 'fetch' | 'push' | 'discovery' | 'git-
   const root = await mkdtemp(join(tmpdir(), 'tau-lfs-budget-'));
   const server = await startGitHttpBackend({ root });
   const marker = join(root, 'transfer-started');
-  const executable = join(root, 'slow-git');
   const release = join(root, 'release-transfer');
   const fail = join(root, 'fail-transfer');
-  await writeFile(
-    executable,
-    `#!${process.execPath}
-const { spawn } = require('node:child_process');
+  const executable = await writeNodeExecutable(
+    join(root, 'slow-git'),
+    `const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 const operation = ${JSON.stringify(operation)};
@@ -48,7 +47,6 @@ if (delayed && !fs.existsSync(${JSON.stringify(release)})) {
   setTimeout(start, 31000);
 } else start();
 `,
-    { mode: 0o755 },
   );
   const repositoryPath = join(root, 'source');
   await mkdir(repositoryPath);

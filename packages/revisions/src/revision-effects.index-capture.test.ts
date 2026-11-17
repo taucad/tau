@@ -28,6 +28,7 @@ import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { recordedBy, testIdentity } from '#test/identity.js';
+import { diskKeepsExecutableBit, fileHeavyTimeout } from '#test/native-git-harness.js';
 import { generatedGitattributesContent, generatedGitattributesPath, tauRevisionPolicy } from '#workspace-config.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
@@ -343,7 +344,8 @@ const moveHead = async (at: Fixture, entries: ReadonlyArray<readonly [string, st
 
 const outside = (at: Fixture, path: string): string => join(at.root, path);
 
-describe('a cut driven by a real Project Index (S10)', () => {
+/* A real index over a real disk: file-heavy, so ten times as long on Windows (`fileHeavyTimeout`). */
+describe('a cut driven by a real Project Index (S10)', { timeout: fileHeavyTimeout(5000) }, () => {
   it('should read only the file Tau wrote, and hash what a walk hashes', async () => {
     const at = await fixture(files(50));
     await mint(at);
@@ -408,7 +410,8 @@ describe('a cut driven by a real Project Index (S10)', () => {
     await expect(readFile(outside(at, 'racy.txt'), 'utf8')).resolves.toBe('other\n');
   });
 
-  it('should read a file whose mode alone changed, as a walk would see it', async () => {
+  /* A change of mode alone needs a disk with an executable bit: NTFS has none (the row below is Windows'). */
+  it.runIf(diskKeepsExecutableBit)('should read a file whose mode alone changed, as a walk would see it', async () => {
     const at = await fixture(files(20));
     await mint(at);
     const before = await stat(outside(at, 'dir0/f5.txt'));
@@ -422,6 +425,25 @@ describe('a cut driven by a real Project Index (S10)', () => {
     expect(at.walked()).toBe(false);
     expect(treeId).toBe(await walkedTreeId(at.walking));
   });
+
+  it.runIf(!diskKeepsExecutableBit)(
+    'should record nothing for a chmod a disk without an executable bit ignores',
+    async () => {
+      const at = await fixture(files(20));
+      const minted = await mint(at);
+      const before = await stat(outside(at, 'dir0/f5.txt'));
+      await chmod(outside(at, 'dir0/f5.txt'), 0o755);
+      await utimes(outside(at, 'dir0/f5.txt'), before.mtime, before.mtime);
+
+      at.count();
+      const { treeId } = await cut(at.actors);
+
+      expect(at.walked()).toBe(false);
+      expect(treeId).toBe(await walkedTreeId(at.walking));
+      const recorded = await at.port.readRevision(revisionId(minted));
+      expect(treeId).toBe(recorded?.treeId);
+    },
+  );
 
   it('should walk when the ignored paths changed since the last capture', async () => {
     const at = await fixture(files(20));
@@ -814,7 +836,9 @@ describe('a first revision built from recorded blob ids (D12)', () => {
  * cut asks them only about the paths it reads, and walks only when a rule's
  * source changed (S10, I5).
  */
-describe("a cut under the checkout's own Git ignore rules (S10)", () => {
+/* Real Git and a real disk per row. On the hosted windows-2025 runner these rows took 2.0-2.4 s (run 44012123071),
+ * 1.8-2.4 s (run 44028941814) and timed out at 5 s (run 44033552647). */
+describe("a cut under the checkout's own Git ignore rules (S10)", { timeout: fileHeavyTimeout(5000) }, () => {
   const ignoring = { '.gitignore': '*.log\nbuild/\n', 'kept.log': 'ignored from the start\n' };
 
   it('should ask only about the paths it reads, never walking the checkout for its rules', async () => {

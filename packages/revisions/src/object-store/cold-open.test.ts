@@ -1228,14 +1228,28 @@ describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
     expect(opened!.report.ranges.waves).toBeGreaterThanOrEqual(13);
     /* Equivalent to git's own closure of the head: every object, byte for byte. */
     const closure = lines(deep.git('rev-list', '--objects', deep.main)).map((line) => line.split(' ')[0]!);
+    /* Git's own bytes for the whole closure from one `cat-file --batch`: a process per object cost this row 3-5 s on
+     * the hosted windows-2025 runner (runs 44028941814, 44037270940 and 44039670024; 0.8 s on Linux), where the open
+     * itself takes about a tenth of that. */
+    const batch = execFileSync('git', ['cat-file', '--batch'], {
+      cwd: deep.directory,
+      input: `${closure.join('\n')}\n`,
+    });
+    const expected = new Map<string, { type: string; data: Uint8Array<ArrayBuffer> }>();
+    for (let at = 0; at < batch.byteLength; ) {
+      const headerEnd = batch.indexOf(0x0a, at);
+      const [oid, type, size] = batch.subarray(at, headerEnd).toString('utf8').split(' ');
+      const start = headerEnd + 1;
+      const end = start + Number(size);
+      expected.set(oid!, { type: type!, data: new Uint8Array(batch.subarray(start, end)) });
+      at = end + 1;
+    }
+    expect([...expected.keys()].toSorted()).toStrictEqual(closure.toSorted());
     for (const oid of closure) {
       // oxlint-disable-next-line no-await-in-loop -- one object compared at a time.
       const read = await store.read(oid);
-      const type = deep.git('cat-file', '-t', oid);
-      expect(read?.type).toBe(type);
-      expect(read?.data).toStrictEqual(
-        new Uint8Array(execFileSync('git', ['cat-file', type, oid], { cwd: deep.directory })),
-      );
+      expect(read?.type).toBe(expected.get(oid)?.type);
+      expect(read?.data).toStrictEqual(expected.get(oid)?.data);
     }
     expect(opened!.report.imported).toBe(closure.length);
   });

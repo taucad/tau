@@ -4,8 +4,9 @@
  * The web has no main process to notice a page that never mounts, so the server-rendered document carries a small
  * inline script and a hidden static strip. The script starts a timer; if the app has not reported `shell-mounted`
  * (`globalThis.__tauBoot.shellMounted`, written by `lib/boot-signals.ts`) after {@link bootWatchdogDeadline}, it
- * reveals the strip with **Reload** and **Open in safe mode**. Neither depends on the bundle, so they still work when
- * the bundle throws before hydration or never loads.
+ * reveals the strip with **Reload** and **Open in safe mode**, looking again each second while the strip has not yet
+ * reached the document. Neither depends on the bundle, so they still work when the bundle throws before hydration or
+ * never loads.
  *
  * The desktop build emits neither: main owns its watchdog and the recovery window there.
  */
@@ -14,6 +15,9 @@ import { isDesktopTarget } from '#lib/build-target.js';
 
 /** How long the page may take to mount its shell before the strip is shown. Milliseconds. @public */
 export const bootWatchdogDeadline = 20_000;
+
+/* A strip not yet in the document at the deadline (a body still streaming) is looked for again this often. */
+const bootStripRetry = 1000;
 
 /** The `data-boot-action` value of the strip's Reload button, which the script wires. @public */
 export const bootReloadAction = 'reload';
@@ -46,7 +50,7 @@ export const buildBootWatchdogScript = (): string | undefined =>
   isDesktopTarget()
     ? undefined
     : `(()=>{try{const b=globalThis.${bootGlobalName}=globalThis.${bootGlobalName}||{};` +
-      `setTimeout(()=>{if(b.shellMounted)return;const s=document.getElementById(${JSON.stringify(bootStripId)});` +
-      `if(!s)return;const r=s.querySelector('[data-boot-action=${bootReloadAction}]');` +
-      `if(r)r.addEventListener('click',()=>{location.reload()});s.hidden=false},${bootWatchdogDeadline})` +
+      `const w=()=>{if(b.shellMounted)return;const s=document.getElementById(${JSON.stringify(bootStripId)});` +
+      `if(!s){setTimeout(w,${bootStripRetry});return}const r=s.querySelector('[data-boot-action=${bootReloadAction}]');` +
+      `if(r)r.addEventListener('click',()=>{location.reload()});s.hidden=false};setTimeout(w,${bootWatchdogDeadline})` +
       `}catch(e){}})()`;

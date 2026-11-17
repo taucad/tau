@@ -6,6 +6,7 @@ pub mod container;
 pub mod desktop;
 pub mod dpapi;
 pub mod environment;
+pub mod executable;
 pub mod firewall;
 pub mod job;
 pub mod launch;

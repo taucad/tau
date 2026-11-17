@@ -30,6 +30,7 @@ describe('windows sandbox frames', () => {
   it('should encode each host frame with its contract type', () => {
     expect([...encodeWindowsHostFrame({ type: 'start' })]).toStrictEqual([0x02, 0, 0, 0, 0]);
     expect([...encodeWindowsHostFrame({ type: 'terminate' })]).toStrictEqual([0x05, 0, 0, 0, 0]);
+    expect([...encodeWindowsHostFrame({ type: 'close-input' })]).toStrictEqual([0x06, 0, 0, 0, 0]);
     expect([
       ...encodeWindowsHostFrame({
         type: 'input',
@@ -45,6 +46,33 @@ describe('windows sandbox frames', () => {
       columns: 120,
       rows: 40,
     });
+  });
+
+  it('should carry a native worker spec with its digest, stdin and network on the wire as written', () => {
+    const spec = {
+      version: 1,
+      executable: String.raw`C:\Users\person\AppData\Local\Tau\python\pythonw.exe`,
+      executableDigest: `sha256:${'ab'.repeat(32)}`,
+      arguments: ['-I', '-m', 'tau_worker'],
+      workingDirectory: String.raw`C:\Projects\gear\.tau\out`,
+      environment: {},
+      stdio: { kind: 'pipes', input: true },
+      filesystem: {
+        readable: [String.raw`C:\Users\person\AppData\Local\Tau\python`],
+        writable: [String.raw`C:\Projects\gear\.tau\out`],
+        readOnly: [],
+        denied: [],
+      },
+      network: { domains: [] },
+      journal: String.raw`C:\custody\worker.acl.json`,
+    } as const;
+    const frame = encodeWindowsHostFrame({ type: 'spec', spec });
+
+    expect(frame[0]).toBe(0x01);
+    expect(JSON.parse(text(frame.subarray(5)))).toStrictEqual(spec);
+    expect(
+      JSON.parse(text(encodeWindowsHostFrame({ type: 'spec', spec: { ...spec, network: undefined } }).subarray(5))),
+    ).not.toHaveProperty('network');
   });
 
   it('should refuse a frame type that is not one byte', () => {

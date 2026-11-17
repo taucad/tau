@@ -100,6 +100,10 @@ pub struct RunnerSpec {
     /// `WinSta0\<private desktop>`, created by `launch`.
     pub desktop: String,
     pub executable: String,
+    /// The launch's `executableDigest`, which `launch` already checked on a handle it holds until the process
+    /// exists. The runner needs it only to admit an executable outside the fixed roots.
+    #[serde(default)]
+    pub executable_digest: Option<String>,
     pub arguments: Vec<String>,
     pub working_directory: String,
     pub environment: BTreeMap<String, String>,

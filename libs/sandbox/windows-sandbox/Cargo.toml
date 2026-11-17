@@ -10,6 +10,11 @@ publish = false
 name = "tau-windows-sandbox"
 path = "src/main.rs"
 
+# A stand-in native worker for the WIN-X64 conformance row, never installed: it answers JSON lines on stdin.
+[[example]]
+name = "tau-worker-probe"
+path = "examples/tau_worker_probe.rs"
+
 [dependencies]
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"

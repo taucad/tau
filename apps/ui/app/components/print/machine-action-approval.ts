@@ -1,6 +1,6 @@
 import type { MachineClient } from '@taucad/runtime/machine';
 import { describePrintError } from '#components/print/machine-facts.js';
-import { operator } from '#hooks/use-machine-control.js';
+import { operator } from '#components/print/machine-operator.js';
 import type { AgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
 
 /** A pending interrupt as the chat answers it: the approval and the id the answer names. @public */

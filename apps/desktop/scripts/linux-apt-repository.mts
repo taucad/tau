@@ -30,7 +30,8 @@ const inventorySchema = z.strictObject({
   schemaVersion: z.literal(1),
   channel: z.enum(['production', 'staging']),
   issuedAt: z.iso.datetime(),
-  validUntil: z.iso.datetime(),
+  // Retired: APT metadata no longer expires. Inventories signed before that still carry it.
+  validUntil: z.iso.datetime().optional(),
   signingFingerprint: z.string().regex(/^(?:[A-F\d]{40}|[A-F\d]{64})$/u),
   packages: z.array(packageSchema),
   byHash: z.array(objectSchema),
@@ -103,7 +104,6 @@ export const buildLinuxAptRepository = async (
   if ((await realpath(gnupgHome)) !== resolve(gnupgHome)) {
     throw new Error('GNUPGHOME must not traverse symlinks');
   }
-  const validUntil = new Date(issuedMilliseconds + 7 * 24 * 60 * 60 * 1000).toISOString();
   const suite = channel === 'staging' ? 'staging' : 'stable';
   const label = channel === 'staging' ? 'TauStaging' : 'TauProduction';
   const root = await realpath(dirname(outputDirectory));
@@ -248,7 +248,7 @@ export const buildLinuxAptRepository = async (
       }
     }
     const releasePath = `dists/${suite}/Release`;
-    const release = `Origin: Tau\nLabel: ${label}\nSuite: ${suite}\nCodename: ${suite}\nDate: ${new Date(issuedAt).toUTCString()}\nValid-Until: ${new Date(validUntil).toUTCString()}\nArchitectures: amd64\nComponents: main\nAcquire-By-Hash: yes\nSHA256:\n${indexes.map((item) => ` ${item.sha256} ${item.size} ${item.path.slice(`dists/${suite}/`.length)}`).join('\n')}\n`;
+    const release = `Origin: Tau\nLabel: ${label}\nSuite: ${suite}\nCodename: ${suite}\nDate: ${new Date(issuedAt).toUTCString()}\nArchitectures: amd64\nComponents: main\nAcquire-By-Hash: yes\nSHA256:\n${indexes.map((item) => ` ${item.sha256} ${item.size} ${item.path.slice(`dists/${suite}/`.length)}`).join('\n')}\n`;
     await put(releasePath, release, false);
     const signingArgs = [
       '--batch',
@@ -295,7 +295,6 @@ export const buildLinuxAptRepository = async (
       schemaVersion: 1,
       channel,
       issuedAt,
-      validUntil,
       signingFingerprint,
       packages: [...packages.values()],
       byHash: [...byHash.values()],

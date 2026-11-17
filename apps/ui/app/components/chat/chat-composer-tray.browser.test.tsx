@@ -13,7 +13,7 @@ let recordFailure: string | undefined;
 const onScreen = new Set<string>();
 const answers = {};
 vi.mock('#hooks/use-chat.js', () => ({ useChatContext: () => ({ activeChatId: 'tray-audit' }) }));
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: () =>
     hasTasks
       ? {

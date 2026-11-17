@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react';
 import { z } from 'zod';
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -35,9 +35,7 @@ import {
   DropdownMenuSeparator,
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
-import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
-import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { toast } from '@taucad/ui/components/sonner';
 import {
@@ -71,12 +69,7 @@ import { useWaitClock, useWaitClockSource } from '@taucad/ui/hooks/use-wait-cloc
 import type { WaitIndicatorTiming } from '@taucad/ui/utils/wait-timing';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
-import {
-  ProjectCard,
-  ProjectCardCadPreview,
-  ProjectCardMedia,
-  projectCardVerticalFieldOfView,
-} from '#components/project-card.js';
+import { ProjectCard, ProjectCardMedia } from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader, SectionHeader, usePhoneTopBar } from '#components/layout/page-header.js';
@@ -97,6 +90,12 @@ import {
   useMaterializeCloudProjects,
 } from '#routes/projects_/cloud-projects.js';
 import type { LibraryRow } from '#routes/projects_/cloud-projects.js';
+
+/* A card's live model preview, with its CAD and graphics machines, loads when it is first turned on (PL5). */
+const ProjectCardLivePreview = lazy(async () => {
+  const module = await import('#components/project-card-live-preview.js');
+  return { default: module.ProjectCardLivePreview };
+});
 
 // Note: useCookie is still used for projectViewMode (user preference, not per-build state)
 
@@ -1442,17 +1441,9 @@ export function ProjectLibraryCard({
         onPreviewVisibilityChange={setShowPreview}
       >
         {showPreview && mainFile !== undefined ? (
-          <SharedWorkerGate>
-            <HomeFileManagerProvider key={project.id} projectId={project.id} rootDirectory={`/projects/${project.id}`}>
-              <CadPreviewProvider
-                projectId={project.id}
-                mainFile={mainFile}
-                initialVerticalFieldOfView={projectCardVerticalFieldOfView}
-              >
-                <ProjectCardCadPreview />
-              </CadPreviewProvider>
-            </HomeFileManagerProvider>
-          </SharedWorkerGate>
+          <Suspense fallback={null}>
+            <ProjectCardLivePreview key={project.id} projectId={project.id} mainFile={mainFile} />
+          </Suspense>
         ) : null}
       </ProjectCardMedia>
       <CardHeader>

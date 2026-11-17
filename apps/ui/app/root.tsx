@@ -1,5 +1,4 @@
 import type { LinksFunction, MetaFunction, MiddlewareFunction, ShouldRevalidateFunction } from 'react-router';
-import { lazy, Suspense } from 'react';
 import type { ReactNode } from 'react';
 import { rootMiddleware } from '#lib/root-middleware.server.js';
 import { getClientEnvironment } from '#environment.config.js';
@@ -13,26 +12,18 @@ import { CookieConsentBanner } from '#components/cookie-consent-banner.js';
 import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
+import { DeferredExampleCommandPaletteItems } from '#components/nav/deferred-example-command-items.js';
 import type { Handle } from '#types/matches.types.js';
 import { prefetchModelCatalog, prefetchShellModelCatalog } from '#lib/model-catalog.server.js';
 import { timeModelCatalogRead } from '#lib/server-timing.server.js';
 import type { Route } from './+types/root.js';
-
-// Every route mounts the palette items, so the example catalog loads on its own
-// chunk instead of joining each route's entry.
-const ExampleCommandPaletteItems = lazy(async () => {
-  const m = await import('#components/nav/example-command-items.js');
-  return { default: m.ExampleCommandPaletteItems };
-});
 
 export const handle: Handle = {
   commandPalette(match) {
     return (
       <>
         <RootCommandPaletteItems match={match} />
-        <Suspense fallback={null}>
-          <ExampleCommandPaletteItems />
-        </Suspense>
+        <DeferredExampleCommandPaletteItems />
       </>
     );
   },
@@ -120,5 +111,6 @@ export default function App(): React.JSX.Element {
 }
 
 export function ErrorBoundary(): React.JSX.Element {
+  /* The root error document brings its own scroller (D4.8); `RootErrorBoundary` owns it, for the desktop root too. */
   return <RootErrorBoundary />;
 }

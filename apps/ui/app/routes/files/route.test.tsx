@@ -14,6 +14,7 @@ type ToastSuccessOptions = {
 
 const {
   desktop,
+  catalogState,
   connectionState,
   mockAssertWorkspaceMutationAllowed,
   mockDisconnectWorkspace,
@@ -31,6 +32,7 @@ const {
       rootStatuses: [] as RootStatus[],
       workspaces: undefined as Workspace[] | undefined,
     },
+    catalogState: { extraWorkspaces: [] as Workspace[] },
     connectionState: { connected: true },
     mockAssertWorkspaceMutationAllowed: vi.fn(),
     mockDisconnectWorkspace: vi.fn<(workspaceId: string) => Promise<WorkspaceEntry | undefined>>(),
@@ -96,7 +98,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   checkHandlePermission: vi.fn(async () => 'granted'),
   getWorkspace: mockGetWorkspace,
-  listWorkspaces: vi.fn(async () => desktop.workspaces ?? [workspace]),
+  listWorkspaces: vi.fn(async () => desktop.workspaces ?? [workspace, ...catalogState.extraWorkspaces]),
   listProjectsForWorkspace: vi.fn(async () => []),
   removeWorkspace: vi.fn(async () => true),
   requestHandlePermission: vi.fn(async () => true),
@@ -142,6 +144,7 @@ vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
 describe('FilesRoute workspace disconnect', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    catalogState.extraWorkspaces = [];
     connectionState.connected = true;
     workspaceConnectionState.current = { phase: 'idle' };
     mockGetWorkspace.mockImplementation(async () => (connectionState.connected ? entry : undefined));
@@ -210,6 +213,51 @@ describe('FilesRoute workspace disconnect', () => {
     expect(await screen.findByText('0 projects ready')).toBeInTheDocument();
     expect(screen.getByText('47 projects need attention')).toBeInTheDocument();
     expect(screen.queryByText('2 projects ready')).not.toBeInTheDocument();
+  });
+});
+
+/* T-A3.1 (D4.4): Files is a document page. The columns flow and the shell scrolls; each column's tree keeps a bounded
+ * height of its own, so a long workspace list always has a scroll owner. */
+describe('FilesRoute layout', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    connectionState.connected = true;
+    workspaceConnectionState.current = { phase: 'idle' };
+    catalogState.extraWorkspaces = Array.from({ length: 29 }, (_unused, index) => ({
+      workspaceId: `wsp_extra_${index}`,
+      name: `Extra ${index}`,
+      lastConnectedAt: 1,
+      slug: `extra-${index}`,
+    }));
+    const entries = new Map<string, WorkspaceEntry>(
+      [workspace, ...catalogState.extraWorkspaces].map((item) => [
+        item.workspaceId,
+        { workspace: item, handle: mock<FileSystemDirectoryHandle>({ name: item.name }) },
+      ]),
+    );
+    mockGetWorkspace.mockImplementation(async (workspaceId) => entries.get(workspaceId));
+  });
+
+  it('should lay 30 workspaces out as a document with a bounded tree per column', async () => {
+    const { container } = render(
+      <TooltipProvider>
+        <FilesRoute />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByText('Extra 28')).toBeInTheDocument();
+    const pageRoot = container.firstElementChild;
+    expect(pageRoot).not.toHaveClass('h-full');
+    expect(container.querySelector('.auto-rows-fr')).toBeNull();
+    expect(container.querySelector('.h-full')).toBeNull();
+
+    const trees = container.querySelectorAll('[data-slot=files-column-tree]');
+    // Home plus 30 workspaces.
+    expect(trees).toHaveLength(31);
+    for (const tree of trees) {
+      expect(tree.className).toMatch(/(?:^|\s)max-h-\S+/);
+      expect(tree).toHaveClass('overflow-auto');
+    }
   });
 });
 

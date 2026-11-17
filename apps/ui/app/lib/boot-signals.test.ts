@@ -3,7 +3,8 @@
  * to the page global the web watchdog reads and through the desktop bridge when it exists.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createActor, createMachine } from 'xstate';
+import { createActor, setup } from 'xstate';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import {
   followHomeReady,
   homeOnlyConfiguration,
@@ -17,9 +18,9 @@ type DesktopHolder = { tau?: { boot?: { report: (stage: BootStage) => void } } }
 type BootHolder = { __tauBoot?: { shellMounted?: boolean; homeReady?: boolean } };
 
 /** A stand-in for `rootFiles`: `connecting` until it is told it is ready. */
-const rootFilesMachine = createMachine({
+const rootFilesMachine = setup({ schemas: { events: eventSchemas<{ type: 'ready' }>() } }).createMachine({
   initial: 'connecting',
-  states: { connecting: { on: { ready: 'ready' } }, ready: {} },
+  states: { connecting: { on: { ready: { target: 'ready' } } }, ready: {} },
 });
 
 describe('boot signals', () => {

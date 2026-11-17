@@ -11,37 +11,29 @@
   "variants": {
     "self-host": {
       "project": {
-        "brotliBytes": 2953073,
-        "requests": 405,
-        "largestChunkBrotliBytes": 228543,
-        "knownHeavy": {
-          "editor": "PL5: the code viewer of the workbench dock",
-          "react-three": "PL5: the printer viewer of the workbench dock",
-          "three": "PL5: part thumbnails and the printer viewer"
-        }
+        "brotliBytes": 1928788,
+        "requests": 305,
+        "largestChunkBrotliBytes": 167393,
+        "knownHeavy": {}
       },
       "home": {
-        "brotliBytes": 1273734,
-        "requests": 294,
-        "largestChunkBrotliBytes": 138882,
+        "brotliBytes": 1230036,
+        "requests": 225,
+        "largestChunkBrotliBytes": 140852,
         "knownHeavy": {}
       }
     },
     "cloud": {
       "project": {
-        "brotliBytes": 2978856,
-        "requests": 420,
-        "largestChunkBrotliBytes": 229660,
-        "knownHeavy": {
-          "editor": "PL5: the code viewer of the workbench dock",
-          "react-three": "PL5: the printer viewer of the workbench dock",
-          "three": "PL5: part thumbnails and the printer viewer"
-        }
+        "brotliBytes": 1956998,
+        "requests": 314,
+        "largestChunkBrotliBytes": 167319,
+        "knownHeavy": {}
       },
       "home": {
-        "brotliBytes": 1296528,
-        "requests": 308,
-        "largestChunkBrotliBytes": 138947,
+        "brotliBytes": 1252118,
+        "requests": 236,
+        "largestChunkBrotliBytes": 140921,
         "knownHeavy": {}
       }
     }

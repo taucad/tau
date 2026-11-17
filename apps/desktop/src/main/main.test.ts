@@ -238,6 +238,9 @@ const fakeWindow = {
   isDestroyed: vi.fn(() => false),
   isMinimized: vi.fn(() => false),
   isFullScreen: vi.fn(() => false),
+  getSize: vi.fn((): [number, number] => [1216, 859]),
+  getContentSize: vi.fn((): [number, number] => [1200, 800]),
+  setMinimumSize: vi.fn(),
   restore: vi.fn(),
   loadURL: vi.fn(async () => undefined),
   reload: vi.fn(),
@@ -869,6 +872,34 @@ describe('desktop main compute owner', () => {
       fakeWindow.isFullScreen.mockReturnValue(false);
       leave?.();
       expect(fakeWindow.webContents.send).toHaveBeenLastCalledWith(windowFullscreenChannel, false);
+    },
+    bootMilliseconds,
+  );
+
+  /* T-A2.1 (D4.6): the floor is a 400 × 300 content area, so the minimum set on the frame adds the frame's own size,
+   * measured after creation and again whenever full screen changes the chrome. */
+  it(
+    'should hold the window to a 400 x 300 content floor through its frame, and measure again after full screen',
+    async () => {
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1216, 859]);
+      fakeWindow.getContentSize.mockReturnValue([1200, 800]);
+      await bootstrap();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(416, 359);
+
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1440, 900]);
+      fakeWindow.getContentSize.mockReturnValue([1440, 900]);
+      const enter = fakeWindow.on.mock.calls.findLast(([name]) => name === 'enter-full-screen')?.[1];
+      enter?.();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(400, 300);
+
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1216, 859]);
+      fakeWindow.getContentSize.mockReturnValue([1200, 800]);
+      const leave = fakeWindow.on.mock.calls.findLast(([name]) => name === 'leave-full-screen')?.[1];
+      leave?.();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(416, 359);
     },
     bootMilliseconds,
   );

@@ -13,8 +13,8 @@ const treeService = {
   },
 };
 
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useOptionalFileManager: () => ({ treeService }),
+vi.mock('#hooks/use-file-services.js', () => ({
+  useOptionalFileServices: () => ({ treeService }),
 }));
 
 const entry = (path: string): FileEntry => ({

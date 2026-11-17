@@ -1,4 +1,6 @@
 import { observeHomeProjectSaves } from '@taucad/files-ui/filesystem/observe-home-project-saves';
+import { FileServicesProvider } from '@taucad/files-ui/hooks/use-file-services';
+import type { FileServices } from '@taucad/files-ui/hooks/use-file-services';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { machineSettingsPath } from '@taucad/runtime/machine/settings';
@@ -44,6 +46,7 @@ import {
   selectActiveWorkspaceId,
   selectBridgeOpener,
   selectProxy,
+  selectSafeMode,
   servicesBound,
   servicesOf,
 } from '#runtime/file-manager-facade.js';
@@ -941,8 +944,7 @@ function FileManagerScope({
         proxy.disposeStorageRoot(`webaccess:${previousWorkspaceId}`);
       }
       proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-      const { safeMode } = fileManagerRef.getSnapshot().context;
-      await proxy.configureProjectRoots(await readRootConfigurationOnly(safeMode));
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(selectSafeMode(fileManagerRef)));
       const discovery = await proxy.listProjectManifests();
       const matches = discovery.entries.filter(
         (entry) =>
@@ -961,7 +963,7 @@ function FileManagerScope({
         workspaceId,
         providerBasePath: match.locator.relativeDirectory,
       });
-      await proxy.configureProjectRoots(await readRootConfigurationOnly(safeMode));
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(selectSafeMode(fileManagerRef)));
 
       workspaceTelemetry.workspaceSwap({
         previousWorkspaceId,
@@ -1498,7 +1500,14 @@ function FileManagerScope({
     ],
   );
 
-  return <FileManagerContext.Provider value={value}>{children}</FileManagerContext.Provider>;
+  /* The files feature's hooks (`@taucad/files-ui/hooks/*`) read the two services from their own context. */
+  const fileServices = useMemo<FileServices>(() => ({ contentService, treeService }), [contentService, treeService]);
+
+  return (
+    <FileManagerContext.Provider value={value}>
+      <FileServicesProvider value={fileServices}>{children}</FileServicesProvider>
+    </FileManagerContext.Provider>
+  );
 }
 
 export function useFileManager(): FileManagerContextType {

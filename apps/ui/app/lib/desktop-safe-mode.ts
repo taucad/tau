@@ -5,7 +5,8 @@
  * recovery exits on `window.tau.troubleshooting`. Read here, renderer-locally, as optional members: a shell built
  * before them has neither, and its page starts normally.
  */
-import type { SafeModeReason } from '#components/layout/safe-mode-bar.js';
+/** Why this load started in safe mode. `requested`: the person asked for it; `unhealthy-launches`: the watchdog did. */
+export type SafeModeReason = 'requested' | 'unhealthy-launches';
 
 /** The preload's troubleshooting calls; each is optional, and a missing one hides its button. */
 export type DesktopTroubleshooting = Readonly<{

@@ -6,9 +6,7 @@
 import { ShieldAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { desktopTroubleshooting } from '#lib/desktop-safe-mode.js';
-
-/** Why this load started in safe mode. `requested`: the person asked for it; `unhealthy-launches`: the watchdog did. */
-export type SafeModeReason = 'requested' | 'unhealthy-launches';
+import type { SafeModeReason } from '#lib/desktop-safe-mode.js';
 
 const reasonCopy: Record<SafeModeReason, string> = {
   requested: 'You started Tau in safe mode. Only Home is open; other folders are not connected.',

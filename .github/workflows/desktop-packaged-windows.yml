@@ -128,6 +128,8 @@ jobs:
           $helper = 'apps/desktop/package-out/Tau-win32-x64/resources/windows-sandbox/win32-x64/tau-windows-sandbox.exe'
           if (-not (Test-Path -LiteralPath $helper)) { throw "the package has no $helper" }
           $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          # The drive roots' DACLs before setup, so a failed run can tell the image's own grants from the helper's.
+          icacls 'C:\' 'D:\' | Out-File -FilePath (Join-Path $env:RUNNER_TEMP 'drive-roots-before-setup.txt')
           & $helper setup --for-user $sid
           if ($LASTEXITCODE -ne 0) { throw "the sandbox setup exited $LASTEXITCODE" }
           & $helper status
@@ -173,6 +175,8 @@ jobs:
             '--- helper status ---'
             & $helper status 2>&1
             "exit $LASTEXITCODE"
+            '--- volume root ACLs before setup ---'
+            Get-Content (Join-Path $env:RUNNER_TEMP 'drive-roots-before-setup.txt') -ErrorAction SilentlyContinue
             '--- volume root ACLs ---'
             icacls 'C:\' 2>&1
             icacls 'D:\' 2>&1

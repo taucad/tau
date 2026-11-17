@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 // oxlint-disable-next-line no-restricted-imports -- Exercise the script-owned publisher directly.
-import { publishIntelBetaDmg } from './publish-intel-beta-dmg.mjs';
+import { intelFeedTag, publishIntelBetaDmg } from './publish-intel-beta-dmg.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Same script-owned publisher types.
 import type { IntelBetaDmgDependencies } from './publish-intel-beta-dmg.mjs';
 
@@ -81,4 +81,36 @@ await test('rejects a tag that is not a desktop release', async () => {
     publishIntelBetaDmg({ tag: 'ui@1.0.0', sha256, size: 1, dependencies }),
     /Invalid desktop release tag/u,
   );
+});
+
+const feedFetch =
+  (status: number, body: unknown, seen: string[] = []): typeof fetch =>
+  async (input) => {
+    seen.push(input instanceof Request ? input.url : input.toString());
+    return Response.json(body, { status });
+  };
+
+const entry = (version: string, name: string) => ({ version, updateTo: { version, name } });
+
+await test('reads the Intel feed release from the channel origin', async () => {
+  const seen: string[] = [];
+  const staging = 'desktop-staging@0.5.0-staging.1499';
+  const body = {
+    currentRelease: '1.13.72',
+    releases: [
+      entry('1.13.70', 'desktop-staging@0.4.0-staging.1370'),
+      entry('1.13.72', 'desktop-staging@0.4.0-staging.1372'),
+    ],
+  };
+  assert.equal(await intelFeedTag(staging, feedFetch(200, body, seen)), 'desktop-staging@0.4.0-staging.1372');
+  assert.deepEqual(seen, ['https://downloads.taucad.dev/latest/desktop-update-darwin-x64.json']);
+});
+
+await test('refuses an Intel feed without an entry for its current release', async () => {
+  const body = { currentRelease: '0.5.0', releases: [entry('0.4.0', 'desktop@0.4.0')] };
+  await assert.rejects(intelFeedTag(tag, feedFetch(200, body)), /no entry for its current release 0\.5\.0/u);
+});
+
+await test('refuses an Intel feed that does not answer', async () => {
+  await assert.rejects(intelFeedTag(tag, feedFetch(404, {})), /answered 404/u);
 });

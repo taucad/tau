@@ -1734,7 +1734,14 @@ const enterOnPaintedDraft = async (
   );
   await releaseHeldRequests();
   await target.expectVisible(selectors.getByCss(richComposer), 60_000);
-  /* A send reaches the agent host and its reply shows; time for it to happen, or not. */
+  /* A send reaches the agent host and its reply shows; time for it to happen, or not. Where it should happen the row
+   * waits for the reply rather than a fixed time a loaded runner can outlast; the window after it still catches a
+   * second send. */
+  if (hint === 'same') {
+    await target
+      .waitFor((reply) => document.body.textContent.includes(reply), paintedReply, { timeout: 30_000 })
+      .catch(() => undefined);
+  }
   await target.delay(settleWindow * 4);
   const state = await target.evaluate(
     ([selector, reply]) => ({

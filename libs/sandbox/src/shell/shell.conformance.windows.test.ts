@@ -74,6 +74,19 @@ type RowResult = Readonly<{
 const results: RowResult[] = [];
 /** Context the sandboxed commands printed, kept for the receipt only; no verdict reads it. */
 const observations: Record<string, unknown> = {};
+/** The helper's own diagnostic lines (the runner's AppContainer, registry and COM checks), kept for the receipt. */
+const helperDiagnostics: string[] = [];
+const helperDiagnosticLimit = 400;
+const recordHelperDiagnostic = (line: string): void => {
+  if (line.trim() === '') {
+    return;
+  }
+  // Printed as it arrives so a failing CI run carries it in its log, not only in the receipt artifact.
+  console.info(`[helper] ${line}`);
+  if (helperDiagnostics.length < helperDiagnosticLimit) {
+    helperDiagnostics.push(line);
+  }
+};
 
 /** A conformance row: the outcome lands in the receipt whether it passes or fails. */
 const conformance = (id: string, title: string, body: () => Promise<void>): void => {
@@ -510,7 +523,7 @@ const receipt = (): Record<string, unknown> => {
     },
     shell: { ...shell, version: shellVersion },
     windowsPowerShell: windowsPowerShellIdentity,
-    observations,
+    observations: { ...observations, helperDiagnostics },
     results,
   };
 };
@@ -595,6 +608,7 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     provider = createWindowsShellProvider({
       helperPath,
       custody: { directory: join(custodyRoot, 'records'), sessionDirectory: join(custodyRoot, 'sessions') },
+      onHelperDiagnostic: recordHelperDiagnostic,
     });
     ready = true;
   });

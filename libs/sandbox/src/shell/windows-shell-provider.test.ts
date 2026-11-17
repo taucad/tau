@@ -303,6 +303,16 @@ describe('createWindowsShellProvider', () => {
       });
     });
 
+    it('should hand each helper diagnostic line to the host, the unterminated last one included', async () => {
+      const lines: string[] = [];
+      const h = harness('die-before-ready', { onHelperDiagnostic: (line) => lines.push(line) });
+      const execution = await prepare(h);
+
+      await h.provider.launch(launchOf(execution.executionId));
+
+      await expect.poll(() => lines).toStrictEqual(['boom: the runner could not be created']);
+    });
+
     it('should answer sandbox-unavailable when the helper never gets ready', async () => {
       const h = harness('never-ready', { startupMilliseconds: 200 });
       const execution = await prepare(h);

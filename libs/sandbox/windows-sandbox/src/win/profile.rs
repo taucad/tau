@@ -7,7 +7,7 @@
 //! creates `TauSandbox`'s profile once with `CreateProfile`, from the Default user template like any account,
 //! `launch` starts the runner with `LOGON_WITH_PROFILE` so the secondary-logon service loads that hive as
 //! `HKU\<account SID>` for the launch's logon and unloads it after, and the runner checks, impersonating the
-//! shell's lowbox token, that the AppContainer can open the hive root before it lets the shell start.
+//! suspended shell's own token, that the AppContainer can open the hive root before it lets the shell run.
 //!
 //! The hive belongs to the sandbox account and holds nothing of the person's. The template grants
 //! `ALL APPLICATION PACKAGES` read on it, as on every account's hive: Tau grants nothing in the registry. The

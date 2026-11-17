@@ -19,33 +19,44 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
 - **Token.** The workload runs as `TauSandbox` in an AppContainer (lowbox) token derived from a `WRITE_RESTRICTED`
   token. The runner first mints the restricted token (`DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED`) with three
   restricting SIDs: a fresh random per-launch capability SID (`S-1-5-21-…`), the runner's logon SID and Everyone. It
-  then derives a lowbox token from it with `NtCreateLowBoxToken`, for a fresh per-launch package SID and with no
-  capabilities (no `internetClient`, nothing else). The kernel makes the lowbox token Low integrity and keeps the
-  restricting SIDs. Every access check on every securable (files, registry, named pipes, sections, ALPC ports, desktops)
-  then has three passes, and access needs all three. The first pass is the account and its groups. The second is the
-  AppContainer pass, which matches only ACEs for the launch's package SID or for `ALL APPLICATION PACKAGES`. The third,
-  for writes only, is the restricted pass, which matches only ACEs for the restricting SIDs. Mandatory integrity applies
-  on top: a Low process cannot write to an unlabelled (Medium) object. So an object whose DACL grants only Everyone
-  (A22), or uses the default named-pipe DACL (Everyone may read), is closed to the shell. The default DACL of the
-  shell's token gives the logon SID and the package all access and `OWNER RIGHTS` read-control only.
+  then starts the shell with `CreateProcessAsUserW` on that token and `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` for
+  a fresh per-launch package SID and no capabilities (no `internetClient`, nothing else). Windows derives the lowbox
+  token from the restricted token, makes it Low integrity and keeps the restricting SIDs. Every access check on every
+  securable (files, registry, named pipes, sections, ALPC ports, desktops) then has three passes, and access needs all
+  three. The first pass is the account and its groups. The second is the AppContainer pass, which matches only ACEs for
+  the launch's package SID or for `ALL APPLICATION PACKAGES`. The third, for writes only, is the restricted pass, which
+  matches only ACEs for the restricting SIDs. Mandatory integrity applies on top: a Low process cannot write to an
+  unlabelled (Medium) object. So an object whose DACL grants only Everyone (A22), or uses the default named-pipe DACL
+  (Everyone may read), is closed to the shell. The default DACL of the shell's token gives the logon SID and the package
+  all access and `OWNER RIGHTS` read-control only.
 - **AppContainer without an AppContainer profile.** The runner does not call `CreateAppContainerProfile`, which would
-  write per-package `HKCU` state and create `%LOCALAPPDATA%\Packages\<name>` for every launch. It follows Chromium's
-  lowbox route (`sandbox/win/src/app_container_base.cc`, `restricted_token_utils.cc`, read as reference, not vendored).
-  The launcher derives the package SID from a random name, `tau.sandbox.<32 hex digits>`, with
-  `DeriveAppContainerSidFromAppContainerName`, a hash with no side effect. No two launches, concurrent or later, share a
-  package or any grant to it. The runner creates the package's named-object directory
-  (`\Sessions\<n>\AppContainerNamedObjects\<package SID>`), laid out as `CreateProcess` lays it out for a profile-backed
-  AppContainer. It contains `RPC Control` and the `Global`, `Local` and `Session` links. Its protected DACL names
-  SYSTEM, the runner's logon SID and the package, without `DELETE` or `WRITE_DAC`, and it carries a Low label. The
-  runner hands these handles to `NtCreateLowBoxToken`, so they live as long as a token of the package. A name the shell
-  creates lands in its own directory; a name it opens elsewhere still faces the AppContainer check.
+  write per-package `HKCU` state and create `%LOCALAPPDATA%\Packages\<name>` for every launch. The launcher derives the
+  package SID from a random name, `tau.sandbox.<32 hex digits>`, with `DeriveAppContainerSidFromAppContainerName`, a
+  hash with no side effect. No two launches, concurrent or later, share a package or any grant to it. `CreateProcess`
+  builds the package's named-object namespace (`\Sessions\<n>\AppContainerNamedObjects\<package SID>`, with its
+  `RPC Control` directory and its `Global`, `Local` and `Session` links) as it does for any AppContainer, and hands the
+  handles to the kernel, so the namespace lives as long as a token of the package. A name the shell creates lands in
+  its own directory; a name it opens elsewhere still faces the AppContainer check. Tau no longer lays the namespace
+  out itself: with a hand-built one (`NtCreateLowBoxToken`, after Chromium's lowbox policy) PowerShell started and
+  then failed its first COM wait with `E_FAIL` (WIN-X64 run 44014261732). That namespace's DACL is built for
+  unrestricted AppContainer tokens, and a write-restricted token needs one of its restricting SIDs granted to create
+  an object there. So the runner adds one non-inheritable ACE for its logon SID (query, traverse, create object,
+  create subdirectory and read-control; never `DELETE` or `WRITE_DAC`) to the directory and to its `RPC Control`.
+  These are temporary objects of the launch, so nothing is journaled; a failed grant is logged and the launch goes on.
 - **Admission.** The runner starts the shell suspended. It reads the token the kernel actually assigned to the shell and
   refuses anything but an AppContainer token for this launch's package with zero capabilities, the launch's capability
   SID among its restricting SIDs, and Low integrity. Any other token is killed before its first instruction, and the
   runner reports `runner-error` at stage `spawn`. It then adds one ACE for the person to the shell's process
   (`PROCESS_QUERY_LIMITED_INFORMATION`) and to its token (`TOKEN_QUERY`), so the host can confirm all of this from
-  outside (conformance W08), and only then resumes the shell. It logs the token through `runner-log`, for example
-  `shell token: user=… appContainer=true package=S-1-15-2-… capabilities=[] restricted=[…] integrity=S-1-16-4096`.
+  outside (conformance W08). It sets the token's default DACL (above), grants the namespace (above) and checks `HKCU`
+  (below). Last, it logs a `probe:` line of what the shell's own token can reach, impersonated on a separate thread: the
+  namespace path and layout, opening the namespace, the window station and the desktop, and a COM single-threaded
+  apartment with `CoWaitForMultipleHandles` on a signalled and an unsignalled event (what .NET does for
+  `WaitHandle.WaitOne` on an STA thread). The probe never admits or refuses a launch. Only then does it resume the
+  shell. It logs the token through `runner-log`, for example
+  `shell token: user=… appContainer=true package=S-1-15-2-… capabilities=[] restricted=[…] integrity=S-1-16-4096`. A
+  host sees these lines through the provider's `onHelperDiagnostic` option; the conformance suite prints them and keeps
+  them in its receipt.
 - **Reads and writes.** `TauSandbox` cannot open another account's profile (the default profile DACL). The helper grants
   on the launch's readable and writable roots and adds deny ACEs for the denied set inside them. Every grant names the
   package SID beside the account: nothing is granted to `ALL APPLICATION PACKAGES`, and nothing to a broad root. Per
@@ -68,8 +79,8 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
   then loads that hive as `HKU\<account SID>` for the launch and unloads it afterwards. The template's hive grants
   `ALL APPLICATION PACKAGES` read as every account's does, so Tau grants nothing in the registry. The hive holds nothing
   of the person's. The shell cannot write it, because the restricted pass finds none of its restricting SIDs there, so
-  no registry state carries over between launches. Before it starts the shell, the runner impersonates the lowbox
-  token, opens the hive root and the keys PowerShell reads, and logs each as `read`, `absent` or `error <code>`
+  no registry state carries over between launches. Before it resumes the shell, the runner impersonates the shell's
+  own token, opens the hive root and the keys PowerShell reads, and logs each as `read`, `absent` or `error <code>`
   through `runner-log`. If the root cannot be opened, the runner refuses at stage `registry` with that line, and the
   shell never starts. `launch` refuses "the sandbox account has no profile (run setup again)" when the profile is not
   registered. `revoke` deletes the profile before the account.
@@ -119,7 +130,7 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
 - **Cleanup.** The AppContainer leaves no durable state. There is no AppContainer profile, no registry key, no firewall
   or loopback exemption and no permanent kernel object. The account's own profile is account-level state, created by
   `setup` and deleted by `revoke`. The named-object directory and its links are temporary objects that go away with the
-  last handle, held by the runner and the lowbox token, when the launch's job ends. The ACEs for the package SID and the
+  last handle, held by the shell's token, when the launch's job ends. The ACEs for the package SID and the
   Low labels on writable roots are journaled and restored with the rest of the ACL change. A restored root that was
   replaced during the launch must not name the package SID either. `restore` therefore has nothing AppContainer-specific
   to remove beyond the journal.

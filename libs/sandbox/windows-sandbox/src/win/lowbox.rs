@@ -1,48 +1,63 @@
-//! The shell's AppContainer (lowbox) token, minted without an AppContainer profile.
+//! The shell's AppContainer, created by Windows itself without an AppContainer profile.
 //!
-//! The profile-backed path (`CreateAppContainerProfile`, which writes per-package state into the runner's
-//! `HKCU` and creates `%LOCALAPPDATA%\Packages\<name>`) would leave per-launch state behind. The runner
-//! takes the route Chromium's sandbox takes for its lowbox policy (`sandbox/win/src/app_container_base.cc`,
-//! `restricted_token_utils.cc`, read as reference and not vendored): the launcher derives a fresh package
-//! SID from a random name (`DeriveAppContainerSidFromAppContainerName`, a hash with no side effect), and
-//! the runner creates the package's named-object directory itself and calls `NtCreateLowBoxToken` on the
-//! write-restricted token, handing the kernel the directory handles so they live exactly as long as a token
-//! of the package does. No registry key, profile folder, firewall entry or other durable object exists for
-//! the package, so nothing outlives the launch.
+//! The launcher derives a fresh package SID from a random name (`DeriveAppContainerSidFromAppContainerName`, a
+//! hash with no side effect), and the runner passes it to `CreateProcessAsUserW` as
+//! `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` with no capability, together with the write-restricted token.
+//! `CreateProcess` then derives the lowbox token from that token (it keeps the restricting SIDs and is Low
+//! integrity) and builds the package's named-object namespace (`\Sessions\<n>\AppContainerNamedObjects\<package
+//! SID>`, its `RPC Control` directory and its links) exactly as it does for any AppContainer, handing the kernel the
+//! handles so the namespace lives as long as a token of the package. Tau does not lay out that namespace itself:
+//! a hand-built one (the first cut, through `NtCreateLowBoxToken`) let PowerShell start and then fail its first
+//! COM wait with `E_FAIL` (WIN-X64 run 44014261732). No profile is registered (`CreateAppContainerProfile` would
+//! write per-package `HKCU` state and create `%LOCALAPPDATA%\Packages\<name>` for every launch), so no registry
+//! key, profile folder, firewall entry or other durable object exists for the package, and nothing outlives the
+//! launch.
 //!
-//! The named-object directory is laid out as `CreateProcess` lays it out for a profile-backed AppContainer
-//! (`\Sessions\<n>\AppContainerNamedObjects\<package SID>` with the `Global`, `Local` and `Session`
-//! symbolic links and an `RPC Control` directory), so a named object the shell creates lands in its own
-//! directory, and one it opens elsewhere still faces the AppContainer access check.
+//! [`probe`] checks, as the suspended shell's own token, what the shell will need first (its named-object
+//! directory, the window station and desktop, a COM apartment and a COM wait) and reports every result for the
+//! runner's log, so a failing launch says where it fails.
 
 use std::ffi::c_void;
 
 use windows_sys::Win32::Foundation::{HANDLE, NTSTATUS, UNICODE_STRING};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertStringSecurityDescriptorToSecurityDescriptorW, EXPLICIT_ACCESS_W, GRANT_ACCESS, GetSecurityInfo,
-    SDDL_REVISION_1, SE_KERNEL_OBJECT, SetEntriesInAclW, SetSecurityInfo, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN,
-    TRUSTEE_W,
+    EXPLICIT_ACCESS_W, GRANT_ACCESS, GetSecurityInfo, SE_KERNEL_OBJECT, SetEntriesInAclW, SetSecurityInfo,
+    TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::Isolation::DeriveAppContainerSidFromAppContainerName;
 use windows_sys::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, FreeSid, NO_INHERITANCE, PSECURITY_DESCRIPTOR, PSID, SID_AND_ATTRIBUTES,
-    TOKEN_ALL_ACCESS, TOKEN_APPCONTAINER_INFORMATION, TOKEN_GROUPS, TOKEN_MANDATORY_LABEL, TokenAppContainerSid,
-    TokenCapabilities, TokenIntegrityLevel, TokenIsAppContainer, TokenRestrictedSids,
+    ACL, DACL_SECURITY_INFORMATION, DuplicateTokenEx, FreeSid, NO_INHERITANCE, PSECURITY_DESCRIPTOR, PSID,
+    SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES, SecurityImpersonation, TOKEN_APPCONTAINER_INFORMATION, TOKEN_GROUPS,
+    TOKEN_IMPERSONATE, TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenAppContainerSid, TokenCapabilities, TokenImpersonation,
+    TokenIntegrityLevel, TokenIsAppContainer, TokenRestrictedSids,
 };
+use windows_sys::Win32::Storage::FileSystem::{READ_CONTROL, WRITE_DAC};
+use windows_sys::Win32::System::Com::{
+    COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize, CoWaitForMultipleHandles,
+};
+use windows_sys::Win32::System::StationsAndDesktops::{
+    CloseDesktop, CloseWindowStation, OpenDesktopW, OpenWindowStationW,
+};
+use windows_sys::Win32::System::Threading::{CreateEventW, SetThreadToken};
 
 use super::sid::{Sid, token_information, token_user};
-use super::util::{Error, Local, Owned, Result, check, check_status, wide};
+use super::util::{Error, Local, Owned, Result, check_status, wide};
 use crate::appcontainer::TokenFacts;
 
-/// `DIRECTORY_ALL_ACCESS`.
-const DIRECTORY_ALL_ACCESS: u32 = 0x000F_000F;
-/// `SYMBOLIC_LINK_ALL_ACCESS`.
-const SYMBOLIC_LINK_ALL_ACCESS: u32 = 0x000F_0001;
-/// `DIRECTORY_QUERY | DIRECTORY_TRAVERSE | DIRECTORY_CREATE_OBJECT | DIRECTORY_CREATE_SUBDIRECTORY |
-/// READ_CONTROL`: what the shell needs in its own directory, without `DELETE`, `WRITE_DAC` or `WRITE_OWNER`.
-const DIRECTORY_SHELL_ACCESS: u32 = 0x0002_000F;
-/// `SYMBOLIC_LINK_QUERY | READ_CONTROL`.
-const SYMBOLIC_LINK_SHELL_ACCESS: u32 = 0x0002_0001;
+/// `DIRECTORY_QUERY | DIRECTORY_TRAVERSE | DIRECTORY_CREATE_OBJECT | DIRECTORY_CREATE_SUBDIRECTORY`: what
+/// kernelbase asks for when an AppContainer process opens its own named-object directory.
+const DIRECTORY_OPEN_ACCESS: u32 = 0x000F;
+/// `DIRECTORY_QUERY`.
+const DIRECTORY_QUERY: u32 = 0x0001;
+/// `SYMBOLIC_LINK_QUERY`.
+const SYMBOLIC_LINK_QUERY: u32 = 0x0001;
+/// `WINSTA_ENUMDESKTOPS | WINSTA_READATTRIBUTES | WINSTA_ACCESSGLOBALATOMS`: what a GUI-capable process uses of
+/// its window station, the global atom table among it (window classes such as COM's hidden STA window).
+const WINSTA_PROBE_ACCESS: u32 = 0x0001 | 0x0002 | 0x0020;
+/// `DESKTOP_READOBJECTS | DESKTOP_CREATEWINDOW`: enough to create the hidden window an STA uses.
+const DESKTOP_PROBE_ACCESS: u32 = 0x0001 | 0x0002;
+/// `RPC_S_CALLPENDING`: what a COM wait that times out returns.
+const RPC_S_CALLPENDING: i32 = 0x8001_0115_u32 as i32;
 
 #[repr(C)]
 struct ObjectAttributes {
@@ -54,47 +69,43 @@ struct ObjectAttributes {
     security_quality_of_service: *const c_void,
 }
 
-// ntdll's native object and token services; stable since Windows 8 and what Chromium calls. Linked as raw
-// dylib imports so the crate needs no import library beyond the toolchain's.
+// ntdll's native object services and kernelbase's own resolver for an AppContainer's named-object path;
+// stable since Windows 8. Linked as raw dylib imports so the crate needs no import library beyond the
+// toolchain's.
 #[link(name = "ntdll", kind = "raw-dylib")]
 unsafe extern "system" {
-    fn NtCreateLowBoxToken(
-        token: *mut HANDLE,
-        existing: HANDLE,
-        access: u32,
-        attributes: *const ObjectAttributes,
+    fn RtlGetAppContainerNamedObjectPath(
+        token: HANDLE,
         package_sid: PSID,
-        capability_count: u32,
-        capabilities: *const SID_AND_ATTRIBUTES,
-        handle_count: u32,
-        handles: *const HANDLE,
+        relative: u8,
+        path: *mut UNICODE_STRING,
     ) -> NTSTATUS;
-    fn NtCreateDirectoryObject(handle: *mut HANDLE, access: u32, attributes: *const ObjectAttributes) -> NTSTATUS;
-    fn NtCreateSymbolicLinkObject(
-        handle: *mut HANDLE,
-        access: u32,
-        attributes: *const ObjectAttributes,
-        target: *const UNICODE_STRING,
-    ) -> NTSTATUS;
+    fn RtlFreeUnicodeString(string: *mut UNICODE_STRING);
+    fn NtOpenDirectoryObject(handle: *mut HANDLE, access: u32, attributes: *const ObjectAttributes) -> NTSTATUS;
+    fn NtOpenSymbolicLinkObject(handle: *mut HANDLE, access: u32, attributes: *const ObjectAttributes) -> NTSTATUS;
 }
 
-fn nt(status: NTSTATUS, context: &str) -> Result<()> {
-    if status >= 0 { Ok(()) } else { Err(Error::msg(format!("{context} (NTSTATUS {:#010x})", status as u32))) }
+/// The `SECURITY_CAPABILITIES` attribute value for a package with no capability. Owns the package SID the
+/// pointer refers to, so it must outlive the `CreateProcessAsUserW` call it is passed to.
+pub struct Capabilities {
+    _package: Sid,
+    value: SECURITY_CAPABILITIES,
 }
 
-/// A counted UTF-16 string over a buffer that outlives it.
-struct NtString {
-    buffer: Vec<u16>,
-}
-
-impl NtString {
-    fn new(text: &str) -> Self {
-        Self { buffer: text.encode_utf16().collect() }
+impl Capabilities {
+    pub fn none(package: &Sid) -> Result<Box<Self>> {
+        let package = package.clone();
+        let value = SECURITY_CAPABILITIES {
+            AppContainerSid: package.as_psid(),
+            Capabilities: std::ptr::null_mut(),
+            CapabilityCount: 0,
+            Reserved: 0,
+        };
+        Ok(Box::new(Self { _package: package, value }))
     }
 
-    fn get(&mut self) -> UNICODE_STRING {
-        let bytes = (self.buffer.len() * 2) as u16;
-        UNICODE_STRING { Length: bytes, MaximumLength: bytes, Buffer: self.buffer.as_mut_ptr() }
+    pub fn as_ptr(&self) -> *const c_void {
+        &self.value as *const SECURITY_CAPABILITIES as *const c_void
     }
 }
 
@@ -109,156 +120,6 @@ pub fn derive_package_sid(name: &str) -> Result<Sid> {
     let copied = unsafe { Sid::copy_from(sid) };
     unsafe { FreeSid(sid) };
     copied
-}
-
-/// A self-relative security descriptor parsed from SDDL, freed on drop.
-fn descriptor(sddl: &str, what: &str) -> Result<Local> {
-    let sddl_w = wide(sddl);
-    let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
-    check(
-        unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                sddl_w.as_ptr(),
-                SDDL_REVISION_1,
-                &mut sd,
-                std::ptr::null_mut(),
-            )
-        },
-        &format!("ConvertStringSecurityDescriptorToSecurityDescriptorW({what})"),
-    )?;
-    Ok(Local(sd))
-}
-
-/// The package's named-object directory and its links. Every object is temporary: it goes away when the
-/// runner's handles and the lowbox token's copies are closed, which is when the last process of the launch
-/// ends.
-pub struct NamedObjects {
-    pub path: String,
-    handles: Vec<Owned>,
-}
-
-impl NamedObjects {
-    /// `\Sessions\<session>\AppContainerNamedObjects\<package>`, created fresh (an existing one is an error,
-    /// never reused), with a protected DACL for SYSTEM, the runner's logon SID and the package, a Low
-    /// mandatory label so the Low-integrity shell can create objects in it, and `OWNER RIGHTS` limited to
-    /// read-control so the sandbox account's ownership grants nothing more.
-    pub fn create(session: u32, package: &Sid, logon: &Sid) -> Result<Self> {
-        let package_text = package.to_sddl();
-        let logon_text = logon.to_sddl();
-        let path = format!("\\Sessions\\{session}\\AppContainerNamedObjects\\{package_text}");
-        let directory_sd = descriptor(
-            &format!(
-                "D:P(A;;GA;;;SY)(A;;0x{DIRECTORY_SHELL_ACCESS:x};;;{logon_text})(A;;0x{DIRECTORY_SHELL_ACCESS:x};;;{package_text})(A;;RC;;;OW)S:(ML;;NW;;;LW)"
-            ),
-            "named-object directory",
-        )?;
-        let link_sd = descriptor(
-            &format!(
-                "D:P(A;;GA;;;SY)(A;;0x{SYMBOLIC_LINK_SHELL_ACCESS:x};;;{logon_text})(A;;0x{SYMBOLIC_LINK_SHELL_ACCESS:x};;;{package_text})(A;;RC;;;OW)S:(ML;;NW;;;LW)"
-            ),
-            "named-object link",
-        )?;
-        let mut objects = Self { path: path.clone(), handles: Vec::new() };
-        let root = create_directory(None, &path, &directory_sd)?;
-        let root_raw = root.raw();
-        objects.handles.push(root);
-        objects.handles.push(create_directory(Some(root_raw), "RPC Control", &directory_sd)?);
-        let session_objects = if session == 0 {
-            "\\BaseNamedObjects".to_owned()
-        } else {
-            format!("\\Sessions\\{session}\\BaseNamedObjects")
-        };
-        for (name, target) in
-            [("Global", "\\BaseNamedObjects".to_owned()), ("Local", path.clone()), ("Session", session_objects)]
-        {
-            objects.handles.push(create_link(root_raw, name, &target, &link_sd)?);
-        }
-        Ok(objects)
-    }
-
-    fn raw_handles(&self) -> Vec<HANDLE> {
-        self.handles.iter().map(Owned::raw).collect()
-    }
-}
-
-fn create_directory(root: Option<HANDLE>, name: &str, sd: &Local) -> Result<Owned> {
-    let mut name_nt = NtString::new(name);
-    let name_us = name_nt.get();
-    let attributes = ObjectAttributes {
-        length: size_of::<ObjectAttributes>() as u32,
-        root_directory: root.unwrap_or(std::ptr::null_mut()),
-        object_name: &name_us,
-        // Case-insensitive, and never OBJ_OPENIF: a directory that already exists is not this launch's.
-        attributes: windows_sys::Win32::Foundation::OBJ_CASE_INSENSITIVE,
-        security_descriptor: sd.0,
-        security_quality_of_service: std::ptr::null(),
-    };
-    let mut handle: HANDLE = std::ptr::null_mut();
-    nt(
-        unsafe { NtCreateDirectoryObject(&mut handle, DIRECTORY_ALL_ACCESS, &attributes) },
-        &format!("NtCreateDirectoryObject({name})"),
-    )?;
-    Ok(Owned(handle))
-}
-
-fn create_link(root: HANDLE, name: &str, target: &str, sd: &Local) -> Result<Owned> {
-    let mut name_nt = NtString::new(name);
-    let name_us = name_nt.get();
-    let mut target_nt = NtString::new(target);
-    let target_us = target_nt.get();
-    let attributes = ObjectAttributes {
-        length: size_of::<ObjectAttributes>() as u32,
-        root_directory: root,
-        object_name: &name_us,
-        attributes: windows_sys::Win32::Foundation::OBJ_CASE_INSENSITIVE,
-        security_descriptor: sd.0,
-        security_quality_of_service: std::ptr::null(),
-    };
-    let mut handle: HANDLE = std::ptr::null_mut();
-    nt(
-        unsafe { NtCreateSymbolicLinkObject(&mut handle, SYMBOLIC_LINK_ALL_ACCESS, &attributes, &target_us) },
-        &format!("NtCreateSymbolicLinkObject({name} -> {target})"),
-    )?;
-    Ok(Owned(handle))
-}
-
-/// A lowbox token and the named objects it keeps alive.
-pub struct LowBox {
-    pub token: Owned,
-    pub objects: NamedObjects,
-}
-
-/// Derive the shell's AppContainer token from `base` (the write-restricted token, whose restricting SIDs
-/// it keeps) for `package`, with no capability at all. The kernel makes it Low integrity.
-pub fn create(base: &Owned, package: &Sid, logon: &Sid, session: u32) -> Result<LowBox> {
-    let objects = NamedObjects::create(session, package, logon)?;
-    let handles = objects.raw_handles();
-    let attributes = ObjectAttributes {
-        length: size_of::<ObjectAttributes>() as u32,
-        root_directory: std::ptr::null_mut(),
-        object_name: std::ptr::null(),
-        attributes: 0,
-        security_descriptor: std::ptr::null(),
-        security_quality_of_service: std::ptr::null(),
-    };
-    let mut token: HANDLE = std::ptr::null_mut();
-    nt(
-        unsafe {
-            NtCreateLowBoxToken(
-                &mut token,
-                base.raw(),
-                TOKEN_ALL_ACCESS,
-                &attributes,
-                package.as_psid(),
-                0,
-                std::ptr::null(),
-                handles.len() as u32,
-                handles.as_ptr(),
-            )
-        },
-        "NtCreateLowBoxToken",
-    )?;
-    Ok(LowBox { token: Owned(token), objects })
 }
 
 fn groups(token: HANDLE, class: i32) -> Result<Vec<String>> {
@@ -347,4 +208,173 @@ pub fn grant_kernel_object(handle: HANDLE, sid: &Sid, mask: u32, what: &str) -> 
         },
         &format!("SetSecurityInfo({what})"),
     )
+}
+
+fn nt_path(path: &str) -> Vec<u16> {
+    path.encode_utf16().collect()
+}
+
+/// Open a named kernel object by its native path as the calling thread's token.
+fn open_native(path: &str, access: u32, link: bool) -> std::result::Result<Owned, NTSTATUS> {
+    let mut buffer = nt_path(path);
+    let bytes = (buffer.len() * 2) as u16;
+    let name = UNICODE_STRING { Length: bytes, MaximumLength: bytes, Buffer: buffer.as_mut_ptr() };
+    let attributes = ObjectAttributes {
+        length: size_of::<ObjectAttributes>() as u32,
+        root_directory: std::ptr::null_mut(),
+        object_name: &name,
+        attributes: windows_sys::Win32::Foundation::OBJ_CASE_INSENSITIVE,
+        security_descriptor: std::ptr::null(),
+        security_quality_of_service: std::ptr::null(),
+    };
+    let mut handle: HANDLE = std::ptr::null_mut();
+    let status = unsafe {
+        if link {
+            NtOpenSymbolicLinkObject(&mut handle, access, &attributes)
+        } else {
+            NtOpenDirectoryObject(&mut handle, access, &attributes)
+        }
+    };
+    if status >= 0 { Ok(Owned(handle)) } else { Err(status) }
+}
+
+/// The named-object directory Windows resolves for an AppContainer token (`\Sessions\<n>\AppContainerNamedObjects\
+/// <package SID>`), as kernelbase itself resolves it.
+pub fn named_object_path(token: HANDLE) -> Result<String> {
+    let mut path = UNICODE_STRING { Length: 0, MaximumLength: 0, Buffer: std::ptr::null_mut() };
+    let status = unsafe { RtlGetAppContainerNamedObjectPath(token, std::ptr::null_mut(), 0, &mut path) };
+    if status < 0 {
+        return Err(Error::msg(format!("RtlGetAppContainerNamedObjectPath (NTSTATUS {:#010x})", status as u32)));
+    }
+    let text =
+        String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(path.Buffer, usize::from(path.Length) / 2) });
+    unsafe { RtlFreeUnicodeString(&mut path) };
+    Ok(text)
+}
+
+fn status_text(opened: std::result::Result<Owned, NTSTATUS>) -> String {
+    match opened {
+        Ok(_) => "ok".to_owned(),
+        Err(status) => format!("{:#010x}", status as u32),
+    }
+}
+
+/// Let the shell's restricted pass through its own named-object directory and its `RPC Control`. A
+/// write-restricted token needs one of its restricting SIDs granted for `DIRECTORY_CREATE_OBJECT` (a write
+/// right), and the DACL `CreateProcess` gives the namespace is built for unrestricted AppContainer tokens and is
+/// not documented to grant any of them. One non-inheritable ACE for the logon SID (`DIRECTORY_OPEN_ACCESS | READ_CONTROL`, never
+/// `DELETE` or `WRITE_DAC`) is added to each; the objects are temporary and go away with the launch, so there is
+/// nothing to restore. Returns a line for the runner's log; the caller logs a failure and goes on, since the
+/// grant only widens the shell's own namespace and [`probe`] reports what the shell can open either way.
+pub fn admit_namespace(token: HANDLE, logon: &Sid) -> Result<String> {
+    let path = named_object_path(token)?;
+    let mut granted = Vec::new();
+    for name in [path.clone(), format!("{path}\\RPC Control")] {
+        let directory = open_native(&name, READ_CONTROL | WRITE_DAC, false).map_err(|status| {
+            Error::msg(format!("NtOpenDirectoryObject({name}) (NTSTATUS {:#010x})", status as u32))
+        })?;
+        grant_kernel_object(directory.raw(), logon, DIRECTORY_OPEN_ACCESS | READ_CONTROL, &name)?;
+        granted.push(name);
+    }
+    Ok(format!("namespace granted to the logon SID: {}", granted.join(", ")))
+}
+
+fn win32_text(ok: bool) -> String {
+    if ok { "ok".to_owned() } else { format!("error {}", unsafe { windows_sys::Win32::Foundation::GetLastError() }) }
+}
+
+fn hresult_text(hr: i32) -> String {
+    if hr == 0 { "S_OK".to_owned() } else { format!("{:#010x}", hr as u32) }
+}
+
+/// What the shell's own token (`token`, the suspended shell's primary token) can reach of what PowerShell
+/// needs first, for the runner's log. Diagnostic only: the result never admits or refuses a launch. Each probe
+/// runs on a separate thread impersonating the token, so this process's own identity stays untouched; the
+/// namespace layout itself is read as the runner.
+///
+/// `station` and `desktop` are the window station and desktop the shell starts on. The COM probe initializes a
+/// single-threaded apartment, waits through `CoWaitForMultipleHandles` on a signalled and on an unsignalled event
+/// (what .NET does for `WaitHandle.WaitOne` on an STA thread), and uninitializes. Under impersonation COM still
+/// runs in this process, so a COM failure the shell sees and this probe does not see points at the shell's own
+/// process state (its namespace or its profile), and one both see points at the token.
+pub fn probe(token: HANDLE, station: &str, desktop: &str) -> String {
+    let mut parts = Vec::new();
+    let path = match named_object_path(token) {
+        Ok(path) => path,
+        Err(err) => return format!("probe: {err}"),
+    };
+    parts.push(format!("namespace {path}"));
+    // Layout, as the runner: what CreateProcess built.
+    let layout = [("RPC Control", false), ("Global", true), ("Local", true), ("Session", true)]
+        .iter()
+        .map(|(name, link)| {
+            let access = if *link { SYMBOLIC_LINK_QUERY } else { DIRECTORY_QUERY };
+            format!("{name}={}", status_text(open_native(&format!("{path}\\{name}"), access, *link)))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    parts.push(format!("layout {layout}"));
+
+    let mut impersonation: HANDLE = std::ptr::null_mut();
+    let duplicated = unsafe {
+        DuplicateTokenEx(
+            token,
+            TOKEN_IMPERSONATE | TOKEN_QUERY,
+            std::ptr::null(),
+            SecurityImpersonation,
+            TokenImpersonation,
+            &mut impersonation,
+        )
+    };
+    if duplicated == 0 {
+        parts.push(format!("impersonation {}", win32_text(false)));
+        return format!("probe: {}", parts.join("; "));
+    }
+    let impersonation = Owned(impersonation);
+    let station_w = wide(station);
+    let desktop_w = wide(desktop);
+    let as_shell = std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                if unsafe { SetThreadToken(std::ptr::null(), impersonation.raw()) } == 0 {
+                    return vec![format!("SetThreadToken {}", win32_text(false))];
+                }
+                let mut seen = Vec::new();
+                seen.push(format!("open namespace {}", status_text(open_native(&path, DIRECTORY_OPEN_ACCESS, false))));
+                let station_handle = unsafe { OpenWindowStationW(station_w.as_ptr(), 0, WINSTA_PROBE_ACCESS) };
+                seen.push(format!("window station {}", win32_text(!station_handle.is_null())));
+                if !station_handle.is_null() {
+                    unsafe { CloseWindowStation(station_handle) };
+                }
+                let desktop_handle = unsafe { OpenDesktopW(desktop_w.as_ptr(), 0, 0, DESKTOP_PROBE_ACCESS) };
+                seen.push(format!("desktop {}", win32_text(!desktop_handle.is_null())));
+                if !desktop_handle.is_null() {
+                    unsafe { CloseDesktop(desktop_handle) };
+                }
+                let init = unsafe { CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32) };
+                seen.push(format!("CoInitializeEx(STA) {}", hresult_text(init)));
+                if init >= 0 {
+                    for (label, signalled, expected) in [("signalled", 1, 0), ("unsignalled", 0, RPC_S_CALLPENDING)] {
+                        let event = unsafe { CreateEventW(std::ptr::null(), 1, signalled, std::ptr::null()) };
+                        if event.is_null() {
+                            seen.push(format!("CreateEventW {}", win32_text(false)));
+                            continue;
+                        }
+                        let event = Owned(event);
+                        let handles = [event.raw()];
+                        let mut index = 0u32;
+                        let hr = unsafe { CoWaitForMultipleHandles(0, 10, 1, handles.as_ptr(), &mut index) };
+                        let verdict = if hr == expected { "" } else { " (unexpected)" };
+                        seen.push(format!("CoWait({label}) {}{verdict}", hresult_text(hr)));
+                    }
+                    unsafe { CoUninitialize() };
+                }
+                unsafe { SetThreadToken(std::ptr::null(), std::ptr::null_mut()) };
+                seen
+            })
+            .join()
+            .unwrap_or_else(|_| vec!["the probe thread panicked".to_owned()])
+    });
+    parts.push(format!("as the shell: {}", as_shell.join(", ")));
+    format!("probe: {}", parts.join("; "))
 }

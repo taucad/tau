@@ -73,6 +73,11 @@ export type WindowsShellProviderOptions = Readonly<{
   terminationMilliseconds?: number | undefined;
   /** Whether a process exists, for recovery; injectable for tests. */
   processAlive?: ((pid: number) => boolean) | undefined;
+  /**
+   * Receives each line a launch's helper writes to its diagnostic log, such as the runner's AppContainer, registry and
+   * COM checks, for the host's own log. The lines name SIDs and Windows error codes, never file contents or secrets.
+   */
+  onHelperDiagnostic?: ((line: string) => void) | undefined;
 }>;
 
 /** What the helper's `status` reports. @public */
@@ -288,7 +293,11 @@ type Answer =
  * @param stdio - The launch's stdio kind, which decides the output frames it may send.
  * @returns The channel.
  */
-const openChannel = (child: ChildProcessWithoutNullStreams, stdio: ShellLaunch['stdio']['kind']) => {
+const openChannel = (
+  child: ChildProcessWithoutNullStreams,
+  stdio: ShellLaunch['stdio']['kind'],
+  onDiagnostic?: (line: string) => void,
+) => {
   const decoder = createWindowsFrameDecoder();
   const answer = Promise.withResolvers<Answer>();
   const ending = Promise.withResolvers<Ending>();
@@ -303,6 +312,7 @@ const openChannel = (child: ChildProcessWithoutNullStreams, stdio: ShellLaunch['
     closed: false,
   };
   let diagnostics = '';
+  let partialLine = '';
   let inputOpen = true;
   const finish = (end: Ending): void => {
     if (state.phase === 'ended') {
@@ -411,6 +421,19 @@ const openChannel = (child: ChildProcessWithoutNullStreams, stdio: ShellLaunch['
   });
   child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
     diagnostics = (diagnostics + chunk).slice(-diagnosticCharacters);
+    if (onDiagnostic !== undefined) {
+      const lines = (partialLine + chunk).split(/\r?\n/u);
+      partialLine = lines.pop() ?? '';
+      for (const line of lines) {
+        onDiagnostic(line);
+      }
+    }
+  });
+  child.stderr.on('end', () => {
+    if (onDiagnostic !== undefined && partialLine !== '') {
+      onDiagnostic(partialLine);
+      partialLine = '';
+    }
   });
   child.stdin.on('error', () => {
     /* The helper closed its input; its exit or death settles the launch. */
@@ -742,7 +765,7 @@ export const createWindowsShellProvider = (options: WindowsShellProviderOptions)
         message: `the Windows sandbox helper could not start: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
-    const channel = openChannel(child, launch.stdio.kind);
+    const channel = openChannel(child, launch.stdio.kind, options.onHelperDiagnostic);
     const notStarted = async (): Promise<void> => {
       channel.send({ type: 'terminate' });
       await stopHelper(child, channel, terminationMilliseconds);

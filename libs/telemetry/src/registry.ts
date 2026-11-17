@@ -287,7 +287,6 @@ const agentEvidenceErasureOutcomes = ['accepted', 'retry', 'lease_lost'] as cons
  *
  * Canonical metrics with OTEL-compliant names. Renames from legacy:
  * - `ws.connections.total` -> `ws.disconnections` (counters must not use `.total`)
- * - `kernel.execution.total` -> `kernel.executions` (counters must be pluralized, no `.total`)
  *
  * @public
  */
@@ -744,42 +743,6 @@ export const TauMetrics = {
       'tau.storage.operation': z.string().optional(),
       'tau.storage.tier': z.enum(['public', 'private', 'account']).optional(),
       direction: z.enum(['upload', 'download']).optional(),
-    }),
-  }),
-
-  /*
-   * Deprecated, in the runtime-telemetry dual-write window (package "Dual-write window (after PR-9)"): the legacy
-   * `observability.createGeometry`/`exportGeometry` entries still record here, and the API also writes each recorded
-   * `runtime.operation` evaluate/render (executions, duration) and export (export duration, `export.format` `_OTHER`).
-   * Dashboards read `tau_runtime_*`; a follow-up removes these three once 14 days pass with no old-entry receipts.
-   */
-  kernelExecutionDuration: defineHistogram({
-    name: 'kernel.execution.duration',
-    unit: 's',
-    description: 'CAD kernel code evaluation time (reported by client)',
-    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
-    attributes: z.object({
-      'kernel.status': z.string().optional(),
-    }),
-  }),
-
-  kernelExecutions: defineCounter({
-    name: 'kernel.executions',
-    unit: '{execution}',
-    description: 'Total kernel invocations (reported by client)',
-    attributes: z.object({
-      'kernel.status': z.string().optional(),
-    }),
-  }),
-
-  kernelExportDuration: defineHistogram({
-    name: 'kernel.geometry.export.duration',
-    unit: 's',
-    description: 'Geometry export/conversion time (reported by client)',
-    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
-    attributes: z.object({
-      'kernel.status': z.string().optional(),
-      'export.format': z.string().optional(),
     }),
   }),
 

@@ -836,7 +836,9 @@ describe('a first revision built from recorded blob ids (D12)', () => {
  * cut asks them only about the paths it reads, and walks only when a rule's
  * source changed (S10, I5).
  */
-describe("a cut under the checkout's own Git ignore rules (S10)", () => {
+/* Real Git and a real disk per row. On the hosted windows-2025 runner these rows took 2.0-2.4 s (run 44012123071),
+ * 1.8-2.4 s (run 44028941814) and timed out at 5 s (run 44033552647). */
+describe("a cut under the checkout's own Git ignore rules (S10)", { timeout: fileHeavyTimeout(5000) }, () => {
   const ignoring = { '.gitignore': '*.log\nbuild/\n', 'kept.log': 'ignored from the start\n' };
 
   it('should ask only about the paths it reads, never walking the checkout for its rules', async () => {

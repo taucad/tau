@@ -34,7 +34,7 @@ import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import { remoteTrackingRef } from '#remotes.js';
 import type { Checkout, ConflictRecord, RemoteRef, RevisionPort, RevisionPushInput } from '#revision-port.js';
-import { gitToolchainOnPath, nativeHarness, removalRetries } from '#test/native-git-harness.js';
+import { fileHeavyTimeout, gitToolchainOnPath, nativeHarness, removalRetries } from '#test/native-git-harness.js';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
@@ -312,9 +312,15 @@ describe('close cancels background transfers', () => {
     });
     actor.start();
     try {
-      await vi.waitFor(() => {
-        expect(fetching).toBe(true);
-      });
+      /* The first transfer starts once the actor has opened the store on a real disk. These rows took 0.7-1.0 s on
+       * the hosted windows-2025 runner in runs 44012123071 and 44028941814 and 1.5-4.8 s in run 44033552647, where
+       * this wait outran `vi.waitFor`'s 1 s default. */
+      await vi.waitFor(
+        () => {
+          expect(fetching).toBe(true);
+        },
+        { timeout: fileHeavyTimeout(1000) },
+      );
       let settled = false;
       const quiesce = (async () => {
         await awaitSyncSettled(actor, persistence === 'stalled' ? 100 : 2100);

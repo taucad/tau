@@ -1720,6 +1720,13 @@ export const fileSystemLongCalls: Readonly<Record<string, number | undefined>> =
   /* A read of a pending entry waits for its large object (D9) under the
    * authority's own no-progress bound; its signature has no options slot. */
   readFile: undefined,
+  /* A read of a path a tree write still owes waits for it to land (D10, STO-25) under the same bound, so do these. */
+  readFileWithDigest: undefined,
+  readRange: undefined,
+  stat: undefined,
+  lstat: undefined,
+  exists: undefined,
+  readdir: undefined,
   /* Its controls ride `ApplyOptions` and the changeset's own signal;
    * `prepareApplyCall` takes them out. */
   apply: undefined,

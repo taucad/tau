@@ -8,6 +8,7 @@ import {
   FileSystemBridgeProtocolVersionError,
   fileSystemBridgeProtocolVersion,
   fileSystemBridgeSchemas,
+  fileSystemLongCalls,
 } from '#filesystem-bridge-protocol.js';
 import { createTransferredFileSystemBridgeProxy } from '#filesystem-bridge.js';
 
@@ -59,6 +60,15 @@ describe('metadata-only stats (I3)', () => {
 
 /* A literal, so a bump is a deliberate edit to this line and not a silent one:
  * every other assertion in the suite now reads the constant (G0-11). */
+describe('reads a tree write holds (D10, STO-25)', () => {
+  it('should carry every read that may wait for a landing as a long call, never under the ordinary deadline', () => {
+    for (const method of ['readFile', 'readFileWithDigest', 'readRange', 'stat', 'lstat', 'exists', 'readdir']) {
+      expect(Object.hasOwn(fileSystemLongCalls, method)).toBe(true);
+      expect(Object.hasOwn(fileSystemBridgeSchemas.calls, method)).toBe(true);
+    }
+  });
+});
+
 describe('filesystem bridge protocol version', () => {
   it('should be 11', () => {
     expect(fileSystemBridgeProtocolVersion).toBe(11);

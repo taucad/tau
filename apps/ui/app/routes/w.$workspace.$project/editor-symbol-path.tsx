@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
-import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
+import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
 
 type SymbolPathReporter = (path: readonly EditorSymbolCrumb[]) => void;
 

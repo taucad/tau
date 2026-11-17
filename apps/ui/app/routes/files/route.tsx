@@ -36,7 +36,7 @@ import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { WorkspaceDirectoryStatus } from '@taucad/ui-core/constants/workspace-directory-copy.constants';
 import { toast } from '@taucad/ui/components/sonner';
-import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
+import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
@@ -378,7 +378,7 @@ function ColumnShell({
           {unsupportedHint ?? 'Not supported here'}
         </div>
       ) : (
-        <div className='min-h-0 flex-1 overflow-auto rounded-md border'>
+        <div data-slot='files-column-tree' className='max-h-[60dvh] min-h-32 overflow-auto rounded-md border'>
           {isLoading ? (
             <div className='flex h-32 items-center justify-center'>
               <Loader className='size-6' />
@@ -466,7 +466,7 @@ export default function FilesRoute(): React.JSX.Element {
   const homeBackend = useHomeStorageBackend();
   if (homeBackend === undefined) {
     return (
-      <PageContent className='flex h-full flex-col gap-4'>
+      <PageContent className='flex flex-col gap-4'>
         <PageHeader title='Files' />
         <div role='status' aria-label='Opening Home' aria-busy='true'>
           Opening Home…
@@ -855,11 +855,12 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
   }, [connectionCanBrowse, connectionWorkspace, loadColumnTree]);
 
   return (
-    <PageContent className='flex h-full flex-col gap-4'>
+    <PageContent className='flex flex-col gap-4'>
       <PageHeader title='Files' />
       {isDesktopTarget() ? <WorkspaceConnections /> : undefined}
 
-      <div className='grid min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-4 overflow-x-auto md:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]'>
+      {/* A document page (D4.4): the columns flow and the shell scrolls; each column's tree keeps a bounded height. */}
+      <div className='grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]'>
         <ColumnShell
           icon={homeColumn.icon}
           title={homeColumn.label}

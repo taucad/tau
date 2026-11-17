@@ -21,7 +21,6 @@ import type { Handle } from '#types/matches.types.js';
 export const meta: MetaFunction = () => [{ title: `${setupChromeCopy.pageTitle} · ${metaConfig.name}` }];
 
 export const handle: Handle = {
-  enableOverflowY: true,
   enablePageWrapper: true,
 };
 

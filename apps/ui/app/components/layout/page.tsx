@@ -36,6 +36,7 @@ import { sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constan
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { WorkspaceFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { useWorkspaceFrameState } from '#components/layout/use-workspace-frame-state.js';
+import { documentScrollClass } from '#components/layout/document-scroll.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 export const desktopHeaderHeight = 'calc(var(--spacing) * 9)';
@@ -64,7 +65,7 @@ export const desktopTitlebarInset = 'md:sidebar-closed:pt-9';
  * Each history entry keeps its place in the shell's scroller. React Router's
  * `ScrollRestoration` restores `window`, but `html, body { overflow: hidden }`
  * (global.css) makes the shell's inner element the one that scrolls, so Back
- * used to land at the top. `Page` owns it once for every `enableOverflowY` route.
+ * used to land at the top. `Page` owns it once for every document route.
  */
 const scrollStorageKey = (locationKey: string): string => `tau.page-scroll.${locationKey}`;
 
@@ -562,7 +563,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     titleItems,
     actionItems,
     pageWrapperMatches,
-    enableOverflowY: routeEnablesOverflowY,
+    isContained,
     providers,
     enablePageHeaderMatches,
   } = useTypedMatches((handles) => ({
@@ -571,13 +572,15 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     titleItems: handles.title,
     actionItems: handles.actions,
     pageWrapperMatches: handles.enablePageWrapper,
-    enableOverflowY: handles.enableOverflowY.some((match) => match.handle.enableOverflowY === true),
+    isContained: handles.scroll.some((match) => match.handle.scroll === 'contained'),
     providers: handles.providers,
     enablePageHeaderMatches: handles.enablePageHeader,
   }));
   const { key: locationKey, pathname, hash } = useLocation();
   const workspaceFrame = useWorkspaceFrameState();
-  const enableOverflowY = routeEnablesOverflowY && !workspaceFrame.pending;
+  // D4.1: every route scrolls at the shell unless it declares `scroll: 'contained'`; the pending workspace frame is
+  // laid out as the project route, which is contained.
+  const isDocumentScroll = !isContained && !workspaceFrame.pending;
   const navigationType = useNavigationType();
   const pageScrollRef = useRef<HTMLDivElement>(null);
   const previousPathnameRef = useRef(pathname);
@@ -586,7 +589,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     const scroller = pageScrollRef.current;
     const isSamePage = previousPathnameRef.current === pathname;
     previousPathnameRef.current = pathname;
-    if (!enableOverflowY || !scroller) {
+    if (!isDocumentScroll || !scroller) {
       return;
     }
     if (navigationType === NavigationType.Replace && isSamePage) {
@@ -612,7 +615,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     return holdScrollPosition(scroller, savedTop, () => {
       isRestoringRef.current = false;
     });
-  }, [enableOverflowY, hash, locationKey, navigationType, pathname]);
+  }, [isDocumentScroll, hash, locationKey, navigationType, pathname]);
   const handlePageScroll = useCallback(
     (event: UIEvent) => {
       if (!isRestoringRef.current) {
@@ -680,18 +683,17 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   if (!enablePageWrapper) {
     // `html, body { overflow: hidden }` (global.css) means the document never
     // scrolls — the app shell's inner `<section>` is normally the scroll
-    // container. Without the wrapper we must supply one, but only when the route
-    // asks for it (`enableOverflowY`); full-screen routes (auth, viewer) opt out
-    // and keep the bare outlet.
+    // container. Without the wrapper we supply the same scroller, unless the
+    // route declares `scroll: 'contained'` and keeps the bare outlet (D4.1).
     return (
       <Compose components={Providers}>
         {desktopDragBand}
-        {routeEnablesOverflowY ? (
-          <div ref={pageScrollRef} className='h-dvh overflow-y-auto' onScroll={handlePageScroll}>
+        {isContained ? (
+          <Outlet />
+        ) : (
+          <div ref={pageScrollRef} className={documentScrollClass} onScroll={handlePageScroll}>
             <Outlet />
           </div>
-        ) : (
-          <Outlet />
         )}
       </Compose>
     );
@@ -725,8 +727,8 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
             ) : null}
             <section
               ref={pageScrollRef}
-              className={cn('h-dvh', enableOverflowY && 'overflow-y-auto', sectionClass)}
-              onScroll={enableOverflowY ? handlePageScroll : undefined}
+              className={cn('h-dvh', isDocumentScroll && 'overflow-x-auto overflow-y-auto', sectionClass)}
+              onScroll={isDocumentScroll ? handlePageScroll : undefined}
             >
               <PhoneTopBarContext.Provider value={phoneTopBar}>
                 {/* Outside the route's providers, so a route waiting on the file-manager worker still opens

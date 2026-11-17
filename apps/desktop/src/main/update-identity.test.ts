@@ -76,12 +76,18 @@ describe('installed update identity', () => {
       { arch: 'arm64' },
       { path: 'latest/Tau-win32-x64.exe' },
       { sha512: 'invalid' },
-      { expiresAt: '2026-10-20T00:00:00Z' },
       { issuedAt: '2026-10-22T00:00:00Z' },
-      { expiresAt: '2026-11-21T00:00:00Z' },
       { schemaVersion: 2 },
     ]) {
       expect(() => parseDesktopUpdateDescriptor({ ...descriptor, ...change }, installed, now)).toThrow();
+    }
+    // Descriptors no longer expire: an old or long-dated one, or one without expiresAt, is still admitted.
+    for (const change of [
+      { expiresAt: '2026-10-20T00:00:00Z' },
+      { expiresAt: '2027-11-21T00:00:00Z' },
+      { expiresAt: undefined },
+    ]) {
+      expect(parseDesktopUpdateDescriptor({ ...descriptor, ...change }, installed, now).version).toBe('0.2.0');
     }
     expect(() =>
       parseDesktopUpdateDescriptor(

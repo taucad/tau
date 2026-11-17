@@ -64,12 +64,20 @@ export default {
   routeDiscovery: { mode: 'initial' },
   /**
    * `buildEnd` is the only hook that runs after prerendering, so it is where
-   * the offline shell worker is generated from the emitted `/usage` document
-   * and the Vite build manifest (B5 R3). The desktop and daemon configs are
-   * separate files and never run this: both already boot from a packaged SPA
+   * the Home shell is moved off `/`'s static path to the file the marketing edge
+   * function rewrites to (progressive loading PL4, `scripts/place-static-shells.ts`),
+   * and where the offline shell worker is generated from the emitted `/usage`
+   * document and the Vite build manifest (B5 R3). The desktop and daemon configs
+   * are separate files and never run this: both already boot from a packaged SPA
    * index fallback.
    */
   async buildEnd({ reactRouterConfig }) {
+    const { placeEdgeShells } = await import('./scripts/place-static-shells');
+    for (const placed of placeEdgeShells(`${reactRouterConfig.buildDirectory}/client`)) {
+      console.log(
+        `Static shell: ${placed.from} -> ${placed.to}${placed.removed.map((file) => `, removed ${file}`).join('')}`,
+      );
+    }
     if (!tauCloudEnabled) {
       return;
     }

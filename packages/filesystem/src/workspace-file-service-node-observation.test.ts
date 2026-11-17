@@ -47,7 +47,7 @@ const createNodeService = async (options?: {
   service: WorkspaceFileService;
   root: string;
   eventBus: ChangeEventBus;
-  configured: Promise<void>;
+  configured: Promise<unknown>;
 }> => {
   const root = mkdtempSync(join(tmpdir(), 'tau-node-observe-'));
   mkdirSync(join(root, physicalRoot));

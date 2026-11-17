@@ -3,7 +3,7 @@ title: 'Page Composition Policy'
 description: 'Page frame, title row, view controls, collection grid and pagination, card anatomy and states, button roles, busy and collection states, copy, view URL state, keyboard order and first-viewport budget for Tau product pages.'
 status: active
 created: '2026-09-28'
-updated: '2026-11-15'
+updated: '2026-11-17'
 related:
   - docs/policy/design-policy.md
   - docs/policy/ui-policy.md
@@ -15,6 +15,7 @@ related:
   - docs/research/community-page-refresh-audit.md
   - docs/research/project-card-composition-blueprint.md
   - docs/research/panel-empty-state-component-blueprint.md
+  - docs/research/desktop-resilient-startup-and-scroll-blueprint.md
 ---
 
 # Page Composition Policy
@@ -45,7 +46,9 @@ This policy owns page composition. It links, and never restates, the owners belo
 
 Render route content inside the shell (`components/layout/page.tsx` mounts `SidebarInset`, which is the document's `<main>`) as `container mx-auto px-4`, with vertical padding that keeps Rule 14's budget, exactly one `<h1>` and no route-owned `<main>`. Only routes that opt out of the wrapper (`Handle.enablePageWrapper`, `types/matches.types.ts`) render their own landmark. A section that also appears on another page (`ProjectLibrary`, `HomepageChatHero`) takes its heading level from its host. Export route `meta` so the document title names the page ("Community · Tau").
 
-**Why**: the signed-in and desktop homes rendered two `<h1>`s, `/plugins` and `/github/complete` nested a second `main` inside the shell's, and 6 of 32 routes exported `meta`, so `/community` was titled "Tau".
+A page is a `document` by default: it grows and the shell scrolls it on both axes, wrapped or wrapperless (`Handle.scroll`, default `'document'`). A route that owns its scroll areas declares `scroll: 'contained'` and keeps `min-h-0` down to a named inner scroller; `PageContent layout='fill'` and an `h-full` page root belong only on such a route. The reviewed `contained` list is the workbench (`routes/w.$workspace.$project/route.tsx`) and its preview (`routes/w.$workspace.$project_.preview/route.tsx`); adding a route to it is a reviewed change to this rule. A column that must scroll on its own inside a document page keeps a bounded height (`max-h-*`), as the Files columns do. Overlays follow the same default: `DialogContent` and `AlertDialogContent` are bound to the dynamic viewport and scroll their body, side sheets scroll theirs, and one that manages its own scroller passes `scroll='contained'`.
+
+**Why**: the signed-in and desktop homes rendered two `<h1>`s, `/plugins` and `/github/complete` nested a second `main` inside the shell's, and 6 of 32 routes exported `meta`, so `/community` was titled "Tau". Scrolling was a per-route opt-in flag, so the Files page, `/machines` and every route that forgot the flag clipped in a short window with no way to reach the rest of the page.
 
 CORRECT:
 
@@ -405,6 +408,7 @@ Lint rules scope to `apps/ui/app/**/*.tsx` and `packages/ui/src/**/*.tsx`, exclu
 - `w-[Npx]` triggers and menus; raw ids in trigger labels; menus that do not mark the current value.
 - A search field named only by its placeholder; a clear button under 24 px.
 - View state in `useState` that a reload or shared link should reproduce.
+- `scroll: 'contained'`, `layout='fill'` or an `h-full` page root on a route outside the reviewed `contained` list; a route or overlay that hand-rolls its own page scroller.
 - A copied grid class chain; a skeleton with a different grid; "Load more", infinite scroll or show-all in place of `DataTablePagination`.
 - `onClick` on a card, a button nested in a link, placeholder authors and avatars, a "Preview" label on a link that opens a page.
 - `hover:text-primary` or `hover:border-primary/*` on neutral surfaces; muted text on an enabled action.
@@ -416,6 +420,7 @@ Lint rules scope to `apps/ui/app/**/*.tsx` and `packages/ui/src/**/*.tsx`, exclu
 ## Summary Checklist
 
 - [ ] One frame, one `<h1>` through `PageHeader`, route `meta`, no route-owned `<main>` inside the shell
+- [ ] A `document` page unless the route is on the reviewed `contained` list; overlays keep the primitives' scroll bound
 - [ ] One view-control row; content-sized controls; trigger labels and menu marks agree; catalog names and marks
 - [ ] Search has an accessible name; clear control is 24 px
 - [ ] Query, filters, sort and trash live in the URL through `useSearchParameter`; page size in a cookie

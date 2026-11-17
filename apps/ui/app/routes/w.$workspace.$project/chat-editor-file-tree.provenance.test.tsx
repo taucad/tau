@@ -55,7 +55,7 @@ vi.mock('#hooks/use-native-file-manager.js', async (importOriginal) => ({
   useRevealInFileManager: (projectId: string | undefined) =>
     projectId === undefined ? undefined : { label: 'Reveal in Finder', icon: 'finder', reveal: revealInFileManager },
 }));
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeMap: () => tree.current,
   useFileTreeSelector: <T,>(select: (snapshot: typeof tree.current) => T): T => select(tree.current),
   useFileTreeEntry: () => undefined,

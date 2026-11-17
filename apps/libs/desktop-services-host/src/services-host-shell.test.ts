@@ -64,6 +64,18 @@ describe('bundledGitToolchain', () => {
     expect(bundledGitToolchain(undefined)).toBeUndefined();
     expect(bundledGitToolchain('')).toBeUndefined();
   });
+
+  it('finds git-lfs.exe in the MinGit exec path of the Windows payload', async () => {
+    const payload = join(base, 'resources', 'git', 'win32-x64');
+    await mkdir(join(payload, 'bin'), { recursive: true });
+    await mkdir(join(payload, 'mingw64', 'libexec', 'git-core'), { recursive: true });
+    await writeFile(join(payload, 'mingw64', 'libexec', 'git-core', 'git-lfs.exe'), '');
+
+    expect(bundledGitToolchain(join(payload, 'bin', 'git.exe'))).toStrictEqual({
+      roots: [payload],
+      bins: [join(payload, 'bin'), join(payload, 'mingw64', 'libexec', 'git-core')],
+    });
+  });
 });
 
 describe.runIf(process.platform === 'linux' || process.platform === 'darwin')('createDesktopShell', () => {

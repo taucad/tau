@@ -123,11 +123,12 @@ export const bundledGitToolchain = (
   }
   const bin = dirname(gitExecutable);
   const payload = dirname(bin);
-  const execPath = join(payload, 'libexec', 'git-core');
-  return {
-    roots: [payload],
-    bins: existsSync(join(execPath, 'git-lfs')) ? [bin, execPath] : [bin],
-  };
+  /* MinGit keeps its exec path, and so `git-lfs.exe`, under `mingw64` (the Windows payload, OQ3). */
+  const execPath = [
+    { path: join(payload, 'libexec', 'git-core'), lfs: 'git-lfs' },
+    { path: join(payload, 'mingw64', 'libexec', 'git-core'), lfs: 'git-lfs.exe' },
+  ].find((candidate) => existsSync(join(candidate.path, candidate.lfs)))?.path;
+  return { roots: [payload], bins: execPath === undefined ? [bin] : [bin, execPath] };
 };
 
 /**

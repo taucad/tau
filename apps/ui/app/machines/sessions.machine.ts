@@ -130,7 +130,7 @@ export type SessionsMachineContext = Readonly<{
 
 /** Events accepted by sessionsMachine. @public */
 export type SessionsMachineEvent =
-  /** Every open carries its request: focus is the only sender (D7, A5b), and A10 made the field required. */
+  /** Every open carries its request: focus is the only outside sender (D7, A5b), and A10 made the field required. */
   | {
       readonly type: 'open';
       readonly projectId: string;

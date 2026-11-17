@@ -296,7 +296,8 @@ export type ProjectSessionMachineEvent =
    * The session's own timer: an asked flush ran past its bound (A7c, I15). It is raised with a delay and cancelled by
    * the flush's answer; any other delivery finds no flush under its id and is answered with nothing (MC-R18). It is in
    * the public alphabet under D14 because `schemas.internalEvents` loses the emitted types of a spawned session in the
-   * registry's `refs` under the pinned XState alpha; A10 moves it back to internal once the pin allows.
+   * registry's `refs` under the pinned XState alpha. It goes back to internal once the pin allows (XState policy, App state
+   * contract).
    */
   | { readonly type: 'flushExpired'; readonly requestId: string }
   /**

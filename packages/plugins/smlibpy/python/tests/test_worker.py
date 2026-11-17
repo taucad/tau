@@ -119,7 +119,7 @@ class Workspace:
         self.workspace.mkdir()
         self.artifacts.mkdir()
         for name, text in files.items():
-            (self.workspace / name).write_text(text)
+            (self.workspace / name).write_text(text, encoding="utf-8")
         self.cancelled = threading.Event()
         self.worker = worker.Worker(WorkerContext(self.workspace.resolve(), Artifacts(self.artifacts), self.cancelled))
 
@@ -458,14 +458,14 @@ class WorkerTest(unittest.TestCase):
         with Workspace({"main.py": ASSEMBLY, "empty.py": MODEL.replace("return Box(params.width, 3, 4)", "return None")}) as space:
             handle = space.dispatch("build", {"entryPath": "main.py"})["handleId"]
             step = space.dispatch("export", {"handleId": handle, "format": "step", "coordinateSystem": "y-up"})
-            text = Path(step["artifactPath"]).read_text()
+            text = Path(step["artifactPath"]).read_text(encoding="utf-8")
             self.assertIn("Base", text)
             self.assertIn("ISO-10303-21", text)
             stl = space.dispatch(
                 "export",
                 {"handleId": handle, "format": "stl", "linearTolerance": 0.1, "angularTolerance": 15, "binary": False},
             )
-            self.assertTrue(Path(stl["artifactPath"]).read_text().startswith("solid"))
+            self.assertTrue(Path(stl["artifactPath"]).read_text(encoding="utf-8").startswith("solid"))
             binary = space.dispatch(
                 "export", {"handleId": handle, "format": "stl", "linearTolerance": 0.1, "angularTolerance": 15}
             )

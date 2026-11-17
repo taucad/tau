@@ -16,11 +16,20 @@ import {
   getWorkspaceMetadata,
   checkHandlePermission,
   getHomeStorageBackend,
-  getProjectRootConfigs,
 } from '@taucad/files-ui/filesystem/handle-store';
+import type { ProjectRootConfigurationResult, RootStatus, SkippedConfigurationEntry } from '@taucad/filesystem';
+import {
+  reportFileServiceEntrySkipped,
+  reportFileServiceRootUnavailable,
+  reportFileServiceStartFailed,
+  reportFileServiceStartedDegraded,
+  reportableCode,
+} from '#lib/file-service-reports.js';
+import type { FileServiceErrorClass, FileServiceErrorPhase } from '#lib/file-service-reports.js';
+import { readRootConfiguration } from '#runtime/root-configuration.js';
 import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { fileManagerWorkerName } from '@taucad/files-ui/machines/file-manager-worker-name';
-import type { WorkspaceRootSkip } from '@taucad/files-ui/filesystem/handle-store';
+import type { ProjectRootConfigurationDegraded, WorkspaceRootSkip } from '@taucad/files-ui/filesystem/handle-store';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import type { ProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
@@ -198,7 +207,74 @@ type FileManagerContext = {
   openPerformance: ProjectOpenPerformance | undefined;
   /** The first effect or child failure no transition modelled; later ones are usually its consequences (D23). */
   fault: string | undefined;
+  /** This page load started in safe mode (D0): the root configuration is Home alone. */
+  safeMode: boolean;
+  /** Each configured root's published status, in configuration order (blueprint D1); empty until configured. */
+  rootStatuses: readonly RootStatus[];
+  /** The configuration entries the authority skipped at the last configure (D1, B3). */
+  skippedEntries: readonly SkippedConfigurationEntry[];
+  /** The input that could not be read, so the start went on with Home alone (B5); `undefined` when none. */
+  degraded: ProjectRootConfigurationDegraded | undefined;
+  /** Where the last start failure happened (D3); kept until the next `ready`. */
+  errorPhase: FileServiceErrorPhase | undefined;
+  /** Whether the last start failure can be cured by retrying (D3); kept until the next `ready`. */
+  errorClass: FileServiceErrorClass | undefined;
+  /** The last start failure's code: an errno, a Tau code or an error name (D3); kept until the next `ready`. */
+  errorCode: string | undefined;
+  /** The machine retries a transient failure once by itself, after `transientRetry`; this marks one is due. */
+  autoRetryPending: boolean;
+  /** The one automatic retry was used since the last `ready`. */
+  autoRetried: boolean;
+  /** Times the start deadline passed since the last `ready`: the second is deterministic. */
+  startDeadlineMisses: number;
+  /** `file_service.start_failed` is reported once for each machine (D5). */
+  startFailureReported: boolean;
 };
+
+// ============ Start failures (blueprint D3) ============
+
+/** The start deadline over `connectingWorker` and `initializingServices` (B12). Milliseconds. @public */
+export const fileManagerStartDeadlineMilliseconds = 20_000;
+
+/** A start that missed its deadline. @public */
+export class FileServiceStartDeadlineError extends Error {
+  public override readonly name = 'FileServiceStartDeadlineError';
+
+  public get code(): string {
+    return 'START_DEADLINE';
+  }
+}
+
+/** What the start knows about a failure beyond the error itself: where it happened, and its code when the error has none. */
+const failureNotes = new WeakMap<WeakKey, { phase?: FileServiceErrorPhase; code?: string }>();
+
+const noteFailure = <T>(error: T, notes: { phase?: FileServiceErrorPhase; code?: string }): T => {
+  if (typeof error === 'object' && error !== null && !failureNotes.has(error)) {
+    failureNotes.set(error, notes);
+  }
+  return error;
+};
+
+/** The names that mean a local database cannot open, which retrying does not change (D3). */
+const deterministicNames = new Set(['VersionError', 'DatabaseOpenTimeoutError', 'StorageUpgradeBlockedError']);
+
+const failureCode = (error: unknown): string => {
+  const noted = typeof error === 'object' && error !== null ? failureNotes.get(error)?.code : undefined;
+  const own = (error as { code?: unknown } | undefined)?.code;
+  if (typeof own === 'string') {
+    return reportableCode(own);
+  }
+  if (noted !== undefined) {
+    return noted;
+  }
+  if (error instanceof Error && error.name !== 'Error') {
+    return reportableCode(error.name);
+  }
+  return 'UNKNOWN';
+};
+
+const failurePhase = (error: unknown, fallback: FileServiceErrorPhase): FileServiceErrorPhase =>
+  (typeof error === 'object' && error !== null ? failureNotes.get(error)?.phase : undefined) ?? fallback;
 
 // ============ Lifecycle Actors ============
 
@@ -212,6 +288,10 @@ type WorkerConnectedEvent = {
   openComputeStorePort: (projectId: string) => MessagePort;
   computeControl: ReturnType<typeof computeOpeners>['computeControl'];
   openRevisionSessionPort: ReturnType<typeof computeOpeners>['openRevisionSessionPort'];
+  /** What configuring the roots reported, when this connection configured them (the root mount only). */
+  configured?: ProjectRootConfigurationResult | undefined;
+  /** The input that could not be read, so the configuration was Home alone (B5). */
+  degraded?: ProjectRootConfigurationDegraded | undefined;
 };
 
 /**
@@ -263,6 +343,57 @@ const loadFileSystemBridge = async (): Promise<typeof FileSystemBridgeModule> =>
   return fileSystemBridgeModule;
 };
 
+/** Home's engine for the worker's name, a failure marked as the `resolveHome` phase. */
+const resolveHomeBackend = async (): Promise<Awaited<ReturnType<typeof getHomeStorageBackend>>> => {
+  try {
+    return await getHomeStorageBackend();
+  } catch (error) {
+    throw noteFailure(error, { phase: 'resolveHome' });
+  }
+};
+
+/** Rejects once `signal` aborts; never an unhandled rejection when nothing awaits it. */
+const abortRejection = (signal: AbortSignal): Readonly<{ rejected: Promise<never> }> => {
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const onAbort = (): void => {
+      reject(signal.reason instanceof Error ? signal.reason : new Error('The worker connection was stopped.'));
+    };
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+  const suppressUnhandledAbort = async (): Promise<void> => {
+    try {
+      await aborted;
+    } catch {
+      /* Swallowed by design: the race that awaits it reports it. */
+    }
+  };
+  void suppressUnhandledAbort();
+  return { rejected: aborted };
+};
+
+/**
+ * Configure the roots from the root configuration, Home first (D1): this rejects only when Home itself cannot be
+ * admitted, and every other root becomes a status. Safe mode configures Home alone (D0). A failure releases the
+ * connection through `release` and is marked as the `configureRoots` phase.
+ */
+const configureRoots = async (
+  context: FileManagerContext,
+  proxy: FileManagerWorkerProxy,
+  release: () => void,
+): Promise<{ configured: ProjectRootConfigurationResult; degraded: ProjectRootConfigurationDegraded | undefined }> => {
+  try {
+    const read = await readRootConfiguration({ safeMode: context.safeMode, onRootSkipped: context.onRootSkipped });
+    return { configured: await proxy.configureProjectRoots(read.configuration), degraded: read.degraded };
+  } catch (error) {
+    release();
+    throw noteFailure(error, { phase: 'configureRoots' });
+  }
+};
+
 const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileManagerContext }>(
   async ({ input, signal }) => {
     const { context } = input;
@@ -288,7 +419,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     // managers never pay for the lookup.
     let worker = context.sharedWorker;
     if (!worker) {
-      const homeBackend = await getHomeStorageBackend();
+      const homeBackend = await resolveHomeBackend();
       worker = reportWorkerFailures(
         createFileManagerWorker({ name: fileManagerWorkerName(homeBackend) }),
         'file-manager',
@@ -328,7 +459,12 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
             void replaceNodeFsPort();
           }
         });
-        await deliverNodeFsPort(nodeWorker);
+        await deliverNodeFsPort(nodeWorker).catch((error: unknown) => {
+          safeDispose(() => {
+            nodeWorker.terminate();
+          });
+          throw noteFailure(error, { code: 'SERVICES_UNAVAILABLE' });
+        });
       }
     }
 
@@ -391,8 +527,10 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
 
     if (!context.sharedWorker) {
       const span = context.openPerformance?.begin('worker.connect');
+      /* A start that missed its deadline stops this actor; the wait ends with it so the worker is terminated below. */
+      const aborted = abortRejection(signal).rejected;
       try {
-        await Promise.race([waitForWorkerReady(worker, signal), crashSignal]);
+        await Promise.race([waitForWorkerReady(worker, signal), crashSignal, aborted]);
         span?.finish('ok');
       } catch (error) {
         span?.finish(signal.aborted ? 'cancelled' : 'error');
@@ -416,9 +554,17 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     const proxy = createFileSystemBridgeProxy(bridge);
     // Project roots are worker-global and every mutation re-syncs them (`syncProjectRoots`), so a
     // nested mount inherits the root mount's configuration instead of rebuilding it (W21).
-    if (!context.sharedWorker) {
-      await proxy.configureProjectRoots(await getProjectRootConfigs(context.onRootSkipped));
-    }
+    const { configured, degraded } = context.sharedWorker
+      ? { configured: undefined, degraded: undefined }
+      : await configureRoots(context, proxy, () => {
+          safeDispose(() => {
+            proxy.dispose();
+          });
+          safeDispose(bridgeDispose);
+          safeDispose(() => {
+            worker.terminate();
+          });
+        });
     const previewPrefix = '/previews/';
     if (context.backendType === 'memory' && context.rootDirectory.startsWith(previewPrefix)) {
       await proxy.mount(context.rootDirectory, {
@@ -445,6 +591,8 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
       openComputeStorePort,
       computeControl,
       openRevisionSessionPort,
+      configured,
+      degraded,
     };
   },
 );
@@ -689,9 +837,47 @@ const initializeServicesActor = fromSafeAsync<
  * it would have caused — the moment the machine leaves that state for another
  * reason.
  */
-const watchProxyClosedActor = fromSafeAsync<void, { proxy: FileManagerContext['proxy'] }>(async ({ input }) => {
-  await input.proxy?.closed;
+const watchProxyClosedActor = fromSafeAsync<
+  void,
+  { proxy: FileManagerContext['proxy']; worker?: FileManagerContext['worker'] }
+>(async ({ input, signal }) => {
+  /* The worker gives up on the services utility after its backoff (B7): that is this service stopping too. */
+  const servicesUnavailable = new Promise<'servicesUnavailable'>((resolve) => {
+    const onMessage = (event: MessageEvent<{ type?: string } | undefined>): void => {
+      if (event.data?.type === 'nodeFsUnavailable') {
+        resolve('servicesUnavailable');
+      }
+    };
+    input.worker?.addEventListener('message', onMessage);
+    signal.addEventListener('abort', () => {
+      input.worker?.removeEventListener('message', onMessage);
+    });
+  });
+  const ended = await Promise.race([input.proxy?.closed, servicesUnavailable]);
+  if (ended === 'servicesUnavailable') {
+    throw Object.assign(new Error('The services utility did not start.'), { code: 'SERVICES_UNAVAILABLE' });
+  }
   throw new Error('The file service for this project stopped.');
+});
+
+/** The root mount hears every root's status change (D1), as the worker's `rootStatus` event. */
+const watchRootStatusActor = createCallbackLogic<
+  EventObject,
+  { proxy: FileManagerContext['proxy']; isRootMount: boolean }
+>(({ input, sendBack }) => {
+  if (!input.isRootMount || typeof input.proxy?.listen !== 'function') {
+    return;
+  }
+  const unsubscribe = input.proxy.listen('rootStatus', (roots) => {
+    if (Array.isArray(roots)) {
+      sendBack({ type: 'rootStatusChanged', roots: roots as RootStatus[] });
+    }
+  });
+  return () => {
+    if (typeof unsubscribe === 'function') {
+      unsubscribe();
+    }
+  };
 });
 
 /** Keep the resident root projection observed without gating usable content services. */
@@ -727,6 +913,7 @@ const fileManagerActors = {
   connectWorkerActor,
   initializeServicesActor,
   watchProxyClosedActor,
+  watchRootStatusActor,
   observeRootDirectoryActor,
 } as const;
 
@@ -748,7 +935,11 @@ type FileManagerEventLifecycle =
    * `useFileManager`) after `setProjectFileSystemConfig` resolves. See
    * `docs/policy/filesystem-authority-policy.md` Rule 11.
    */
-  | { type: 'reloadWorkspace' };
+  | { type: 'reloadWorkspace' }
+  /** The worker published every root's status after a change (blueprint D1). */
+  | { type: 'rootStatusChanged'; roots: readonly RootStatus[] }
+  /** Probe again the roots that are not available; all of them, or the keys named (blueprint D1). */
+  | { type: 'recheckRoots'; storageRootKeys?: readonly string[] };
 
 /** Events accepted by fileManagerMachine. @public */
 export type FileManagerEvent =
@@ -772,6 +963,8 @@ export const fileManagerEventTypes = [
   'workerConnected',
   'workerInitialized',
   'webAccessUnavailable',
+  'rootStatusChanged',
+  'recheckRoots',
 ] as const satisfies ReadonlyArray<FileManagerEvent['type']>;
 
 const fileManagerStates = [
@@ -816,6 +1009,10 @@ export const fileManagerIgnoredEvents: ReadonlyArray<readonly [state: string, ev
     [state, 'workerInitialized'] as const,
     [state, 'webAccessUnavailable'] as const,
   ]),
+  ...fileManagerStatesExcept('ready').flatMap((state) => [
+    [state, 'rootStatusChanged'] as const,
+    [state, 'recheckRoots'] as const,
+  ]),
 ];
 
 type FileManagerInput = {
@@ -828,6 +1025,8 @@ type FileManagerInput = {
   onRootSkipped?: (skip: WorkspaceRootSkip) => void;
   /** Explicit local diagnostic recorder for passive User Timing spans. */
   openPerformance?: ProjectOpenPerformance;
+  /** This page load started in safe mode (D0): the root mount configures Home alone. */
+  safeMode?: boolean;
 } & (
   | { backendResolution: 'pending'; initialBackend?: never }
   | { backendResolution?: undefined; initialBackend?: FileSystemBackend }
@@ -836,14 +1035,95 @@ type FileManagerInput = {
 type FileManagerEnqueue = EnqueueObject<FileManagerEvent, EventObject, SystemRegistry, typeof fileManagerActors>;
 type FileManagerPatch = Partial<FileManagerContext>;
 
-const setError = (error: unknown, enq: FileManagerEnqueue): FileManagerPatch => {
-  if (error instanceof Error) {
-    enq(() => {
-      console.error('[FileManager] error:', error);
-    });
-    return { error };
+/**
+ * Enter a failure: keep the error, its phase, code and class (D3), report the first one (D5), and say whether the one
+ * automatic retry of a transient failure is due. Only the root mount retries by itself: a nested mount's worker is its
+ * parent's, and a worker that died after `ready` already had its restart.
+ */
+const fail = (
+  {
+    context,
+    error,
+    fallbackPhase,
+  }: Readonly<{ context: FileManagerContext; error: unknown; fallbackPhase: FileServiceErrorPhase }>,
+  enq: FileManagerEnqueue,
+): FileManagerPatch => {
+  const phase = failurePhase(error, fallbackPhase);
+  const code = failureCode(error);
+  const name = error instanceof Error || error instanceof DOMException ? error.name : undefined;
+  const startDeadlineMisses = context.startDeadlineMisses + (phase === 'startDeadline' ? 1 : 0);
+  const errorClass: FileServiceErrorClass =
+    code === context.errorCode ||
+    (name !== undefined && deterministicNames.has(name)) ||
+    (phase === 'startDeadline' && startDeadlineMisses >= 2)
+      ? 'deterministic'
+      : 'transient';
+  const autoRetryPending =
+    errorClass === 'transient' &&
+    !context.autoRetried &&
+    context.sharedWorker === undefined &&
+    phase !== 'watchProxyClosed';
+  const shouldReport = !context.startFailureReported;
+  const { backendType, rootStatuses } = context;
+  enq(() => {
+    console.error('[FileManager] error:', error);
+    if (shouldReport) {
+      reportFileServiceStartFailed({ phase, code, errorClass, homeBackend: backendType, roots: rootStatuses });
+    }
+  });
+  return {
+    error: error instanceof Error ? error : undefined,
+    errorPhase: phase,
+    errorClass,
+    errorCode: code,
+    startDeadlineMisses,
+    autoRetryPending,
+    startFailureReported: true,
+  };
+};
+
+/** Probe the named roots again, or every one that is not available, and hand the statuses on (D1). */
+const probeRootsAgain = async (
+  proxy: FileManagerContext['proxy'],
+  storageRootKeys: readonly string[] | undefined,
+  deliver: (roots: readonly RootStatus[]) => void,
+): Promise<void> => {
+  try {
+    const roots = await proxy?.recheckRoots(storageRootKeys === undefined ? undefined : [...storageRootKeys]);
+    if (roots !== undefined) {
+      deliver(roots);
+    }
+  } catch {
+    // The worker publishes what changed as `rootStatus`; a failed probe leaves the statuses as they are.
   }
-  return { error: undefined };
+};
+
+/** What `ready` clears: the start succeeded, so the next failure is a first one again. */
+const startSucceeded: FileManagerPatch = {
+  errorPhase: undefined,
+  errorClass: undefined,
+  errorCode: undefined,
+  autoRetryPending: false,
+  autoRetried: false,
+  startDeadlineMisses: 0,
+};
+
+/** Report what one configure found: a degraded input, skipped entries and roots that are not available (D5). */
+const reportConfigured = (
+  configured: ProjectRootConfigurationResult | undefined,
+  degraded: ProjectRootConfigurationDegraded | undefined,
+): void => {
+  if (degraded !== undefined) {
+    reportFileServiceStartedDegraded(degraded);
+  }
+  for (const entry of configured?.skipped ?? []) {
+    reportFileServiceEntrySkipped(entry);
+  }
+  for (const root of configured?.roots ?? []) {
+    if (root.state !== 'available') {
+      void reportFileServiceRootUnavailable(root);
+    }
+  }
 };
 
 /** Release the service graph; the worker, proxy, bridge opener and authority are not touched. */
@@ -969,6 +1249,10 @@ export const fileManagerMachine = setup({
   delays: {
     /** A worker that dies again within this bound of its restart is shown as failed (RV1-F1, T9 E4). Milliseconds. */
     restartWindow: 3500,
+    /** No wait of the start outlives this (B12, D3). Milliseconds. */
+    startDeadline: fileManagerStartDeadlineMilliseconds,
+    /** The pause before the one automatic retry of a transient failure (D3). Milliseconds. */
+    transientRetry: 1000,
   },
 }).createMachine({
   id: 'fileManager',
@@ -1004,6 +1288,17 @@ export const fileManagerMachine = setup({
     onRootSkipped: input.onRootSkipped,
     openPerformance: input.openPerformance ?? readLocalProjectOpenPerformance(),
     fault: undefined,
+    safeMode: input.safeMode ?? false,
+    rootStatuses: [],
+    skippedEntries: [],
+    degraded: undefined,
+    errorPhase: undefined,
+    errorClass: undefined,
+    errorCode: undefined,
+    autoRetryPending: false,
+    autoRetried: false,
+    startDeadlineMisses: 0,
+    startFailureReported: false,
   }),
   /* A fault no transition modelled is recorded and reported once, and the machine keeps answering in the state it was
    * in: the first is kept, later ones are its consequences (MC-R12, D23; B2). Today's modelled failures still enter
@@ -1046,30 +1341,69 @@ export const fileManagerMachine = setup({
 
     connectingWorker: {
       entry: () => ({ context: { error: undefined } }),
+      timeout: 'startDeadline',
+      onTimeout: ({ context }, enq) => ({
+        target: 'error',
+        context: fail(
+          {
+            context,
+            error: new FileServiceStartDeadlineError('The file service did not start in time.'),
+            fallbackPhase: 'startDeadline',
+          },
+          enq,
+        ),
+      }),
       on: {
         setRoot: changeRoot({ whenChanged: true, stopPolling: true }),
-        workerConnected: {
-          context: ({ event }) => ({
-            worker: event.worker,
-            proxy: event.proxy,
-            bridgeDispose: event.bridgeDispose,
-            openFileSystemBridge: event.openFileSystemBridge,
-            openComputeBinding: event.openComputeBinding,
-            openComputeStorePort: event.openComputeStorePort,
-            computeControl: event.computeControl,
-            openRevisionSessionPort: event.openRevisionSessionPort,
-          }),
+        workerConnected: ({ event }, enq) => {
+          const { configured, degraded } = event;
+          if (configured !== undefined || degraded !== undefined) {
+            enq(() => {
+              reportConfigured(configured, degraded);
+            });
+          }
+          return {
+            context: {
+              worker: event.worker,
+              proxy: event.proxy,
+              bridgeDispose: event.bridgeDispose,
+              openFileSystemBridge: event.openFileSystemBridge,
+              openComputeBinding: event.openComputeBinding,
+              openComputeStorePort: event.openComputeStorePort,
+              computeControl: event.computeControl,
+              openRevisionSessionPort: event.openRevisionSessionPort,
+              ...(configured === undefined
+                ? {}
+                : { rootStatuses: configured.roots, skippedEntries: configured.skipped }),
+              ...(event.configured === undefined && event.degraded === undefined ? {} : { degraded }),
+            },
+          };
         },
       },
       invoke: {
         src: 'connectWorkerActor',
         input: ({ context }) => ({ context }),
         onDone: { target: 'initializingServices' },
-        onError: ({ event }, enq) => ({ target: 'error', context: setError(event.error, enq) }),
+        onError: ({ context, event }, enq) => ({
+          target: 'error',
+          context: fail({ context, error: event.error, fallbackPhase: 'connectWorker' }, enq),
+        }),
       },
     },
 
     initializingServices: {
+      timeout: 'startDeadline',
+      onTimeout: ({ context }, enq) => ({
+        target: 'error',
+        context: fail(
+          {
+            context,
+            error: new FileServiceStartDeadlineError('The file service did not start in time.'),
+            fallbackPhase: 'startDeadline',
+          },
+          enq,
+        ),
+      }),
       on: {
         setRoot: changeRoot({ whenChanged: true, stopPolling: true }),
         workerInitialized: {
@@ -1104,13 +1438,16 @@ export const fileManagerMachine = setup({
         onDone: ({ context }) => ({
           target: context.unavailableReason === undefined ? 'ready' : 'webAccessUnavailable',
         }),
-        onError: ({ event }, enq) => ({ target: 'error', context: setError(event.error, enq) }),
+        onError: ({ context, event }, enq) => ({
+          target: 'error',
+          context: fail({ context, error: event.error, fallbackPhase: 'initializeServices' }, enq),
+        }),
       },
     },
 
     ready: {
       entry: ({ context, self }, enq) => {
-        const { treeService, backendType, sharedWorker, onRootSkipped } = context;
+        const { treeService, backendType, sharedWorker, onRootSkipped, safeMode } = context;
         enq(() => {
           if (backendType === 'webaccess') {
             treeService?.startPolling();
@@ -1125,7 +1462,7 @@ export const fileManagerMachine = setup({
           // workspaces even when its own mounted backend is IndexedDB.
           void (async () => {
             try {
-              const configuration = await getProjectRootConfigs(onRootSkipped);
+              const { configuration } = await readRootConfiguration({ safeMode, onRootSkipped });
               const snapshot = self.getSnapshot();
               if (
                 snapshot.matches('ready') &&
@@ -1139,6 +1476,7 @@ export const fileManagerMachine = setup({
             }
           })();
         });
+        return { context: startSucceeded };
       },
       exit: ({ context }, enq) => {
         stopPolling(context, enq);
@@ -1149,7 +1487,7 @@ export const fileManagerMachine = setup({
       invoke: [
         {
           src: 'watchProxyClosedActor',
-          input: ({ context }) => ({ proxy: context.proxy }),
+          input: ({ context }) => ({ proxy: context.proxy, worker: context.worker }),
           /* RV1-F1: the root mount restarts its own dead worker once without a click; a nested mount's worker is its
            * parent's to restart, and a second death within the bound shows the error with "Try again". */
           onError: ({ context, event }, enq) =>
@@ -1160,18 +1498,39 @@ export const fileManagerMachine = setup({
                 }
               : {
                   target: 'error',
-                  context: { ...setError(event.error, enq), ...destroyWorkerAndServices(context, enq) },
+                  context: {
+                    ...fail({ context, error: event.error, fallbackPhase: 'watchProxyClosed' }, enq),
+                    ...destroyWorkerAndServices(context, enq),
+                  },
                 },
         },
         {
           src: 'observeRootDirectoryActor',
           input: ({ context }) => ({ context }),
         },
+        {
+          src: 'watchRootStatusActor',
+          input: ({ context }) => ({ proxy: context.proxy, isRootMount: context.sharedWorker === undefined }),
+        },
       ],
       on: {
         setRoot: changeRoot({ whenChanged: true, stopPolling: true }),
 
         setBackendType: { context: ({ event }) => ({ backendType: event.backendType }) },
+
+        rootStatusChanged: { context: ({ event }) => ({ rootStatuses: event.roots }) },
+
+        /* Probe the roots that are not available again; their new statuses arrive as `rootStatusChanged` too. */
+        recheckRoots: ({ context, event, self }, enq) => {
+          const { proxy } = context;
+          enq(() => {
+            /* Outside `ready` the answer is ignored, as every `rootStatusChanged` there is. */
+            void probeRootsAgain(proxy, event.storageRootKeys, (roots) => {
+              self.send({ type: 'rootStatusChanged', roots });
+            });
+          });
+          return {};
+        },
 
         reloadWorkspace: ({ context }, enq) => {
           stopPolling(context, enq);
@@ -1209,10 +1568,17 @@ export const fileManagerMachine = setup({
           console.error('[FileManager] state → error', error);
         });
       },
+      /* A transient failure gets one automatic retry before the person has to act (D3). */
+      after: {
+        transientRetry: ({ context }) =>
+          context.autoRetryPending
+            ? { target: 'connectingWorker', context: { autoRetryPending: false, autoRetried: true } }
+            : undefined,
+      },
       on: {
         setRoot: changeRoot({ whenChanged: false, stopPolling: false }),
-        initialize: { target: 'connectingWorker' },
-        reloadWorkspace: { target: 'connectingWorker', context: { error: undefined } },
+        initialize: { target: 'connectingWorker', context: { autoRetryPending: false } },
+        reloadWorkspace: { target: 'connectingWorker', context: { error: undefined, autoRetryPending: false } },
       },
     },
   },

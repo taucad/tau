@@ -108,6 +108,35 @@ describe('createDiagnosticsLog', () => {
     expect(readFileSync(log.filePath, 'utf8')).toContain('after.rotation');
   });
 
+  it('should keep three rotated generations and drop the oldest', async () => {
+    const directory = logDirectory();
+    const log = createDiagnosticsLog({ directory, echo: false, maxBytes: 32 });
+    for (let generation = 1; generation <= 4; generation += 1) {
+      writeFileSync(log.filePath, `generation ${String(generation)} `.padEnd(64, 'x'));
+      log.log('info', 'after.rotation', { generation });
+      // oxlint-disable-next-line no-await-in-loop -- each rotation must land before the next file is written
+      await log.flush();
+    }
+    expect(readFileSync(join(directory, 'desktop.1.log'), 'utf8')).toContain('generation 4');
+    expect(readFileSync(join(directory, 'desktop.2.log'), 'utf8')).toContain('generation 3');
+    expect(readFileSync(join(directory, 'desktop.3.log'), 'utf8')).toContain('generation 2');
+    expect(existsSync(join(directory, 'desktop.4.log'))).toBe(false);
+  });
+
+  it('should open the log under the system temporary folder when its directory cannot be created', () => {
+    const parent = logDirectory();
+    /* A file where the log directory's parent should be: `mkdir` fails whatever the account's privileges. */
+    const blocked = join(parent, 'not-a-directory');
+    writeFileSync(blocked, 'occupied');
+    let log: ReturnType<typeof createDiagnosticsLog> | undefined;
+    expect(() => {
+      log = createDiagnosticsLog({ directory: join(blocked, 'logs'), echo: false });
+    }).not.toThrow();
+    expect(log?.filePath.startsWith(tmpdir())).toBe(true);
+    log?.log('error', 'main.bootstrap-failed', { step: 'home-directory' });
+    expect(readFileSync(log!.filePath, 'utf8')).toContain('main.bootstrap-failed');
+  });
+
   it('never throws when the log cannot be written', () => {
     const log = createDiagnosticsLog({ directory: logDirectory(), echo: false });
     expect(() => {

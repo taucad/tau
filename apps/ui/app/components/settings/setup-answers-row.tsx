@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { resetLeaf } from '@taucad/preferences';
 import type { PersonProfile } from '@taucad/preferences';
-import { SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { setupAnswersCopy } from '@taucad/settings-ui/components/settings/setup-answers-copy';
 import { goalCopy, languageCopy, toolCopy } from '#components/onboarding/setup-copy.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';

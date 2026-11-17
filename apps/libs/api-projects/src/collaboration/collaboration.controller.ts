@@ -4,7 +4,11 @@ import { UseAuth, User } from '@taucad/api-auth';
 import { PublicationRateLimiterService } from '@taucad/api-redis';
 import { ProjectAccessService } from '#collaboration/project-access.service.js';
 import type { ProjectCollaboratorEntry } from '#collaboration/project-access.service.js';
-import { InviteCollaboratorDto, SetCollaboratorRoleDto } from '#collaboration/collaboration.dto.js';
+import {
+  AcceptInvitationDto,
+  InviteCollaboratorDto,
+  SetCollaboratorRoleDto,
+} from '#collaboration/collaboration.dto.js';
 
 /** Daily invite cap per owner, matching the publication invite budget it shares a limiter with. */
 const collaboratorInvitesPerOwnerPerDay = 200;
@@ -128,7 +132,8 @@ export class CollaboratorsController {
  *
  * It is authenticated, because accepting binds the invitation to an account and
  * there is no account to bind before signing in. The client's job is to carry
- * the token through sign-in and post it afterwards.
+ * the token through sign-in and post it afterwards, in the body: a token in the
+ * path would be written to every access log the request line passes (#2290).
  */
 @Controller({ path: 'invitations', version: '1' })
 @UseAuth()
@@ -138,15 +143,15 @@ export class InvitationsController {
   /**
    * Accepts an invitation as the signed-in account.
    *
-   * @param token - The raw token from the invitation link.
+   * @param body - The raw token from the invitation link.
    * @param userId - The signed-in caller, whose verified email must be the invited one.
    * @returns The project now reachable, and the role held on it.
    */
-  @Post(':token')
+  @Post('accept')
   public async accept(
-    @Param('token') token: string,
+    @Body() body: AcceptInvitationDto,
     @User('id') userId: string,
   ): Promise<{ projectId: string; role: 'read' | 'write' }> {
-    return this.access.accept(token, userId);
+    return this.access.accept(body.token, userId);
   }
 }

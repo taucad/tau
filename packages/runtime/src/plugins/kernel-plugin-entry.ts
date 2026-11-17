@@ -74,6 +74,7 @@ export {
 } from '#kernels/kernel-module-helpers.js';
 export type { RuntimeModuleExports } from '#kernels/kernel-module-helpers.js';
 export { checkAbort } from '#framework/cooperative-abort.js';
+export { isRenderAbortedError } from '#framework/runtime-operation-errors.js';
 export { createRealmGroup } from '#framework/realm-resources.js';
 export { named } from '#framework/named.js';
 export { getWebAssemblyExceptionConstructor, isWebAssemblyException } from '#framework/wasm-exception.js';

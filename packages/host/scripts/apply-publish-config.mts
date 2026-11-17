@@ -64,7 +64,8 @@ const workspaceManifests = (deployDirectory: string): string[] => {
     const packages = join(store, entry, 'node_modules');
     for (const scopeOrName of readdirSync(packages)) {
       const names = scopeOrName.startsWith('@')
-        ? readdirSync(join(packages, scopeOrName)).map((name) => join(scopeOrName, name))
+        ? // A package name keeps its `/` on every platform; `join` would give `@scope\name` on Windows.
+          readdirSync(join(packages, scopeOrName)).map((name) => `${scopeOrName}/${name}`)
         : [scopeOrName];
       for (const name of names) {
         const directory = join(packages, name);

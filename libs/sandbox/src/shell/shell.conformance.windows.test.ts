@@ -150,6 +150,12 @@ const delay = async (milliseconds: number): Promise<void> =>
 
 /** A PowerShell single-quoted literal. */
 const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+/**
+ * PowerShell that writes `value` (an expression) to `path` (an expression) atomically: a sibling temporary file, then a
+ * rename into place (`File.Replace` over an existing target, which never leaves it missing). A file the test polls while a shell writes it must never be seen half written.
+ */
+const atomicWrite = (path: string, value: string): string =>
+  `& { param($target, $text) $partial = $target + '.partial'; Set-Content -LiteralPath $partial -Value $text -NoNewline; if (Test-Path -LiteralPath $target) { [System.IO.File]::Replace($partial, $target, [NullString]::Value) } else { Move-Item -LiteralPath $partial -Destination $target } } ${path} ${value}`;
 
 /** `-EncodedCommand` text: UTF-16LE, base64, so a nested script survives every command line it passes through. */
 const encoded = (script: string): string => Buffer.from(script, 'utf16le').toString('base64');
@@ -373,14 +379,14 @@ const pipeServer = async (
     '$servers = @(1..4 | ForEach-Object { New-Instance })',
     '$waits = @($servers | ForEach-Object { $_.WaitForConnectionAsync() })',
     '$accepted = 0',
-    'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_COUNT -Value 0 -NoNewline',
+    atomicWrite('$env:CONFORMANCE_PIPE_COUNT', "'0'"),
     'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_LISTENING -Value 1 -NoNewline',
     'while (-not (Test-Path -LiteralPath $env:CONFORMANCE_PIPE_STOP)) {',
     '  for ($i = 0; $i -lt $servers.Count; $i++) {',
     '    if ($waits[$i].IsCompleted) {',
     "      if ($waits[$i].Status -eq 'RanToCompletion') {",
     '        $accepted++',
-    '        Set-Content -LiteralPath $env:CONFORMANCE_PIPE_COUNT -Value $accepted -NoNewline',
+    `        ${atomicWrite('$env:CONFORMANCE_PIPE_COUNT', '"$accepted"')}`,
     '      }',
     '      $servers[$i].Dispose()',
     '      $servers[$i] = New-Instance',
@@ -1167,7 +1173,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
         mkdirSync(sync, { recursive: true });
         const parked = run(
           [
-            `@{ pid = $PID; TEMP = $env:TEMP; LOCALAPPDATA = $env:LOCALAPPDATA; APPDATA = $env:APPDATA } | ConvertTo-Json -Compress | Set-Content -LiteralPath ${quote(join(sync, 'seen.json'))} -NoNewline`,
+            `$seen = @{ pid = $PID; TEMP = $env:TEMP; LOCALAPPDATA = $env:LOCALAPPDATA; APPDATA = $env:APPDATA } | ConvertTo-Json -Compress`,
+            atomicWrite(quote(join(sync, 'seen.json')), '$seen'),
             `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
           ].join('\n'),
           { commandId: `conformance#w08-${tag}` },
@@ -1233,7 +1240,7 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     const sentinels = Object.fromEntries(names.map((name) => [name, join(work, `${prefix}-${name}.beat`)]));
     const pids = Object.fromEntries(names.map((name) => [name, join(work, `${prefix}-${name}.pid`)]));
     const writer = (name: (typeof names)[number]): string =>
-      `Set-Content -LiteralPath ${quote(pids[name]!)} -Value $PID -NoNewline; while ($true) { Add-Content -LiteralPath ${quote(sentinels[name]!)} -Value b -NoNewline; Start-Sleep -Milliseconds 100 }`;
+      `${atomicWrite(quote(pids[name]!), '"$PID"')}; while ($true) { Add-Content -LiteralPath ${quote(sentinels[name]!)} -Value b -NoNewline; Start-Sleep -Milliseconds 100 }`;
     const argumentsOf = (name: (typeof names)[number]): string =>
       `-NoLogo -NoProfile -NonInteractive -EncodedCommand ${encoded(writer(name))}`;
     const breakaway = [

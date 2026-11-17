@@ -642,14 +642,14 @@ describe('createServicesHost — filesystem authority lifetime', () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     type ServeRuntimeFileSystem = NonNullable<ServicesHostOptions['serveRuntimeFileSystem']>;
-    let capturedHandlers: Parameters<ServeRuntimeFileSystem>[0] | undefined;
+    const served = Promise.withResolvers<Parameters<ServeRuntimeFileSystem>[0]>();
     const bridge = { emit: vi.fn(), dispose: vi.fn() };
     const host = createServicesHost({
       authorityDirectory,
       log: vi.fn(),
       serveRuntimeFileSystem: (handlers, port) => {
         void port;
-        capturedHandlers = handlers;
+        served.resolve(handlers);
         vi.spyOn(handlers, 'writeFile').mockImplementation(async (path, data) => {
           entered.resolve();
           await release.promise;
@@ -665,10 +665,11 @@ describe('createServicesHost — filesystem authority lifetime', () => {
     host.handleMessage(
       frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: root } }, [stubPort()]),
     );
-    if (capturedHandlers === undefined) {
-      throw new Error('The runtime filesystem concern was not served.');
-    }
-    return { bridge, entered, handlers: capturedHandlers, host, release, root, sandbox };
+    /* Under macOS `$TMPDIR` the admitted spelling is not canonical, so the
+     * concern is served once the background `realpath` settles (D8), not
+     * synchronously. A refusal closes the port and never serves. */
+    const handlers = await served.promise;
+    return { bridge, entered, handlers, host, release, root, sandbox };
   };
 
   it('waits for a dispatched runtime bridge success reply before quiescing', async () => {

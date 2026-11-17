@@ -125,16 +125,18 @@ describe('desktop artifact contract', () => {
     );
   });
 
-  it('should admit a single-platform production candidate only for Apple silicon Mac or Linux', () => {
+  it('should admit a single-platform production candidate only for Apple silicon Mac, Windows or Linux', () => {
     const tag = 'desktop@0.2.0';
     const mac = manifest([artifact('macos-zip', 'darwin-arm64', tag)], tag);
+    const windows = manifest([artifact('windows-zip', 'win32-x64', tag)], tag);
     const linux = manifest([artifact('linux-tar', 'linux-x64', tag)], tag);
     expect(parseDesktopArtifactManifest(mac)).toEqual(mac);
+    expect(parseDesktopArtifactManifest(windows)).toEqual(windows);
     expect(parseDesktopArtifactManifest(linux)).toEqual(linux);
     for (const artifacts of [
       [artifact('macos-zip', 'darwin-x64', tag)],
-      [artifact('windows-zip', 'win32-x64', tag)],
       [artifact('macos-zip', 'darwin-arm64', tag), artifact('linux-tar', 'linux-x64', tag)],
+      [artifact('windows-zip', 'win32-x64', tag), artifact('linux-tar', 'linux-x64', tag)],
       [artifact('macos-zip', 'darwin-arm64', tag), artifact('macos-zip', 'darwin-x64', tag)],
     ]) {
       expect(() => parseDesktopArtifactManifest(manifest(artifacts, tag))).toThrow(

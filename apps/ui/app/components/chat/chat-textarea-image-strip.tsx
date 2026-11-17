@@ -5,7 +5,8 @@ import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 import { cn } from '@taucad/ui/utils/cn';
 import { focusTrapAttribute } from '@taucad/chat-ui/components/use-composer-exit';
 import { AttachmentFileChip, AttachmentImage } from '#components/chat/attachment-preview.js';
-import type { DraftAttachment } from '#hooks/draft.machine.js';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import type { DraftAttachment, PendingDraftImage } from '#hooks/draft.machine.js';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { attachmentKind, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 
@@ -13,6 +14,8 @@ type ChatTextareaAttachmentRailSize = 'desktop' | 'mobile';
 
 type ChatTextareaAttachmentRailProperties = {
   readonly attachments: readonly DraftAttachment[];
+  /** Images still converting or storing, after the stored ones: each holds the slot its thumbnail will take. */
+  readonly pendingImages?: readonly PendingDraftImage[];
   /** The directories the draft's attachment references resolve against, in order. */
   readonly directory: AttachmentDirectories;
   /** Why Send is disabled for these attachments, shown under them (D20). */
@@ -41,6 +44,7 @@ const removeButtonClassName = cn(
  */
 export const ChatTextareaAttachmentRail = memo(function ({
   attachments,
+  pendingImages = [],
   directory,
   blockReason,
   blockReasonId,
@@ -72,7 +76,7 @@ export const ChatTextareaAttachmentRail = memo(function ({
     [images],
   );
 
-  if (attachments.length === 0) {
+  if (attachments.length === 0 && pendingImages.length === 0) {
     return undefined;
   }
 
@@ -171,6 +175,19 @@ export const ChatTextareaAttachmentRail = memo(function ({
               </div>
             );
           })}
+          {pendingImages.map((pending, index) => (
+            /* The thumbnail's own box, drawn as a skeleton until the stored image takes the slot (UI policy §5). */
+            <div
+              // oxlint-disable-next-line react/no-array-index-key -- a pending image has no identity until it is stored
+              key={`pending-${index}`}
+              role='status'
+              aria-busy='true'
+              className={cn('relative shrink-0 overflow-hidden rounded-md border', thumbnailSize[size])}
+            >
+              <Skeleton aria-hidden='true' className='size-full rounded-none' />
+              <span className='sr-only'>{pending.isConverting ? 'Converting image…' : 'Adding image…'}</span>
+            </div>
+          ))}
         </div>
       </OmniScroller>
       {blockReason === undefined ? null : (

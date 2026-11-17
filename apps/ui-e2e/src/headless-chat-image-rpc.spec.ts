@@ -15,7 +15,11 @@ type CaptureInput = {
   readonly includeEdges?: boolean;
 };
 type CaptureResult =
-  | { readonly success: true; readonly images: ReadonlyArray<{ readonly view: string; readonly dataUrl: string }> }
+  | {
+      readonly success: true;
+      readonly images: ReadonlyArray<{ readonly view: string; readonly dataUrl: string }>;
+      readonly message?: string;
+    }
   | { readonly success: false; readonly errorCode: string; readonly message: string };
 type SectionCutValues =
   | Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>

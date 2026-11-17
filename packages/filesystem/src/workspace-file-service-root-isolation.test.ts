@@ -96,8 +96,27 @@ const until = async (condition: () => boolean): Promise<void> => {
   expect(condition()).toBe(true);
 };
 
+/** Yield real I/O turns, so admissions and queued topology work run. */
+const turns = async (count: number): Promise<void> => {
+  for (let turn = 0; turn < count; turn += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- Each turn yields to the host's message port.
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+};
+
+/** A gate a stubbed admission waits on until the row opens it. */
+const admissionGate = () => {
+  const gate = Promise.withResolvers<() => void>();
+  cleanups.push(() => {
+    gate.resolve(() => undefined);
+  });
+  return { open: () => gate.resolve(() => undefined), wait: async () => gate.promise };
+};
+
 /** The host directory one node provider serves. */
-const baseOf = (provider: NodeFsProvider): string => (provider as unknown as { _base: string })._base;
+const baseOf = (provider: NodeFsProvider): string => provider.root;
 
 /**
  * Replace native admission for the named roots; every other root admits for real.
@@ -419,6 +438,8 @@ describe('WorkspaceFileService root isolation', () => {
     const home = createRoot('home', homeProjectId);
     const { service, providerRegistry } = createNodeService([home]);
     const workspaceId = 'wsp_web_root_unavailable';
+    /* The mock implements the directory-handle members the provider reads, not the DOM interface's full surface. */
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- last resort: no typed factory for a DOM handle.
     const directoryHandle = createMockRootHandle() as unknown as FileSystemDirectoryHandle;
     const getProvider = providerRegistry.getProvider.bind(providerRegistry);
     vi.spyOn(providerRegistry, 'getProvider').mockImplementation(async (scope) => {
@@ -446,5 +467,206 @@ describe('WorkspaceFileService root isolation', () => {
       storageRootKey: `webaccess:${workspaceId}`,
     });
     await expect(service.readFile(`/projects/${homeProjectId}/main.ts`, 'utf8')).resolves.toBe('home source');
+  });
+
+  /* Review of #2384 (CodeRabbit): a route's provider was awaited before any admission deadline existed, so a root whose
+   * provider never settles held Home's routes and the whole configuration. */
+  it("should mount Home and settle at the deadline when another root's provider never resolves", async () => {
+    const home = createRoot('home', homeProjectId);
+    const hung = createRoot('hung', lostProjectId);
+    const { service, providerRegistry } = createNodeService([home, hung]);
+    const getProvider = providerRegistry.getProvider.bind(providerRegistry);
+    vi.spyOn(providerRegistry, 'getProvider').mockImplementation(async (scope) =>
+      providerRegistry.resolveStorageRootKey(scope) === nodeKey(hung)
+        ? Promise.withResolvers<never>().promise
+        : getProvider(scope),
+    );
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const outcome: { result?: Awaited<ReturnType<WorkspaceFileService['configureProjectRoots']>> } = {};
+    const configure = async (): Promise<void> => {
+      outcome.result = await service.configureProjectRoots({
+        projects: [nodeProject(home, homeProjectId, 'home'), nodeProject(hung, lostProjectId, 'hung')],
+        roots: [
+          { backend: 'node', path: home },
+          { backend: 'node', path: hung },
+        ],
+      });
+    };
+    const configured = configure();
+    await turns(50);
+    await vi.advanceTimersByTimeAsync(5000);
+    await until(() => outcome.result !== undefined);
+    await configured;
+    vi.useRealTimers();
+
+    expect(outcome.result?.roots[1]).toEqual({
+      storageRootKey: nodeKey(hung),
+      backend: 'node',
+      state: 'unreachable',
+      code: 'ROOT_DEADLINE',
+    });
+    expect(outcome.result?.skipped).toContainEqual({
+      kind: 'project',
+      reason: 'root-unavailable',
+      projectId: lostProjectId,
+      storageRootKey: nodeKey(hung),
+    });
+    await expect(service.readFile(`/projects/${homeProjectId}/main.ts`, 'utf8')).resolves.toBe('home source');
+  });
+
+  /* Review of #2384 (CodeRabbit): a provider failure excluded its route for good, so a root that admitted after the
+   * failure read `available` while its project stayed unbound. */
+  it('should mount the route of a root that admits after its provider failed once', async () => {
+    const home = createRoot('home', homeProjectId);
+    const flaky = createRoot('flaky', lostProjectId);
+    const { service, providerRegistry } = createNodeService([home, flaky]);
+    const getProvider = providerRegistry.getProvider.bind(providerRegistry);
+    let refusals = 1;
+    vi.spyOn(providerRegistry, 'getProvider').mockImplementation(async (scope) => {
+      if (providerRegistry.resolveStorageRootKey(scope) === nodeKey(flaky) && refusals > 0) {
+        refusals -= 1;
+        throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+      }
+      return getProvider(scope);
+    });
+    const configuration: ProjectRootConfiguration = {
+      projects: [nodeProject(home, homeProjectId, 'home'), nodeProject(flaky, lostProjectId, 'flaky')],
+      roots: [
+        { backend: 'node', path: home },
+        { backend: 'node', path: flaky },
+      ],
+    };
+
+    await service.configureProjectRoots(configuration);
+    const statuses = await service.recheckRoots();
+
+    expect(statuses[1]?.state).toBe('available');
+    await expect(service.readFile(`/projects/${lostProjectId}/main.ts`, 'utf8')).resolves.toBe('flaky source');
+  });
+
+  /* Review of #2384 (CodeRabbit): a late admission attached itself outside the topology queue, so it could mount the
+   * previous configuration's provider over a route the configuration in flight had just replaced. */
+  it("should attach a late admission after the configuration in flight, never over that configuration's routes", async () => {
+    const home = createRoot('home', homeProjectId);
+    const late = createRoot('late', lostProjectId);
+    const replacement = createRoot('replacement', lostProjectId);
+    const gate = admissionGate();
+    stubAdmission(new Map([[late, gate.wait]]));
+    const { service, providerRegistry } = createNodeService([home, late, replacement]);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const first = service.configureProjectRoots({
+      projects: [nodeProject(home, homeProjectId, 'home'), nodeProject(late, lostProjectId, 'late')],
+      roots: [
+        { backend: 'node', path: home },
+        { backend: 'node', path: late },
+      ],
+    });
+    await turns(50);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect((await first).roots[1]?.state).toBe('unreachable');
+
+    /* The next configuration moves the project to another root and holds on Home's provider for its checkout. */
+    const getProvider = providerRegistry.getProvider.bind(providerRegistry);
+    const held = Promise.withResolvers<void>();
+    let homeCalls = 0;
+    let holding = false;
+    vi.spyOn(providerRegistry, 'getProvider').mockImplementation(async (scope) => {
+      if (providerRegistry.resolveStorageRootKey(scope) === nodeKey(home)) {
+        homeCalls += 1;
+        if (homeCalls === 2) {
+          holding = true;
+          await held.promise;
+        }
+      }
+      return getProvider(scope);
+    });
+    const second = service.configureProjectRoots({
+      projects: [nodeProject(home, homeProjectId, 'home'), nodeProject(replacement, lostProjectId, 'replacement')],
+      checkouts: [
+        {
+          backend: 'node',
+          path: home,
+          projectId: homeProjectId,
+          checkoutId: 'chk_review',
+          providerBasePath: '.tau/checkouts/review',
+        },
+      ],
+      roots: [
+        { backend: 'node', path: home },
+        { backend: 'node', path: late },
+        { backend: 'node', path: replacement },
+      ],
+    });
+    await until(() => holding);
+    gate.open();
+    await turns(200);
+    held.resolve();
+    await turns(50);
+    await vi.advanceTimersByTimeAsync(5000);
+    await second;
+    await turns(50);
+    vi.useRealTimers();
+
+    await expect(service.readFile(`/projects/${lostProjectId}/main.ts`, 'utf8')).resolves.toBe('replacement source');
+  });
+
+  /* Review of #2384 (CodeRabbit): a checkout id the path rules refuse threw out of staging and failed the call. */
+  it('should skip a checkout whose id is not a valid path segment and keep the rest of the configuration', async () => {
+    const home = createRoot('home', homeProjectId);
+    const { service } = createNodeService([home]);
+
+    const result = await service.configureProjectRoots({
+      projects: [nodeProject(home, homeProjectId, 'home')],
+      checkouts: [
+        {
+          backend: 'node',
+          path: home,
+          projectId: homeProjectId,
+          checkoutId: 'chk_bad\u0000id',
+          providerBasePath: '.tau/checkouts/bad',
+        },
+      ],
+      roots: [{ backend: 'node', path: home }],
+    });
+
+    expect(result.skipped).toContainEqual({ kind: 'checkout', reason: 'checkout-rule' });
+    await expect(service.readFile(`/projects/${homeProjectId}/main.ts`, 'utf8')).resolves.toBe('home source');
+  });
+
+  /* Review of #2384 (CodeRabbit): a probe queued behind the two probe slots admitted its root after the authority was
+   * disposed, recreating a provider nothing would release. */
+  it('should not admit a queued root once the authority is disposed', async () => {
+    const home = createRoot('home');
+    const first = createRoot('first');
+    const second = createRoot('second');
+    const queued = createRoot('queued');
+    const firstGate = admissionGate();
+    const secondGate = admissionGate();
+    stubAdmission(
+      new Map([
+        [first, firstGate.wait],
+        [second, secondGate.wait],
+      ]),
+    );
+    const { service, providerRegistry } = createNodeService([home, first, second, queued]);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const configured = service.configureProjectRoots({
+      projects: [],
+      roots: [home, first, second, queued].map((path) => ({ backend: 'node', path }) as const),
+    });
+    await turns(50);
+    await vi.advanceTimersByTimeAsync(5000);
+    await configured;
+    vi.useRealTimers();
+    const getProvider = vi.spyOn(providerRegistry, 'getProvider');
+
+    service.dispose();
+    firstGate.open();
+    secondGate.open();
+    await turns(200);
+
+    expect(
+      getProvider.mock.calls.some(([scope]) => providerRegistry.resolveStorageRootKey(scope) === nodeKey(queued)),
+    ).toBe(false);
   });
 });

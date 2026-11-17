@@ -1397,7 +1397,7 @@ describe('project discovery over unavailable roots (T-B13.3)', () => {
     const release = Promise.withResolvers<() => void>();
     vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(
       async function (this: NodeFsProvider, request, handler) {
-        if ((this as unknown as { _base: string })._base === hung) {
+        if (this.root === hung) {
           return release.promise;
         }
         return nativeWatch.call(this, request, handler);
@@ -1439,6 +1439,74 @@ describe('project discovery over unavailable roots (T-B13.3)', () => {
         expect.objectContaining({ status: 'inaccessible', reason: 'unreachable' }),
       ]);
       expect(getProvider.mock.calls.some(([scope]) => scope.backend === 'node' && scope.path === hung)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      release.resolve(() => undefined);
+      nodeService.dispose();
+      await stopHost();
+      port2.close();
+      rmSync(home, { recursive: true, force: true });
+      rmSync(hung, { recursive: true, force: true });
+    }
+  });
+
+  /* Review of #2384 (CodeRabbit): while a configuration admits a root, the root has no published state, so discovery
+   * resolved its provider and listed it with no deadline. */
+  it('should report a root still in admission as pending without resolving its provider', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'tau-discovery-home-'));
+    const hung = mkdtempSync(join(tmpdir(), 'tau-discovery-hung-'));
+    mkdirSync(join(home, 'alpha'));
+    const nativeWatch = NodeFsProvider.prototype.watch;
+    /* Released at teardown, so the host can close; never during the row. */
+    const release = Promise.withResolvers<() => void>();
+    vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(
+      async function (this: NodeFsProvider, request, handler) {
+        if (this.root === hung) {
+          return release.promise;
+        }
+        return nativeWatch.call(this, request, handler);
+      },
+    );
+    const { port1, port2 } = new MessageChannel();
+    const stopHost = serveNodeFsProvider(port2, {
+      policy: tauPathPolicy,
+      allowRoot: (candidate) => candidate === home || candidate === hung,
+    }).close;
+    const registry = new ProviderRegistry({ createNodeFsPort: async () => port1 });
+    const nodeService = new WorkspaceFileService({
+      providerRegistry: registry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable: new MountTable(),
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const configured = nodeService.configureProjectRoots({
+        projects: [],
+        roots: [
+          { backend: 'node', path: home },
+          { backend: 'node', path: hung },
+        ],
+      });
+      /* Home is admitted and the other root's probe is still pending: the configuration has not settled. */
+      for (let turn = 0; turn < 100; turn += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- Each turn yields to the host's message port.
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
+      }
+      const getProvider = vi.spyOn(registry, 'getProvider');
+
+      const result = await nodeService.listProjectManifests();
+
+      expect(result.roots).toEqual([
+        expect.objectContaining({ status: 'complete' }),
+        expect.objectContaining({ status: 'inaccessible', reason: 'pending' }),
+      ]);
+      expect(getProvider.mock.calls.some(([scope]) => scope.backend === 'node' && scope.path === hung)).toBe(false);
+      await vi.advanceTimersByTimeAsync(5000);
+      await configured;
     } finally {
       vi.useRealTimers();
       vi.restoreAllMocks();

@@ -266,14 +266,21 @@ describe('createServicesHost — root admission', () => {
       }
       return realpathAsync(candidate);
     }) as typeof fsPromises.realpath);
-    const { host, serve } = hostHarness();
+    const serve = vi.fn<NonNullable<ServicesHostOptions['serve']>>(() => ({
+      run: vi.fn(),
+      close: async () => undefined,
+    }));
+    const { host } = hostHarness({ serve });
 
     try {
       host.handleMessage(frame({ type: 'allowRoots', roots: [home, hung] }));
       host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
-      const [, options] = serve.mock.calls[0] as unknown as [unknown, { allowRoot: (root: string) => boolean }];
+      const [, options] = serve.mock.calls[0]!;
 
       expect(options.allowRoot(join(home, 'widget'))).toBe(true);
+      /* Review of #2384 (CodeRabbit): a path no spelling matches was answered by canonicalising, on the request's
+       * path, every root whose background call had not settled, a hung one included. */
+      expect(options.allowRoot('/srv/not-a-granted-root/file.ts')).toBe(false);
       expect(syncCalls.filter((candidate) => candidate.startsWith(hung))).toEqual([]);
     } finally {
       syncRealpath.mockRestore();

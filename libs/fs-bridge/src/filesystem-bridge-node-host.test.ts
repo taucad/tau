@@ -17,7 +17,13 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ChangeEvent } from '@taucad/types';
-import type { ExposeFileSystemHandle, FileSystemBridgeProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
+import type {
+  BridgeRootStatusEvents,
+  ExposeFileSystemHandle,
+  FileSystemBridgeProxy,
+  RootedBridgeConsumer,
+} from '@taucad/fs-bridge';
+import type { RootStatus } from '@taucad/filesystem';
 import {
   createTransferredFileSystemBridgeProxy,
   exposeFileSystem,
@@ -33,6 +39,7 @@ const projectRoot = `/projects/${projectId}`;
 type Workspace = {
   readonly service: WorkspaceFileService;
   readonly bus: ChangeEventBus;
+  readonly rootStatusEvents?: BridgeRootStatusEvents;
 };
 
 const createWorkspace = async (): Promise<Workspace> => {
@@ -80,11 +87,12 @@ type NodeHost = {
  * post connect envelopes into the other end — the same handshake a browser
  * worker performs, with the worker boundary replaced by a port pair.
  */
-const hostOnNode = ({ service, bus }: Workspace): NodeHost => {
+const hostOnNode = ({ service, bus, rootStatusEvents }: Workspace): NodeHost => {
   const boundary = new MessageChannel();
   const exposed = exposeFileSystem(workspaceBridgeService(service), {
     policy: tauPathPolicy,
     changeEventBus: bus,
+    ...(rootStatusEvents === undefined ? {} : { rootStatusEvents }),
     /*
      * The composition every host performs (charter D2): the connection's view,
      * plus the read content operations served over it. The mask comes with the
@@ -558,6 +566,58 @@ describe('project root isolation through the bridge (T-B1.3)', () => {
       await stopNodeHost();
       nodeChannel.port2.close();
       rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+/* Review of #2384 (CodeRabbit): the broadcast listen validates every frame, and accepted only `fileChanged`, so the first
+ * `rootStatus` frame ended the shared subscription and the connection heard no further file changes. */
+describe('root statuses on the workspace surface', () => {
+  it('should deliver a rootStatus frame and keep delivering fileChanged after it', async () => {
+    const workspace = await createWorkspace();
+    const publishers = new Set<(roots: readonly RootStatus[]) => void>();
+    const host = hostOnNode({
+      ...workspace,
+      rootStatusEvents: {
+        subscribe: (handler) => {
+          publishers.add(handler);
+          return () => {
+            publishers.delete(handler);
+          };
+        },
+      },
+    });
+    const surface = host.connect();
+    const statuses: unknown[] = [];
+    const changes: unknown[] = [];
+    const stopStatuses = surface.proxy.listen('rootStatus', (roots) => {
+      statuses.push(roots);
+    });
+    const stopChanges = surface.proxy.listen('fileChanged', (event) => {
+      changes.push(event);
+    });
+    try {
+      await surface.proxy.ready;
+      const roots: RootStatus[] = [
+        { storageRootKey: 'node:/srv/gone', backend: 'node', state: 'notFound', code: 'ENOENT' },
+      ];
+      for (const publish of publishers) {
+        publish(roots);
+      }
+      await vi.waitFor(() => {
+        expect(statuses).toEqual([roots]);
+      });
+
+      await workspace.service.writeFile(`${projectRoot}/after-status.ts`, 'export default 2;\n');
+
+      await vi.waitFor(() => {
+        expect(changes.length).toBeGreaterThan(0);
+      });
+    } finally {
+      stopStatuses();
+      stopChanges();
+      surface.dispose();
+      host.dispose();
     }
   });
 });

@@ -32,7 +32,7 @@ vi.mock('@taucad/files-ui/filesystem/handle-store', async (importOriginal) => ({
 const { RevisionCollaborators } = await import('#routes/w.$workspace.$project/revision-collaborators.js');
 const { WorkspaceUnavailableRecovery } =
   await import('#routes/w.$workspace.$project/workspace-unavailable-recovery.js');
-const { PublicationAccessPanel } = await import('#components/publish/publication-access-panel.js');
+const { PublicationAccessPanel } = await import('@taucad/publish-ui/components/publish/publication-access-panel');
 const { AdditionalField } = await import('#components/auth/additional-field.js');
 const { DataTablePagination } = await import('@taucad/ui-kit/components/data-table');
 

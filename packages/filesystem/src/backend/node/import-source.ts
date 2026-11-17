@@ -219,9 +219,20 @@ const rowOf = async (absolute: string, name: string): Promise<NodeFsImportSource
  * One page of one directory of a grant, listed by `lstat`: each row's kind (a
  * link and a special file named as such), size and modification time, at most
  * {@link maximumImportSourceRows} rows from `offset` in the directory's own
- * order. On Linux the rows are read through the held, proved directory; on
- * other platforms the directory's identity is checked again after the page. A
- * file grant lists its one file at `''`.
+ * order. A file grant lists its one file at `''`.
+ *
+ * A listing is advisory: it shapes the person's review, and nothing it says
+ * is trusted by the copy. Each copy opens its file again, proves it is the
+ * file its path names inside the grant, reads only through that descriptor,
+ * checks the size on it, and hashes its facts from the bytes that landed.
+ * On Linux the rows are read through the held, proved directory
+ * (`/proc/self/fd`). Node offers no `fstatat` or handle enumeration elsewhere,
+ * so on macOS and Windows the rows are read back by path and the directory's
+ * identity is checked again after the page. A directory swapped in and back
+ * while a page is read can then lend the page its rows (taucad/tau#2009).
+ * Those rows show the person names and sizes from a folder their own account
+ * can already read, and a copy of any of them lands the chosen folder's file
+ * or is refused; it never lands the other folder's bytes.
  *
  * @param grant - The chosen source.
  * @param relative - The directory inside it.

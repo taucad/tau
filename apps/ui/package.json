@@ -1,6 +1,6 @@
 {
   "name": "@taucad/app",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -58,6 +58,7 @@
     "@taucad/esbuild": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/files-ui": "workspace:*",
+    "@taucad/publish-ui": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/fs-client": "workspace:*",

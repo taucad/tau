@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@taucad/ui/components/button';
-import type { SettingsSection } from '#hooks/use-settings-dialog.js';
-import { SettingsPageSkeleton } from '#components/settings/settings-item.js';
+import type { SettingsSection } from '@taucad/settings-ui/components/settings/settings-section';
+import { SettingsPageSkeleton } from '@taucad/settings-ui/components/settings/settings-item';
 import type { SettingsContent } from '#components/settings/settings-content.js';
 
 const loadSettingsContent = async (): Promise<{ SettingsContent: typeof SettingsContent }> =>

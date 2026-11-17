@@ -7,8 +7,26 @@
  * component supplies the call-to-action buttons.
  */
 
-/** Discriminated status used by `WorkspaceDirectoryPanel`. */
-export type WorkspaceDirectoryStatus = 'connected' | 'permission' | 'disconnected' | 'missing' | 'unsupported';
+/**
+ * Discriminated status used by `WorkspaceDirectoryPanel`.
+ *
+ * A folder row's status comes from the file service's published root state
+ * (desktop resilient startup blueprint D2): `connected` is the root state
+ * `available`, and `notFound`, `unreachable`, `permission` and `conflict`
+ * carry theirs, as does `error`, a root that failed for a reason the file service could not classify. `disconnected` is a record without a grant or handle, `none`
+ * is a surface with no folder chosen yet, and `unsupported` a browser that
+ * cannot connect folders. The type is not stored anywhere.
+ */
+export type WorkspaceDirectoryStatus =
+  | 'connected'
+  | 'notFound'
+  | 'unreachable'
+  | 'permission'
+  | 'conflict'
+  | 'error'
+  | 'disconnected'
+  | 'none'
+  | 'unsupported';
 
 /**
  * Title + description copy keyed by status. Components pick the right
@@ -23,15 +41,31 @@ export const workspaceDirectoryCopy: Record<
     title: 'Workspace connected',
     description: 'Projects in this workspace are stored as folders on your computer.',
   },
+  notFound: {
+    title: 'Folder not found',
+    description: 'Your files weren’t changed; Tau can’t see this folder.',
+  },
+  unreachable: {
+    title: 'Not responding',
+    description: 'Tau keeps trying to reach this folder.',
+  },
   permission: {
-    title: 'Folder access required',
+    title: 'Access needed',
     description: 'Grant access to this folder before continuing.',
   },
+  conflict: {
+    title: 'Can’t use this folder',
+    description: 'Locate the folder again, or remove it from Tau.',
+  },
+  error: {
+    title: 'Couldn’t open this folder',
+    description: 'Try again, or remove it from Tau. Your files weren’t changed.',
+  },
   disconnected: {
-    title: 'Folder disconnected',
+    title: 'Disconnected',
     description: 'Reconnect this folder before continuing.',
   },
-  missing: {
+  none: {
     title: 'No folder connected',
     description: 'Connect a folder to create projects as files on your disk.',
   },
@@ -48,4 +82,8 @@ export const workspaceDirectoryActions = {
   grantAccess: 'Grant access',
   change: 'Change folder',
   disconnect: 'Disconnect workspace',
+  retry: 'Try again',
+  locate: 'Locate…',
+  remove: 'Remove from Tau',
+  removeAll: 'Remove all',
 } as const;

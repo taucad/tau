@@ -836,6 +836,30 @@ describe('desktop main compute owner', () => {
   );
 
   it(
+    "should refuse a picked folder that holds Tau's own data and leave the grants unchanged",
+    async () => {
+      await bootstrap();
+      const list = state.handlers.get(directoryGrantChannels.list)!;
+      const before = list({ senderFrame: {} });
+      dialog.showMessageBox.mockClear();
+      const pickRefused = async (picked: string): Promise<void> => {
+        await mkdir(picked, { recursive: true });
+        dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [picked] });
+
+        await expect(state.handlers.get('tau:select-directory')!({ senderFrame: {} })).resolves.toBeUndefined();
+
+        expect(list({ senderFrame: {} })).toEqual(before);
+      };
+      await pickRefused(state.userData);
+      await pickRefused(join(state.userData, 'filesystem-authority', 'nested'));
+      expect(dialog.showMessageBox).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(dialog.showMessageBox.mock.calls[0])).toContain("Tau's own data");
+      expect(fakeWindow.webContents.send).not.toHaveBeenCalledWith(directoryGrantChannels.changed);
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'refuses Home, relative paths, and untrusted grant requests',
     async () => {
       await bootstrap();

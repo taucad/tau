@@ -41,6 +41,7 @@ import type {
   CheckoutRootConfig,
   ProjectRootConfig,
   ProjectRootConfiguration,
+  RootStatus,
   StorageRootConfig,
 } from '@taucad/filesystem';
 import type { WorkspaceMarker } from '@taucad/types';
@@ -50,9 +51,14 @@ import {
   workspaceMarkerPath,
   workspaceMarkerSchemaUrl,
 } from '@taucad/types';
+import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 import { allocateSlug, projectNameToSlug } from '@taucad/ui-core/utils/project-directory.utils';
-import { toStorageWriteError, WorkspaceIdentityConflictError } from '@taucad/ui-core/filesystem/workspace-errors';
+import {
+  toStorageWriteError,
+  WorkspaceIdentityConflictError,
+  WorkspaceOverlapError,
+} from '@taucad/ui-core/filesystem/workspace-errors';
 import { probeHomeOpfs } from '#filesystem/home-opfs-probe.js';
 import { desktopBridge, hostPathName, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { armDatabaseOpenDeadline } from '@taucad/ui-core/lib/database-open-deadline';
@@ -88,7 +94,15 @@ type ProjectCreationLocationMeta = {
   readonly location: ProjectCreationLocation;
 };
 
-export type ProjectCreationLocationRepairReason = 'invalid' | 'unknown-workspace' | 'unsupported';
+/**
+ * Why a creation-location read answered Home. `workspace-unavailable` is the one reason that leaves the stored
+ * preference in place: the folder is only missing, and the choice applies again when it is back (blueprint B9).
+ */
+export type ProjectCreationLocationRepairReason =
+  | 'invalid'
+  | 'unknown-workspace'
+  | 'unsupported'
+  | 'workspace-unavailable';
 
 export type ProjectCreationLocationRead = {
   readonly location: ProjectCreationLocation;
@@ -707,9 +721,31 @@ export async function setProjectCreationLocation(location: ProjectCreationLocati
   );
 }
 
-/** Read and repair advisory creation-location metadata against current capability and rows. */
+/**
+ * The storage-root key a workspace's root status is published under: `node:<path>` for a picked folder,
+ * `webaccess:<workspaceId>` for a handle (the same keys `resolveStorageRootKey` derives).
+ *
+ * @param workspace - The workspace row.
+ * @returns Its storage-root key.
+ */
+const workspaceStorageRootKey = (workspace: Workspace): string =>
+  resolveStorageRootKey(
+    workspace.path === undefined
+      ? { backend: 'webaccess', workspaceId: workspace.workspaceId }
+      : { backend: 'node', path: workspace.path },
+    appMetaConfig.databasePrefix,
+  );
+
+/**
+ * Read and repair advisory creation-location metadata against current capability and rows.
+ *
+ * With the file service's published `rootStatuses`, a stored workspace whose folder is not `available` reads as Home
+ * with `repaired: 'workspace-unavailable'` and nothing is written, so the choice returns with the folder (B9).
+ * A workspace with no published status is treated as available.
+ */
 export async function getProjectCreationLocation(options: {
   webAccessSupported: boolean;
+  rootStatuses?: readonly RootStatus[];
 }): Promise<ProjectCreationLocationRead> {
   const raw = await withDb(readProjectCreationLocationMeta);
   if (raw === undefined) {
@@ -725,8 +761,15 @@ export async function getProjectCreationLocation(options: {
     repaired = 'unsupported';
   } else if (location.kind === 'workspace') {
     const workspaces = await listWorkspaces();
-    if (!workspaces.some((workspace) => workspace.workspaceId === location.workspaceId)) {
+    const stored = workspaces.find((workspace) => workspace.workspaceId === location.workspaceId);
+    if (stored === undefined) {
       repaired = 'unknown-workspace';
+    } else {
+      const storageRootKey = workspaceStorageRootKey(stored);
+      const status = options.rootStatuses?.find((root) => root.storageRootKey === storageRootKey);
+      if (status !== undefined && status.state !== 'available') {
+        return { location: homeProjectCreationLocation, repaired: 'workspace-unavailable' };
+      }
     }
   }
 
@@ -904,6 +947,35 @@ async function createWorkspaceLocked(
 /** Trailing separators are cosmetic; the key derived from the path is not. */
 const normalizeHostPath = (path: string): string => path.replace(/[/\\]+$/, '') || path;
 
+/** Whether `inner` is `outer` or inside it, by host path segments in either separator. */
+const isHostPathWithin = (outer: string, inner: string): boolean =>
+  inner === outer || inner.startsWith(`${outer}/`) || inner.startsWith(`${outer}\\`);
+
+/**
+ * Refuse a picked folder that is Home, or contains or sits inside Home or another workspace's folder (R6). The same
+ * folder as an existing workspace is that workspace again, and is re-adopted by the caller.
+ *
+ * @param path - The normalized picked folder.
+ * @param others - Every other workspace row.
+ * @throws {WorkspaceOverlapError} When the folder overlaps one of them.
+ */
+function assertNoWorkspaceOverlap(path: string, others: readonly Workspace[]): void {
+  const homeRoot = desktopBridge()?.nodeFs.homeRoot;
+  const home = homeRoot === undefined ? undefined : normalizeHostPath(homeRoot);
+  if (home !== undefined && (isHostPathWithin(home, path) || isHostPathWithin(path, home))) {
+    throw new WorkspaceOverlapError('home');
+  }
+  for (const other of others) {
+    if (other.path === undefined || other.path === home) {
+      continue;
+    }
+    const otherPath = normalizeHostPath(other.path);
+    if (isHostPathWithin(otherPath, path) || isHostPathWithin(path, otherPath)) {
+      throw new WorkspaceOverlapError('workspace', { workspaceId: other.workspaceId });
+    }
+  }
+}
+
 /**
  * Create (or re-adopt) the workspace for a picked node folder.
  *
@@ -930,6 +1002,7 @@ export async function createNodeWorkspace(hostPath: string, options?: { name?: s
         const existing = await readAllWorkspaces(db);
         const matched = existing.find((workspace) => workspace.path === path);
         const others = existing.filter((workspace) => workspace.workspaceId !== matched?.workspaceId);
+        assertNoWorkspaceOverlap(path, others);
         const workspace: Workspace = {
           workspaceId: matched?.workspaceId ?? generatePrefixedId(idPrefix.workspace),
           name: options?.name ?? matched?.name ?? folderName,
@@ -1120,6 +1193,70 @@ export async function restoreWorkspaceHandle(workspaceId: string, handle: FileSy
     publishProjectRootConfigurationChange();
   }
   return restored;
+}
+
+/**
+ * Forget a workspace: its row, its handle and every project binding to it, in one transaction (blueprint D2
+ * **Remove from Tau**). A binding belongs to it when it is a `webaccess` row naming its id or a `node` row naming its
+ * path. It never calls a file API, so the folder and the chats inside its projects (`.tau/chats`) stay on disk and
+ * come back when the folder is added again. A desktop grant is main's and is revoked by the caller first.
+ *
+ * @param workspaceId - The workspace to forget.
+ * @returns Whether a row was removed.
+ */
+export async function removeWorkspace(workspaceId: string): Promise<boolean> {
+  const removed = await withStorageWrite(async () =>
+    withDb(
+      async (db) =>
+        new Promise<boolean>((resolve, reject) => {
+          const tx = db.transaction([workspacesStoreName, handlesStoreName, configsStoreName], 'readwrite');
+          const workspaces = tx.objectStore(workspacesStoreName);
+          const configs = tx.objectStore(configsStoreName);
+          let didRemove = false;
+          const workspaceRequest = workspaces.get(workspaceId);
+          workspaceRequest.addEventListener('success', () => {
+            const workspace = workspaceRequest.result as Workspace | undefined;
+            if (workspace === undefined) {
+              return;
+            }
+            didRemove = true;
+            workspaces.delete(workspaceId);
+            tx.objectStore(handlesStoreName).delete(workspaceId);
+            const path = workspace.path === undefined ? undefined : normalizeHostPath(workspace.path);
+            const configsRequest = configs.getAll();
+            configsRequest.addEventListener('success', () => {
+              for (const value of configsRequest.result as unknown[]) {
+                if (!isProjectFileSystemConfig(value)) {
+                  continue;
+                }
+                const bound =
+                  (value.backend === 'webaccess' && value.workspaceId === workspaceId) ||
+                  (value.backend === 'node' &&
+                    path !== undefined &&
+                    value.path !== undefined &&
+                    normalizeHostPath(value.path) === path);
+                if (bound) {
+                  configs.delete(value.projectId);
+                }
+              }
+            });
+          });
+          tx.addEventListener('complete', () => {
+            resolve(didRemove);
+          });
+          tx.addEventListener('error', () => {
+            reject(tx.error ?? new Error('Failed to remove workspace'));
+          });
+          tx.addEventListener('abort', () => {
+            reject(tx.error ?? new Error('Removing the workspace was aborted'));
+          });
+        }),
+    ),
+  );
+  if (removed) {
+    publishProjectRootConfigurationChange();
+  }
+  return removed;
 }
 
 /**

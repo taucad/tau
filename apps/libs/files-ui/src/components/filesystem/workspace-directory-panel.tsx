@@ -16,7 +16,7 @@
  * the persistence target varies by surface.
  */
 
-import { FolderOpen, AlertTriangle, RefreshCw, Unplug } from 'lucide-react';
+import { FolderOpen, AlertTriangle, RefreshCw, Unplug, Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import {
@@ -31,7 +31,7 @@ export type WorkspaceDirectoryPanelProps = {
   /** Layout variant. */
   readonly variant: WorkspaceDirectoryPanelVariant;
   /**
-   * Identity of the workspace this panel represents. Optional — `missing`
+   * Identity of the workspace this panel represents. Optional — `none`
    * and `unsupported` panels render before a workspace exists.
    */
   readonly workspaceId?: string;
@@ -49,6 +49,14 @@ export type WorkspaceDirectoryPanelProps = {
   readonly onGrantAccess?: () => void | Promise<void>;
   /** Remove Tau's retained directory handle while preserving workspace identity. */
   readonly onDisconnect?: () => void | Promise<void>;
+  /** Probe an unavailable folder again (D2 **Try again**). */
+  readonly onRetry?: () => void | Promise<void>;
+  /** Relink this workspace to the folder's new place (D2 **Locate…**); the row offers it only when supplied. */
+  readonly onLocate?: () => void | Promise<void>;
+  /** Forget this workspace, its access and its project bindings, never its files (D2 **Remove from Tau**). */
+  readonly onRemove?: () => void | Promise<void>;
+  /** Why a `conflict` or `error` folder can't be used, shown after the row's label. */
+  readonly reason?: string;
   /**
    * Optional right-aligned metadata node rendered in the `row` variant
    * between the description block and the action group. Lets callers
@@ -67,16 +75,19 @@ export function WorkspaceDirectoryPanel({
   onConnect,
   onGrantAccess,
   onDisconnect,
+  onRetry,
+  onLocate,
+  onRemove,
+  reason,
   meta,
 }: WorkspaceDirectoryPanelProps): React.JSX.Element {
   const copy = workspaceDirectoryCopy[status];
+  const isAttention = status !== 'connected' && status !== 'unsupported';
   const showConnect =
-    (status === 'missing' || status === 'disconnected' || status === 'connected' || status === 'permission') &&
-    onConnect;
+    (status === 'none' || status === 'disconnected' || status === 'connected' || status === 'permission') && onConnect;
   const showGrantAccess = status === 'permission' && onGrantAccess;
-  const showDisconnect = (status === 'connected' || status === 'permission') && variant === 'row' && onDisconnect;
   const connectLabel =
-    status === 'missing'
+    status === 'none'
       ? workspaceDirectoryActions.connect
       : status === 'disconnected'
         ? workspaceDirectoryActions.reconnect
@@ -94,12 +105,10 @@ export function WorkspaceDirectoryPanel({
   if (variant === 'banner') {
     return (
       <div
-        role={status === 'permission' || status === 'disconnected' || status === 'missing' ? 'alert' : undefined}
+        role={isAttention ? 'alert' : undefined}
         className={cn(
           'flex items-center justify-between gap-4 rounded-md border px-3 py-2 text-sm',
-          status === 'permission' || status === 'disconnected' || status === 'missing'
-            ? 'border-warning/40 bg-warning/10'
-            : 'border-border bg-muted/40',
+          isAttention ? 'border-warning/40 bg-warning/10' : 'border-border bg-muted/40',
         )}
       >
         <div className='flex min-w-0 items-center gap-2'>
@@ -129,41 +138,33 @@ export function WorkspaceDirectoryPanel({
   if (variant === 'row') {
     return (
       <div className='flex flex-wrap items-center justify-between gap-3 py-3'>
-        <div className='flex min-w-0 items-center gap-3'>
+        <div className={cn('flex min-w-0 items-center gap-3', isAttention && 'text-muted-foreground')}>
           {indicator}
           <div className='flex min-w-0 flex-col'>
-            <span className='truncate text-sm font-medium'>{workspaceName ?? copy.title}</span>
+            <span className='truncate text-sm font-medium text-foreground'>{workspaceName ?? copy.title}</span>
             {description ? <span className='text-xs break-all text-muted-foreground'>{description}</span> : undefined}
             {status === 'connected' ? undefined : (
-              <span className='truncate text-xs text-muted-foreground'>{copy.description}</span>
+              <span className='text-xs text-muted-foreground'>
+                <span className='font-medium text-foreground'>{copy.title}</span>
+                {(status === 'conflict' || status === 'error') && reason ? <span>: {reason}</span> : undefined}
+                <span>. {copy.description}</span>
+              </span>
             )}
           </div>
         </div>
-        <div className='flex shrink-0 items-center gap-2'>
+        <div className='flex shrink-0 flex-wrap items-center gap-2'>
           {meta}
-          {showGrantAccess ? (
-            <Button size='sm' variant='outline' disabled={isBusy} onClick={onGrantAccess}>
-              {workspaceDirectoryActions.grantAccess}
-            </Button>
-          ) : undefined}
-          {showConnect ? (
-            <Button size='sm' variant='outline' disabled={isBusy} onClick={onConnect}>
-              {connectLabel}
-            </Button>
-          ) : undefined}
-          {showDisconnect ? (
-            <Button
-              size='sm'
-              variant='outline'
-              disabled={isBusy}
-              aria-busy={isBusy}
-              onClick={onDisconnect}
-              aria-label={workspaceDirectoryActions.disconnect}
-            >
-              <Unplug aria-hidden />
-              Disconnect
-            </Button>
-          ) : undefined}
+          <RowActions
+            status={status}
+            isBusy={isBusy}
+            connectLabel={connectLabel}
+            onConnect={onConnect}
+            onGrantAccess={onGrantAccess}
+            onDisconnect={onDisconnect}
+            onRetry={onRetry}
+            onLocate={onLocate}
+            onRemove={onRemove}
+          />
         </div>
       </div>
     );
@@ -196,5 +197,94 @@ export function WorkspaceDirectoryPanel({
         </div>
       ) : undefined}
     </div>
+  );
+}
+
+type RowAction = 'connect' | 'grantAccess' | 'retry' | 'locate' | 'remove' | 'disconnect';
+
+/**
+ * The actions a folder row offers in each state, in order (blueprint D2's table). `connect` is Reconnect on a
+ * disconnected row and the web's Change folder on a connected one; Remove is offered in every state but `connected`.
+ */
+const rowActionsByStatus: Readonly<Record<WorkspaceDirectoryStatus, readonly RowAction[]>> = {
+  connected: ['connect', 'disconnect'],
+  notFound: ['locate', 'retry', 'remove'],
+  unreachable: ['retry', 'locate', 'remove'],
+  permission: ['grantAccess', 'locate', 'remove'],
+  conflict: ['locate', 'remove'],
+  error: ['retry', 'remove'],
+  disconnected: ['connect', 'remove'],
+  none: ['connect'],
+  unsupported: [],
+};
+
+function RowActions({
+  status,
+  isBusy,
+  connectLabel,
+  onConnect,
+  onGrantAccess,
+  onDisconnect,
+  onRetry,
+  onLocate,
+  onRemove,
+}: Pick<
+  WorkspaceDirectoryPanelProps,
+  'status' | 'onConnect' | 'onGrantAccess' | 'onDisconnect' | 'onRetry' | 'onLocate' | 'onRemove'
+> & { readonly isBusy: boolean; readonly connectLabel: string }): React.JSX.Element {
+  const handlers: Readonly<Record<RowAction, (() => void | Promise<void>) | undefined>> = {
+    connect: onConnect,
+    grantAccess: onGrantAccess,
+    retry: onRetry,
+    locate: onLocate,
+    remove: onRemove,
+    disconnect: onDisconnect,
+  };
+  return (
+    <>
+      {rowActionsByStatus[status].map((action) => {
+        const handler = handlers[action];
+        if (handler === undefined) {
+          return undefined;
+        }
+        if (action === 'disconnect') {
+          return (
+            <Button
+              key={action}
+              size='sm'
+              variant='outline'
+              disabled={isBusy}
+              aria-busy={isBusy}
+              onClick={handler}
+              aria-label={workspaceDirectoryActions.disconnect}
+            >
+              <Unplug aria-hidden />
+              Disconnect
+            </Button>
+          );
+        }
+        if (action === 'remove') {
+          return (
+            <Button key={action} size='sm' variant='outline' disabled={isBusy} aria-busy={isBusy} onClick={handler}>
+              <Trash2 aria-hidden />
+              {workspaceDirectoryActions.remove}
+            </Button>
+          );
+        }
+        const label =
+          action === 'connect'
+            ? connectLabel
+            : action === 'grantAccess'
+              ? workspaceDirectoryActions.grantAccess
+              : action === 'retry'
+                ? workspaceDirectoryActions.retry
+                : workspaceDirectoryActions.locate;
+        return (
+          <Button key={action} size='sm' variant='outline' disabled={isBusy} onClick={handler}>
+            {label}
+          </Button>
+        );
+      })}
+    </>
   );
 }

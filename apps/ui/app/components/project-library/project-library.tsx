@@ -800,7 +800,7 @@ export function ProjectLibrary({
       )}
 
       {recoveries.length > 0 && (
-        <div role='group' className='mb-6 space-y-2' aria-label='Project recovery'>
+        <div id='project-recovery' role='group' className='mb-6 space-y-2' aria-label='Project recovery'>
           {recoveries.map((recovery) => (
             <div
               key={recovery.operationId}

@@ -3,6 +3,10 @@
  *
  * Dedicated workers come from Playwright, not product instrumentation. The
  * basename Vite gives the project kernel entry counts.
+ *
+ * Needs: the self-host tier `test:e2e` starts (UI only). Runs answer from the agent-host gateway stand-in
+ * (`installAgentHostGatewayFixture`), as every other chat spec's do, so no row signs in or reaches a Tau API: a
+ * self-host build has no credit fence (#2288).
  */
 
 /* oxlint-disable eslint/no-await-in-loop -- projects and sidebar pages must open in browser-observed order. */
@@ -66,15 +70,6 @@ const seedProject = async (): Promise<string> => {
    * it proves that creation has reached a resolved project route. */
   await target.expectVisible(selectors.getByRole('button', { name: /^Open History\./u }), 120_000);
   return target.currentUrl();
-};
-
-const authenticateAgentSession = async (): Promise<void> => {
-  await target.authenticateTauTestUser({
-    creditAtoms: '100000000',
-    email: `sessions-liveness-${globalThis.crypto.randomUUID()}@e2e.tau`,
-    name: 'Sessions Liveness E2E',
-    password: 'Tau-test-password-7!',
-  });
 };
 
 /** Page the sidebar until it has no next page, waiting on the list itself. */
@@ -254,7 +249,7 @@ const closeRunningProject = async (path: string): Promise<void> => {
   await target.expectVisible(close, 30_000);
   await target.click(close);
   try {
-    await target.expectVisible(selectors.getByRole('heading', { name: /^Stop 1 agent and close /u }), 30_000);
+    await target.expectVisible(selectors.getByRole('heading', { name: /^Stop 1 run and close /u }), 30_000);
   } catch (error) {
     throw new Error(
       `Running-project close confirmation did not open: ${JSON.stringify({
@@ -263,7 +258,7 @@ const closeRunningProject = async (path: string): Promise<void> => {
         row: await projectRowDescription(path),
         visibleDialogs: await target.evaluate(() =>
           [...document.querySelectorAll<HTMLElement>('[role="alertdialog"], [role="dialog"]')]
-            .filter((element) => element.offsetParent !== null)
+            .filter((element) => element.getClientRects().length > 0)
             .map((element) => element.textContent),
         ),
       })}`,
@@ -306,8 +301,16 @@ const expectProjectClosed = async (path: string): Promise<void> => {
 
 /** Start a real browser-host run against the already-installed gateway. */
 const startAgent = async (projectMarker: string): Promise<void> => {
-  if (!(await target.isVisible(selectors.getByCss(composer)))) {
-    await target.click(selectors.getByCss('[aria-label="Toggle Chat lane"]'));
+  /* The lane's own state, not the composer's visibility: the composer mounts after the lane opens, so reading it
+   * too early toggled an open lane shut. */
+  const toggle = '[aria-label="Toggle Chat lane"]';
+  await target.expectVisible(selectors.getByCss(toggle), 60_000);
+  const isOpen = await target.evaluate(
+    (selector) => document.querySelector(selector)?.getAttribute('aria-pressed') === 'true',
+    toggle,
+  );
+  if (!isOpen) {
+    await target.click(selectors.getByCss(toggle));
   }
   await target.expectVisible(selectors.getByCss(composer), 60_000);
   await target.type(composer, `Keep ${projectMarker} live while I inspect another project.`);
@@ -317,7 +320,6 @@ const startAgent = async (projectMarker: string): Promise<void> => {
 
 describe('liveness across navigation (S48(16), V21)', () => {
   test('keeps two running projects live, settles one, and releases the other on manual Close', async () => {
-    await authenticateAgentSession();
     await target.setViewport({ width: 1440, height: 900 });
     const first = await seedProject();
     const second = await seedProject();

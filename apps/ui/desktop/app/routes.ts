@@ -68,10 +68,14 @@ const routes: RouteConfigEntry[] = await flatRoutes({
  * is where `tau://s/<slug>` lands (R4) and the web module resolves a Tau
  * publication in a server `loader` SPA mode forbids, so the desktop swaps the
  * module and leaves the web route's SSR, cookies and meta untouched.
+ * `/invitations/:token` is where `tau://invitations/<token>` lands, and its web
+ * module is a server redirect that moves the token out of the address (#2290);
+ * the desktop module does the same in the renderer.
  */
 const desktopRouteFiles = new Map<string, string>([
   ['../../app/routes/_index', '../../app/routes/_index/home-surface.desktop.tsx'],
   ['../../app/routes/s.$slug', '../../app/routes/s.$slug/desktop-route.tsx'],
+  ['../../app/routes/invitations.$token', '../../app/routes/invitations.$token/desktop-route.tsx'],
 ]);
 
 export default routes.map((entry) => {

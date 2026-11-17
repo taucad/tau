@@ -1,0 +1,44 @@
+name: Desktop Windows bundled git
+
+# The MinGit + git-lfs payload every Windows desktop package ships (Windows desktop readiness R3): prepared from its
+# pinned archives, checked whole and without what prepare-git leaves out, counted for the signing budget, and proven
+# to record, back up and restore a large file with nothing else on PATH.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-windows-git.yml'
+      - 'apps/desktop/scripts/prepare-git.mts'
+      - 'apps/desktop/scripts/git-payload.mts'
+      - 'apps/desktop/scripts/check-windows-git-payload.mts'
+      - 'apps/desktop/scripts/windows-git-payload-roundtrip.mts'
+      - 'packages/revisions/src/**'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels its outdated run; a dispatch is never cancelled.
+concurrency:
+  group: desktop-windows-git-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  payload:
+    name: Bundled git and git-lfs (windows-2025)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Preserve source bytes on Windows
+        run: git config --global core.autocrlf false
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      - name: Prepare, check and round-trip the payload
+        run: pnpm nx run desktop:test-windows-git-payload

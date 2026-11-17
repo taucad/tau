@@ -61,20 +61,43 @@ const scopeTargets = {
   linux: ['linux-x64'],
   // Apple silicon only: hosted Intel Macs have no WebGL, so Intel is not qualified or published (operator ruling).
   macos: ['darwin-arm64'],
+  windows: ['win32-x64'],
 } as const;
+type CandidateScope = keyof typeof scopeTargets;
+/** Display name of each platform scope in refusals. */
+const scopeNames = { all: 'Full', linux: 'Linux', macos: 'Mac', windows: 'Windows' } as const;
 /**
- * The release-build workflow artifact that carries the unsigned Linux archive. A Linux-only staging candidate takes its
- * archive from here, bound to the exact run, source and GitHub-recorded digest, so it never waits for the release's
- * other platforms to be packaged and attached (macOS signing and notarization in particular).
+ * The release-build workflow artifact that carries each portable platform's unsigned archive. A Linux-only or
+ * Windows-only candidate takes its archive from here, bound to the exact run, source and GitHub-recorded digest, so it
+ * never waits for the release's other platforms to be packaged and attached (macOS signing and notarization in
+ * particular).
  */
-const linuxArchiveArtifact = 'desktop-linux-x64';
+const archiveArtifacts = { linux: 'desktop-linux-x64', windows: 'desktop-win32-x64' } as const;
+type ArtifactScope = keyof typeof archiveArtifacts;
+const isArtifactScope = (scope: CandidateScope): scope is ArtifactScope => scope in archiveArtifacts;
+/** The exact release-build jobs that must have succeeded before each scoped candidate admits its archive. */
+const scopePrerequisites = {
+  // The archive comes from the job's workflow artifact, never the release, so attaching the release's assets (which
+  // waits for macOS signing and notarization) is not a Linux or Windows prerequisite.
+  linux: ['Package linux-x64 (unsigned)'],
+  windows: ['Package win32-x64 (unsigned)'],
+  // The Mac-only scope is Apple silicon only; an Intel job's result neither admits nor blocks it.
+  macos: [
+    'Package macOS arm64 (signed)',
+    'Verify native macOS arm64 OTA replacement',
+    'Attach immutable candidate assets',
+  ],
+} as const;
 const runIdSchema = z.string().regex(/^[1-9]\d*$/u);
-/** Admit exactly one unexpired Linux archive artifact produced by the exact trusted release-build run and source. */
-const admitLinuxArchiveArtifact = (
-  repository: string,
-  runId: string,
-  source: string,
-): { id: number; sha256: string } => {
+/** Admit exactly one unexpired platform archive artifact produced by the exact trusted release-build run and source. */
+const admitArchiveArtifact = (selection: {
+  scope: ArtifactScope;
+  repository: string;
+  runId: string;
+  source: string;
+}): { id: number; sha256: string } => {
+  const { scope, repository, runId, source } = selection;
+  const name = archiveArtifacts[scope];
   /* eslint-disable @typescript-eslint/naming-convention -- GitHub artifact provenance fields. */
   const list = z
     .object({
@@ -90,14 +113,11 @@ const admitLinuxArchiveArtifact = (
     })
     .parse(
       JSON.parse(
-        command('gh', [
-          'api',
-          `repos/${repository}/actions/runs/${runId}/artifacts?name=${linuxArchiveArtifact}&per_page=100`,
-        ]),
+        command('gh', ['api', `repos/${repository}/actions/runs/${runId}/artifacts?name=${name}&per_page=100`]),
       ),
     );
   /* eslint-enable @typescript-eslint/naming-convention -- End artifact provenance fields. */
-  const matches = list.artifacts.filter((artifact) => artifact.name === linuxArchiveArtifact);
+  const matches = list.artifacts.filter((artifact) => artifact.name === name);
   const artifact = matches[0];
   if (
     matches.length !== 1 ||
@@ -107,20 +127,24 @@ const admitLinuxArchiveArtifact = (
     artifact.workflow_run.head_sha !== source ||
     !/^sha256:[a-f\d]{64}$/u.test(artifact.digest ?? '')
   ) {
-    throw new Error('Linux source archive artifact is not the exact trusted release-build output');
+    throw new Error(`${scopeNames[scope]} source archive artifact is not the exact trusted release-build output`);
   }
   return { id: artifact.id, sha256: artifact.digest!.slice('sha256:'.length) };
 };
 /** Download the admitted artifact, require its GitHub digest and exactly the one archive member, then extract it. */
-const fetchLinuxArchive = async (
-  root: string,
-  archiveName: string,
-  source: string,
-): Promise<{ sha256: string; size: number; artifactId: number; artifactSha256: string }> => {
+const fetchArchive = async (selection: {
+  scope: ArtifactScope;
+  root: string;
+  archiveName: string;
+  source: string;
+}): Promise<{ sha256: string; size: number; artifactId: number; artifactSha256: string }> => {
+  const { scope, root, archiveName, source } = selection;
   const repository = required('GITHUB_REPOSITORY');
   const runId = runIdSchema.parse(required('DESKTOP_RELEASE_RUN_ID'));
-  const artifact = admitLinuxArchiveArtifact(repository, runId, source);
-  const temporary = await mkdtemp(join(tmpdir(), 'tau-linux-archive-'));
+  const artifact = admitArchiveArtifact({ scope, repository, runId, source });
+  const temporary = await mkdtemp(join(tmpdir(), `tau-${scope}-archive-`));
+  // Windows has no unzip; the inbox bsdtar lists and extracts the artifact ZIP there.
+  const tar = process.platform === 'win32' ? join(required('SystemRoot'), 'System32/tar.exe') : undefined;
   try {
     const zip = join(temporary, 'artifact.zip');
     const fd = openSync(zip, 'wx');
@@ -133,16 +157,21 @@ const fetchLinuxArchive = async (
       closeSync(fd);
     }
     if ((await hash(zip)) !== artifact.sha256) {
-      throw new Error('Linux source archive artifact digest differs');
+      throw new Error(`${scopeNames[scope]} source archive artifact digest differs`);
     }
-    const names = command('unzip', ['-Z1', zip]).split('\n');
+    const names = (tar ? command(tar, ['-tf', zip]) : command('unzip', ['-Z1', zip])).split(/\r?\n/u);
     if (names.length !== 1 || names[0] !== archiveName) {
-      throw new Error('Linux source archive artifact must contain exactly the Linux archive');
+      throw new Error(
+        `${scopeNames[scope]} source archive artifact must contain exactly the ${scopeNames[scope]} archive`,
+      );
     }
     // A fresh directory: nothing staged earlier can stand in for the authenticated archive.
     await mkdir(dirname(root), { recursive: true });
     await mkdir(root);
-    execFileSync('unzip', ['-q', zip, archiveName, '-d', root], { stdio: 'inherit', timeout: 600_000 });
+    execFileSync(tar ?? 'unzip', tar ? ['-xf', zip, '-C', root, archiveName] : ['-q', zip, archiveName, '-d', root], {
+      stdio: 'inherit',
+      timeout: 600_000,
+    });
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
@@ -159,9 +188,12 @@ const main = async (): Promise<void> => {
   const operation = process.argv[2];
   const tag = required('DESKTOP_RELEASE_TAG');
   const identity = desktopReleaseIdentity(tag);
-  const scope = z.enum(['all', 'linux', 'macos']).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
-  // D-H5: a platform candidate (Linux APT+AppImage, or Apple silicon ZIP+DMG) is admissible on either channel, since
-  // production promotes each platform on its own complete receipts. Its exact shape is still checked after assembly.
+  const scope = z
+    .enum(['all', 'linux', 'macos', 'windows'])
+    .parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+  // D-H5: a platform candidate (Linux APT+AppImage, Apple silicon ZIP+DMG, or Windows NSIS+ZIP) is admissible on either
+  // channel, since production promotes each platform on its own complete receipts. Its exact shape is still checked
+  // after assembly.
   if (operation === 'resolve') {
     if (required('GITHUB_REF') !== 'refs/heads/main') {
       throw new Error('Installer candidate dispatch is main-only');
@@ -182,14 +214,14 @@ const main = async (): Promise<void> => {
       .parse(JSON.parse(command('gh', ['api', `repos/${repository}/actions/runs/${runId}`])));
     /* eslint-enable @typescript-eslint/naming-convention -- End GitHub response schema. */
     const source = command('git', ['rev-parse', `refs/tags/${tag}^{commit}`]);
-    // A Linux-only staging candidate may start while the release run is still packaging other platforms: its own
-    // prerequisite jobs below must already have succeeded. Every other scope still needs the whole run to finish.
+    // A Linux-only or Windows-only candidate may start while the release run is still packaging other platforms: its
+    // own prerequisite jobs below must already have succeeded. Every other scope still needs the whole run to finish.
     const finished =
       run.status === 'completed'
         ? scope === 'all'
           ? run.conclusion === 'success'
           : ['success', 'failure'].includes(run.conclusion ?? '')
-        : scope === 'linux';
+        : isArtifactScope(scope);
     if (
       run.path !== '.github/workflows/release-build.yml' ||
       run.event !== 'push' ||
@@ -230,20 +262,7 @@ const main = async (): Promise<void> => {
         );
       /* eslint-enable @typescript-eslint/naming-convention -- End job provenance fields. */
       const jobs = pages.flatMap((page) => page.jobs);
-      for (const name of [
-        'resolve',
-        `Verify ${tag}`,
-        ...(scope === 'linux'
-          ? // The Linux archive comes from this job's workflow artifact, never the release, so attaching the release's
-            // assets (which waits for macOS signing and notarization) is not a Linux prerequisite.
-            ['Package linux-x64 (unsigned)']
-          : // The Mac-only scope is Apple silicon only; an Intel job's result neither admits nor blocks it.
-            [
-              'Package macOS arm64 (signed)',
-              'Verify native macOS arm64 OTA replacement',
-              'Attach immutable candidate assets',
-            ]),
-      ]) {
+      for (const name of ['resolve', `Verify ${tag}`, ...scopePrerequisites[scope]]) {
         const matches = jobs.filter((job) => job.name === name);
         if (
           matches.length !== 1 ||
@@ -253,12 +272,12 @@ const main = async (): Promise<void> => {
           matches[0]!.conclusion !== 'success'
         ) {
           throw new Error(
-            `${scope === 'linux' ? 'Linux' : 'Mac'} source archive prerequisite did not succeed at the exact source/run: ${name}`,
+            `${scopeNames[scope]} source archive prerequisite did not succeed at the exact source/run: ${name}`,
           );
         }
       }
-      if (scope === 'linux') {
-        admitLinuxArchiveArtifact(repository, runId, source);
+      if (isArtifactScope(scope)) {
+        admitArchiveArtifact({ scope, repository, runId, source });
       }
     }
     command('git', ['merge-base', '--is-ancestor', source, 'HEAD']);
@@ -272,8 +291,8 @@ const main = async (): Promise<void> => {
     .regex(/^[a-f\d]{40}$/u)
     .parse(required('TAU_DESKTOP_SOURCE_SHA'));
   if (operation === 'admit-scope') {
-    // After assembly, a platform candidate must be exactly its platform's routes (Apple silicon ZIP/DMG, or Linux
-    // APT/AppImage) and nothing else: the same shape publication will later admit.
+    // After assembly, a platform candidate must be exactly its platform's routes (Apple silicon ZIP/DMG, Windows
+    // NSIS/ZIP, or Linux APT/AppImage) and nothing else: the same shape publication will later admit.
     const manifest = parseDesktopArtifactManifest(
       JSON.parse(await readFile(join(resolve(required('DESKTOP_ASSETS_DIR')), 'desktop-artifacts.json'), 'utf8')),
     );
@@ -297,8 +316,10 @@ const main = async (): Promise<void> => {
     return metadata;
   };
   if (operation === 'preflight') {
-    if (scope === 'linux') {
-      throw new Error('Linux-only candidates read the release-build archive artifact, not attached release metadata');
+    if (isArtifactScope(scope)) {
+      throw new Error(
+        `${scopeNames[scope]}-only candidates read the release-build archive artifact, not attached release metadata`,
+      );
     }
     const metadata = await readMetadata();
     const targets = scopeTargets[scope];
@@ -319,7 +340,7 @@ const main = async (): Promise<void> => {
     .enum(['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'])
     .parse(required('DESKTOP_CANDIDATE_TARGET'));
   if (!(scopeTargets[scope] as readonly string[]).includes(target)) {
-    throw new Error(`${scope === 'linux' ? 'Linux' : 'Mac'}-only candidates cannot stage another platform`);
+    throw new Error(`${scopeNames[scope]}-only candidates cannot stage another platform`);
   }
   if (operation !== 'stage' && !(operation === 'dmg' && target.startsWith('darwin-'))) {
     throw new Error('Unknown candidate operation');
@@ -328,10 +349,10 @@ const main = async (): Promise<void> => {
   const archiveName = desktopArchiveName(platform!, arch!);
   let asset: { sha256: string; size: number };
   let artifactProvenance: { releaseRunId: string; artifactId: number; artifactSha256: string } | undefined;
-  if (scope === 'linux') {
+  if (isArtifactScope(scope)) {
     // No release metadata exists until every platform is attached; the exact run's artifact digest binds the bytes and
     // the packaged application identity below binds tag, version, channel and source.
-    const fetched = await fetchLinuxArchive(root, archiveName, source);
+    const fetched = await fetchArchive({ scope, root, archiveName, source });
     asset = fetched;
     artifactProvenance = {
       releaseRunId: required('DESKTOP_RELEASE_RUN_ID'),

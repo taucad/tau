@@ -283,7 +283,7 @@ export const useTheme = (): UseThemeReturn => {
 
 /**
  * The client-facts head script and the color-scheme declaration, before any stylesheet in `<head>`. The script is the
- * same for every visitor and every build; the CSP admits it by hash.
+ * same for every visitor and every build; its CSP hash is listed in `#lib/inline-script-hashes`.
  *
  * @returns The head elements.
  */

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { CodeEditor, markCodeEditorMilestone } from '#components/code/code-editor.client.js';
+import { CodeEditor, markCodeEditorMilestone } from '@taucad/editor-ui/components/code/code-editor.client';
 import { useEditorDocument, useEditorLanguageEnvironment } from '#hooks/use-editor-document-session.js';
 import { useProject } from '#hooks/use-project.js';
-import type { EditorDocument } from '#lib/editor-document.js';
+import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import { registerEditorView } from '#lib/editor-navigation-service.js';
 import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 import { Button } from '@taucad/ui/components/button';

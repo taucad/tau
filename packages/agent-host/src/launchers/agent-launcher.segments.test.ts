@@ -20,7 +20,7 @@ import { memoryFileSystem } from '#browser/leadership.fixture.js';
 import type { MemoryFileSystem } from '#browser/leadership.fixture.js';
 import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { createAgentLauncher } from '#launchers/agent-launcher.js';
-import type { AgentLauncher, AgentLauncherOptions } from '#launchers/agent-launcher.js';
+import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import { chatStoreBinding, createChatStore } from '#launchers/chat-store.js';
 import type { ChatStore } from '#launchers/chat-store.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
@@ -86,7 +86,8 @@ const launch = (
     publish?: NonNullable<TurnPlacementPort['publish']>;
     pull?: NonNullable<TurnPlacementPort['pull']>;
     placement?: TurnPlacementPort;
-    clock?: AgentLauncherOptions['clock'];
+    /** Drives the host's timers and, through `monotonicNow`, every liveness interval they test (the paused hold). */
+    clock?: SimulatedClock;
   }> = {},
 ): AgentLauncher => {
   const fake = options.placement ?? fakePlacement({ registry: emptyTools }).port;
@@ -112,7 +113,9 @@ const launch = (
       },
     }),
     modelTransport: transport,
-    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.clock === undefined
+      ? {}
+      : { clock: options.clock, monotonicNow: options.clock.now.bind(options.clock) }),
     credential: () => ({ mode: 'session' }),
     model,
     systemPrompt: 'You are Tau.',

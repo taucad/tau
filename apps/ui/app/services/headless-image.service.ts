@@ -457,7 +457,9 @@ export class HeadlessImageService {
           if (this.activeJob === queued) {
             this.activeJob = undefined;
           }
-          this.activeTelemetry = undefined;
+          /* `activeTelemetry` stays this job's until the next job starts: the worker flushes an operation's spans after
+           * its terminal reply, so they arrive once the transcode has resolved and land in the array the job's
+           * `runtime.transcode` record holds. */
         }
       }
       /* oxlint-enable no-await-in-loop */

@@ -9,10 +9,12 @@
  * and never touches the worker global once a message source is injected.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import { serveNodeFsProvider } from '@taucad/filesystem/backend/node';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -512,9 +514,6 @@ describe('one rooted connection as the change transport (W12a)', () => {
 
 describe('project root isolation through the bridge (T-B1.3)', () => {
   it('should resolve with notFound for a deleted folder while Home lists its files', async () => {
-    const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { serveNodeFsProvider } = await import('@taucad/filesystem/backend/node');
     const home = mkdtempSync(path.join(tmpdir(), 'tau-bridge-home-'));
     const lost = mkdtempSync(path.join(tmpdir(), 'tau-bridge-lost-'));
     const homeProject = 'proj_hhhhhhhhhhhhhhhhhhhhh';

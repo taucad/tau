@@ -1678,7 +1678,11 @@ const callSchemas = {
   pendingPaths: { args: z.tuple([z.array(rootedPathSchema)]), result: z.array(z.string()) },
 } satisfies FileSystemBridgeCallSchemas;
 
-const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });
+/* Every named event the authority broadcasts: a frame this rejects ends the shared broadcast subscription. */
+const broadcastValidator = z.union([
+  z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema }),
+  z.looseObject({ event: z.literal('rootStatus'), data: rootStatusesSchema }),
+]);
 
 /** Exact runtime-validator inventory for the filesystem bridge domain. @public */
 export const fileSystemBridgeSchemas = {

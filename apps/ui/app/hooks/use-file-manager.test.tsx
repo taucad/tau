@@ -859,6 +859,12 @@ describe('HomeFileManagerProvider', () => {
   });
 });
 
+/** The desktop shell's recovery members, on a desktop build: the panel reads them only there. */
+const stubDesktopShell = (shell: Record<string, unknown>): void => {
+  vi.stubEnv('TAU_TARGET', 'desktop');
+  vi.stubGlobal('tau', shell);
+};
+
 describe('SharedWorkerGate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -936,6 +942,7 @@ describe('SharedWorkerGate', () => {
     const updates = { check: vi.fn(async () => undefined) };
     afterEach(() => {
       vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
     });
 
     const renderFailure = async (error: Error) => {
@@ -956,7 +963,7 @@ describe('SharedWorkerGate', () => {
     const named = (name: string, message: string): Error => Object.assign(new Error(message), { name });
 
     it('offers Update Tau, Show logs and Troubleshooting for a database a newer Tau opened', async () => {
-      vi.stubGlobal('tau', { troubleshooting, updates });
+      stubDesktopShell({ troubleshooting, updates });
       const panel = await renderFailure(named('VersionError', 'The requested version is less than the existing one'));
 
       await vi.waitFor(() => {
@@ -970,7 +977,7 @@ describe('SharedWorkerGate', () => {
     });
 
     it('asks to close the other Tau window when the database is blocked', async () => {
-      vi.stubGlobal('tau', { troubleshooting, updates });
+      stubDesktopShell({ troubleshooting, updates });
       const panel = await renderFailure(named('StorageUpgradeBlockedError', 'Opening the database is blocked'));
 
       await vi.waitFor(() => {
@@ -980,7 +987,7 @@ describe('SharedWorkerGate', () => {
     });
 
     it('offers Restart in Safe Mode, Check for Updates and Show logs when the services utility will not start', async () => {
-      vi.stubGlobal('tau', { troubleshooting, updates });
+      stubDesktopShell({ troubleshooting, updates });
       const panel = await renderFailure(
         Object.assign(new Error('The services utility did not start'), { code: 'SERVICES_UNAVAILABLE' }),
       );
@@ -995,7 +1002,7 @@ describe('SharedWorkerGate', () => {
     });
 
     it('hides a desktop action the shell does not provide', async () => {
-      vi.stubGlobal('tau', { updates });
+      stubDesktopShell({ updates });
       const panel = await renderFailure(named('VersionError', 'The requested version is less than the existing one'));
 
       await vi.waitFor(() => {
@@ -1059,6 +1066,7 @@ describe('database panel', () => {
     handleStoreTestState.degraded = undefined;
     handleStoreTestState.mirror = undefined;
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   const renderHome = async (): Promise<HTMLElement> => {
@@ -1075,7 +1083,7 @@ describe('database panel', () => {
   };
 
   it('should keep Home open and offer Reset local database on the desktop', async () => {
-    vi.stubGlobal('tau', { troubleshooting, updates });
+    stubDesktopShell({ troubleshooting, updates });
     handleStoreTestState.degraded = { input: 'records', errorName: 'UnknownError' };
 
     const panel = await renderHome();
@@ -1087,7 +1095,7 @@ describe('database panel', () => {
   });
 
   it('should offer Update Tau beside the reset for a database a newer Tau opened', async () => {
-    vi.stubGlobal('tau', { troubleshooting, updates });
+    stubDesktopShell({ troubleshooting, updates });
     handleStoreTestState.degraded = { input: 'records', errorName: 'VersionError' };
 
     const panel = await renderHome();
@@ -1097,7 +1105,7 @@ describe('database panel', () => {
   });
 
   it('should ask to close the other Tau window when the database is blocked, and offer Try again', async () => {
-    vi.stubGlobal('tau', { troubleshooting, updates });
+    stubDesktopShell({ troubleshooting, updates });
     handleStoreTestState.degraded = { input: 'records', errorName: 'StorageUpgradeBlockedError' };
 
     const panel = await renderHome();
@@ -1129,7 +1137,7 @@ describe('database panel', () => {
   });
 
   it('should show no database panel when the grant list, not the database, could not be read', async () => {
-    vi.stubGlobal('tau', { troubleshooting, updates });
+    stubDesktopShell({ troubleshooting, updates });
     handleStoreTestState.degraded = { input: 'grants', errorName: 'Error' };
     render(
       <RootFileManagerProvider>

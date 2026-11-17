@@ -281,12 +281,43 @@ let refCount = 0;
 let idleTimer: ReturnType<typeof setTimeout> | undefined;
 let openPromise: Promise<IDBDatabase> | undefined;
 
+const upgradeBlockedError = (): Error =>
+  Object.assign(
+    new Error(`Opening ${dbName} is blocked by another Tau tab on an older version; close it and reload.`),
+    { name: 'StorageUpgradeBlockedError' },
+  );
+
+/*
+ * A blocked upgrade stays pending until the other tab closes, and every later open of the database queues behind it
+ * and fires no event of its own. While one is blocked, every open still waiting fails as blocked at once, and a new
+ * open fails before it queues: otherwise each waits out its deadline and the failure reads as a timeout, which the
+ * database panel cannot tell from an unreadable database (desktop resilient startup blueprint D3, T-B5.7).
+ */
+let upgradeBlocked = false;
+const waitingOpens = new Set<() => void>();
+
 async function openHandleDbRaw(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    if (upgradeBlocked) {
+      reject(upgradeBlockedError());
+      return;
+    }
     const request = indexedDB.open(dbName, dbVersion);
     let blocked = false;
     /* An open that fires no event at all must not hold the start (B31): it rejects at the deadline. */
     const deadline = armDatabaseOpenDeadline(request, dbName, reject);
+    const failBlocked = (): void => {
+      waitingOpens.delete(failBlocked);
+      blocked = true;
+      deadline.clear();
+      reject(upgradeBlockedError());
+    };
+    waitingOpens.add(failBlocked);
+    /* The open has its answer: an upgrade it was waiting behind, its own included, is no longer pending. */
+    const settle = (): void => {
+      waitingOpens.delete(failBlocked);
+      upgradeBlocked = false;
+    };
 
     // Pure bootstrap: create whatever the current schema needs and nothing
     // else. The v2 -> v3 legacy-handle promotion was deleted at L6 — the
@@ -344,17 +375,14 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
     // connection closes. Without this listener the open never settles and the whole app sits on the
     // "Opening Home" shell for as long as the other tab lives. Fail loudly instead.
     request.addEventListener('blocked', () => {
-      blocked = true;
-      deadline.clear();
-      reject(
-        Object.assign(
-          new Error(`Opening ${dbName} is blocked by another Tau tab on an older version; close it and reload.`),
-          { name: 'StorageUpgradeBlockedError' },
-        ),
-      );
+      upgradeBlocked = true;
+      for (const fail of waitingOpens) {
+        fail();
+      }
     });
 
     request.addEventListener('success', () => {
+      settle();
       deadline.clear();
       const db = request.result;
       if (deadline.expired()) {
@@ -378,6 +406,7 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
     });
 
     request.addEventListener('error', () => {
+      settle();
       deadline.clear();
       reject(request.error ?? new Error(`Failed to open IndexedDB database: ${dbName}`));
     });

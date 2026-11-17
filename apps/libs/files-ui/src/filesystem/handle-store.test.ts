@@ -754,6 +754,38 @@ describe('Home storage backend', () => {
     older.close();
   });
 
+  /* T-B5.7 (B5): an open queued behind the blocked upgrade must not wait out its deadline and read as a timeout, or
+   * the panel shows "couldn't open" instead of asking for the other window to close (D3). */
+  it('fails every later open as blocked while another tab blocks the upgrade', async () => {
+    globalThis.indexedDB = new IDBFactory();
+    const older = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(`${appMetaConfig.databasePrefix}fs-handles`, 3);
+      request.addEventListener('upgradeneeded', () => {
+        request.result.createObjectStore('meta', { keyPath: 'key' });
+      });
+      request.addEventListener('success', () => {
+        resolve(request.result);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('older open failed'));
+      });
+    });
+    globalThis.localStorage.setItem('tau:home-backend', 'opfs');
+    stubHomeProbe(false);
+    vi.resetModules();
+    const { getHomeStorageBackend, readProjectRootConfigs } = await import('#filesystem/handle-store.js');
+
+    try {
+      await expect(getHomeStorageBackend()).resolves.toBe('opfs');
+      const read = await readProjectRootConfigs();
+
+      expect(read.degraded).toEqual({ input: 'records', errorName: 'StorageUpgradeBlockedError' });
+    } finally {
+      older.close();
+      globalThis.localStorage.clear();
+    }
+  }, 30_000);
+
   it('closes its connection so a newer version in another tab can upgrade', async () => {
     stubHomeProbe(false);
     const { getHomeStorageBackend } = await loadStore();

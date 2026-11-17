@@ -9,6 +9,7 @@
  */
 import { readHomeBackendMirror, resetHomeRecords } from '@taucad/files-ui/filesystem/handle-store';
 import { safeModeHref } from '#lib/boot-signals.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 /** The shell's troubleshooting members (WP6's preload), each optional. */
 type TroubleshootingBridge = Readonly<{
@@ -49,7 +50,9 @@ const labels: Readonly<Record<RecoveryActionId, string>> = {
   resetFolderList: 'Reset folder list',
 };
 
-const shell = (): RecoveryShell | undefined => (globalThis as { tau?: RecoveryShell }).tau;
+/* The build decides, not the global: on the web the inline icon sprite's `<symbol id="tau">` is `window.tau` too. */
+const shell = (): RecoveryShell | undefined =>
+  isDesktopTarget() ? (globalThis as { tau?: RecoveryShell }).tau : undefined;
 
 const runner = (call: () => Promise<void>) => async (): Promise<void> => {
   try {

@@ -72,6 +72,14 @@ const grantsPath = (profile: string): string => join(profile, 'granted-roots.jso
 const readGrants = async (profile: string): Promise<readonly string[]> =>
   (await readJson<readonly string[]>(grantsPath(profile))) ?? [];
 
+/** The granted folders, without Home: main admits Home into the same file at every launch (`main.ts`). */
+const readFolderGrants = async (profile: string): Promise<readonly string[]> => {
+  const home = join(profile, 'home');
+  const homeSpellings = new Set([home, await realpath(home).catch(() => home)]);
+  const grants = await readGrants(profile);
+  return grants.filter((entry) => !homeSpellings.has(entry));
+};
+
 /** Whether the grant file names this folder, in either spelling (`/var/…` and `/private/var/…` on macOS). */
 const isGranted = async (profile: string, directory: string): Promise<boolean> => {
   const spellings = new Set([directory, await realpath(directory).catch(() => directory)]);
@@ -130,6 +138,23 @@ const connectNextFolder = async (session: DesktopSession, directory: string): Pr
   await expect
     .poll(async () => createInTrigger(page).getAttribute('aria-label'), { timeout: 60_000 })
     .toBe('Create in tau-desktop-workspace');
+  /* The connect is finished when the picker closes and its request to focus the composer, queued for the next frame,
+   * has run. The grant lands before both and the label cannot tell one connect from the next, so without this the
+   * next connect opened the picker and the finishing one moved focus out of it, which closed it under the click and
+   * left no "Connect a folder…" to press. */
+  await expect
+    .poll(async () => page.getByRole('button', { name: /Connect a folder/u }).count(), { timeout: 60_000 })
+    .toBe(0);
+  await page.evaluate(
+    async () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      }),
+  );
 };
 
 /** Create a project in Home through the new-project page while Home is the creation location. */
@@ -263,14 +288,21 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
   cleanups.push(async () => removeDesktopRoot(profile));
   await createHomeProject(producer.page, homeProjectName);
   /* The surviving folder is connected first and holds the folder project and its chat; the folders connected after
-   * it are the ones deleted, and the last of them stays the composer's creation location, as in the incident. */
+   * it are the ones deleted, and the last of them stays the composer's creation location, as in the incident. The
+   * composer stores its location when a project is created there, not when a folder is connected, so the last folder
+   * gets a project too. */
   await connectNextFolder(producer, survivor);
   const survivorProject = await createFolderProjectWithChat(producer, survivor);
   for (const directory of doomed) {
     // oxlint-disable-next-line no-await-in-loop -- The dialog stub answers the folders in order.
     await connectNextFolder(producer, directory);
   }
-  expect(await readGrants(profile)).toHaveLength(grantedFolders);
+  const chosen = doomed.at(-1);
+  if (chosen === undefined) {
+    throw new Error('The rehearsal needs a folder to choose.');
+  }
+  await createFolderProjectWithChat(producer, chosen);
+  expect(await readFolderGrants(profile)).toHaveLength(grantedFolders);
   await closeSession(producer);
 
   /* 2. Break it: delete 28 folders, the composer's chosen one among them, and keep the grant file's bytes. */
@@ -314,14 +346,15 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
   /* 5. One optional click. */
   const survivorBefore = await snapshotTree(survivorProject);
   await page.getByRole('button', { name: 'Remove all', exact: true }).click();
-  await expect.poll(async () => readGrants(profile).then((grants) => grants.length), { timeout: 60_000 }).toBe(1);
+  await expect.poll(async () => readFolderGrants(profile).then((grants) => grants.length), { timeout: 60_000 }).toBe(1);
   expect(await isGranted(profile, survivor)).toBe(true);
   await expect.poll(async () => notFoundGroup.count(), { timeout: 60_000 }).toBe(0);
   expect(await snapshotTree(survivorProject)).toEqual(survivorBefore);
 };
 
 describe('desktop missing-folder recovery (the operator rehearsal)', () => {
-  /* T-REH.1: the incident's profile, produced and opened by the candidate. */
+  /* T-REH.1: the incident's profile, produced and opened by the candidate. Steps 1-3 and 5 pass; step 4 waits for
+   * the Files page to label the surviving folder's row "Connected" (blueprint D2), which it does not yet. */
   // Expected-failure: @rifont until 2026-12-15
   it.fails(
     'should start Home over 28 deleted folders with nothing forgotten automatically',

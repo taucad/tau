@@ -43,9 +43,13 @@ const databasePanel = selectors.getByRole('alert', { name: "Tau's local database
  * In the second tab: hold the handle database open at `version` and never yield, as a tab running another build of
  * Tau does. A version below the current one is what an older build holds; recreating the database at it is the only
  * way a newer profile can be held there. A higher version leaves the page's own open with `VersionError`.
+ *
+ * Both tabs stand on a static file while the database is replaced: a live Tau page in either one reopens the database
+ * at the current version the moment it is deleted, and the hold then fails or holds nothing.
  */
 const holdHandleDatabase = async (version: number): Promise<void> => {
-  await target.openSecondary('/');
+  await target.navigate('/robots.txt');
+  await target.openSecondary('/robots.txt');
   await target.evaluate(
     async (heldVersion) => {
       const databases = await indexedDB.databases();
@@ -93,13 +97,12 @@ const holdHandleDatabase = async (version: number): Promise<void> => {
   );
 };
 
-/* T-B5.7 (B5): unverified in the authoring environment, which cannot run browser e2e. */
+/* T-B5.7 (B5). */
 describe('Home storage when the handle database cannot be opened', () => {
   test('shows the blocked copy while another tab holds the database, and opens Home once it closes', async () => {
     await createHomeProject('Blocked Home Browser Test');
     await holdHandleDatabase(3);
 
-    await target.reload();
     await target.navigate('/');
     await target.expectVisible(databasePanel, 30_000);
     await target.expectVisible(selectors.getByText(/close the other Tau window/iu));
@@ -112,7 +115,6 @@ describe('Home storage when the handle database cannot be opened', () => {
     await createHomeProject('Mirrored Home Browser Test');
     await holdHandleDatabase(5);
 
-    await target.reload();
     await target.navigate('/');
     await target.expectVisible(databasePanel, 30_000);
     await target.evaluate(
@@ -137,7 +139,6 @@ describe('Home storage when the handle database cannot be opened', () => {
     });
     await holdHandleDatabase(5);
 
-    await target.reload();
     await target.navigate('/');
     await target.expectVisible(selectors.getByRole('button', { name: 'Try again' }), 30_000);
     expect(await target.isVisible(selectors.getByRole('button', { name: 'Reset folder list' }))).toBe(false);

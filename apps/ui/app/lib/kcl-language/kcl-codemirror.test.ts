@@ -11,7 +11,7 @@ import type { TextChange } from '@taucad/editor-ui/lib/editor-document';
 import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
 import type { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import type { KclSymbol, KclSymbolService } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
-import type { EditorDocumentSession } from '#lib/editor-document-session.js';
+import type { EditorDocumentSession } from '@taucad/editor-ui/lib/editor-document-session';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import {
   applyKclWorkspaceEdit,

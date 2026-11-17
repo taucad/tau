@@ -1,7 +1,7 @@
-import { createEvent, fireEvent, render, screen } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { DockviewApi, DockviewPanelApi, IDockviewPanelHeaderProps } from 'dockview-react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { DockviewTab } from '#components/panes/dockview-tab.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
@@ -9,9 +9,11 @@ const createProperties = (title = 'main.scad', params?: Record<string, unknown>)
   const containerApi = Object.create(null) as DockviewApi;
   const api = {
     title,
+    group: { id: 'left' },
     close: vi.fn(),
     setActive: vi.fn(),
     onDidTitleChange: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidGroupChange: vi.fn(() => ({ dispose: vi.fn() })),
   } as unknown as DockviewPanelApi;
 
   const properties: IDockviewPanelHeaderProps = {
@@ -100,6 +102,36 @@ describe('DockviewTab', () => {
     await user.hover(title);
 
     expect(await screen.findByRole('tooltip')).toHaveTextContent(expectedTitle);
+  });
+
+  it('names the new tab by the full path when its panel moves to another group (#2291)', () => {
+    const properties = createProperties('gear', { filePath: 'src/models/gear.scad' });
+    const { container } = render(
+      <TooltipProvider>
+        <div className='dv-tab' role='tab' tabIndex={0}>
+          <DockviewTab {...properties} />
+        </div>
+      </TooltipProvider>,
+    );
+    const content = container.querySelector('.dv-default-tab')!;
+    const groupChange = vi.mocked(properties.api.onDidGroupChange).mock.calls[0]![0];
+
+    // Dockview moves the tab's content into a new `.dv-tab` in the target group and names that by the bare title.
+    const moved = document.createElement('div');
+    moved.className = 'dv-tab';
+    moved.setAttribute('role', 'tab');
+    moved.setAttribute('aria-label', 'gear');
+    moved.append(content);
+    document.body.append(moved);
+    onTestFinished(() => {
+      moved.remove();
+    });
+    Object.assign(properties.api, { group: { id: 'right' } });
+    act(() => {
+      groupChange({});
+    });
+
+    expect(moved).toHaveAttribute('aria-label', 'src/models/gear.scad');
   });
 
   it('closes from a pointer-only glyph without nesting an interactive control in the tab', () => {

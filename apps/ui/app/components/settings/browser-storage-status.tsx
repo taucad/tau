@@ -1,4 +1,4 @@
-import { SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import type { PersistentStorageStatus } from '@taucad/files-ui/filesystem/handle-store';
 
 const statusCopy: Record<PersistentStorageStatus, { title: string; description: string }> = {

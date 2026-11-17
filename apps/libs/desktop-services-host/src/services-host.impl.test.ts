@@ -368,6 +368,41 @@ describe('createServicesHost — admitted spelling before canonicalisation', () 
   });
 });
 
+describe('createServicesHost — admitted spelling after canonicalisation', () => {
+  it('should refuse a published link retargeted after its realpath settled', async () => {
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-retarget-')));
+    const granted = join(sandbox, 'granted');
+    const elsewhere = join(sandbox, 'elsewhere');
+    const alias = join(sandbox, 'alias');
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+    await Promise.all([mkdir(granted), mkdir(elsewhere)]);
+    await symlink(granted, alias, linkType);
+    const serve = vi.fn<NonNullable<ServicesHostOptions['serve']>>(() => ({
+      run: vi.fn(),
+      close: async () => undefined,
+    }));
+    const { host } = hostHarness({ serve });
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [alias] }));
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+      const [, options] = serve.mock.calls[0]!;
+      await vi.waitFor(() => {
+        expect(options.allowRoot(granted)).toBe(true);
+      });
+      expect(options.allowRoot(alias)).toBe(true);
+
+      await unlink(alias);
+      await symlink(elsewhere, alias, linkType);
+      expect(options.allowRoot(alias)).toBe(false);
+    } finally {
+      host.dispose();
+      await unlink(alias);
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('createServicesHost — concern ports', () => {
   it('serves the node filesystem over the transferred port, gated by the admitted set', () => {
     const { host, serve } = hostHarness();

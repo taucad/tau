@@ -1,53 +1,81 @@
-//! One launch, or one `restore`, at a time on this computer (README "Sessions").
+//! Cross-launch locking (README "Sessions").
 //!
-//! Every launch grants its paths to the one sandbox account and restores them from a snapshot of their whole
-//! descriptors (`acl.rs`). Two live launches over overlapping paths would each snapshot the other's ACEs, and
-//! whichever restored last would write the other's grants back after that launch had ended. So `launch` holds the
-//! named mutex [`MUTEX`] from before it journals until its teardown has restored every descriptor, and `restore`
-//! holds it while it writes a journal back. A second caller is refused at once; nothing waits.
+//! Launches run concurrently. What they must not do concurrently is edit descriptors: the journaling and granting
+//! of a launch, and each restore, read the ledger (`ledger.rs`) and the descriptors they are about to change, and
+//! another launch's edits in between would make that reading stale. So those steps, and nothing else, hold the
+//! person's descriptor lock, [`Descriptors`], a named mutex. A launcher that dies abandons it, and the next waiter
+//! takes it: the dead launch's journal is still registered, and its `restore` is what puts it right.
 //!
-//! The mutex is a kernel object: a launcher that dies releases it (abandoned), and its journal stays for `restore`
-//! as before. It lives in `Global\`, so a launch in another Windows session, whose person may not open the object
-//! at all, counts as running too.
+//! Each launcher also holds a mutex of its own, [`Live`], for its whole life, so `restore` can tell a live launch's
+//! journal from a dead one's and never restores the former.
 
-use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, GetLastError, WAIT_ABANDONED, WAIT_OBJECT_0};
-use windows_sys::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
+use std::time::Duration;
 
+use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, GetLastError, WAIT_ABANDONED, WAIT_OBJECT_0};
+use windows_sys::Win32::System::Threading::{
+    CreateMutexW, OpenMutexW, ReleaseMutex, SYNCHRONIZATION_SYNCHRONIZE, WaitForSingleObject,
+};
+
+use super::sid::current_user;
 use super::util::{Error, Owned, Result, wide};
 
-/// The mutex every launch and every `restore` holds while it may change a descriptor.
-pub const MUTEX: &str = "Global\\tau.sandbox.descriptors";
+/// How long a launch or a restore waits for another's descriptor edits: those take as long as a walk of the
+/// granted trees, never as long as a launch.
+pub const WAIT: Duration = Duration::from_secs(120);
 
-/// What a second launch is told while another launch (or a restore) holds [`MUTEX`].
-pub const BUSY: &str =
-    "another sandboxed launch is running on this computer, and Windows runs one at a time; try again when it ends";
-
-/// The held mutex; released on drop, which must happen on the thread that took it.
-pub struct Exclusive {
+/// The person's descriptor lock, held while journaling and granting or restoring. Released on drop, which must
+/// happen on the thread that took it.
+pub struct Descriptors {
     handle: Owned,
 }
 
-impl Drop for Exclusive {
+impl Drop for Descriptors {
     fn drop(&mut self) {
         unsafe { ReleaseMutex(self.handle.raw()) };
     }
 }
 
-/// Take [`MUTEX`] without waiting: `Ok(None)` while another process holds it.
-pub fn try_acquire() -> Result<Option<Exclusive>> {
-    let name = wide(MUTEX);
-    let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+fn descriptors_name() -> Result<String> {
+    Ok(format!("Global\\tau.sandbox.descriptors.{}", current_user()?.to_sddl()))
+}
+
+/// Take the person's descriptor lock, waiting up to [`WAIT`].
+pub fn descriptors() -> Result<Descriptors> {
+    let name = wide(&descriptors_name()?);
+    let handle = Owned::new(unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) }, "CreateMutexW(descriptors)")?;
+    match unsafe { WaitForSingleObject(handle.raw(), WAIT.as_millis() as u32) } {
+        WAIT_OBJECT_0 | WAIT_ABANDONED => Ok(Descriptors { handle }),
+        _ => Err(Error::msg(format!(
+            "another sandboxed launch kept its folder permissions locked for over {} seconds",
+            WAIT.as_secs()
+        ))),
+    }
+}
+
+fn live_name(package: &str) -> String {
+    format!("Global\\tau.sandbox.launcher.{package}")
+}
+
+/// Held by a launcher for its whole life.
+pub struct Live {
+    _handle: Owned,
+}
+
+/// Mark the launch of `package` live.
+pub fn live(package: &str) -> Result<Live> {
+    let name = wide(&live_name(package));
+    let handle = Owned::new(unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) }, "CreateMutexW(live)")?;
+    Ok(Live { _handle: handle })
+}
+
+/// Whether the launch of `package` is still running.
+pub fn is_live(package: &str) -> bool {
+    let name = wide(&live_name(package));
+    let handle = unsafe { OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr()) };
     if handle.is_null() {
-        // Created by a launch of another person, whose default DACL does not admit us: it is running.
-        if unsafe { GetLastError() } == ERROR_ACCESS_DENIED {
-            return Ok(None);
-        }
-        return Err(Error::last("CreateMutexW(descriptor owner)"));
+        // Present but not ours to open counts as live: never restore what might be running.
+        return unsafe { GetLastError() } != ERROR_FILE_NOT_FOUND;
     }
-    let handle = Owned(handle);
-    match unsafe { WaitForSingleObject(handle.raw(), 0) } {
-        // An abandoned mutex belongs to a launcher that died; its journal is `restore`'s, and ours is our own.
-        WAIT_OBJECT_0 | WAIT_ABANDONED => Ok(Some(Exclusive { handle })),
-        _ => Ok(None),
-    }
+    drop(Owned(handle));
+    true
 }

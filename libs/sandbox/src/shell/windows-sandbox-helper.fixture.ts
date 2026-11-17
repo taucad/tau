@@ -202,6 +202,16 @@ const launch = (): void => {
           leave(0);
           return;
         }
+        case 'busy': {
+          json(0x86, {
+            status: 'sandbox-unavailable',
+            requirement: 'exclusive-launch',
+            message: 'another sandboxed launch kept its folder permissions locked for over 120 seconds',
+          });
+          ended = true;
+          leave(0);
+          return;
+        }
         case 'refuse-unavailable': {
           json(0x86, {
             status: 'sandbox-unavailable',

@@ -7,11 +7,10 @@
  * It frames bytes itself rather than importing the protocol codec, so a codec bug cannot hide behind its own mirror.
  *
  * - `TAU_FIXTURE_SCENARIO`: `echo` (default), `refuse`, `crash` (journals, then dies after `started`), `cleanup-failed`,
- *   `garbage` (an unknown frame after `started`), `busy-once` (refuses as busy the first time, then echoes), `busy`
- *   (always refuses as busy).
+ *   `garbage` (an unknown frame after `started`).
  * - `TAU_FIXTURE_LOG`: a file each event is appended to as one JSON line.
  */
-import { appendFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, rmSync, writeFileSync } from 'node:fs';
 
 const scenario = process.env['TAU_FIXTURE_SCENARIO'] ?? 'echo';
 const logPath = process.env['TAU_FIXTURE_LOG'];
@@ -70,19 +69,6 @@ if (command === 'restore') {
         const spec = JSON.parse(Buffer.from(payload).toString('utf8')) as { journal: string };
         log({ event: 'spec', spec });
         journal = spec.journal;
-        const marker = `${logPath ?? 'fixture'}.busy`;
-        if (scenario === 'busy' || (scenario === 'busy-once' && !existsSync(marker))) {
-          writeFileSync(marker, '');
-          ended = true;
-          json(0x86, {
-            status: 'sandbox-unavailable',
-            requirement: 'exclusive-launch',
-            message:
-              'another sandboxed launch is running on this computer, and Windows runs one at a time; try again when it ends',
-          });
-          leave(0);
-          return;
-        }
         if (scenario === 'refuse') {
           ended = true;
           json(0x86, { status: 'sandbox-unavailable', message: 'the executable digest does not match' });

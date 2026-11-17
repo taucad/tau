@@ -65,6 +65,13 @@ function ProjectSessionBinding({
       retryManifestObservation();
     }
   }, [cloudIntent, retryManifestObservation, status?.sync.hasAppliedRemote]);
+  /* STO-25: once a tree write's closure has landed its `tau.json`, the manifest is read again, so the model surfaces
+     know from the first view whether the project holds that manifest. */
+  useEffect(() => {
+    if (cloudIntent === 'open' && status?.entryManifest !== undefined) {
+      retryManifestObservation();
+    }
+  }, [cloudIntent, retryManifestObservation, status?.entryManifest]);
   const role = useProjectRole();
   usePublishCloudProjectPreview({
     projectId,

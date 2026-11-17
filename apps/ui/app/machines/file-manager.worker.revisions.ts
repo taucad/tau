@@ -103,6 +103,7 @@ import type { ChangeEvent } from '@taucad/types';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { logWorkerTimings } from '@taucad/ui-core/lib/worker-timing-report';
 import { randomUuid } from '@taucad/utils/id';
+import { sha256BytesSync } from '@taucad/utils/hash';
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
@@ -743,6 +744,8 @@ export type TreeWriteWatch = {
   observed: Set<string>;
   /** The watched paths this write has landed for good (STO-25): its own, never another write's. */
   landedPaths?: Set<string>;
+  /** The SHA-256 of the `tau.json` bytes its closure lands, once hashed: what the page's manifest is checked against. */
+  manifest?: string;
 };
 
 /**
@@ -975,15 +978,30 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     const answered = [...watchedPaths].filter((path) => write.landedPaths?.has(path) === true).toSorted();
     return answered.length === 0 ? undefined : answered;
   };
+  /*
+   * STO-25: the `tau.json` the root's tree write landed with its entry closure, kept with the write as its landings
+   * are: never a failed write's nor a rollback's, and unknown until the closure has landed (I7).
+   */
+  const entryManifestOf = (root: string | undefined): string | undefined => {
+    const write = root === undefined ? undefined : landingWrites.get(root);
+    if (root === undefined || write?.manifest === undefined || recovering.has(root)) {
+      return undefined;
+    }
+    return write.landed || (entryClosures.get(root) === write && entryClosureLanded(root)) ? write.manifest : undefined;
+  };
   const watchEntryClosure = async (
     root: string,
-    closure: readonly string[],
-    touched: readonly string[],
+    write: Readonly<{ closure: readonly string[]; touched: readonly string[]; manifest?: Uint8Array<ArrayBuffer> }>,
   ): Promise<void> => {
+    const { closure, touched, manifest } = write;
     const entry: TreeWriteWatch = { closure, landed: false, touched: new Set(touched), observed: new Set() };
     entryClosures.set(root, entry);
     /* A new tree: what the last write landed says nothing of this one's. */
     landingWrites.set(root, entry);
+    /* Named as the write begins, so its first reading at `entryReady` already carries it; a `tau.json` is small. */
+    if (manifest !== undefined) {
+      entry.manifest = sha256BytesSync(manifest);
+    }
     try {
       entry.view = await options.filesystem(root);
     } catch (error) {
@@ -1156,7 +1174,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           recovering.add(root);
         }
         // async-iife: bootstrap -- the view is opened once per write; the reading follows as it lands.
-        void watchEntryClosure(root, bracket.closure, paths);
+        void watchEntryClosure(root, {
+          closure: bracket.closure,
+          touched: paths,
+          ...(bracket.manifest === undefined ? {} : { manifest: bracket.manifest }),
+        });
       }
       writing.set(root, (writing.get(root) ?? 0) + 1);
       republish();
@@ -1212,11 +1234,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     const facet = status.checkoutId === undefined ? undefined : largeObjects.get(status.checkoutId)?.facet;
     const applyingRoots = [...applying.keys()].toSorted();
     const landed = landedOf(status.checkoutRoot);
+    const entryManifest = entryManifestOf(status.checkoutRoot);
     const merged = {
       ...status,
       ...(facet === undefined ? {} : { largeObjects: facet }),
       ...(applyingRoots.length === 0 ? {} : { applyingRoots }),
       ...(landed === undefined ? {} : { landedPaths: landed }),
+      ...(entryManifest === undefined ? {} : { entryManifest }),
     };
     if (status.checkoutId !== undefined && failedTreeWrites.has(status.checkoutId)) {
       const failedAt = failedTreeWrites.get(status.checkoutId);

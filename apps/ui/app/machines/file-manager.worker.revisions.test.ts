@@ -1198,8 +1198,14 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await project.writeFile('main.scad', 'cube(30);');
     await project.writeFile('lib/a.scad', 'b();');
     const before = await root.log();
-    /* At the entryReady frame the closure reads its restored bytes, and the rest has not landed yet. */
+    /*
+     * At the entryReady frame the closure reads its restored bytes, and the rest has not landed yet: the disk (the
+     * writer's raw view) still holds the old bytes, and a reader's view holds its read until the write lands them
+     * (Rule 33), never answering the old ones (I7).
+     */
     const atEntryReady: Record<string, string> = {};
+    const disk = fixture.service.createRootedFileSystem('/projects/alpha', undefined, { placeholders: 'raw' });
+    let heldRead: Promise<string> | undefined;
     gate = async () => {
       await vi.waitFor(
         () => {
@@ -1212,7 +1218,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
         { timeout: 5000 },
       );
       atEntryReady['main.scad'] = await project.readFile('main.scad', 'utf8');
-      atEntryReady['lib/a.scad'] = await project.readFile('lib/a.scad', 'utf8');
+      atEntryReady['lib/a.scad'] = await disk.readFile('lib/a.scad', 'utf8');
+      heldRead = project.readFile('lib/a.scad', 'utf8');
     };
     alpha.send({ command: 'restore', revisionId: head! });
     await vi.waitFor(
@@ -1235,6 +1242,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     /* Reached while the write still held the tree, not at its end. */
     expect(statuses.find((status) => status.readiness === 'entryReady')?.applyingRoots).toEqual(['/projects/alpha']);
     expect(atEntryReady).toEqual({ 'main.scad': 'cube(20);', 'lib/a.scad': 'b();' });
+    await expect(heldRead).resolves.toBe('a();');
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
     expect(await project.readFile('lib/a.scad', 'utf8')).toBe('a();');
   });
@@ -1425,6 +1433,114 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       },
       { timeout: 10_000 },
     );
+  });
+
+  /*
+   * STO-25: the model renders from the first view once the page's manifest is the `tau.json` the write landed. The
+   * host names those bytes from the moment the closure lands until the next tree write, and never a failed write's
+   * nor its rollback's (I7).
+   */
+  it('should name the tau.json a tree write landed with its closure, never a failed write’s', async () => {
+    let failNext = false;
+    let gate: (() => Promise<void>) | undefined;
+    const fixture = harness(['alpha'], (port) => port, {
+      observeFileEvents: true,
+      wrapFileSystem: (filesystem) => ({
+        ...filesystem,
+        ...(filesystem.apply === undefined
+          ? {}
+          : {
+              apply: async (changeset) => {
+                if (changeset.entries.some((entry) => entry.op === 'write' && entry.path.startsWith('lib/'))) {
+                  const held = gate;
+                  gate = undefined;
+                  await held?.();
+                  if (failNext) {
+                    failNext = false;
+                    throw new Error('The disk went away.');
+                  }
+                }
+                return filesystem.apply!(changeset);
+              },
+            }),
+      }),
+    });
+    const manifestOf = (name: string): Uint8Array<ArrayBuffer> =>
+      serializeProjectManifest({
+        $schema: projectManifestSchemaUrl,
+        name,
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.scad' } },
+      });
+    const landedManifest = manifestOf('Alpha');
+    const digest = createHash('sha256').update(landedManifest).digest('hex');
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('tau.json', landedManifest);
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('lib/a.scad', 'a();');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    /* The checkout holds another manifest now: the restore lands `Alpha`'s again with its closure. */
+    await project.writeFile('tau.json', manifestOf('Placeholder'));
+    await project.writeFile('lib/a.scad', 'b();');
+    await settle(10);
+    const latest = (): RevisionStatusProjection | undefined =>
+      alpha.frames.findLast((frame) => frame.type === 'status')?.status;
+    expect(latest()?.entryManifest).toBeUndefined();
+
+    /* A failed write landed its closure, then failed: its manifest is never named once it has. */
+    failNext = true;
+    let atEntryReady: RevisionStatusProjection | undefined;
+    gate = async () => {
+      await vi.waitFor(
+        () => {
+          atEntryReady = latest();
+          expect(atEntryReady?.readiness).toBe('entryReady');
+          expect(atEntryReady?.entryManifest).toBeDefined();
+        },
+        { timeout: 5000 },
+      );
+    };
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      () => {
+        expect(failNext).toBe(false);
+        expect(latest()?.applyingRoots).toBeUndefined();
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+    expect(atEntryReady?.entryManifest).toBe(digest);
+    expect(latest()?.entryManifest).toBeUndefined();
+
+    /* The retry names its own, and keeps naming it once the write has ended, until the next tree write. */
+    gate = async () => {
+      await vi.waitFor(
+        () => {
+          expect(latest()?.entryManifest).toBe(digest);
+          expect(latest()?.applyingRoots).toBeDefined();
+        },
+        { timeout: 5000 },
+      );
+    };
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      async () => {
+        expect(await project.readFile('lib/a.scad', 'utf8')).toBe('a();');
+        expect(latest()?.applyingRoots).toBeUndefined();
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+    expect(gate).toBeUndefined();
+    expect(latest()?.entryManifest).toBe(digest);
   });
 
   /* D10, I7: an aborted restore's tree is never read as written, and its rollback, which writes the checkout whole again, is. */

@@ -20,8 +20,9 @@ use crate::tree::Sample;
 ///
 /// A journal without its `end` line was cut short before any ACL changed: there is nothing to restore.
 /// `account_sids` are the sandbox account and group, when known; the capability and package SIDs come from
-/// the journal. The package has no other state to remove: no AppContainer profile, registry key or durable named object
-/// exists for it (`lowbox.rs`).
+/// the journal. The package's registration (`container.rs`) lives in the sandbox account's profile, which the
+/// person cannot change: the next launch's runner deletes it when its runner is gone, and `revoke` deletes the
+/// whole profile. No durable named object exists for it.
 pub fn restore_journal(path: &Path, account_sids: &[String]) -> Vec<String> {
     let summary = match journal::read_summary(path) {
         Ok(summary) => summary,
@@ -31,6 +32,11 @@ pub fn restore_journal(path: &Path, account_sids: &[String]) -> Vec<String> {
         eprintln!("tau-windows-sandbox: the journal was cut short before any ACL changed; nothing to restore");
         return Vec::new();
     }
+    eprintln!(
+        "tau-windows-sandbox: AppContainer {} stays registered in the sandbox account's profile until the next launch \
+         or revoke deletes it",
+        summary.header.package_name
+    );
     let mut principals = vec![summary.header.capability_sid.clone(), summary.header.package_sid.clone()];
     principals.extend(account_sids.iter().cloned());
     let mut failures = Sample::default();

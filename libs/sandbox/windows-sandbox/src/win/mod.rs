@@ -2,6 +2,7 @@
 
 pub mod account;
 pub mod acl;
+pub mod container;
 pub mod desktop;
 pub mod dpapi;
 pub mod firewall;

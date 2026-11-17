@@ -29,20 +29,34 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
   unlabelled (Medium) object. So an object whose DACL grants only Everyone (A22), or uses the default named-pipe DACL
   (Everyone may read), is closed to the shell. The default DACL of the shell's token gives the logon SID and the package
   all access and `OWNER RIGHTS` read-control only.
-- **AppContainer without an AppContainer profile.** The runner does not call `CreateAppContainerProfile`, which would
-  write per-package `HKCU` state and create `%LOCALAPPDATA%\Packages\<name>` for every launch. The launcher derives the
-  package SID from a random name, `tau.sandbox.<32 hex digits>`, with `DeriveAppContainerSidFromAppContainerName`, a
-  hash with no side effect. No two launches, concurrent or later, share a package or any grant to it. `CreateProcess`
-  builds the package's named-object namespace (`\Sessions\<n>\AppContainerNamedObjects\<package SID>`, with its
-  `RPC Control` directory and its `Global`, `Local` and `Session` links) as it does for any AppContainer, and hands the
-  handles to the kernel, so the namespace lives as long as a token of the package. A name the shell creates lands in
-  its own directory; a name it opens elsewhere still faces the AppContainer check. Tau no longer lays the namespace
-  out itself: with a hand-built one (`NtCreateLowBoxToken`, after Chromium's lowbox policy) PowerShell started and
-  then failed its first COM wait with `E_FAIL` (WIN-X64 run 44014261732). That namespace's DACL is built for
-  unrestricted AppContainer tokens, and a write-restricted token needs one of its restricting SIDs granted to create
-  an object there. So the runner adds one non-inheritable ACE for its logon SID (query, traverse, create object,
-  create subdirectory and read-control; never `DELETE` or `WRITE_DAC`) to the directory and to its `RPC Control`.
-  These are temporary objects of the launch, so nothing is journaled; a failed grant is logged and the launch goes on.
+- **A registered AppContainer per launch.** The launcher derives the package SID from a random name,
+  `tau.sandbox.<32 hex digits>`, with `DeriveAppContainerSidFromAppContainerName`, a hash with no side effect, so it
+  can grant and journal before anything runs. No two launches, concurrent or later, share a package or any grant to
+  it. The runner registers that name with `CreateAppContainerProfile` (no capabilities) in `TauSandbox`'s own profile,
+  which `LOGON_WITH_PROFILE` loads: the mapping goes in `TauSandbox`'s `HKCU` and the folder under its own
+  `%LOCALAPPDATA%\Packages`. The runner refuses at stage `appcontainer` unless the returned SID is the launcher's and
+  the folder lies under the account's own `%LOCALAPPDATA%`, so nothing lands in the person's profile. `CreateProcess`
+  needs the registration: for an unregistered package it fails with `ERROR_FILE_NOT_FOUND` (WIN-X64 run 44017795494).
+  `CreateProcess` builds the package's named-object namespace (`\Sessions\<n>\AppContainerNamedObjects\<package
+SID>`, with its `RPC Control` directory and its `Global`, `Local` and `Session` links) as it does for any
+  AppContainer, and hands the handles to the kernel, so the namespace lives as long as a token of the package. A name
+  the shell creates lands in its own directory; a name it opens elsewhere still faces the AppContainer check. Tau does
+  not lay the namespace out itself: with a hand-built one (`NtCreateLowBoxToken`, after Chromium's lowbox policy)
+  PowerShell started and then failed its first COM wait with `E_FAIL` (WIN-X64 run 44014261732). That namespace's DACL
+  is built for unrestricted AppContainer tokens, and a write-restricted token needs one of its restricting SIDs
+  granted to create an object there. So the runner adds one non-inheritable ACE for its logon SID (query, traverse,
+  create object, create subdirectory and read-control; never `DELETE` or `WRITE_DAC`) to the directory and to its
+  `RPC Control`. These are temporary objects of the launch, so nothing is journaled; a failed grant is logged and the
+  launch goes on.
+- **Registration lifetime.** Before registering, the runner creates the named mutex `Global\<package name>` and holds
+  it until it exits, so a live launch is visible to every other runner. The runner deletes the registration with
+  `DeleteAppContainerProfile` once the launch's job is empty: after the shell's exit, on any refusal after
+  registration, and when the launcher goes away. A runner that crashed leaves a registration with no live mutex. The
+  next runner deletes every such `tau.sandbox.*` registration before it registers its own, and logs the sweep. The
+  journal header records the name. `restore` runs as the person and cannot change `TauSandbox`'s profile, so it only
+  logs that the name stays registered until the next launch or `revoke`. A leftover holds no grant on anything of the
+  person's: those ACEs are journaled and restored by the launcher. `revoke` deletes the account's profile, which
+  removes every leftover with it.
 - **Admission.** The runner starts the shell suspended. It reads the token the kernel actually assigned to the shell and
   refuses anything but an AppContainer token for this launch's package with zero capabilities, the launch's capability
   SID among its restricting SIDs, and Low integrity. Any other token is killed before its first instruction, and the
@@ -127,13 +141,13 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
   The desktop carries a Low label (`S:(ML;;NW;;;LW)`) so the Low-integrity shell can attach to it. The launcher adds one
   session ACE per participant to the window station when the person may change its DACL (best-effort: the ACE only
   widens access), journals the original descriptor, and restores it byte for byte at teardown.
-- **Cleanup.** The AppContainer leaves no durable state. There is no AppContainer profile, no registry key, no firewall
+- **Cleanup.** The AppContainer leaves no durable state once its registration is deleted (above). There is no firewall
   or loopback exemption and no permanent kernel object. The account's own profile is account-level state, created by
   `setup` and deleted by `revoke`. The named-object directory and its links are temporary objects that go away with the
-  last handle, held by the shell's token, when the launch's job ends. The ACEs for the package SID and the
-  Low labels on writable roots are journaled and restored with the rest of the ACL change. A restored root that was
-  replaced during the launch must not name the package SID either. `restore` therefore has nothing AppContainer-specific
-  to remove beyond the journal.
+  last handle, held by the shell's token, when the launch's job ends. The ACEs for the package SID and the Low labels on
+  writable roots are journaled and restored with the rest of the ACL change. A restored root that was replaced during
+  the launch must not name the package SID either. Beyond the journal, `restore` has nothing AppContainer-specific it
+  can remove.
 - **Runner binary.** `TauSandbox` cannot read the person's profile, where the desktop app installs, so `setup` copies the
   helper to `%ProgramData%\Tau\Sandbox\bin\` (readable by `TauSandboxUsers`, writable only by SYSTEM and
   Administrators) and `launch` starts that copy. `launch` refuses `sandbox-unavailable` when the installed copy differs
@@ -286,7 +300,7 @@ its stderr, sent at any time, also before `ready`), which `launch` never forward
 JSON lines, streamed on write and on restore so memory stays bounded however large the granted trees are:
 
 ```text
-{"kind":"header","version":3,"capabilitySid":"S-1-5-21-…","packageSid":"S-1-15-2-…","launcherPid":1234,"windowStation":{"sessionId":1,"name":"WinSta0","descriptor":"<hex self-relative SD>"}}
+{"kind":"header","version":3,"capabilitySid":"S-1-5-21-…","packageSid":"S-1-15-2-…","packageName":"tau.sandbox.…","launcherPid":1234,"windowStation":{"sessionId":1,"name":"WinSta0","descriptor":"<hex self-relative SD>"}}
 {"kind":"root","path":"C:\\…\\home","sddl":"O:S-1-5-21-…G:S-1-5-21-…D:(A;OICI;FA;;;SY)…S:(ML;…)","fileId":"<volume serial>:<file index>"}
 {"kind":"child","path":"C:\\…\\home\\a.txt","sddl":"O:…G:…D:AI(A;ID;FA;;;SY)…","fileId":"…"}
 {"kind":"end","roots":1,"children":1}

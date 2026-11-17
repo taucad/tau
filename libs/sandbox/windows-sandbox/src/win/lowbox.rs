@@ -1,17 +1,16 @@
-//! The shell's AppContainer, created by Windows itself without an AppContainer profile.
+//! The shell's AppContainer, created by Windows itself for a package registered per launch.
 //!
 //! The launcher derives a fresh package SID from a random name (`DeriveAppContainerSidFromAppContainerName`, a
-//! hash with no side effect), and the runner passes it to `CreateProcessAsUserW` as
+//! hash with no side effect). The runner registers that name in the sandbox account's own profile
+//! (`container.rs`) and passes the SID to `CreateProcessAsUserW` as
 //! `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` with no capability, together with the write-restricted token.
 //! `CreateProcess` then derives the lowbox token from that token (it keeps the restricting SIDs and is Low
 //! integrity) and builds the package's named-object namespace (`\Sessions\<n>\AppContainerNamedObjects\<package
 //! SID>`, its `RPC Control` directory and its links) exactly as it does for any AppContainer, handing the kernel the
 //! handles so the namespace lives as long as a token of the package. Tau does not lay out that namespace itself:
 //! a hand-built one (the first cut, through `NtCreateLowBoxToken`) let PowerShell start and then fail its first
-//! COM wait with `E_FAIL` (WIN-X64 run 44014261732). No profile is registered (`CreateAppContainerProfile` would
-//! write per-package `HKCU` state and create `%LOCALAPPDATA%\Packages\<name>` for every launch), so no registry
-//! key, profile folder, firewall entry or other durable object exists for the package, and nothing outlives the
-//! launch.
+//! COM wait with `E_FAIL` (WIN-X64 run 44014261732). An unregistered package does not work either: `CreateProcess`
+//! fails with `ERROR_FILE_NOT_FOUND` (run 44017795494), hence the per-launch registration.
 //!
 //! [`probe`] checks, as the suspended shell's own token, what the shell will need first (its named-object
 //! directory, the window station and desktop, a COM apartment and a COM wait) and reports every result for the

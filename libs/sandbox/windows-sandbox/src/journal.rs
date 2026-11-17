@@ -17,7 +17,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
-/// Version 3 added the package SID and the mandatory label. Older journals are refused: version 2 shipped
+/// Version 3 added the package name and SID and the mandatory label. Older journals are refused: version 2 shipped
 /// only on unmerged branches, behind `TAU_WINDOWS_SHELL_SANDBOX`.
 pub const JOURNAL_VERSION: u32 = 3;
 
@@ -38,6 +38,10 @@ pub struct Header {
     pub capability_sid: String,
     /// The launch's AppContainer package SID (`S-1-15-2-…`): a restored root must not name it either.
     pub package_sid: String,
+    /// The launch's AppContainer name (`tau.sandbox.<32 hex digits>`), which the runner registers in the
+    /// sandbox account's profile and deletes at the end; a leftover from a crash is deleted by the next
+    /// launch's runner or by `revoke`.
+    pub package_name: String,
     pub launcher_pid: u32,
     #[serde(default)]
     pub window_station: Option<WindowStationEntry>,
@@ -227,6 +231,7 @@ mod tests {
             version: JOURNAL_VERSION,
             capability_sid: "S-1-5-21-1-2-3-4".into(),
             package_sid: "S-1-15-2-1-2-3-4-5-6-7".into(),
+            package_name: "tau.sandbox.000000010000000200000003ffffffff".into(),
             launcher_pid: 77,
             window_station: Some(WindowStationEntry {
                 session_id: 1,

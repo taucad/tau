@@ -153,6 +153,7 @@ struct Session {
     journal_path: String,
     capability_sid: String,
     package_sid: String,
+    package_name: String,
     /// The journaled roots, in application order. Their descendants are only in the journal file.
     roots: Vec<Entry>,
     /// Opened for `WRITE_DAC` when the person may change it. The session ACEs are best-effort: adding
@@ -235,6 +236,7 @@ impl Session {
             version: JOURNAL_VERSION,
             capability_sid: capability_text.clone(),
             package_sid: package_text.clone(),
+            package_name: package_label.clone(),
             launcher_pid: unsafe { GetCurrentProcessId() },
             window_station: station_entry,
         };
@@ -248,6 +250,7 @@ impl Session {
             journal_path,
             capability_sid: capability_text,
             package_sid: package_text,
+            package_name: package_label,
             roots,
             station,
             station_name,
@@ -434,6 +437,7 @@ impl Session {
         let runner_spec = RunnerSpec {
             capability_sid: self.capability_sid.clone(),
             package_sid: self.package_sid.clone(),
+            package_name: self.package_name.clone(),
             person_sid: self.person.to_sddl(),
             desktop: desktop.startup_name.clone(),
             executable: self.valid.executable.clone(),

@@ -39,6 +39,7 @@ use windows_sys::Win32::System::Threading::{
     STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
+use super::container::{self, Container};
 use super::job::Job;
 use super::lowbox::{self, Capabilities, grant_kernel_object, token_facts};
 use super::pipe::{self, HandleIo};
@@ -546,6 +547,17 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
 
     let capability = Sid::parse(&spec.capability_sid).at("token")?;
     let package = Sid::parse(&spec.package_sid).at("token")?;
+    // Register this launch's AppContainer in the sandbox account's own profile (CreateProcess resolves the
+    // package against it), after deleting what crashed launches left behind.
+    send(sink, &Frame::new(frame::RUNNER_LOG, container::sweep().into_bytes()));
+    let container = Arc::new(Container::create(&spec.package_name, &package).at("appcontainer")?);
+    send(
+        sink,
+        &Frame::new(
+            frame::RUNNER_LOG,
+            format!("AppContainer {} registered; its folder is {}", container.name, container.folder).into_bytes(),
+        ),
+    );
     let (token, logon) = mint_token(&capability, &package).at("token")?;
     let account = current_user().at("registry")?;
     let identity = Identity { token: &token, logon: &logon, package: &package, person: &person };
@@ -609,7 +621,7 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
                         vec![(pump(HandleIo(output.raw()), frame::OUTPUT, sink.clone()), output)]
                     }
                 };
-                watch(shell, job.clone(), console.clone(), pumps, sink.clone());
+                watch(shell, job.clone(), container.clone(), console.clone(), pumps, sink.clone());
             }
             frame::INPUT => {
                 if let Some(input) = &terminal_input {
@@ -630,8 +642,12 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
             _ => {}
         }
     }
-    // The launcher went away: kill the shell tree. The launcher's own job kills this process too.
-    let _ = job.terminate();
+    // The launcher went away: kill the shell tree, then delete the registration. The launcher's own job kills
+    // this process too; a registration left by that is the next launch's sweep's.
+    let _ = job.kill_and_wait(REAP_TIMEOUT);
+    if let Err(err) = container.delete() {
+        send(sink, &Frame::new(frame::RUNNER_LOG, err.to_string().into_bytes()));
+    }
     std::process::exit(0);
 }
 
@@ -639,6 +655,7 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
 fn watch(
     shell: Shell,
     job: Arc<Job>,
+    container: Arc<Container>,
     console: Option<Arc<PseudoConsole>>,
     pumps: Vec<(std::thread::JoinHandle<()>, Owned)>,
     sink: Sink,
@@ -655,6 +672,14 @@ fn watch(
         for (pump, handle) in pumps {
             let _ = pump.join();
             drop(handle);
+        }
+        // Only once nothing of the launch runs: the registration's folder is the package's.
+        if emptied {
+            let deleted = match container.delete() {
+                Ok(()) => format!("AppContainer {} deleted", container.name),
+                Err(err) => err.to_string(),
+            };
+            send(&sink, &Frame::new(frame::RUNNER_LOG, deleted.into_bytes()));
         }
         if emptied && have_code {
             send(&sink, &Frame::json(frame::EXIT, &Exit::Code { exit_code: i64::from(code) }));

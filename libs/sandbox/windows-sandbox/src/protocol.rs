@@ -91,6 +91,9 @@ pub struct RunnerSpec {
     pub capability_sid: String,
     /// The launch's fresh AppContainer package SID; the shell's lowbox token is minted for it.
     pub package_sid: String,
+    /// The name `package_sid` was derived from; the runner registers it with `CreateAppContainerProfile` for
+    /// the launch and deletes it at the end.
+    pub package_name: String,
     /// The person running `launch`: the runner grants it query access to the shell's process and token, so
     /// the host can check the token from outside.
     pub person_sid: String,

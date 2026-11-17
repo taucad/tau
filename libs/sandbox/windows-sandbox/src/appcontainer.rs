@@ -16,6 +16,13 @@ pub fn package_name(random: [u32; 4]) -> String {
     format!("{PACKAGE_NAME_PREFIX}{a:08x}{b:08x}{c:08x}{d:08x}")
 }
 
+/// Whether `name` is a per-launch AppContainer name as [`package_name`] makes it: the prefix and exactly 32
+/// lowercase hex digits. The runner registers and the sweep deletes nothing else.
+pub fn is_package_name(name: &str) -> bool {
+    name.strip_prefix(PACKAGE_NAME_PREFIX)
+        .is_some_and(|rest| rest.len() == 32 && rest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+}
+
 /// Whether `sid` is an AppContainer package SID: `S-1-15-2-` and seven 32-bit sub-authorities (the shape
 /// `DeriveAppContainerSidFromAppContainerName` produces). Capability SIDs (`S-1-15-3-…`) and the
 /// `ALL APPLICATION PACKAGES` (`S-1-15-2-1`) and `ALL RESTRICTED APPLICATION PACKAGES` (`S-1-15-2-2`)
@@ -153,6 +160,22 @@ mod tests {
         assert_eq!(name, "tau.sandbox.00000001deadbeef00000000ffffffff");
         assert!(name.len() <= 64);
         assert_ne!(package_name([1, 2, 3, 4]), package_name([1, 2, 3, 5]));
+    }
+
+    #[test]
+    fn recognises_per_launch_package_names_only() {
+        assert!(is_package_name(&package_name([1, 2, 3, u32::MAX])));
+        for name in [
+            "tau.sandbox.",
+            "tau.sandbox.0000000100000002000000030000000",
+            "tau.sandbox.000000010000000200000003ffffffff0",
+            "tau.sandbox.000000010000000200000003FFFFFFFF",
+            "tau.sandbox.000000010000000200000003fffffffg",
+            "other.000000010000000200000003ffffffff",
+            "Microsoft.WindowsCalculator_8wekyb3d8bbwe",
+        ] {
+            assert!(!is_package_name(name), "{name}");
+        }
     }
 
     #[test]

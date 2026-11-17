@@ -1025,7 +1025,8 @@ describe('node filesystem client/host round trip', () => {
     await provider.writeFile('run.sh', '#!/bin/sh\n');
 
     await provider.setFileMode('run.sh', '100755');
-    await expect(provider.getFileMode('run.sh')).resolves.toBe('100755');
+    // NTFS keeps no execute bit, only a read-only attribute: Windows accepts the mode and reads the file back as 100644.
+    await expect(provider.getFileMode('run.sh')).resolves.toBe(process.platform === 'win32' ? '100644' : '100755');
     await provider.setFileMode('run.sh', '100644');
     await expect(provider.getFileMode('run.sh')).resolves.toBe('100644');
   });

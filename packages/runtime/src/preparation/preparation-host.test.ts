@@ -1183,6 +1183,44 @@ describe('createPreparationHost', () => {
       expect(uncontained.registry.calls).toEqual([]);
     });
 
+    it("should refuse on Windows a closure whose sealed paths pass Windows' library-loading limit, and seal nothing", async () => {
+      const windows = {
+        os: 'win32',
+        arch: 'x64',
+        osVersion: '10.0.26100',
+        translated: false,
+        wasm: { threads: false },
+      } as const;
+      const windowsTarget = { runtime: 'native', os: 'win32', arch: 'x64' } as const;
+      const deep = ['python', 'Lib', 'site-packages', 'x'.repeat(120), `${'y'.repeat(120)}.dll`];
+      const writeDeep =
+        (parts: readonly string[]): NonNullable<PreparationPlugin['seal']> =>
+        async ({ root }) => {
+          await mkdir(join(root, ...parts.slice(0, -1)), { recursive: true });
+          await writeFile(join(root, ...parts), 'library');
+          return undefined;
+        };
+      const tooDeep = await scenario({
+        variants: (dependencyFiles) => [{ target: windowsTarget, files: dependencyFiles }],
+        host: { indicators: windows, nativeContainment: () => undefined },
+        seal: writeDeep(deep),
+      });
+      const fits = await scenario({
+        variants: (dependencyFiles) => [{ target: windowsTarget, files: dependencyFiles }],
+        host: { indicators: windows, nativeContainment: () => undefined },
+        seal: writeDeep(['python', 'Lib', 'site-packages', 'short.dll']),
+      });
+
+      const refused = await prepare(tooDeep.host);
+      const ready = await prepare(fits.host);
+
+      expect(refused).toMatchObject({ status: 'blocked', reason: 'unsupported-target' });
+      expect(refused.status === 'blocked' && refused.message).toContain("past Windows' 259-character limit");
+      expect(refused.status === 'blocked' && refused.message).toContain('y'.repeat(120));
+      await expect(readdir(join(tooDeep.store, 'closures', 'sha256'))).rejects.toThrow();
+      expect(ready.status).toBe('ready');
+    });
+
     it('should record the host snapshot, the candidates and the emulation flag in every receipt', async () => {
       const { host } = await scenario({
         variants: (dependencyFiles) => [

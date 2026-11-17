@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import type { ChildProcess, ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { lstat, readFile, realpath, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path';
@@ -219,20 +219,25 @@ export const terminateProcessTree = async (child: ChildProcessWithoutNullStreams
       return;
     }
     await new Promise<void>((resolve) => {
-      const killer = spawn(
-        resolvePath(systemRoot, 'System32', 'taskkill.exe'),
-        ['/pid', String(child.pid), '/T', '/F'],
-        {
+      const fallback = (): void => {
+        child.kill('SIGKILL');
+        resolve();
+      };
+      let killer: ChildProcess;
+      try {
+        killer = spawn(resolvePath(systemRoot, 'System32', 'taskkill.exe'), ['/pid', String(child.pid), '/T', '/F'], {
           shell: false,
           windowsHide: true,
           stdio: 'ignore',
-        },
-      );
+        });
+      } catch {
+        /* Windows reports some launch failures (a file that is not a Win32 executable: `spawn UNKNOWN`) by throwing
+         * here rather than through `'error'`; the tree must still end. */
+        fallback();
+        return;
+      }
       killer.once('close', resolve);
-      killer.once('error', () => {
-        child.kill('SIGKILL');
-        resolve();
-      });
+      killer.once('error', fallback);
     });
     return;
   }
@@ -437,14 +442,32 @@ const verifyResources = async (launch: NativeWorkerLaunch): Promise<void> => {
   }
 };
 
-/* POSIX process groups of the workers this process started and that have not exited yet. */
+/* Workers this process started that have not exited yet: POSIX process-group leaders, or Windows process-tree roots. */
 const liveProcessGroups = new Set<number>();
 let exitHookInstalled = false;
 
 /* Synchronous, because nothing asynchronous runs in `'exit'`: a session's graceful `cleanup()` cannot finish there, and
- * a worker held inside a long native call would not see its parent watchdog fire until the call returned. */
+ * a worker held inside a long native call would not see its parent watchdog fire until the call returned. Windows has
+ * no process groups and does not end a child with its parent, so each tree is ended with `taskkill /T /F`, synchronously. */
 const killLiveProcessGroups = (): void => {
+  const systemRoot = process.env['SystemRoot'];
   for (const pid of liveProcessGroups) {
+    if (process.platform === 'win32') {
+      if (systemRoot) {
+        spawnSync(resolvePath(systemRoot, 'System32', 'taskkill.exe'), ['/pid', String(pid), '/T', '/F'], {
+          shell: false,
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+      } else {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // The worker exited already.
+        }
+      }
+      continue;
+    }
     try {
       process.kill(-pid, 'SIGKILL');
     } catch {
@@ -456,7 +479,7 @@ const killLiveProcessGroups = (): void => {
 
 const trackProcessGroup = (child: ChildProcessWithoutNullStreams): void => {
   const { pid } = child;
-  if (process.platform === 'win32' || pid === undefined) {
+  if (pid === undefined) {
     return;
   }
   if (!exitHookInstalled) {
@@ -646,8 +669,14 @@ export class NativeProcessSession<Issue> {
     if (!isDescendant(this.options.artifactPath, resolved)) {
       throw new Error(`${this.options.sessionName} returned an artifact outside its private directory.`);
     }
-    const [stats, physical] = await Promise.all([lstat(resolved), realpath(resolved)]);
-    if (!stats.isFile() || stats.isSymbolicLink() || !isDescendant(this.options.artifactPath, physical)) {
+    /* The physical path is compared with the physical root: on Windows a temporary root is often spelled with an 8.3
+     * short name (`C:\Users\RUNNER~1\…`) that `realpath` expands, so the spelled root never contains the physical file. */
+    const [stats, physical, physicalRoot] = await Promise.all([
+      lstat(resolved),
+      realpath(resolved),
+      realpath(this.options.artifactPath),
+    ]);
+    if (!stats.isFile() || stats.isSymbolicLink() || !isDescendant(physicalRoot, physical)) {
       throw new Error(`${this.options.sessionName} returned an invalid artifact file.`);
     }
     if (stats.size !== artifact.byteLength || stats.size > this.options.maxArtifactBytes) {

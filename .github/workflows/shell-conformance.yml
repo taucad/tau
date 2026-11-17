@@ -333,6 +333,8 @@ jobs:
         shell: pwsh
     env:
       TAU_SHELL_CONFORMANCE_ROW: WIN-X64
+      # Always fresh: the Windows row is not a reuse row yet.
+      TAU_SHELL_EVIDENCE: fresh
       TAU_SHELL_TIER: ${{ needs.select.outputs.tier }}
     steps:
       # Digests and the helper build read the bytes Git stores, not a CRLF rewrite of them.

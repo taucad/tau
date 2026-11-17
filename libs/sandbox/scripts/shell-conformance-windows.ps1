@@ -47,7 +47,7 @@ $drop = Join-Path $workspace 'out\shell-conformance-windows'
 # The only names `inner` receives from the elevated step; anything else comes from the user's own profile.
 $forwarded = @(
   'PATH', 'CI', 'GITHUB_ACTIONS', 'GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_REPOSITORY', 'GITHUB_SERVER_URL',
-  'TAU_SHELL_CONFORMANCE_ROW', 'TAU_SHELL_CONFORMANCE_RECEIPT', 'TAU_SHELL_TIER',
+  'TAU_SHELL_CONFORMANCE_ROW', 'TAU_SHELL_CONFORMANCE_RECEIPT', 'TAU_SHELL_TIER', 'TAU_SHELL_EVIDENCE',
   'NX_NO_CLOUD', 'NX_DAEMON', 'NX_NATIVE_COMMAND_RUNNER', 'pnpm_config_verify_deps_before_run'
 )
 

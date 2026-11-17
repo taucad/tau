@@ -14,6 +14,7 @@ const heapHooks = ['observedHeapBytes', 'heapBytes', 'observedChildResidentBytes
 const expectedHeapHooks: Record<string, ReadonlyArray<(typeof heapHooks)[number]>> = {
   // WebAssembly linear memory through the observation-only hook.
   brep: ['observedHeapBytes'],
+  cadmpeg: ['observedHeapBytes'],
   gltf: ['observedHeapBytes'],
   picovoxel: ['observedHeapBytes'],
   zoo: ['observedHeapBytes'],

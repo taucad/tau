@@ -52,6 +52,7 @@ describe('kernel-worker constants', () => {
       'smlib',
       'gltf',
       'brep',
+      'cadmpeg',
       'assimp',
       'replicad',
       'zoo',

@@ -186,8 +186,13 @@ const countingCheckout = (
       mutate('rename', async () => real.rename(pathOf(from), pathOf(to))),
     unlink: async (path: string): Promise<void> => mutate('unlink', async () => real.unlink(pathOf(path))),
     exists: async (path: string): Promise<boolean> => real.exists(pathOf(path)),
-    setFileMode: async (path: string, mode: FileMode): Promise<void> =>
-      mutate('setFileMode', async () => real.setFileMode(pathOf(path), mode)),
+    /* A disk without an executable bit (Windows) exposes no mode seam, so neither does this surface. */
+    ...(real.setFileMode === undefined
+      ? {}
+      : {
+          setFileMode: async (path: string, mode: FileMode): Promise<void> =>
+            mutate('setFileMode', async () => real.setFileMode?.(pathOf(path), mode)),
+        }),
     ...(options.statAge === undefined ? {} : { statTree }),
   };
   const checkout: RevisionFileSystem = Object.assign(Object.create(real) as RevisionFileSystem, counted, {
@@ -695,8 +700,8 @@ describe('a large apply', () => {
     await materializer(context.checkout)(liveCheckout, target, { before: new ImmutableRevisionTree([]) });
 
     expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
-    await expect(context.tree.getFileMode('bin/run.sh')).resolves.toBe('100755');
-    await expect(context.tree.getFileMode('bin/readme.txt')).resolves.toBe('100644');
+    await expect(context.tree.getFileMode?.('bin/run.sh')).resolves.toBe('100755');
+    await expect(context.tree.getFileMode?.('bin/readme.txt')).resolves.toBe('100644');
   });
 });
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -87,6 +87,12 @@ describe('offerMoveToApplications', () => {
     const second = host([0]);
     expect(offerMoveToApplications(blocked, directory, second)).toBe(false);
     expect(second.ask).not.toHaveBeenCalled();
+  });
+
+  it('should read a damaged answer file as not yet declined', () => {
+    const directory = userData();
+    writeFileSync(join(directory, 'app-location.json'), '{"moveDeclined": tr');
+    expect(moveOfferDeclined(directory)).toBe(false);
   });
 
   it('should keep this launch going when the move fails', () => {

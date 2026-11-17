@@ -435,6 +435,35 @@ const isSameProfile = async (effective: unknown, expected: string): Promise<bool
   return left === right;
 };
 
+/**
+ * Playwright's rejection when the main-process handle behind an `evaluate` is collected before it settles. It can hit
+ * the first evaluate straight after launch, while the main process is still starting, and says nothing about the
+ * profile, so only this rejection is retried (shell-conformance runs 44017533915 on LNX-D, LNX-U and LNX-U26).
+ */
+const collectedEvaluation = /Resulting promise was garbage collected/u;
+
+/** Attempts and pause for {@link collectedEvaluation}: a bounded wait of about two seconds, never an open loop. */
+const profileReadAttempts = 10;
+const profileReadPauseMilliseconds = 200;
+
+/**
+ * The app's effective `userData`, or the error that kept it from being read. Only a collected evaluation is retried;
+ * any other failure is returned at once, so the profile check still fails closed.
+ */
+const readEffectiveProfile = async (application: ElectronApplication): Promise<string | Error> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await application.evaluate(({ app }) => app.getPath('userData'));
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      if (attempt >= profileReadAttempts || !collectedEvaluation.test(failure.message)) {
+        return failure;
+      }
+      await wait(profileReadPauseMilliseconds);
+    }
+  }
+};
+
 /** PostHog through Tau's web proxy or directly. */
 export const analyticsRequestPattern = /\/api\/ph(?:\/|$)|posthog\.com/iu;
 
@@ -686,9 +715,7 @@ export const launchDesktopApp = async (options: {
   /* R11 (D7): whatever the build does with `--user-data-dir`, a run that landed in another profile, such as a
    * person's installed app, stops here: before the page is touched, a folder is picked or a grant is written. */
   recordStartupPhase('profile-check.before');
-  const effectiveProfile = await application
-    .evaluate(({ app }) => app.getPath('userData'))
-    .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+  const effectiveProfile = await readEffectiveProfile(application);
   if (!(await isSameProfile(effectiveProfile, userData))) {
     child.kill('SIGKILL');
     if (ownedPickedParent !== undefined) {

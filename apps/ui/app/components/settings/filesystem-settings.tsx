@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
-import { SettingsGroup, SettingsItem, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsItem, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
 import { BrowserStorageStatus } from '#components/settings/browser-storage-status.js';
 import { usePersistentStorageStatus } from '@taucad/files-ui/filesystem/use-persistent-storage-status';

@@ -4,14 +4,17 @@ import type { Project } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { CreatedProject } from '#runtime/project-library-commands.js';
-import { projectLibraryEntryToListItem } from '#types/project-library.types.js';
+import { isInProjectScope, projectLibraryEntryToListItem } from '#types/project-library.types.js';
+import type { ProjectScope } from '#types/project-library.types.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { viewExceptions } from '#workbench-records/view-exceptions.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
-export function useProjects(options?: { includeDeleted?: boolean }) {
+export function useProjects(options?: { scope?: ProjectScope }) {
   const chatSessions = useChatSessionStore();
-  const includeDeleted = options?.includeDeleted ?? false;
+  /* `live` by default: the Trash is asked for by name (`trash`), and only callers that resolve any held project
+   * (a slug, an import's name check) ask for `all`. */
+  const scope = options?.scope ?? 'live';
   const {
     projectListingQuery,
     discoveryObservationError,
@@ -27,6 +30,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     repairProject,
     chooseProjectDirectory,
     verifyProjectQuiescent: requireQuiescentProject,
+    leaseQuiescentProject,
     closeProjectSession,
   } = useProjectManager();
 
@@ -37,8 +41,8 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     error,
     refetch,
   } = useQuery({
-    // One key for one whole-workspace discovery pass per navigation: the deleted rows are
-    // filtered below rather than scanned again under a second key (W21). The library writes it (D9).
+    // One key for one whole-workspace discovery pass per navigation: each scope is filtered
+    // below rather than scanned again under a second key (W21). The library writes it (D9).
     ...projectListingQuery,
     enabled: !isWorkerLoading,
     // No poll: worker filesystem events and cross-tab root broadcasts already
@@ -74,15 +78,25 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
 
   const handlePermanentlyDeleteProject = useCallback(
     async (projectId: string) => {
+      /* A session this tab holds is verified through it before it closes; the closed project is then held quiescent
+       * by its chat-log lease until its bytes are gone (W30), so no tab can start a run in between. */
       await requireQuiescentProject(projectId);
       await closeProjectSession(projectId);
-      // Live composer records must stop before their directory is removed, or they write it back (D11).
-      await chatSessions.removeProject(projectId);
-      await permanentlyDeleteProject(projectId);
+      const lease = await leaseQuiescentProject(projectId);
+      try {
+        // Live composer records must stop before their directory is removed, or they write it back (D11).
+        await chatSessions.removeProject(projectId);
+        if (lease.lost()) {
+          throw new Error("Another tab opened one of this project's chats. Close it there before deleting.");
+        }
+        await permanentlyDeleteProject(projectId);
+      } finally {
+        lease.release();
+      }
       // This device's view exceptions for the project go with it; a trashed project keeps them for its restore.
       viewExceptions.dropProject(projectId);
     },
-    [chatSessions, closeProjectSession, permanentlyDeleteProject, requireQuiescentProject],
+    [chatSessions, closeProjectSession, leaseQuiescentProject, permanentlyDeleteProject, requireQuiescentProject],
   );
 
   const handleDuplicateProject = useCallback(
@@ -120,9 +134,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
   );
 
   return {
-    projects: listing.projects
-      .map(projectLibraryEntryToListItem)
-      .filter((project) => includeDeleted || project.deletedAt === undefined),
+    projects: listing.projects.map(projectLibraryEntryToListItem).filter((project) => isInProjectScope(project, scope)),
     conflicts: listing.conflicts,
     recoveries: listing.recoveries,
     workspaceBindingRepairs: listing.workspaceBindingRepairs,

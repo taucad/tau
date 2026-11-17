@@ -224,9 +224,10 @@ describe('two API processes over one object store (S2)', () => {
     expect(invited.status, await invited.clone().text()).toBe(201);
     const { token: invitationToken } = (await invited.json()) as { readonly token: string };
 
-    const accepted = await fetch(`${gitE2ESecondaryApiUrl}/v1/invitations/${invitationToken}`, {
+    const accepted = await fetch(`${gitE2ESecondaryApiUrl}/v1/invitations/accept`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${collaborator.token}` },
+      headers: { authorization: `Bearer ${collaborator.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ token: invitationToken }),
     });
     expect(accepted.status, await accepted.clone().text()).toBe(201);
     expect(await accepted.json()).toEqual(expect.objectContaining({ projectId, role: 'write' }));

@@ -4,7 +4,7 @@ import { NavLink } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { Loader } from '@taucad/ui/components/loader';
-import { SettingsPageSkeleton } from '#components/settings/settings-item.js';
+import { SettingsPageSkeleton } from '@taucad/settings-ui/components/settings/settings-item';
 import { authClient } from '#lib/auth-client.js';
 
 /**

@@ -327,7 +327,7 @@
     "package-windows-e2e": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "The unpacked win32-x64 test package the Windows packaged end-to-end gate runs (desktop-packaged-windows.yml). No --archive, so it honours TAU_API_URL and the TAU_E2E_* switches; never a distribution."
+        "description": "The unpacked win32-x64 test package the Windows packaged end-to-end gate runs (desktop-packaged-windows.yml), with the Windows sandbox helper its Build123d worker runs in. No --archive, so it honours TAU_API_URL and the TAU_E2E_* switches; never a distribution."
       },
       "dependsOn": [
         "build",
@@ -336,7 +336,8 @@
           "target": "check-desktop-payload"
         },
         "prepare-build123d-python-windows",
-        "prepare-git-windows"
+        "prepare-git-windows",
+        "prepare-windows-sandbox"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {

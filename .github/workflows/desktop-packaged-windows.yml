@@ -86,6 +86,15 @@ jobs:
           command -v uv || pipx install uv
           uv --version
 
+      # desktop:prepare-windows-sandbox builds the sandbox helper with the toolchain its crate pins.
+      - name: Install the pinned Rust toolchain
+        working-directory: libs/sandbox/windows-sandbox
+        run: |
+          set -euo pipefail
+          test -f rust-toolchain.toml || { echo 'libs/sandbox/windows-sandbox/rust-toolchain.toml is missing' >&2; exit 1; }
+          rustup toolchain install
+          rustup show active-toolchain
+
       - name: Record package source identity
         run: echo "TAU_DESKTOP_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
@@ -109,12 +118,29 @@ jobs:
           export PATH="/c/Windows/System32:$PATH"
           pnpm nx run-many -p desktop api -t package-windows-e2e build --parallel=1 --outputStyle=stream
 
+      # The packaged app runs Build123d's worker in the Windows sandbox (TAU_WINDOWS_SHELL_SANDBOX=1 below). The runner's
+      # account is already elevated, so the helper's one-time setup runs here, for that account, where a person would
+      # approve one UAC prompt.
+      - name: Set up the Windows sandbox for the runner's account (elevated)
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $helper = 'apps/desktop/package-out/Tau-win32-x64/resources/windows-sandbox/win32-x64/tau-windows-sandbox.exe'
+          if (-not (Test-Path -LiteralPath $helper)) { throw "the package has no $helper" }
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          & $helper setup --for-user $sid
+          if ($LASTEXITCODE -ne 0) { throw "the sandbox setup exited $LASTEXITCODE" }
+          & $helper status
+          if ($LASTEXITCODE -ne 0) { throw "the sandbox status exited $LASTEXITCODE" }
+
       - name: Run the packaged Windows suite
         id: packaged
         timeout-minutes: 90
         working-directory: apps/desktop-e2e
         env:
           TAU_E2E_SERVICES: host
+          # Contain native kernels and the Terminal in the Windows sandbox the step above set up (Q15 gate).
+          TAU_WINDOWS_SHELL_SANDBOX: '1'
           # The API listens on IPv4 only. On windows-2025 the packaged app's services process failed every gateway
           # call to `localhost:4014` with a network error while the renderer reached it (run 44008138089), so name
           # the loopback address the API binds.

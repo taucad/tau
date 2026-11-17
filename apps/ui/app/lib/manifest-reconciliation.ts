@@ -8,19 +8,20 @@
  * only while the two are the same digest, so it never renders the main entry of a manifest the tree does not hold
  * (I7).
  */
-import { useCallback, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
+import { Topic } from '@taucad/events';
 import { sha256Bytes } from '@taucad/utils/hash';
 
 const reconciled = new Map<string, string>();
 /* Per project, the latest finding: a digest that settles after a newer finding speaks for nothing. */
 const findings = new Map<string, number>();
-const listeners = new Set<() => void>();
+const changes = new Topic<void>({ name: 'manifest.reconciled' });
 
 const notify = (): void => {
-  for (const listener of listeners) {
-    listener();
-  }
+  changes.emit(undefined);
 };
+
+const subscribe = (listener: () => void): (() => void) => changes.subscribe(listener);
 
 /* One finding's digest, recorded only while no newer finding has been made since. */
 const record = async (projectId: string, finding: number, bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
@@ -77,12 +78,6 @@ export function reconciledManifest(projectId: string): string | undefined {
  * @returns The digest, or `undefined` while none is known.
  */
 export function useReconciledManifest(projectId: string): string | undefined {
-  const subscribe = useCallback((listener: () => void) => {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  }, []);
   return useSyncExternalStore(
     subscribe,
     () => reconciled.get(projectId),

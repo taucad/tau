@@ -33,7 +33,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { promisify } from 'node:util';
-import type { SessionConfigOption } from '@agentclientprotocol/sdk';
+import type { SessionConfigOption, SessionConfigSelectOption } from '@agentclientprotocol/sdk';
 
 import { modelChoice } from '#acp/session.js';
 import { discoveredModeOptions, grokNoAutoFallback } from '#acp/acp-modes.js';
@@ -47,6 +47,9 @@ import type { ExternalAgentDescriptor, ExternalAgentRefusalCode } from '@taucad/
 /**
  * One config option cut to the wire's keys: an adapter's own extras (codex-acp puts `_meta` on every mode value) would
  * fail the strict descriptor schema and drop the whole option, which left Codex with no Mode control.
+ *
+ * @param option - The option as the adapter reported it.
+ * @returns The option with only the keys the wire schema knows.
  */
 function wireConfigOption(option: SessionConfigOption): Record<string, unknown> {
   const base = {
@@ -60,7 +63,7 @@ function wireConfigOption(option: SessionConfigOption): Record<string, unknown> 
   if (option.type !== 'select') {
     return base;
   }
-  const value = (entry: { value: string; name: string; description?: string | null }) => ({
+  const value = (entry: SessionConfigSelectOption) => ({
     value: entry.value,
     name: entry.name,
     description: entry.description,

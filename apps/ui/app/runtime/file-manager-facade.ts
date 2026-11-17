@@ -114,6 +114,14 @@ export const selectActiveWorkspaceId = (fileManagerRef: FileManagerRef): string 
 export const selectProxy = (fileManagerRef: FileManagerRef): FileManagerSnapshot['context']['proxy'] =>
   fileManagerRef.getSnapshot().context.proxy;
 
+/**
+ * Whether the ref's file service started in safe mode, read in a callback.
+ *
+ * @public
+ */
+export const selectSafeMode = (fileManagerRef: FileManagerRef): boolean =>
+  fileManagerRef.getSnapshot().context.safeMode;
+
 /** The ref's tree service, read in a callback. */
 const selectTreeService = (fileManagerRef: FileManagerRef): FileTreeService | undefined =>
   fileManagerRef.getSnapshot().context.treeService;
@@ -375,7 +383,7 @@ export const createWorkspaceFacade = ({
     const [proxy, services, configuration] = await Promise.all([
       getReadiedProxy(),
       whenServicesReady(),
-      readRootConfigurationOnly(fileManagerRef.getSnapshot().context.safeMode),
+      readRootConfigurationOnly(selectSafeMode(fileManagerRef)),
     ]);
     assertOpen(owner);
     if (selectProxy(fileManagerRef) !== proxy) {
@@ -456,7 +464,7 @@ export const createWorkspaceFacade = ({
       const proxy = await getConnectedProxy();
       await updateWorkspaceHandle(workspaceId, handle);
       proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-      await proxy.configureProjectRoots(await readRootConfigurationOnly(fileManagerRef.getSnapshot().context.safeMode));
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(selectSafeMode(fileManagerRef)));
     },
     disconnectWorkspace: async (workspaceId) => {
       const proxy = await getReadiedProxy();

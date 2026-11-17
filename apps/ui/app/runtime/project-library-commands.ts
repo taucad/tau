@@ -780,6 +780,28 @@ export class ProjectCommands {
     return lease;
   };
 
+  /**
+   * Close the project's live session, for a person's delete or directory change: resolves once the registry has
+   * dropped it, at once when it holds none.
+   *
+   * @param projectId - The project.
+   */
+  public readonly closeProjectSession = async (projectId: string): Promise<void> => {
+    const sessions = this.#sessions();
+    if (!selectProjectLive(sessions.getSnapshot(), projectId)) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const subscription = sessions.subscribe((snapshot) => {
+        if (!selectProjectLive(snapshot, projectId)) {
+          subscription.unsubscribe();
+          resolve();
+        }
+      });
+      sessions.send({ type: 'close', projectId, reason: 'user' });
+    });
+  };
+
   async #storedChatsOf(projectId: string): Promise<readonly Chat[]> {
     return this.#host.readChats(
       async (source) => source.getChatsForResource(projectId, { includeDeleted: true }),
@@ -806,28 +828,6 @@ export class ProjectCommands {
       throw new Error('This project has running work. Stop it and wait for the chat log to settle before deleting.');
     }
   }
-
-  /**
-   * Close the project's live session, for a person's delete or directory change: resolves once the registry has
-   * dropped it, at once when it holds none.
-   *
-   * @param projectId - The project.
-   */
-  public readonly closeProjectSession = async (projectId: string): Promise<void> => {
-    const sessions = this.#sessions();
-    if (!selectProjectLive(sessions.getSnapshot(), projectId)) {
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      const subscription = sessions.subscribe((snapshot) => {
-        if (!selectProjectLive(snapshot, projectId)) {
-          subscription.unsubscribe();
-          resolve();
-        }
-      });
-      sessions.send({ type: 'close', projectId, reason: 'user' });
-    });
-  };
 
   #sessions(): ProjectLibrarySessions {
     const sessions = this.#host.sessions();

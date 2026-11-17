@@ -137,8 +137,15 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      # Two workers and a 15 s test / 30 s hook timeout, on this lane only, from measurements of the revisions suite
+      # on this image (Brain log, research/artifacts/windows-desktop-production-readiness/log.md):
+      # - Defender is already off here and CPU is not saturated (median 43-64%), yet a Windows row runs a median
+      #   3.5x (p90 7.8x) its Linux time, and it stalls in bursts to 3-5x its slowest passing time.
+      # - At default workers 3 of 6 runs hit a timeout; at 2 workers 1 of 6. At 2 workers with these timeouts,
+      #   0 of 8 did, for about 15% more wall time.
+      # A row with its own explicit timeout keeps it.
       - name: Test ${{ matrix.project }} on Windows
         shell: bash
         env:
           PROJECT: ${{ matrix.project }}
-        run: pnpm nx run "$PROJECT:test" --outputStyle=static
+        run: pnpm nx run "$PROJECT:test" --outputStyle=static -- --maxWorkers=2 --testTimeout=15000 --hookTimeout=30000

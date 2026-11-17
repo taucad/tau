@@ -32,7 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions';
-import { DiffViewer } from '#components/code/diff-viewer.js';
+import { DiffViewer } from '@taucad/editor-ui/components/code/diff-viewer';
 import { ActionButton } from '@taucad/ui/components/actions';
 import { NamePopover } from '@taucad/revisions-ui/components/revisions/name-popover';
 import { useProject } from '#hooks/use-project.js';

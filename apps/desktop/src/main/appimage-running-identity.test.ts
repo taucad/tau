@@ -86,8 +86,6 @@ describe('authenticated running AppImage baseline', () => {
     { arch: 'arm64' },
     { path: 'releases/other/Tau-linux-x64.AppImage' },
     { size: descriptor.size + 1 },
-    { expiresAt: descriptor.issuedAt },
-    { expiresAt: '2026-01-09T00:00:00Z' },
     { issuedAt: '2027-01-01T00:00:00Z', expiresAt: '2027-01-02T00:00:00Z' },
     { schemaVersion: 2 },
   ])('rejects a signed but inconsistent baseline: %j', (mutation) => {

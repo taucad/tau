@@ -439,6 +439,7 @@ exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
    * about a path it may not read (CI1). */
   policy: tauPathPolicy,
   changeEventBus: eventBus,
+  rootStatusEvents: { subscribe: (handler) => fileService.onRootStatusChange(handler) },
   createCoalescer: (deliver, coalescingWindow, onOverflow) =>
     new EventCoalescer(deliver, { coalescingWindow, onOverflow }),
   computeEvents: computeEvents.source,

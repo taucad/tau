@@ -98,6 +98,9 @@ const main = async (): Promise<void> => {
     release.replaceAll(/^Date: .*\n|^Valid-Until: .*\n/gmu, ''),
   );
   assert.ok(updatedRelease.endsWith(checksumLines));
+  // A legacy Release that carried Valid-Until is renewed without one.
+  assert.doesNotMatch(updatedRelease, /Valid-Until/u);
+  assert.equal(renewed.inventory.validUntil, undefined);
   command([
     '--verify',
     join(outputDirectory, 'dists/staging/Release.gpg'),

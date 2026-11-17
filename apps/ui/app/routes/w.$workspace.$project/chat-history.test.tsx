@@ -247,6 +247,11 @@ vi.mock('@taucad/chat-ui/components/at-reference-context', () => ({
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ treeService: undefined }),
 }));
+/* The files hooks read the same services from files-ui's own context. */
+vi.mock('@taucad/files-ui/hooks/use-file-services', async () => {
+  const { useFileManager } = await import('#hooks/use-file-manager.js');
+  return { useFileServices: useFileManager, useOptionalFileServices: useFileManager };
+});
 
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({ chats: [] }),

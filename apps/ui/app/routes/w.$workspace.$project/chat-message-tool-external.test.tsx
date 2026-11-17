@@ -24,7 +24,7 @@ vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [false, vi.fn(), vi.fn
 vi.mock('#components/files/file-link.js', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
-vi.mock('#components/code/diff-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
   DiffViewer: ({ modifiedContent }: { readonly modifiedContent: string }) => <pre>{modifiedContent}</pre>,
   getFirstChangedLine: () => 1,
 }));
@@ -44,7 +44,7 @@ vi.mock('#hooks/use-file-manager.js', () => {
   };
   return { useOptionalFileManager: () => fileManager };
 });
-vi.mock('#components/code/code-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/code-viewer', () => ({
   CodeViewer: ({ text }: { readonly text: string }) => <pre>{text}</pre>,
 }));
 

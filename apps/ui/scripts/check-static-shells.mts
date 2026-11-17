@@ -19,6 +19,9 @@
  *    `Document-Policy` equal the static headers the shell gets on this site (`netlify.toml` and the `_headers` the
  *    build writes for `TAU_FRONTEND_URL`).
  * 6. **Sentinel guard.** The shell's placeholder (`__shell`) appears in no rendered text, attribute or loader data.
+ * 7. **Nothing left behind (edge shells).** The Home shell's prerendered `index.html` and `_root.data` are gone from the
+ *    client output: Netlify's function yields to a static file, so either would answer the `/` and `/_root.data`
+ *    requests the marketing edge function leaves to the function (`scripts/place-static-shells.ts`).
  *
  * Shell invariant 7 (no early kernel) is `check-critical-budget.mts`, which reads every prerendered document.
  *
@@ -35,7 +38,7 @@ import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { ServerBuild } from 'react-router';
 /* oxlint-disable no-restricted-imports -- Native Node build check reads app modules without bundler aliases. */
-import { shellDocumentFile, shellSentinel, staticShellClasses } from '../app/lib/route-classes.ts';
+import { prerenderedFiles, shellDocumentFile, shellSentinel, staticShellClasses } from '../app/lib/route-classes.ts';
 import type { StaticShellClass } from '../app/lib/route-classes.ts';
 import { resolveContentSecurityPolicyEnvironment } from '../app/lib/content-security-policy.server.ts';
 import { contentSecurityPolicyHeaders } from './write-content-security-policy-headers.mts';
@@ -217,6 +220,24 @@ const headersFileHeaders = (text: string, path: string): Array<[string, string]>
 };
 
 /**
+ * The prerendered files an edge shell must not leave at its URL's own static path.
+ *
+ * @param routeClass - A static-shell class.
+ * @param exists - Whether a file exists, relative to the client output directory.
+ * @returns The files that remain; always empty for a rewrite shell, which is served from its prerendered file.
+ */
+export const findStrayPrerenderOutputs = (
+  routeClass: StaticShellClass,
+  exists: (file: string) => boolean,
+): string[] => {
+  if (routeClass.via !== 'edge') {
+    return [];
+  }
+  const { document, data } = prerenderedFiles(routeClass.shellPath);
+  return [document, ...data].filter((file) => exists(file));
+};
+
+/**
  * Every failed invariant of one shell.
  *
  * @param input - The prerendered shell, the documents the server build rendered, its build id and the static headers.
@@ -231,6 +252,8 @@ export const checkShell = (
     functionHeaders: Headers;
     staticHeaders: ReadonlyArray<ReadonlyMap<string, string>>;
     serverBuildId: string | undefined;
+    /** {@link findStrayPrerenderOutputs} for this shell. */
+    strayFiles: readonly string[];
   }>,
 ): string[] => {
   const { routeClass } = input;
@@ -266,6 +289,9 @@ export const checkShell = (
         );
       }
     }
+  }
+  for (const file of input.strayFiles) {
+    problems.push(`${file} is still in the client output, where it would answer requests the function serves`);
   }
   return problems.map((problem) => `${routeClass.label}: ${problem}`);
 };
@@ -337,6 +363,9 @@ const main = async (): Promise<number> => {
           staticHeadersFor(`/${shellDocumentFile(routeClass)}`, files),
         ],
         serverBuildId,
+        strayFiles: findStrayPrerenderOutputs(routeClass, (relative) =>
+          existsSync(join(buildDirectory, 'client', relative)),
+        ),
       }),
     );
     if (problems.length === 0) {

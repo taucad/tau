@@ -35,7 +35,7 @@ import { generatedSetupPaths } from '@taucad/revisions';
 import type { RevisionDiffEntry } from '@taucad/revisions';
 import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
 import { CopyButton } from '@taucad/ui/components/copy-button';
-import { DiffViewer } from '#components/code/diff-viewer.js';
+import { DiffViewer } from '@taucad/editor-ui/components/code/diff-viewer';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { disclosureMotion } from '@taucad/ui/components/actions';
 import { NamePopover } from '@taucad/revisions-ui/components/revisions/name-popover';

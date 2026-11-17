@@ -24,6 +24,8 @@ export const archiveDownloads = {
     label: 'Windows',
     icon: platformIcons.windows,
     file: 'Tau-win32-x64.zip',
+    /** Listed as beta until native x64 consumer evidence qualifies the Windows build. */
+    beta: true,
     detail: 'Windows x64 · ZIP download',
     install: 'Extract the ZIP to a folder you own, then run Tau.exe and sign in.',
     updates:
@@ -33,6 +35,7 @@ export const archiveDownloads = {
     label: 'Linux',
     icon: platformIcons.linux,
     file: 'Tau-linux-x64.tar.gz',
+    beta: false,
     detail: 'Linux x64 · tar.gz download',
     install: 'Extract the archive to a folder you own, then run Tau and sign in.',
     updates:
@@ -99,6 +102,28 @@ export const desktopDownloadLabel = (platform: keyof typeof desktopDownloads): s
 
 /** Mac file links name the chip, because one Mac label cannot say which architecture a direct file serves. */
 const macFileLabels = { mac: 'Apple silicon', macIntel: 'Intel Mac' } as const;
+
+/**
+ * Builds offered before they pass installer qualification: the page lists each as a direct channel archive marked beta,
+ * never recommends it to a detected host, and drops it once the installer catalog admits that platform's DMG.
+ */
+export const betaDownloads = {
+  macIntel: { file: 'Tau-macos-x64.zip', detail: 'Intel Mac · ZIP download' },
+};
+
+/**
+ * @param platform - A platform offered as a beta archive.
+ * @returns The production archive URL.
+ */
+export const betaDownloadHref = (platform: keyof typeof betaDownloads): string =>
+  `${downloadsOrigin}/latest/${betaDownloads[platform].file}`;
+
+/**
+ * @param platform - A platform offered as a beta archive.
+ * @returns Label markup from checked-in icon and product constants only.
+ */
+export const betaDownloadLabel = (platform: keyof typeof betaDownloads): string =>
+  `${desktopDownloads[platform].icon}<span>Download ZIP for ${macFileLabels[platform]}</span>`;
 
 /**
  * Label a link that downloads a file directly. A Mac link only ever serves its qualified DMG, so it says DMG and names

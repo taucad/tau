@@ -1125,6 +1125,7 @@
         "apps/ui/app/**/*.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
         "apps/libs/files-ui/src/**/*.{ts,tsx}",
+        "apps/libs/editor-ui/src/**/*.{ts,tsx}",
         "apps/libs/revisions-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
@@ -1133,6 +1134,7 @@
         "apps/ui/app/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/files-ui/src/**/*.{test,spec}.{ts,tsx}",
+        "apps/libs/editor-ui/src/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/revisions-ui/src/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{test,spec}.{ts,tsx}",
         "apps/ui/app/root.{ts,tsx}",
@@ -1752,6 +1754,7 @@
         "apps/ui/app/**/*.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
         "apps/libs/files-ui/src/**/*.{ts,tsx}",
+        "apps/libs/editor-ui/src/**/*.{ts,tsx}",
         "apps/libs/revisions-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
@@ -1767,6 +1770,7 @@
         "apps/ui/app/**/*.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
         "apps/libs/files-ui/src/**/*.{ts,tsx}",
+        "apps/libs/editor-ui/src/**/*.{ts,tsx}",
         "apps/libs/revisions-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
@@ -1782,6 +1786,7 @@
         "apps/ui/app/**/*.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
         "apps/libs/files-ui/src/**/*.{ts,tsx}",
+        "apps/libs/editor-ui/src/**/*.{ts,tsx}",
         "apps/libs/revisions-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}",
         "packages/ui/src/**/*.{ts,tsx}"
@@ -1816,6 +1821,7 @@
         "apps/ui/app/**/*.tsx",
         "apps/libs/project-workspace/src/**/*.tsx",
         "apps/libs/files-ui/src/**/*.tsx",
+        "apps/libs/editor-ui/src/**/*.tsx",
         "apps/libs/revisions-ui/src/**/*.tsx",
         "apps/libs/ui-core/src/**/*.tsx",
         "packages/ui/src/**/*.tsx"
@@ -1955,6 +1961,7 @@
       "files": [
         "apps/ui/app/**/*.{ts,tsx}",
         "apps/libs/chat-ui/src/**/*.{ts,tsx}",
+        "apps/libs/editor-ui/src/**/*.{ts,tsx}",
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
         "apps/libs/revisions-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}",
@@ -2014,16 +2021,16 @@
             // conversion and preview routes and the e2e fixtures.
             "deferredLeaves": [
               "apps/libs/chat-ui/src/chat-clients/_internal/shared-chat-transport.ts",
+              "apps/libs/editor-ui/src/components/code/editor-definition.ts",
+              "apps/libs/editor-ui/src/components/code/editor-language-features.ts",
+              "apps/libs/editor-ui/src/components/code/editor-search-panel.tsx",
+              "apps/libs/editor-ui/src/components/code/editor-surface-theme.ts",
+              "apps/libs/editor-ui/src/components/code/json-depth-highlighting.ts",
               "apps/libs/ui-core/src/lib/lsp-completion-apply.ts",
               "apps/libs/ui-core/src/services/headless-capture-presentation.ts",
               "apps/ui/app/components/cad/ar-webxr-scene.ts",
               "apps/ui/app/components/code/code-editor-view.client.tsx",
-              "apps/ui/app/components/code/editor-definition.ts",
-              "apps/ui/app/components/code/editor-language-features.ts",
               "apps/ui/app/components/code/editor-lint.ts",
-              "apps/ui/app/components/code/editor-search-panel.tsx",
-              "apps/ui/app/components/code/editor-surface-theme.ts",
-              "apps/ui/app/components/code/json-depth-highlighting.ts",
               "apps/ui/app/components/geometry/debug/",
               "apps/ui/app/components/geometry/loader/glass-prism-controller.ts",
               "apps/ui/app/components/geometry/loader/glass-prism-light-sheet.ts",

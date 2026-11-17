@@ -33,7 +33,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useFileTreeMap } from '#hooks/use-file-tree.js';
+import { useFileTreeMap } from '@taucad/files-ui/hooks/use-file-tree';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
@@ -46,7 +46,7 @@ import { listedBranchesOf } from '#routes/w.$workspace.$project/history-lanes.js
 import { requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
+import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 

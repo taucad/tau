@@ -37,11 +37,9 @@ export const authenticateRunningAppImage = (options: {
       sha512: z.string(),
       size: z.number(),
       issuedAt: z.string(),
-      expiresAt: z.string(),
     })
     .parse(verifyDesktopDescriptor(options.document, installation.keys));
   const issued = Date.parse(descriptor.issuedAt);
-  const descriptorExpires = Date.parse(descriptor.expiresAt);
   const artifact = desktopArtifactName({ kind: 'linux-appimage', ...installation });
   if (
     descriptor.tag !== installation.tag ||
@@ -51,9 +49,7 @@ export const authenticateRunningAppImage = (options: {
     descriptor.route !== installation.route ||
     descriptor.arch !== installation.arch ||
     descriptor.path !== `releases/${encodeURIComponent(installation.tag)}/${artifact}` ||
-    issued > (options.now ?? Date.now()) + 300_000 ||
-    descriptorExpires <= issued ||
-    descriptorExpires - issued > 7 * 24 * 60 * 60 * 1000
+    issued > (options.now ?? Date.now()) + 300_000
   ) {
     throw new Error('AppImage baseline descriptor does not identify the running installed release');
   }

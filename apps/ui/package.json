@@ -54,6 +54,7 @@
     "@taucad/consent": "workspace:*",
     "@taucad/converter": "workspace:*",
     "@taucad/csharp-language": "workspace:*",
+    "@taucad/editor-ui": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/files-ui": "workspace:*",

@@ -1,5 +1,8 @@
-import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
-import { editorCompletionInfo, renderEditorDocumentation } from '#components/code/editor-documentation.js';
+import { completionTypeFromLsp } from '@taucad/editor-ui/components/code/editor-completion-icon';
+import {
+  editorCompletionInfo,
+  renderEditorDocumentation,
+} from '@taucad/editor-ui/components/code/editor-documentation';
 import { startAfterLineBreaks } from '#components/code/editor-lint.js';
 import type { Extension } from '@codemirror/state';
 import { autocompletion, snippet } from '@codemirror/autocomplete';

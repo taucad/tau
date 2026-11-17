@@ -22,7 +22,7 @@ vi.mock('#components/chat/chat-model-selector.js', () => ({
   ChatModelSelector: ({ children }: { readonly children: () => ReactNode }) => <div>{children()}</div>,
 }));
 
-vi.mock('#components/code/code-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/code-viewer', () => ({
   CodeViewer: ({ text }: { readonly text: string }) => <pre data-testid='code-viewer'>{text}</pre>,
 }));
 

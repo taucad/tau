@@ -3,7 +3,7 @@ import type React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { CircleAlert, Play, RefreshCcw, Repeat } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { CodeViewer } from '#components/code/code-viewer.js';
+import { CodeViewer } from '@taucad/editor-ui/components/code/code-viewer';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { useChatActions } from '#hooks/use-chat.js';
 import { ChatErrorCard, turnSavedSentence } from '#routes/w.$workspace.$project/chat-error-card.js';

@@ -83,7 +83,6 @@ const main = async (): Promise<void> => {
       { path: '../Tau.AppImage' },
       { size: bytes.length + 1 },
       { sha512: 'A'.repeat(86) + '==' },
-      { expiresAt: new Date(Date.now() - 1).toISOString() },
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- Each subprocess consumes the same fixture path before the next mutation.
       await writeFile(metadata, JSON.stringify(envelope({ ...descriptor, ...change })));
@@ -99,7 +98,11 @@ const main = async (): Promise<void> => {
         }),
       ),
     );
-    assert.equal(run().status, 1, 'Expired immutable original cannot authorize a first installation');
+    assert.equal(
+      run().status,
+      0,
+      'Descriptors no longer expire: an old signed descriptor still authorizes the same bytes',
+    );
     await writeFile(
       metadata,
       JSON.stringify(

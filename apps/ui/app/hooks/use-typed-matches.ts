@@ -23,7 +23,7 @@ export function useTypedMatches<Selected>(
       commandPalette: [],
       enablePageWrapper: [],
       enablePageHeader: [],
-      enableOverflowY: [],
+      scroll: [],
       providers: [],
     };
 

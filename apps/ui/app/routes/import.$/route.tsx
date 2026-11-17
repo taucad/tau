@@ -75,7 +75,6 @@ import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {
   title: 'Import',
-  enableOverflowY: true,
 };
 
 const readSplatPath = (params: Record<string, string | undefined>): string => params['*'] ?? '';

@@ -8,7 +8,7 @@ import {
   createFileTreeDownloadError,
   getFileTreeDownloadErrorMessage,
   getFileTreeDownloadPolicy,
-} from '#routes/w.$workspace.$project/file-tree-download-policy.js';
+} from '#utils/file-tree-download-policy.js';
 
 describe('file-tree-download-policy', () => {
   describe('getFileTreeDownloadPolicy', () => {

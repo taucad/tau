@@ -30,6 +30,29 @@ describe('void call results', () => {
   });
 });
 
+describe('project root configuration results (T-R1.1)', () => {
+  it('should parse the per-root result of configureProjectRoots and the two root-status calls', () => {
+    const { configureProjectRoots, getRootStatuses, recheckRoots } = fileSystemBridgeSchemas.calls;
+    const result = {
+      roots: [
+        { storageRootKey: 'node:/home', backend: 'node', state: 'available' },
+        { storageRootKey: 'node:/lost', backend: 'node', state: 'notFound', code: 'ENOENT' },
+      ],
+      skipped: [{ kind: 'project', reason: 'root-unavailable', projectId: 'proj_x', storageRootKey: 'node:/lost' }],
+    };
+    expect(configureProjectRoots.result.safeParse(result)).toMatchObject({ success: true, data: result });
+    expect(configureProjectRoots.result.safeParse(undefined).success).toBe(false);
+    expect(
+      configureProjectRoots.result.safeParse({ ...result, roots: [{ ...result.roots[0], state: 'gone' }] }).success,
+    ).toBe(false);
+    expect(getRootStatuses.args.safeParse([]).success).toBe(true);
+    expect(getRootStatuses.result.safeParse(result.roots).success).toBe(true);
+    expect(recheckRoots.args.safeParse([]).success).toBe(true);
+    expect(recheckRoots.args.safeParse([['node:/lost']]).success).toBe(true);
+    expect(recheckRoots.result.safeParse(result.roots).success).toBe(true);
+  });
+});
+
 describe('archive ceilings', () => {
   it('carries a caller byte ceiling on both archive calls and refuses a malformed one', () => {
     const { archive, getScopedZippedDirectory } = fileSystemBridgeSchemas.calls;

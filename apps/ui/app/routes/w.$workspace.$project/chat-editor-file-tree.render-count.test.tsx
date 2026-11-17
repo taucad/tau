@@ -107,6 +107,11 @@ vi.mock('#hooks/use-file-manager.js', () => {
   };
   return { useFileManager: () => fileManager, useOptionalFileManager: () => fileManager };
 });
+/* The files hooks read the same services from files-ui's own context. */
+vi.mock('@taucad/files-ui/hooks/use-file-services', async () => {
+  const { useFileManager } = await import('#hooks/use-file-manager.js');
+  return { useFileServices: useFileManager, useOptionalFileServices: useFileManager };
+});
 
 function file(path: string, size = 12): [string, FileEntry] {
   return [

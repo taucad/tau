@@ -4,6 +4,7 @@ import {
   absentAttachmentMarker,
   chatAttachmentPath,
   createSessionRecord,
+  createTransportFailureDiagnostic,
   documentSentinel,
   hasFileRef,
   materializeAttachments,
@@ -28,7 +29,13 @@ const history = (): ProviderMessage[] => [
       { type: 'text', text: 'look at these' },
       // `byteLength` is optional (P29): this row carries none.
       { type: 'file-ref', path: imagePath, mimeType: 'image/png' },
-      { type: 'file-ref', path: pdfPath, mimeType: 'application/pdf', byteLength: 8, filename: 'spec.pdf' },
+      {
+        type: 'file-ref',
+        path: pdfPath,
+        mimeType: 'application/pdf',
+        byteLength: 8,
+        filename: 'spec.pdf',
+      },
     ],
     metadata: { timestamp: 1 },
   },
@@ -57,7 +64,16 @@ describe('materializeAttachments', () => {
       { type: 'text', text: `⟃tau:document:${pdfHash}⟄` },
     ]);
     expect(outcome.documents).toEqual(
-      new Map([[pdfHash, { data: base64(pdfBytes), mediaType: 'application/pdf', filename: 'spec.pdf' }]]),
+      new Map([
+        [
+          pdfHash,
+          {
+            data: base64(pdfBytes),
+            mediaType: 'application/pdf',
+            filename: 'spec.pdf',
+          },
+        ],
+      ]),
     );
     expect(outcome.absent).toEqual([]);
     expect(documentSentinel(pdfHash)).toBe(`⟃tau:document:${pdfHash}⟄`);
@@ -76,17 +92,38 @@ describe('materializeAttachments', () => {
   });
 
   it("materializes an external agent's image on its assistant and tool-output rows, and never a tool-input", async () => {
-    const reference = { type: 'file-ref', path: imagePath, mimeType: 'image/png' } as const;
+    const reference = {
+      type: 'file-ref',
+      path: imagePath,
+      mimeType: 'image/png',
+    } as const;
     const outcome = await materializeAttachments(
       [
         { id: 'assistant-image', role: 'assistant', content: [reference] },
-        { id: 'call', role: 'tool-input', toolCallId: 't', toolName: 'Read', content: [reference] },
-        { id: 'result', role: 'tool-output', toolCallId: 't', toolName: 'Read', content: [reference], isError: false },
+        {
+          id: 'call',
+          role: 'tool-input',
+          toolCallId: 't',
+          toolName: 'Read',
+          content: [reference],
+        },
+        {
+          id: 'result',
+          role: 'tool-output',
+          toolCallId: 't',
+          toolName: 'Read',
+          content: [reference],
+          isError: false,
+        },
       ],
       reader({ [imagePath]: imageBytes }),
     );
 
-    const image = { type: 'image', mimeType: 'image/png', data: base64(imageBytes) };
+    const image = {
+      type: 'image',
+      mimeType: 'image/png',
+      data: base64(imageBytes),
+    };
     expect(outcome.messages.map((message) => message.content)).toEqual([[image], [reference], [image]]);
   });
 
@@ -106,7 +143,13 @@ describe('materializeAttachments', () => {
         {
           id: 'user-bad',
           role: 'user',
-          content: [{ type: 'file-ref', path: '../../etc/passwd', mimeType: 'image/png' }],
+          content: [
+            {
+              type: 'file-ref',
+              path: '../../etc/passwd',
+              mimeType: 'image/png',
+            },
+          ],
         },
       ],
       reader({}),
@@ -119,7 +162,13 @@ describe('materializeAttachments', () => {
 
   it('should keep a user message whose only attachment is absent, as a marker the model can read (F10)', async () => {
     const outcome = await materializeAttachments(
-      [{ id: 'user-only', role: 'user', content: [{ type: 'file-ref', path: imagePath, mimeType: 'image/png' }] }],
+      [
+        {
+          id: 'user-only',
+          role: 'user',
+          content: [{ type: 'file-ref', path: imagePath, mimeType: 'image/png' }],
+        },
+      ],
       reader({}),
     );
 
@@ -153,7 +202,10 @@ describe('materializeAttachments', () => {
 
     expect(outcome.messages[0]?.content).toContainEqual({
       type: 'resource',
-      resource: { uri: `tau://attachments/${pdfHash}.pdf`, blob: base64(pdfBytes) },
+      resource: {
+        uri: `tau://attachments/${pdfHash}.pdf`,
+        blob: base64(pdfBytes),
+      },
     });
   });
 
@@ -162,8 +214,18 @@ describe('materializeAttachments', () => {
       history().slice(0, 1),
       reader({ [imagePath]: imageBytes, [pdfPath]: pdfBytes }),
       (hash, document, reference): readonly JsonValue[] => [
-        { type: 'resource_link', uri: `file:///${reference.path}`, name: reference.filename ?? hash },
-        { type: 'resource', resource: { uri: `tau://attachments/${hash}.pdf`, blob: document.data } },
+        {
+          type: 'resource_link',
+          uri: `file:///${reference.path}`,
+          name: reference.filename ?? hash,
+        },
+        {
+          type: 'resource',
+          resource: {
+            uri: `tau://attachments/${hash}.pdf`,
+            blob: document.data,
+          },
+        },
       ],
     );
 
@@ -171,7 +233,13 @@ describe('materializeAttachments', () => {
       { type: 'text', text: 'look at these' },
       { type: 'image', mimeType: 'image/png', data: base64(imageBytes) },
       { type: 'resource_link', uri: `file:///${pdfPath}`, name: 'spec.pdf' },
-      { type: 'resource', resource: { uri: `tau://attachments/${pdfHash}.pdf`, blob: base64(pdfBytes) } },
+      {
+        type: 'resource',
+        resource: {
+          uri: `tau://attachments/${pdfHash}.pdf`,
+          blob: base64(pdfBytes),
+        },
+      },
     ]);
   });
 });
@@ -191,7 +259,11 @@ describe('materializeAttachments — labels from the bytes (I1, I10)', () => {
     );
 
     expect(outcome.messages[0]?.content).toEqual([
-      { type: 'image', mimeType: 'image/png', data: base64(new Uint8Array(headerBytes.png)) },
+      {
+        type: 'image',
+        mimeType: 'image/png',
+        data: base64(new Uint8Array(headerBytes.png)),
+      },
     ]);
   });
 
@@ -202,7 +274,11 @@ describe('materializeAttachments — labels from the bytes (I1, I10)', () => {
     );
 
     expect(outcome.messages[0]?.content).toEqual([
-      { type: 'image', mimeType: 'image/webp', data: base64(new Uint8Array(headerBytes.webp)) },
+      {
+        type: 'image',
+        mimeType: 'image/webp',
+        data: base64(new Uint8Array(headerBytes.webp)),
+      },
     ]);
   });
 
@@ -224,6 +300,74 @@ describe('materializeAttachments — labels from the bytes (I1, I10)', () => {
     const outcome = await materializeAttachments([reference('image/jpeg')], reader({ [jpgPath]: imageBytes }));
 
     expect(outcome.messages[0]?.content).toEqual([{ type: 'image', mimeType: 'image/jpeg', data: base64(imageBytes) }]);
+  });
+});
+
+describe('createTransportFailureDiagnostic', () => {
+  const codedFailure = (cause: unknown): Error & { readonly code: string } =>
+    Object.assign(new Error('Tau model gateway request failed.', { cause }), {
+      name: 'GatewayModelTransportError',
+      code: 'NETWORK_ERROR',
+    });
+
+  it('names the errors under a network failure by name, code and syscall, never by message', () => {
+    const refused = Object.assign(new Error(String.raw`connect ECONNREFUSED 127.0.0.1:4014 at C:\Users\someone`), {
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+    });
+    const diagnostic = createTransportFailureDiagnostic(
+      codedFailure(new TypeError('fetch failed', { cause: refused })),
+      7,
+    );
+
+    expect(diagnostic).toEqual({
+      type: 'tau.model-transport-failure',
+      timestamp: 7,
+      error: {
+        name: 'GatewayModelTransportError',
+        message: 'Tau model gateway request failed.',
+        code: 'NETWORK_ERROR',
+      },
+      details: {
+        causes: [{ name: 'TypeError' }, { name: 'Error', code: 'ECONNREFUSED', syscall: 'connect' }],
+      },
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain('someone');
+  });
+
+  it("lists an aggregate cause's members", () => {
+    const member = (code: string): Error => Object.assign(new Error(code), { code, syscall: 'connect' });
+    const aggregate = Object.assign(new AggregateError([member('ECONNREFUSED'), member('EACCES')], 'connect failed'), {
+      code: 'ECONNREFUSED',
+    });
+
+    expect(createTransportFailureDiagnostic(codedFailure(aggregate), 1)?.details).toEqual({
+      causes: [
+        {
+          name: 'AggregateError',
+          code: 'ECONNREFUSED',
+          errors: [
+            { name: 'Error', code: 'ECONNREFUSED', syscall: 'connect' },
+            { name: 'Error', code: 'EACCES', syscall: 'connect' },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('records no causes for a failure that has none', () => {
+    expect(createTransportFailureDiagnostic(codedFailure(undefined), 1)).not.toHaveProperty('details');
+  });
+
+  it('stops after a bounded number of causes', () => {
+    let cause: unknown;
+    for (let index = 0; index < 10; index++) {
+      cause = new Error(`layer ${index}`, { cause });
+    }
+
+    expect(createTransportFailureDiagnostic(codedFailure(cause), 1)?.details).toEqual({
+      causes: [{ name: 'Error' }, { name: 'Error' }, { name: 'Error' }, { name: 'Error' }],
+    });
   });
 });
 
@@ -275,7 +419,13 @@ describe('stored screenshot captures (D-UI-04)', () => {
     const outcome = await materializeAttachments([row], reader({ [webpPath]: webpBytes }));
 
     expect(outcome.messages[0]?.content).toEqual({
-      images: [{ view: '3d', angle: 'front', dataUrl: `data:image/webp;base64,${base64(webpBytes)}` }],
+      images: [
+        {
+          view: '3d',
+          angle: 'front',
+          dataUrl: `data:image/webp;base64,${base64(webpBytes)}`,
+        },
+      ],
       message: 'No section cut.',
     });
     expect(hasFileRef(outcome.messages[0]!)).toBe(false);
@@ -287,7 +437,13 @@ describe('stored screenshot captures (D-UI-04)', () => {
     const outcome = await materializeAttachments([stored()], reader({ [webpPath]: png }));
 
     expect(outcome.messages[0]?.content).toEqual({
-      images: [{ view: '3d', angle: 'front', dataUrl: `data:image/png;base64,${base64(png)}` }],
+      images: [
+        {
+          view: '3d',
+          angle: 'front',
+          dataUrl: `data:image/png;base64,${base64(png)}`,
+        },
+      ],
       message: 'No section cut.',
     });
   });
@@ -295,14 +451,19 @@ describe('stored screenshot captures (D-UI-04)', () => {
   it('omits a capture whose bytes are not on this device and reports it absent', async () => {
     const outcome = await materializeAttachments([stored()], reader({}));
 
-    expect(outcome.messages[0]?.content).toEqual({ images: [], message: 'No section cut.' });
+    expect(outcome.messages[0]?.content).toEqual({
+      images: [],
+      message: 'No section cut.',
+    });
     expect(outcome.absent).toEqual([webpPath]);
     expect(hasFileRef(outcome.messages[0]!)).toBe(false);
   });
 
   it('leaves an external agent capture, which names its own readable file, as it is', async () => {
     const external = stored();
-    const content = external.content as { images: Array<Record<string, unknown>> };
+    const content = external.content as {
+      images: Array<Record<string, unknown>>;
+    };
     content.images[0]!['absolutePath'] = '/tmp/capture.webp';
 
     expect(hasFileRef(external)).toBe(false);
@@ -313,7 +474,11 @@ describe('createSessionRecord', () => {
   // RA-S10: the history is the appender's incremental reduction, not a re-read and re-reduction of the file.
   it('should read history from the log it reduces as it appends', async () => {
     const log = await createMemoryLogFile().open();
-    const record = await createSessionRecord({ log, runId: 'run-1', leaderEpoch: 'epoch-1' });
+    const record = await createSessionRecord({
+      log,
+      runId: 'run-1',
+      leaderEpoch: 'epoch-1',
+    });
     await record.append({
       type: 'message.appended',
       message: { id: 'user-1', role: 'user', content: 'Hello.' },

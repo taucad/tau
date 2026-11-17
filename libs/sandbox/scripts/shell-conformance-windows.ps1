@@ -89,7 +89,7 @@ function Invoke-Setup {
   if ($null -ne (Get-UserSid)) { throw "The local user $user already exists; revoke the previous run first." }
 
   New-LocalUser -Name $user -Password (New-Password) -FullName 'Tau shell conformance (ephemeral)' `
-    -Description 'Ephemeral standard user for the WIN-X64 shell conformance row' `
+    -Description 'Tau WIN-X64 shell conformance standard user' `
     -AccountNeverExpires -PasswordNeverExpires | Out-Null
   $sid = Get-UserSid
   # A first check here; `inner` makes the authoritative one from the token of the process that runs the suite.

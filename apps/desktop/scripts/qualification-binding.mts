@@ -1,5 +1,5 @@
 /**
- * Authenticate Mac and Linux platform-scoped CI and clean-host (vm) application and harness identities, on staging and
+ * Authenticate Mac, Windows and Linux platform-scoped CI and clean-host (vm) application and harness identities, on staging and
  * production, without changing public acceptance receipts.
  */
 import { execFileSync } from 'node:child_process';
@@ -17,9 +17,12 @@ const candidateSchema = z.strictObject({
   archiveSha256: digest,
 });
 export type InstallerCandidateProvenance = z.infer<typeof candidateSchema>;
+/** Platform scopes whose qualification carries a separately authenticated source/harness binding. */
+export const qualificationBindingScopes = ['macos', 'windows', 'linux'] as const;
+export type QualificationBindingScope = (typeof qualificationBindingScopes)[number];
 const bindingSchema = z.strictObject({
   schemaVersion: z.literal(1),
-  scope: z.enum(['macos', 'linux']),
+  scope: z.enum(qualificationBindingScopes),
   channel: z.enum(['staging', 'production']),
   kind: z.enum(['ci', 'vm']),
   sourceCommit: sha,
@@ -30,13 +33,13 @@ const bindingSchema = z.strictObject({
 });
 
 /**
- * The Mac and Linux platform scopes, on staging and production, have a separately authenticated source/harness
- * binding for both their hosted CI rows and their clean-host (vm) rows: a candidate is built from a green ancestor,
- * so its source can never be the tip that a later main dispatch runs at. The all-platform and Windows scopes keep
+ * The Mac, Windows and Linux platform scopes, on staging and production, have a separately authenticated
+ * source/harness binding for both their hosted CI rows and their clean-host (vm) rows: a candidate is built from a
+ * green ancestor, so its source can never be the tip that a later main dispatch runs at. The all-platform scope keeps
  * exact source equality.
  */
 export const usesQualificationBinding = (scope: string, channel: string, kind: string): boolean =>
-  (scope === 'macos' || scope === 'linux') &&
+  (scope === 'macos' || scope === 'windows' || scope === 'linux') &&
   (channel === 'staging' || channel === 'production') &&
   (kind === 'ci' || kind === 'vm');
 
@@ -46,7 +49,7 @@ export const verifyQualificationBinding = (
   options: {
     manifest: DesktopArtifactManifest;
     candidate: InstallerCandidateProvenance;
-    scope: 'macos' | 'linux';
+    scope: QualificationBindingScope;
     kind: 'ci' | 'vm';
     runId: number;
     workflowCommit: string;
@@ -86,7 +89,7 @@ export const verifyQualificationBinding = (
 export const createQualificationBinding = (options: {
   manifest: DesktopArtifactManifest;
   candidate: InstallerCandidateProvenance;
-  scope: 'macos' | 'linux';
+  scope: QualificationBindingScope;
   kind: 'ci' | 'vm';
   runId: number;
   workflowCommit: string;

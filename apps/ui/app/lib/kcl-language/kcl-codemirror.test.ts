@@ -6,12 +6,12 @@ import { autocompletion, currentCompletions, selectedCompletion, startCompletion
 import type { Completion } from '@codemirror/autocomplete';
 import type * as LSP from 'vscode-languageserver-protocol';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-import { EditorDocument } from '#lib/editor-document.js';
-import type { TextChange } from '#lib/editor-document.js';
-import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import type { TextChange } from '@taucad/editor-ui/lib/editor-document';
+import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
 import type { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import type { KclSymbol, KclSymbolService } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
-import type { EditorDocumentSession } from '#lib/editor-document-session.js';
+import type { EditorDocumentSession } from '@taucad/editor-ui/lib/editor-document-session';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import {
   applyKclWorkspaceEdit,
@@ -23,7 +23,7 @@ import {
   kclLspCompletion,
   symbolCompletion,
 } from '#lib/kcl-language/kcl-codemirror.js';
-import { indexKclProgram } from '#lib/kcl-language/kcl-bindings.js';
+import { indexKclProgram } from '@taucad/editor-ui/lib/kcl-language/kcl-bindings';
 import { languageFeatures } from '@taucad/editor-ui/components/code/editor-language-features';
 
 describe('KCL pending worker requests', () => {

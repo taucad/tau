@@ -227,10 +227,14 @@ describe('large workspace connection', () => {
     await target.openSecondary('/projects');
     await target.expectVisible(selectors.getByText('Connection Fixture 0', { exact: true }), 20_000, 'secondary');
     await target.navigate(`/w/${slug}/project-0`, 'secondary');
-    const unavailable = selectors.getByText("The project you're looking for doesn't exist or may have been deleted.");
+    /* A disconnected workspace keeps its projects: the route says their storage is unavailable and asks to reconnect
+     * it, never that the project does not exist (W30, #2288). */
+    const unavailable = selectors.getByText('Storage unavailable', { exact: true });
+    const missing = selectors.getByText('Project not found', { exact: true });
     await target.expectHidden(unavailable, 60_000, 'secondary');
     await target.click(selectors.getByRole('button', { name: 'Disconnect workspace' }));
     await target.expectVisible(unavailable, 20_000, 'secondary');
+    await target.expectCount(missing, 0, undefined, 'secondary');
     await target.click(selectors.getByRole('button', { name: 'Add Workspace' }));
     await target.expectVisible(selectors.getByText('1 project ready'), 10_000);
     await target.expectHidden(unavailable, 20_000, 'secondary');

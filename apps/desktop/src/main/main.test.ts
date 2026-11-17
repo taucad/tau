@@ -1,9 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
+import type * as FileSystem from 'node:fs';
 import type { StreamingMachine, MachineQuitDecision } from '@taucad/types/desktop';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
@@ -32,7 +33,7 @@ import {
   windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 
-type UpdateMenuItem = { label: string; click?: () => void };
+type UpdateMenuItem = { label?: string; type?: string; role?: string; click?: () => void; submenu?: unknown };
 const originalTitle = process.title;
 const originalResourcesPath = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
 const originalUncaught = new Set(process.listeners('uncaughtException'));
@@ -123,6 +124,14 @@ const state = vi.hoisted(() => ({
   log: vi.fn(),
   updateMenuItems: [{ label: 'About Tau' }] as UpdateMenuItem[],
   installedUpdateMenuItems: [] as UpdateMenuItem[],
+  helpMenuItems: [{ label: 'Learn More' }] as UpdateMenuItem[],
+  installedHelpMenuItems: [] as UpdateMenuItem[],
+  reportSignal: vi.fn(),
+  flushReports: vi.fn(async () => true),
+  authSignIn: vi.fn(async () => undefined),
+  /* Per-case faults in synchronous filesystem calls main makes during bootstrap (B18). */
+  mkdirSync: undefined as undefined | ((path: string) => void),
+  realpathNative: undefined as undefined | ((path: string) => void),
   updaterCheck: vi.fn(async () => undefined),
   updaterInstall: vi.fn(async () => undefined),
   nativeStoreOptions: undefined as unknown,
@@ -133,9 +142,29 @@ const state = vi.hoisted(() => ({
   servicesPost: vi.fn(),
 }));
 
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof FileSystem>();
+  const mkdirSync = ((path: FileSystem.PathLike, options?: FileSystem.MakeDirectoryOptions) => {
+    state.mkdirSync?.(String(path));
+    return actual.mkdirSync(path, options);
+  }) as typeof actual.mkdirSync;
+  const native = ((path: FileSystem.PathLike) => {
+    state.realpathNative?.(String(path));
+    return actual.realpathSync.native(path);
+  }) as typeof actual.realpathSync.native;
+  const realpathSync = Object.assign(
+    ((path: FileSystem.PathLike, options?: FileSystem.EncodingOption) =>
+      actual.realpathSync(path, options)) as typeof actual.realpathSync,
+    { native },
+  );
+  const overridden = { ...actual, mkdirSync, realpathSync };
+  return { ...overridden, default: overridden };
+});
+
 vi.mock('#main/error-reporting.js', () => ({
   initializeDesktopErrorReporting: state.initializeErrorReporting,
-  reportDesktopSignal: vi.fn(),
+  reportDesktopSignal: state.reportSignal,
+  flushDesktopErrorReporting: state.flushReports,
   rendererErrorReportingEnvironment: vi.fn(() => ({})),
 }));
 
@@ -267,13 +296,24 @@ vi.mock('electron', () => ({
     getApplicationMenu: vi.fn(() => ({
       items: [
         { submenu: { insert: (index: number, item: UpdateMenuItem) => state.updateMenuItems.splice(index, 0, item) } },
+        {
+          role: 'help',
+          label: 'Help',
+          submenu: {
+            items: state.helpMenuItems,
+            append: (item: UpdateMenuItem) => state.helpMenuItems.push(item),
+          },
+        },
       ],
+      append: vi.fn(),
     })),
     setApplicationMenu: vi.fn(() => {
       // Electron's native menu does not reflect additions until it is installed again.
       state.installedUpdateMenuItems = [...state.updateMenuItems];
+      state.installedHelpMenuItems = [...state.helpMenuItems];
     }),
   },
+  clipboard: { writeText: vi.fn() },
   MenuItem: vi.fn(function MenuItem(options: UpdateMenuItem) {
     return options;
   }),
@@ -370,12 +410,17 @@ vi.mock('#main/auth-service.js', () => ({
     onChange: vi.fn(),
     dispose: vi.fn(),
     handleCallback: state.authHandleCallback,
-    signIn: vi.fn(),
+    signIn: state.authSignIn,
     signOut: vi.fn(),
   })),
 }));
 vi.mock('#main/diagnostics.js', () => ({
-  createDiagnosticsLog: vi.fn(() => ({ log: state.log, dispose: vi.fn() })),
+  createDiagnosticsLog: vi.fn(() => ({
+    filePath: join(state.userData, 'logs', 'desktop.log'),
+    log: state.log,
+    flush: vi.fn(async () => undefined),
+    dispose: vi.fn(),
+  })),
   forwardRendererDiagnostics: vi.fn(),
   forwardUtilityDiagnostics: vi.fn(),
   kernelUtilityDiagnostics: vi.fn(() => ({})),
@@ -495,6 +540,11 @@ afterEach(async () => {
   state.prepareToInstall = undefined;
   state.updateMenuItems = [{ label: 'About Tau' }];
   state.installedUpdateMenuItems = [];
+  state.helpMenuItems = [{ label: 'Learn More' }];
+  state.installedHelpMenuItems = [];
+  state.mkdirSync = undefined;
+  state.realpathNative = undefined;
+  state.flushReports.mockImplementation(async () => true);
   getWindows.mockReturnValue([fakeWindow]);
   state.acpDiscovery = undefined;
   state.ready = undefined;
@@ -1647,11 +1697,14 @@ describe('desktop main compute owner', () => {
 describe('desktop main admission gates', () => {
   const bootMilliseconds = 30_000;
 
+  /* T-R11.2 (D7): only a locked release owns `Tau Staging`. A staging build that honours overrides and is started
+   * without `--user-data-dir` uses `Tau Staging Dev`, so a development or test run can never default into the
+   * installed app's profile. */
   it.each([
-    { overrides: true, explicitProfile: true, usesChannelProfile: false },
-    { overrides: true, explicitProfile: false, usesChannelProfile: true },
-    { overrides: false, explicitProfile: true, usesChannelProfile: true },
-    { overrides: false, explicitProfile: false, usesChannelProfile: true },
+    { overrides: true, explicitProfile: true, profile: undefined },
+    { overrides: true, explicitProfile: false, profile: 'Tau Staging Dev' },
+    { overrides: false, explicitProfile: true, profile: 'Tau Staging' },
+    { overrides: false, explicitProfile: false, profile: 'Tau Staging' },
   ])(
     'should isolate a staging profile according to $overrides/$explicitProfile',
     async (options) => {
@@ -1666,10 +1719,10 @@ describe('desktop main admission gates', () => {
       );
       await import('#main/main.js');
       const profileCall = app.setPath.mock.calls.find(([name]) => name === 'userData');
-      if (options.usesChannelProfile) {
-        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', 'Tau Staging')]);
-      } else {
+      if (options.profile === undefined) {
         expect(profileCall).toBeUndefined();
+      } else {
+        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', options.profile)]);
       }
       expect(app.setPath).toHaveBeenCalledWith('sessionData', state.userData);
     },
@@ -1743,35 +1796,53 @@ describe('desktop main admission gates', () => {
   );
 
   it(
-    'restores the credential before the first page can request an authenticated origin',
+    'holds the first authenticated request, not the first page, until the credential is restored (B32)',
     async () => {
       const restore = Promise.withResolvers<void>();
       state.authRestored = restore.promise;
-      const { injectTauHeaders } = await vi.importActual<{
-        injectTauHeaders: (
-          url: string,
-          headers: Record<string, string>,
+      const { installTauHeaderInjection } = await vi.importActual<{
+        installTauHeaderInjection: (
+          webRequest: {
+            onBeforeSendHeaders: (
+              filter: unknown,
+              listener: (
+                details: { url: string; requestHeaders: Record<string, string> },
+                callback: (response: { requestHeaders: Record<string, string> }) => void,
+              ) => void,
+            ) => void;
+          },
           options: TauHeaderInjectionOptions,
-        ) => Record<string, string>;
+        ) => void;
       }>('#main/header-injection.js');
       let firstRequestHeaders: Record<string, string> | undefined;
       fakeWindow.loadURL.mockImplementationOnce(async () => {
-        firstRequestHeaders = injectTauHeaders('http://127.0.0.1:1/v1/projects', {}, state.headerOptions!);
+        installTauHeaderInjection(
+          {
+            onBeforeSendHeaders: (_filter, listener) => {
+              listener({ url: 'http://127.0.0.1:1/v1/projects', requestHeaders: {} }, ({ requestHeaders }) => {
+                firstRequestHeaders = requestHeaders;
+              });
+            },
+          },
+          state.headerOptions!,
+        );
       });
 
       await boot();
       await vi.waitFor(() => {
-        expect(state.headerOptions).toBeDefined();
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
       });
-      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
       expect(state.headerOptions?.token()).toBeUndefined();
+      expect(firstRequestHeaders).toBeUndefined();
 
       state.authToken = 'restored-token';
       restore.resolve();
       await vi.waitFor(() => {
-        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+        expect(firstRequestHeaders).toEqual({
+          authorization: 'Bearer restored-token',
+          'tau-client': 'tau-desktop/test',
+        });
       });
-      expect(firstRequestHeaders).toEqual({ authorization: 'Bearer restored-token', 'tau-client': 'tau-desktop/test' });
     },
     bootMilliseconds,
   );
@@ -1785,7 +1856,10 @@ describe('desktop main admission gates', () => {
       const openUrl = state.appListeners.get('open-url')?.at(-1);
       expect(openUrl).toBeDefined();
       openUrl?.({ preventDefault: vi.fn() }, 'tau://invitations/queued-token');
-      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/');
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalledWith('app://tau/invitations/queued-token');
 
       restore.resolve();
       await vi.waitFor(() => {
@@ -1796,20 +1870,21 @@ describe('desktop main admission gates', () => {
   );
 
   it(
-    'reports a failed credential restore without loading an unauthenticated page',
+    'logs a failed credential restore and starts signed out instead of ending the launch',
     async () => {
       const restore = Promise.withResolvers<void>();
       state.authRestored = restore.promise;
       await boot();
       await vi.waitFor(() => {
-        expect(state.headerOptions).toBeDefined();
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
       });
       restore.reject(new Error('credential store failed'));
 
       await vi.waitFor(() => {
-        expect(app.exit).toHaveBeenCalledWith(1);
+        expect(state.log).toHaveBeenCalledWith('warn', 'auth.restore-failed', expect.any(Error));
       });
-      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+      expect(app.exit).not.toHaveBeenCalled();
+      expect(state.headerOptions?.token()).toBeUndefined();
     },
     bootMilliseconds,
   );
@@ -2344,3 +2419,262 @@ describe('desktop main machine store', () => {
 });
 
 /* eslint-enable @typescript-eslint/naming-convention -- End environment fixtures. */
+
+/* eslint-disable @typescript-eslint/naming-convention -- Electron exports keep their names; Sentry tags are snake_case. */
+describe('desktop main boot hardening (WP5)', () => {
+  const bootMilliseconds = 30_000;
+
+  /** Boot main over fresh user data, after `before` lays out what an earlier launch left there. */
+  const boot = async (before?: (userData: string) => Promise<void>): Promise<void> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-hardening-'));
+    await before?.(state.userData);
+    await import('#main/main.js');
+  };
+  const booted = async (before?: (userData: string) => Promise<void>): Promise<void> => {
+    await boot(before);
+    await vi.waitFor(() => {
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+    });
+  };
+  const signals = (name: string): Array<{ tags: Record<string, string> }> =>
+    state.reportSignal.mock.calls
+      .map(([signal]) => signal as { fingerprint?: readonly string[]; tags: Record<string, string> } | undefined)
+      .filter((signal) => signal?.fingerprint?.[0] === name) as Array<{ tags: Record<string, string> }>;
+  const troubleshooting = (): UpdateMenuItem[] => {
+    const entry = state.installedHelpMenuItems.find((item) => item.label === 'Troubleshooting');
+    return (entry?.submenu ?? []) as UpdateMenuItem[];
+  };
+
+  it(
+    'should start the updater and install the menu before the first page loads, and show the window at 15 s (T-B17.1)',
+    async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        fakeWindow.loadURL.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
+        await boot();
+        /* `vi.waitFor` advances fake timers while it polls, which would spend the deadline under test. */
+        const giveUpAt = Date.now() + 20_000;
+        while (Date.now() < giveUpAt && fakeWindow.loadURL.mock.calls.length === 0) {
+          // oxlint-disable-next-line no-await-in-loop -- yield to bootstrap without touching the faked clock
+          await new Promise((resolve) => {
+            setImmediate(resolve);
+          });
+        }
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+        const { Menu } = await import('electron');
+        expect(state.prepareToRestart).toBeDefined();
+        expect(state.installedUpdateMenuItems.map((item) => item.label)).toContain('Check for Updates…');
+        expect(troubleshooting().map((item) => item.label)).toContain('Check for Updates…');
+        expect(vi.mocked(Menu.setApplicationMenu).mock.invocationCallOrder[0]).toBeLessThan(
+          fakeWindow.loadURL.mock.invocationCallOrder[0] ?? 0,
+        );
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(14_999);
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(fakeWindow.show).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should show the window as soon as it is ready to show (T-B17.2)',
+    async () => {
+      fakeWindow.loadURL.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
+      await boot();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      });
+      const readyToShow = [...fakeWindow.once.mock.calls, ...fakeWindow.on.mock.calls].find(
+        ([event]) => event === 'ready-to-show',
+      )?.[1] as (() => void) | undefined;
+      expect(readyToShow).toBeTypeOf('function');
+      expect(fakeWindow.show).not.toHaveBeenCalled();
+      readyToShow!();
+      expect(fakeWindow.show).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should explain a bootstrap failure in a native dialog before it exits (T-B18.1)',
+    async () => {
+      state.mkdirSync = (path) => {
+        if (path === join(state.userData, 'home')) {
+          throw Object.assign(new Error(`EACCES: permission denied, mkdir '${path}'`), { code: 'EACCES' });
+        }
+      };
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 3 });
+      await boot();
+      await vi.waitFor(() => {
+        expect(app.exit).toHaveBeenCalled();
+      });
+      expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+      const options = dialog.showMessageBox.mock.calls[0]![0];
+      expect(options.buttons).toEqual(['Restart in Safe Mode', 'Show Logs', 'Download Tau', 'Quit']);
+      expect(dialog.showMessageBox.mock.invocationCallOrder[0]).toBeLessThan(app.exit.mock.invocationCallOrder[0]!);
+      expect(state.flushReports.mock.invocationCallOrder[0]).toBeLessThan(
+        dialog.showMessageBox.mock.invocationCallOrder[0]!,
+      );
+      expect(signals('desktop-bootstrap-failed')).toEqual([
+        expect.objectContaining({ tags: { step: 'home-directory', errno: 'EACCES' } }),
+      ]);
+      expect(state.log).toHaveBeenCalledWith(
+        'error',
+        'main.bootstrap-failed',
+        expect.objectContaining({ step: 'home-directory' }),
+      );
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should log and report an uncaught exception and an unhandled rejection after bootstrap (T-B18.3)',
+    async () => {
+      await booted();
+      const added = (event: 'uncaughtException' | 'unhandledRejection', original: ReadonlySet<unknown>) =>
+        (process.listeners(event as 'uncaughtException') as unknown[]).filter(
+          (listener) => !original.has(listener),
+        ) as Array<(...args: unknown[]) => void>;
+      const exception = new TypeError('late fault');
+      const rejection = new RangeError('late rejection');
+      for (const listener of added('uncaughtException', originalUncaught)) {
+        listener(exception, 'uncaughtException');
+      }
+      for (const listener of added('unhandledRejection', originalUnhandled)) {
+        listener(rejection, Promise.resolve());
+      }
+      expect(state.log).toHaveBeenCalledWith('error', 'main.uncaught-exception', exception);
+      expect(state.log).toHaveBeenCalledWith('error', 'main.unhandled-rejection', rejection);
+      expect(signals('desktop-main-uncaught')).toEqual([
+        expect.objectContaining({ tags: { kind: 'exception', error_name: 'TypeError' } }),
+        expect.objectContaining({ tags: { kind: 'rejection', error_name: 'RangeError' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should skip a failing optional step and still load the first page (T-B18.4)',
+    async () => {
+      const { removeStaleQuickLookSessions } = await import('#main/quick-look.js');
+      vi.mocked(removeStaleQuickLookSessions).mockImplementationOnce(() => {
+        throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+      });
+      await booted(async (userData) => {
+        await mkdir(join(userData, 'machines'));
+        state.realpathNative = (path) => {
+          if (path === join(userData, 'machines')) {
+            throw Object.assign(new Error('EIO'), { code: 'EIO' });
+          }
+        };
+      });
+      expect(signals('desktop-optional-step-failed').map(({ tags }) => tags)).toEqual(
+        expect.arrayContaining([
+          { step: 'quick-look-cleanup', errno: 'EBUSY' },
+          { step: 'legacy-machines', errno: 'EIO' },
+        ]),
+      );
+      expect(signals('desktop-optional-step-failed')).toHaveLength(2);
+      expect(app.exit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should create a window for a second launch when none exists, and show a hidden one (T-B19.1)',
+    async () => {
+      await booted();
+      const { BrowserWindow } = await import('electron');
+      const created = vi.mocked(BrowserWindow).mock.calls.length;
+      const secondInstance = state.appListeners.get('second-instance')!.at(-1)!;
+      getWindows.mockReturnValue([]);
+      secondInstance({}, ['tau']);
+      await vi.waitFor(() => {
+        expect(vi.mocked(BrowserWindow).mock.calls.length).toBe(created + 1);
+      });
+      getWindows.mockReturnValue([fakeWindow]);
+      fakeWindow.show.mockClear();
+      secondInstance({}, ['tau']);
+      expect(fakeWindow.show).toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should boot normally past a leftover route qualification state file and report it once (T-B23.1)',
+    async () => {
+      await booted(async (userData) => {
+        await writeFile(join(userData, 'route-qualification.state.json'), '{}');
+      });
+      expect(signals('desktop-probe-leftover-ignored')).toEqual([
+        expect.objectContaining({ tags: { probe: 'route-qualification', error_name: 'Error' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should boot normally past a leftover OTA receipt and report it once (T-B29.1)',
+    async () => {
+      await booted(async (userData) => {
+        await writeFile(join(userData, 'ota-probe.pending.json'), 'not json');
+      });
+      expect(signals('desktop-probe-leftover-ignored')).toEqual([
+        expect.objectContaining({ tags: { probe: 'ota', error_name: 'Error' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should load the first page while the credential is unread, and hold sign-in until it is (T-B32.1)',
+    async () => {
+      const restore = Promise.withResolvers<void>();
+      state.authRestored = restore.promise;
+      await booted();
+      const signIn = state.handlers.get('tau:auth:sign-in')!;
+      const pending = signIn({ senderFrame: {} });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(state.authSignIn).not.toHaveBeenCalled();
+      restore.resolve();
+      await pending;
+      expect(state.authSignIn).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should offer Help → Troubleshooting with logs and scrubbed diagnostics (T-U5.1)',
+    async () => {
+      await booted();
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toEqual([
+          'Restart in Safe Mode',
+          'Show Logs',
+          'Copy Diagnostics',
+          'Check for Updates…',
+        ]);
+      });
+      const { clipboard, shell } = await import('electron');
+      troubleshooting().find((item) => item.label === 'Show Logs')!.click!();
+      expect(shell.showItemInFolder).toHaveBeenCalledWith(join(state.userData, 'logs', 'desktop.log'));
+      troubleshooting().find((item) => item.label === 'Copy Diagnostics')!.click!();
+      await vi.waitFor(() => {
+        expect(clipboard.writeText).toHaveBeenCalledOnce();
+      });
+      const text = vi.mocked(clipboard.writeText).mock.calls[0]![0];
+      expect(text).toContain('Version: test');
+      expect(text).not.toContain(homedir());
+    },
+    bootMilliseconds,
+  );
+});
+/* eslint-enable @typescript-eslint/naming-convention -- End WP5 boot hardening rows. */

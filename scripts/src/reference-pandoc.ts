@@ -41,7 +41,7 @@ const appendBounded = (options: {
   return next;
 };
 
-const runProcess = async (options: {
+export const runProcess = async (options: {
   executable: string;
   args: readonly string[];
   input?: string;
@@ -111,6 +111,13 @@ const runProcess = async (options: {
         return;
       }
       resolve({ stdout: output, stderr: errorOutput });
+    });
+    // Pandoc can exit before it reads all of its input (`--version`, or an early error). Writing to the closed pipe then
+    // raises EPIPE on stdin, which would be an unhandled error event. The exit code and stderr report the real outcome.
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EPIPE') {
+        finishError(error);
+      }
     });
     child.stdin.end(options.input ?? '', 'utf8');
   });

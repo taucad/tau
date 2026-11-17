@@ -3,7 +3,7 @@ import {
   editorCompletionInfo,
   renderEditorDocumentation,
 } from '@taucad/editor-ui/components/code/editor-documentation';
-import { startAfterLineBreaks } from '#components/code/editor-lint.js';
+import { startAfterLineBreaks } from '@taucad/editor-ui/components/code/editor-lint';
 import type { Extension } from '@codemirror/state';
 import { autocompletion, snippet } from '@codemirror/autocomplete';
 import type { Completion } from '@codemirror/autocomplete';
@@ -12,7 +12,7 @@ import { foldService } from '@codemirror/language';
 import { hoverTooltip, keymap } from '@codemirror/view';
 import type { EditorView } from '@codemirror/view';
 import { Topic } from '@taucad/events';
-import type { EditorDocument, TextChange } from '#lib/editor-document.js';
+import type { EditorDocument, TextChange } from '@taucad/editor-ui/lib/editor-document';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { lspSnippetToCodeMirror } from '@taucad/ui-core/lib/lsp-completion-snippet';
 

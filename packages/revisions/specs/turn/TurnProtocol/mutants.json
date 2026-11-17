@@ -68,8 +68,8 @@
     "drift": "round 28: a remotes read that failed, or one still running, counts as no remote (its `kind` is `'none'` too), so a pull is refused CHAT_NOT_SHARED and the host runs past another device's live run",
     "file": "src/turn-placement.ts",
     "test": "src/turn-placement.test.ts",
-    "find": "    return remote !== undefined && remote.value !== 'none';\n",
-    "replace": "    return remote !== undefined && remote.context.kind !== 'none';\n"
+    "find": "    if (remote === undefined || remote.value === 'none') {\n",
+    "replace": "    if (remote === undefined || remote.context.kind === 'none') {\n"
   },
   {
     "id": "identity-read-failure-is-no-identity",

@@ -1,5 +1,5 @@
 import { URI } from 'vscode-uri';
-import type { EditorDocument, TextChange } from '#lib/editor-document.js';
+import type { EditorDocument, TextChange } from '@taucad/editor-ui/lib/editor-document';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { workspacePathFromFileUri } from '#lib/editor-workspace-fs/editor-workspace-fs.js';
 

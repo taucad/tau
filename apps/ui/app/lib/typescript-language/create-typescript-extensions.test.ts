@@ -5,7 +5,7 @@ import type { Completion } from '@codemirror/autocomplete';
 import type { EditorView } from '@codemirror/view';
 import type { TypeScriptEditBasis } from '@taucad/lsp/typescript-worker/typescript-service';
 import ts from 'typescript';
-import { EditorDocument } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import {
   applyTypeScriptCompletionSelection,
   createTypeScriptActions,

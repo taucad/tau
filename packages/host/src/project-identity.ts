@@ -114,11 +114,15 @@ const initializeIdentity = async (root: string, projectId: string): Promise<Proj
         throw error;
       }
     });
-    const directoryHandle = await open(directory, 'r');
-    try {
-      await directoryHandle.sync();
-    } finally {
-      await directoryHandle.close();
+    /* A directory cannot be synced on Windows (`fsync` there fails EPERM, so every first agent start in a new
+     * project failed). The record's own handle was flushed above, and NTFS journals the new link. */
+    if (process.platform !== 'win32') {
+      const directoryHandle = await open(directory, 'r');
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
     }
     const bytes = await readBounded(target, identityLimit);
     if (bytes === undefined) {

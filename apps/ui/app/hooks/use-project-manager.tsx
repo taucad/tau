@@ -75,6 +75,11 @@ type ProjectManagerContextType = {
   permanentlyDeleteProject: (projectId: string) => Promise<void>;
   /** Refuse a delete while a stored chat's history is not caught up or work is running (row L7). */
   verifyProjectQuiescent: (projectId: string) => Promise<void>;
+  /**
+   * Hold a closed project quiescent for an irreversible step (W30): its chat logs leased and read headlessly. Refuses
+   * a run that has not ended, or a chat another tab leads; the caller releases it.
+   */
+  leaseQuiescentProject: (projectId: string) => Promise<Readonly<{ lost: () => boolean; release: () => void }>>;
   /** Close the project's live session and wait for the registry to drop it; nothing when it holds none. */
   closeProjectSession: (projectId: string) => Promise<void>;
   /**
@@ -216,6 +221,7 @@ export function ProjectManagerProvider({
     permanentlyDeleteProject,
     adoptProject,
     verifyProjectQuiescent,
+    leaseQuiescentProject,
     closeProjectSession,
   } = commands;
   const {
@@ -460,6 +466,7 @@ export function ProjectManagerProvider({
       restoreProject,
       permanentlyDeleteProject,
       verifyProjectQuiescent,
+      leaseQuiescentProject,
       closeProjectSession,
       libraryRevision,
       adoptProject,
@@ -520,6 +527,7 @@ export function ProjectManagerProvider({
     restoreProject,
     permanentlyDeleteProject,
     verifyProjectQuiescent,
+    leaseQuiescentProject,
     closeProjectSession,
     libraryRevision,
     adoptProject,

@@ -7,6 +7,7 @@ use std::io;
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree};
 use windows_sys::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom};
 use windows_sys::Win32::System::Com::CoTaskMemFree;
+use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, GetConsoleWindow, SetConsoleCtrlHandler};
 use windows_sys::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows_sys::Win32::UI::Shell::{FOLDERID_ProgramData, FOLDERID_ProgramFiles, SHGetKnownFolderPath};
 use windows_sys::core::{GUID, PWSTR};
@@ -156,6 +157,30 @@ pub fn system_root() -> Result<String> {
         return Err(Error::last("GetSystemWindowsDirectoryW"));
     }
     Ok(String::from_utf16_lossy(&buf[..len]))
+}
+
+/// Survive Ctrl-C and Ctrl-Break on this process's own console without exiting.
+unsafe extern "system" fn ignore_interrupts(kind: u32) -> windows_sys::core::BOOL {
+    i32::from(kind == CTRL_C_EVENT || kind == CTRL_BREAK_EVENT)
+}
+
+/// Let the children this process creates receive Ctrl-C again: clear the inherited "ignore Ctrl-C" flag
+/// (`SetConsoleCtrlHandler(NULL, FALSE)`), which every child copies at creation. Anything in the chain
+/// above (a parent started with `CREATE_NEW_PROCESS_GROUP`, a host that ignores Ctrl-C) can have set it,
+/// and with it set the shell ignores the `CTRL_C_EVENT` its pseudoconsole raises for `0x03`. A handler
+/// that reports Ctrl-C and Ctrl-Break handled goes in first, so clearing the flag never lets a signal on
+/// this process's own console end it. Returns a diagnostic line for the log.
+pub fn clear_ctrl_c_ignore() -> String {
+    let handler = unsafe { SetConsoleCtrlHandler(Some(ignore_interrupts), 1) };
+    let handler_error = if handler == 0 { unsafe { GetLastError() } } else { 0 };
+    let cleared = unsafe { SetConsoleCtrlHandler(None, 0) };
+    let cleared_error = if cleared == 0 { unsafe { GetLastError() } } else { 0 };
+    let console = !unsafe { GetConsoleWindow() }.is_null();
+    format!(
+        "ctrl-c: handler={} (error {handler_error}) ignore-flag cleared={} (error {cleared_error}) console-window={console}",
+        handler != 0,
+        cleared != 0
+    )
 }
 
 /// Overwrite a secret in place before it is dropped.

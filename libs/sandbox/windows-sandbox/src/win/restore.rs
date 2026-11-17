@@ -2,60 +2,104 @@
 
 use std::path::Path;
 
-use super::acl;
+use super::acl::{self, Exact};
 use super::desktop::{WindowStation, current_session};
 use super::setup::load_record;
-use crate::journal::Journal;
+use crate::journal::{self, Header};
+use crate::tree::Sample;
 
-/// Restore every journaled descriptor (children before parents, the reverse of application order) and
-/// confirm each. Returns the failures; an empty list means the journal may be deleted.
-pub fn restore_journal(journal: &Journal, principal_sids: &[String]) -> Vec<String> {
-    let mut failures = Vec::new();
-    for entry in journal.entries.iter().rev() {
-        if let Err(err) = acl::restore(entry) {
-            failures.push(format!("{}: {err}", entry.path));
+/// Restore everything a journal recorded and confirm it. Returns the failures (a bounded sample plus a
+/// count); an empty list means the journal may be deleted.
+///
+/// 1. Each root's journaled DACL is written back with propagation, children before parents (the reverse
+///    of application order), so every descendant, including objects created during the launch, loses the
+///    ACEs it inherited from the grant.
+/// 2. Every journaled descendant, then every root, gets its exact original DACL and control flags back
+///    through its handle, without propagation, and is read back and compared as full SDDL.
+/// 3. The window station is restored when this runs in the journaled session.
+///
+/// A journal without its `end` line was cut short before any ACL changed: there is nothing to restore.
+/// `account_sids` are the sandbox account and group, when known; the capability SID comes from the journal.
+pub fn restore_journal(path: &Path, account_sids: &[String]) -> Vec<String> {
+    let summary = match journal::read_summary(path) {
+        Ok(summary) => summary,
+        Err(err) => return vec![format!("the journal cannot be read: {err}")],
+    };
+    if !summary.complete {
+        eprintln!("tau-windows-sandbox: the journal was cut short before any ACL changed; nothing to restore");
+        return Vec::new();
+    }
+    let mut principals = vec![summary.header.capability_sid.clone()];
+    principals.extend(account_sids.iter().cloned());
+    let mut failures = Sample::default();
+
+    for root in summary.roots.iter().rev() {
+        if let Err(err) = acl::restore_propagating(root) {
+            failures.note(format!("{}: {err}", root.path));
         }
     }
-    for entry in &journal.entries {
-        match acl::verify_restored(entry, principal_sids) {
-            Ok(true) => {}
-            Ok(false) => failures.push(format!("{}: the restored DACL does not match the journal", entry.path)),
-            Err(err) => failures.push(format!("{}: {err}", entry.path)),
+    let (mut rewritten, mut replaced) = (0u64, 0u64);
+    let streamed = journal::for_each_child(path, |child| match acl::restore_exact(&child) {
+        Ok(Exact::Rewritten) => rewritten += 1,
+        Ok(Exact::Replaced) => replaced += 1,
+        Ok(Exact::Matched | Exact::Missing) => {}
+        Err(err) => failures.note(format!("{}: {err}", child.path)),
+    });
+    if let Err(err) = streamed {
+        failures.note(format!("the journal cannot be read: {err}"));
+    }
+    for root in &summary.roots {
+        match acl::restore_exact(root) {
+            Ok(Exact::Matched | Exact::Rewritten | Exact::Missing) => {}
+            // Another directory now stands at the root: it cannot match the journal, but it must not keep
+            // any of the launch's ACEs.
+            Ok(Exact::Replaced) => match acl::dacl_names_any(&root.path, &principals) {
+                Ok(false) => {}
+                Ok(true) => failures.note(format!("{}: the replaced root still names a sandbox principal", root.path)),
+                Err(err) => failures.note(format!("{}: {err}", root.path)),
+            },
+            Err(err) => failures.note(format!("{}: {err}", root.path)),
         }
     }
-    if let Some(station) = &journal.window_station {
-        match current_session() {
-            Ok(session) if session == station.session_id => {
-                if let Err(err) = WindowStation::open_current().and_then(|ws| ws.restore(station)) {
-                    failures.push(format!("window station {}: {err}", station.name));
-                }
-            }
-            Ok(_) => failures.push(format!(
-                "window station {} belongs to session {}; run restore from that session",
-                station.name, station.session_id
-            )),
-            Err(err) => failures.push(format!("window station: {err}")),
-        }
+    if rewritten > 0 || replaced > 0 {
+        eprintln!(
+            "tau-windows-sandbox: rewrote {rewritten} descendant descriptor(s); {replaced} journaled object(s) were replaced during the launch"
+        );
     }
-    failures
+    restore_station(&summary.header, &mut failures);
+    failures.messages()
 }
 
-/// The SIDs whose ACEs a restore must have removed: the launch's capability SID and, when an install
-/// record is readable, the sandbox account and group.
-pub fn principal_sids(journal: &Journal) -> Vec<String> {
-    let mut sids = vec![journal.capability_sid.clone()];
-    if let Ok(Some(record)) = load_record() {
-        sids.push(record.account_sid);
-        sids.push(record.group_sid);
+fn restore_station(header: &Header, failures: &mut Sample) {
+    let Some(station) = &header.window_station else { return };
+    match current_session() {
+        Ok(session) if session == station.session_id => {
+            if let Err(err) = WindowStation::open_current().and_then(|ws| ws.restore(station)) {
+                failures.note(format!("window station {}: {err}", station.name));
+            }
+        }
+        Ok(_) => failures.note(format!(
+            "window station {} belongs to session {}; run restore from that session",
+            station.name, station.session_id
+        )),
+        Err(err) => failures.note(format!("window station: {err}")),
     }
-    sids
+}
+
+/// The sandbox account and group SIDs from the install record, when it is readable: a restored root must
+/// not name them.
+pub fn account_sids() -> Vec<String> {
+    match load_record() {
+        Ok(Some(record)) => vec![record.account_sid, record.group_sid],
+        _ => Vec::new(),
+    }
 }
 
 /// `restore --journal <path>`: idempotent. A missing journal means there is nothing left to restore.
 pub fn run(path: &str) -> i32 {
     let path = Path::new(path);
-    let journal = match Journal::load(path) {
-        Ok(journal) => journal,
+    match std::fs::metadata(path) {
+        Ok(_) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             println!("{{\"restored\":true}}");
             return 0;
@@ -64,8 +108,8 @@ pub fn run(path: &str) -> i32 {
             eprintln!("tau-windows-sandbox restore: cannot read the journal: {err}");
             return 1;
         }
-    };
-    let failures = restore_journal(&journal, &principal_sids(&journal));
+    }
+    let failures = restore_journal(path, &account_sids());
     if failures.is_empty() {
         if let Err(err) = std::fs::remove_file(path)
             && err.kind() != std::io::ErrorKind::NotFound

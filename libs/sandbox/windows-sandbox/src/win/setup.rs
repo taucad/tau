@@ -20,6 +20,7 @@ use super::firewall;
 use super::pipe::HandleIo;
 use super::sid::{ADMINISTRATORS, Sid};
 use super::util::{Error, Local, Owned, Result, check, check_status, program_data, random_bytes, wide, wipe};
+use super::wfp;
 use crate::install::{
     ACCOUNT, FIREWALL_RULES, GROUP, INSTALL_DIR, InstallRecord, PASSWORD_FILE, RECORD_FILE, RECORD_VERSION, RUNNER_DIR,
     RUNNER_FILE, password_from,
@@ -45,24 +46,71 @@ pub fn load_password() -> Result<Vec<u8>> {
     dpapi::unprotect(&blob)
 }
 
+/// The network fence as it stands: Windows Firewall per current profile, the four firewall rules and the
+/// WFP filters. Read-only; runs as the person.
+pub struct Fence {
+    /// Current profiles whose firewall is off.
+    pub off_profiles: Vec<&'static str>,
+    /// Why the rules or filters would not hold; empty when every one is present and enabled.
+    pub problems: Vec<String>,
+}
+
+impl Fence {
+    pub fn firewall_enabled(&self) -> bool {
+        self.off_profiles.is_empty()
+    }
+
+    pub fn rules_present(&self) -> bool {
+        self.problems.is_empty()
+    }
+}
+
+pub fn fence(record: Option<&InstallRecord>) -> Result<Fence> {
+    let state = firewall::state(record.map(|r| r.account_sid.as_str()))?;
+    let mut problems = state.rule_problems;
+    if let Some(record) = record {
+        problems
+            .extend(wfp::missing(&record.proxy_ports)?.into_iter().map(|name| format!("WFP filter {name} is missing")));
+    }
+    Ok(Fence { off_profiles: state.off_profiles, problems })
+}
+
+fn with_fence(mut value: serde_json::Value, record: Option<&InstallRecord>) -> serde_json::Value {
+    let (enabled, present) = match fence(record) {
+        Ok(fence) => {
+            if !fence.firewall_enabled() {
+                eprintln!("tau-windows-sandbox status: Windows Firewall is off for {}", fence.off_profiles.join(", "));
+            }
+            for problem in &fence.problems {
+                eprintln!("tau-windows-sandbox status: {problem}");
+            }
+            (fence.firewall_enabled(), fence.rules_present())
+        }
+        Err(err) => {
+            eprintln!("tau-windows-sandbox status: the network fence cannot be read: {err}");
+            (false, false)
+        }
+    };
+    value["firewallEnabled"] = enabled.into();
+    value["rulesPresent"] = present.into();
+    value
+}
+
 pub fn status() -> i32 {
-    match load_record() {
+    let value = match load_record() {
         Ok(Some(record)) => {
             let mut value = serde_json::to_value(&record).unwrap_or_default();
             value["installed"] = true.into();
-            println!("{value}");
-            0
+            with_fence(value, Some(&record))
         }
-        Ok(None) => {
-            println!("{{\"installed\":false}}");
-            0
-        }
+        Ok(None) => with_fence(serde_json::json!({ "installed": false }), None),
         Err(err) => {
             eprintln!("tau-windows-sandbox status: {err}");
-            println!("{{\"installed\":false}}");
-            0
+            with_fence(serde_json::json!({ "installed": false }), None)
         }
-    }
+    };
+    println!("{value}");
+    0
 }
 
 fn is_elevated_admin() -> Result<bool> {
@@ -206,6 +254,7 @@ pub fn setup(options: &SetupOptions) -> Result<InstallRecord> {
     )?;
 
     let rules = firewall::ensure_rules(&account_sid.to_sddl(), &options.proxy_ports)?;
+    let filters = wfp::install(&account_sid.to_sddl(), &options.proxy_ports)?;
 
     let record = InstallRecord {
         version: RECORD_VERSION,
@@ -215,6 +264,7 @@ pub fn setup(options: &SetupOptions) -> Result<InstallRecord> {
         group_sid: group_sid.to_sddl(),
         proxy_ports: options.proxy_ports.clone(),
         firewall_rules: rules,
+        wfp_filters: filters,
         for_user: for_user_sddl,
         runner: runner.to_string_lossy().into_owned(),
     };
@@ -244,6 +294,7 @@ pub fn revoke() -> Result<()> {
         }
     }
     note(firewall::remove_rules(&names));
+    note(wfp::remove());
     note(account::delete_user(ACCOUNT));
     note(account::delete_group(GROUP));
     note(account::unhide(ACCOUNT));

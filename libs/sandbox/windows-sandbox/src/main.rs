@@ -15,6 +15,7 @@ mod journal;
 mod paths;
 mod protocol;
 mod spec;
+mod tree;
 #[cfg(windows)]
 mod win;
 
@@ -39,7 +40,22 @@ fn dispatch(command: Command) -> i32 {
         Command::Setup { for_user, proxy_ports } => {
             match win::setup::setup(&win::setup::SetupOptions { for_user, proxy_ports }) {
                 Ok(record) => {
-                    println!("{}", serde_json::to_string(&record).unwrap_or_default());
+                    // `setup` does not turn Windows Firewall on (machine policy); it says when it is off,
+                    // since `launch` refuses until it is on.
+                    let mut value = serde_json::to_value(&record).unwrap_or_default();
+                    match win::setup::fence(Some(&record)) {
+                        Ok(fence) => {
+                            value["firewallEnabled"] = fence.firewall_enabled().into();
+                            value["rulesPresent"] = fence.rules_present().into();
+                            if !fence.firewall_enabled() {
+                                let message = install::firewall_off_message(&fence.off_profiles);
+                                eprintln!("tau-windows-sandbox setup: {message}");
+                                value["warning"] = message.into();
+                            }
+                        }
+                        Err(err) => eprintln!("tau-windows-sandbox setup: the network fence cannot be read: {err}"),
+                    }
+                    println!("{value}");
                     0
                 }
                 Err(err) => {

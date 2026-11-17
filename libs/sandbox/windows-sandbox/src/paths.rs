@@ -99,6 +99,17 @@ pub fn extension(path: &str) -> Option<String> {
     Some(ext.to_ascii_lowercase())
 }
 
+/// The `\\?\` spelling of a drive path, so Win32 opens it without the `MAX_PATH` limit or any further
+/// parsing. Anything else (already prefixed, or not a drive path) is returned unchanged.
+pub fn extended(path: &str) -> String {
+    let bytes = path.as_bytes();
+    if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\' {
+        format!("\\\\?\\{path}")
+    } else {
+        path.to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,6 +152,13 @@ mod tests {
         assert!(!is_within("C:\\Program Files (x86)\\x.exe", "C:\\Program Files"));
         assert!(!is_within("C:\\WindowsApps\\x.exe", "C:\\Windows"));
         assert!(is_within("C:\\x", "C:\\"));
+    }
+
+    #[test]
+    fn extended_prefixes_drive_paths_only() {
+        assert_eq!(extended("C:\\a\\b"), "\\\\?\\C:\\a\\b");
+        assert_eq!(extended("\\\\?\\C:\\a"), "\\\\?\\C:\\a");
+        assert_eq!(extended("relative"), "relative");
     }
 
     #[test]

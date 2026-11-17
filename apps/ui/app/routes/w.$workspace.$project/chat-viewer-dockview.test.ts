@@ -363,9 +363,13 @@ describe('listViewerSourceFiles', () => {
     routes: [],
     renderCapabilities: {},
   });
+  type SearchFiles = (
+    query: string,
+    options?: { maxResults?: number; includeDirectories?: boolean },
+  ) => Promise<FileStatEntry[]>;
 
   it('lists sources under folders the tree never expanded, one name glob per kernel extension', async () => {
-    const searchFiles = vi.fn(async (query: string) =>
+    const searchFiles = vi.fn<SearchFiles>(async (query) =>
       query === '*.ts' ? [stat('src/main.ts'), stat('src/checks/main.geospec.ts')] : [stat('parts/a.scad')],
     );
 
@@ -390,7 +394,7 @@ describe('listViewerSourceFiles', () => {
   });
 
   it('searches every file once for a wildcard kernel', async () => {
-    const searchFiles = vi.fn(async () => [stat('notes.xml')]);
+    const searchFiles = vi.fn<SearchFiles>(async () => [stat('notes.xml')]);
 
     await expect(
       listViewerSourceFiles(

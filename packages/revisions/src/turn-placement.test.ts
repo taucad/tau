@@ -27,6 +27,7 @@ import { createTurnPlacementPort } from '#turn-placement.js';
 import type { TurnPlacementAdapter } from '#turn-placement.js';
 import type { TurnAttemptKey } from '#turn.types.js';
 import { recordedBy, testIdentity } from '#test/identity.js';
+import { fileHeavyTimeout } from '#test/native-git-harness.js';
 
 const roots: string[] = [];
 const stops: Array<() => Promise<void>> = [];
@@ -285,7 +286,9 @@ const firstLeaseHeld = async (placement: TurnPlacementAdapter<RevisionFileSystem
   throw new Error('The settlements listen ended with no leaseHeld fact.');
 };
 
-describe('createTurnPlacementPort (TS-S3)', () => {
+/* Every row commits and checks out on a real disk. On the hosted windows-2025 runner the same row took from 0.3 s
+ * to 6.8 s between two runs of one commit's suite (runs 44012123071 and 44028941814), so a 5 s default flaps there. */
+describe('createTurnPlacementPort (TS-S3)', { timeout: fileHeavyTimeout(5000) }, () => {
   it('should attest only an actual versioned change through the admitted tools', async () => {
     const project = await createProject(true);
     await project.filesystem.writeFile('main.ts', 'before');

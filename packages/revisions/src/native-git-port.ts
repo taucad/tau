@@ -18,7 +18,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve as resolvePath } from 'node:path';
+import { basename, dirname, join, normalize, resolve as resolvePath } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileMode } from '@taucad/filesystem';
@@ -228,34 +228,55 @@ const gitDirectoryName = '.git';
 const ignorePathspecBatch = 512;
 const liveCheckoutId = 'live';
 /**
+ * The file, in the store's control area, that every command pins as
+ * `core.hooksPath`. It is an empty regular file, never a directory, so Git finds
+ * no hook under it (`<file>/post-checkout` is not a path) and git-lfs, which
+ * installs its four hooks under `core.hooksPath` whenever its filter runs (a
+ * `worktree add` over tracked large files, even with smudging skipped), cannot
+ * create one there. An empty directory would take them, and Git would then
+ * run them. Its absolute path is the same rule on every platform. `/dev/null`
+ * has no drive on Windows, and git-lfs joined it to the checkout, planting
+ * `dev/null/*` hooks in the project. Windows' device path `\\.\NUL` was
+ * the previous fix, and with it a turn on the packaged Windows build was
+ * admitted and never placed (L4 bisect runs 44036295222 and 44036299558,
+ * against 44036304364).
+ */
+const disabledHooksFileName = 'tau-hooks-disabled';
+
+/**
  * Configuration this port pins on every command, ahead of the subcommand.
  *
- * The environment scrub takes care of `GIT_*`; these three reach git from the
+ * The environment scrub takes care of `GIT_*`; these reach git from the
  * user's own `~/.gitconfig` instead, and each of them changes the bytes a
  * checkout or a new repository ends up holding (W3a review R43):
  *
  * - `core.autocrlf` rewrites line endings on checkout, so a tree recorded on one
  *   machine would materialize differently on another — and `treeId` is the
  *   identity every host compares (I4).
- * - `core.hooksPath` runs somebody else's scripts inside Tau's own plumbing. A
- *   path that is not a directory disables hooks on every platform.
+ * - `core.hooksPath` runs somebody else's scripts inside Tau's own plumbing. It
+ *   names the store's empty hooks file, a path that is not a directory, which
+ *   disables hooks on every platform.
  * - `init.templateDir` installs hooks and config into a repository this port
  *   creates. Empty is git's own "no template", and it is silent.
  * - `core.fsmonitor` names a program git runs on `status`, `diff` and every
  *   index refresh. A value in the store's own `config` is somebody else's
  *   program run by Tau's plumbing; `false` is git's own "no monitor"
  *   (linux-terminal-git-parity LP4, threat case 1).
+ *
+ * @param hooksFile - The store's empty hooks file.
+ * @returns The `-c` arguments.
  */
-const pinnedConfiguration: readonly string[] = Object.freeze([
-  '-c',
-  'core.autocrlf=false',
-  '-c',
-  'core.hooksPath=/dev/null',
-  '-c',
-  'core.fsmonitor=false',
-  '-c',
-  'init.templateDir=',
-]);
+const pinnedConfiguration = (hooksFile: string): readonly string[] =>
+  Object.freeze([
+    '-c',
+    'core.autocrlf=false',
+    '-c',
+    `core.hooksPath=${hooksFile}`,
+    '-c',
+    'core.fsmonitor=false',
+    '-c',
+    'init.templateDir=',
+  ]);
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder('utf-8', { fatal: true });
 
@@ -355,6 +376,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
   /** The store this port owns: every checkout's common directory. */
   const storePath = join(repositoryPath, gitDirectoryName);
+  /** The empty file every command names as its hooks path; see {@link disabledHooksFileName}. */
+  const disabledHooksFile = join(storePath, disabledHooksFileName);
+  const pinnedArguments = pinnedConfiguration(disabledHooksFile);
 
   /**
    * The cleared environment, pinned to this project's own store as its common
@@ -484,7 +508,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       return await runGitCommand({
         gitExecutable,
         cwd: repositoryPath,
-        args: [...pinnedConfiguration, ...args],
+        args: [...pinnedArguments, ...args],
         env: options.env ?? gitEnvironment(),
         ...(options.input === undefined ? {} : { input: options.input }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -1840,10 +1864,13 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     const collected: Checkout[] = [];
     for (const block of blocks) {
       const lines = block.split('\n').filter((line) => line !== '');
-      const root = lines.find((line) => line.startsWith('worktree '))?.slice('worktree '.length);
-      if (root === undefined) {
+      const listed = lines.find((line) => line.startsWith('worktree '))?.slice('worktree '.length);
+      if (listed === undefined) {
         continue;
       }
+      /* Git for Windows lists `C:/Users/…`: a checkout's root is a path of this
+       * platform, the one its host opens and compares, so `C:\Users\…` there. */
+      const root = normalize(listed);
       const head = lines.find((line) => line.startsWith('HEAD '))?.slice('HEAD '.length);
       const branch = lines.find((line) => line.startsWith('branch '))?.slice('branch '.length);
       const linked = collected.length > 0;
@@ -2385,6 +2412,22 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       opened = undefined;
       ignoreCase = undefined;
     }
+    /* The hooks file every command pins exists before anything can run a
+     * filter, in every store this port opens, adopted ones included. Git-lfs
+     * makes the hooks path a directory of hooks when nothing is there, so one
+     * left as a directory, by an older build or by hand, is replaced. */
+    const hooksEntry = await lstat(disabledHooksFile).catch(() => undefined);
+    if (hooksEntry?.isFile() !== true) {
+      if (hooksEntry !== undefined) {
+        await rm(disabledHooksFile, { recursive: true, force: true });
+      }
+      await writeFile(disabledHooksFile, '', { flag: 'wx' }).catch((error: unknown) => {
+        /* A concurrent open of the same store wrote it first. */
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+          throw error;
+        }
+      });
+    }
     /* Tau's derived-content ignores go where stock Git reads them and no
      * revision records them, in every store, so the records Tau keeps under
      * `.tau/` stay out of `git status` without a line in the person's ignore
@@ -2405,9 +2448,15 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * config is the person's: the pointers its own attributes ask for are
      * resolved by whatever filters they configured (D16). Asked on every
      * open and idempotent, so a session after a crash between `git init` and
-     * here still configures them. */
+     * here still configures them.
+     *
+     * The filters only: `--skip-repo` installs no hooks. Tau's plumbing runs
+     * none (`core.hooksPath` names the store's empty hooks file). Without it,
+     * git-lfs installs its hooks under that path: the L4 bisect head with the
+     * flag reverted (run 44036304364) left `dev/null/pre-push` and three more
+     * in a Windows project under the old `/dev/null` pin. */
     if (!(await isAdopted())) {
-      await run(['lfs', 'install', '--local']);
+      await run(['lfs', 'install', '--local', '--skip-repo']);
     }
     /* Every project an older build recorded has no index at all, so this open
      * heals it. An existing index is left alone: in a repository Tau adopted

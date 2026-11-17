@@ -9,10 +9,14 @@ import type {} from '#test/webgpu-profile.test-utils.js';
 /**
  * The override a row that asserts the hardware composition runs under. On the software profile (SwiftShader in CI) the
  * render tier would drop ambient occlusion, FXAA and speculative camera preparation; the override runs them anyway, so
- * the row exercises the pipeline it asserts. The hardware profile keeps the production tier.
+ * the row exercises the pipeline it asserts. The environment keeps the adapter's size: at the hardware size SwiftShader
+ * filters the cubemap on the CPU for minutes, and no composition row asserts reflections. The hardware profile keeps the
+ * production tier.
  */
 export const hardwareCompositionOverride: RenderTierOverride | undefined =
-  inject('webGpuProfile') === 'software' ? { features: 'hardware' } : undefined;
+  inject('webGpuProfile') === 'software'
+    ? { features: { ambientOcclusion: true, antialias: true, speculativePreparation: true } }
+    : undefined;
 
 /**
  * Mount a viewer subtree under the hardware composition: the tier's AO, FXAA and speculative preparation run whatever

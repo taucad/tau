@@ -29,7 +29,7 @@ import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 import type { EnvironmentDesktopQuit, EnvironmentHost, UnloadSequencer } from '#runtime/environment.js';
 import { createFocusComposition } from '#runtime/app-runtime-focus.js';
 import type { FocusHandle } from '#runtime/app-runtime-focus.js';
-import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
+import { openProjectWorkspace } from '#lib/project-workspace-warmup.js';
 import { onDesktopQuitRequested, reportDesktopQuiesced } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { createFileManagerHost } from '#runtime/file-manager-host.js';
 import type {
@@ -85,7 +85,7 @@ export type AppRuntimeOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'ins
     environment?: () => EnvironmentHost | undefined;
     /** The desktop quit seam `environment` listens to; the desktop bridge's by default. */
     desktopQuit?: EnvironmentDesktopQuit;
-    /** The session module's import focus waits for; `loadProjectWorkspace` by default. */
+    /** The session module's import focus waits for; `openProjectWorkspace` by default, which warms the layout beside it. */
     loadSessionModule?: () => Promise<unknown>;
     /**
      * The product analytics client the file manager's workspace telemetry captures through (D15). The client entry
@@ -376,7 +376,7 @@ const createSessionRuntimeOpener = (
 export const createAppRuntime = ({
   environment,
   desktopQuit = desktopBridgeQuit,
-  loadSessionModule = loadProjectWorkspace,
+  loadSessionModule = openProjectWorkspace,
   analytics = noAnalytics,
   loadHomeBackend,
   idleFileManagers = false,

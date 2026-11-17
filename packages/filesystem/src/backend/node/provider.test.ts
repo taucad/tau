@@ -17,7 +17,7 @@ import { pbkdf2 } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { join, sep } from 'node:path';
-import { NodeFsProvider, drainNodeFsProviderWatchClosures } from '#backend/node/provider.js';
+import { NodeFsProvider, drainNodeFsProviderWatchClosures, nodeDiskKeepsFileModes } from '#backend/node/provider.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { BatchEntry } from '#changeset.js';
 import parcelWatcher from '@parcel/watcher';
@@ -146,6 +146,44 @@ describe('NodeFsProvider entry kinds', () => {
       const names = await provider.readdir('');
       expect(names.sort()).toEqual(entries.map(({ name }) => name).sort());
       await expect(provider.readdirEntries('escape')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      provider.dispose();
+    }
+  });
+});
+
+/** Construct under another `process.platform`, as the host process on that disk would see it. */
+const onPlatform = <Result>(platform: NodeJS.Platform, run: () => Result): Result => {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  if (original === undefined) {
+    throw new Error('process.platform has no descriptor to fake.');
+  }
+  Object.defineProperty(process, 'platform', { ...original, value: platform });
+  try {
+    return run();
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+};
+
+describe('NodeFsProvider file modes', () => {
+  it('should expose no file mode on a Windows disk, which keeps no executable bit', () => {
+    const root = createRoot();
+    const provider = onPlatform('win32', () => new NodeFsProvider(root));
+    try {
+      expect(provider.getFileMode).toBeUndefined();
+      expect(provider.setFileMode).toBeUndefined();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should expose file modes on a POSIX disk', () => {
+    const root = createRoot();
+    const provider = onPlatform('linux', () => new NodeFsProvider(root));
+    try {
+      expect(provider.getFileMode).toBeTypeOf('function');
+      expect(provider.setFileMode).toBeTypeOf('function');
     } finally {
       provider.dispose();
     }
@@ -651,6 +689,7 @@ describe('NodeFsProvider atomic writes', () => {
       // The spelled row is read-write and the real row is read-only: the laundered write is the whole finding.
       expect(tauPathPolicy.classify('docs/chats').agentAccess).toBe('read-write');
       expect(tauPathPolicy.classify('.tau/chats').agentAccess).toBe('read-only');
+      const { setFileMode } = provider;
 
       await expect(provider.readFile('docs/chats/record.json', 'utf8')).resolves.toBe('RECORD');
 
@@ -660,7 +699,8 @@ describe('NodeFsProvider atomic writes', () => {
         async () => provider.mkdir('docs/chats/planted'),
         async () => provider.rmdir('docs/chats'),
         async () => provider.rename('docs/chats/record.json', 'docs/chats/moved.json'),
-        async () => provider.setFileMode('docs/chats/record.json', '100755'),
+        // A disk without an executable bit exposes no mode seam to launder through.
+        ...(setFileMode === undefined ? [] : [async () => setFileMode('docs/chats/record.json', '100755')]),
       ]) {
         // oxlint-disable-next-line no-await-in-loop -- one laundered mutation at a time, each judged on disk after.
         await expect(mutation()).rejects.toMatchObject({ code: 'ELOOP' });
@@ -1008,7 +1048,7 @@ describe('NodeFsProvider applyBatch (D16)', () => {
     expect((receipts[1]!.error as NodeJS.ErrnoException).code).toBe('EISDIR');
     expect(receipts[2]).toEqual({ outcome: 'applied', kind: 'file', created: true });
     expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
-    expect(await provider.getFileMode('fresh.sh')).toBe(process.platform === 'win32' ? '100644' : '100755');
+    expect(await provider.getFileMode?.('fresh.sh')).toBe(nodeDiskKeepsFileModes() ? '100755' : undefined);
     expect(readFileSync(join(root, 'arrived.txt'), 'utf8')).toBe('m');
     expect(lstatSync(join(root, 'made')).isDirectory()).toBe(true);
     expect(readdirSync(root).toSorted()).toEqual(
@@ -1021,9 +1061,9 @@ describe('NodeFsProvider applyBatch (D16)', () => {
     const provider = new NodeFsProvider(root);
     writeFileSync(join(root, 'run.sh'), 'old', { mode: 0o755 });
     await provider.applyBatch([{ op: 'write', path: 'run.sh', data: new TextEncoder().encode('new') }]);
-    expect(await provider.getFileMode('run.sh')).toBe(process.platform === 'win32' ? '100644' : '100755');
+    expect(await provider.getFileMode?.('run.sh')).toBe(nodeDiskKeepsFileModes() ? '100755' : undefined);
     await provider.applyBatch([{ op: 'write', path: 'run.sh', data: new TextEncoder().encode('x'), mode: '100644' }]);
-    expect(await provider.getFileMode('run.sh')).toBe('100644');
+    expect(await provider.getFileMode?.('run.sh')).toBe(nodeDiskKeepsFileModes() ? '100644' : undefined);
   });
 
   it('reports a write uncertain when its directory fsync fails after the rename', async () => {

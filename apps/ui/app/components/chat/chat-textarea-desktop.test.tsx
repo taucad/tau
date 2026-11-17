@@ -608,6 +608,33 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       expect(submit.mock.calls[0]?.[0]).toBe('Make a bracket.');
     });
 
+    /* STO-25 SP5: the composer mounts and takes the native input before the catalog names a model; only the send
+     * waits for it. */
+    it('should mount the editor with the queued text before the catalog names a model, and send only once it has', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      execution.current = { kind: 'tau', model: '' };
+      try {
+        const view = renderComposer('Make a bracket.', codexSession, {
+          handleSubmit: submit,
+          earlyInput: queued('Make a bracket.'),
+        });
+        expect(await screen.findByRole('textbox')).toHaveTextContent('Make a bracket.');
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(submit).not.toHaveBeenCalled();
+
+        execution.current = { kind: 'tau', model: 'm' };
+        view.rerenderWith(codexSession);
+
+        await vi.waitFor(() => {
+          expect(submit).toHaveBeenCalledOnce();
+        });
+      } finally {
+        execution.current = { kind: 'tau', model: 'm' };
+      }
+    });
+
     /* Any edit after the Enter cancels it, as in the native input: an edit undone back to the same text included. */
     it('should drop the queued send after an edit, even one undone back to the queued text', async () => {
       const submit = vi.fn(async (_text?: string) => undefined);

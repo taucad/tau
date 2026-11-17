@@ -4,7 +4,7 @@ import type { RefCallback } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
-import type { SettingsSection } from '#hooks/use-settings-dialog.js';
+import type { SettingsSection } from '@taucad/settings-ui/components/settings/settings-section';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 
@@ -21,7 +21,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from '#components/ui/sidebar.js';
-import type { SettingId } from '#components/settings/settings-registry.js';
+import type { SettingId } from '@taucad/settings-ui/components/settings/settings-catalogue';
 import { searchSettings, useSettingsSections } from '#components/settings/settings-registry.js';
 import { DeferredSettingsContent } from '#components/settings/deferred-settings-content.js';
 

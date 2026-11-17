@@ -35,6 +35,7 @@
 @source '../../../libs/files-ui/src';
 @source '../../../libs/editor-ui/src';
 @source '../../../libs/settings-ui/src';
+@source '../../../libs/publish-ui/src';
 @source '../../../libs/ui-core/src';
 @source '../../../../packages/ui/src';
 @source '../../../../packages/viewer/src';

@@ -2339,10 +2339,16 @@ export type WorkerRevisionRegistryOptions = Readonly<{
    * exists. The worker holds the box; the rule itself lives in
    * `@taucad/revisions` so both legs and the integration pins read the one
    * implementation (W12 review R7).
+   *
+   * `telemetryConsent` reads the page's last `telemetryConsent` frame for this
+   * project, for the port's own load reporters (`observability.projectOpen`,
+   * `observability.lfsFetch`): only `granted` reports, and never said reports
+   * nothing (runtime observability PR-7 follow-up, AR-W6-02).
    */
   createPort: (
     projectId: string,
     credential: () => GitRemoteCredential | undefined,
+    telemetryConsent: () => ReportingConsent | undefined,
   ) => RevisionPort | Promise<RevisionPort>;
   /**
    * Offer one project's last push again under `keepalive`, for `pagehide` (W13).
@@ -2596,7 +2602,11 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       createWorkerProjectRevisions({
         projectId,
         attention,
-        port: await options.createPort(projectId, () => writeCredential ?? credential),
+        port: await options.createPort(
+          projectId,
+          () => writeCredential ?? credential,
+          () => telemetryConsent,
+        ),
         ...(options.createCandidatePort === undefined
           ? {}
           : {

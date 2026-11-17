@@ -42,14 +42,16 @@ const wasmBudgets: WasmBudget[] = [
   },
   {
     name: 'Zoo/KCL',
+    // 0.1.192 (stable KCL 3.0, tau #490): 15,873,862 bytes.
     path: dependencyPath('packages/plugins/zoo', '@taucad/kcl-wasm-lib/kcl.wasm'),
-    maxBytes: 15_728_640,
+    maxBytes: 16_252_928,
   },
   { name: 'esbuild', path: 'packages/plugins/esbuild/src/vm/wasm/esbuild.wasm', maxBytes: 14_286_848 },
   {
     name: 'libassimp',
+    // 0.4.1 (LightUSD importer and exporter, `usdc` export; tau 175440673): 15,858,674 bytes.
     path: dependencyPath('packages/plugins/assimp', 'libassimp/wasm'),
-    maxBytes: 11_993_088,
+    maxBytes: 16_187_392,
   },
   { name: 'BRep OCCT', path: 'packages/plugins/brep/src/wasm/occt-import-js.wasm', maxBytes: 7_798_784 },
   {

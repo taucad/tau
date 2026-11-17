@@ -11,11 +11,23 @@
 
 import { createNodeGeoSpecCliHost, runGeoSpecCli } from 'geospec/cli';
 
+import { reserveStdout } from '#output.js';
+
 const tauExporterModule = new URL('../src/geospec/exporter-module.ts', import.meta.url).href;
 // Tau's esbuild VM, the one `tau test` hands the pool, so specs resolve npm packages as they do there.
 const tauModuleVmModule = new URL('../src/geospec/module-vm.ts', import.meta.url).href;
 
+// The `--json` report is the only thing on stdout; a model's own console output (replicad's font
+// loader, a kernel worker's forwarded stdout) goes to stderr, as it does for `tau test --json`.
+const writeReport = reserveStdout();
+
 process.exitCode = await runGeoSpecCli(
   process.argv.slice(2),
-  createNodeGeoSpecCliHost({ exporterModules: [tauExporterModule], moduleVmModule: tauModuleVmModule }),
+  createNodeGeoSpecCliHost({
+    exporterModules: [tauExporterModule],
+    moduleVmModule: tauModuleVmModule,
+    reportStream: (chunk) => {
+      writeReport(chunk);
+    },
+  }),
 );

@@ -14,10 +14,10 @@ import {
   isRecordingEditorConflict,
 } from '#lib/editor-document-session.js';
 import { confirmFlush } from '#workbench-records/record-health.js';
-import type { EditorDocument } from '#lib/editor-document.js';
+import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import { clearEditorNavigation } from '#lib/editor-navigation-service.js';
 import type { EditorLanguageEnvironment, EditorNavigationTarget } from '#lib/editor-language-environment.js';
-import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
+import { isVirtualDeclarationPath } from '@taucad/editor-ui/lib/virtual-declarations';
 import { URI } from 'vscode-uri';
 import { assertRootedPath } from '@taucad/utils/path';
 

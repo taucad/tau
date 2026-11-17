@@ -5,7 +5,7 @@ import type { IssueSeverity } from '@taucad/runtime';
 import type { CodeIssue } from '@taucad/types';
 import { URI } from 'vscode-uri';
 import type { EditorDocumentSession } from '#lib/editor-document-session.js';
-import type { EditorDiagnostic } from '#lib/editor-diagnostics.js';
+import type { EditorDiagnostic } from '@taucad/editor-ui/lib/editor-diagnostics';
 
 const kernelOwner = 'kernel';
 

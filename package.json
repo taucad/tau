@@ -163,7 +163,7 @@
     "oxlint-tsgolint": "catalog:",
     "pino-http": "^10.5.0",
     "polygon-clipping": "catalog:",
-    "postgres": "^3.4.9",
+    "postgres": "4.1.1",
     "posthog-js": "^1.391.2",
     "postprocessing": "catalog:",
     "react": "catalog:",

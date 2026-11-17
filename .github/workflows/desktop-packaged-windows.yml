@@ -34,6 +34,13 @@ on:
         type: string
         required: false
         default: ''
+      defender_exclude_temp:
+        description: >-
+          Evidence only, never a fix: exclude the runner's temporary folders from Defender's real-time scan for this
+          run, to measure how much of the suite's Git and file time the scan accounts for
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -109,6 +116,42 @@ jobs:
           export PATH="/c/Windows/System32:$PATH"
           pnpm nx run-many -p desktop api -t package-windows-e2e build --parallel=1 --outputStyle=stream
 
+      # Real users run with Defender on, so the gate does too. These steps record what Defender is doing and sample
+      # CPU and disk once a second through the suite (typeperf, stopped after it), so a slow run can tell scanning
+      # and load apart from Tau's own work. A dispatch can exclude the temporary folders for one comparison run.
+      - name: Record Defender's state and start the load sampler
+        shell: pwsh
+        env:
+          DEFENDER_EXCLUDE_TEMP: ${{ inputs.defender_exclude_temp && 'true' || 'false' }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'desktop-e2e-services'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          if ($env:DEFENDER_EXCLUDE_TEMP -eq 'true') {
+            Add-MpPreference -ExclusionPath $env:RUNNER_TEMP, ([System.IO.Path]::GetTempPath())
+            "Defender exclusions added for this diagnostic run: $env:RUNNER_TEMP, $([System.IO.Path]::GetTempPath())"
+          }
+          & {
+            '--- Get-MpComputerStatus ---'
+            Get-MpComputerStatus | Format-List AMRunningMode, AntivirusEnabled, RealTimeProtectionEnabled,
+              OnAccessProtectionEnabled, IoavProtectionEnabled, BehaviorMonitorEnabled, IsTamperProtected,
+              AMEngineVersion, AntivirusSignatureVersion, QuickScanAge, FullScanAge
+            '--- Get-MpPreference ---'
+            Get-MpPreference | Format-List DisableRealtimeMonitoring, DisableIOAVProtection, DisableBehaviorMonitoring,
+              ScanAvgCPULoadFactor, EnableLowCpuPriority, ExclusionPath, ExclusionProcess, ExclusionExtension
+          } *> (Join-Path $dir 'defender-state.log')
+          Get-Content (Join-Path $dir 'defender-state.log')
+          $counters = @(
+            '\Processor(_Total)\% Processor Time',
+            '\Process(MsMpEng)\% Processor Time',
+            '\PhysicalDisk(_Total)\% Disk Time',
+            '\PhysicalDisk(_Total)\Avg. Disk Queue Length',
+            '\Memory\Available MBytes'
+          )
+          $sampler = Start-Process -FilePath typeperf -PassThru -WindowStyle Hidden -ArgumentList (
+            ($counters | ForEach-Object { '"{0}"' -f $_ }) + @('-si', '1', '-f', 'CSV', '-y', '-o', ('"{0}"' -f (Join-Path $dir 'load-samples.csv')))
+          )
+          Set-Content -Path (Join-Path $env:RUNNER_TEMP 'load-sampler.pid') -Value $sampler.Id
+
       - name: Run the packaged Windows suite
         id: packaged
         timeout-minutes: 90
@@ -128,6 +171,16 @@ jobs:
             ../../node_modules/.bin/vitest run --config vitest.config.ts \
             src/desktop-webgl-renderer.spec.ts src/desktop-build123d.spec.ts \
             | tee "$RUNNER_TEMP/desktop-packaged-windows.log"
+
+      - name: Stop the load sampler
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $pidFile = Join-Path $env:RUNNER_TEMP 'load-sampler.pid'
+          if (Test-Path -LiteralPath $pidFile) { Stop-Process -Id (Get-Content $pidFile) -ErrorAction SilentlyContinue }
+          $csv = Join-Path $env:RUNNER_TEMP 'desktop-e2e-services/load-samples.csv'
+          if (Test-Path -LiteralPath $csv) { "load samples: $((Get-Content $csv).Count - 1) rows" }
 
       - name: Summarise the packaged suite and the WebGL measurement
         if: always()
@@ -154,6 +207,7 @@ jobs:
           path: |
             out/test-results/desktop-e2e
             ${{ runner.temp }}/desktop-e2e-services/*.log
+            ${{ runner.temp }}/desktop-e2e-services/*.csv
             ${{ runner.temp }}/desktop-packaged-windows.log
           if-no-files-found: ignore
           retention-days: 7

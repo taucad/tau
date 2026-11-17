@@ -22,14 +22,26 @@ import { dirname, join, resolve } from 'node:path';
 const isWindows = process.platform === 'win32';
 
 /**
- * A host path as a shell script spells it: forward slashes, which Git for
- * Windows' `bash` reads as the same Windows path; unchanged elsewhere.
+ * Text as one POSIX shell word: single-quoted, with each `'` closed, escaped
+ * and reopened, so a space, `$` or glob character in it is never split or
+ * expanded.
  *
- * @param path - Absolute host path.
- * @returns The path to interpolate into a script.
+ * @param text - Any text, a whole script included.
+ * @returns The quoted word.
  * @internal
  */
-export const shellPath = (path: string): string => (isWindows ? path.replaceAll('\\', '/') : path);
+export const shellQuote = (text: string): string => `'${text.replaceAll("'", String.raw`'\''`)}'`;
+
+/**
+ * A host path as one word of a shell script: forward slashes, which Git for
+ * Windows' `bash` reads as the same Windows path, then quoted, since a temporary
+ * directory can hold a space (a Windows user profile often does).
+ *
+ * @param path - Absolute host path.
+ * @returns The quoted path to interpolate into a script.
+ * @internal
+ */
+export const shellWord = (path: string): string => shellQuote(isWindows ? path.replaceAll('\\', '/') : path);
 
 /** Git for Windows' own `bin/bash.exe`, found from the `git` on PATH: never WSL's `bash.exe` in System32. */
 const gitForWindowsShell = (): string => {
@@ -107,7 +119,7 @@ const compiledLauncher = async (extension: '.sh' | '.cjs'): Promise<string> => {
  * Write one executable shell script.
  *
  * @param path - Absolute path to create, without an extension.
- * @param lines - The script's body, without a shebang; interpolate host paths with {@link shellPath}.
+ * @param lines - The script's body, without a shebang; interpolate host paths with {@link shellWord}.
  * @param interpreter - The shebang elsewhere; Windows runs every script under Git for Windows' `bash`.
  * @returns The path to spawn: `path` itself, or `path.exe` on Windows.
  * @internal

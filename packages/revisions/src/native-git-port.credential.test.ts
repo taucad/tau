@@ -19,7 +19,7 @@ import type { NativeGitRemoteCredential } from '#native-git-port.js';
 import type { RevisionPort } from '#revision-port.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
-import { shellPath, writeShellExecutable } from '#test/script-executable.js';
+import { shellQuote, shellWord, writeShellExecutable } from '#test/script-executable.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 
@@ -75,12 +75,12 @@ const helperFixture = async (authenticated = true): Promise<HelperFixture> => {
       execFileSync('git', ['config', 'user.name', author.name], { cwd: repositoryPath });
       execFileSync('git', ['config', 'user.email', author.email], { cwd: repositoryPath });
       await port.setRemote({ name: 'origin', url: fixture.url });
-      execFileSync('git', ['config', 'credential.helper', `!f() { echo generic >> ${shellPath(helperLog)}; }; f`], {
+      execFileSync('git', ['config', 'credential.helper', `!f() { echo generic >> ${shellWord(helperLog)}; }; f`], {
         cwd: repositoryPath,
       });
       execFileSync(
         'git',
-        ['config', `credential.${fixture.url}.helper`, `!f() { echo scoped >> ${shellPath(helperLog)}; }; f`],
+        ['config', `credential.${fixture.url}.helper`, `!f() { echo scoped >> ${shellWord(helperLog)}; }; f`],
         {
           cwd: repositoryPath,
         },
@@ -241,9 +241,13 @@ describe.runIf(gitToolchainOnPath)('GitHub SSH credentials', () => {
         cwd: fixture.repositoryPath,
       });
       const sshLog = join(fixture.repositoryPath, 'ssh-called');
-      execFileSync('git', ['config', 'core.sshCommand', `sh -c 'echo called > ${shellPath(sshLog)}; exit 1'`], {
-        cwd: fixture.repositoryPath,
-      });
+      execFileSync(
+        'git',
+        ['config', 'core.sshCommand', `sh -c ${shellQuote(`echo called > ${shellWord(sshLog)}; exit 1`)}`],
+        {
+          cwd: fixture.repositoryPath,
+        },
+      );
       await expect(port.fetch({ remote: 'origin' })).rejects.toThrow('Native Git failed');
       await expect(readFile(sshLog)).rejects.toMatchObject({ code: 'ENOENT' });
       expect(await fixture.helperCalls()).toStrictEqual([]);

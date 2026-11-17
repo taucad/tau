@@ -1136,8 +1136,15 @@ ${keepAlive}`);
     expect(environment['TMPDIR']).toBe('/artifacts');
     expect(environment['HOME']).toBe('/artifacts');
     expect(environment['PATH']).toBe('/usr/bin:/bin');
+    expect(environment).not.toHaveProperty('USERPROFILE');
     await withPlatform('win32', async () => {
       expect(processEnvironment('/artifacts')).not.toHaveProperty('PATH');
+      const windows = processEnvironment('/artifacts');
+      expect([windows['USERPROFILE'], windows['APPDATA'], windows['LOCALAPPDATA']]).toEqual([
+        '/artifacts',
+        '/artifacts',
+        '/artifacts',
+      ]);
     });
   });
 });

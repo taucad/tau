@@ -1,0 +1,105 @@
+diff --git a/cf/src/connection.js b/cf/src/connection.js
+index 8e79170aeb13efe8c3c77ccede0cd3a115b5e1b5..3090172ad889aa7e4ce813bb4699cce3ccf32f60 100644
+--- a/cf/src/connection.js
++++ b/cf/src/connection.js
+@@ -159,6 +159,11 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+     if (terminated)
+       return queryError(q, Errors.connection('CONNECTION_DESTROYED', options))
+ 
++    // A reserved connection's next query (a transaction's rollback) after its socket closed has nowhere to go.
++    // Settle it rather than write to no socket; true keeps the closed connection out of the pool's full queue.
++    if (!socket)
++      return queryError(q, Errors.connection('CONNECTION_CLOSED', options)), true
++
+     if (stream)
+       return queryError(q, Errors.generic('COPY_IN_PROGRESS', 'You cannot execute queries during copy'))
+ 
+@@ -440,6 +445,8 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+     remaining = 0
+     incomings = null
+     clearImmediate(nextWriteTimer)
++    // Bytes buffered for the closed socket belong to its session; a stale timer would stop the next one's writes.
++    chunk = nextWriteTimer = null
+     socket.removeListener('data', data)
+     socket.removeListener('connect', connected)
+     idleTimer.cancel()
+@@ -453,6 +460,9 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+       return reconnect()
+ 
+     !hadError && (query || sent.length) && error(Errors.connection('CONNECTION_CLOSED', options, socket))
++    // Both are settled now. Left set, the next session's startup error is held for a ReadyForQuery that never
++    // comes, and the connection reconnects forever without settling the query waiting on it.
++    query = errorResponse = null
+     closedTime = performance.now()
+     hadError && options.shared.retries++
+     delay = (typeof backoff === 'function' ? backoff(options.shared.retries) : backoff) * 1000
+diff --git a/cjs/src/connection.js b/cjs/src/connection.js
+index 07f6716702ac888215c86ad6e0071aaf55ae519c..43456823394fa8f6c38da328a3f5e03a6ae8ac89 100644
+--- a/cjs/src/connection.js
++++ b/cjs/src/connection.js
+@@ -157,6 +157,11 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+     if (terminated)
+       return queryError(q, Errors.connection('CONNECTION_DESTROYED', options))
+ 
++    // A reserved connection's next query (a transaction's rollback) after its socket closed has nowhere to go.
++    // Settle it rather than write to no socket; true keeps the closed connection out of the pool's full queue.
++    if (!socket)
++      return queryError(q, Errors.connection('CONNECTION_CLOSED', options)), true
++
+     if (stream)
+       return queryError(q, Errors.generic('COPY_IN_PROGRESS', 'You cannot execute queries during copy'))
+ 
+@@ -438,6 +443,8 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+     remaining = 0
+     incomings = null
+     clearImmediate(nextWriteTimer)
++    // Bytes buffered for the closed socket belong to its session; a stale timer would stop the next one's writes.
++    chunk = nextWriteTimer = null
+     socket.removeListener('data', data)
+     socket.removeListener('connect', connected)
+     idleTimer.cancel()
+@@ -451,6 +458,9 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+       return reconnect()
+ 
+     !hadError && (query || sent.length) && error(Errors.connection('CONNECTION_CLOSED', options, socket))
++    // Both are settled now. Left set, the next session's startup error is held for a ReadyForQuery that never
++    // comes, and the connection reconnects forever without settling the query waiting on it.
++    query = errorResponse = null
+     closedTime = performance.now()
+     hadError && options.shared.retries++
+     delay = (typeof backoff === 'function' ? backoff(options.shared.retries) : backoff) * 1000
+diff --git a/src/connection.js b/src/connection.js
+index 1b1cccde43b4570d5d071d6ffaab2669b3c2065a..2f480520ffd21ac475e37aa6d29102ce3fa206cd 100644
+--- a/src/connection.js
++++ b/src/connection.js
+@@ -157,6 +157,11 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+     if (terminated)
+       return queryError(q, Errors.connection('CONNECTION_DESTROYED', options))
+ 
++    // A reserved connection's next query (a transaction's rollback) after its socket closed has nowhere to go.
++    // Settle it rather than write to no socket; true keeps the closed connection out of the pool's full queue.
++    if (!socket)
++      return queryError(q, Errors.connection('CONNECTION_CLOSED', options)), true
++
+     if (stream)
+       return queryError(q, Errors.generic('COPY_IN_PROGRESS', 'You cannot execute queries during copy'))
+ 
+@@ -438,6 +443,8 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+     remaining = 0
+     incomings = null
+     clearImmediate(nextWriteTimer)
++    // Bytes buffered for the closed socket belong to its session; a stale timer would stop the next one's writes.
++    chunk = nextWriteTimer = null
+     socket.removeListener('data', data)
+     socket.removeListener('connect', connected)
+     idleTimer.cancel()
+@@ -451,6 +458,9 @@ function Connection(options, queues = {}, { onopen = noop, onend = noop, onclose
+       return reconnect()
+ 
+     !hadError && (query || sent.length) && error(Errors.connection('CONNECTION_CLOSED', options, socket))
++    // Both are settled now. Left set, the next session's startup error is held for a ReadyForQuery that never
++    // comes, and the connection reconnects forever without settling the query waiting on it.
++    query = errorResponse = null
+     closedTime = performance.now()
+     hadError && options.shared.retries++
+     delay = (typeof backoff === 'function' ? backoff(options.shared.retries) : backoff) * 1000

@@ -66,7 +66,7 @@ fn take_co_string(text: *mut u16) -> String {
 }
 
 /// This process's own `%LOCALAPPDATA%` (the known folder, as `CreateAppContainerProfile` resolves it).
-fn own_local_app_data() -> Result<String> {
+pub fn own_local_app_data() -> Result<String> {
     let mut path: *mut u16 = std::ptr::null_mut();
     let hr = unsafe { SHGetKnownFolderPath(&FOLDERID_LocalAppData, 0, std::ptr::null_mut(), &mut path) };
     let text = take_co_string(path);

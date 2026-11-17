@@ -178,6 +178,7 @@ export const nativeWorkerConformance = async (context: NativeWorkerContext): Pro
       { op: 'write', path: join(elsewhere, 'planted.txt'), text: 'planted' },
       { op: 'connect', address: `${address}:${String(remote.port)}` },
       { op: 'connect', address: `127.0.0.1:${String(loopback.port)}` },
+      { op: 'environment' },
     ];
     const bytes = new TextEncoder().encode(`${requests.map((request) => JSON.stringify(request)).join('\n')}\n`);
     /* Cut inside the first line: stdin is a byte stream, not a frame stream. */
@@ -212,8 +213,18 @@ export const nativeWorkerConformance = async (context: NativeWorkerContext): Pro
       { op: 'write', ok: false },
       { op: 'connect', ok: false },
       { op: 'connect', ok: false },
+      { op: 'environment', ok: true },
       { op: 'eof', lines: requests.length },
     ]);
+    /*
+     * Exactly the launch's environment: Windows needs a LOCALAPPDATA to create the AppContainer process and derives
+     * the package's LOCALAPPDATA, TEMP and TMP from it, and the runner takes all of them away again before it runs.
+     */
+    const seen = replies[8]!['value'] as Record<string, string>;
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(seen).filter(([name]) => !name.startsWith('='))),
+      Object.fromEntries([['SystemRoot', systemRoot]]),
+    );
     /* The DLL the worker loaded is the one in its runtime root. */
     assert.equal(String(replies[2]!['module']).toLowerCase(), library.toLowerCase());
     assert.equal(readFileSync(artifact, 'utf8'), nonce);

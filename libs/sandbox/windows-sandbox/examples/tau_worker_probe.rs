@@ -4,7 +4,8 @@
 //!
 //! Requests: `{"op":"echo","value":…}`; `{"op":"read","path":…}`; `{"op":"write","path":…,"text":…}`;
 //! `{"op":"load","path":…}` (`LoadLibraryW`, answering the loaded module's own file name); and
-//! `{"op":"connect","address":"ip:port"}` (TCP, three seconds). Every answer carries `ok`, and `error` when
+//! `{"op":"connect","address":"ip:port"}` (TCP, three seconds); and `{"op":"environment"}` (every variable the
+//! worker sees, as an object). Every answer carries `ok`, and `error` when
 //! it is false.
 
 use std::io::{BufRead, Write};
@@ -52,6 +53,9 @@ fn text(request: &Value, key: &str) -> String {
 fn answer(request: &Value) -> Value {
     let op = text(request, "op");
     let outcome = match op.as_str() {
+        "environment" => {
+            return json!({ "op": op, "ok": true, "value": std::env::vars().map(|(name, value)| (name, Value::String(value))).collect::<serde_json::Map<String, Value>>() });
+        }
         "echo" => return json!({ "op": op, "ok": true, "value": request.get("value").cloned().unwrap_or(Value::Null) }),
         "read" => match std::fs::read_to_string(text(request, "path")) {
             Ok(content) => return json!({ "op": op, "ok": true, "text": content }),

@@ -49,9 +49,17 @@ describe('pending invitation', () => {
     holdPendingInvitation('newer');
 
     clearPendingInvitation('older');
-    expect(readPendingInvitation()).toBe('newer');
-    globalThis.sessionStorage.clear();
-    expect(readPendingInvitation()).toBe('newer');
+    expect(Cookies.get('tau-invitation')).toBe('newer');
+    expect(globalThis.sessionStorage.getItem('tau.pending-invitation')).toBe('newer');
+  });
+
+  it('clears the answered token from both hosts', () => {
+    Cookies.set('tau-invitation', 'answered', { path: '/invitations' });
+    holdPendingInvitation('answered');
+
+    clearPendingInvitation('answered');
+    expect(Cookies.get('tau-invitation')).toBeUndefined();
+    expect(globalThis.sessionStorage.getItem('tau.pending-invitation')).toBeNull();
   });
 
   it('holds nothing by default', () => {

@@ -769,6 +769,7 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     expect(select?.outputs).toEqual({
       tier: expression('steps.select.outputs.tier'),
       projects: expression('steps.select.outputs.projects'),
+      'macos-rows': expression('steps.select.outputs.macos-rows'),
     });
     const step = select?.steps?.find((candidate) => candidate.id === 'select');
     expect(step?.env?.['TIER']).toBe(expression("inputs.tier || 'full'"));
@@ -776,6 +777,37 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     for (const name of ['linux', 'macos']) {
       expect(shellWorkflow.jobs[name]?.needs, name).toBe('select');
     }
+  });
+
+  it('should run MAC-X in the full tier only, so the merge queue never waits on macos-26-intel', () => {
+    const step = shellWorkflow.jobs['select']?.steps?.find((candidate) => candidate.id === 'select');
+    expect(shellWorkflow.jobs['macos']?.strategy?.matrix).toEqual({
+      include: expression('fromJSON(needs.select.outputs.macos-rows)'),
+    });
+    const rowsFor = (tier: string): unknown => {
+      const directory = mkdtempSync(join(tmpdir(), 'shell-select-'));
+      try {
+        const output = join(directory, 'output');
+        writeFileSync(output, '');
+        const result = spawnSync('bash', ['-c', step?.run ?? ''], {
+          encoding: 'utf8',
+          env: { ...process.env, TIER: tier, PROJECTS: JSON.stringify(allProjects), GITHUB_OUTPUT: output },
+        });
+        expect(result.status, result.stderr).toBe(0);
+        const line = readFileSync(output, 'utf8')
+          .split('\n')
+          .find((entry) => entry.startsWith('macos-rows='));
+        return JSON.parse(line?.slice('macos-rows='.length) ?? 'null') as unknown;
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    };
+    const macA = { runner: 'macos-26', row: 'MAC-A' };
+    const macX = { runner: 'macos-26-intel', row: 'MAC-X' };
+    // The candidate gate, a dispatch, the drift check and the label pass no tier: both rows, fresh.
+    expect(rowsFor('full')).toEqual([macA, macX]);
+    // The merge queue's call: MAC-A alone (merge-queue defects MQ-1).
+    expect(rowsFor('semantics')).toEqual([macA]);
   });
 
   it('should guard every nx run step by its project and read no input directly', () => {

@@ -623,6 +623,7 @@ const composerRegions = { input: homeLoadProbe.composerEditor } as const;
 
 knownDefect('H-e (A15d): a stored Home draft is the composer value in the first frame it is painted', {
   artifact: 'h-e-wide',
+  // expected-failure: @rifont until 2026-12-15
   expectedFailure: true,
   budget: homeBudget,
   measure: async () => {
@@ -727,6 +728,7 @@ knownDefect(
   'H-f (A15d): Enter pressed before Home hydrates, with the entry chunk held until the typing is done, sends exactly once after adoption',
   {
     artifact: 'h-f-send-wide',
+    // expected-failure: @rifont until 2026-12-15
     expectedFailure: true,
     budget: homeBudget,
     measure: async () => typeBeforeHomeHydrates('h-f-send-wide', { enter: true }),
@@ -742,6 +744,7 @@ knownDefect(
 
 knownDefect('H-f (A15d): an edit after Enter before Home hydrates cancels the queued send and keeps the text', {
   artifact: 'h-f-cancel-wide',
+  // expected-failure: @rifont until 2026-12-15
   expectedFailure: true,
   budget: homeBudget,
   measure: async () => typeBeforeHomeHydrates('h-f-cancel-wide', { enter: true, afterEnter: ' Twice' }),

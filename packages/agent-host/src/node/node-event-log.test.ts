@@ -256,6 +256,7 @@ describe('Node event log', () => {
      * Darwin, so a main-thread writer is admitted while the worker's writer is open. The pid marker names this live
      * process, so after the worker terminates without closing, the chat stays WRITER_LOCKED until the process exits.
      * `it.fails` pins today's behaviour; it turns red when the helper holds the lock from a worker. */
+    // expected-failure: @rifont until 2026-12-15
     it.fails('should admit a writer after the holding worker thread terminates', async () => {
       const filePath = await temporaryLogPath();
       const worker = new Worker(

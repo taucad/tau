@@ -292,6 +292,7 @@ describe('WorkspaceConnections', () => {
   });
 
   /* Locate is WP4's: the row offers it once that package wires the command, and removes this mark. */
+  // Expected-failure: @rifont until 2026-12-15
   it.fails('should offer Locate on a folder that is not found', async () => {
     state.rootStatuses = [
       { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },

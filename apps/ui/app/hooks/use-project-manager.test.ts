@@ -3931,6 +3931,12 @@ describe('useProjectManager.createProject', () => {
   it.each([
     { generatedName: 'New Project', expectedName: 'New Project', outputKind: 'generic output' },
     { generatedName: '   ', expectedName: 'New Project', outputKind: 'blank output' },
+    {
+      // Staging: 8 images and a prompt asking for one short line each, answered one title per line (226 code units).
+      generatedName: `${'Red Square With TAU 42 Horizontal\n'.repeat(6)}Red Square With TAU 42`,
+      expectedName: 'Red Square With TAU 42 Horizontal',
+      outputKind: 'one title per line past the manifest limit',
+    },
   ])('should create with $expectedName when naming returns $outputKind', async ({ generatedName, expectedName }) => {
     mockGenerateProjectName.mockResolvedValueOnce(generatedName);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });

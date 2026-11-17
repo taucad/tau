@@ -39,6 +39,8 @@ export const handle: Handle = {
   providers: () => RouteProvider,
   // Preview draws its own top bar, with the sidebar and the crumb back to the project on phones (HDR-12, D11).
   enablePageHeader: false,
+  // The preview owns its viewport and panels (D4.2, reviewed contained list).
+  scroll: 'contained',
 };
 
 export default function WorkspaceProjectPreviewRoute(): React.JSX.Element {

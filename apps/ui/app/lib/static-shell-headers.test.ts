@@ -141,10 +141,7 @@ const functionDocumentHeaders = async (
 ): Promise<Headers> => {
   vi.stubEnv('NETLIFY_SKEW_PROTECTION_TOKEN', token ?? '');
   const context = { staticHandlerContext: { matches: [{ route: { id: 'root' } }] } } as unknown as EntryContext;
-  const response = await serveDocument(
-    new Request(new URL(path, frontendUrl), { method: 'HEAD' }),
-    context,
-  );
+  const response = await serveDocument(new Request(new URL(path, frontendUrl), { method: 'HEAD' }), context);
   const headers = new Headers(response.headers);
   headers.set('Content-Security-Policy-Report-Only', siteContentSecurityPolicy(frontendUrl));
   return headers;

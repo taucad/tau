@@ -478,7 +478,11 @@ export function WorkspaceConnections({
         return { ...row, reason: undefined };
       }
       const status = folderStatusOf(root);
-      return { ...row, status, reason: status === 'conflict' ? conflictReasonOf(root.code) : undefined };
+      return {
+        ...row,
+        status,
+        reason: status === 'conflict' || status === 'error' ? conflictReasonOf(root.code) : undefined,
+      };
     });
   }, [rootStatuses, rows]);
   const notFoundRows = shouldGroupNotFound ? displayedRows.filter((row) => row.status === 'notFound') : [];

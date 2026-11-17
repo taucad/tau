@@ -33,28 +33,18 @@ export function useRootStatuses(fileManagerRef: FileManagerRef | undefined): rea
 }
 
 /**
- * A granted folder's row status from its published root state (D2). `connected` is the root state `available`; a
- * root that failed with an unclassified error cannot be used, so it reads as `conflict` with its code as the reason.
+ * A granted folder's row status from its published root state (D2). `connected` is the root state `available`; every
+ * other state, `error` included, keeps its name.
  *
  * @param root - The folder's published status.
  * @returns The row status.
  */
 export function folderStatusOf(root: RootStatus): WorkspaceDirectoryStatus {
-  switch (root.state) {
-    case 'available': {
-      return 'connected';
-    }
-    case 'error': {
-      return 'conflict';
-    }
-    default: {
-      return root.state;
-    }
-  }
+  return root.state === 'available' ? 'connected' : root.state;
 }
 
 /**
- * Why a folder in `conflict` can't be used, for the row's label. Codes only: a root status never carries a message.
+ * Why a folder in `conflict` or `error` can't be used, for the row's label. Codes only: a root status never carries a message.
  *
  * @param code - The root status code.
  * @returns The reason, or nothing when there is no code.

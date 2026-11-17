@@ -55,7 +55,7 @@ export type WorkspaceDirectoryPanelProps = {
   readonly onLocate?: () => void | Promise<void>;
   /** Forget this workspace, its access and its project bindings, never its files (D2 **Remove from Tau**). */
   readonly onRemove?: () => void | Promise<void>;
-  /** Why a `conflict` folder can't be used, shown after the row's label. */
+  /** Why a `conflict` or `error` folder can't be used, shown after the row's label. */
   readonly reason?: string;
   /**
    * Optional right-aligned metadata node rendered in the `row` variant
@@ -146,7 +146,7 @@ export function WorkspaceDirectoryPanel({
             {status === 'connected' ? undefined : (
               <span className='text-xs text-muted-foreground'>
                 <span className='font-medium text-foreground'>{copy.title}</span>
-                {status === 'conflict' && reason ? <span>: {reason}</span> : undefined}
+                {(status === 'conflict' || status === 'error') && reason ? <span>: {reason}</span> : undefined}
                 <span>. {copy.description}</span>
               </span>
             )}
@@ -212,6 +212,7 @@ const rowActionsByStatus: Readonly<Record<WorkspaceDirectoryStatus, readonly Row
   unreachable: ['retry', 'locate', 'remove'],
   permission: ['grantAccess', 'locate', 'remove'],
   conflict: ['locate', 'remove'],
+  error: ['retry', 'remove'],
   disconnected: ['connect', 'remove'],
   none: ['connect'],
   unsupported: [],

@@ -5538,6 +5538,9 @@ importers:
       '@taucad/events':
         specifier: workspace:*
         version: link:../events
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../utils
     devDependencies:
       '@taucad/types':
         specifier: workspace:*

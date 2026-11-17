@@ -4,6 +4,8 @@
  * bounded, identity-pinned, policy-first delivery queue. Structural input only: no import of `@taucad/runtime`.
  */
 import { Topic } from '@taucad/events';
+import { boundMaxAge, createMemoryAnswerStore, isAnswerFresh, requestAnswer } from '@taucad/utils/origin-answer';
+import type { AnswerStore } from '@taucad/utils/origin-answer';
 import type { z } from 'zod';
 import {
   RuntimeEntryName,
@@ -943,11 +945,11 @@ export type TauIdentity =
 /** A cached policy answer, per API origin. @public */
 export type CachedTelemetryPolicy = Readonly<{ policy: TelemetryPolicyAnswer['policy']; expiresAt: number }>;
 
-/** Where a host keeps the policy answer (the browser: `localStorage` by API origin; Node: memory). @public */
-export type TelemetryPolicyStore = Readonly<{
-  read(): CachedTelemetryPolicy | undefined;
-  write(value: CachedTelemetryPolicy): void;
-}>;
+/**
+ * Where a host keeps the policy answer (the browser: `localStorage` by API origin; Node: memory). The shared
+ * per-origin {@link AnswerStore} of `@taucad/utils/origin-answer`. @public
+ */
+export type TelemetryPolicyStore = AnswerStore<CachedTelemetryPolicy>;
 
 /** Input to {@link createIngestReporter}. @public */
 export type IngestReporterInput = Readonly<{
@@ -1134,13 +1136,7 @@ export const createIngestReporter = (input: IngestReporterInput): IngestReporter
   const now = input.now ?? Date.now;
   const jitter = input.jitter ?? Math.random;
   const send = input.fetch ?? globalThis.fetch.bind(globalThis);
-  let memoryPolicy: CachedTelemetryPolicy | undefined;
-  const store: TelemetryPolicyStore = input.policyStore ?? {
-    read: () => memoryPolicy,
-    write: (value) => {
-      memoryPolicy = value;
-    },
-  };
+  const store: TelemetryPolicyStore = input.policyStore ?? createMemoryAnswerStore<CachedTelemetryPolicy>();
   let queue: Queued[] = [];
   const dropped = new Map<DropReason, number>();
   let spansDropped = 0;
@@ -1177,7 +1173,7 @@ export const createIngestReporter = (input: IngestReporterInput): IngestReporter
   };
   const policyState = (): PolicyState => {
     const cached = store.read();
-    return cached !== undefined && now() < cached.expiresAt ? cached.policy : 'unknown';
+    return isAnswerFresh(cached, now()) ? cached.policy : 'unknown';
   };
   const announce = (policy: TelemetryPolicyAnswer['policy']): void => {
     if (announced !== policy) {
@@ -1186,7 +1182,7 @@ export const createIngestReporter = (input: IngestReporterInput): IngestReporter
     }
   };
   const applyPolicy = (policy: TelemetryPolicyAnswer['policy'], maxAgeSeconds: number): void => {
-    const bounded = Math.min(Math.max(maxAgeSeconds, policyMaxAgeBounds.minimum), policyMaxAgeBounds.maximum);
+    const bounded = boundMaxAge(maxAgeSeconds, policyMaxAgeBounds);
     policyLifetime = bounded * 1000;
     store.write({ policy, expiresAt: now() + policyLifetime });
     if (policy === 'on') {
@@ -1208,17 +1204,22 @@ export const createIngestReporter = (input: IngestReporterInput): IngestReporter
   const probe = async (): Promise<void> => {
     probing = true;
     try {
-      const response = await send(input.policyEndpoint, { method: 'GET', credentials: 'omit' });
-      if (response.status === 404) {
+      /* A `404` (an API that predates the route) reads as off; any other failure retries. */
+      const answer = await requestAnswer({
+        fetch: send,
+        url: input.policyEndpoint,
+        parse: (body) => {
+          const parsed = policyProbeSchema.safeParse(body);
+          return parsed.success ? parsed.data : undefined;
+        },
+      });
+      if (answer.kind === 'absent') {
         applyPolicy('off', policyMaxAgeBounds.minimum);
+      } else if (answer.kind === 'answer') {
+        probeRetryWait = reporterBounds.probeRetry;
+        applyPolicy(answer.body.policy, answer.body.maxAge);
       } else {
-        const answer = policyProbeSchema.safeParse(response.ok ? await response.json() : undefined);
-        if (answer.success) {
-          probeRetryWait = reporterBounds.probeRetry;
-          applyPolicy(answer.data.policy, answer.data.maxAge);
-        } else {
-          throw new Error('policy probe failed');
-        }
+        throw new Error('policy probe failed');
       }
     } catch {
       nextProbeAt = now() + probeRetryWait;

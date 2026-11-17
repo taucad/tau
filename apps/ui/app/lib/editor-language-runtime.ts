@@ -1,5 +1,5 @@
 import type { Extension } from '@codemirror/state';
-import type { EditorDocument } from '#lib/editor-document.js';
+import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 
 export type EditorLanguageLease = Readonly<{ extensions: Extension[]; dispose(): void }>;

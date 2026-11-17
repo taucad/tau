@@ -1,0 +1,58 @@
+{
+  "release": "ui@0.12.0",
+  "commit": "947cdfd45a24393c868370ebcd37ec0d550bd6f2",
+  "pusher": "user_released_ui_writer",
+  "tree": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "parent": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "objects": [
+    {
+      "scenario": "Start version of a new project",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_released_ui_writer@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id ynvlwuqnumtonnyuzywzluqzpslyqmym\n\nStart version of a new project\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_released_ui_writer\",\"name\":\"Released Writer\"},\"capture\":\"create\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Start version of a new project\"}}\nTau-Actor: user Released Writer\nTau-Trigger: create\n"
+    },
+    {
+      "scenario": "Saved in the browser",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_released_ui_writer@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id kskvwxmwsutzmrtzqkkpkxtsvtzvsonq\n\nSaved in the browser\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_released_ui_writer\",\"name\":\"Released Writer\"},\"capture\":\"save\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved in the browser\"}}\nTau-Actor: user Released Writer\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved when the tab was hidden",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_released_ui_writer@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id kwqxqmqlywtymutorsmkvovxruvvvurp\n\nSaved when the tab was hidden\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_released_ui_writer\",\"name\":\"Released Writer\"},\"capture\":\"hidden\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved when the tab was hidden\"}}\nTau-Actor: user Released Writer\nTau-Trigger: hidden\n"
+    },
+    {
+      "scenario": "Agent turn on the signed-in person’s behalf",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_released_ui_writer@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id lpywovwptwnlynomsrswymzstqlosrnw\n\nAgent turn on the signed-in person’s behalf\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"agent\",\"actor\":{\"kind\":\"agent\",\"id\":\"claude\",\"runId\":\"run_released\",\"onBehalfOf\":{\"kind\":\"user\",\"id\":\"user_released_ui_writer\",\"name\":\"Released Writer\"}},\"capture\":\"turn\",\"via\":\"browser\",\"runId\":\"run_released\",\"turnCut\":\"result\",\"turnId\":\"turn_released\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Agent turn on the signed-in person’s behalf\"}}\nTau-Actor: agent claude run run_released for Released Writer\nTau-Trigger: turn\n"
+    },
+    {
+      "scenario": "Restored an earlier version",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Released Writer <user_released_ui_writer@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id nyypyzmqrvnsnkxxxulvxtsrmkmuowvz\n\nRestored an earlier version\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"restore\",\"actor\":{\"kind\":\"user\",\"id\":\"user_released_ui_writer\",\"name\":\"Released Writer\"},\"capture\":\"restore\",\"via\":\"browser\",\"restoredFrom\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Restored an earlier version\"}}\nTau-Actor: user Released Writer\nTau-Trigger: restore\n"
+    },
+    {
+      "scenario": "Saved anonymously",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor Anonymous <anon:5e1ea5edc0de@users.noreply.tau.new> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id slyzvtnxmsywtsqszoosykppommsxnln\n\nSaved anonymously\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"anon:5e1ea5edc0de\",\"name\":\"Anonymous\",\"anonymous\":true},\"capture\":\"save\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved anonymously\"}}\nTau-Actor: user Anonymous\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Saved in a project linked to GitHub",
+      "type": "commit",
+      "ref": "refs/heads/main",
+      "forge": "github",
+      "body": "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nparent bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nauthor released-writer <1234567+released-writer@users.noreply.github.com> 1790000000 +0000\ncommitter Tau <noreply@tau.new> 1790000000 +0000\nchange-id tynottqoyotymxnozpsltlrqttqnzsvl\n\nSaved in a project linked to GitHub\n\nTau-Metadata: {\"version\":2,\"parents\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"provenance\":{\"source\":\"user\",\"actor\":{\"kind\":\"user\",\"id\":\"user_released_ui_writer\",\"name\":\"Released Writer\"},\"capture\":\"save\",\"via\":\"browser\",\"createdAt\":1790000000000},\"summary\":{\"generated\":\"Saved in a project linked to GitHub\"}}\nTau-Actor: user Released Writer\nTau-Trigger: save\n"
+    },
+    {
+      "scenario": "Named a version",
+      "type": "tag",
+      "ref": "refs/tags/v2",
+      "body": "object bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ntype commit\ntag v2\ntagger Released Writer <user_released_ui_writer@users.noreply.tau.new> 1790000000 +0000\n\nReady for print\n\nTau-Tag: {\"version\":2,\"id\":\"0123456789abcdef0123456789abcdef\",\"name\":\"Ready for print\",\"actor\":{\"kind\":\"user\",\"id\":\"user_released_ui_writer\",\"name\":\"Released Writer\"}}\n"
+    }
+  ]
+}

@@ -90,6 +90,21 @@ export type WorkspaceLanes = Readonly<{ chat: boolean; workbench: boolean }>;
  */
 export const WorkspaceLanesContext = createContext<WorkspaceLanes | undefined>(undefined);
 
+/**
+ * Whether the workspace's panes have their settled sizes (layout-ready). `ChatInterfaceDesktop` lays its lanes out
+ * after its first paint, and until then each pane sits at its content's width (1 px) with its contents unrendered; a
+ * pane whose contents size themselves once, as the viewer's canvas sizes its camera, waits for this before it mounts
+ * them. True outside the desktop lanes: mobile and shared pages size their panes on their first layout.
+ */
+export const WorkspaceLayoutReadyContext = createContext(true);
+
+/**
+ * Reads whether the workspace's panes are laid out at their settled sizes.
+ *
+ * @returns Whether the panes are layout-ready; true outside the desktop lanes.
+ */
+export const useWorkspaceLayoutReady = (): boolean => useContext(WorkspaceLayoutReadyContext);
+
 const noLanes: WorkspaceLanes = { chat: false, workbench: false };
 
 /**

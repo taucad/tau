@@ -67,7 +67,9 @@ export default {
    * the Home shell is moved off `/`'s static path to the file the marketing edge
    * function rewrites to (progressive loading PL4, `scripts/place-static-shells.ts`),
    * and where the offline shell worker is generated from the emitted `/usage`
-   * document and the Vite build manifest (B5 R3). The desktop and daemon configs
+   * document and the Vite build manifest (B5 R3), and where the warm manifest is
+   * written from the Vite build manifest and the module-id manifest (progressive
+   * loading PL8, `scripts/write-warm-manifest.ts`). The desktop and daemon configs
    * are separate files and never run this: both already boot from a packaged SPA
    * index fallback.
    */
@@ -78,6 +80,16 @@ export default {
         `Static shell: ${placed.from} -> ${placed.to}${placed.removed.map((file) => `, removed ${file}`).join('')}`,
       );
     }
+    const { writeWarmManifest } = await import('./scripts/write-warm-manifest');
+    const warm = writeWarmManifest({
+      clientDirectory: `${reactRouterConfig.buildDirectory}/client`,
+      moduleIdsPath: `${reactRouterConfig.buildDirectory}/client-module-ids.json`,
+    });
+    console.log(
+      `Warm manifest: ${Object.entries(warm.classes)
+        .map(([id, files]) => `${id} ${String(files.length)} files`)
+        .join(', ')}`,
+    );
     if (!tauCloudEnabled) {
       return;
     }

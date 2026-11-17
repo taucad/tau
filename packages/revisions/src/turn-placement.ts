@@ -730,12 +730,26 @@ export const createTurnPlacementPort = <Tools>(
    * XD4: whether a branch this device lacks may still arrive: only a project that syncs with a remote can bring one.
    * Without that evidence a missing branch is gone for good, and waiting on it would hold the chat forever. Round 28:
    * the evidence is a remotes read that settled on none (`none`), never a read still running or one that failed, whose
-   * `kind` is `'none'` too: a read failure is never taken for no remote.
+   * `kind` is `'none'` too: a read failure is never taken for no remote. A failed read retries (`retrying`), so it
+   * settles on one or the other. Tau #1098: nor is a `failed` with no remote recorded, a connect that failed and undid
+   * its own write: the project still syncs with no remote, and waiting on one would hold the chat until it is reopened.
    */
   const branchMayArrive = (): boolean => {
     const remote = actor.getSnapshot().children.remote?.getSnapshot();
-    return remote !== undefined && remote.value !== 'none';
+    if (remote === undefined || remote.value === 'none') {
+      return false;
+    }
+    return !(remote.value === 'failed' && remote.context.remote === undefined);
   };
+
+  /*
+   * Tau #1098: whether another device reads this project's chats, one answer for `publish` and `pull`, and so for the
+   * heartbeat the host writes only while a publish applies. A remote may bring a branch, and the root pulls this
+   * project's chats (a root without the answer does). An answer that fails rejects the verb, which its host reads as
+   * no evidence either way.
+   */
+  const sharesChats = async (): Promise<boolean> =>
+    branchMayArrive() && (await options.revisions.pullsChats?.()) !== false;
 
   /*
    * XD4: where the placement intent is on this device. A checkout id derives from its branch, so the branch is the
@@ -1129,12 +1143,13 @@ export const createTurnPlacementPort = <Tools>(
       if (fenced) {
         return fencedAnswer(requestId);
       }
-      /* No remote, no other device to tell: the host then writes no heartbeat, which older builds read as opaque. */
-      if (!branchMayArrive()) {
+      /* No other device to tell (no remote, or chat sync off): the host then writes no heartbeat, which older builds
+       * read as opaque. */
+      if (!(await sharesChats())) {
         return refused({
           requestId,
           code: 'CHAT_NOT_SHARED',
-          message: 'This project syncs with no remote, so no other device reads its chats.',
+          message: 'No other device reads this project’s chats.',
         });
       }
       recordsChanged();
@@ -1146,9 +1161,7 @@ export const createTurnPlacementPort = <Tools>(
       if (fenced) {
         return fencedAnswer(requestId);
       }
-      /* Round 27: and only where its root says it pulls this project's chats (a root without the answer does). An
-       * answer that fails rejects the pull, which its host reads as no evidence that this device cannot pull. */
-      if (!branchMayArrive() || (await options.revisions.pullsChats?.()) === false) {
+      if (!(await sharesChats())) {
         return refused({
           requestId,
           code: 'CHAT_NOT_SHARED',

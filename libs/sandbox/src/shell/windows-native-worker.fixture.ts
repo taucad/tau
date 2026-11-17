@@ -15,7 +15,6 @@ import {
   openSync,
   readFileSync,
   realpathSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -24,7 +23,7 @@ import type { Server } from 'node:net';
 import { join } from 'node:path';
 
 import { openWindowsHelperSession } from '#shell/windows-helper-session.fixture.js';
-import { windowsExclusiveLaunchRequirement } from '#shell/windows-sandbox-protocol.js';
+import type { WindowsHelperSession } from '#shell/windows-helper-session.fixture.js';
 import type { WindowsHelperFrame, WindowsLaunchSpec } from '#shell/windows-sandbox-protocol.js';
 
 /** What the row borrows from the conformance suite. */
@@ -264,114 +263,272 @@ export const nativeWorkerConformance = async (context: NativeWorkerContext): Pro
   assert.equal(existsSync(journal), false);
 };
 
-/**
- * Run NW02: the helper runs one launch at a time on the computer (`windows-sandbox/README.md`, "Sessions"). While a
- * worker is live, a second launch is refused before anything changes and `restore` keeps the journal it is given;
- * once the first has ended and restored, the second runs, and both leave every ACL exactly as it was.
- *
- * @param context - The suite's root, helper, probe and outside observers.
- */
-export const launchExclusionConformance = async (context: NativeWorkerContext): Promise<void> => {
-  const { root, helperPath, workerProbe, systemRoot, recordHelperDiagnostic, sddlOf, waitUntil } = context;
-  const runtime = join(root, 'exclusion-runtime');
-  const firstArtifacts = join(root, 'exclusion-first');
-  const secondArtifacts = join(root, 'exclusion-second');
-  const journals = join(root, 'exclusion-journal');
-  for (const directory of [runtime, firstArtifacts, secondArtifacts, journals]) {
+/** One worker of the concurrency rows: its own folders beside the shared runtime root, and its live session. */
+type Worker = Readonly<{
+  name: string;
+  secret: string;
+  nonce: string;
+  artifacts: string;
+  journal: string;
+  session: WindowsHelperSession;
+}>;
+
+/** The shared setup of NW02-NW04: one runtime root every worker reads, holding the probe and a data file. */
+const concurrencySetup = (context: NativeWorkerContext, row: string) => {
+  const { root, helperPath, workerProbe, systemRoot, recordHelperDiagnostic, waitUntil } = context;
+  const base = join(root, row);
+  const runtime = join(base, 'runtime');
+  const journals = join(base, 'journals');
+  for (const directory of [runtime, journals]) {
     mkdirSync(directory, { recursive: true });
   }
   const runtimeRoot = realpathSync.native(runtime);
   const worker = join(runtimeRoot, 'tau-worker-probe.exe');
   copyFileSync(workerProbe, worker);
+  const data = join(runtimeRoot, 'runtime-data.txt');
+  const shared = randomUUID();
+  writeFileSync(data, shared);
   const digest = `sha256:${createHash('sha256').update(readFileSync(worker)).digest('hex')}`;
-  const watched = [runtimeRoot, worker, firstArtifacts, secondArtifacts];
-  const before = sddlOf(watched);
-  const specOf = (artifacts: string, journal: string): WindowsLaunchSpec => ({
-    version: 1,
-    executable: worker,
-    executableDigest: digest,
-    arguments: [],
-    workingDirectory: artifacts,
-    environment: Object.fromEntries([['SystemRoot', systemRoot]]),
-    stdio: { kind: 'pipes', input: true },
-    filesystem: { readable: [runtimeRoot], writable: [artifacts], readOnly: [], denied: [] },
-    journal,
-  });
-  const firstJournal = join(journals, 'first.acl.json');
-  const secondJournal = join(journals, 'second.acl.json');
-  const open = () => openWindowsHelperSession(helperPath, recordHelperDiagnostic);
-  const settled = (frame: WindowsHelperFrame): boolean =>
-    frame.type === 'ready' || frame.type === 'refused' || frame.type === 'cleanup-failed';
-  const ended = (frame: WindowsHelperFrame): boolean => frame.type === 'exit' || frame.type === 'cleanup-failed';
+  const watched: string[] = [runtimeRoot, worker, data];
+  const folders = (name: string) => {
+    const made = (folder: string): string => {
+      mkdirSync(folder, { recursive: true });
+      return realpathSync.native(folder);
+    };
+    const own = made(join(base, `${name}-private`));
+    const artifacts = made(join(base, `${name}-artifacts`));
+    const secret = join(own, 'secret.txt');
+    const nonce = randomUUID();
+    writeFileSync(secret, nonce);
+    watched.push(own, secret, artifacts);
+    return { own, artifacts, secret, nonce };
+  };
+  /** Start a worker that reads the runtime root and its own folder and writes its own artifacts; `started` awaited. */
+  const start = async (name: string, made: ReturnType<typeof folders>): Promise<Worker> => {
+    const journal = join(journals, `${name}.acl.json`);
+    const session = openWindowsHelperSession(helperPath, recordHelperDiagnostic);
+    session.send({
+      type: 'spec',
+      spec: {
+        version: 1,
+        executable: worker,
+        executableDigest: digest,
+        arguments: [],
+        workingDirectory: made.artifacts,
+        environment: Object.fromEntries([['SystemRoot', systemRoot]]),
+        stdio: { kind: 'pipes', input: true },
+        filesystem: { readable: [runtimeRoot, made.own], writable: [made.artifacts], readOnly: [], denied: [] },
+        journal,
+      },
+    });
+    const ready = await session.frame((frame) => frame.type !== 'stderr' && frame.type !== 'stdout', 60_000);
 
-  const first = open();
-  first.send({ type: 'spec', spec: specOf(firstArtifacts, firstJournal) });
-  const firstReady = await first.frame(settled, 60_000);
+    assert.equal(ready.type, 'ready', JSON.stringify(ready));
+    session.send({ type: 'start' });
+    const started = await session.frame(
+      (frame) =>
+        frame.type === 'started' ||
+        frame.type === 'exit' ||
+        frame.type === 'refused' ||
+        frame.type === 'cleanup-failed',
+      60_000,
+    );
 
-  assert.equal(firstReady.type, 'ready', JSON.stringify(firstReady));
-  first.send({ type: 'start' });
-  const firstStarted = await first.frame((frame) => frame.type === 'started' || ended(frame), 60_000);
+    assert.equal(started.type, 'started', JSON.stringify(started));
+    assert.equal(existsSync(journal), true);
+    return { name, secret: made.secret, nonce: made.nonce, artifacts: made.artifacts, journal, session };
+  };
+  /** Send requests and wait for exactly their answers (after every earlier one). */
+  const ask = async (
+    worker_: Worker,
+    requests: ReadonlyArray<Record<string, unknown>>,
+  ): Promise<Array<Record<string, unknown>>> => {
+    const answers = (): Array<Record<string, unknown>> =>
+      worker_.session
+        .stdout()
+        .split('\n')
+        .filter((line) => line.trim() !== '')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const before = answers().length;
+    worker_.session.send({
+      type: 'input',
+      bytes: new TextEncoder().encode(requests.map((request) => `${JSON.stringify(request)}\n`).join('')),
+    });
+    assert.equal(
+      await waitUntil(() => answers().length >= before + requests.length, 30_000),
+      true,
+      worker_.session.stdout(),
+    );
+    return answers().slice(before, before + requests.length);
+  };
+  /** What a worker can read: its own secret and the shared data, never the other's secret or artifacts. */
+  const isolated = async (self: Worker, other: Worker): Promise<void> => {
+    assertMatches(
+      await ask(self, [
+        { op: 'read', path: self.secret },
+        { op: 'read', path: data },
+        { op: 'read', path: other.secret },
+        { op: 'write', path: join(other.artifacts, `${self.name}.txt`), text: 'planted' },
+        { op: 'write', path: join(self.artifacts, `${self.name}.txt`), text: self.nonce },
+      ]),
+      [
+        { op: 'read', ok: true, text: self.nonce },
+        { op: 'read', ok: true, text: shared },
+        { op: 'read', ok: false },
+        { op: 'write', ok: false },
+        { op: 'write', ok: true },
+      ],
+    );
+  };
+  /** End a worker on close-input: it exits 0 with everything restored and its journal gone. */
+  const finish = async (worker_: Worker): Promise<void> => {
+    worker_.session.send({ type: 'close-input' });
+    const exit = await worker_.session.frame(
+      (frame) => frame.type === 'exit' || frame.type === 'cleanup-failed',
+      60_000,
+    );
+    await worker_.session.closed;
 
-  assert.equal(firstStarted.type, 'started', JSON.stringify(firstStarted));
-  /* The first worker is live: its journal exists and its grant is on its folder. */
-  assert.equal(existsSync(firstJournal), true);
-  assert.notEqual(sddlOf([firstArtifacts])[firstArtifacts], before[firstArtifacts]);
-
-  const secondSddl = sddlOf([secondArtifacts]);
-  const refused = open();
-  refused.send({ type: 'spec', spec: specOf(secondArtifacts, secondJournal) });
-  const refusal = await refused.frame(settled, 60_000);
-  refused.end();
-  await refused.closed;
-
-  assert.equal(refusal.type, 'refused', JSON.stringify(refusal));
-  /* Machine-readable: a host matches the requirement, never the message. */
-  assert.equal(refusal.refusal.status, 'sandbox-unavailable');
-  assert.equal(refusal.refusal.requirement, windowsExclusiveLaunchRequirement);
-  /* Refused before anything changed. */
-  assert.equal(existsSync(secondJournal), false);
-  assert.deepEqual(sddlOf([secondArtifacts]), secondSddl);
-
-  /* `restore` waits for no one either: it keeps a journal while a launch is live. Its content is never read. */
-  const stray = join(journals, 'stray.acl.json');
-  writeFileSync(stray, '');
-  const restore = spawnSync(helperPath, ['restore', '--journal', stray], { encoding: 'utf8', windowsHide: true });
-  for (const line of restore.stderr.split(/\r?\n/u).filter((text) => text !== '')) {
-    recordHelperDiagnostic(line);
-  }
-
-  assert.equal(restore.status, 1, restore.stdout);
-  assert.equal((JSON.parse(restore.stdout) as { requirement?: string }).requirement, windowsExclusiveLaunchRequirement);
-  assert.equal(existsSync(stray), true);
-  rmSync(stray);
-
-  /* The first worker is unaffected, and its end releases the computer: restored, journal gone. */
-  first.send({ type: 'input', bytes: new TextEncoder().encode(`${JSON.stringify({ op: 'echo', value: 1 })}\n`) });
-  assert.equal(await waitUntil(() => first.stdout().includes('"op":"echo"'), 30_000), true, first.stdout());
-  first.send({ type: 'close-input' });
-  const firstExit = await first.frame(ended, 60_000);
-
-  assert.deepEqual(firstExit, { type: 'exit', exit: { exitCode: 0 } });
-  assert.equal(existsSync(firstJournal), false);
-  assert.deepEqual(sddlOf(watched), before);
-
-  /* Taken at once on `exit`, before the first helper has even ended: it released the computer before that frame. */
-  const second = open();
-  second.send({ type: 'spec', spec: specOf(secondArtifacts, secondJournal) });
-  const secondReady = await second.frame(settled, 60_000);
-
-  assert.equal(secondReady.type, 'ready', JSON.stringify(secondReady));
-  await first.closed;
-  second.send({ type: 'start' });
-  second.send({ type: 'close-input' });
-  const secondExit = await second.frame(ended, 60_000);
-  await second.closed;
-
-  assert.deepEqual(secondExit, { type: 'exit', exit: { exitCode: 0 } });
-  assert.deepEqual(JSON.parse(second.stdout().trim()), { op: 'eof', lines: 0 });
-  assert.equal(existsSync(secondJournal), false);
-  assert.deepEqual(sddlOf(watched), before);
+    assert.deepEqual(exit, { type: 'exit', exit: { exitCode: 0 } });
+    assert.equal(existsSync(worker_.journal), false);
+  };
+  return { runtimeRoot, data, shared, watched, folders, start, ask, isolated, finish };
 };
+
+/**
+ * Run NW02 or NW03: two workers live at once over one shared runtime root, each with a folder of its own. Neither
+ * reads the other's folder or writes the other's artifacts; when one ends, the other keeps every grant it had (it
+ * still reads the runtime root and its own folder) while the first's own folders are back exactly as they were; when
+ * both have ended, every path is exactly as before either started, whichever ended first.
+ *
+ * @param context - The suite's root, helper, probe and outside observers.
+ * @param order - Which worker ends first.
+ */
+export const concurrentWorkersConformance = async (
+  context: NativeWorkerContext,
+  order: 'first-ends-first' | 'second-ends-first',
+): Promise<void> => {
+  const { sddlOf } = context;
+  const row = order === 'first-ends-first' ? 'nw02' : 'nw03';
+  const setup = concurrencySetup(context, row);
+  const madeA = setup.folders('a');
+  const madeB = setup.folders('b');
+  const before = sddlOf(setup.watched);
+  const a = await setup.start('a', madeA);
+  const b = await setup.start('b', madeB);
+  await setup.isolated(a, b);
+  await setup.isolated(b, a);
+
+  const [ending, staying] = order === 'first-ends-first' ? [a, b] : [b, a];
+  const [endingMade, stayingMade] = order === 'first-ends-first' ? [madeA, madeB] : [madeB, madeA];
+  await setup.finish(ending);
+  /* The ending worker's own folders are exactly as before; the staying one's grants and the shared root's are intact. */
+  const ownPaths = [endingMade.own, endingMade.secret, endingMade.artifacts];
+  assert.deepEqual(sddlOf(ownPaths), Object.fromEntries(ownPaths.map((path) => [path, before[path]])));
+  assert.notDeepEqual(sddlOf([setup.runtimeRoot]), { [setup.runtimeRoot]: before[setup.runtimeRoot] });
+  assertMatches(
+    await setup.ask(staying, [
+      { op: 'read', path: setup.data },
+      { op: 'read', path: staying.secret },
+      { op: 'write', path: join(stayingMade.artifacts, 'after.txt'), text: 'after' },
+    ]),
+    [
+      { op: 'read', ok: true, text: setup.shared },
+      { op: 'read', ok: true, text: staying.nonce },
+      { op: 'write', ok: true },
+    ],
+  );
+  await setup.finish(staying);
+
+  assert.deepEqual(sddlOf(setup.watched), before);
+};
+
+/**
+ * Run NW04: crash recovery beside a live launch. A worker is killed with its launcher, leaving its journal and its
+ * grants; `restore` refuses the live worker's journal, then restores the dead one's while the live worker runs. The
+ * dead worker's folders come back exactly, the live worker keeps every grant (the shared runtime root included), and
+ * once it ends every path is exactly as before.
+ *
+ * @param context - The suite's root, helper, probe and outside observers.
+ */
+export const crashRecoveryConformance = async (context: NativeWorkerContext): Promise<void> => {
+  const { helperPath, recordHelperDiagnostic, sddlOf } = context;
+  const setup = concurrencySetup(context, 'nw04');
+  const madeLive = setup.folders('live');
+  const madeDead = setup.folders('dead');
+  const before = sddlOf(setup.watched);
+  const live = await setup.start('live', madeLive);
+  const dead = await setup.start('dead', madeDead);
+  await setup.isolated(dead, live);
+
+  dead.session.kill();
+  await dead.session.closed;
+  assert.equal(existsSync(dead.journal), true);
+  const restore = (journal: string) => {
+    const result = spawnSync(helperPath, ['restore', '--journal', journal], { encoding: 'utf8', windowsHide: true });
+    for (const line of result.stderr.split(/\r?\n/u).filter((text) => text !== '')) {
+      recordHelperDiagnostic(line);
+    }
+    return result;
+  };
+  /* A live launch's journal is never restored from outside it. */
+  const refused = restore(live.journal);
+
+  assert.equal(refused.status, 1, refused.stdout);
+  assert.equal(existsSync(live.journal), true);
+  const restored = restore(dead.journal);
+
+  assert.equal(restored.status, 0, `${restored.stdout}${restored.stderr}`);
+  assert.equal(existsSync(dead.journal), false);
+  const deadPaths = [madeDead.own, madeDead.secret, madeDead.artifacts];
+  assert.deepEqual(sddlOf(deadPaths), Object.fromEntries(deadPaths.map((path) => [path, before[path]])));
+  assertMatches(
+    await setup.ask(live, [
+      { op: 'read', path: setup.data },
+      { op: 'read', path: live.secret },
+      { op: 'read', path: dead.secret },
+    ]),
+    [
+      { op: 'read', ok: true, text: setup.shared },
+      { op: 'read', ok: true, text: live.nonce },
+      { op: 'read', ok: false },
+    ],
+  );
+  await setup.finish(live);
+
+  assert.deepEqual(sddlOf(setup.watched), before);
+};
+
+/**
+ * The WIN-X64 native-worker rows, as `[id, title, body]`, for the conformance suite to register.
+ *
+ * @param context - Builds the suite's context when a row runs (its root exists only then).
+ * @returns NW01-NW04.
+ */
+export const nativeWorkerRows = (
+  context: () => NativeWorkerContext,
+): ReadonlyArray<readonly [string, string, () => Promise<void>]> => [
+  [
+    'NW01',
+    'a native worker outside Program Files runs pinned to its digest, loads from its unwritable runtime root, writes only its artifacts, has no network and reads stdin to close-input',
+    async () => nativeWorkerConformance(context()),
+  ],
+  [
+    'NW02',
+    'two concurrent workers over one shared runtime root cannot read each other, and the first to end leaves the other every grant',
+    async () => concurrentWorkersConformance(context(), 'first-ends-first'),
+  ],
+  [
+    'NW03',
+    'the same two workers ending in the other order leave every path exactly as before both',
+    async () => concurrentWorkersConformance(context(), 'second-ends-first'),
+  ],
+  [
+    'NW04',
+    'a crashed worker is restored by restore while another worker over the same runtime root stays live and keeps its grants',
+    async () => crashRecoveryConformance(context()),
+  ],
+];
 
 /** The person's GUI session as a process of theirs sees it: what every launch must leave unchanged. */
 export type PersonSession = Readonly<{

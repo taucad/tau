@@ -25,6 +25,8 @@ export type WindowsHelperSession = Readonly<{
   stdout: () => string;
   /** Close the helper's stdin, which the protocol reads as `terminate`. */
   end: () => void;
+  /** Kill the launcher outright, as a crash would: its job takes the runner and the child, and its journal stays. */
+  kill: () => void;
   /** Settles with the helper's exit code (`undefined` when a signal ended it) once it and its stdout have ended. */
   closed: Promise<number | undefined>;
 }>;
@@ -127,6 +129,9 @@ export const openWindowsHelperSession = (
     stdout: () => output,
     end: () => {
       child.stdin.end();
+    },
+    kill: () => {
+      child.kill('SIGKILL');
     },
     closed,
   };

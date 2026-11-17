@@ -8,10 +8,9 @@
  * descriptor is restored; `cleanup-failed`, a helper that dies without `exit`, and a protocol violation reject it, and
  * the journal stays for {@link ShellProvider.recover}, which has the helper's `restore` write the descriptors back.
  *
- * Each launch has its own AppContainer package, but restore writes whole descriptors back, so two live launches over
- * overlapping paths would undo each other's grants (`windows-sandbox/README.md` "Sessions"): the provider runs one
- * launch at a time and refuses another while one is live or while any earlier launch's journal is unrestored, and the
- * helper refuses a second launch on the computer itself.
+ * Launches run concurrently (`windows-sandbox/README.md` "Sessions"): each grants only SIDs of its own and restores by
+ * removing exactly those, the helper serializes the descriptor edits themselves, and an earlier launch's unrestored
+ * journal stays registered with the helper, so a new launch may start beside it and recovery restores it later.
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -736,8 +735,8 @@ const defaultCustody = (): Readonly<{
  * Create the win32 shell provider over the Windows sandbox helper.
  *
  * Every launch is prepared first (I7): its receipt names the helper's journal before the helper starts and the
- * helper's launcher and runner before the shell starts. One launch runs at a time; another, or one while an earlier
- * launch's journal is unrestored, answers `sandbox-unavailable` without starting anything.
+ * helper's launcher and runner before the shell starts. Launches run concurrently, beside live ones and beside an
+ * earlier launch's unrestored journal alike.
  *
  * @public
  * @param options - The helper, the custody namespace and the host environment.
@@ -758,8 +757,6 @@ export const createWindowsShellProvider = (options: WindowsShellProviderOptions)
     home: options.home ?? homedir(),
     environment,
   });
-  /* Claimed synchronously, before any await, so two launches never both pass the journal check. */
-  const slot = { taken: false };
 
   /**
    * Wrap one started launch: termination on abort, `terminate` or disposal; settlement on the helper's ending.
@@ -790,7 +787,6 @@ export const createWindowsShellProvider = (options: WindowsShellProviderOptions)
       } catch {
         /* The receipt keeps its journal; recovery restores it. */
       }
-      slot.taken = false;
       if (end.kind === 'exit') {
         return end.exit;
       }
@@ -836,13 +832,6 @@ export const createWindowsShellProvider = (options: WindowsShellProviderOptions)
   };
 
   const stage = async (launch: ShellLaunch): Promise<ShellLaunchOutcome> => {
-    if (await custody.occupied()) {
-      return {
-        status: 'sandbox-unavailable',
-        message:
-          'an earlier sandboxed shell has not finished restoring its folder permissions; restart Tau if this persists.',
-      };
-    }
     let journal: string;
     try {
       journal = await custody.begin(launch.executionId);
@@ -963,22 +952,7 @@ export const createWindowsShellProvider = (options: WindowsShellProviderOptions)
       if (refusal !== undefined) {
         return refusal;
       }
-      if (slot.taken) {
-        return {
-          status: 'sandbox-unavailable',
-          message: 'Windows runs one sandboxed shell at a time and another one is running; close it, then try again.',
-        };
-      }
-      slot.taken = true;
-      let outcome: ShellLaunchOutcome | undefined;
-      try {
-        outcome = await stage(launch);
-        return outcome;
-      } finally {
-        if (outcome?.status !== 'started') {
-          slot.taken = false;
-        }
-      }
+      return stage(launch);
     },
   };
 };

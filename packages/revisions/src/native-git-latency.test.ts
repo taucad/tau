@@ -14,7 +14,7 @@
  * observable rather than inferred.
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
@@ -28,6 +28,7 @@ import { readRevisionLog } from '#revision-verbs.js';
 import type { RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
 import { recordedBy } from '#test/identity.js';
+import { shellPath, writeShellExecutable } from '#test/script-executable.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
 const roots: string[] = [];
@@ -51,12 +52,13 @@ const countedProject = async (
   const root = await mkdtemp(join(tmpdir(), `tau-latency-${label}-`));
   roots.push(root);
   const log = join(root, 'children.log');
-  const shim = join(root, 'git-counting');
-  await writeFile(
-    shim,
-    ['#!/bin/sh', `echo start >> ${log}`, 'git "$@"', 'status=$?', `echo end >> ${log}`, 'exit $status', ''].join('\n'),
-    { mode: 0o755 },
-  );
+  const shim = await writeShellExecutable(join(root, 'git-counting'), [
+    `echo start >> ${shellPath(log)}`,
+    'git "$@"',
+    'status=$?',
+    `echo end >> ${shellPath(log)}`,
+    'exit $status',
+  ]);
   const repositoryPath = join(root, 'project');
   await mkdir(repositoryPath, { recursive: true });
   let read = 0;

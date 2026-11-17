@@ -36,20 +36,16 @@ const patches = {
     // record counters (and the poison seam) attach to the resident map instead.
     code = replaceOnce(
       code,
-      'const cached = residentBytes.get(digest);',
-      'const cached = globalThis.__laneB ? globalThis.__laneB.time("session.lookup", () => { const p = globalThis.__laneB; if (p.poisonBytes) { p.state.poisonedLookups += 1; p.state.lookups.hit += 1; p.state.lookups.cache += 1; return p.poisonBytes; } const v = residentBytes.get(digest); if (v) { p.state.lookups.hit += 1; p.state.lookups.cache += 1; } else { p.state.lookups.miss += 1; } return v; }, 0) : residentBytes.get(digest);',
+      'const cached = touch(digest);',
+      'const cached = globalThis.__laneB ? globalThis.__laneB.time("session.lookup", () => { const p = globalThis.__laneB; if (p.poisonBytes) { p.state.poisonedLookups += 1; p.state.lookups.hit += 1; p.state.lookups.cache += 1; return p.poisonBytes; } const v = touch(digest); if (v) { p.state.lookups.hit += 1; p.state.lookups.cache += 1; } else { p.state.lookups.miss += 1; } return v; }, 0) : touch(digest);',
       url,
     );
+    // Publication serializes inline into the resident tier's `keep`, which also runs for
+    // imported entries and recency refreshes; only this call site is a recorded result.
     code = replaceOnce(
       code,
-      'const bytes = utf8.encode(shape.serialize());',
-      'const bytes = globalThis.__laneB ? globalThis.__laneB.time("brep.serialize", () => utf8.encode(shape.serialize())) : utf8.encode(shape.serialize());',
-      url,
-    );
-    code = replaceOnce(
-      code,
-      'residentBytes.set(digest, bytes);',
-      'residentBytes.set(digest, bytes); if (globalThis.__laneB) { const p = globalThis.__laneB; p.note("session.record", 0, bytes.byteLength); if (p.captureRecordedBrep && !p.capturedBrep) { p.state.capturedBrep = bytes; } p.state.records.staged += 1; p.state.records.bytes += bytes.byteLength; }',
+      'keep(digest, utf8.encode(shape.serialize()), descriptor);',
+      '{ const bytes = globalThis.__laneB ? globalThis.__laneB.time("brep.serialize", () => utf8.encode(shape.serialize())) : utf8.encode(shape.serialize()); keep(digest, bytes, descriptor); if (globalThis.__laneB) { const p = globalThis.__laneB; p.note("session.record", 0, bytes.byteLength); if (p.captureRecordedBrep && !p.capturedBrep) { p.state.capturedBrep = bytes; } p.state.records.staged += 1; p.state.records.bytes += bytes.byteLength; } }',
       url,
     );
     code = replaceOnce(

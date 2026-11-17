@@ -117,7 +117,7 @@ import type { ImportGrant } from '#main/import-grants.js';
 import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
-import { isRendererTelemetryConsent, writeRendererTelemetryConsent } from '#main/telemetry-consent.js';
+import { createRendererTelemetryConsentRelay } from '#main/telemetry-consent.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import { updaterFailureSignal } from '#main/desktop-signals.js';
 import {
@@ -188,9 +188,13 @@ if (environmentLocked) {
 const desktopChannel = app.isPackaged ? packagedChannel(app.getAppPath()) : 'production';
 app.setName(desktopChannel === 'staging' ? 'Tau Staging' : 'Tau');
 if (desktopChannel === 'staging') {
-  // Development acceptance runs may explicitly isolate their profile; releases retain the channel profile.
-  if (environmentLocked || !app.commandLine.hasSwitch('user-data-dir')) {
+  /* Only a locked release owns `Tau Staging`. A build that honours overrides keeps an explicit `--user-data-dir` and
+   * otherwise uses `Tau Staging Dev`, so a development or test run never defaults into the installed app's profile
+   * (desktop resilient startup blueprint, D7). */
+  if (environmentLocked) {
     app.setPath('userData', join(app.getPath('appData'), 'Tau Staging'));
+  } else if (!app.commandLine.hasSwitch('user-data-dir')) {
+    app.setPath('userData', join(app.getPath('appData'), 'Tau Staging Dev'));
   }
   app.setPath('sessionData', app.getPath('userData'));
 }
@@ -390,6 +394,10 @@ const launchDeepLink = deepLinkArgument(process.argv.slice(1), desktopScheme);
 if (launchDeepLink !== undefined) {
   receiveDeepLink(launchDeepLink);
 }
+
+/** The smallest content area a window can be resized to (D4.6); the web sweep's smallest viewport is the same. */
+const minimumContentWidth = 400;
+const minimumContentHeight = 300;
 
 /* How far each quit wait outlasts the bound it awaits, so the inner reason lands first (rule 9). */
 const quitMarginMilliseconds = 3000;
@@ -1498,16 +1506,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
       await auth.signOut();
     }
   });
-  /* AR-W4-03c: main follows the renderer's resolved consent; persisted for the next launch's main producers. */
-  const telemetryConsentPath = join(app.getPath('userData'), 'telemetry-consent.json');
+  /* AR-W4-03c: main follows the renderer's resolved consent, persisted for the next launch, and relays it to the
+   * services host, whose desktop project hosts report sync attempts only under `granted` (AR-W6-02). */
+  const telemetryConsent = createRendererTelemetryConsentRelay({
+    path: join(app.getPath('userData'), 'telemetry-consent.json'),
+    publish: (frame) => {
+      services.post(frame);
+    },
+    warn: (event, detail) => {
+      log.log('warn', event, detail);
+    },
+  });
   ipcMain.on(telemetryConsentChannel, (event, consent: unknown) => {
-    if (!trusted(event.senderFrame) || !isRendererTelemetryConsent(consent)) {
-      return;
-    }
-    try {
-      writeRendererTelemetryConsent(telemetryConsentPath, consent);
-    } catch (error) {
-      log.log('warn', 'telemetry-consent.write-failed', { message: String(error) });
+    if (trusted(event.senderFrame)) {
+      telemetryConsent.accept(consent);
     }
   });
   ipcMain.on(appIconThemeChannel, (event, theme: unknown) => {
@@ -1870,8 +1882,26 @@ const bootstrapElectronApp = async (): Promise<void> => {
     const publishFullscreen = (): void => {
       window.webContents.send(windowFullscreenChannel, window.isFullScreen());
     };
-    window.on('enter-full-screen', publishFullscreen);
-    window.on('leave-full-screen', publishFullscreen);
+    /* D4.6: the floor is a 400 × 300 content area on every platform. Electron's minimum applies to the frame, so the
+     * frame's own size (title bar, menu bar, borders) is measured and added, after creation and whenever full screen
+     * changes the chrome. */
+    const holdContentFloor = (): void => {
+      const [frameWidth = 0, frameHeight = 0] = window.getSize();
+      const [contentWidth = 0, contentHeight = 0] = window.getContentSize();
+      window.setMinimumSize(
+        minimumContentWidth + Math.max(0, frameWidth - contentWidth),
+        minimumContentHeight + Math.max(0, frameHeight - contentHeight),
+      );
+    };
+    holdContentFloor();
+    window.on('enter-full-screen', () => {
+      publishFullscreen();
+      holdContentFloor();
+    });
+    window.on('leave-full-screen', () => {
+      publishFullscreen();
+      holdContentFloor();
+    });
     window.webContents.on('did-finish-load', publishFullscreen);
     /* Closing or reloading a window never asks: a page that holds its unload is let through, and a running Terminal
      * session ends with the page. */

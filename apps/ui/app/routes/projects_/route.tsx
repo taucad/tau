@@ -15,7 +15,6 @@ export const handle: Handle = {
   // D11 (PG-PROJ-1): New project in the phone top bar at 40px; from `md` up it stays in the title row.
   actions: () => <NewProjectLink size='lg' />,
   actionsScope: 'phone',
-  enableOverflowY: true,
 };
 
 export default function Projects(): React.JSX.Element {

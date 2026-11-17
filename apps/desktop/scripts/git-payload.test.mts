@@ -25,7 +25,35 @@ const sha256 = /^[\da-f]{64}$/u;
 assert.match(payload.gitSourceSha256, sha256);
 assert.match(payload.gitLfsLicenseSha256, sha256);
 assert.equal(payload.gitSourceUrl, `https://www.kernel.org/pub/software/scm/git/git-${payload.gitVersion}.tar.xz`);
-assert.deepEqual(Object.keys(payload.gitTargets).sort(), ['darwin-arm64', 'darwin-x64', 'linux-x64']);
+assert.deepEqual(Object.keys(payload.gitTargets).sort(), ['darwin-arm64', 'darwin-x64', 'linux-x64', 'win32-x64']);
+assert.deepEqual(
+  Object.entries(payload.gitTargets)
+    .filter(([, target]) => target.build === 'mingit')
+    .map(([name]) => name),
+  ['win32-x64'],
+);
+/* One git release everywhere: MinGit is Git for Windows' build of `gitVersion`, so the store policy review covers it. */
+assert.ok(payload.mingitVersion.startsWith(`${payload.gitVersion}.windows.`), payload.mingitVersion);
+assert.match(payload.mingitArchive.sha256, sha256);
+assert.equal(
+  payload.mingitArchive.url,
+  `https://github.com/git-for-windows/git/releases/download/v${payload.mingitVersion}/${payload.mingitArchive.name}`,
+);
+assert.ok(payload.gitTargets['win32-x64']?.gitLfs.name.startsWith('git-lfs-windows-amd64-'));
+/* Left out: Git Credential Manager, its selector, the self-updater and the system config, and nothing at the root. */
+assert.ok(payload.mingitOmittedPaths.includes('etc/gitconfig'), 'the payload has no system config');
+assert.ok(payload.mingitOmittedPaths.includes('mingw64/bin/git-credential-manager.exe'));
+assert.ok(payload.mingitOmittedPaths.includes('mingw64/bin/git-update-git-for-windows'));
+assert.equal(new Set(payload.mingitOmittedPaths).size, payload.mingitOmittedPaths.length);
+for (const kept of [
+  'mingw64/bin/git.exe',
+  'cmd/git.exe',
+  'usr/bin/sh.exe',
+  'LICENSE.txt',
+  'etc/package-versions.txt',
+]) {
+  assert.ok(!payload.mingitOmittedPaths.includes(kept), `${kept} must ship`);
+}
 for (const { gitLfs } of Object.values(payload.gitTargets)) {
   assert.match(gitLfs.sha256, sha256);
   assert.ok(gitLfs.url.startsWith('https://github.com/git-lfs/git-lfs/releases/download/'), gitLfs.url);
@@ -86,6 +114,26 @@ try {
     payload.gitPayloadNotice.includes(`../SOURCES/${payload.gitSourceName}`),
     'the NOTICE names where the source is',
   );
+
+  /* Windows: MinGit's launcher at bin/git.exe, git-lfs in mingw64's exec path, its LICENSE.txt and no source copy. */
+  const windows = payload.gitPayloadLayout(join(root, 'git'), 'win32-x64');
+  await mkdir(dirname(windows.git), { recursive: true });
+  await writeFile(windows.git, 'MZ');
+  assert.deepEqual(bundledGitEnvironment(root, { architecture: 'x64', platform: 'win32' }), {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+    TAU_GIT_EXECUTABLE: windows.git,
+  });
+  assert.equal(windows.gitLfs, join(windows.root, 'mingw64', 'libexec', 'git-core', 'git-lfs.exe'));
+  assert.equal(windows.gitCopying, join(windows.root, 'LICENSE.txt'));
+  assert.equal(windows.source, undefined);
+  assert.equal(
+    payload.gitPayloadLayout(join(root, 'git'), 'win32-x64', '.win32-x64.1.tmp').gitLfs,
+    join(root, 'git', '.win32-x64.1.tmp', 'mingw64', 'libexec', 'git-core', 'git-lfs.exe'),
+    'a staging directory has its target’s layout',
+  );
+  for (const named of [payload.mingitArchive.sha256, `v${payload.mingitVersion}`, ...payload.mingitOmittedPaths]) {
+    assert.ok(payload.mingitPayloadNotice.includes(named), `the Windows NOTICE names ${named}`);
+  }
   console.log('✓ the payload lands where bundledGitEnvironment resolves it');
 
   /* The source copy: the pinned bytes are copied, anything else is refused. */
@@ -118,6 +166,15 @@ try {
     !payload.gitPayloadManifestIsCurrent({ ...payload.gitPayloadManifest(built), makeVariables: [] }, built),
     'changed make variables are not',
   );
+  const mingitBuilt = { ...built, target: 'win32-x64' };
+  const mingitManifest = payload.gitPayloadManifest(mingitBuilt);
+  assert.equal(mingitManifest.gitVersion, payload.mingitVersion);
+  assert.ok(payload.gitPayloadManifestIsCurrent(structuredClone(mingitManifest), mingitBuilt));
+  assert.ok(
+    !payload.gitPayloadManifestIsCurrent({ ...mingitManifest, omittedPaths: [] }, mingitBuilt),
+    'a changed omission list is not',
+  );
+  assert.ok(!payload.gitPayloadManifestIsCurrent(manifest, mingitBuilt), 'another target’s manifest is not');
   console.log('✓ a written manifest reads as current, and a changed payload does not');
 } finally {
   await rm(root, { recursive: true, force: true });

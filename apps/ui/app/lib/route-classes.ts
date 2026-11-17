@@ -7,8 +7,10 @@
  * - the prerender list (`static-paths.ts`, read by `react-router.config.ts`);
  * - the Netlify routing of static shells: the React Router function's `excludedPaths` (`vite.config.ts`) and the
  *   rewrite, redirect and header rules of `netlify.toml`, which {@link renderNetlifyShellRouting} generates and
- *   `route-classes.test.ts` holds equal to the checked-in file;
- * - the interactive roots the critical-path guards measure (`scripts/critical-path.mts`);
+ *   `route-classes.test.ts` holds equal to the checked-in file, and the Home shell's file, which the marketing edge
+ *   function names and the build moves into place (`scripts/place-static-shells.ts`);
+ * - the interactive roots the critical-path guards measure (`scripts/critical-path.mts`), and the warm manifest the
+ *   build writes from them (`scripts/write-warm-manifest.ts`, read by `warm-next-step.ts` and the marketing site);
  * - the shell invariants checked on the build output (`scripts/check-static-shells.mts`).
  *
  * The file imports nothing, so build configuration and native Node scripts can read it before app aliases exist.
@@ -41,6 +43,11 @@ type RouteClassBase = Readonly<{
    * so it belongs to the interactive tier). Present on the classes the critical-path guards measure.
    */
   interactive?: readonly string[];
+  /**
+   * The class whose interactive tier this class's documents prefetch once idle (progressive loading PL8,
+   * `warm-next-step.ts`): the step a visitor most likely takes next. It names a class with {@link interactive} roots.
+   */
+  warms?: string;
 }>;
 
 /** A class served by one prerendered document for all of its URLs. */
@@ -54,6 +61,16 @@ export type StaticShellClass = RouteClassBase &
     match: string;
     /** Where the shell is prerendered: the pattern with each `:name` replaced by {@link shellSentinel}. */
     shellPath: string;
+    /**
+     * What sends a request to the shell.
+     *
+     * - `rewrite`: Netlify, from the URL alone. The function excludes the class's URLs and a generated `netlify.toml`
+     *   rule rewrites them to the shell's prerendered file.
+     * - `edge`: the marketing edge function (`netlify/edge-functions/marketing.ts`), per request, because the same URL
+     *   also serves marketing. The build moves the prerendered file to {@link shellDocumentFile} (`place-static-shells.ts`)
+     *   so that a request the edge function passes on reaches the function as before and never a static file.
+     */
+    via: 'rewrite' | 'edge';
   }>;
 
 /** A class whose documents are not a shared shell. */
@@ -89,6 +106,7 @@ const projectClass: StaticShellClass = {
   id: 'project',
   label: 'project route',
   delivery: 'static-shell',
+  via: 'rewrite',
   match: '/w/:workspace/:project',
   shellPath: `/w/${shellSentinel}/${shellSentinel}`,
   routes: ['w.$workspace.$project'],
@@ -105,18 +123,30 @@ const projectClass: StaticShellClass = {
   ],
 };
 
+/**
+ * The Home shell (PL4): `/` is marketing or Home by the visitor's `tau-entry` preference, so the marketing edge function
+ * chooses per request and rewrites a `tau-entry=app` visit to this document. Home has no server loader and the root
+ * loader reads no visitor (PL2), so the function's Home was already a function of the deploy only. Every other answer at
+ * `/` (no preference, `?website`, a write, the `www` alias) and `/_root.data` stay where they were.
+ */
+const homeClass: StaticShellClass = {
+  id: 'home',
+  label: 'Home',
+  delivery: 'static-shell',
+  via: 'edge',
+  match: '/',
+  shellPath: '/',
+  routes: ['_index'],
+  // Home's open graph adds the rich composer, which `useNewProjectComposer` requests at mount.
+  interactive: [...shellRoots, 'routes/_index/route.tsx', 'components/chat/new-project-chat-composer.tsx'],
+  // LB9: a project row and the composer's first send both open the project route.
+  warms: 'project',
+};
+
 /** The registry. Order is report order. */
 export const routeClasses: readonly RouteClass[] = [
   projectClass,
-  {
-    id: 'home',
-    label: 'Home',
-    // PL4 moves it to a static shell behind the marketing edge function's `tau-entry=app` rewrite.
-    delivery: 'function',
-    routes: ['_index'],
-    // Home's open graph adds the rich composer, which `useNewProjectComposer` requests at mount.
-    interactive: [...shellRoots, 'routes/_index/route.tsx', 'components/chat/new-project-chat-composer.tsx'],
-  },
+  homeClass,
   {
     id: 'offline-shell',
     label: 'offline shell',
@@ -150,7 +180,7 @@ export const routeClasses: readonly RouteClass[] = [
       'files',
       'github.complete',
       'import.$',
-      'invitations.$token',
+      'invitations._index',
       'loader',
       'loader_.glass',
       'machines.$hostId.$machineId',
@@ -180,6 +210,7 @@ export const routeClasses: readonly RouteClass[] = [
       'health.ready.ts',
       'health.startup.ts',
       'i.$',
+      'invitations.$token',
       'settings_',
       'settings_.$',
     ],
@@ -195,6 +226,16 @@ export const routeClasses: readonly RouteClass[] = [
 /** The classes served by a static shell. */
 export const staticShellClasses: readonly StaticShellClass[] = routeClasses.filter(
   (routeClass): routeClass is StaticShellClass => routeClass.delivery === 'static-shell',
+);
+
+/** The shells Netlify's generated rules serve from the URL alone. */
+export const rewriteShellClasses: readonly StaticShellClass[] = staticShellClasses.filter(
+  (routeClass) => routeClass.via === 'rewrite',
+);
+
+/** The shells the marketing edge function chooses per request. */
+export const edgeShellClasses: readonly StaticShellClass[] = staticShellClasses.filter(
+  (routeClass) => routeClass.via === 'edge',
 );
 
 /**
@@ -246,14 +287,15 @@ export const shellPathExpression = (routeClass: StaticShellClass): RegExp =>
   );
 
 /**
- * The static shell that serves a pathname, if any. This is the routing the deployed site performs, for tests and
- * local servers that stand in for it.
+ * The static shell Netlify serves for a pathname, if any: the routing the deployed site performs after its edge
+ * functions, for tests and local servers that stand in for it. An edge shell (Home) depends on the request's cookies, so
+ * none is named here; `netlify/edge-functions/marketing.ts` chooses it.
  *
  * @param pathname - A URL pathname, as sent (percent escapes kept).
  * @returns The class whose shell answers it, or `undefined` when the function does.
  */
 export const staticShellFor = (pathname: string): StaticShellClass | undefined =>
-  staticShellClasses.find((routeClass) => shellPathExpression(routeClass).test(pathname));
+  rewriteShellClasses.find((routeClass) => shellPathExpression(routeClass).test(pathname));
 
 /**
  * Whether a pathname is a shell's own prerender path: the prerender pass renders it, and the root loader then renders
@@ -270,14 +312,37 @@ export const isStaticShellPath = (pathname: string): boolean => {
 /** The paths the build prerenders a shell at. */
 export const staticShellPrerenderPaths = (): string[] => staticShellClasses.map((routeClass) => routeClass.shellPath);
 
+/** The files React Router's prerender pass writes for one path, relative to the client output directory. */
+export type PrerenderedFiles = Readonly<{ document: string; data: readonly string[] }>;
+
 /**
- * The file the build writes a shell to, relative to the client output directory.
+ * The files the prerender pass writes for a path (`@react-router/dev` `prerenderRoute` and `prerenderData`): the
+ * document at `<path>/index.html`, and the root loader's data at `<path>.data`. For `/` the data file is `_root.data`
+ * on React Router 7, and `_.data` under the trailing-slash-aware data requests React Router 8 makes the default, so both
+ * are named.
+ *
+ * @param path - A prerender path.
+ * @returns The document file and the candidate data files.
+ */
+export const prerenderedFiles = (path: string): PrerenderedFiles => {
+  const relative = path.replaceAll(/^\/+|\/+$/gu, '');
+  return relative === ''
+    ? { document: 'index.html', data: ['_root.data', '_.data'] }
+    : { document: `${relative}/index.html`, data: [`${relative}.data`] };
+};
+
+/**
+ * The file a shell is served from, relative to the client output directory. A rewrite shell is served from the file the
+ * prerender writes; an edge shell is moved to `__shell/<id>/index.html`, a path no route or rewrite answers, so that its
+ * URL's own static path stays empty.
  *
  * @param routeClass - A static-shell class.
  * @returns The `index.html` path.
  */
 export const shellDocumentFile = (routeClass: StaticShellClass): string =>
-  `${routeClass.shellPath.slice(1)}/index.html`;
+  routeClass.via === 'edge'
+    ? `${shellSentinel}/${routeClass.id}/index.html`
+    : prerenderedFiles(routeClass.shellPath).document;
 
 /**
  * The React Router function's `excludedPaths` (`@netlify/vite-plugin-react-router`): each shell pattern in URLPattern
@@ -288,7 +353,7 @@ export const shellDocumentFile = (routeClass: StaticShellClass): string =>
  * @returns The excluded paths.
  */
 export const netlifyFunctionExcludedPaths = (): string[] =>
-  staticShellClasses.map((routeClass) =>
+  rewriteShellClasses.map((routeClass) =>
     routeClass.match
       .split('/')
       .map((segment) => (segment.startsWith(':') ? `${segment}(${shellSegment})` : segment))
@@ -319,7 +384,7 @@ export type NetlifyRedirect = Readonly<{ from: string; to: string; status: numbe
  * @returns The rules.
  */
 export const netlifyShellRedirects = (canonicalHost: string): NetlifyRedirect[] =>
-  staticShellClasses.flatMap((routeClass) => {
+  rewriteShellClasses.flatMap((routeClass) => {
     const placeholders = routeClass.match;
     const prefix = shellPrefix(routeClass);
     const shellFile = `/${shellDocumentFile(routeClass)}`;
@@ -336,7 +401,8 @@ export const netlifyShellRedirects = (canonicalHost: string): NetlifyRedirect[] 
   });
 
 /**
- * The `Set-Cookie` a shell response sends: it expires the skew protection cookie (`tau_skew`) an earlier function
+ * The `Set-Cookie` a shell response sends (from `netlify.toml` for a rewrite shell, from the marketing edge function for
+ * the Home shell): it expires the skew protection cookie (`tau_skew`) an earlier function
  * document set. A static shell cannot name its own deploy's token (OD7 waits on Netlify confirming the token is not a
  * secret), and a token left from an older deploy would pin the shell's asset requests to that deploy, which does not
  * hold this build's chunks. Unpinned, the shell's requests go to the live deploy, which serves this build and keeps the
@@ -367,7 +433,7 @@ export const renderNetlifyShellRouting = ({
     (rule) =>
       `[[redirects]]\nfrom = ${tomlString(rule.from)}\nto = ${tomlString(rule.to)}\nstatus = ${String(rule.status)}\nforce = ${String(rule.force)}\n`,
   );
-  const prefixes = [...new Set(staticShellClasses.map((routeClass) => `${shellPrefix(routeClass)}/*`))];
+  const prefixes = [...new Set(rewriteShellClasses.map((routeClass) => `${shellPrefix(routeClass)}/*`))];
   const headers = prefixes.map(
     (prefix) =>
       `[[headers]]\nfor = ${tomlString(prefix)}\n[headers.values]\nSet-Cookie = ${tomlString(shellSkewCookie(skewCookieName))}\n`,

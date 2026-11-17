@@ -1,22 +1,27 @@
 /**
- * `/invitations/:token` — accepting a project invitation (charter W5, D27).
+ * `/invitations` — accepting a project invitation (charter W5, D27).
  *
- * There is no invitation email, so this link is the whole of what an invitee
+ * There is no invitation email, so the link is the whole of what an invitee
  * receives: an address they may not recognise, in an account they may not be
  * signed in to. Every branch it lands in therefore has to be a sentence a
  * stranger can act on with no other context.
  *
+ * The link is `/invitations/<token>`, but nothing renders there: that route
+ * moves the token out of the address and redirects here (#2290), so no page,
+ * pageview, replay or sign-in `redirectTo` ever carries it. This page reads the
+ * token back from where that route held it (`#lib/pending-invitation.lib`).
+ *
  * Accepting is authenticated, because it binds the invitation to an account and
- * there is no account to bind before signing in. A signed-out visitor keeps the
- * link through the app's own `redirectTo` and comes back here afterwards.
+ * there is no account to bind before signing in. A signed-out visitor signs in
+ * with `redirectTo=/invitations` and comes back here to a token still held.
  */
 
 import type { MetaFunction } from 'react-router';
 import type { Handle } from '#types/matches.types.js';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
-import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Link, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@better-auth-ui/react';
 import { Users } from 'lucide-react';
@@ -28,12 +33,15 @@ import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { authClient } from '#lib/auth-client.js';
 import { cloudProjectsQueryKeyFor, fetchCloudProjects } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
+import { clearPendingInvitation, readPendingInvitation } from '#lib/pending-invitation.lib.js';
 
 export const meta: MetaFunction = () => [{ title: 'Project invitation · Tau' }];
-export const handle: Handle = { title: 'Project invitation', enableOverflowY: true };
+export const handle: Handle = { title: 'Project invitation' };
 
 /** What the route can end in, once the token has been offered. */
 type AcceptOutcome =
+  /** Accepted: the token is spent and forgotten, and the project is opening. */
+  | Readonly<{ kind: 'accepted' }>
   | Readonly<{ kind: 'mismatch' }>
   | Readonly<{ kind: 'unverified' }>
   | Readonly<{ kind: 'spent' }>
@@ -98,20 +106,34 @@ export function InvitationNotice({
  * The offer never gates the page: accepting in the browser is what this route
  * does, and the app is the second way. On the desktop build, and for any link
  * the shell would refuse, `OpenInDesktop` renders nothing and this is the
- * page exactly as it was.
+ * page exactly as it was. The address bar no longer holds the link, so the
+ * offer is handed the path it stands for; it never renders it.
  *
  * @param body - What the route decided to show.
+ * @param token - The invitation being accepted, when one is held.
  * @returns The page.
  */
-const withDesktopOffer = (body: React.ReactNode): React.JSX.Element => (
+const withDesktopOffer = (body: React.ReactNode, token?: string): React.JSX.Element => (
   <PageContent className='space-y-6'>
     <PageHeader title='Project invitation' />
     <div className='flex flex-col items-center gap-6'>
       {body}
-      <OpenInDesktop continueLabel='Accept in the browser' />
+      {token === undefined ? undefined : (
+        <OpenInDesktop continueLabel='Accept in the browser' path={`/invitations/${token}`} />
+      )}
     </div>
   </PageContent>
 );
+
+/**
+ * The held token is fixed for the life of the page: it is written before the
+ * page loads and only ever cleared once the API has answered, which ends the
+ * page's use of it. So nothing is subscribed to.
+ */
+const subscribeHeld = (): (() => void) => () => undefined;
+/** The server renders before any cookie or session storage is readable: `null` is "not read yet". */
+// oxlint-disable-next-line typescript/no-restricted-types -- `null` is the server's "not read yet", distinct from "no token".
+const serverHeld = (): string | undefined | null => null;
 
 /**
  * Accept an invitation as the signed-in account, then open the project.
@@ -119,7 +141,8 @@ const withDesktopOffer = (body: React.ReactNode): React.JSX.Element => (
  * @returns The route.
  */
 export default function AcceptInvitation(): React.JSX.Element {
-  const { token } = useParams();
+  const held = useSyncExternalStore(subscribeHeld, readPendingInvitation, serverHeld);
+  const token = held ?? undefined;
   const { data: session, isPending } = useSession(authClient);
   const { signIn } = useAuthLinks();
   const navigate = useNavigate();
@@ -149,10 +172,20 @@ export default function AcceptInvitation(): React.JSX.Element {
         });
         if (!response.ok) {
           const refused = (await response.json().catch(() => ({}))) as Readonly<{ code?: unknown }>;
-          setOutcome(outcomeForCode(refused.code));
+          const refusal = outcomeForCode(refused.code);
+          /* A spent token never works again; the other refusals are fixed by
+             another account or a verified address, and keep it for the retry. */
+          if (refusal.kind === 'spent') {
+            clearPendingInvitation(token);
+          }
+          setOutcome(refusal);
           return;
         }
-        const accepted = (await response.json()) as Readonly<{ projectId?: unknown }>;
+        setOutcome({ kind: 'accepted' });
+        clearPendingInvitation(token);
+        const accepted = (await response.json()) as Readonly<{
+          projectId?: unknown;
+        }>;
         if (typeof accepted.projectId !== 'string') {
           setOutcome({ kind: 'failed' });
           return;
@@ -181,8 +214,26 @@ export default function AcceptInvitation(): React.JSX.Element {
     void accept();
   }, [navigate, openProject, queryClient, session, token]);
 
-  if (isPending) {
-    return withDesktopOffer(
+  const page = (body: React.ReactNode): React.JSX.Element => withDesktopOffer(body, token);
+
+  /* Only before an answer: once the API has answered, the token is forgotten
+     (`clearPendingInvitation`) and the answer is what the page shows. */
+  if (held === undefined && outcome === undefined) {
+    return page(
+      <InvitationNotice
+        title='There is no invitation to open.'
+        detail='Open the invitation link you were sent again. If it no longer works, ask the project owner for a new one.'
+        action={
+          <Button asChild variant='outline'>
+            <Link to='/projects'>Go to projects</Link>
+          </Button>
+        }
+      />,
+    );
+  }
+
+  if (isPending || held === null) {
+    return page(
       <div
         role='status'
         aria-busy='true'
@@ -195,7 +246,7 @@ export default function AcceptInvitation(): React.JSX.Element {
   }
 
   if (!session) {
-    return withDesktopOffer(
+    return page(
       <InvitationNotice
         title='Sign in to accept this invitation'
         detail='Tau records who works on a project, so it needs to know who you are before it can add you to this one.'
@@ -210,7 +261,7 @@ export default function AcceptInvitation(): React.JSX.Element {
 
   if (outcome?.kind === 'mismatch') {
     const address = session.user.email;
-    return withDesktopOffer(
+    return page(
       <InvitationNotice
         title='This invitation was sent to a different email address.'
         detail={`You are signed in as ${address}. Sign in with the invited address to accept it.`}
@@ -224,7 +275,7 @@ export default function AcceptInvitation(): React.JSX.Element {
   }
 
   if (outcome?.kind === 'unverified') {
-    return withDesktopOffer(
+    return page(
       <InvitationNotice
         title='Verify your email address, then open this link again.'
         detail='An invitation is issued to an address, so Tau adds you only once that address is proven to be yours.'
@@ -238,7 +289,7 @@ export default function AcceptInvitation(): React.JSX.Element {
   }
 
   if (outcome?.kind === 'spent') {
-    return withDesktopOffer(
+    return page(
       <InvitationNotice
         title='This invitation link is no longer valid.'
         detail='It was revoked or it has expired. Ask the project owner for a new one.'
@@ -252,7 +303,7 @@ export default function AcceptInvitation(): React.JSX.Element {
   }
 
   if (outcome?.kind === 'failed') {
-    return withDesktopOffer(
+    return page(
       <InvitationNotice
         title='The invitation could not be accepted.'
         detail='Tau Cloud did not answer. Open the link again in a moment.'
@@ -265,7 +316,7 @@ export default function AcceptInvitation(): React.JSX.Element {
     );
   }
 
-  return withDesktopOffer(
+  return page(
     <div role='status' aria-busy='true' className='flex items-center justify-center gap-3 py-16'>
       <Loader className='size-6 text-muted-foreground' />
       <span className='text-sm text-muted-foreground'>Opening the invitation…</span>

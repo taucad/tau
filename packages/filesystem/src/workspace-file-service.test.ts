@@ -123,20 +123,21 @@ describe('WorkspaceFileService', () => {
     /* A1 review R4 nit: `/checkouts/a/b` canonicalizes to itself, so a slashed
        id would install a route nested under another checkout's prefix. */
     it('should refuse a checkout id that is more than one path segment', async () => {
-      await expect(
-        service.configureProjectRoots({
-          projects: [{ projectId, backend: 'indexeddb', providerBasePath: projectId }],
-          checkouts: [
-            {
-              checkoutId: `${checkoutId}/nested`,
-              projectId,
-              backend: 'indexeddb',
-              providerBasePath: `${checkoutBasePath}/nested`,
-            },
-          ],
-          roots: [{ backend: 'indexeddb' }],
-        } as const),
-      ).rejects.toThrow('one path segment');
+      const result = await service.configureProjectRoots({
+        projects: [{ projectId, backend: 'indexeddb', providerBasePath: projectId }],
+        checkouts: [
+          {
+            checkoutId: `${checkoutId}/nested`,
+            projectId,
+            backend: 'indexeddb',
+            providerBasePath: `${checkoutBasePath}/nested`,
+          },
+        ],
+        roots: [{ backend: 'indexeddb' }],
+      } as const);
+      /* Skipped with its rule (blueprint B3) and never mounted. */
+      expect(result.skipped).toEqual([{ kind: 'checkout', reason: 'checkout-rule' }]);
+      await expect(service.exists(`/checkouts/${checkoutId}/nested`)).resolves.toBe(false);
     });
   });
 

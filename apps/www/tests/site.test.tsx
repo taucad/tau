@@ -235,6 +235,16 @@ test('should render download CTAs and every archive before JavaScript', () => {
   const downloads = renderToStaticMarkup(<MemoryRouter>{download()}</MemoryRouter>);
   for (const platform of ['windows', 'linux'] as const) {
     expect(downloads).toContain(desktopDownloadHref(platform));
+    // Windows and Linux are untested on real devices: each entry carries the Intel beta's badge on its title row.
+    const entry = new RegExp(
+      `<div class="download-title"><a\\b[^>]*data-download-platform="${platform}"[^>]*>.*?</a>(<span data-slot="badge"[^>]*>Beta</span>)</div>`,
+      'u',
+    ).exec(downloads);
+    const intelBadge = /<div data-beta-route="macIntel">.*?(<span data-slot="badge"[^>]*>Beta<\/span>)/u.exec(
+      downloads,
+    );
+    expect(entry?.[1]).toBeDefined();
+    expect(entry?.[1]).toBe(intelBadge?.[1]);
   }
   // Mac entries render hidden with no file URL until a qualified catalog publishes their DMG: no ZIP fallback.
   expect(downloads).toContain('data-mac-route="macIntel" data-mac-hero="true" hidden=""');
@@ -250,6 +260,11 @@ test('should render download CTAs and every archive before JavaScript', () => {
   // The icon is the link's own child, as the client renders the Apple silicon button, so both get the same padding.
   expect(downloads).toMatch(/<a\b[^>]*data-download-platform="macIntel"[^>]*><svg/u);
   expect(downloads).toContain('Download for Windows');
+  // Windows and Linux are untested on real devices, so both are listed as beta.
+  const badged = [...downloads.matchAll(/<div class="download-title">(.*?)<\/div>/gu)]
+    .filter(([row]) => /data-slot="badge"[^>]*>Beta</u.test(row))
+    .map(([row]) => /<span>(Download [^<]+)<\/span>/u.exec(row)?.[1]);
+  expect(badged).toEqual(['Download ZIP for Intel Mac', 'Download for Windows', 'Download for Linux']);
   expect(downloads).toContain('Download for Linux');
   expect(downloads).not.toContain('DMG');
   expect(downloads).not.toContain('No installer is published');

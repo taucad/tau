@@ -143,8 +143,10 @@ export default function main(
       left(eye),
       forkNeck,
       left(forkNeck),
-      rod([-260, -174, 432], [-260, 174, 432], 18),
-      rod([130, -205, 432], [130, 205, 432], 18),
+      // Cross members are a smaller tube than the 18 mm rails: two equal-radius
+      // cylinders meeting at a coplanar T leave OCCT an invalid solid.
+      rod([-260, -174, 432], [-260, 174, 432], 16),
+      rod([130, -205, 432], [130, 205, 432], 16),
       rod([249.13, -222.925, 160], [249.13, 222.925, 160], 12),
     ])
     .cut(makeCylinder(10.5, 260, [-540, -130, 190], [0, 1, 0]));

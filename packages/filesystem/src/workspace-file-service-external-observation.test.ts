@@ -414,23 +414,27 @@ describe('WorkspaceFileService external webaccess observation', () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it('rejects a webaccess project route without its canonical discovery root', async () => {
+  it('refuses a webaccess project route without its canonical discovery root', async () => {
     vi.stubGlobal('FileSystemObserver', TestFileSystemObserver);
     const { service, workspaceId } = await createWebAccessService({ native: true });
 
-    await expect(
-      service.configureProjectRoots({
-        projects: [
-          {
-            backend: 'webaccess',
-            workspaceId,
-            projectId: alphaProjectId,
-            providerBasePath: alphaPhysicalRoot,
-          },
-        ],
-        roots: [],
-      }),
-    ).rejects.toThrow('requires an explicit');
+    const result = await service.configureProjectRoots({
+      projects: [
+        {
+          backend: 'webaccess',
+          workspaceId,
+          projectId: alphaProjectId,
+          providerBasePath: alphaPhysicalRoot,
+        },
+      ],
+      roots: [],
+    });
+
+    /* Skipped (blueprint B3): a route with no root never mounts on a cached handle. */
+    expect(result.skipped).toEqual([{ kind: 'project', reason: 'root-unavailable', projectId: alphaProjectId }]);
+    await expect(service.exists(`/projects/${alphaProjectId}`)).rejects.toMatchObject({
+      name: 'UnboundProjectRouteError',
+    });
   });
 
   it('delivers a native out-of-band file edit to only the matching rooted watch', async () => {

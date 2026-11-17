@@ -24,6 +24,8 @@ export const archiveDownloads = {
     label: 'Windows',
     icon: platformIcons.windows,
     file: 'Tau-win32-x64.zip',
+    /** Listed as beta until native x64 consumer evidence qualifies the Windows build. */
+    beta: true,
     detail: 'Windows x64 · ZIP download',
     install: 'Extract the ZIP to a folder you own, then run Tau.exe and sign in.',
     updates:
@@ -33,6 +35,8 @@ export const archiveDownloads = {
     label: 'Linux',
     icon: platformIcons.linux,
     file: 'Tau-linux-x64.tar.gz',
+    /** Listed as beta until the Linux build is qualified on a real device (deferred and untested, 2026-11-17). */
+    beta: true,
     detail: 'Linux x64 · tar.gz download',
     install: 'Extract the archive to a folder you own, then run Tau and sign in.',
     updates:
@@ -49,6 +53,18 @@ export const desktopDownloads = { ...macDownloads, ...archiveDownloads };
  */
 export const isArchivePlatform = (platform: keyof typeof desktopDownloads): platform is keyof typeof archiveDownloads =>
   Object.hasOwn(archiveDownloads, platform);
+
+/**
+ * Whether a platform's download entries are marked beta: an archive platform by its own `beta` flag, the installer
+ * catalog's portable Linux route as Linux. Clearing a flag removes its badge everywhere.
+ *
+ * @param platform - A desktop platform or installer catalog route platform.
+ * @returns Whether its download entries are marked beta.
+ */
+export const isBetaPlatform = (platform: keyof typeof desktopDownloads | 'linuxPortable'): boolean => {
+  const archive = platform === 'linuxPortable' ? 'linux' : platform;
+  return isArchivePlatform(archive) && archiveDownloads[archive].beta;
+};
 
 /**
  * Select an OS from low-entropy browser hints, without persisting or transmitting them.
@@ -331,6 +347,7 @@ const admitDesktopCatalog = (
 /** Routes each platform lane of a composed catalog must carry exactly (D-H5 per-platform promotion). */
 const laneRoutes = {
   macos: ['macos-zip:darwin-arm64'],
+  windows: ['windows-nsis:win32-x64'],
   linux: ['linux-apt:linux-x64', 'linux-appimage:linux-x64'],
 } as const;
 
@@ -366,13 +383,16 @@ export const createDesktopDownloadCatalog = (options: {
     for (const input of composed['platforms']) {
       const platform = catalogRecord(input, ['lane', 'catalog']);
       const { lane } = platform;
-      if ((lane !== 'macos' && lane !== 'linux') || lanes.has(lane)) {
+      if (typeof lane !== 'string' || !Object.hasOwn(laneRoutes, lane) || lanes.has(lane)) {
         throw new TypeError('Unsupported or duplicate installer platform');
       }
       lanes.add(lane);
       const admitted = admitDesktopCatalog(platform['catalog'], options.channel, immutableArtifacts);
       // Each platform is complete on its own: exactly its routes, never a partial or another platform's.
-      if (JSON.stringify([...admitted.seen].sort()) !== JSON.stringify([...laneRoutes[lane]].sort())) {
+      if (
+        JSON.stringify([...admitted.seen].sort()) !==
+        JSON.stringify([...laneRoutes[lane as keyof typeof laneRoutes]].sort())
+      ) {
         throw new TypeError('Installer platform catalog is incomplete or carries another platform');
       }
       result.push(...admitted.result);

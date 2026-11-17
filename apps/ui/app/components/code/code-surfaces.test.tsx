@@ -16,7 +16,7 @@ import {
   renderEditorDocumentation,
 } from '@taucad/editor-ui/components/code/editor-documentation';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
-import { loadEditorSyntax } from '#lib/editor-syntax.js';
+import { loadEditorSyntax } from '@taucad/editor-ui/lib/editor-syntax';
 
 /**
  * Every code surface highlights every language through the one grammar registry and token classes.

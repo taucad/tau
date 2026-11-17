@@ -24,9 +24,10 @@ export type EarlyChatInput = HandOffSnapshot;
 /*
  * The hand-off recorder, served right after the whole box rather than beside the input: a browser may paint the
  * half-parsed document when the parser reaches a script, and here that cut can only fall after the box and its bar,
- * never between them. Home leaves Enter as a line break until its adopter can send (H-f).
+ * never between them. Home leaves Enter as a line break until its adopter can send (H-f). Its CSP hash is listed in
+ * `#lib/inline-script-hashes`.
  */
-const earlyInputScript = handOffScript('within-previous-sibling', { queueSubmit: false });
+export const earlyInputScript = handOffScript('within-previous-sibling', { queueSubmit: false });
 
 /** What the bar under the native input is drawn from. */
 export type EarlyChatInputBarState = {

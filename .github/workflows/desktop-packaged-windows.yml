@@ -115,7 +115,10 @@ jobs:
         working-directory: apps/desktop-e2e
         env:
           TAU_E2E_SERVICES: host
-          TAU_E2E_API_URL: http://localhost:4014
+          # The API listens on IPv4 only. On windows-2025 the packaged app's services process failed every gateway
+          # call to `localhost:4014` with a network error while the renderer reached it (run 44008138089), so name
+          # the loopback address the API binds.
+          TAU_E2E_API_URL: http://127.0.0.1:4014
           PGUSER: dev_user
           PGPASSWORD: dev_password
         run: |

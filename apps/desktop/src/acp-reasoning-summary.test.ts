@@ -2,14 +2,24 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { expect, it } from 'vitest';
 import { isRecord } from '@taucad/utils/schema';
 import { acpAgentProfiles, spawnAcpAdapter } from '@taucad/host';
 
+// oxlint-disable-next-line no-restricted-imports -- The executable-stub fixture has no package import mapping.
+import { writeExecutableStub } from '../scripts/executable-stub.mjs';
+
 it('should preserve Codex summary identity through the shipped ACP adapter without promoting raw thoughts', async () => {
   const home = await mkdtemp(join(tmpdir(), 'tau-codex-summary-'));
   const require = createRequire(import.meta.url);
+  /* The adapter starts `CODEX_PATH` as a program (through `cmd.exe` on Windows), so the fixture peer runs behind
+   * an executable stub every platform can start. */
+  const codexPath = await writeExecutableStub(
+    join(home, 'bin', 'codex'),
+    `import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, 'fixtures', 'codex-summary-server.ts')).href)});`,
+  );
   const profile = acpAgentProfiles.find((entry) => entry.id === 'codex');
   if (profile?.package === undefined) {
     throw new Error('Missing Codex adapter');
@@ -20,17 +30,23 @@ it('should preserve Codex summary identity through the shipped ACP adapter witho
       ...profile,
       spawnEnv: {
         ...profile.spawnEnv,
-        CODEX_PATH: new URL('fixtures/codex-summary-server.ts', import.meta.url).pathname,
+        CODEX_PATH: codexPath,
       },
       modulePath: join(dirname(require.resolve('@agentclientprotocol/codex-acp/package.json')), 'dist/index.js'),
     },
     cwd: home,
     // Only the fixture peer runs: no user credentials, model requests, or inherited config.
     environment: {
-      PATH: dirname(process.execPath),
+      /* A Windows user's PATH always holds System32, and the Codex adapter starts its CLI through `cmd.exe` there. */
+      PATH: [
+        dirname(process.execPath),
+        ...(process.platform === 'win32'
+          ? [join(process.env['SystemRoot'] ?? String.raw`C:\Windows`, 'System32')]
+          : []),
+      ].join(delimiter),
       HOME: home,
       CODEX_HOME: home,
-      CODEX_PATH: new URL('fixtures/codex-summary-server.ts', import.meta.url).pathname,
+      CODEX_PATH: codexPath,
     },
   });
   /* eslint-enable @typescript-eslint/naming-convention -- External environment keys end here. */
@@ -97,6 +113,9 @@ it('should preserve Codex summary identity through the shipped ACP adapter witho
       running.signal('SIGTERM');
       await exited;
     }
-    await rm(home, { recursive: true, force: true });
+    /* Windows holds the home directory while the adapter's Codex tree (cmd.exe, the stub, Node), whose cwd it
+     * is, notices its closed stdin and exits after the adapter: rmdir answers EBUSY until then (windows-2025,
+     * run 44001117649), so removal retries for up to 5 s. */
+    await rm(home, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
   }
 }, 20_000);

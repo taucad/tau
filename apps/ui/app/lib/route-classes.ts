@@ -407,6 +407,8 @@ export const netlifyShellRedirects = (canonicalHost: string): NetlifyRedirect[] 
  * hold this build's chunks. Unpinned, the shell's requests go to the live deploy, which serves this build and keeps the
  * previous builds' assets (`retain-previous-assets.mts`); the build-skew guard covers tabs older than that.
  * The attributes match the function's cookie, so the browser replaces that cookie and does not add a second one.
+ * Netlify's edge cache answers a hit without this header rule's `Set-Cookie`, so the static shell edge function
+ * (`netlify/edge-functions/static-shell.ts`) sets the same value on every shell response.
  *
  * @param cookieName - The skew protection cookie's name (`skewProtectionCookieName`).
  * @returns The header value.

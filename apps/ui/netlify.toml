@@ -137,6 +137,8 @@ force = true
 # shape stay on it. The shell's headers are the static ones below and `_headers`, which
 # match a function document's (scripts/check-static-shells.mts). Generated from
 # app/lib/route-classes.ts; app/lib/route-classes.test.ts fails when this block drifts.
+# The edge cache serves the shell without the `Set-Cookie` below on a hit, so the edge function
+# netlify/edge-functions/static-shell.ts sets the same expiry on every shell response.
 # BEGIN static shell routing
 [[redirects]]
 from = "https://www.tau.new/w/*"

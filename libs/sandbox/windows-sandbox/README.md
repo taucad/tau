@@ -140,6 +140,10 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   is what an image load needs in both access-check passes, so the worker loads its DLLs and `.pyd` modules from the
   runtime root (NW01 loads a DLL it carries there with `LoadLibraryW` and checks the module's path). Nothing
   PowerShell-specific is forced on a worker: its environment is the spec's, plus `SystemRoot` when left out.
+  Windows derives an AppContainer's `LOCALAPPDATA`, `TEMP` and `TMP` from the `LOCALAPPDATA` of the block it is
+  given and fails `CreateProcess` with `ERROR_ENVVAR_NOT_FOUND` (203) when there is none, so a launch without one is
+  created with the sandbox account's own (where its package is registered), and the runner then gives the suspended
+  process exactly the spec's environment, as for every launch (NW01 reads the worker's whole environment back).
 - **Sessions.** One launch at a time per computer, enforced by the helper itself. Read and write isolation between
   two launches would hold (each has its own package SID, which every grant names, and its own capability SID for the
   restricted pass; the restricting SIDs are that capability, the runner's own logon SID and Everyone, and the volume

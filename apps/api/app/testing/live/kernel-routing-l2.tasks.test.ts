@@ -5,10 +5,11 @@ import { kernelRoutingRoutingCases } from '#testing/live/kernel-routing.cases.js
 import { l2Kernels, l2Tasks, renderL2Oracle } from '#testing/live/kernel-routing-l2.tasks.js';
 
 describe('l2Tasks', () => {
-  it('should hold eight tasks, two of them computational engineering (Appendix E)', () => {
-    expect(l2Tasks).toHaveLength(8);
+  it('should hold the eight Appendix E tasks, two of them computational engineering, and one library-first task', () => {
+    expect(l2Tasks).toHaveLength(9);
     expect(l2Tasks.filter(({ family }) => family === 'U8')).toHaveLength(2);
-    expect(new Set(l2Tasks.map(({ id }) => id)).size).toBe(8);
+    expect(l2Tasks.filter(({ library }) => library !== undefined).map(({ id }) => id)).toEqual(['l2-u1-cable-comb']);
+    expect(new Set(l2Tasks.map(({ id }) => id)).size).toBe(9);
   });
 
   it('should exclude Zoo (Appendix F)', () => {
@@ -27,6 +28,7 @@ describe('l2Tasks', () => {
       expect(task.acceptable.every((id) => zoneAcceptable.includes(id))).toBe(true);
       expect(task.acceptable).toContain(task.reference.kernel);
       expect(task.wrong.kernel).toBe(task.reference.kernel);
+      expect(task.library?.kernel ?? task.reference.kernel).toBe(task.reference.kernel);
     }
   });
 

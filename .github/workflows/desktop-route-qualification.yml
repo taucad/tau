@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, or one platform's evidence (Linux APT/AppImage, or Apple silicon ZIP/DMG) on either channel (D-H5)
+        description: All platforms, or one platform's evidence (Linux APT/AppImage, Apple silicon ZIP/DMG, or Windows NSIS) on either channel (D-H5)
         required: true
         default: all
         type: choice
-        options: [all, linux, macos]
+        options: [all, linux, macos, windows]
       channel:
         description: Exact candidate channel; all three candidates must agree
         required: true
@@ -28,7 +28,7 @@ on:
         required: true
         type: string
       candidate_c:
-        description: Successful trusted C run; the Mac and Linux platform scopes may pin a trusted ancestor (bound by qualification-binding.json)
+        description: Successful trusted C run; the Mac, Windows and Linux platform scopes may pin a trusted ancestor (bound by qualification-binding.json)
         required: true
         type: string
 
@@ -72,7 +72,7 @@ jobs:
           node --input-type=module <<'NODE'
           import { appendFileSync } from 'node:fs';
           const scope = process.env.TAU_DESKTOP_QUALIFICATION_SCOPE;
-          if (!['all', 'linux', 'macos'].includes(scope) || !['staging', 'production'].includes(process.env.CHANNEL)) throw new Error('Invalid qualification scope/channel');
+          if (!['all', 'linux', 'macos', 'windows'].includes(scope) || !['staging', 'production'].includes(process.env.CHANNEL)) throw new Error('Invalid qualification scope/channel');
           const graphics = process.env.TAU_QUALIFICATION_GRAPHICS;
           if (!['stock', 'isolated-software'].includes(graphics) || (graphics === 'isolated-software' && (scope !== 'linux' || process.env.CHANNEL !== 'staging'))) throw new Error('Software CI requires Linux staging');
           const rows = [
@@ -89,8 +89,8 @@ jobs:
             {"id": "debian-appimage-x11", "route": "linux-appimage", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
           ];
           // A scoped run selects exactly its own platform's rows. Mac-only is ZIP and DMG on Apple silicon: hosted Intel
-          // Macs have no WebGL, so Intel is out of the Mac-only scope by operator ruling.
-          const selected = scope === 'all' ? rows : rows.filter(row => scope === 'linux' ? row.route.startsWith('linux-') : row.route.startsWith('macos-') && row.id.endsWith('-arm64'));
+          // Macs have no WebGL, so Intel is out of the Mac-only scope by operator ruling. Windows-only is the NSIS row.
+          const selected = scope === 'all' ? rows : rows.filter(row => row.route.startsWith(`${scope}-`) && (scope !== 'macos' || row.id.endsWith('-arm64')));
           // Canary first (D-H8): a Linux run starts with one row alone and holds the rest until it passes, so a defect
           // costs one row instead of the whole serial matrix. Other scopes have no canary.
           const canary = scope === 'linux' ? selected.slice(0, 1) : [];
@@ -130,7 +130,10 @@ jobs:
       TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
       TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
       TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
-    steps: &row-steps
+    steps: &row-steps # Windows checkouts default to CRLF, which breaks the lockfile parse; keep the committed bytes.
+      - name: Keep committed line endings
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
@@ -239,13 +242,13 @@ jobs:
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ inputs.scope == 'linux' && 'desktop-linux-host-matrix' || inputs.scope == 'macos' && 'desktop-macos-host-matrix' || 'desktop-route-host-matrix' }}
+          name: ${{ inputs.scope == 'all' && 'desktop-route-host-matrix' || format('desktop-{0}-host-matrix', inputs.scope) }}
           path: out/qualification-receipts/host-matrix.json
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ inputs.scope == 'linux' && 'desktop-linux-ci-receipts' || inputs.scope == 'macos' && 'desktop-macos-ci-receipts' || 'desktop-route-ci-receipts' }}
+          name: ${{ inputs.scope == 'all' && 'desktop-route-ci-receipts' || format('desktop-{0}-ci-receipts', inputs.scope) }}
           path: |
             out/qualification-receipts/route-receipts.json
-            ${{ (inputs.scope == 'macos' || inputs.scope == 'linux') && 'out/qualification-receipts/qualification-binding.json' || '' }}
+            ${{ inputs.scope != 'all' && 'out/qualification-receipts/qualification-binding.json' || '' }}
           if-no-files-found: error

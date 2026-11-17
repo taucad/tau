@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-import { EditorDocument } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import type { EditorDocumentSession } from '#lib/editor-document-session.js';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import {
@@ -24,7 +24,7 @@ import {
   openKclTarget,
 } from '#lib/kcl-language/kcl-navigation.js';
 import type { KclNavigationContext } from '#lib/kcl-language/kcl-navigation.js';
-import { loadKclStdlib } from '#lib/kcl-language/kcl-stdlib.js';
+import { loadKclStdlib } from '@taucad/editor-ui/lib/kcl-language/kcl-stdlib';
 import { KclSymbolService } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
 import type { Node } from '@taucad/kcl-wasm-lib/bindings/Node';
 import type { Program } from '@taucad/kcl-wasm-lib/bindings/Program';

@@ -7,8 +7,8 @@ import type * as LSP from 'vscode-languageserver-protocol';
 import { openscadBuiltinsUri } from '@taucad/openscad-language/protocol';
 import { goToDefinitionAt } from '@taucad/editor-ui/components/code/editor-definition';
 import { availableLanguageActions, languageFeatures } from '@taucad/editor-ui/components/code/editor-language-features';
-import { EditorDocument } from '#lib/editor-document.js';
-import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import {
   applyOpenscadWorkspaceEdit,

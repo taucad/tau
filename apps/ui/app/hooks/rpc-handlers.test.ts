@@ -1692,7 +1692,7 @@ describe('rpc-handlers', () => {
         });
       });
 
-      it('returns one truthful drawing PNG for either SVG capture mode', async () => {
+      it('returns one truthful drawing PNG for either SVG capture mode, with a note on multi_angle', async () => {
         const rendering = {
           ...gltfRendering,
           view: 'drawing',
@@ -1726,6 +1726,8 @@ describe('rpc-handlers', () => {
           images: [
             { view: 'drawing', dataUrl: `data:image/png;base64,${Buffer.from(capturePng()).toString('base64')}` },
           ],
+          message:
+            'View drawing is a 2D drawing with one canonical view, so multi_angle returned one image; its six camera angles apply to 3D views only.',
         });
         expect(exportImage).toHaveBeenCalledOnce();
       });

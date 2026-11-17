@@ -6,6 +6,8 @@ import { hardwareRenderTier, renderTierFeatures, resolveRenderTier } from '#grap
 const { environmentResolution } = viewerRenderProfile.lighting;
 
 const webGpuRenderer = (adapterInfo: Record<string, unknown> | undefined): WeakKey => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Three's node renderer flag.
+  isWebGPURenderer: true,
   coordinateSystem: WebGPUCoordinateSystem,
   backend: { device: { adapterInfo } },
 });
@@ -32,8 +34,10 @@ describe('resolveRenderTier', () => {
     });
   });
 
-  it('should keep the WebGL composer on a software rasterizer and shrink only its environment', () => {
+  it('should keep the node renderer on its WebGL 2 backend beauty-only on a software rasterizer', () => {
     const renderer = {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Three's node renderer flag.
+      isWebGPURenderer: true,
       coordinateSystem: WebGLCoordinateSystem,
       backend: {
         gl: {
@@ -46,7 +50,25 @@ describe('resolveRenderTier', () => {
     expect(resolveRenderTier(renderer)).toMatchObject({
       backend: 'webgl',
       rasterizer: 'software',
-      features: { ambientOcclusion: true, environmentResolution: environmentResolution.softwareRasterizer },
+      features: {
+        ambientOcclusion: false,
+        antialias: false,
+        speculativePreparation: false,
+        environmentResolution: environmentResolution.softwareRasterizer,
+      },
+    });
+  });
+
+  it('should keep the classic WebGL composer whole', () => {
+    expect(resolveRenderTier({ coordinateSystem: WebGLCoordinateSystem })).toEqual(hardwareRenderTier('webgl'));
+  });
+
+  it('should keep every composition feature for a software rasterizer outside the node composition', () => {
+    expect(renderTierFeatures('webgl', 'software')).toMatchObject({
+      ambientOcclusion: true,
+      antialias: true,
+      speculativePreparation: true,
+      environmentResolution: environmentResolution.softwareRasterizer,
     });
   });
 

@@ -8,7 +8,7 @@ import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 import { DefaultPermissionsSetting } from '#components/settings/default-permissions-setting.js';
 import { desktopPermissions } from '@taucad/files-ui/filesystem/desktop-permissions';
 import { SetupAnswersRow } from '#components/settings/setup-answers-row.js';
-import { setupAnswersCopy } from '#components/settings/setup-answers-copy.js';
+import { setupAnswersCopy } from '@taucad/settings-ui/components/settings/setup-answers-copy';
 import { useFeature } from '#flags/use-feature.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
 

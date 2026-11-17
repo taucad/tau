@@ -24,6 +24,8 @@ export const archiveDownloads = {
     label: 'Windows',
     icon: platformIcons.windows,
     file: 'Tau-win32-x64.zip',
+    /** Listed as beta until native x64 consumer evidence qualifies the Windows build. */
+    beta: true,
     detail: 'Windows x64 · ZIP download',
     install: 'Extract the ZIP to a folder you own, then run Tau.exe and sign in.',
     updates:
@@ -33,6 +35,7 @@ export const archiveDownloads = {
     label: 'Linux',
     icon: platformIcons.linux,
     file: 'Tau-linux-x64.tar.gz',
+    beta: false,
     detail: 'Linux x64 · tar.gz download',
     install: 'Extract the archive to a folder you own, then run Tau and sign in.',
     updates:

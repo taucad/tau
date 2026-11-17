@@ -9,6 +9,8 @@ import type {
   WorkspaceMutationError,
   WorkspaceScope,
   ProjectRootConfiguration,
+  ProjectRootConfigurationResult,
+  RootStatus,
   ProjectDiscoveryResult,
   ProjectRouteVerification,
   ResolvedProjectManifest,
@@ -78,6 +80,8 @@ export type WorkspaceAuthorityClient = Pick<
   | 'mount'
   | 'unmount'
   | 'configureProjectRoots'
+  | 'getRootStatuses'
+  | 'recheckRoots'
   | 'listProjectManifests'
   | 'verifyProjectRoute'
   | 'commitPendingProjectDirectory'
@@ -200,8 +204,15 @@ export type FileSystemClient = {
    */
   mount(prefix: string, config: MountConfig): Promise<void>;
   unmount(prefix: string): void;
-  /** Replace the worker's persistent project routes from the main-thread locator store. */
-  configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void>;
+  /**
+   * Replace the worker's persistent project routes from the main-thread locator store.
+   * Resolves with one status per root; rejects only when Home cannot be admitted.
+   */
+  configureProjectRoots(configuration: ProjectRootConfiguration): Promise<ProjectRootConfigurationResult>;
+  /** The published status of each configured root, in configuration order. */
+  getRootStatuses(): Promise<RootStatus[]>;
+  /** Probe again every root that is not found, needs permission or is not responding. */
+  recheckRoots(storageRootKeys?: string[]): Promise<RootStatus[]>;
   /** Discover content-addressed projects by scanning configured physical roots. */
   listProjectManifests(): Promise<ProjectDiscoveryResult>;
   /** Verify the exact installed binding without discovery or repair. */

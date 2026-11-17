@@ -250,6 +250,11 @@ test('should render download CTAs and every archive before JavaScript', () => {
   // The icon is the link's own child, as the client renders the Apple silicon button, so both get the same padding.
   expect(downloads).toMatch(/<a\b[^>]*data-download-platform="macIntel"[^>]*><svg/u);
   expect(downloads).toContain('Download for Windows');
+  // Windows is listed as beta; Linux is not.
+  const badged = [...downloads.matchAll(/<div class="download-title">(.*?)<\/div>/gu)]
+    .filter(([row]) => /data-slot="badge"[^>]*>Beta</u.test(row))
+    .map(([row]) => /<span>(Download [^<]+)<\/span>/u.exec(row)?.[1]);
+  expect(badged).toEqual(['Download ZIP for Intel Mac', 'Download for Windows']);
   expect(downloads).toContain('Download for Linux');
   expect(downloads).not.toContain('DMG');
   expect(downloads).not.toContain('No installer is published');

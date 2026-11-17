@@ -520,7 +520,7 @@ const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
 /** Where the web client build writes its module-id manifest (`@taucad/vite/module-id-manifest`). */
 const criticalModuleIdsPath = path.resolve(__dirname, 'build/client-module-ids.json');
 
-export default defineConfig(({ command, mode }) => {
+export default defineConfig(({ command, mode, isSsrBuild }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   // Deploys load the pinned host from the digest mirror; development and e2e serve a prepared bundle.
   const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT'], {
@@ -740,6 +740,23 @@ export default defineConfig(({ command, mode }) => {
         return undefined;
       },
       target: 'es2022',
+      /*
+       * Chunk grouping (progressive loading PL5): every lucide icon in one chunk. Left to automatic chunking, each icon
+       * that two lazy chunks share became a chunk of its own (72 requests of Home's interactive tier, 95 of the
+       * project route's, a few hundred bytes each); together the icons are about 18 KB brotli. The client build only:
+       * the server build evaluates every icon anyway.
+       */
+      ...(isSsrBuild === true
+        ? {}
+        : {
+            rolldownOptions: {
+              output: {
+                codeSplitting: {
+                  groups: [{ name: 'icons', test: /[\\/]node_modules[\\/](?:.+[\\/])?lucide-react[\\/]/u }],
+                },
+              },
+            },
+          }),
       /*
        * The offline shell allowlist is generated from this manifest
        * (`scripts/generate-offline-shell.ts`), so hashed filenames are never

@@ -3,7 +3,7 @@ import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { Columns2, Copy, FileCode, FolderTree, Plus, Printer, Rows2, X, XCircle } from 'lucide-react';
 import { ContextMenuItem, ContextMenuSeparator } from '@taucad/ui/components/context-menu';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@taucad/ui/components/dropdown-menu';
-import { isPrinterFileName } from '#components/printer/printer-file.js';
+import { isPrinterFileName } from '#components/printer/printer-file-kind.js';
 import {
   closeOtherPanels,
   closePanelsToTheRight,

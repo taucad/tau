@@ -1,5 +1,4 @@
 import { observabilityHarnessTags } from '#lib/observability-harness-context.js';
-import { defaultStackParser } from '@sentry/react';
 import type { ErrorEvent, StackFrame } from '@sentry/react';
 import { randomUuid } from '@taucad/utils/id';
 import { ENV } from '#environment.config.js';
@@ -14,8 +13,39 @@ import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 
 /*
  * What every Sentry event from the UI carries and how it is scrubbed, without the SDK: the page's
- * main bundle uses it to send an event itself when the SDK's own chunk could not be loaded.
+ * main bundle uses it to send an event itself when the SDK's own chunk could not be loaded. Its one
+ * part of the SDK, the stack parser, loads on demand ({@link loadStackParser}).
  */
+
+/** Parses a stack into Sentry's frames, oldest first. */
+type StackParser = (stack: string) => StackFrame[];
+
+/** The SDK's stack parser once {@link loadStackParser} has loaded it. */
+let stackParser: StackParser | undefined;
+let stackParserLoad: Promise<StackParser | undefined> | undefined;
+
+/** Import the parser's chunk; a failure clears the memo so the next load tries again. */
+const importStackParser = async (): Promise<StackParser | undefined> => {
+  try {
+    const parserModule = await import('#lib/sentry-stack-parser.js');
+    stackParser = parserModule.parseSentryStack;
+    return stackParser;
+  } catch {
+    stackParserLoad = undefined;
+    return undefined;
+  }
+};
+
+/**
+ * Load the SDK's stack parser, once per page; a failed load is not kept, so the next call tries again. Until it is
+ * in, an event goes without parsed frames and keeps its raw stack under `extra.stack`.
+ *
+ * @returns The parser, or undefined when its chunk could not be loaded.
+ */
+export const loadStackParser = async (): Promise<StackParser | undefined> => {
+  stackParserLoad ??= importStackParser();
+  return stackParserLoad;
+};
 
 /**
  * Remove the query string and fragment, then any invitation token, from a URL.
@@ -306,13 +336,13 @@ let debugIdFiles: { readonly count: number; readonly byFile: ReadonlyMap<string,
  * Each injected chunk's URL and debug id, as the SDK reads them (`getFilenameToDebugIdMap`): the
  * innermost frame of the stack a chunk registered names that chunk. Parsed again only when chunks were added.
  */
-const readDebugIdFiles = (): ReadonlyMap<string, string> => {
+const readDebugIdFiles = (parse: StackParser): ReadonlyMap<string, string> => {
   const injected = (globalThis as { _sentryDebugIds?: InjectedDebugIds })._sentryDebugIds;
   const entries = injected === undefined ? [] : Object.entries(injected);
   if (debugIdFiles?.count !== entries.length) {
     const byFile = new Map<string, string>();
     for (const [stack, debugId] of entries) {
-      const file = defaultStackParser(stack).findLast((frame) => frame.filename !== undefined)?.filename;
+      const file = parse(stack).findLast((frame) => frame.filename !== undefined)?.filename;
       if (file !== undefined) {
         byFile.set(file, debugId);
       }
@@ -323,7 +353,7 @@ const readDebugIdFiles = (): ReadonlyMap<string, string> => {
 };
 
 /**
- * The stack frames of an error, parsed by the SDK's own stack parser (oldest first, as Sentry
+ * The stack frames of an error, parsed by the SDK's own stack parser once loaded (oldest first, as Sentry
  * expects), and the debug images that let Sentry resolve them (principle 7).
  *
  * @param stack - The error's stack, already capped.
@@ -332,11 +362,11 @@ const readDebugIdFiles = (): ReadonlyMap<string, string> => {
 const parseStackForEnvelope = (
   stack: string | undefined,
 ): { readonly frames: StackFrame[]; readonly images: DebugImage[] } => {
-  if (stack === undefined || stack === '') {
+  if (stack === undefined || stack === '' || stackParser === undefined) {
     return { frames: [], images: [] };
   }
-  const frames = defaultStackParser(stack);
-  const byFile = readDebugIdFiles();
+  const frames = stackParser(stack);
+  const byFile = readDebugIdFiles(stackParser);
   const files = new Set(frames.flatMap((frame) => (frame.filename === undefined ? [] : [frame.filename])));
   const images = [...files].flatMap((file): DebugImage[] => {
     const debugId = byFile.get(file);
@@ -482,6 +512,9 @@ export const sendSentryEventDirectly = async (
     return;
   }
   markCaptured(error);
+  // Never wait for the parser here: the page may leave in that time, and the event must still go.
+  // Until the parser is in, the event keeps its raw stack under `extra.stack`.
+  void loadStackParser();
   const envelope = buildEnvelope({ dsn: target.dsn, error, tags, stackLimit: directEventTextLimit.stack });
   await post(target.endpoint, envelope, fitsKeepalive(envelope.size, 1));
 };

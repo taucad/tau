@@ -16,7 +16,8 @@ import type { SliceSummary } from '#components/printer/printer-summary.js';
 import { parseGcode, ToolpathParseError } from '@taucad/slicer/toolpath';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
 import { readPrinterFile } from '#components/printer/printer-file.js';
-import type { PrinterFileContents, PrinterFileKind } from '#components/printer/printer-file.js';
+import type { PrinterFileContents } from '#components/printer/printer-file.js';
+import type { PrinterFileKind } from '#components/printer/printer-file-kind.js';
 import type { PrinterPlateModel } from '#components/printer/printer-plates.js';
 
 /** A parsed printer file. */

@@ -29,7 +29,8 @@ export const tauViewerPanelDragMime = 'application/x-tau-viewer-panel';
  * Map of file extensions to their canonical {@link ExportFidelity}.
  *
  * Boundary representation (`brep`) is used for CAD interchange formats that
- * preserve exact topology (STEP, IGES, BREP). All other formats are treated
+ * preserve exact topology (STEP, IGES, BREP, and the native SolidWorks, Fusion,
+ * FreeCAD and Rhino formats `@taucad/cadmpeg` writes). All other formats are treated
  * as tessellated `mesh` exports by default — see {@link lookupExportFidelity}.
  *
  * @public
@@ -40,6 +41,10 @@ export const exportFidelities = {
   iges: 'brep',
   igs: 'brep',
   brep: 'brep',
+  sldprt: 'brep',
+  f3d: 'brep',
+  fcstd: 'brep',
+  '3dm': 'brep',
 } as const satisfies Partial<Record<FileExtension, ExportFidelity>>;
 
 /** Supported export-fidelity wire values. @public */

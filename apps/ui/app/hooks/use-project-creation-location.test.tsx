@@ -35,6 +35,14 @@ const mockWorkspaceCreated = vi.fn();
 const mockWorkspaceConnected = vi.fn();
 const mockWorkspaceOpenFailed = vi.fn();
 const mockToastError = vi.fn();
+const mockToastInfo = vi.fn();
+/** The root file manager's published root statuses, as the hook reads them (D1). */
+const rootStatusState = vi.hoisted(() => ({ roots: [] as unknown[] }));
+const mockFileManagerRef = {
+  getSnapshot: () => ({ status: 'active', context: { rootStatuses: rootStatusState.roots } }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+  send: vi.fn(),
+};
 const mockConnectWorkspace = vi.fn(async () => {
   try {
     const handle = (await globalThis.window.showDirectoryPicker({
@@ -98,7 +106,7 @@ vi.mock('#hooks/use-file-manager.js', () => {
     syncProjectRoots: mockSyncProjectRoots,
     replaceWorkspaceHandle: mockReplaceWorkspaceHandle,
   };
-  return { useFileManager: () => ({ workspace: workspaceManager }) };
+  return { useFileManager: () => ({ workspace: workspaceManager, fileManagerRef: mockFileManagerRef }) };
 });
 
 vi.mock('#hooks/use-project-manager.js', () => ({
@@ -114,7 +122,7 @@ vi.mock('#utils/workspace-telemetry.utils.js', () => {
   return { useWorkspaceTelemetry: () => telemetry };
 });
 
-vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: mockToastError } }));
+vi.mock('@taucad/ui/components/sonner', () => ({ toast: { error: mockToastError, info: mockToastInfo } }));
 
 const { useProjectCreationLocation } = await import('#hooks/use-project-creation-location.js');
 
@@ -150,6 +158,7 @@ describe('useProjectCreationLocation', () => {
     mockReplaceWorkspaceHandle.mockReset();
     mockReplaceWorkspaceHandle.mockResolvedValue(undefined);
     mockGetPreference.mockResolvedValue({ location: { kind: 'home' }, repaired: undefined });
+    rootStatusState.roots = [];
     Object.defineProperty(globalThis.window, 'showDirectoryPicker', {
       configurable: true,
       value: vi.fn(),
@@ -259,6 +268,31 @@ describe('useProjectCreationLocation', () => {
     expect(result.current.value).toEqual({ kind: 'workspace', workspaceId: 'wsp_locked' });
     expect(result.current.canCreate).toBe(false);
     expect(result.current.selectedWorkspaceRecovery?.kind).toBe('grant');
+  });
+
+  it('creates in Home with a one-time notice while the chosen folder is not found, keeping the stored choice (R4, B9)', async () => {
+    const workshop = { ...workspace('wsp_node', 'Workshop', 5), path: '/Users/tester/Workshop' };
+    mockListWorkspaces.mockResolvedValue([workshop]);
+    rootStatusState.roots = [
+      { storageRootKey: 'node:/Users/tester/Workshop', backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    mockGetPreference.mockResolvedValue({ location: { kind: 'home' }, repaired: 'workspace-unavailable' });
+
+    const first = renderHook(() => useProjectCreationLocation());
+    await waitForReady(first.result);
+
+    expect(mockGetPreference).toHaveBeenCalledWith(
+      expect.objectContaining({ webAccessSupported: true, rootStatuses: rootStatusState.roots }),
+    );
+    expect(first.result.current.value).toEqual({ kind: 'home' });
+    expect(first.result.current.canCreate).toBe(true);
+    expect(mockToastInfo).toHaveBeenCalledOnce();
+    expect(String(mockToastInfo.mock.calls[0]![0])).toMatch(/Home/);
+    first.unmount();
+
+    const second = renderHook(() => useProjectCreationLocation());
+    await waitForReady(second.result);
+    expect(mockToastInfo).toHaveBeenCalledOnce();
   });
 
   it('reports an unreconnectable host as unsupported, never as a user cancel', async () => {

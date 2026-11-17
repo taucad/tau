@@ -1795,3 +1795,432 @@ describe('node workspace overlap', () => {
     await expect(store.createNodeWorkspace('/Users/tester/Workshop Two')).resolves.toMatchObject({ minted: true });
   });
 });
+
+describe('relinkWorkspace (Locate)', () => {
+  const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
+  const oldPath = '/Users/tester/Workshop';
+  const newPath = '/Volumes/Archive/Workshop Moved';
+
+  type Store = typeof HandleStore;
+  type Evidence = Awaited<ReturnType<HandleStore.RelinkPorts['readEvidence']>>;
+
+  const evidence = (overrides: Partial<Evidence> = {}): Evidence => ({
+    marker: undefined,
+    projects: [],
+    subfolders: [],
+    ...overrides,
+  });
+
+  const ports = (
+    found: Evidence,
+  ): { readEvidence: ReturnType<typeof vi.fn>; revokeGrant: ReturnType<typeof vi.fn> } => ({
+    readEvidence: vi.fn(async () => found),
+    revokeGrant: vi.fn(async () => undefined),
+  });
+
+  /** A node workspace at {@link oldPath} with the given projects bound to it, plus Studio as another workspace. */
+  const seed = async (
+    store: Store,
+    bound: ReadonlyArray<{ readonly id: string; readonly directory: string }>,
+  ): Promise<HandleStore.Workspace> => {
+    const workspace = await store.createNodeWorkspace(oldPath);
+    await store.createNodeWorkspace('/Users/tester/Studio');
+    for (const project of bound) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Seeding rows in order.
+      await store.setProjectFileSystemConfig({
+        projectId: project.id,
+        backend: 'node',
+        path: oldPath,
+        providerBasePath: project.directory,
+      });
+    }
+    return workspace;
+  };
+
+  const nodeConfigs = async (store: Store): Promise<Array<Record<string, unknown>>> =>
+    ((await store.getAllProjectFileSystemConfigs()) as Array<Record<string, unknown>>).toSorted((left, right) =>
+      String(left['projectId']).localeCompare(String(right['projectId'])),
+    );
+
+  beforeEach(() => {
+    buildTarget.desktop = true;
+    vi.stubGlobal('tau', {
+      nodeFs: { homeRoot, connect: async () => new MessageChannel().port1 },
+      directories: { list: async () => [], onChange: () => () => undefined },
+    });
+  });
+
+  afterEach(() => {
+    buildTarget.desktop = false;
+  });
+
+  describe('evidence rules (T-R4.1)', () => {
+    it('should relink with no prompt when the folder carries a marker naming this workspace', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+      ]);
+      const found = evidence({
+        marker: {
+          $schema: workspaceMarkerSchemaUrl,
+          workspaceId: workspace.workspaceId,
+          slug: 'workshop',
+          createdAt: '2026-07-24T00:11:47.808Z',
+        },
+      });
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(found),
+      );
+
+      expect(result).toMatchObject({ status: 'relinked' });
+      expect(await rawReadWorkspace(workspace.workspaceId)).toMatchObject({ path: newPath });
+    });
+
+    it('should relink with no prompt when every bound project is found', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+      ]);
+      const found = evidence({
+        projects: [
+          { projectId: projectId(1), directory: 'gearbox' },
+          { projectId: projectId(2), directory: 'bracket' },
+        ],
+      });
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(found),
+      );
+
+      expect(result).toMatchObject({ status: 'relinked', matched: 2, unmatched: [] });
+      expect(await nodeConfigs(store)).toEqual([
+        { projectId: projectId(1), backend: 'node', path: newPath, providerBasePath: 'gearbox' },
+        { projectId: projectId(2), backend: 'node', path: newPath, providerBasePath: 'bracket' },
+      ]);
+    });
+
+    it('should ask for confirmation with the counts and write nothing when only some projects are found', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+        { id: projectId(3), directory: 'hinge' },
+      ]);
+      const before = await rawReadWorkspace(workspace.workspaceId);
+      const configsBefore = await nodeConfigs(store);
+      const found = evidence({ projects: [{ projectId: projectId(1), directory: 'gearbox' }] });
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(found),
+      );
+
+      expect(result).toEqual({ status: 'confirm', matched: 1, total: 3 });
+      expect(await rawReadWorkspace(workspace.workspaceId)).toEqual(before);
+      expect(await nodeConfigs(store)).toEqual(configsBefore);
+
+      const confirmed = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(found),
+        { confirmed: true },
+      );
+      expect(confirmed).toMatchObject({ status: 'relinked', matched: 1, unmatched: [projectId(2), projectId(3)] });
+      /* An unmatched project keeps its binding; it is never dropped silently. */
+      expect(await nodeConfigs(store)).toEqual([
+        { projectId: projectId(1), backend: 'node', path: newPath, providerBasePath: 'gearbox' },
+        { projectId: projectId(2), backend: 'node', path: oldPath, providerBasePath: 'bracket' },
+        { projectId: projectId(3), backend: 'node', path: oldPath, providerBasePath: 'hinge' },
+      ]);
+    });
+
+    it('should say the folder looks different when none of its projects match', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+      const before = await rawReadWorkspace(workspace.workspaceId);
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(evidence({ projects: [{ projectId: projectId(9), directory: 'someone-else' }] })),
+      );
+
+      expect(result).toEqual({ status: 'confirm-different' });
+      expect(await rawReadWorkspace(workspace.workspaceId)).toEqual(before);
+    });
+
+    it('should suggest the subfolder that holds every project when the parent was picked', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+      ]);
+      const before = await rawReadWorkspace(workspace.workspaceId);
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: '/Volumes/Archive', wasGranted: false },
+        ports(
+          evidence({
+            subfolders: [
+              { name: 'Other', projects: [{ projectId: projectId(9), directory: 'other' }] },
+              {
+                name: 'Workshop Moved',
+                projects: [
+                  { projectId: projectId(1), directory: 'gearbox' },
+                  { projectId: projectId(2), directory: 'bracket' },
+                ],
+              },
+            ],
+          }),
+        ),
+      );
+
+      expect(result).toEqual({ status: 'suggest-subfolder', name: 'Workshop Moved' });
+      expect(await rawReadWorkspace(workspace.workspaceId)).toEqual(before);
+    });
+
+    it('should match a renamed project folder by its manifest id and move its provider path', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(evidence({ projects: [{ projectId: projectId(1), directory: 'gearbox-v2' }] })),
+      );
+
+      expect(result).toMatchObject({ status: 'relinked', matched: 1 });
+      expect(await nodeConfigs(store)).toEqual([
+        { projectId: projectId(1), backend: 'node', path: newPath, providerBasePath: 'gearbox-v2' },
+      ]);
+    });
+
+    it('should resolve two folders with one id by the old directory name, or leave the project unmatched', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+      ]);
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        ports(
+          evidence({
+            projects: [
+              { projectId: projectId(1), directory: 'gearbox' },
+              { projectId: projectId(1), directory: 'gearbox copy' },
+              { projectId: projectId(2), directory: 'bracket-a' },
+              { projectId: projectId(2), directory: 'bracket-b' },
+            ],
+          }),
+        ),
+        { confirmed: true },
+      );
+
+      expect(result).toMatchObject({ status: 'relinked', matched: 1, unmatched: [projectId(2)] });
+      expect(await nodeConfigs(store)).toEqual([
+        { projectId: projectId(1), backend: 'node', path: newPath, providerBasePath: 'gearbox' },
+        { projectId: projectId(2), backend: 'node', path: oldPath, providerBasePath: 'bracket' },
+      ]);
+    });
+  });
+
+  describe('refusals (T-R4.2)', () => {
+    it.each([
+      ['Home', homeRoot, 'home'],
+      ['another workspace', '/Users/tester/Studio/Parts', 'workspace-overlap'],
+      ['the data directory', '/Users/tester/Library/Application Support/Tau/filesystem-authority', 'data-directory'],
+    ] as const)('should refuse a target that overlaps %s', async (_case, path, reason) => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+      const rowsBefore = await store.listWorkspaces();
+      const configsBefore = await nodeConfigs(store);
+      const relinkPorts = ports(evidence({ projects: [{ projectId: projectId(1), directory: 'gearbox' }] }));
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path, wasGranted: false },
+        relinkPorts,
+      );
+
+      expect(result).toEqual({ status: 'refused', reason });
+      expect(await store.listWorkspaces()).toEqual(rowsBefore);
+      expect(await nodeConfigs(store)).toEqual(configsBefore);
+      expect(relinkPorts.revokeGrant).toHaveBeenCalledWith(path);
+    });
+
+    it('should refuse a folder marked for another workspace', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+      const rowsBefore = await store.listWorkspaces();
+      const relinkPorts = ports(
+        evidence({
+          marker: {
+            $schema: workspaceMarkerSchemaUrl,
+            workspaceId: 'wsp_someoneElse000000000',
+            slug: 'elsewhere',
+            createdAt: '2026-07-24T00:11:47.808Z',
+          },
+          projects: [{ projectId: projectId(1), directory: 'gearbox' }],
+        }),
+      );
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        relinkPorts,
+      );
+
+      expect(result).toEqual({ status: 'refused', reason: 'marker-owned-by-another-workspace' });
+      expect(await store.listWorkspaces()).toEqual(rowsBefore);
+      expect(relinkPorts.revokeGrant).toHaveBeenCalledWith(newPath);
+    });
+
+    it('should keep a grant the folder held before the pick', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+      const relinkPorts = ports(evidence());
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: '/Users/tester/Studio', wasGranted: true },
+        relinkPorts,
+      );
+
+      expect(result).toEqual({ status: 'refused', reason: 'workspace-overlap' });
+      expect(relinkPorts.revokeGrant).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('atomicity and order (T-R4.3)', () => {
+    it('should change no row when the commit aborts halfway', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [
+        { id: projectId(1), directory: 'gearbox' },
+        { id: projectId(2), directory: 'bracket' },
+      ]);
+      const before = await rawReadWorkspace(workspace.workspaceId);
+      const configsBefore = await nodeConfigs(store);
+      const relinkPorts = ports(
+        evidence({
+          projects: [
+            { projectId: projectId(1), directory: 'gearbox' },
+            { projectId: projectId(2), directory: 'bracket' },
+          ],
+        }),
+      );
+      const { IDBObjectStore: FakeIDBObjectStore } = await import('fake-indexeddb');
+      const put = FakeIDBObjectStore.prototype.put;
+      let puts = 0;
+      const failing = vi.spyOn(FakeIDBObjectStore.prototype, 'put').mockImplementation(function (
+        this: IDBObjectStore,
+        ...args: Parameters<IDBObjectStore['put']>
+      ) {
+        puts += 1;
+        if (this.name === 'configs' && puts === 3) {
+          throw new DOMException('The disk is full', 'QuotaExceededError');
+        }
+        return put.apply(this, args);
+      });
+
+      await expect(
+        store.relinkWorkspace(
+          workspace.workspaceId,
+          { backend: 'node', path: newPath, wasGranted: false },
+          relinkPorts,
+        ),
+      ).rejects.toThrow();
+      failing.mockRestore();
+
+      expect(await rawReadWorkspace(workspace.workspaceId)).toEqual(before);
+      expect(await nodeConfigs(store)).toEqual(configsBefore);
+      expect(relinkPorts.revokeGrant).not.toHaveBeenCalledWith(oldPath);
+    });
+
+    it('should keep the workspace id, re-allocate the slug and revoke the old grant only after the commit', async () => {
+      const store = await loadStore();
+      const workspace = await seed(store, [{ id: projectId(1), directory: 'gearbox' }]);
+      const seen: Array<Record<string, unknown> | undefined> = [];
+      const relinkPorts = ports(evidence({ projects: [{ projectId: projectId(1), directory: 'gearbox' }] }));
+      relinkPorts.revokeGrant.mockImplementation(async () => {
+        seen.push(await rawReadWorkspace(workspace.workspaceId));
+      });
+
+      const result = await store.relinkWorkspace(
+        workspace.workspaceId,
+        { backend: 'node', path: newPath, wasGranted: false },
+        relinkPorts,
+      );
+
+      expect(result).toMatchObject({ status: 'relinked', workspace: { workspaceId: workspace.workspaceId } });
+      const row = await rawReadWorkspace(workspace.workspaceId);
+      expect(row).toMatchObject({ workspaceId: workspace.workspaceId, path: newPath, slug: 'workshop-moved' });
+      expect(relinkPorts.revokeGrant).toHaveBeenCalledOnce();
+      expect(relinkPorts.revokeGrant).toHaveBeenCalledWith(oldPath);
+      expect(seen).toEqual([expect.objectContaining({ path: newPath })]);
+    });
+  });
+});
+
+describe('node workspace marker (T-R4.4)', () => {
+  it("should write .tau/workspace.json through the file service with the workspace's id", async () => {
+    const store = await loadStore();
+    const workspace = await store.createNodeWorkspace('/Users/tester/Workshop');
+    const written: string[] = [];
+
+    const outcome = await store.syncNodeWorkspaceMarker(workspace, {
+      read: async () => undefined,
+      write: async (content) => {
+        written.push(content);
+      },
+    });
+
+    expect(outcome).toBe('written');
+    expect(written).toHaveLength(1);
+    expect(JSON.parse(written[0]!)).toMatchObject({
+      $schema: workspaceMarkerSchemaUrl,
+      workspaceId: workspace.workspaceId,
+      slug: workspace.slug,
+    });
+  });
+
+  it('should skip a read-only folder without an error', async () => {
+    const store = await loadStore();
+    const workspace = await store.createNodeWorkspace('/Users/tester/Workshop');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(
+      store.syncNodeWorkspaceMarker(workspace, {
+        read: async () => undefined,
+        write: async () => {
+          throw new DOMException('The request is not allowed', 'NotAllowedError');
+        },
+      }),
+    ).resolves.toBe('skipped');
+    warn.mockRestore();
+  });
+
+  it('should leave a marker that already names the workspace untouched', async () => {
+    const store = await loadStore();
+    const workspace = await store.createNodeWorkspace('/Users/tester/Workshop');
+    const write = vi.fn(async () => undefined);
+
+    await expect(
+      store.syncNodeWorkspaceMarker(workspace, {
+        read: async () => markerJson(workspace.workspaceId, workspace.slug),
+        write,
+      }),
+    ).resolves.toBe('unchanged');
+    expect(write).not.toHaveBeenCalled();
+  });
+});

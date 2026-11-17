@@ -6,8 +6,9 @@
 //! `{"op":"load","path":…}` (`LoadLibraryW`, answering the loaded module's own file name); and
 //! `{"op":"connect","address":"ip:port"}` (TCP, three seconds); `{"op":"environment"}` (every variable the
 //! worker sees, as an object); and `{"op":"session"}` (the DACLs of the process's window station and thread desktop
-//! as SDDL, and whether it can create a window there: the conformance suite runs it as the person after every row,
-//! so a launch that leaves the person's session unusable for GUI processes fails). Every answer carries `ok`, and
+//! as SDDL, whether it can create a window there, and the DACL of every fixed volume's root folder: the conformance
+//! suite runs it as the person after every row, so a launch that leaves the person's session unusable for GUI
+//! processes, or a volume root changed, fails). Every answer carries `ok`, and
 //! `error` when it is false.
 
 use std::io::{BufRead, Write};
@@ -76,9 +77,12 @@ fn session() -> Result<Value, String> {
     unsafe extern "system" {
         fn GetCurrentThreadId() -> u32;
         fn LocalFree(memory: *mut c_void) -> *mut c_void;
+        fn GetLogicalDrives() -> u32;
+        fn GetDriveTypeW(root: *const u16) -> u32;
     }
     #[link(name = "advapi32")]
     unsafe extern "system" {
+        fn GetFileSecurityW(path: *const u16, info: u32, sd: *mut c_void, length: u32, needed: *mut u32) -> i32;
         fn ConvertSecurityDescriptorToStringSecurityDescriptorW(
             sd: *mut c_void,
             revision: u32,
@@ -115,6 +119,46 @@ fn session() -> Result<Value, String> {
         unsafe { LocalFree(text.cast()) };
         Ok(sddl.trim_end_matches('\0').to_owned())
     };
+    let sddl_of = |buffer: &mut [u64], what: &str| -> Result<String, String> {
+        let mut text: *mut u16 = std::ptr::null_mut();
+        let mut length = 0u32;
+        if unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                buffer.as_mut_ptr().cast(),
+                1,
+                DACL_SECURITY_INFORMATION,
+                &mut text,
+                &mut length,
+            )
+        } == 0
+        {
+            return Err(format!("ConvertSecurityDescriptorToStringSecurityDescriptorW({what}): {}", last()));
+        }
+        let sddl = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(text, length as usize) });
+        unsafe { LocalFree(text.cast()) };
+        Ok(sddl.trim_end_matches('\0').to_owned())
+    };
+    // Every fixed volume's root folder (`DRIVE_FIXED`), which `setup` gives the volume capability and no launch may
+    // change.
+    let mut volumes = serde_json::Map::new();
+    let drives = unsafe { GetLogicalDrives() };
+    for letter in (0..26u8).filter(|bit| drives & (1 << bit) != 0) {
+        let root = format!("{}:\\", char::from(b'A' + letter));
+        let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+        if unsafe { GetDriveTypeW(wide.as_ptr()) } != 3 {
+            continue;
+        }
+        let mut needed = 0u32;
+        unsafe { GetFileSecurityW(wide.as_ptr(), DACL_SECURITY_INFORMATION, std::ptr::null_mut(), 0, &mut needed) };
+        let mut buffer = vec![0u64; (needed as usize).div_ceil(8).max(1)];
+        if unsafe {
+            GetFileSecurityW(wide.as_ptr(), DACL_SECURITY_INFORMATION, buffer.as_mut_ptr().cast(), needed, &mut needed)
+        } == 0
+        {
+            return Err(format!("GetFileSecurityW({root}): {}", last()));
+        }
+        volumes.insert(root.clone(), Value::String(sddl_of(&mut buffer, &root)?));
+    }
     let station = dacl(unsafe { GetProcessWindowStation() }, "window station")?;
     let desktop = dacl(unsafe { GetThreadDesktop(GetCurrentThreadId()) }, "desktop")?;
     // A hidden window of the predefined STATIC class on the thread's desktop.
@@ -139,7 +183,13 @@ fn session() -> Result<Value, String> {
     if !window.is_null() {
         unsafe { DestroyWindow(window) };
     }
-    Ok(json!({ "station": station, "desktop": desktop, "window": window_error.is_none(), "windowError": window_error }))
+    Ok(json!({
+        "station": station,
+        "desktop": desktop,
+        "window": window_error.is_none(),
+        "windowError": window_error,
+        "volumes": volumes,
+    }))
 }
 
 #[cfg(not(windows))]

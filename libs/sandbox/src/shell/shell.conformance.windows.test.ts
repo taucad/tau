@@ -648,8 +648,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     ready = true;
   });
 
-  /* Every row ends with the person's session as it began: the same window-station and desktop DACLs, and a new
-     process of theirs that starts and creates a window. */
+  /* Every row ends with the person's session as it began: the same window-station, desktop and volume-root DACLs (as
+     `setup` left them), and a new process of theirs that starts and creates a window. */
   afterEach(() => {
     expect(personSession(workerProbe)).toStrictEqual(sessionBefore);
   });

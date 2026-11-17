@@ -617,6 +617,16 @@ describe('createIngestReporter', () => {
     expect(store.write).toHaveBeenCalled();
   });
 
+  it('should probe once and deliver when the host store keeps nothing (no localStorage, a write that throws)', async () => {
+    const store = { read: vi.fn(() => undefined), write: vi.fn() };
+    const { reporter, fetch, posts } = harness([policy('on')], { policyStore: store });
+    reporter.record(settled());
+    await vi.advanceTimersByTimeAsync(reporterBounds.interval);
+    expect(fetch.mock.calls.filter(([url]) => url === 'https://api.test/v1/telemetry/policy')).toHaveLength(1);
+    expect(posts()).toHaveLength(1);
+    await reporter.dispose();
+  });
+
   it('should keep delivering when a policy handler throws', async () => {
     const { reporter, posts } = harness([policy('on')]);
     reporter.onPolicy(() => {

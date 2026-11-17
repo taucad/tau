@@ -1134,13 +1134,13 @@ export const createIngestReporter = (input: IngestReporterInput): IngestReporter
   const now = input.now ?? Date.now;
   const jitter = input.jitter ?? Math.random;
   const send = input.fetch ?? globalThis.fetch.bind(globalThis);
+  /**
+   * The last answer this reporter applied. A host store that keeps nothing (no `localStorage`, a write that throws)
+   * falls back to it; without it the policy stays `unknown` and a non-empty queue re-probes at once, forever, sending
+   * nothing.
+   */
   let memoryPolicy: CachedTelemetryPolicy | undefined;
-  const store: TelemetryPolicyStore = input.policyStore ?? {
-    read: () => memoryPolicy,
-    write: (value) => {
-      memoryPolicy = value;
-    },
-  };
+  const store: TelemetryPolicyStore = input.policyStore ?? { read: () => undefined, write: () => undefined };
   let queue: Queued[] = [];
   const dropped = new Map<DropReason, number>();
   let spansDropped = 0;
@@ -1176,7 +1176,7 @@ export const createIngestReporter = (input: IngestReporterInput): IngestReporter
     queue = [];
   };
   const policyState = (): PolicyState => {
-    const cached = store.read();
+    const cached = store.read() ?? memoryPolicy;
     return cached !== undefined && now() < cached.expiresAt ? cached.policy : 'unknown';
   };
   const announce = (policy: TelemetryPolicyAnswer['policy']): void => {
@@ -1188,7 +1188,8 @@ export const createIngestReporter = (input: IngestReporterInput): IngestReporter
   const applyPolicy = (policy: TelemetryPolicyAnswer['policy'], maxAgeSeconds: number): void => {
     const bounded = Math.min(Math.max(maxAgeSeconds, policyMaxAgeBounds.minimum), policyMaxAgeBounds.maximum);
     policyLifetime = bounded * 1000;
-    store.write({ policy, expiresAt: now() + policyLifetime });
+    memoryPolicy = { policy, expiresAt: now() + policyLifetime };
+    store.write(memoryPolicy);
     if (policy === 'on') {
       reprobeWait = reporterBounds.reprobe;
     } else {

@@ -44,8 +44,8 @@ export default {
    *
    * `v8_splitRouteModules` is React Router 8's default (blueprint B8, RR6): a route's `clientLoader`, `clientAction`,
    * `clientMiddleware` and `HydrateFallback` load as their own chunks. No route has one that splits today, and
-   * `route-module-splitting.node.test.ts` fails when a split module first appears in the manifest, because split
-   * chunks load outside the patched `loadRouteModule` stale-build fallback.
+   * `scripts/check-critical-budget.mts` fails when a split module first appears in the manifest, because split chunks
+   * load outside the patched `loadRouteModule` stale-build fallback.
    */
   /* eslint-disable @typescript-eslint/naming-convention -- React Router's flag names. */
   future: {

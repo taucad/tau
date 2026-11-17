@@ -367,6 +367,7 @@ describe('desktop-rehearsal-gate.yml (T-REH.2)', () => {
           gh: `case "$*" in *"release list"*) printf '%s' "$RELEASES" ;; esac`,
           git: `case "$1" in rev-parse) case "$2" in HEAD) echo candidate ;; *) echo "base-of-$2" ;; esac ;; esac`,
         },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- an environment variable name.
         { RELEASES: releases },
       );
     const found = run('desktop-staging@0.9.1-staging.11');

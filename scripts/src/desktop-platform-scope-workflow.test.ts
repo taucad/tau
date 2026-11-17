@@ -218,7 +218,7 @@ describe('desktop route qualification platform scopes', () => {
       TAU_DESKTOP_QUALIFICATION_SCOPE: 'all',
       CHANNEL: 'staging',
     });
-    const recovery = (all['matrix'] as ReadonlyArray<{ id: string; route: string; scenario?: string }>).filter(
+    const recovery = ((all['matrix'] ?? []) as Array<{ id: string; route: string; scenario?: string }>).filter(
       (row) => row.scenario === 'recovery',
     );
     expect(recovery.map((row) => [row.id, row.route])).toEqual([

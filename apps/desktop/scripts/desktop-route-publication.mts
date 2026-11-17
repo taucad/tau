@@ -28,13 +28,14 @@ export const desktopManifestDigest = (manifest: DesktopArtifactManifest): string
     .digest('hex');
 
 /**
- * Explicitly selected publication scope the publisher workflows accept. `all` keeps the original admission. `macos`
- * and `linux` are platform scopes (D-H5, operator ruling 2026-11-10: each platform is promoted on its own receipts from
- * its own candidate): `macos` must carry exactly the Apple silicon ZIP and DMG, `linux` exactly the linux-x64 APT and
- * AppImage routes, and neither any other architecture's or platform's artifact. Intel is excluded by operator ruling
- * until a GPU-capable Intel Mac host can qualify it.
+ * Explicitly selected publication scope the publisher workflows accept. `all` keeps the original admission. `macos`,
+ * `windows` and `linux` are platform scopes (D-H5, operator ruling 2026-11-10: each platform is promoted on its own
+ * receipts from its own candidate; Windows joined on 2026-11-17): `macos` must carry exactly the Apple silicon ZIP and
+ * DMG, `windows` exactly the win32-x64 NSIS installer and ZIP, `linux` exactly the linux-x64 APT and AppImage routes, and
+ * none any other architecture's or platform's artifact. Intel is excluded by operator ruling until a GPU-capable Intel
+ * Mac host can qualify it.
  */
-export const desktopPublicationScopes = ['all', 'macos', 'linux'] as const;
+export const desktopPublicationScopes = ['all', 'macos', 'windows', 'linux'] as const;
 export type DesktopPublicationScope = (typeof desktopPublicationScopes)[number];
 /** Route admission and publication accept the same scopes. */
 export const desktopAdmissionScopes = desktopPublicationScopes;
@@ -47,6 +48,13 @@ const platformScopes = {
     routes: ['macos-zip'],
     kinds: ['macos-dmg', 'macos-zip'],
     refusal: (channel: string) => `Mac-only publication requires exactly ${channel} ZIP and DMG for Apple silicon`,
+  },
+  windows: {
+    name: 'Windows-only',
+    target: 'win32-x64',
+    routes: ['windows-nsis'],
+    kinds: ['windows-nsis', 'windows-zip'],
+    refusal: () => 'Windows-only publication requires exactly the NSIS installer and ZIP for win32-x64',
   },
   linux: {
     name: 'Linux-only',
@@ -150,7 +158,8 @@ export const qualifyDesktopScopedRoutes = (
   ) {
     throw new Error(`${platformScopes[scope].name} publication cannot admit another platform route`);
   }
-  // Only a Mac-only publication may record clean-host acceptance as pending; `all` and Linux always need VM receipts.
+  // Only a Mac-only publication may record clean-host acceptance as pending; `all`, Windows and Linux always need VM
+  // receipts.
   const cleanHostMayBePending = scope === 'macos';
   return {
     manifest,
@@ -299,12 +308,15 @@ export const desktopLaneManifestKey = (tag: string, lane: DesktopPublicationScop
 
 const routeKey = ({ route, target }: { route: string; target: string }): string => `${route}:${target}`;
 
+/** Platform lanes in their fixed composed-catalog order. */
+export const desktopPlatformLanes = ['macos', 'windows', 'linux'] as const satisfies readonly DesktopPlatformLane[];
+
 /** Compose platform catalogs: each carries exactly its platform's routes, on one channel, in a fixed lane order. */
 export const composeDesktopInstallerCatalog = (
   channel: 'production' | 'staging',
   platforms: Partial<Record<DesktopPlatformLane, DesktopInstallerCatalog>>,
 ): DesktopComposedInstallerCatalog => {
-  const entries = (['macos', 'linux'] as const).flatMap((lane) => {
+  const entries = desktopPlatformLanes.flatMap((lane) => {
     const catalog = platforms[lane];
     if (!catalog) {
       return [];
@@ -344,7 +356,7 @@ const catalogDocument = z.union([
       channel: z.enum(['production', 'staging']),
       platforms: z.array(
         z.object({
-          lane: z.enum(['macos', 'linux']),
+          lane: z.enum(desktopPlatformLanes),
           catalog: z.object({ routes: z.array(z.object({ route: z.string(), target: z.string() })) }),
         }),
       ),

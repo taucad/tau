@@ -12,9 +12,9 @@ on:
         options: [promote-routes, renew-routes]
         required: true
       scope:
-        description: All qualified routes, or one platform's catalog (Apple silicon ZIP/DMG, or Linux APT/AppImage) on either channel (D-H5, promotion only)
+        description: All qualified routes, or one platform's catalog (Apple silicon ZIP/DMG, Windows NSIS/ZIP, or Linux APT/AppImage) on either channel (D-H5, promotion only)
         type: choice
-        options: [all, macos, linux]
+        options: [all, macos, windows, linux]
         default: all
       tag:
         description: Exact candidate tag (promotion only)
@@ -44,7 +44,7 @@ jobs:
   # `release-desktop-staging.yml` for a full candidate (`intel`) of the same commit and stops: the
   # operator promotes that tag once its installer candidate and qualification runs are green. A
   # production tag (`desktop@*`) always packages both. Only the `all` scope asks for Intel, so a
-  # per-platform scope (`macos` or `linux`) never does.
+  # per-platform scope (`macos`, `windows` or `linux`) never does.
   candidate:
     name: Require a full candidate
     if: github.ref == 'refs/heads/main'
@@ -189,9 +189,9 @@ jobs:
       - name: Load protected signing inputs
         if: steps.selected.outputs.run == 'true'
         env:
-          APPIMAGE_PRIVATE_KEY: ${{ inputs.scope != 'macos' && secrets.TAU_APPIMAGE_PRIVATE_KEY || '' }}
-          APPIMAGE_PUBLIC_KEYS: ${{ inputs.scope != 'macos' && vars.TAU_APPIMAGE_PUBLIC_KEYS || '' }}
-          APT_PRIVATE_KEY_BASE64: ${{ inputs.scope != 'macos' && secrets.TAU_APT_PRIVATE_KEY_BASE64 || '' }}
+          APPIMAGE_PRIVATE_KEY: ${{ inputs.scope != 'macos' && inputs.scope != 'windows' && secrets.TAU_APPIMAGE_PRIVATE_KEY || '' }}
+          APPIMAGE_PUBLIC_KEYS: ${{ inputs.scope != 'macos' && inputs.scope != 'windows' && vars.TAU_APPIMAGE_PUBLIC_KEYS || '' }}
+          APT_PRIVATE_KEY_BASE64: ${{ inputs.scope != 'macos' && inputs.scope != 'windows' && secrets.TAU_APT_PRIVATE_KEY_BASE64 || '' }}
           ROUTE_TRUST: ${{ vars.TAU_ROUTE_TRUST }}
         run: |
           set -euo pipefail
@@ -199,8 +199,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/desktop-signing" out/desktop
           printf '%s' "$ROUTE_TRUST" > "$RUNNER_TEMP/desktop-signing/route-trust.json"
           mkdir -m 700 "$RUNNER_TEMP/desktop-signing/gnupg"
-          # A Mac-only promotion admits no AppImage or APT route, so Linux signing material is never materialized.
-          if [ "$TAU_DESKTOP_QUALIFICATION_SCOPE" != macos ]; then
+          # A Mac-only or Windows-only promotion admits no AppImage or APT route, so Linux signing material is never
+          # materialized.
+          if [ "$TAU_DESKTOP_QUALIFICATION_SCOPE" != macos ] && [ "$TAU_DESKTOP_QUALIFICATION_SCOPE" != windows ]; then
             printf '%s' "$APPIMAGE_PRIVATE_KEY" > "$RUNNER_TEMP/desktop-signing/appimage.pem"
             printf '%s' "$APPIMAGE_PUBLIC_KEYS" > "$RUNNER_TEMP/desktop-signing/public-keys.json"
             if [ -n "$APT_PRIVATE_KEY_BASE64" ]; then

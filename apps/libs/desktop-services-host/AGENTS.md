@@ -54,5 +54,5 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 - No file, test or fixture imports the desktop app (`#main`, `#shared`, `@taucad/desktop`) or the UI app: the app imports this library, never the reverse (`scripts/src/desktop-split-graph.test.ts` pins it).
 - The diagnostics file log is the app's: the app's kernel and services entries call `provideDiagnosticsLog(createDiagnosticsLog)` before importing a bootstrap, and a process handed no factory writes no log file (D-DS6).
 - The IPC contracts shared with main and preload are `@taucad/types/desktop` (D-DS5).
-- `tauCloudBuildEnabled` and `tauDesktopHostBuild` are the desktop build's constants (`src/build-environment.d.ts`); `vitest.config.ts` defines them for a self-host build.
+- `tauCloudBuildEnabled`, `tauTelemetryHostCloudBuild` and `tauDesktopHostBuild` are the desktop build's constants (`src/build-environment.d.ts`); `vitest.config.ts` defines them for a self-host build.
 - `test:terminal-conformance` stays `cache: false`, and every receipt binds the commit tested. `test:authority-writer` runs as a dependency of `desktop:test:authority-writer`.

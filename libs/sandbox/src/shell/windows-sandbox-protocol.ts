@@ -19,6 +19,7 @@ export const windowsHostFrameType = {
   input: 0x03,
   resize: 0x04,
   terminate: 0x05,
+  closeInput: 0x06,
 } as const;
 
 /** Helper-to-host frame types. @public */
@@ -62,16 +63,30 @@ export class WindowsSandboxProtocolError extends Error {
 export type WindowsLaunchSpec = Readonly<{
   version: typeof windowsSandboxProtocolVersion;
   executable: string;
+  /**
+   * `sha256:<64 lowercase hex>` of the executable. Required for an executable outside `%ProgramFiles%` and
+   * `%SystemRoot%` (a native worker's), whose folder must then be readable and never writable; checked when given for
+   * one inside them.
+   */
+  executableDigest?: string | undefined;
   arguments: readonly string[];
   workingDirectory: string;
   environment: Readonly<Record<string, string>>;
-  stdio: Readonly<{ kind: 'pipes' }> | Readonly<{ kind: 'terminal'; columns: number; rows: number }>;
+  /** `input: true` gives a pipes launch a stdin the host writes with `input` frames and ends with `close-input`. */
+  stdio:
+    | Readonly<{ kind: 'pipes'; input?: boolean | undefined }>
+    | Readonly<{ kind: 'terminal'; columns: number; rows: number }>;
   filesystem: Readonly<{
     readable: readonly string[];
     writable: readonly string[];
     readOnly: readonly string[];
     denied: readonly string[];
   }>;
+  /**
+   * The launch's network. Omitted or `{ domains: [] }` (the helper also reads `null` so): none at all (the AppContainer has no network
+   * capability). Named domains are refused with `network-isolation` until the helper has the sandbox proxy.
+   */
+  network?: Readonly<{ domains: readonly string[] }> | undefined;
   /** Where the helper journals each descriptor it changes before it changes it. */
   journal: string;
 }>;
@@ -82,7 +97,8 @@ export type WindowsHostFrame =
   | Readonly<{ type: 'start' }>
   | Readonly<{ type: 'input'; bytes: Uint8Array<ArrayBuffer> }>
   | Readonly<{ type: 'resize'; size: ShellTerminalSize }>
-  | Readonly<{ type: 'terminate' }>;
+  | Readonly<{ type: 'terminate' }>
+  | Readonly<{ type: 'close-input' }>;
 
 /** The helper's `ready` payload (`0x81`). @public */
 export type WindowsHelperReady = Readonly<{
@@ -174,6 +190,9 @@ export const encodeWindowsHostFrame = (frame: WindowsHostFrame): Uint8Array<Arra
     }
     case 'terminate': {
       return encodeWindowsFrame(windowsHostFrameType.terminate);
+    }
+    case 'close-input': {
+      return encodeWindowsFrame(windowsHostFrameType.closeInput);
     }
   }
 };

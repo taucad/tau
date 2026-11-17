@@ -54,6 +54,8 @@ import {
 } from '#shell/shell-identity.js';
 import type { ShellExecutable } from '#shell/shell-identity.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellProcess, ShellProvider } from '#shell/shell-provider.js';
+import { launchExclusionConformance, nativeWorkerConformance } from '#shell/windows-native-worker.fixture.js';
+import type { NativeWorkerContext } from '#shell/windows-native-worker.fixture.js';
 import { createWindowsShellProvider } from '#shell/windows-shell-provider.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
@@ -62,6 +64,15 @@ const helperPath =
   process.env['TAU_SHELL_CONFORMANCE_WINDOWS_HELPER'] ??
   fileURLToPath(
     new URL('../../windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe', import.meta.url),
+  );
+/** NW01's stand-in native worker (`windows-sandbox/examples/tau_worker_probe.rs`), built beside the helper. */
+const workerProbe =
+  process.env['TAU_SHELL_CONFORMANCE_WINDOWS_WORKER_PROBE'] ??
+  fileURLToPath(
+    new URL(
+      '../../windows-sandbox/target/x86_64-pc-windows-msvc/release/examples/tau-worker-probe.exe',
+      import.meta.url,
+    ),
   );
 const systemRoot = process.env['SystemRoot'] ?? process.env['SYSTEMROOT'] ?? String.raw`C:\Windows`;
 /** Windows PowerShell 5.1 at its fixed path; T02 runs on it too when present beside PowerShell 7. */
@@ -1602,6 +1613,32 @@ describe.runIf(enabled)('Windows shell conformance', () => {
         await reading.catch(() => undefined);
       }
     },
+  );
+
+  const nativeWorkerContext = (): NativeWorkerContext => ({
+    root,
+    helperPath,
+    workerProbe,
+    systemRoot,
+    recordHelperDiagnostic,
+    sddlOf,
+    interfaceAddress,
+    tcpCanary,
+    tcpControl,
+    waitUntil,
+    pause: delay,
+  });
+
+  conformanceWithin(180_000)(
+    'NW01',
+    'a native worker outside Program Files runs pinned to its digest, loads from its unwritable runtime root, writes only its artifacts, has no network and reads stdin to close-input',
+    async () => nativeWorkerConformance(nativeWorkerContext()),
+  );
+
+  conformanceWithin(180_000)(
+    'NW02',
+    'the helper runs one launch at a time: a second launch and a restore are refused while a worker is live, and the next launch runs as soon as it exits',
+    async () => launchExclusionConformance(nativeWorkerContext()),
   );
 
   conformance('W07', 'after every launch, each path the suite touched has exactly its original ACL', async () => {

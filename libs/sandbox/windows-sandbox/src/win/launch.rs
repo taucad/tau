@@ -5,6 +5,7 @@
 //! the job is empty and every descriptor is restored before `exit`. Anything unconfirmed is
 //! `cleanup-failed`, and the journal stays for `restore`.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -22,6 +23,8 @@ use windows_sys::Win32::System::Threading::{
 
 use super::acl::{self, Principals};
 use super::desktop::{PrivateDesktop, WindowStation, current_station_name};
+use super::exclusive::{self, Exclusive};
+use super::executable::pin;
 use super::job::Job;
 use super::lowbox::derive_package_sid;
 use super::pipe::{self, HandleIo};
@@ -39,7 +42,7 @@ use crate::install::{InstallRecord, firewall_off_message};
 use crate::journal::{Entry, Header, JOURNAL_VERSION, JournalWriter};
 use crate::paths::is_within;
 use crate::protocol::{CleanupFailed, Exit, Ready, Refused, RunnerError, RunnerSpec};
-use crate::spec::{self, ExecutableRoots, ValidSpec};
+use crate::spec::{self, ExecutableRoots, ValidSpec, format_digest};
 use crate::tree::{self, Sample};
 
 const RUNNER_EXIT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -107,11 +110,41 @@ pub fn run() -> i32 {
     if let Err(refused) = check_fence(&record) {
         return refuse(&sink, &refused);
     }
-    let session = match Session::prepare(valid, &record) {
-        Ok(session) => session,
-        Err(refused) => return refuse(&sink, &refused),
+    // A digest is checked on a handle held until the launch ends, before anything changes: nobody can then
+    // write, delete or rename the file `CreateProcessAsUserW` maps by name (`executable.rs`).
+    let pinned = match &valid.executable_digest {
+        Some(digest) => match pin(&valid.executable, digest) {
+            Ok(pinned) => Some(pinned),
+            Err(refused) => return refuse(&sink, &refused),
+        },
+        None => None,
     };
-    session.run(stdin, sink)
+    // One launch at a time: held from before the journal until teardown has restored it (`exclusive.rs`).
+    let exclusive = match exclusive::try_acquire() {
+        Ok(Some(exclusive)) => exclusive,
+        Ok(None) => return refuse(&sink, &Refused::unavailable(exclusive::BUSY, None)),
+        Err(err) => {
+            return refuse(
+                &sink,
+                &Refused::unavailable(
+                    "the sandbox cannot tell whether another launch is running",
+                    Some(err.to_string()),
+                ),
+            );
+        }
+    };
+    let mut session = match Session::prepare(valid, &record) {
+        Ok(session) => session,
+        Err(refused) => {
+            drop(exclusive);
+            return refuse(&sink, &refused);
+        }
+    };
+    // Released by the teardown, before the last frame: a host that starts the next launch on `exit` finds it free.
+    session.exclusive = RefCell::new(Some(exclusive));
+    let code = session.run(stdin, sink);
+    drop(pinned);
+    code
 }
 
 /// The runner `TauSandbox` executes is the copy `setup` installed; it must be this very binary, or the
@@ -160,6 +193,8 @@ struct Session {
     /// them only widens access, and Codex's shape runs without them.
     station: Option<WindowStation>,
     station_name: String,
+    /// One launch at a time (`exclusive.rs`), held until [`Session::teardown`] has restored everything.
+    exclusive: RefCell<Option<Exclusive>>,
 }
 
 impl Session {
@@ -262,6 +297,7 @@ impl Session {
             roots,
             station,
             station_name,
+            exclusive: RefCell::new(None),
         })
     }
 
@@ -286,6 +322,8 @@ impl Session {
         {
             failures.push(format!("the journal could not be deleted: {err}"));
         }
+        // Restored, or kept for `restore`: either way this launch changes nothing more.
+        drop(self.exclusive.borrow_mut().take());
         if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
     }
 
@@ -449,6 +487,7 @@ impl Session {
             person_sid: self.person.to_sddl(),
             desktop: desktop.startup_name.clone(),
             executable: self.valid.executable.clone(),
+            executable_digest: self.valid.executable_digest.as_ref().map(format_digest),
             arguments: self.valid.arguments.clone(),
             working_directory: self.valid.working_directory.clone(),
             environment: with_system_root(&self.valid.environment),
@@ -636,14 +675,17 @@ fn spawn_runner(record: &InstallRecord, names: &pipe::PipeNames) -> Result<Runne
     Ok(Runner { process: Owned(info.hProcess), thread: Owned(info.hThread), pid: info.dwProcessId })
 }
 
-/// Forward host frames to the runner. `terminate` or a closed stdin kills the whole job.
+/// Forward host frames to the runner: `input` for a terminal or for pipes that take input, `close-input` for
+/// the latter, `resize` for a terminal. `terminate` or a closed stdin kills the whole job.
 fn host_reader(mut stdin: HandleIo, to_runner: Sink, job: Arc<Job>, killed: Arc<AtomicBool>, stdio: spec::Stdio) {
     std::thread::spawn(move || {
         let terminal = matches!(stdio, spec::Stdio::Terminal { .. });
         while let Ok(Some(frame)) = read_frame(&mut stdin) {
             match frame.kind {
                 frame::START => send(&to_runner, &frame),
-                frame::INPUT | frame::RESIZE if terminal => send(&to_runner, &frame),
+                frame::INPUT if stdio.takes_input() => send(&to_runner, &frame),
+                frame::CLOSE_INPUT if stdio.closes_input() => send(&to_runner, &frame),
+                frame::RESIZE if terminal => send(&to_runner, &frame),
                 frame::TERMINATE => break,
                 _ => {}
             }

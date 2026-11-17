@@ -110,6 +110,17 @@ pub fn extended(path: &str) -> String {
     }
 }
 
+/// Whether the path `GetFinalPathNameByHandleW` reports for an open file (`\\?\C:\…`, every link and
+/// junction resolved) names the same file as the normalised path it was opened by. A link anywhere along the
+/// way makes them differ.
+pub fn same_final_path(final_path: &str, path: &str) -> bool {
+    let Some(drive_path) = final_path.strip_prefix("\\\\?\\") else { return false };
+    match normalize_absolute(drive_path) {
+        Ok(drive_path) => fold(&drive_path) == fold(path),
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +170,18 @@ mod tests {
         assert_eq!(extended("C:\\a\\b"), "\\\\?\\C:\\a\\b");
         assert_eq!(extended("\\\\?\\C:\\a"), "\\\\?\\C:\\a");
         assert_eq!(extended("relative"), "relative");
+    }
+
+    #[test]
+    fn final_paths_must_name_the_opened_path() {
+        assert!(same_final_path("\\\\?\\C:\\Users\\a\\rt\\python.exe", "C:\\Users\\a\\rt\\python.exe"));
+        assert!(same_final_path("\\\\?\\c:\\users\\A\\RT\\Python.exe", "C:\\Users\\a\\rt\\python.exe"));
+        // Through a junction: the final path is the target's.
+        assert!(!same_final_path("\\\\?\\D:\\elsewhere\\python.exe", "C:\\Users\\a\\rt\\python.exe"));
+        assert!(!same_final_path("\\\\?\\UNC\\server\\share\\python.exe", "C:\\Users\\a\\rt\\python.exe"));
+        assert!(!same_final_path("C:\\Users\\a\\rt\\python.exe", "C:\\Users\\a\\rt\\python.exe"));
+        // An 8.3 alias of the same file is not its final path.
+        assert!(!same_final_path("\\\\?\\C:\\Users\\a\\runtime\\python.exe", "C:\\Users\\a\\RUNTIM~1\\python.exe"));
     }
 
     #[test]

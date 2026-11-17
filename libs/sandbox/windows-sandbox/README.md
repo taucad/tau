@@ -126,8 +126,35 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   through `runner-log`. If the root cannot be opened, the runner refuses at stage `registry` with that line, and the
   shell never starts. `launch` refuses "the sandbox account has no profile (run setup again)" when the profile is not
   registered. `revoke` deletes the profile before the account.
-- **Sessions.** One sandbox account means read isolation is per account, not per session, so the provider serializes
-  launches and answers a second concurrent one `session-limit` (A23 fallback clause).
+- **Native workers.** A launch may run an `.exe` outside `%ProgramFiles%` and `%SystemRoot%` (a Build123d worker's
+  Python) only with `executableDigest`, `sha256:` and 64 lowercase hex digits; without it the launch is
+  `unsupported: executable`. Before anything changes, `launch` opens the file sharing read only, refuses a reparse
+  point or a path whose final name (`GetFinalPathNameByHandleW`) differs from the one given (a link, a junction or an
+  8.3 short name anywhere on it: the host passes the long, resolved path), hashes that very handle with SHA-256 (CNG)
+  and holds it until the launch ends. While it is open nobody can open the file for writing or deleting, rename it or
+  rename a folder above it, so the image `CreateProcessAsUserW` maps by name is the one hashed. A mismatch is
+  `unsupported: executable-digest`, naming both digests. Inside the fixed roots the digest is optional and checked when
+  given. The executable's folder is the worker's runtime root: a `readable` or `readOnly` path must equal or contain
+  it, and no `writable` path may equal, contain or lie inside it; otherwise `unsupported: executable` (a drive root is
+  never a runtime root). The `readable` grant gives the account and the package read and execute (`0x1200A9`), which
+  is what an image load needs in both access-check passes, so the worker loads its DLLs and `.pyd` modules from the
+  runtime root (NW01 loads a DLL it carries there with `LoadLibraryW` and checks the module's path). Nothing
+  PowerShell-specific is forced on a worker: its environment is the spec's, plus `SystemRoot` when left out.
+- **Sessions.** One launch at a time per computer, enforced by the helper itself. Read and write isolation between
+  two launches would hold (each has its own package SID, which every grant names, and its own capability SID for the
+  restricted pass; the restricting SIDs are that capability, the runner's own logon SID and Everyone, and the volume
+  capability is granted by `setup` on volume roots only, so none of these is shared state a launch adds or removes).
+  Restore is what is not safe: grants also name the shared account (the first pass needs it) and denials the shared
+  group, `SetEntriesInAclW` merges a second launch's account ACE into the first's, the Low label of a writable root is
+  shared, and restore writes back whole snapshots, roots and descendants alike, plus the window station's descriptor
+  byte for byte. Two live launches over overlapping paths would each journal the other's ACEs, and whichever restored
+  last would write the other's grants back after it ended. So `launch` holds the named mutex
+  `Global\tau.sandbox.descriptors` from before it journals until its teardown has restored everything, and `restore`
+  holds it while it writes a journal back. A second launch is refused at once, before anything changes: `refused`
+  with status `sandbox-unavailable` and the message "another sandboxed launch is running on this computer, and Windows
+  runs one at a time; try again when it ends" (NW02). `restore` then exits 1 with the same failure and keeps
+  the journal. A launcher that dies abandons the mutex, and the next caller takes it. The provider also serializes its
+  own launches and answers a second one `sandbox-unavailable` without running the helper.
 - **Descendants.** The runner places the shell in a Job Object with `KILL_ON_JOB_CLOSE`, no `BREAKAWAY_OK` and no
   `SILENT_BREAKAWAY_OK`; the launcher places the runner in its own kill-on-close job. Closing either kills the tree.
   `exit` is reported only once the job reports zero active processes.
@@ -248,13 +275,14 @@ for the host log only.
 
 Host to helper:
 
-| Type   | Name        | Payload                                                                                                     |
-| ------ | ----------- | ----------------------------------------------------------------------------------------------------------- |
-| `0x01` | `spec`      | JSON launch spec, first frame, exactly once                                                                 |
-| `0x02` | `start`     | empty; the start barrier. The helper starts the shell only after this, so the host can record custody first |
-| `0x03` | `input`     | raw bytes for the terminal (`terminal` launches only)                                                       |
-| `0x04` | `resize`    | JSON `{ "columns": n, "rows": n }`                                                                          |
-| `0x05` | `terminate` | empty; kill the job, then report `exit`                                                                     |
+| Type   | Name          | Payload                                                                                                     |
+| ------ | ------------- | ----------------------------------------------------------------------------------------------------------- |
+| `0x01` | `spec`        | JSON launch spec, first frame, exactly once                                                                 |
+| `0x02` | `start`       | empty; the start barrier. The helper starts the shell only after this, so the host can record custody first |
+| `0x03` | `input`       | raw bytes for the terminal, or for the child's stdin with `pipes` and `"input": true`; ignored otherwise    |
+| `0x04` | `resize`      | JSON `{ "columns": n, "rows": n }`                                                                          |
+| `0x05` | `terminate`   | empty; kill the job, then report `exit`                                                                     |
+| `0x06` | `close-input` | empty; close the child's stdin (EOF), with `pipes` and `"input": true` only; ignored otherwise              |
 
 Closing stdin is the same as `terminate`.
 
@@ -277,29 +305,37 @@ Launch spec (`0x01`):
 {
   "version": 1,
   "executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+  "executableDigest": "sha256:<64 lowercase hex>",
   "arguments": ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "…"],
   "workingDirectory": "C:\\…",
   "environment": { "PATH": "…", "TEMP": "…" },
-  "stdio": { "kind": "pipes" },
+  "stdio": { "kind": "pipes", "input": false },
   "filesystem": {
     "readable": [],
     "writable": [],
     "readOnly": [],
     "denied": []
   },
+  "network": null,
   "journal": "C:\\Users\\…\\AppData\\Roaming\\Tau\\shell-custody\\<executionId>.acl.json"
 }
 ```
 
-`stdio` is `{ "kind": "terminal", "columns": n, "rows": n }` for the Terminal; with `pipes` the shell's stdin is `NUL`
-and `input`/`resize` are ignored. `writable` includes the private HOME and temporary roots. Every path is absolute
+`stdio` is `{ "kind": "terminal", "columns": n, "rows": n }` for the Terminal. With `pipes` the child's stdin is `NUL`
+and `input`, `close-input` and `resize` are ignored, unless `"input": true`: the child then reads a pipe that `input`
+frames write (a byte stream; frame boundaries mean nothing) and `close-input` closes, and the child sees EOF. A
+dedicated writer feeds it, so a child that never reads cannot stall the relay. Closing the helper's own stdin still
+means `terminate`. `executableDigest` and `input` are optional and additive; the spec stays version 1. `writable` includes the private HOME and temporary roots. Every path is absolute
 (`X:\…`, no `.`/`..`, UNC, device or stream spelling) and already resolved by the host; a path that does not exist gets
-no ACL change. An optional `"network": { "domains": [] }` is accepted; nonempty `domains` is refused. `SystemRoot` is
+no ACL change. `network` may be omitted, `null` or `{ "domains": [] }`, all meaning no network at all; nonempty
+`domains` is refused. `SystemRoot` is
 added to the environment when the host leaves it out.
 
 The helper fails closed: an unknown field anywhere in the spec is refused. `unsupported` refusals carry one of these
 `requirement` values: `spec` (unreadable spec, unknown field, misplaced journal), `spec-version`, `executable` (not an
-`.exe` under `%ProgramFiles%` or `%SystemRoot%`, or a `.cmd`/`.bat`), `absolute-paths`, `environment` (a name with
+`.exe`, a `.cmd`/`.bat`, one outside `%ProgramFiles%` and `%SystemRoot%` without `executableDigest`, a runtime root
+that is not readable or is writable, or a file that is missing, a link or open for writing elsewhere),
+`executable-digest` (a malformed digest, or one the file does not match), `absolute-paths`, `environment` (a name with
 `=` or NUL, or a name given twice in different case), `stdio` (a zero terminal size), `network-isolation`.
 
 Ordering. `refused` normally comes instead of `ready`. If the runner reported `ready` but the shell then could not be
@@ -318,7 +354,8 @@ stderr at every stage. `exit` carries the shell's own exit code when it ended by
 resumes it and talks to it over two one-way named pipes (`\\.\pipe\tau-sandbox-<random>-in`/`-out`) created with
 `FILE_FLAG_FIRST_PIPE_INSTANCE`, `PIPE_REJECT_REMOTE_CLIENTS` and a protected DACL naming only the person and
 `TauSandbox`. Each side checks the other's PID. The frames are the same codec: `launch` sends `spec` (an internal spec
-with the capability SID, the package SID, the person's SID and the desktop name), then forwards `start`, `input`,
+with the capability SID, the package SID, the person's SID, the desktop name and the `executableDigest`, which the
+runner checks for form and roots again; the launcher holds the file), then forwards `start`, `input`, `close-input`,
 `resize` and `terminate`; the runner answers `ready` (empty), `started`, `stdout`/`stderr`/`output` and `exit`, or
 `0xC1` `runner-error` (`{ "stage", "message" }`), or `0xC2` `runner-log` (a UTF-8 diagnostic line the launcher copies to
 its stderr, sent at any time, also before `ready`), which `launch` never forwards to the host.

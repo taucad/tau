@@ -12,6 +12,67 @@ paths.
 | `runner.ts`        | Spawns one arm per process behind the harness loader hook; refuses a partial or non-zero run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `harness/`         | The measurement harness: `run-arm.mts` (one process = one arm), `driver.mts` (paired interleaved campaign), `models.mts` (corpus), `probe.mts` (counters, stub session, fault-injection seam), `hook-impl.mjs` (benchmark-only source substitution, never touches production files on disk), `summarize.mts`, `ceilings.mts`, `glb-determinism.mts`, `overhead-floor.mts`, `identity-tracer.mts`. The headless-Chromium confirming leg was NOT promoted: it carries five pre-existing type errors and belongs to W9's host matrix (G-B11); it remains at `spikes/compute-reuse/lane-b/browser`. |
 
+## Qualification matrix (audit R5)
+
+The qualification harness measures every Replicad reuse change against reuse off, through the public runtime
+client only: no source patching, so kernel or runtime changes cannot silently break it. Program invariant I1
+(byte parity with reuse off, whatever the cache history) is its main gate.
+
+| Path                                                        | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `harness/qualify-corpus.mts`                                | The seven-model matrix (gridfinity-box, stress-test, spur-gearbox, turbofan, bench-vise, six-axis-arm, planetary-gear-system): parameter sets `A`/`B` (pose edits on six-axis-arm and planetary-gear-system), a scrub ladder, a comment-only edit and a one-literal source edit per model; plus the `retained-operand` fixture (booleans on operands the model keeps using, a module-scope shape reused across rebuilds)                                                                                |
+| `harness/qualify-arm.mts`                                   | One process = one arm (`off`, `memory`, `durable`) of one scenario: `matrix` (base,A,base,B,base,comment,literal,original on a live document), `scrub` (back-to-back transient frames, the last committed, a revisit, one rested transient frame), `agent` (nine open/act/close calls on one unchanged build), `history` (ten randomized cache histories, each a new client; durable histories share one store), `abort` (an edit supersedes a running build on a worker thread; stop latency recorded) |
+| `harness/qualify-runtime.mts`, `harness/qualify-worker.mts` | The runtime definition every arm uses, and its worker-thread entry                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `harness/qualify-driver.mts`                                | Fresh child per model, scenario, arm and pair; arms alternate order per pair; writes raw JSON plus `index.json`                                                                                                                                                                                                                                                                                                                                                                                         |
+| `harness/qualify-summarize.mts`                             | Byte parity against off, the history gate, counts, stop latency and timings as median [min–max] (n); `--pins` reports drift, `--writePins` writes a pins file                                                                                                                                                                                                                                                                                                                                           |
+| `qualification-baselines.json`                              | Pinned reuse-off GLB hashes per model and step (the I1 reference) and per-arm counts                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `compute-qualification.test.ts`                             | The CI subset (gridfinity-box, six-axis-arm, retained-operand)                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
+**What is asserted and what is data.** Counts are deterministic and asserted: `modelRuns` (`replicad.run-main`
+spans), `tessellations` (`replicad.render-output` spans) and `storeWrites` (compute publications that settled
+`stored`). GLB hashes are asserted. Wall times are recorded as data only, never as CI thresholds. A pinned hash
+or count moves only in the change that explains it; it is never regenerated to turn the suite green.
+
+**Arms.** `off` is compute `off` with the Replicad adapter off, the byte-parity reference. `memory` is the library
+default. `durable` is a node:sqlite store. `--wasm multi` runs the multi-thread WASM build (Node loads it); its
+parity leg compares it with the single-thread pins.
+
+**Plugging in an arm** (fork seam, live tier, mesh memo): add an `--arm` value in `qualify-arm.mts` (and in
+`qualify-runtime.mts` when it changes the kernel options), then run the driver with `--arms off,<arm>`. The
+summarizer compares every arm with `off` for bytes and reports its counts and timings beside the others. To run
+against a local build of the Replicad fork, point the workspace's `replicad` dependency at it before running.
+
+**Identity tracer.** `harness/identity-tracer.mts` advances a receiver's identity on a builder that returns its
+receiver and on a mutator that returns nothing (audit F7, `identity-tracer.test.ts`). Nothing in the
+qualification matrix uses it; its ceilings remain an analysis aid, not a gate.
+
+```sh
+# CI subset (cheap; asserts hashes and counts):
+pnpm nx compute-qualify-ci runtime-e2e
+
+# Full program campaign: seven models, every scenario, arms off and memory (history also durable), two pairs:
+pnpm nx compute-qualify runtime-e2e
+pnpm nx compute-qualify-summarize runtime-e2e -- out/reports/compute-qualify/<stamp>
+
+# One model or scenario, a new arm, or the multi-thread parity leg:
+node --import @oxc-node/core/register apps/runtime-e2e/src/compute-baseline/harness/qualify-driver.mts \
+  --models turbofan --arms off,memory --scenarios matrix,history --pairs 3
+node --import @oxc-node/core/register apps/runtime-e2e/src/compute-baseline/harness/qualify-driver.mts \
+  --arms off --scenarios matrix --wasm multi --out out/reports/compute-qualify/multi
+node --import @oxc-node/core/register apps/runtime-e2e/src/compute-baseline/harness/qualify-summarize.mts \
+  out/reports/compute-qualify/multi --pins apps/runtime-e2e/src/compute-baseline/qualification-baselines.json
+```
+
+Measure timings in alternating pairs on a machine whose load you record (the summary prints it); compare arms of
+one campaign, never numbers from different windows.
+
+## Lane-B arms (adapter era)
+
+The commands below drive the original W0 harness. Its `bypass`, `memory`, `durable` and `poison` arms patch
+`replicad-compute-reuse.ts` and `replicad.kernel.ts` by exact source match through `hook-impl.mjs`; the adapter
+has since changed, so `compute-baseline-arms`, `-parity` and `-oracle` fail at load on current `main`. They
+qualify the adapter that R2 and R30 switch off and delete; the qualification matrix above replaces them.
+
 ## Commands
 
 ```sh

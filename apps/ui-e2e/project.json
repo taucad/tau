@@ -390,6 +390,14 @@
         "cwd": "{workspaceRoot}",
         "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts apps/ui-e2e/src/observability-delivery.staging.test.ts apps/ui-e2e/src/observability-ssr.staging.test.ts apps/ui-e2e/src/observability-runtime.staging.test.ts --environment=node --no-file-parallelism"
       }
+    },
+    "test:e2e:desktop-boot-signals-staging": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --dir apps/ui-e2e apps/ui-e2e/src/observability.staging.test.ts --environment=node --testNamePattern=T-R9.3"
+      }
     }
   }
 }

@@ -13,6 +13,8 @@ import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
+import { chatDragKindOf } from '#components/chat/chat-drop-zone.js';
+import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
 import type { DraftAttachment, DraftAttachmentSource, PendingDraftImage } from '#hooks/draft.machine.js';
@@ -282,9 +284,9 @@ export function useChatTextareaLogic({
   handleSubmit: (finalizedText?: string, references?: readonly CadReference[]) => Promise<void>;
   handleCancelClick: () => void;
   handleTextareaKeyDown: (event: React.KeyboardEvent) => void;
-  handleDragOver: (event: React.DragEvent) => void;
+  handleDragOver: (event: ChatDragEvent) => void;
   handleDragLeave: () => void;
-  handleDrop: (event: React.DragEvent) => Promise<void>;
+  handleDrop: (event: ChatDragEvent) => Promise<void>;
   handlePaste: (event: ClipboardPasteEvent) => boolean;
   handleFileSelect: () => void;
   handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -603,18 +605,9 @@ export function useChatTextareaLogic({
     [handleSubmit, removeAttachment],
   );
 
-  const handleDragOver = useCallback((event: React.DragEvent): void => {
+  const handleDragOver = useCallback((event: ChatDragEvent): void => {
     event.preventDefault();
-    const { types } = event.dataTransfer;
-    if (types.includes(tauViewerPanelDragMime)) {
-      setDragKind('viewer');
-      return;
-    }
-    if (types.includes(tauEditorPanelDragMime) || types.includes(tauFileDragMime)) {
-      setDragKind('reference');
-      return;
-    }
-    setDragKind('image');
+    setDragKind(chatDragKindOf(event.dataTransfer.types));
   }, []);
 
   const handleDragLeave = useCallback((): void => {
@@ -622,7 +615,7 @@ export function useChatTextareaLogic({
   }, []);
 
   const handleDrop = useCallback(
-    async (event: React.DragEvent): Promise<void> => {
+    async (event: ChatDragEvent): Promise<void> => {
       event.preventDefault();
       setDragKind(undefined);
 

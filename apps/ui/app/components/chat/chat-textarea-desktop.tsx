@@ -11,6 +11,7 @@ import {
   chatComposerShellClassName,
 } from '@taucad/chat-ui/components/chat-input-styles';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
@@ -43,6 +44,8 @@ import { ChatTextareaBorderBeam } from '@taucad/chat-ui/components/chat-textarea
 import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import { ChatDropOverlay, useChatDropZone } from '#components/chat/chat-drop-zone.js';
+import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
 import type { DraftAttachment, PendingDraftImage } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
@@ -66,12 +69,6 @@ import type { ChatContextReference } from '@taucad/chat-ui/components/chat-conte
 const noSkills: SkillsCatalogState['commands'] = [];
 /** One identity for "nothing converting", so the memoised rail is not re-rendered for a new empty list. */
 const noPendingImages: readonly PendingDraftImage[] = [];
-
-const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
-  image: 'Add files',
-  viewer: 'Add screenshot',
-  reference: 'Add reference',
-};
 
 type ChatTextareaDesktopProperties = {
   readonly earlyInput?: EarlyChatInput;
@@ -128,9 +125,9 @@ type ChatTextareaDesktopProperties = {
   // Handlers (all must be stable references to prevent tooltip re-render loops)
   readonly handleSubmit: (finalizedText?: string, references?: readonly CadReference[]) => Promise<void>;
   readonly handleCancelClick: () => void;
-  readonly handleDragOver: (event: React.DragEvent) => void;
+  readonly handleDragOver: (event: ChatDragEvent) => void;
   readonly handleDragLeave: () => void;
-  readonly handleDrop: (event: React.DragEvent) => Promise<void>;
+  readonly handleDrop: (event: ChatDragEvent) => Promise<void>;
   readonly handlePaste: (event: ClipboardPasteEvent) => boolean;
   readonly handleFileSelect: () => void;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -158,6 +155,26 @@ export const acpCommandToSlashCommand = (
     source: agentId,
   };
 };
+
+/** Drag feedback: over the whole area when the composer takes its drops there, else over its own box. */
+function ChatDropFeedback({
+  dragKind,
+  dropZone,
+  className,
+}: {
+  readonly dragKind: ChatTextareaDragKind | undefined;
+  readonly dropZone: HTMLElement | undefined;
+  readonly className: string;
+}): React.ReactNode {
+  if (dragKind === undefined) {
+    return null;
+  }
+  return dropZone === undefined ? (
+    <ChatDropOverlay kind={dragKind} className={className} />
+  ) : (
+    createPortal(<ChatDropOverlay kind={dragKind} />, dropZone)
+  );
+}
 
 /**
  * At rest a collapsible composer is one row; anything in flight — focus, a
@@ -691,6 +708,21 @@ export const ChatTextareaDesktop = memo(function ({
   });
   /* F19: the beam follows the box's corners. */
   const radius = mode === 'edit' ? 'rounded-lg' : 'rounded-2xl';
+  const dropZone = useChatDropZone({
+    isEnabled: mode === 'main',
+    containerReference,
+    onDragOver: handleDragOver,
+    onDragLeave: handleDragLeave,
+    onDrop: handleDrop,
+  });
+  /* With an area to take its drops, the area's listeners are the only ones, so a drop lands once. */
+  const boxDropHandlers = useMemo(
+    () =>
+      dropZone === undefined
+        ? { onDragOver: handleDragOver, onDragLeave: handleDragLeave, onDrop: handleDrop }
+        : undefined,
+    [dropZone, handleDragOver, handleDragLeave, handleDrop],
+  );
 
   return (
     // Outer wrapper is purely a positioning context for the beam overlay
@@ -714,9 +746,7 @@ export const ChatTextareaDesktop = memo(function ({
         data-collapsed={isCollapsed ? '' : undefined}
         onFocus={handleTextareaFocus}
         onBlur={handleTextareaBlur}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        {...boxDropHandlers}
       >
         {/* Only a session's chat can hold a kernel this runtime cannot run. */}
         <ChatKernelFallbackNotice />
@@ -751,14 +781,7 @@ export const ChatTextareaDesktop = memo(function ({
           />
         </div>
 
-        {/* Drag and drop feedback */}
-        {dragKind ? (
-          <div className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-primary/10 backdrop-blur-xs'>
-            <p className='rounded-md border bg-background/50 px-2 font-medium text-primary'>
-              {dragOverlayCopy[dragKind]}
-            </p>
-          </div>
-        ) : null}
+        <ChatDropFeedback dragKind={dragKind} dropZone={dropZone} className={radius} />
 
         <DictationFeedback transcript={dictation.transcript} />
         <ChatTextareaBar

@@ -55,7 +55,11 @@ type WorkspaceRow = {
   projectCount: number | undefined;
 };
 
-type DisplayedRow = WorkspaceRow & { readonly reason: string | undefined };
+type DisplayedRow = WorkspaceRow & {
+  readonly reason: string | undefined;
+  /** Granted, but the file service has not published its status yet: it offers no command until it has (T-R3.2). */
+  readonly isChecking: boolean;
+};
 
 /** Where the project library lists an unfinished operation that can be discarded (U7). */
 const projectRecoveryHref = '/projects#project-recovery';
@@ -688,29 +692,39 @@ export function WorkspaceConnections({
                 ? workspaceConnection.message
                 : undefined;
 
-  /* A granted folder's status is the file service's published one (U3); a record without a grant stays disconnected. */
+  /*
+   * A granted folder's status is the file service's published one (U3); a record without a grant stays disconnected.
+   * Before the file service has published any status (it always publishes Home's), a granted folder is not yet known
+   * to be connected: it is shown as checking, with no command, so a lost folder never offers Disconnect in the
+   * meantime. A file service in `error` publishes nothing new, so its rows keep the grant's word.
+   */
+  const isAwaitingRootStatuses = useSelector(
+    fileManagerRef,
+    (state) => state.context.rootStatuses.length === 0 && !state.matches('error'),
+  );
   const displayedRows = useMemo((): DisplayedRow[] => {
     const byKey = new Map(rootStatuses.map((root) => [root.storageRootKey, root] as const));
     return rows.map((row) => {
       const root = row.status === 'connected' ? byKey.get(workspaceStorageRootKey(row.workspace)) : undefined;
       if (root === undefined) {
-        return { ...row, reason: undefined };
+        return { ...row, reason: undefined, isChecking: row.status === 'connected' && isAwaitingRootStatuses };
       }
       const status = folderStatusOf(root);
       return {
         ...row,
         status,
         reason: status === 'conflict' || status === 'error' ? conflictReasonOf(root.code) : undefined,
+        isChecking: false,
       };
     });
-  }, [rootStatuses, rows]);
+  }, [isAwaitingRootStatuses, rootStatuses, rows]);
   /* A desktop folder connected before markers existed gets one at its next successful admission (D2 step 8). */
   useEffect(() => {
     if (!isDesktopTarget()) {
       return;
     }
     for (const row of displayedRows) {
-      if (row.status === 'connected' && row.workspace.path !== undefined) {
+      if (row.status === 'connected' && !row.isChecking && row.workspace.path !== undefined) {
         void anchorNodeMarker(row.workspace);
       }
     }
@@ -724,12 +738,30 @@ export function WorkspaceConnections({
   const isBusyRow = busyWorkspaceId !== undefined || isAddingWorkspace;
   const renderRow = (row: DisplayedRow): React.JSX.Element => {
     const projectCountLabel = `${row.projectCount} project${row.projectCount === 1 ? '' : 's'}`;
-    const meta =
-      row.projectCount === undefined ? undefined : (
-        <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-          <span>{projectCountLabel}</span>
-        </div>
+    const meta = row.isChecking ? (
+      <div role='status' className='flex items-center gap-2 text-xs text-muted-foreground'>
+        <Loader className='size-3.5' />
+        <span>Checking folder…</span>
+      </div>
+    ) : row.projectCount === undefined ? undefined : (
+      <div className='flex items-center gap-2 text-xs text-muted-foreground'>
+        <span>{projectCountLabel}</span>
+      </div>
+    );
+    if (row.isChecking) {
+      return (
+        <WorkspaceDirectoryPanel
+          key={row.workspace.workspaceId}
+          variant='row'
+          workspaceId={row.workspace.workspaceId}
+          workspaceName={row.workspace.name}
+          status={row.status}
+          description={row.workspace.path}
+          isBusy
+          meta={meta}
+        />
       );
+    }
     return (
       <WorkspaceDirectoryPanel
         key={row.workspace.workspaceId}

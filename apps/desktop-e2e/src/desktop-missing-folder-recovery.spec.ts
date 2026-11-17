@@ -344,8 +344,7 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
   );
 
   /* T-R3.2: removing a folder never touches its chats, and the Home notice is shown once. */
-  // Expected-failure: @rifont until 2026-12-15
-  it.fails(
+  it(
     'should keep a removed folder chat history on disk and list it again when the folder is added back',
     async () => {
       const token = await seedAccount('rehearsal-remove');

@@ -59,10 +59,14 @@ const {
   mockWorkspaceCreated,
 } = vi.hoisted(() => ({
   mockAssertWorkspaceMutationAllowed: vi.fn(),
-  /* The root file manager, as far as the folder rows read it: no root statuses, and not in `error`. One snapshot
-   * object, as an actor returns until it changes, so a selector over it settles. */
+  /* The root file manager, as far as the folder rows read it: started, with Home's root status published, and not in
+   * `error`. One snapshot object, as an actor returns until it changes, so a selector over it settles. */
   mockFileManagerRef: {
-    snapshot: { status: 'active', matches: () => false, context: { rootStatuses: [] } },
+    snapshot: {
+      status: 'active',
+      matches: () => false,
+      context: { rootStatuses: [{ storageRootKey: 'opfs:origin', backend: 'opfs', state: 'available' }] },
+    },
     getSnapshot() {
       return this.snapshot;
     },

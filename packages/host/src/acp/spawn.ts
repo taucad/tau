@@ -57,6 +57,39 @@ export const acpEnvironmentAllowlist: readonly string[] = [
   'NODE_EXTRA_CA_CERTS',
 ];
 
+/**
+ * Further names every adapter is given on Windows, matched there without regard to case.
+ *
+ * They are the operating system's own layout, not credentials: without `SystemRoot` Winsock cannot load
+ * its providers, so a CLI cannot reach its vendor; without `ComSpec` and `PATHEXT` it cannot start a
+ * shell tool; and `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TEMP` and `TMP` are where a CLI finds its
+ * sign-in, its configuration and its scratch space.
+ *
+ * @public
+ */
+export const acpWindowsEnvironmentAllowlist: readonly string[] = [
+  'SystemRoot',
+  'windir',
+  'SystemDrive',
+  'ComSpec',
+  'PATHEXT',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'USERNAME',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'ProgramData',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'ProgramW6432',
+  'TEMP',
+  'TMP',
+  'OS',
+  'PROCESSOR_ARCHITECTURE',
+  'NUMBER_OF_PROCESSORS',
+];
+
 /** Variable prefixes every adapter is given. @public */
 export const acpEnvironmentPrefixAllowlist: readonly string[] = ['XDG_'];
 
@@ -68,6 +101,7 @@ const stderrRetention = 8192;
  *
  * @param base - Environment to filter, normally `process.env`.
  * @param adapter - Adapter whose own config variables survive the allowlist.
+ * @param platform - Platform whose names apply; Windows adds {@link acpWindowsEnvironmentAllowlist} and ignores case.
  * @returns A fresh environment containing only allowlisted variables.
  * @public
  *
@@ -85,13 +119,23 @@ const stderrRetention = 8192;
 export const acpAdapterEnvironment = (
   base: NodeJS.ProcessEnv,
   adapter: Pick<AcpAdapter, 'configEnv'> & Partial<Pick<AcpAdapter, 'spawnEnv' | 'executableEnv' | 'executablePath'>>,
+  platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv => {
-  const allowed = new Set([...acpEnvironmentAllowlist, ...adapter.configEnv]);
+  /* Windows names are case-insensitive: `Path` is `PATH` there. */
+  const windows = platform === 'win32';
+  const spelled = (name: string): string => (windows ? name.toUpperCase() : name);
+  const allowed = new Set(
+    [...acpEnvironmentAllowlist, ...(windows ? acpWindowsEnvironmentAllowlist : []), ...adapter.configEnv].map((name) =>
+      spelled(name),
+    ),
+  );
+  const prefixes = acpEnvironmentPrefixAllowlist.map((name) => spelled(name));
   return {
     ...Object.fromEntries(
       Object.entries(base).filter(
         ([name, value]) =>
-          value !== undefined && (allowed.has(name) || acpEnvironmentPrefixAllowlist.some((p) => name.startsWith(p))),
+          value !== undefined &&
+          (allowed.has(spelled(name)) || prefixes.some((prefix) => spelled(name).startsWith(prefix))),
       ),
     ),
     /* The adapter is spawned from `process.execPath`; inside Electron (the desktop

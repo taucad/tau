@@ -121,6 +121,35 @@ describe('acpAdapterEnvironment', () => {
     });
   });
 
+  it('passes the Windows system layout on win32 only, matching names without regard to case', () => {
+    const base: NodeJS.ProcessEnv = {
+      Path: String.raw`C:\Windows\System32`,
+      SystemRoot: String.raw`C:\Windows`,
+      ComSpec: String.raw`C:\Windows\System32\cmd.exe`,
+      PATHEXT: '.COM;.EXE',
+      USERPROFILE: String.raw`C:\Users\tau`,
+      APPDATA: String.raw`C:\Users\tau\AppData\Roaming`,
+      LOCALAPPDATA: String.raw`C:\Users\tau\AppData\Local`,
+      TEMP: String.raw`C:\Users\tau\AppData\Local\Temp`,
+      codex_home: String.raw`C:\Users\tau\.codex`,
+      OPENAI_API_KEY: 'sk-should-never-travel',
+      Tau_Host_Agent_Token: 'admission-secret',
+    };
+
+    expect(Object.keys(acpAdapterEnvironment(base, { configEnv: ['CODEX_HOME'] }, 'win32')).toSorted()).toEqual([
+      'APPDATA',
+      'ComSpec',
+      'LOCALAPPDATA',
+      'PATHEXT',
+      'Path',
+      'SystemRoot',
+      'TEMP',
+      'USERPROFILE',
+      'codex_home',
+    ]);
+    expect(acpAdapterEnvironment(base, { configEnv: ['CODEX_HOME'] }, 'linux')).toEqual({});
+  });
+
   it('passes the user’s own proxy and CA settings, and still no credential', () => {
     /* Operator ruling 2026-09-03: without these an adapter behind a corporate
      * proxy cannot reach its vendor at all, and a proxy URL is a network
@@ -215,6 +244,12 @@ describe('spawnAcpAdapter', () => {
       expect(echoed.env).not.toContain('ANTHROPIC_API_KEY');
       expect(echoed.env).not.toContain('TAU_HOST_AGENT_TOKEN');
       expect(echoed.env).toContain('PATH');
+      if (windowsHost) {
+        /* Without SystemRoot Winsock cannot load its providers, and the CLI cannot reach its vendor. */
+        expect(echoed.env?.map((name) => name.toUpperCase())).toEqual(
+          expect.arrayContaining(['SYSTEMROOT', 'USERPROFILE', 'TEMP', 'COMSPEC']),
+        );
+      }
 
       // Wire log: both directions were observed, and no credential is in them.
       expect(frames.some((frame) => frame.direction === 'client->agent')).toBe(true);

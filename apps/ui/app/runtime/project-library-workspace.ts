@@ -13,6 +13,7 @@ import { idPrefix } from '@taucad/types/constants';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { selectWorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import type { PreparedWorkspaceCatalog, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
+import { WorkspaceRecoveryPendingError } from '@taucad/ui-core/filesystem/workspace-errors';
 import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
 import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
 import {
@@ -242,7 +243,7 @@ export class WorkspaceCommands {
       return storage.backend === 'node' && storage.path === workspace?.path;
     });
     if (pendingNative || (await worker.hasPendingProjectOperationForWorkspace(workspaceId))) {
-      throw new Error('This workspace is required to recover an unfinished project operation');
+      throw new WorkspaceRecoveryPendingError();
     }
   };
 

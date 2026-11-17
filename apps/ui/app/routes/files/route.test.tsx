@@ -253,8 +253,8 @@ describe('FilesRoute folders that are not found', () => {
     const group = await screen.findByRole('button', { name: 'Folders not found (2)' });
     expect(group).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: 'Remove all' })).toBeEnabled();
-    const workingRow = screen.getByText('Workshop');
-    expect(workingRow.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const ordered = [...document.body.querySelectorAll('span, button')];
+    expect(ordered.indexOf(screen.getByText('Workshop'))).toBeLessThan(ordered.indexOf(group));
     expect(screen.queryByText('Scratch')).not.toBeInTheDocument();
     expect(screen.queryByText('Archive')).not.toBeInTheDocument();
 

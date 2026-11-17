@@ -12,7 +12,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({
+  useOptionalFileManager: () => ({
     fileManagerRef: {
       getSnapshot: () => ({ status: 'active', matches: () => false, context: { rootStatuses: state.rootStatuses } }),
       subscribe: () => ({ unsubscribe: () => undefined }),
@@ -92,10 +92,12 @@ describe('UnavailableFoldersNotice', () => {
 
   it('should announce a folder again after it came back and was lost once more', async () => {
     state.rootStatuses = [lost(scratch)];
-    (await renderSettled()).unmount();
+    const lostView = await renderSettled();
+    lostView.unmount();
 
     state.rootStatuses = [available(scratch)];
-    (await renderSettled()).unmount();
+    const backView = await renderSettled();
+    backView.unmount();
 
     state.rootStatuses = [lost(scratch)];
     await renderSettled();

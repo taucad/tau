@@ -51,6 +51,8 @@ import {
   isNodeWorkspace,
   subscribeProjectRootConfigurationChanges,
 } from '@taucad/files-ui/filesystem/handle-store';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { isWorkspaceOverlapError } from '@taucad/ui-core/filesystem/workspace-errors';
 import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
@@ -1366,7 +1368,17 @@ export class ProjectLibrary {
       const connection =
         selection.backend === 'webaccess'
           ? await createWorkspace(selection.handle)
-          : await createNodeWorkspace(selection.path);
+          : await createNodeWorkspace(selection.path).catch(async (error: unknown) => {
+              /* R6: main granted the folder when it was picked; a refused folder must not stay in the grant file. */
+              if (isWorkspaceOverlapError(error)) {
+                await desktopBridge()
+                  ?.directories?.disconnect(selection.path)
+                  .catch((revokeError: unknown) => {
+                    console.warn('Could not release the refused folder', revokeError);
+                  });
+              }
+              throw error;
+            });
       signal.throwIfAborted();
       if (this.workspaceCommands.connectionTrace) {
         this.workspaceCommands.connectionTrace.workspaceId = connection.workspaceId;

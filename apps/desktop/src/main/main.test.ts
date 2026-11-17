@@ -780,14 +780,16 @@ describe('desktop main compute owner', () => {
       const list = state.handlers.get(directoryGrantChannels.list)!;
       const before = list({ senderFrame: {} });
       dialog.showMessageBox.mockClear();
-      for (const picked of [state.userData, join(state.userData, 'filesystem-authority', 'nested')]) {
+      const pickRefused = async (picked: string): Promise<void> => {
         await mkdir(picked, { recursive: true });
         dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [picked] });
 
         await expect(state.handlers.get('tau:select-directory')!({ senderFrame: {} })).resolves.toBeUndefined();
 
         expect(list({ senderFrame: {} })).toEqual(before);
-      }
+      };
+      await pickRefused(state.userData);
+      await pickRefused(join(state.userData, 'filesystem-authority', 'nested'));
       expect(dialog.showMessageBox).toHaveBeenCalledTimes(2);
       expect(JSON.stringify(dialog.showMessageBox.mock.calls[0])).toContain("Tau's own data");
       expect(fakeWindow.webContents.send).not.toHaveBeenCalledWith(directoryGrantChannels.changed);

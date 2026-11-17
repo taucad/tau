@@ -318,7 +318,8 @@ describe('WorkspaceConnections', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Remove from Tau' }));
 
-    expect((await screen.findByRole('alert')).textContent).toMatch(/^Couldn.t save/);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/^Couldn.t save/);
     expect(screen.getByText('Tau Workspace')).toBeInTheDocument();
     expect(state.removeWorkspace).not.toHaveBeenCalled();
   });

@@ -1670,7 +1670,8 @@ describe('removeWorkspace', () => {
 
     const writes = transaction.mock.calls.filter(([, mode]) => mode === 'readwrite');
     expect(writes).toHaveLength(1);
-    expect([writes[0]![0]].flat().toSorted()).toEqual(['configs', 'handles', 'workspaces']);
+    const stores: string[] = [writes[0]![0]].flat();
+    expect(stores.toSorted((left, right) => left.localeCompare(right))).toEqual(['configs', 'handles', 'workspaces']);
     transaction.mockRestore();
     expect(await rawReadWorkspace(removed.workspaceId)).toBeUndefined();
     expect(await rawReadHandle(removed.workspaceId)).toBeUndefined();
@@ -1712,9 +1713,8 @@ describe('removeWorkspace', () => {
     await expect(removeWorkspace(removed.workspaceId)).resolves.toBe(true);
 
     expect(await rawReadWorkspace(removed.workspaceId)).toBeUndefined();
-    expect(
-      (await getAllProjectFileSystemConfigs()).toSorted((left, right) => left.projectId.localeCompare(right.projectId)),
-    ).toEqual([kept, home]);
+    const remaining = await getAllProjectFileSystemConfigs();
+    expect(remaining.toSorted((left, right) => left.projectId.localeCompare(right.projectId))).toEqual([kept, home]);
   });
 
   it('should report an unknown workspace without writing', async () => {
@@ -1770,15 +1770,15 @@ describe('node workspace overlap', () => {
     ['inside Home', `${homeRoot}/Nested`],
     ['containing another workspace', '/Users/tester'],
     ['inside another workspace', '/Users/tester/Workshop/Parts'],
-    ['inside another workspace on Windows', 'C:\\Users\\tester\\Studio\\Parts'],
+    ['inside another workspace on Windows', String.raw`C:\Users\tester\Studio\Parts`],
   ])('should refuse a folder %s', async (_case, path) => {
     buildTarget.desktop = true;
     const store = await loadStore();
     await store.createNodeWorkspace('/Users/tester/Workshop');
-    await store.createNodeWorkspace('C:\\Users\\tester\\Studio');
+    await store.createNodeWorkspace(String.raw`C:\Users\tester\Studio`);
     const before = await store.listWorkspaces();
 
-    await expect(store.createNodeWorkspace(path)).rejects.toBeInstanceOf(store.WorkspaceOverlapError);
+    await expect(store.createNodeWorkspace(path)).rejects.toMatchObject({ name: 'WorkspaceOverlapError' });
     expect(await store.listWorkspaces()).toEqual(before);
   });
 

@@ -17,9 +17,9 @@ import { installBrowserHost } from '#main/browser-host.js';
  */
 
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { totalmem } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -174,6 +174,27 @@ import {
 } from '#shared/quick-look.js';
 import type { QuickLookResult } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
+
+/** Whether `inner` is `outer` or inside it, the node host's containment rule (`host.ts` `isContained`). */
+const isPathWithin = (outer: string, inner: string): boolean => {
+  const fromOuter = relative(outer, inner);
+  return fromOuter === '' || (!isAbsolute(fromOuter) && fromOuter !== '..' && !fromOuter.startsWith(`..${sep}`));
+};
+
+/** Resolve symbolic links where the path exists, so a link cannot hide an overlap. */
+const canonicalOrResolved = async (path: string): Promise<string> => {
+  try {
+    return await realpath(path);
+  } catch {
+    return resolve(path);
+  }
+};
+
+/** Whether a picked folder contains, or is inside, `protectedDirectory` (blueprint R6). */
+const overlapsDirectory = async (picked: string, protectedDirectory: string): Promise<boolean> => {
+  const [folder, guarded] = await Promise.all([canonicalOrResolved(picked), canonicalOrResolved(protectedDirectory)]);
+  return isPathWithin(folder, guarded) || isPathWithin(guarded, folder);
+};
 
 /* A packaged build ignores endpoint, renderer, client-root, executable-path and
  * `TAU_E2E_*` overrides unless it was packaged to honour them (ad-hoc and
@@ -1674,6 +1695,21 @@ const bootstrapElectronApp = async (): Promise<void> => {
       lastDirectoryById.set(rememberedFor, directory);
     }
     if (directory === undefined) {
+      return undefined;
+    }
+    /* R6: a folder around or inside Tau's own data cannot be a root, because the node host refuses to admit it
+     * (`AUTHORITY_ROOT_OVERLAP`). Refuse it here, with the reason, before it reaches the grant file. */
+    if (await overlapsDirectory(directory, authorityDirectory)) {
+      log.log('warn', 'dialog.directory-refused', { reason: 'authority-overlap' });
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const refusal = {
+        type: 'warning',
+        message: 'Tau can’t use this folder',
+        detail:
+          "This folder contains Tau's own data, or is inside it. Choose a folder that holds only your projects, such as a folder inside Documents.",
+        buttons: ['OK'],
+      } as const;
+      await (window ? dialog.showMessageBox(window, refusal) : dialog.showMessageBox(refusal));
       return undefined;
     }
     /* The picker *is* the admission event: a root becomes nameable by the

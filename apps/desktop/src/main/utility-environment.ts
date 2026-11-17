@@ -189,20 +189,47 @@ export const utilityEnvironmentNames = [
   'TAU_SECRET_VAULT',
 ] as const;
 
+const allowlistedNames: ReadonlySet<string> = new Set(utilityEnvironmentNames);
+
 /**
  * Build the base environment every utility fork starts from.
  *
+ * Windows environment names are case-insensitive, but a copy of `process.env`
+ * (main's `desktopEnvironment`) is a plain object that is not. Explorer starts
+ * the app with `Path`, `SystemRoot` and `windir`; an MSYS shell (Git Bash, a
+ * CI `bash` step) starts it with `PATH`, `SYSTEMROOT` and `WINDIR`. On Windows
+ * each allowlisted name is therefore matched without regard to case and
+ * written under its allowlisted spelling. A utility without `SystemRoot`
+ * cannot initialise Winsock: every socket it opens, loopback included, fails
+ * with `connect UNKNOWN`.
+ *
  * @param source - Environment to copy from. Defaults to main's own.
  * @param additions - Names this fork additionally needs, merged last.
+ * @param platform - The platform whose naming rules apply. Defaults to this one.
  * @returns A fresh environment carrying only allowlisted names.
  */
 export const utilityEnvironment = (
   source: NodeJS.ProcessEnv = process.env,
   additions: Readonly<Record<string, string>> = {},
+  platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv => {
+  const valueOf =
+    platform === 'win32'
+      ? (() => {
+          const byFoldedName = new Map<string, string>();
+          for (const [name, value] of Object.entries(source)) {
+            const folded = name.toUpperCase();
+            /* An exact spelling wins over another case of the same name. */
+            if (value !== undefined && (!byFoldedName.has(folded) || allowlistedNames.has(name))) {
+              byFoldedName.set(folded, value);
+            }
+          }
+          return (name: string): string | undefined => byFoldedName.get(name.toUpperCase());
+        })()
+      : (name: string): string | undefined => source[name];
   const environment: NodeJS.ProcessEnv = {};
   for (const name of utilityEnvironmentNames) {
-    const value = source[name];
+    const value = valueOf(name);
     if (value !== undefined) {
       environment[name] = value;
     }

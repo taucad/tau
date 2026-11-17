@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { BrowserWindow, WebContents, WebContentsDidStartNavigationEventParams } from 'electron';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { _electron as electron } from 'playwright';
@@ -303,6 +303,68 @@ describe('initial main navigation readiness', () => {
       const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
       launch.mockRestore();
       await rm(profileRoot, { recursive: true, force: true });
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+    }
+  });
+});
+
+describe('effective profile assertion', () => {
+  /* T-R11.1 (D7): whatever the build does with `--user-data-dir`, a run that landed in another profile stops before
+   * it touches the page, so test folders can never again be granted in a person's real profile. */
+  it('should close an app whose userData is not the profile this run created and throw before touching the page', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-profile-test-'));
+    const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+    const child = mockDeep<ReturnType<typeof application.process>>({ exitCode: null, signalCode: null });
+    application.process.mockReturnValue(child);
+    application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
+    application.evaluate.mockResolvedValue(join(tmpdir(), 'elsewhere', 'Tau Staging'));
+    const page = mockDeep<Awaited<ReturnType<typeof application.firstWindow>>>();
+    application.firstWindow.mockResolvedValue(page);
+    const launch = vi.spyOn(electron, 'launch').mockResolvedValueOnce(application);
+    try {
+      await expect(launchDesktopApp({ token: 'fixture-token', profileRoot })).rejects.toThrow(
+        /is not the temporary profile this run created/u,
+      );
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(application.firstWindow).not.toHaveBeenCalled();
+      expect(page.waitForLoadState).not.toHaveBeenCalled();
+      expect(page.reload).not.toHaveBeenCalled();
+      expect(application.evaluate).toHaveBeenCalledOnce();
+    } finally {
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      launch.mockRestore();
+      await rm(profileRoot, { recursive: true, force: true });
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('should accept the profile it created when the app reports it through a symbolic link', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'tau-desktop-profile-link-test-'));
+    const profileRoot = join(parent, 'profile');
+    await mkdir(profileRoot);
+    const linked = join(parent, 'linked');
+    await symlink(profileRoot, linked);
+    const stopped = new Error('Fixture stops after the profile check.');
+    const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+    const child = mockDeep<ReturnType<typeof application.process>>({ exitCode: null, signalCode: null });
+    application.process.mockReturnValue(child);
+    application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
+    application.evaluate.mockResolvedValue(linked);
+    application.firstWindow.mockRejectedValue(stopped);
+    const launch = vi.spyOn(electron, 'launch').mockResolvedValueOnce(application);
+    try {
+      await expect(launchDesktopApp({ token: 'fixture-token', profileRoot })).rejects.toThrow(
+        'The desktop shell did not survive launch.',
+      );
+      expect(application.firstWindow).toHaveBeenCalledOnce();
+    } finally {
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      launch.mockRestore();
+      await rm(parent, { recursive: true, force: true });
       if (picked) {
         await rm(dirname(picked), { recursive: true, force: true });
       }

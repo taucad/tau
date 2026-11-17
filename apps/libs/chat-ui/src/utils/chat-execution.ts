@@ -71,6 +71,20 @@ export const isDeviceRelativeHostId = (hostId: string): boolean =>
   hostId === 'desktop' || hostId === 'origin' || hostId.startsWith(loopbackHostIdPrefix);
 
 /**
+ * Whether a record stamped with `recorded` belongs to the placement `hostId`.
+ *
+ * Tau Desktop's in-process launcher stamps no host on what it records (`desktop` names a different machine on every
+ * device), so an unstamped record answers `desktop`; any other placement needs its own id on the record.
+ *
+ * @param recorded - The host id on the record, if any.
+ * @param hostId - The placement asking.
+ * @returns Whether the record is that placement's.
+ * @public
+ */
+export const isRecordedOnHost = (recorded: string | undefined, hostId: string | undefined): boolean =>
+  recorded === hostId || (recorded === undefined && hostId === 'desktop');
+
+/**
  * The execution as a synced chat record keeps it: the chat's intent, without
  * this device's placement.
  *

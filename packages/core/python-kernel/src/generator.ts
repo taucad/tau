@@ -24,14 +24,14 @@ export type LockPin = {
 export type TargetConfig = {
   /** Canonical `<os>-<arch>[-<libc>]` key, as the preparation host's `targetKey` spells it. */
   readonly key: string;
-  readonly os: 'darwin' | 'linux';
+  readonly os: 'darwin' | 'linux' | 'win32';
   readonly arch: 'arm64' | 'x64';
   readonly libc?: 'glibc';
   /** The macOS deployment target the wheels are chosen for (the highest macOS version a chosen wheel may require). */
   readonly deploymentTarget?: string;
   /** Highest glibc version a chosen wheel may require. */
   readonly glibcCeiling?: string;
-  /** The interpreter archive's own OS or glibc floor. */
+  /** The interpreter archive's own OS (macOS, Windows) or glibc floor. */
   readonly interpreterFloor: string;
   readonly interpreter: {
     readonly asset: string;
@@ -60,7 +60,10 @@ export type IndexFile = {
 export type SelectedWheel = {
   readonly pin: LockPin;
   readonly file: IndexFile;
-  /** Lowest OS (macOS) or glibc (Linux) version the wheel supports; absent for a platform-independent wheel. */
+  /**
+   * Lowest OS (macOS) or glibc (Linux) version the wheel supports; absent for a platform-independent wheel and on
+   * Windows, whose wheel tags name no OS version.
+   */
   readonly floor?: string;
 };
 
@@ -70,7 +73,6 @@ const markerEnvironmentBase = {
   implementation_name: 'cpython',
   platform_python_implementation: 'CPython',
   python_version: `3.${String(cpythonMinor)}`,
-  os_name: 'posix',
 } as const;
 
 const compareVersions = (left: string, right: string): number => {
@@ -150,16 +152,15 @@ export const parseRequirementsLock = (text: string): LockPin[] => {
  */
 export const markerEnvironment = (target: TargetConfig): Readonly<Record<string, string>> => ({
   ...markerEnvironmentBase,
+  os_name: target.os === 'win32' ? 'nt' : 'posix',
   sys_platform: target.os,
-  platform_system: target.os === 'darwin' ? 'Darwin' : 'Linux',
-  platform_machine:
-    target.os === 'darwin'
-      ? target.arch === 'arm64'
-        ? 'arm64'
-        : 'x86_64'
-      : target.arch === 'arm64'
-        ? 'aarch64'
-        : 'x86_64',
+  platform_system: { darwin: 'Darwin', linux: 'Linux', win32: 'Windows' }[target.os],
+  // `platform.machine()`: Windows reports the processor architecture as the registry spells it.
+  platform_machine: {
+    darwin: target.arch === 'arm64' ? 'arm64' : 'x86_64',
+    linux: target.arch === 'arm64' ? 'aarch64' : 'x86_64',
+    win32: target.arch === 'arm64' ? 'ARM64' : 'AMD64',
+  }[target.os],
 });
 /* eslint-enable @typescript-eslint/naming-convention -- Tau names resume after the marker environment. */
 
@@ -275,12 +276,15 @@ const macosBinaryFormats = (major: number, minor: number, arch: string): string[
 
 /**
  * The platform tags a target accepts, best first, as `packaging.tags` orders them for a host at the target's
- * deployment target (macOS) or glibc ceiling (Linux).
+ * deployment target (macOS) or glibc ceiling (Linux). Windows has one tag per architecture and no version in it.
  * @param target - A target.
- * @returns Platform tags such as `macosx_12_0_arm64` or `manylinux_2_31_x86_64`, best first.
+ * @returns Platform tags such as `macosx_12_0_arm64`, `manylinux_2_31_x86_64` or `win_amd64`, best first.
  * @public
  */
 export const platformTags = (target: TargetConfig): string[] => {
+  if (target.os === 'win32') {
+    return [target.arch === 'arm64' ? 'win_arm64' : 'win_amd64'];
+  }
   if (target.os === 'darwin') {
     const arch = target.arch === 'arm64' ? 'arm64' : 'x86_64';
     const [major] = (target.deploymentTarget ?? '11.0').split('.').map(Number) as [number];

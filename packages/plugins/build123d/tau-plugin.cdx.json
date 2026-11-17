@@ -45,6 +45,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -82,6 +86,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -180,6 +188,38 @@
       ]
     },
     {
+      "bom-ref": "09b1893ee4063706574c1813abf479b8b51926633fbdb6f96aab8dc7b0976668",
+      "type": "library",
+      "name": "wrapt",
+      "version": "2.5.1",
+      "purl": "pkg:pypi/wrapt@2.5.1?file_name=wrapt-2.5.1-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "09b1893ee4063706574c1813abf479b8b51926633fbdb6f96aab8dc7b0976668"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-2-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/7b/dc/6a5735874ea79816f85c1ec9d92139d7073c20d1881c15ff2108c211354b/wrapt-2.5.1-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
       "bom-ref": "0aadf13b60048d501e05fa699efaf7734e2494f3498a4c2a5521d822640324f3",
       "type": "library",
       "name": "numpy",
@@ -252,6 +292,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -296,6 +340,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -404,6 +452,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -473,6 +525,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -507,6 +563,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -551,6 +611,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -595,6 +659,35 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "207eed544417464ffaf2570880d58a792ecd2534c9c2dede45e895f3200b77e6",
+      "type": "library",
+      "name": "ezdxf",
+      "version": "1.4.4",
+      "purl": "pkg:pypi/ezdxf@1.4.4?file_name=ezdxf-1.4.4-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "207eed544417464ffaf2570880d58a792ecd2534c9c2dede45e895f3200b77e6"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/dd/22/b511a8d9ea8f23447a67fe8977213fac5e4e69df30130a3ef31043613eaf/ezdxf-1.4.4-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -639,6 +732,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -676,6 +773,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -752,6 +853,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -816,6 +921,38 @@
         {
           "name": "taucad:target",
           "value": "linux-arm64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "390ede346628ccc626e5730107cde16c42d3836b89662a115a921f28440e6a3b",
+      "type": "library",
+      "name": "pillow",
+      "version": "12.2.0",
+      "purl": "pkg:pypi/pillow@12.2.0?file_name=pillow-12.2.0-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "390ede346628ccc626e5730107cde16c42d3836b89662a115a921f28440e6a3b"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT-CMU"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/3f/82/8a3739a5e470b3c6cbb1d21d315800d8e16bff503d1f16b03a4ec3212786/pillow-12.2.0-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -917,6 +1054,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -986,6 +1127,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1030,6 +1175,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1067,6 +1216,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1111,6 +1264,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1155,6 +1312,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1229,6 +1390,35 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
+      "type": "library",
+      "name": "colorama",
+      "version": "0.4.6",
+      "purl": "pkg:pypi/colorama@0.4.6?file_name=colorama-0.4.6-py2.py3-none-any.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1265,6 +1455,31 @@
       ]
     },
     {
+      "bom-ref": "559ed65f60c1af5a03f3912605a1b5114f522c7c32fb23c3376ae8f03219fe28",
+      "type": "library",
+      "name": "scipy",
+      "version": "1.18.1",
+      "purl": "pkg:pypi/scipy@1.18.1?file_name=scipy-1.18.1-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "559ed65f60c1af5a03f3912605a1b5114f522c7c32fb23c3376ae8f03219fe28"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/93/0e/e0348fbc0dbab65c114cf78957e7dfeb49f8e8b556b4d930cc12ff195e18/scipy-1.18.1-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
       "bom-ref": "56b25336f502b6ed02e889f4ece894a72612fe885889a6e8c4c80239ff6e5f5f",
       "type": "library",
       "name": "pillow",
@@ -1293,6 +1508,38 @@
         {
           "name": "taucad:target",
           "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "5808d98f15c6bf6d9d96d2348c1997392a5888ce7097e664105f930c4bca1277",
+      "type": "library",
+      "name": "scikit-learn",
+      "version": "1.9.0",
+      "purl": "pkg:pypi/scikit-learn@1.9.0?file_name=scikit_learn-1.9.0-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5808d98f15c6bf6d9d96d2348c1997392a5888ce7097e664105f930c4bca1277"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/20/3f/7917ca72464038f6240ec70c29f94862d08a34a74291ae4d4ec5eb8186a0/scikit_learn-1.9.0-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1337,6 +1584,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1477,6 +1728,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1553,6 +1808,40 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "63d263ab0162f34a241a56dc5b283c22d6e131f5516117e6a921350c69ba7d4f",
+      "type": "platform",
+      "name": "cpython",
+      "version": "3.13.15",
+      "purl": "pkg:github/astral-sh/python-build-standalone@20260901?file_name=cpython-3.13.15%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "63d263ab0162f34a241a56dc5b283c22d6e131f5516117e6a921350c69ba7d4f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PSF-2.0"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1597,6 +1886,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1641,6 +1934,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1675,6 +1972,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1859,6 +2160,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1903,6 +2208,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -1947,6 +2256,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2055,6 +2368,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2124,6 +2441,42 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "85aaccb24182c25df891ad0ec333585967e115269d5f1b17f2c9ae005bc96657",
+      "type": "library",
+      "name": "numpy",
+      "version": "2.5.2",
+      "purl": "pkg:pypi/numpy@2.5.2?file_name=numpy-2.5.2-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "85aaccb24182c25df891ad0ec333585967e115269d5f1b17f2c9ae005bc96657"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/15/20/f3489f86d81ea460b2bcdceaed094142ca6579f6be0ec527b781d39afe68/numpy-2.5.2-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2168,6 +2521,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2360,6 +2717,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2404,6 +2765,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2448,6 +2813,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2492,6 +2861,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2536,6 +2909,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2573,6 +2950,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2617,6 +2998,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2654,6 +3039,42 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "a9eedaa4e549ac2eb4be9b1cb85072497263ae663fae582203966086f9926e04",
+      "type": "library",
+      "name": "cadquery-ocp-novtk",
+      "version": "8.0.1.0.0",
+      "purl": "pkg:pypi/cadquery-ocp-novtk@8.0.1.0.0?file_name=cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a9eedaa4e549ac2eb4be9b1cb85072497263ae663fae582203966086f9926e04"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/d7/b9/e350209cc87210df5f989ffc5d19cae8c499d69bca9cb36ec770be6cd9c7/cadquery_ocp_novtk-8.0.1.0.0-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2698,6 +3119,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2730,6 +3155,38 @@
         {
           "name": "taucad:target",
           "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "aea996a6aba25260827c9ea511d1addfde2da9eb686ac961838509086188b7e6",
+      "type": "library",
+      "name": "charset-normalizer",
+      "version": "3.5.1",
+      "purl": "pkg:pypi/charset-normalizer@3.5.1?file_name=charset_normalizer-3.5.1-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "aea996a6aba25260827c9ea511d1addfde2da9eb686ac961838509086188b7e6"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/8a/33/56d97ade41c8db611e727168c52ae46c9224c362ec28d4b65d7e9869e8da/charset_normalizer-3.5.1-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2856,6 +3313,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -2949,6 +3410,38 @@
       ]
     },
     {
+      "bom-ref": "cac0fdca17b036af3881a9d2729a850b76553f3f716ccb0360ad4dbc06b3b843",
+      "type": "library",
+      "name": "coverage",
+      "version": "7.10.7",
+      "purl": "pkg:pypi/coverage@7.10.7?file_name=coverage-7.10.7-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cac0fdca17b036af3881a9d2729a850b76553f3f716ccb0360ad4dbc06b3b843"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/b1/b1/a75fd25df44eab52d1931e89980d1ada46824c7a3210be0d3c88a44aaa99/coverage-7.10.7-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
       "bom-ref": "d094cab8c38ed2a83350bc0107cbb073529f01e2b97b6437d65269dc4a01b82b",
       "type": "file",
       "name": "tau-worker/tau_kernel/glb.py",
@@ -2979,6 +3472,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -3078,6 +3575,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -3122,6 +3623,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -3166,6 +3671,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -3210,6 +3719,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -3308,6 +3821,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -3352,6 +3869,67 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "e378470855d634708c6ae7f2f2c6fcd89e4996350de86020849e7b2d51ffe6ac",
+      "type": "library",
+      "name": "lib3mf",
+      "version": "2.5.0",
+      "purl": "pkg:pypi/lib3mf@2.5.0?file_name=lib3mf-2.5.0-py3-none-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e378470855d634708c6ae7f2f2c6fcd89e4996350de86020849e7b2d51ffe6ac"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/a9/b3/7a844247dfa1f0b24de6fa0425afb808dd1feeef2d05d6335170433c1071/lib3mf-2.5.0-py3-none-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "e4812f71c39d77ec5041348dafa400532adf7bf8f1fffa9aa6495fce5876d7b8",
+      "type": "library",
+      "name": "fonttools",
+      "version": "4.64.0",
+      "purl": "pkg:pypi/fonttools@4.64.0?file_name=fonttools-4.64.0-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e4812f71c39d77ec5041348dafa400532adf7bf8f1fffa9aa6495fce5876d7b8"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/dd/ed/bb1c217c9e1fbfa59f42b266af57df937a703882a73e59a309773752228f/fonttools-4.64.0-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -3447,6 +4025,42 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "eb7e81434c8d223ec4a219b5fc1c47d0417b12be7ea866e24fb5ad6e84b3d988",
+      "type": "library",
+      "name": "psutil",
+      "version": "7.2.2",
+      "purl": "pkg:pypi/psutil@7.2.2?file_name=psutil-7.2.2-cp37-abi3-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "eb7e81434c8d223ec4a219b5fc1c47d0417b12be7ea866e24fb5ad6e84b3d988"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/b4/90/e2159492b5426be0c1fef7acba807a03511f97c5f86b3caeda6ad92351a7/psutil-7.2.2-cp37-abi3-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -3481,6 +4095,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -3644,6 +4262,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -3749,6 +4371,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },

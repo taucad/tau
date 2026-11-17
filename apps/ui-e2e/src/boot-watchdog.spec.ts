@@ -82,6 +82,7 @@ const installWorkspaceWithProject = async (): Promise<void> => {
 
 /* Expected failure, owned by WP2 (R12 web, Home-only narrowing): safe mode still publishes every connected root, so the
  * workspace's project is listed and its folder is polled. WP2 applies `homeOnlyConfiguration` and removes `.fails`. */
+// Expected-failure: @rifont until 2026-12-15
 test.fails('lists and polls no connected workspace in safe mode', async () => {
   await installWorkspaceWithProject();
   await target.navigate('/files');

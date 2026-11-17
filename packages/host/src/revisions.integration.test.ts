@@ -374,6 +374,70 @@ const ports = [
   },
 ];
 
+/*
+ * A packaged app's own `git`: it runs the system git with only `git-lfs`'s directory on `PATH`. Windows runs no
+ * shell script, so there it is a small executable compiled with the C# compiler every Windows .NET Framework
+ * installation ships; it waits for git, so no grandchild outlives it holding its pipes.
+ */
+const bundledGitCs = (git: string, path: string): string => `
+using System;
+using System.Diagnostics;
+using System.Text;
+static class BundledGit {
+  static string Quote(string value) {
+    if (value.Length > 0 && value.IndexOfAny(new[] { ' ', '\\t', '"' }) < 0) { return value; }
+    var text = new StringBuilder("\\"");
+    var slashes = 0;
+    foreach (var c in value) {
+      if (c == '\\\\') { slashes++; continue; }
+      if (c == '"') { text.Append('\\\\', slashes * 2 + 1); text.Append('"'); slashes = 0; continue; }
+      text.Append('\\\\', slashes);
+      slashes = 0;
+      text.Append(c);
+    }
+    text.Append('\\\\', slashes * 2);
+    return text.Append('"').ToString();
+  }
+  static int Main(string[] args) {
+    var quoted = new string[args.Length];
+    for (var i = 0; i < args.Length; i++) { quoted[i] = Quote(args[i]); }
+    var start = new ProcessStartInfo(${JSON.stringify(git)}, string.Join(" ", quoted));
+    start.UseShellExecute = false;
+    start.EnvironmentVariables["PATH"] = ${JSON.stringify(path)};
+    using (var child = Process.Start(start)) {
+      child.WaitForExit();
+      return child.ExitCode;
+    }
+  }
+}
+`;
+
+/**
+ * Write the bundled `git` stand-in: a shell script on macOS and Linux, a compiled `.exe` on Windows.
+ * @param path - Where it goes, without an extension.
+ * @param git - The system git it runs.
+ * @param lfsDirectory - The only directory on its `PATH`.
+ * @returns The executable's path.
+ */
+const writeBundledGit = async (path: string, git: string, lfsDirectory: string): Promise<string> => {
+  if (process.platform === 'win32') {
+    const executable = `${path}.exe`;
+    await writeFile(`${path}.cs`, bundledGitCs(git, lfsDirectory));
+    const compiler = join(
+      process.env['SystemRoot'] ?? String.raw`C:\Windows`,
+      'Microsoft.NET',
+      'Framework64',
+      'v4.0.30319',
+      'csc.exe',
+    );
+    execFileSync(compiler, ['/nologo', `/out:${executable}`, `${path}.cs`], { stdio: 'ignore' });
+    return executable;
+  }
+  await writeFile(path, `#!/bin/sh\nPATH="${lfsDirectory}"\nexport PATH\nexec "${git}" "$@"\n`);
+  await chmod(path, 0o755);
+  return path;
+};
+
 /**
  * Review a1 R1: the early named refusal, on every disk host.
  *
@@ -418,15 +482,15 @@ describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
      * resolves through it and no second binary is ever named — which is what
      * the stand-in below reproduces, since a system git's exec path has none.
      */
-    const git = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
-    const gitLfs = execFileSync('which', ['git-lfs'], {
-      encoding: 'utf8',
-    }).trim();
+    const locate = (name: string): string =>
+      execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', [name], { encoding: 'utf8' })
+        .split(/\r?\n/u)[0]!
+        .trim();
+    const git = locate('git');
+    const gitLfs = locate('git-lfs');
     const bundledRoot = await mkdtemp(join(tmpdir(), 'tau-host-toolchain-'));
     roots.push(bundledRoot);
-    const bundledGit = join(bundledRoot, 'bundled-git');
-    await writeFile(bundledGit, `#!/bin/sh\nPATH="${dirname(gitLfs)}"\nexport PATH\nexec "${git}" "$@"\n`);
-    await chmod(bundledGit, 0o755);
+    const bundledGit = await writeBundledGit(join(bundledRoot, 'bundled-git'), git, dirname(gitLfs));
     const bundledEvents: HostRevisionEvent[] = [];
     process.env['PATH'] = '';
     const bundled = createProjectRevisions({

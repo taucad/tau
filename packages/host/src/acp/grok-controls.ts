@@ -19,14 +19,6 @@ export const grokPermissionModeOf = (value: unknown): GrokPermissionMode | undef
   value === 'ask' || value === 'auto' || value === 'always-approve' ? value : undefined;
 
 /**
- * Grok's standard session mode IDs are separate from permission policy.
- * @param value - Untrusted mode value.
- * @returns A supported planning mode, or nothing.
- */
-export const grokPlanningModeOf = (value: unknown): GrokPlanningMode | undefined =>
-  value === 'default' || value === 'plan' ? value : undefined;
-
-/**
  * Only offer this bridge for the native Grok protocol version we verified.
  * @param agentId - Selected adapter identity.
  * @param metadata - Native initialize metadata.
@@ -115,60 +107,44 @@ export const grokPlanningRequest = (
 });
 
 /**
- * Shared composer options for the adapter's selected policy and planning mode.
+ * The shared composer's permission select for Grok.
  * Unknown availability does not advertise Auto. A previously selected Auto
- * policy stays visible; the dispatcher must refuse it if availability is lost.
- * @param options - Selected controls and known Auto availability.
+ * policy stays visible; the dispatcher falls back when availability is lost.
+ * Grok's planning mode is not offered: Tau keeps sessions in Build (PR5).
+ * @param options - Selected policy and known Auto availability.
  * @param options.permission - Selected permission policy.
- * @param options.planning - Selected planning mode.
  * @param options.autoAvailable - Whether Auto has been advertised available.
- * @returns Permission and planning selects for the shared composer.
+ * @returns The permission select for the shared composer.
  */
 export const grokControlOptions = ({
   permission,
-  planning,
   autoAvailable,
 }: {
   readonly permission: GrokPermissionMode;
-  readonly planning: GrokPlanningMode;
   readonly autoAvailable: boolean | undefined;
-}): SessionConfigOption[] => {
-  return [
-    {
-      id: grokPermissionConfigId,
-      name: 'Permissions',
-      category: 'mode',
-      type: 'select',
-      currentValue: permission,
-      options: [
-        { value: 'ask', name: 'Ask', description: 'Ask before tools that require approval.' },
-        ...(autoAvailable === true || permission === 'auto'
-          ? [
-              {
-                value: 'auto',
-                name: 'Auto',
-                description: 'Let Grok assess tool approvals. Some actions still need approval.',
-              },
-            ]
-          : []),
-        {
-          value: 'always-approve',
-          name: 'Always approve',
-          description:
-            'Allow Grok tools, including file edits and commands. Managed policy may still require approval.',
-        },
-      ],
-    },
-    {
-      id: grokPlanningConfigId,
-      name: 'Planning',
-      category: 'planning',
-      type: 'select',
-      currentValue: planning,
-      options: [
-        { value: 'default', name: 'Build', description: 'Work on the requested changes.' },
-        { value: 'plan', name: 'Plan', description: 'Prepare a plan for approval before implementation.' },
-      ],
-    },
-  ];
-};
+}): SessionConfigOption[] => [
+  {
+    id: grokPermissionConfigId,
+    name: 'Permissions',
+    category: 'mode',
+    type: 'select',
+    currentValue: permission,
+    options: [
+      { value: 'ask', name: 'Ask', description: 'Ask before tools that require approval.' },
+      ...(autoAvailable === true || permission === 'auto'
+        ? [
+            {
+              value: 'auto',
+              name: 'Auto',
+              description: 'Let Grok assess tool approvals. Some actions still need approval.',
+            },
+          ]
+        : []),
+      {
+        value: 'always-approve',
+        name: 'Always approve',
+        description: 'Allow Grok tools, including file edits and commands. Managed policy may still require approval.',
+      },
+    ],
+  },
+];

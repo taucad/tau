@@ -44,6 +44,7 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
 import { actorSessionIdOf } from '@taucad/ui-core/lib/xstate.lib';
 import { isQuestionTool } from '@taucad/chat-ui/utils/question-tool';
+import { chatFailureSentence } from '@taucad/chat-ui/utils/error.utils';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import {
   selectCaughtUp,
@@ -286,7 +287,7 @@ export const chatStatusLabel = (status: ChatSidebarStatus): string | undefined =
       return 'Done';
     }
     case 'failed': {
-      return `Failed · ${status.failureReason ?? 'the run failed'}`;
+      return `Failed · ${chatFailureSentence(status.failureReason) ?? 'the run failed'}`;
     }
     case 'stopped': {
       return 'Stopped';

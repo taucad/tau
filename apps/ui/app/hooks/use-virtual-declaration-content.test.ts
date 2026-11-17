@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
-import { EditorDocumentSession } from '#lib/editor-document-session.js';
+import { EditorDocumentSession } from '@taucad/editor-ui/lib/editor-document-session';
 import { useVirtualDeclarationContent } from '#hooks/use-virtual-declaration-content.js';
 
 function createSession(): EditorDocumentSession {

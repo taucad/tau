@@ -50,14 +50,26 @@ function roundedBlock(
 }
 
 // Actual helical trapezoid, clipped at both ends; the nut uses the same
-// profile with explicit radial and axial running allowance.
-function thread(length: number, clearance = 0): Shape3D {
+// profile with explicit radial and axial running allowance. `runout` stops the
+// ridge short of the shank so its crest never meets the equal-radius neck.
+function thread(length: number, clearance = 0, runout = 0): Shape3D {
   const root = 8 + clearance;
   const crest = 10 + clearance;
-  const profile = draw([root - 0.15, -3.2 - clearance])
+  // The flanks run from the root diameter to the crest. The profile continues
+  // them 2.5 mm inside the root cylinder it is fused with: a shallow overlap
+  // leaves the helical flank meeting the cylinder at a grazing angle, and OCCT
+  // fits that intersection only to 0.05 mm. Inside the root the extension adds
+  // no material, so the thread above the root is unchanged.
+  const flank = (r: number, z0: number, z1: number) =>
+    z0 + ((r - (root - 0.15)) * (z1 - z0)) / (crest - (root - 0.15));
+  const inner = root - 2.5;
+  const profile = draw([
+    inner,
+    flank(inner, -3.2 - clearance, -2.6 - clearance),
+  ])
     .lineTo([crest, -2.6 - clearance])
     .lineTo([crest, -1.4 + clearance])
-    .lineTo([root - 0.15, -0.8 + clearance])
+    .lineTo([inner, flank(inner, -0.8 + clearance, -1.4 + clearance)])
     .close()
     .sketchOnPlane('XZ') as Sketch;
   const ridge = genericSweep(
@@ -66,7 +78,7 @@ function thread(length: number, clearance = 0): Shape3D {
     { frenet: true },
   );
   return makeCylinder(root, length).fuse(
-    ridge.intersect(box(-11, -11, 0, 22, 22, length)),
+    ridge.intersect(box(-11, -11, 0, 22, 22, length - runout)),
   );
 }
 
@@ -225,7 +237,7 @@ export default function main(
   }
 
   add('Spindle', steel, () => {
-    const threaded = thread(171)
+    const threaded = thread(171, 0, 0.5)
       .rotate(90, [0, 0, 0], [0, 1, 0])
       .rotate((g * 90) % 360, [0, 0, 0], [1, 0, 0])
       .translate([g - 171, 0, 50]);

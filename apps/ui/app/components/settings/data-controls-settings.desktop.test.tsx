@@ -6,6 +6,7 @@ import { entitlementsFromTier } from '@taucad/billing';
 import { store } from '#hooks/use-cookie.js';
 import { desktopAnalyticsStorageName } from '#hooks/use-desktop-analytics.js';
 import { DataControlsSettings } from '#components/settings/data-controls-settings.js';
+import { DeploymentSettingsProvider } from '#components/settings/deployment-settings-provider.js';
 
 /* The settings registry decides which rows exist when it is first evaluated, so the desktop target is set before any
    import runs. */
@@ -50,7 +51,7 @@ describe('DataControlsSettings on desktop', () => {
   });
 
   it('should offer an analytics switch, on by default, in place of cookie preferences', () => {
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     expect(screen.getByRole('switch', { name: 'Analytics' })).toHaveAttribute('data-state', 'checked');
     expect(screen.getByRole('group', { name: 'Analytics' })).toHaveAccessibleDescription(
@@ -64,7 +65,7 @@ describe('DataControlsSettings on desktop', () => {
   });
 
   it('should keep the choice on this device when turned off, and resume when turned back on', async () => {
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
     const user = userEvent.setup();
     const toggle = screen.getByRole('switch', { name: 'Analytics' });
 
@@ -80,7 +81,7 @@ describe('DataControlsSettings on desktop', () => {
   it('should show a turned-off choice as off after a relaunch', () => {
     localStorage.setItem(desktopAnalyticsStorageName, 'false');
 
-    render(<DataControlsSettings />);
+    render(<DataControlsSettings />, { wrapper: DeploymentSettingsProvider });
 
     expect(screen.getByRole('switch', { name: 'Analytics' })).toHaveAttribute('data-state', 'unchecked');
   });

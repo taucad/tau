@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { SidebarProvider } from '@taucad/ui/components/sidebar';
 import { SettingsDialog } from '#components/settings/settings-dialog.js';
 import { availableSettingsSections, searchSettings, settingsSections } from '#components/settings/settings-registry.js';
-import { SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 
 const flags = vi.hoisted(() => ({ viewerControls: false }));
 vi.mock('#flags/use-feature.js', () => ({

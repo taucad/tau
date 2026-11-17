@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -274,6 +274,15 @@ describe('browser host authority', () => {
     expect(guest.close.mock.invocationCallOrder[0]).toBeLessThan(
       browserSession.clearStorageData.mock.invocationCallOrder[0]!,
     );
+  });
+  it('should start from default settings when the saved browser profile is damaged', async () => {
+    writeFileSync(join(directory, 'browser-profile.json'), '{"settings": {"searchEngine": "goo');
+    vi.mocked(ipcMain.handle).mockClear();
+    installBrowserHost({ origins: ['app://tau'], userDataPath: directory });
+    const handler = vi.mocked(ipcMain.handle).mock.calls[0]![1];
+    const snapshot = (await handler(event, { kind: 'snapshot' })) as BrowserSnapshot;
+    expect(snapshot.settings.searchEngine).toBe('duckduckgo');
+    expect(snapshot.history).toEqual([]);
   });
   it('should propagate clear-data failures instead of claiming success', async () => {
     browserSession.clearStorageData.mockRejectedValueOnce(new Error('storage unavailable'));

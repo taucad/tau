@@ -6,7 +6,7 @@ import Bowser from 'bowser';
 import { LogOut, Monitor, Smartphone, X } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { Button } from '@taucad/ui/components/button';
 

@@ -81,6 +81,9 @@ const spyOnBindings = (): (() => Counts) => {
     'ReplicadPrototypeMeshExtractor.ExtractEdges': statics('ReplicadPrototypeMeshExtractor', 'ExtractEdges'),
     'ReplicadShapeIdentity.Inspect': statics('ReplicadShapeIdentity', 'Inspect'),
     'ReplicadShapeIdentityInfo.MatrixValue': members('ReplicadShapeIdentityInfo', 'MatrixValue'),
+    'ReplicadShapeHasher.HashCode': statics('ReplicadShapeHasher', 'HashCode'),
+    'ReplicadShapeIdentity.IsPartner': statics('ReplicadShapeIdentity', 'IsPartner'),
+    'gp_Trsf.Value': members('gp_Trsf', 'Value'),
     'Poly_Triangulation.UVNode': members('Poly_Triangulation', 'UVNode'),
     'BRepAdaptor_Surface.EvalD1': members('BRepAdaptor_Surface', 'EvalD1'),
   };
@@ -144,18 +147,33 @@ const none: Counts = {
   'ReplicadPrototypeMeshExtractor.ExtractEdges': 0,
   'ReplicadShapeIdentity.Inspect': 0,
   'ReplicadShapeIdentityInfo.MatrixValue': 0,
+  'ReplicadShapeHasher.HashCode': 0,
+  'ReplicadShapeIdentity.IsPartner': 0,
+  'gp_Trsf.Value': 0,
   'Poly_Triangulation.UVNode': 0,
   'BRepAdaptor_Surface.EvalD1': 0,
 };
 
 /**
  * Blueprint A19 (deferred: needs a `@taulabs/replicad-opencascadejs` rebuild that returns the
- * matrix in one call, charter D6): every shape's identity is inspected once, which is per shape,
- * but its 4 × 4 location matrix is then read with one `MatrixValue` call per entry.
+ * matrix in one call, charter D6): STEP product reuse inspects every shape's identity once, which
+ * serializes and hashes its BRep, and then reads its 4 × 4 location matrix with one `MatrixValue`
+ * call per entry.
  */
 const identities = (copies: number): Counts => ({
   'ReplicadShapeIdentity.Inspect': copies,
   'ReplicadShapeIdentityInfo.MatrixValue': 16 * copies,
+});
+
+/**
+ * Tessellation instancing reads no BRep content: one partner hash per shape, one `IsPartner`
+ * check per shape after the first of its hash, and the 3 × 4 placement with one `gp_Trsf.Value`
+ * call per entry (the same A19 deferral as `identities`).
+ */
+const occurrences = (copies: number): Counts => ({
+  'ReplicadShapeHasher.HashCode': copies,
+  'ReplicadShapeIdentity.IsPartner': copies - 1,
+  'gp_Trsf.Value': 12 * copies,
 });
 
 describe('Replicad kernel call counts', () => {
@@ -173,15 +191,15 @@ describe('Replicad kernel call counts', () => {
 
   it('should mesh faces and edges once per prototype on the render-with-edges and GLB export paths', () => {
     // The copies share one prototype, so faces and edges are one native extraction each whatever
-    // the copy count; only the per-shape identity reads (A19) grow with it.
+    // the copy count; only the per-shape occurrence reads (A19) grow with it.
     const meshed = {
       ...none,
       'ReplicadPrototypeMeshExtractor.ExtractFaces': 1,
       'ReplicadPrototypeMeshExtractor.ExtractEdges': 1,
     };
     expect({ small: small.render, large: large.render }).toEqual({
-      small: { ...meshed, ...identities(2) },
-      large: { ...meshed, ...identities(6) },
+      small: { ...meshed, ...occurrences(2) },
+      large: { ...meshed, ...occurrences(6) },
     });
     expect({ small: small.glb, large: large.glb }).toEqual({ small: small.render, large: large.render });
   });
@@ -200,7 +218,7 @@ describe('Replicad kernel call counts', () => {
     // vertex, so the count grows as the tolerance tightens.
     const meshed = {
       ...none,
-      ...identities(2),
+      ...occurrences(2),
       'ReplicadPrototypeMeshExtractor.ExtractFaces': 1,
       'ReplicadPrototypeMeshExtractor.ExtractEdges': 1,
     };
@@ -310,6 +328,7 @@ describe('Replicad ocTracing summary', () => {
       'kernel.export-compute',
     ]);
     // The anisotropic material makes render read surface coordinates through OpenCASCADE, so each phase has calls.
-    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([12, 7, 13]);
+    // Render's count includes one identity `TopLoc_Location` per shape for its partner hash.
+    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([12, 9, 13]);
   });
 });

@@ -22,13 +22,18 @@
  * their imports and styles, and every link in a prerendered HTML file) is a wasm file, a worker or verbatim
  * runtime asset, or a chunk holding a kernel module.
  *
+ * The warm manifest (PL8, `app/lib/warm-manifest.ts`): every file it lists for a class is in that class's measured
+ * closure, and none is a wasm file, a worker or runtime asset, or a chunk holding any heavy module family, so warming
+ * the next step never fetches a viewer, three.js, kernel, wasm or worker asset. It also reports what each warm-up
+ * prefetches once idle, after the warming page's own interactive tier.
+ *
  * Usage (after `nx build ui`):
  *   node apps/ui/scripts/check-critical-budget.mts           # check
  *   node apps/ui/scripts/check-critical-budget.mts --write   # rebaseline this build's variant
  *
  * Exit codes:
  *   0  Every class within budget and no early kernel
- *   1  A budget, heavy-family or early-kernel violation, or a missing build output
+ *   1  A budget, heavy-family, early-kernel or warm-manifest violation, or a missing build output
  */
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -37,10 +42,13 @@ import { fileURLToPath } from 'node:url';
 import { brotliCompressSync, constants } from 'node:zlib';
 import type { ModuleIdManifest, ModuleIdManifestChunk } from '@taucad/vite/module-id-manifest';
 import { criticalRouteClasses, heavyFamilyOfModuleId } from '#scripts/critical-path.mts';
-
-/** One entry of Vite's `.vite/manifest.json`, as far as this check reads it. */
-export type ViteManifestChunk = Readonly<{ file: string; imports?: readonly string[]; css?: readonly string[] }>;
-export type ViteManifest = Readonly<Record<string, ViteManifestChunk>>;
+import { rootKeys, staticClosure } from '#scripts/interactive-closure.ts';
+import type { ViteManifest } from '#scripts/interactive-closure.ts';
+/* oxlint-disable no-restricted-imports -- Native Node scripts read the registry without bundler aliases. */
+import { routeClasses } from '../app/lib/route-classes.ts';
+import { isWarmableHref, parseWarmManifest, warmHrefs, warmManifestFile } from '../app/lib/warm-manifest.ts';
+import type { WarmManifest } from '../app/lib/warm-manifest.ts';
+/* oxlint-enable no-restricted-imports */
 
 /** The ratcheted numbers of one route class. */
 export type ClassBudget = {
@@ -80,57 +88,6 @@ const appDirectory = join(scriptDirectory, '..');
 const clientDirectory = join(appDirectory, 'build', 'client');
 const moduleIdsPath = join(appDirectory, 'build', 'client-module-ids.json');
 const budgetPath = join(appDirectory, 'critical-budget.json');
-
-const stripQuery = (key: string): string => key.split('?', 1)[0] ?? key;
-
-/**
- * The manifest keys of each app-relative root (React Router suffixes its client route modules with a query).
- *
- * @param manifest - The client build manifest.
- * @param roots - App-relative source paths.
- * @returns The matching keys.
- * @throws When a root has no manifest entry, so a renamed module never passes by matching nothing.
- */
-export const rootKeys = (manifest: ViteManifest, roots: readonly string[]): string[] =>
-  roots.flatMap((root) => {
-    const keys = Object.keys(manifest).filter((key) => stripQuery(key) === `app/${root}`);
-    if (keys.length === 0) {
-      throw new Error(`check-critical-budget: the client manifest has no entry for app/${root}`);
-    }
-    return keys;
-  });
-
-/**
- * The scripts and stylesheets a page loads before any dynamic import: the roots' own chunks, everything they import
- * statically, transitively, and the stylesheets of each.
- *
- * @param manifest - The client build manifest.
- * @param keys - The manifest keys to start from.
- * @returns The JavaScript and CSS files, each sorted.
- */
-export const staticClosure = (manifest: ViteManifest, keys: readonly string[]): { js: string[]; css: string[] } => {
-  const seen = new Set<string>();
-  const js = new Set<string>();
-  const css = new Set<string>();
-  const pending = [...keys];
-  while (pending.length > 0) {
-    const key = pending.pop();
-    if (key === undefined || seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    const chunk = manifest[key];
-    if (chunk === undefined) {
-      continue;
-    }
-    js.add(chunk.file);
-    for (const file of chunk.css ?? []) {
-      css.add(file);
-    }
-    pending.push(...(chunk.imports ?? []));
-  }
-  return { js: [...js].toSorted(), css: [...css].toSorted() };
-};
 
 /**
  * Measure one route class.
@@ -289,6 +246,64 @@ export const findEarlyKernelPreloads = (input: {
 };
 
 /**
+ * The warm manifest's violations: a class it lists that the guards do not measure or the reverse, and a listed file
+ * outside its class's measured closure, not a warmable URL, a wasm file, a worker or runtime asset, or a chunk holding
+ * any heavy module family.
+ *
+ * @param input - The parsed manifest (`undefined` when it is missing or malformed), each class's measured closure
+ *   (build-relative files) and the module-id manifest.
+ * @returns One message per violation; empty when the manifest holds.
+ */
+export const findWarmManifestProblems = (input: {
+  warm: WarmManifest | undefined;
+  closures: ReadonlyMap<string, readonly string[]>;
+  manifest: ViteManifest;
+  moduleIds: ModuleIdManifest;
+}): string[] => {
+  if (input.warm === undefined) {
+    return [`warm manifest: build/client/${warmManifestFile} is missing or not version 1`];
+  }
+  const chunks = new Map(input.moduleIds.chunks.map((chunk) => [chunk.fileName, chunk]));
+  const assets = new Set(input.moduleIds.assets.map((asset) => asset.fileName));
+  const problems: string[] = [];
+  for (const id of input.closures.keys()) {
+    if (!(id in input.warm.classes)) {
+      problems.push(`warm manifest: no list for the guarded class '${id}'`);
+    }
+  }
+  for (const [id, hrefs] of Object.entries(input.warm.classes)) {
+    const closure = input.closures.get(id);
+    if (closure === undefined) {
+      problems.push(`warm manifest: '${id}' is not a class the critical-path guards measure`);
+      continue;
+    }
+    const inClosure = new Set(closure);
+    for (const href of hrefs) {
+      const file = href.replace(/^\//u, '');
+      // A stylesheet is heavy with the chunks that import it: the viewer's styles go where the viewer goes.
+      const owners = file.endsWith('.css')
+        ? Object.values(input.manifest).flatMap((chunk) => (chunk.css?.includes(file) === true ? [chunk.file] : []))
+        : [file];
+      const heavy = owners
+        .flatMap((owner) => chunks.get(owner)?.modules ?? [])
+        .find((module) => heavyFamilyOfModuleId(module.id) !== undefined);
+      if (!isWarmableHref(href) || file.endsWith('.wasm')) {
+        problems.push(`warm manifest: ${id} lists ${href}, which is not a script or stylesheet of /assets`);
+      } else if (!inClosure.has(file)) {
+        problems.push(`warm manifest: ${id} lists ${href}, which is outside its interactive tier`);
+      } else if (assets.has(file) && !file.endsWith('.css')) {
+        problems.push(`warm manifest: ${id} lists ${href}, a worker or runtime asset`);
+      } else if (heavy !== undefined) {
+        problems.push(
+          `warm manifest: ${id} lists ${href}, which belongs with the ${heavyFamilyOfModuleId(heavy.id)?.name ?? ''} module ${heavy.id}`,
+        );
+      }
+    }
+  }
+  return problems;
+};
+
+/**
  * Which variant a build is: each `#cloud/…` boundary module resolves to its `.cloud` or its `.self-host` file.
  *
  * @param moduleIds - The module-id manifest.
@@ -398,8 +413,10 @@ const main = (): void => {
   const budgets = budgetFile.variants[variant] ?? {};
   const problems: string[] = [];
   const measured: Record<string, ClassBudget> = {};
+  const closures = new Map<string, readonly string[]>();
   for (const routeClass of criticalRouteClasses) {
     const measure = measureClass({ manifest, chunksByFile, roots: routeClass.roots, brotliSize });
+    closures.set(routeClass.id, measure.files);
     const budget = budgets[routeClass.id];
     const label = `${routeClass.label} (${variant})`;
     console.info(
@@ -422,6 +439,26 @@ const main = (): void => {
   }
 
   problems.push(...findEarlyKernelPreloads({ preloads: documentPreloads(), moduleIds }));
+
+  const warm = parseWarmManifest(readJson<unknown>(join(clientDirectory, warmManifestFile)));
+  problems.push(...findWarmManifestProblems({ warm, closures, manifest, moduleIds }));
+  if (warm !== undefined) {
+    const warmUps = [
+      ...routeClasses.flatMap((routeClass) =>
+        routeClass.warms === undefined
+          ? []
+          : [{ from: routeClass.label, target: routeClass.warms, loaded: routeClass.id }],
+      ),
+      { from: 'the marketing site', target: 'home', loaded: undefined },
+    ];
+    for (const { from, target, loaded } of warmUps) {
+      const hrefs = warmHrefs(warm, target, loaded);
+      const bytes = hrefs.reduce((total, href) => total + brotliSize(href.slice(1)), 0);
+      console.info(
+        `Warm-up from ${from}: ${target}'s interactive tier, ${formatBytes(bytes)} brotli in ${hrefs.length} prefetches once idle, after the page's own interactive tier`,
+      );
+    }
+  }
 
   if (write) {
     budgetFile.variants[variant] = measured;

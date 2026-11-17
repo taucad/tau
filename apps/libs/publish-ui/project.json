@@ -1,0 +1,15 @@
+{
+  "name": "publish-ui",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/publish-ui",
+  "projectType": "library",
+  "tags": ["scope:ui", "type:app-lib", "layer:feature"],
+  "targets": {
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer"]
+    },
+    "typecheck": {
+      "inputs": ["default", "^production", "reactEventLayer"]
+    }
+  }
+}

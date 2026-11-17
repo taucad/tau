@@ -83,6 +83,7 @@ import type {
   RemoteActors,
   RemoteInitialSyncActorOutput,
   RemoteMachineEmitted,
+  RemoteReadActorOutput,
   RemoteRecord,
   RemoteValidateActorOutput,
 } from '#remote.machine.js';
@@ -337,18 +338,17 @@ describe('remoteMachine', () => {
    */
   it('reads the remotes list again on a doubling wait until the read settles, and forgets the failure', async () => {
     let calls = 0;
-    const { actor, clock } = start({
-      readRemote: createAsyncLogic({
-        run: async () => {
-          calls += 1;
-          await Promise.resolve();
-          if (calls < 4) {
-            throw new Error('config unreadable');
-          }
-          return { remote: tauRemote };
-        },
-      }),
+    const readRemote: RemoteActors['readRemote'] = createAsyncLogic({
+      run: async (): Promise<RemoteReadActorOutput> => {
+        calls += 1;
+        await Promise.resolve();
+        if (calls < 4) {
+          throw new Error('config unreadable');
+        }
+        return { remote: tauRemote };
+      },
     });
+    const { actor, clock } = start({ readRemote });
     await settle();
     const waits: number[] = [];
     for (let retry = 0; retry < 3; retry += 1) {

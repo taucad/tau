@@ -21,7 +21,7 @@ import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { revisionTreeId } from '#revision-effects.js';
 import type { RevisionPort } from '#revision-port.js';
 import { gitToolchainOnPath } from '#test/native-git-harness.js';
-import { shellPath, writeShellExecutable } from '#test/script-executable.js';
+import { shellWord, writeShellExecutable } from '#test/script-executable.js';
 import { recordedBy } from '#test/identity.js';
 
 const author = { name: 'Tau', email: 'tau@example.com' };
@@ -56,8 +56,8 @@ const countedRepository = async (): Promise<Counted> => {
       '  if [ "$skip" = 1 ]; then skip=0; continue; fi',
       '  case "$argument" in -c|-C) skip=1 ;; -*) ;; *) command="$argument"; break ;; esac',
       'done',
-      `echo "$command" >> ${shellPath(log)}`,
-      `tee -a ${shellPath(capture)} | git "$@"`,
+      `echo "$command" >> ${shellWord(log)}`,
+      `tee -a ${shellWord(capture)} | git "$@"`,
       `exit "\${PIPESTATUS[1]}"`,
     ],
     '/bin/bash',

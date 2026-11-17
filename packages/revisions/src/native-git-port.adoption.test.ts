@@ -437,7 +437,7 @@ describe.runIf(gitToolchainOnPath)('a store this port creates', () => {
       provenance: { source: 'user', ...recordedBy('ada'), createdAt: Date.UTC(2026, 10, 17) },
       summary: { generated: 'Large file' },
     });
-    return { root, marker, port, head: receipt.commitId };
+    return { root, marker, port, head: revisionId(receipt.commitId) };
   };
 
   it("pins every command's hooks to an empty file in its store, so a linked checkout over a large file runs and gains no hook", async () => {

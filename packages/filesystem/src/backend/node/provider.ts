@@ -221,7 +221,6 @@ const removeCreatedParents = async ({ first, last }: Readonly<{ first: string; l
   }
 };
 
-/* Whether a process with this pid exists: `EPERM` means it does, under another user. */
 /** Errors Windows answers a rename with while another program briefly holds one of its files. */
 const transientRenameCodes = new Set(['EPERM', 'EACCES', 'EBUSY']);
 /** How long a Windows rename keeps retrying a transient lock, in total. */
@@ -265,6 +264,7 @@ const renameRetryingTransientLocks = async (from: string, to: string): Promise<v
   }
 };
 
+/* Whether a process with this pid exists: `EPERM` means it does, under another user. */
 const isProcessAlive = (pid: number): boolean => {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return false;

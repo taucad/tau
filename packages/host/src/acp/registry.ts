@@ -33,15 +33,48 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { promisify } from 'node:util';
-import type { SessionConfigOption } from '@agentclientprotocol/sdk';
+import type { SessionConfigOption, SessionConfigSelectOption } from '@agentclientprotocol/sdk';
 
 import { modelChoice } from '#acp/session.js';
+import { discoveredModeOptions, grokNoAutoFallback } from '#acp/acp-modes.js';
 import { openAcpSession } from '#acp/acp-session.js';
 import { acpLocateContext, locateAcpCli } from '#acp/locate.js';
 import type { AcpExecutableFileSystem } from '#acp/locate.js';
 import type { AcpSession } from '#acp/session.js';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 import type { ExternalAgentDescriptor, ExternalAgentRefusalCode } from '@taucad/agent-host/wire';
+
+/**
+ * One config option cut to the wire's keys: an adapter's own extras (codex-acp puts `_meta` on every mode value) would
+ * fail the strict descriptor schema and drop the whole option, which left Codex with no Mode control.
+ *
+ * @param option - The option as the adapter reported it.
+ * @returns The option with only the keys the wire schema knows.
+ */
+function wireConfigOption(option: SessionConfigOption): Record<string, unknown> {
+  const base = {
+    id: option.id,
+    name: option.name,
+    category: option.category,
+    description: option.description,
+    type: option.type,
+    currentValue: option.currentValue,
+  };
+  if (option.type !== 'select') {
+    return base;
+  }
+  const value = (entry: SessionConfigSelectOption) => ({
+    value: entry.value,
+    name: entry.name,
+    description: entry.description,
+  });
+  return {
+    ...base,
+    options: option.options.map((entry) =>
+      'group' in entry ? { group: entry.group, name: entry.name, options: entry.options.map(value) } : value(entry),
+    ),
+  };
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -172,6 +205,14 @@ export type AcpAgentProfile = {
    * shell line, and only after the user presses Enter (ACP agent policy rule 10).
    */
   readonly loginArgs?: readonly string[] | undefined;
+  /**
+   * Mode ids, best first, a new chat starts in (ruling PR5): `auto`, then the
+   * most permissive mode that still keeps a vendor safety boundary, so the
+   * agent edits workspace files without asking but does not lift every check.
+   * Plan and bypass ids are excluded (`acp-modes.ts`). The first one the agent
+   * or its model offers wins; none offered keeps the agent's own mode.
+   */
+  readonly defaultModePreference?: readonly string[] | undefined;
 } & (
   | {
       /** Npm package holding the ACP adapter. */
@@ -223,6 +264,7 @@ export type ReviewedAcpAgentProfile = AcpAgentProfile & {
   readonly updateCommand: AcpShellCommand;
   readonly loginCommand: string;
   readonly loginArgs: readonly string[];
+  readonly defaultModePreference: readonly string[];
 };
 
 /**
@@ -281,6 +323,10 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     /* From code.claude.com/docs/en/cli-reference, read 2026-11-15. */
     loginCommand: 'claude auth login',
     loginArgs: ['auth', 'login'],
+    /* The claude-agent-acp 0.70.0 `buildAvailableModes` (dist/acp-agent.js:5393) offers `auto` only when
+     * `ModelInfo.supportsAutoMode === true`; `acceptEdits` ("Auto-accept file edit operations") is
+     * the most permissive mode left that still asks before commands. */
+    defaultModePreference: ['auto', 'acceptEdits'],
   },
   {
     id: 'codex',
@@ -327,6 +373,10 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     updateCommand: { posix: 'codex update', windows: 'codex update' },
     loginCommand: 'codex login',
     loginArgs: ['login'],
+    /* The codex-acp 1.7.0 `AgentMode` (dist/index.js:27297-27339) offers no `auto`: `agent`
+     * ("Approve for me", kind `auto_review`) is its classifier-reviewed mode and its own default,
+     * then `read-only` ("Ask for approval", still workspace-write). `agent-full-access` is a bypass. */
+    defaultModePreference: ['auto', 'agent', 'read-only'],
   },
   {
     id: 'grok',
@@ -364,6 +414,10 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     updateCommand: { posix: 'grok update', windows: 'grok update' },
     loginCommand: 'grok login',
     loginArgs: ['login'],
+    /* Grok's Tau-owned permission select (`grokControlOptions`) offers `auto` only when Grok reports
+     * it enabled; its other modes are `ask` (its own default) and `always-approve` (yolo). Without
+     * `auto` the chat starts in `grokNoAutoFallback` (PR5 amendment, operator 2026-11-17T03:42Z). */
+    defaultModePreference: ['auto', grokNoAutoFallback],
   },
 ];
 
@@ -792,12 +846,18 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
     const thoughtLevelOf = (option: Extract<SessionConfigOption, { type: 'select' }> | undefined) =>
       option === undefined
         ? undefined
-        : externalAgentDescriptorSchema.shape.thoughtLevel.safeParse({ ...option, category: 'thought_level' }).data;
+        : externalAgentDescriptorSchema.shape.thoughtLevel.safeParse({
+            ...wireConfigOption(option),
+            category: 'thought_level',
+          }).data;
     const thoughtLevel = thoughtLevelOf(thoughtOption);
-    const configOptions = (session.configOptions ?? [])
+    /* What a new chat will run: plan values gone, the mode set to the default its first turn chooses (PR5). */
+    const configOptions = discoveredModeOptions(session.configOptions ?? [], adapter.defaultModePreference)
       .filter((option) => option.category !== 'model' && option.category !== 'thought_level')
       .flatMap((option) => {
-        const parsed = externalAgentDescriptorSchema.shape.configOptions.unwrap().element.safeParse(option);
+        const parsed = externalAgentDescriptorSchema.shape.configOptions
+          .unwrap()
+          .element.safeParse(wireConfigOption(option));
         return parsed.success ? [parsed.data] : [];
       })
       .slice(0, 32);

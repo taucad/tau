@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { createPaymentRequestId, createPortalAction, followPaymentRedirect } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
 import { BillingInlineError, formatBillingDate } from '#components/billing/billing-primitives.js';

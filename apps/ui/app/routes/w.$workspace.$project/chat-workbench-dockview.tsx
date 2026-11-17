@@ -98,7 +98,7 @@ import { useFileTreeEntry } from '@taucad/files-ui/hooks/use-file-tree';
 import type { FileProvenance } from '@taucad/types';
 import { useEditorDocumentSession } from '#hooks/use-editor-document-session.js';
 import type { EditorDocument, DocumentChange, DocumentTransaction } from '@taucad/editor-ui/lib/editor-document';
-import { requestEditorNavigation } from '#lib/editor-navigation-service.js';
+import { requestEditorNavigation } from '@taucad/editor-ui/lib/editor-navigation-service';
 import { Loader } from '@taucad/ui/components/loader';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitStart } from '#hooks/use-wait-start.js';

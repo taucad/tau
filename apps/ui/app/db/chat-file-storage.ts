@@ -662,6 +662,16 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       return chat?.purgedAt === undefined ? chat : undefined;
     },
 
+    readChatLog: async (chatId, projectId) => {
+      try {
+        return await options.client.readFile(`${chatDirectory(projectId, chatId)}/${chatLogFileName}`);
+      } catch (error) {
+        if (isNotFound(error)) {
+          return new Uint8Array();
+        }
+        throw error;
+      }
+    },
     getChatsForResource: async (resourceId, listOptions) => {
       const chats = await listProjectChats(resourceId);
       return listOptions?.includeDeleted === true ? chats : chats.filter((chat) => !isDeleted(chat));

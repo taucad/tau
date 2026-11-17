@@ -57,6 +57,7 @@ const fourthProfile: ReviewedAcpAgentProfile = {
   updateCommand: { posix: 'acme update', windows: 'acme update' },
   loginCommand: 'acme login',
   loginArgs: ['login'],
+  defaultModePreference: ['auto'],
 };
 
 const profiles: ReadonlyArray<{ readonly label: string; readonly profile: ReviewedAcpAgentProfile }> = [

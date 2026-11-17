@@ -699,6 +699,18 @@ describe('ProjectSharePanel', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
+  /* #2304: Tau Cloud answers 410 PROJECT_DELETED for a project whose cloud copy was deleted. */
+  it('says a project whose cloud copy was deleted has none, rather than blaming the network', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 410, headers: new Headers() } as Response);
+
+    renderPanel(<ProjectSharePanel projectId='proj_cloud_deleted' projectName='Demo' entryPath='main.ts' />);
+
+    expect(await screen.findByText('This project has no copy in Tau Cloud.')).toBeInTheDocument();
+    expect(screen.getByText(/duplicate the project to publish a new copy/u)).toBeInTheDocument();
+    expect(screen.queryByText('Check your connection and try again.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
   it('loads unpublished share state with private visibility selected', async () => {
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 

@@ -216,6 +216,7 @@ const syntheticProfile: ReviewedAcpAgentProfile = {
   updateCommand: { posix: 'acme update', windows: 'acme update' },
   loginCommand: 'acme account sign-in',
   loginArgs: ['account', 'sign-in'],
+  defaultModePreference: ['auto'],
 };
 
 describe.each([...acpAgentProfiles, syntheticProfile])('sign-in launch for $id', (profile) => {

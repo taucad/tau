@@ -31,7 +31,6 @@ import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = {
   title: 'Community',
-  enableOverflowY: true,
 };
 
 export const meta: MetaFunction = () => [

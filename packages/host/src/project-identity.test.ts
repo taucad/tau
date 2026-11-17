@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -112,6 +112,18 @@ describe('native project identity', () => {
     } finally {
       await authority.close();
     }
+  });
+  it('should initialize identity from a non-canonical root spelling without syncing its directory on Windows', async () => {
+    /* Windows refuses `fsync` on a directory (EPERM), and its runner temp directory is an 8.3 short name
+     * (`C:\Users\RUNNER~1\...`) whose real path differs. A first start must still publish one complete record
+     * and leave no temporary file beside it. */
+    const root = await project();
+    await writeFile(join(root, 'tau.json'), serializeProjectManifest(declaration));
+    const id = await resolveNodeProjectIdentity({ workspaceRoot: root });
+    expect(id).toMatch(/^proj_[A-Za-z0-9]{21}$/u);
+    expect(await resolveNodeProjectIdentity({ workspaceRoot: await realpath(root) })).toBe(id);
+    expect(await readdir(join(root, '.tau'))).toEqual(['project.json']);
+    expect(JSON.parse(await readFile(join(root, '.tau/project.json'), 'utf8'))).toEqual({ version: 1, projectId: id });
   });
   it('should allow explicit empty-root admission without creating an authored manifest', async () => {
     const root = await project();

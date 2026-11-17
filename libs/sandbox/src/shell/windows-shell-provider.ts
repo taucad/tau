@@ -34,6 +34,7 @@ import {
   decodeWindowsHelperFrame,
   encodeWindowsHostFrame,
   isShellRequirement,
+  windowsHelperEnd,
   windowsLaunchSpec,
   windowsSandboxProtocolVersion,
 } from '#shell/windows-sandbox-protocol.js';
@@ -486,7 +487,7 @@ const openChannel = (
   });
   child.once('close', (code, signal) => {
     onGone(
-      `The sandbox helper stopped before it reported the shell's exit (${code === null ? `signal ${String(signal)}` : `exit ${String(code)}`}).`,
+      `The sandbox helper stopped before it reported the shell's exit (${windowsHelperEnd(code ?? undefined, signal ?? undefined)}).`,
     );
   });
   return {

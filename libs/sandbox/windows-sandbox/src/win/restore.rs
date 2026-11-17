@@ -41,6 +41,9 @@ fn coverage(header: &Header, ours: &HashSet<String>, failures: &mut Sample) -> C
             summary.roots.iter().filter(|root| root.labeled).map(|root| root.path.clone()).collect();
         for root in &summary.roots {
             coverage.note(ours, &root.path, &labeled);
+            if root.account {
+                coverage.note_account(ours, &root.path);
+            }
         }
         if let Err(err) = journal::for_each_child(path, |child| coverage.note(ours, &child.path, &labeled)) {
             failures.note(format!("{}: {err}", other.journal));
@@ -52,9 +55,10 @@ fn coverage(header: &Header, ours: &HashSet<String>, failures: &mut Sample) -> C
 /// Restore what a journal recorded and confirm it. Returns the failures (a bounded sample plus a count); an
 /// empty list means the journal may be deleted and unregistered.
 ///
-/// 1. Each root loses every ACE naming one of the launch's own SIDs, written back with propagation, children
-///    before parents (the reverse of application order), so every descendant, including objects created during
-///    the launch, loses the copies it inherited. A writable root no other journal's writable root covers gets its
+/// 1. Each root loses every ACE naming one of the launch's own SIDs, and, when no other unrestored journal grants the
+///    account on the same root, every ACE naming the account; written back with propagation, children before parents
+///    (the reverse of application order), so every descendant, including objects created during the launch, loses
+///    the copies it inherited, and keeps those another journal's root above it gives it. A writable root no other journal's writable root covers gets its
 ///    journaled label back the same way.
 /// 2. Every journaled descendant, then every root, is read through its handle: it must name none of the launch's
 ///    SIDs. Where no other unrestored journal covers it, it gets its journaled control flags back, and, under a
@@ -87,7 +91,12 @@ pub fn restore_journal(path: &Path) -> Vec<String> {
     let labeled: Vec<&Entry> = summary.roots.iter().filter(|root| root.labeled).collect();
 
     for root in summary.roots.iter().rev() {
-        if let Err(err) = acl::remove_propagating(&root.path, &own) {
+        // With the coverage unknown, the account's ACEs stay: the failure keeps the journal for a later restore.
+        let mut removed = own.clone();
+        if root.account && coverage_known && !coverage.account_covered(&root.path) {
+            removed.push(summary.header.account_sid.clone());
+        }
+        if let Err(err) = acl::remove_propagating(&root.path, &removed) {
             failures.note(format!("{}: {err}", root.path));
         }
     }

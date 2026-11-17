@@ -51,7 +51,7 @@ use super::volume;
 use crate::appcontainer::{is_package_sid, verify_token};
 use crate::cmdline::{command_line, creation_environment, environment_block, is_capability_sid};
 use crate::frame::{self, Frame, read_frame, write_frame};
-use crate::protocol::{Exit, Resize, RunnerError, RunnerReady, RunnerSpec, Started};
+use crate::protocol::{Exit, Resize, RunnerError, RunnerSpec, Started};
 use crate::spec::{ExecutableRoots, Stdio, check_executable};
 
 /// `DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED` (0x0D).
@@ -628,7 +628,7 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
     );
     let job = Arc::new(Job::kill_on_close().at("job")?);
     let prepared = prepare_stdio(&spec.stdio).at("stdio")?;
-    send(sink, &Frame::json(frame::READY, &RunnerReady { logon_sid: logon.to_sddl() }));
+    send(sink, &Frame::json(frame::READY, &serde_json::json!({})));
 
     let mut prepared = Some(prepared);
     let mut console: Option<Arc<PseudoConsole>> = None;

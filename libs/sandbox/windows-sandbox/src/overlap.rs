@@ -1,9 +1,16 @@
 //! Concurrent launches over overlapping paths (README "Sessions"): the portable half.
 //!
-//! A launch changes three things on the objects it journals, and restore undoes exactly those:
+//! A launch changes four things on the objects it journals, and restore undoes exactly those:
 //!
-//! - **Its ACEs.** Every ACE a launch adds names one of its own SIDs (its runner's logon SID, its capability SID, its
-//!   package SID), so restore removes the ACEs naming those SIDs and no other ([`dacl_without_all`]).
+//! - **Its own ACEs.** Every ACE a launch adds names its capability SID or its package SID, or the shared sandbox
+//!   account (below). Restore removes the ACEs naming its own two SIDs and no other ([`dacl_without_all`]).
+//! - **Its account ACEs.** The first pass can only be granted to the sandbox account, which every launch shares, and
+//!   `SetEntriesInAclW` merges two launches' grants to it on one root into one ACE. So a root keeps its account ACEs
+//!   while another unrestored journal grants the same root ([`Coverage::account_covered`]), and the last launch
+//!   granting it removes them all. A launch refuses a root whose original DACL already names the account, so that
+//!   leaves the root's original ACEs. Until then the merged ACE may grant the account more than the remaining launches
+//!   asked for, which no shell can use: every access must also pass its own package SID and, for a write, its own
+//!   capability SID.
 //! - **The DACL's control flags.** Propagation sets `SE_DACL_AUTO_INHERITED` (`AI`) on every object under a root. Each
 //!   object's original flags are restored by whichever launch covering it ends last: an object another unrestored
 //!   journal also covers keeps its flags ([`Coverage`]), and that journal's restore writes them later.
@@ -51,6 +58,19 @@ pub fn names_any(dacl: &str, sids: &[String]) -> bool {
     })
 }
 
+/// Whether an ACE of `dacl` set on the object itself (not inherited: no `ID` flag) names one of `sids`.
+pub fn names_explicitly(dacl: &str, sids: &[String]) -> bool {
+    dacl_aces(dacl).is_some_and(|(_, aces)| {
+        aces.iter().any(|ace| {
+            let inherited = ace
+                .strip_prefix('(')
+                .and_then(|ace| ace.split(';').nth(1))
+                .is_some_and(|flags| flags.as_bytes().chunks(2).any(|flag| flag == b"ID"));
+            !inherited && ace_sid(ace).is_some_and(|sid| sids.iter().any(|own| own.eq_ignore_ascii_case(sid)))
+        })
+    })
+}
+
 /// `dacl` without every ACE naming one of `sids`, its flags and every other ACE in order. `None` when it does not parse.
 pub fn dacl_without_all(dacl: &str, sids: &[String]) -> Option<String> {
     let (prefix, aces) = dacl_aces(dacl)?;
@@ -80,6 +100,9 @@ pub struct Coverage {
     pub covered: HashSet<String>,
     /// Objects under another journal's writable root: their label is that journal's to restore.
     pub labeled: HashSet<String>,
+    /// Objects another journal grants the account on as a root: their account ACEs are the last such journal's to
+    /// remove.
+    pub accounted: HashSet<String>,
 }
 
 impl Coverage {
@@ -94,6 +117,19 @@ impl Coverage {
             self.labeled.insert(key.clone());
         }
         self.covered.insert(key);
+    }
+
+    /// Note one of another journal's roots whose grant names the account.
+    pub fn note_account(&mut self, ours: &HashSet<String>, path: &str) {
+        let key = key(path);
+        if ours.contains(&key) {
+            self.accounted.insert(key);
+        }
+    }
+
+    /// Whether another unrestored journal grants the account on this object as a root of its own.
+    pub fn account_covered(&self, path: &str) -> bool {
+        self.accounted.contains(&key(path))
     }
 
     pub fn flags_covered(&self, path: &str) -> bool {
@@ -114,18 +150,19 @@ pub fn overlaps(left: &[String], right: &[String]) -> bool {
 mod tests {
     use super::*;
 
-    const LOGON: &str = "S-1-5-5-0-123456";
+    const CAPABILITY: &str = "S-1-5-21-1-2-3-4";
     const PACKAGE: &str = "S-1-15-2-1-2-3-4-5-6-7";
-    const OTHER: &str = "S-1-5-5-0-999";
+    const OTHER: &str = "S-1-15-2-9-9-9-9-9-9-9";
 
     fn own() -> Vec<String> {
-        vec![LOGON.to_owned(), PACKAGE.to_owned()]
+        vec![CAPABILITY.to_owned(), PACKAGE.to_owned()]
     }
 
     #[test]
     fn finds_the_dacl_part_between_group_and_label() {
-        let sddl = format!("O:S-1-5-21-1G:S-1-5-21-2D:AI(A;OICI;FA;;;SY)(A;;0x1200a9;;;{LOGON})S:(ML;OICI;NW;;;LW)");
-        assert_eq!(dacl_part(&sddl), Some(format!("D:AI(A;OICI;FA;;;SY)(A;;0x1200a9;;;{LOGON})").as_str()));
+        let sddl =
+            format!("O:S-1-5-21-1G:S-1-5-21-2D:AI(A;OICI;FA;;;SY)(A;;0x1200a9;;;{CAPABILITY})S:(ML;OICI;NW;;;LW)");
+        assert_eq!(dacl_part(&sddl), Some(format!("D:AI(A;OICI;FA;;;SY)(A;;0x1200a9;;;{CAPABILITY})").as_str()));
         assert_eq!(dacl_part("O:SYG:SY"), None);
         // An SID inside an ACE never starts the DACL part.
         assert_eq!(dacl_part("O:BAD:P(A;;FA;;;S-1-5-21-1)"), Some("D:P(A;;FA;;;S-1-5-21-1)"));
@@ -134,7 +171,7 @@ mod tests {
     #[test]
     fn removes_exactly_the_launch_own_aces() {
         let dacl = format!(
-            "D:AI(D;OICI;FA;;;{LOGON})(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;{OTHER})(A;OICIID;0x1200a9;;;{PACKAGE})(A;;FA;;;BA)"
+            "D:AI(D;OICI;FA;;;{CAPABILITY})(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;{OTHER})(A;OICIID;0x1200a9;;;{PACKAGE})(A;;FA;;;BA)"
         );
         assert!(names_any(&dacl, &own()));
         let kept = dacl_without_all(&dacl, &own()).unwrap();
@@ -143,6 +180,11 @@ mod tests {
         // Another launch's ACEs are not ours, and SIDs compare case-insensitively.
         assert!(names_any(&kept, &[OTHER.to_lowercase()]));
         assert_eq!(dacl_without_all("not a dacl", &own()), None);
+        // Only an ACE set on the object itself counts as named explicitly; `ID` marks an inherited one.
+        assert!(names_explicitly(&dacl, &own()));
+        assert!(!names_explicitly(&format!("D:AI(A;OICIID;FA;;;{PACKAGE})(A;;FA;;;SY)"), &own()));
+        assert!(names_explicitly(&format!("D:AI(A;OICIID;FA;;;{PACKAGE})(A;;FA;;;{PACKAGE})"), &own()));
+        assert!(!names_explicitly("not a dacl", &own()));
     }
 
     #[test]
@@ -176,6 +218,12 @@ mod tests {
         assert!(!coverage.label_covered(r"C:\Runtime"));
         assert!(coverage.flags_covered(r"C:\Work\out") && coverage.label_covered(r"C:\Work\out"));
         assert!(!coverage.flags_covered(r"C:\Other\out"));
+        // Only a root another journal grants the account on keeps the account's ACEs.
+        assert!(!coverage.account_covered(r"C:\Runtime"));
+        coverage.note_account(&ours, r"C:\RUNTIME");
+        coverage.note_account(&ours, r"C:\Other\out");
+        assert!(coverage.account_covered(r"c:\runtime"));
+        assert!(!coverage.account_covered(r"C:\Other\out") && !coverage.account_covered(r"C:\Work\out"));
     }
 
     #[test]

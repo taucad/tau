@@ -42,9 +42,9 @@ use crate::cmdline::{capability_sid, quote_arg};
 use crate::frame::{self, Frame, read_frame, write_frame};
 use crate::install::{InstallRecord, firewall_off_message};
 use crate::journal::{self, Entry, Header, JOURNAL_VERSION, JournalWriter};
-use crate::overlap::{key, overlaps};
+use crate::overlap::{dacl_part, key, names_explicitly, overlaps};
 use crate::paths::is_within;
-use crate::protocol::{CleanupFailed, Exit, Ready, Refused, RunnerError, RunnerReady, RunnerSpec};
+use crate::protocol::{CleanupFailed, Exit, Ready, Refused, RunnerError, RunnerSpec};
 use crate::spec::{self, ExecutableRoots, ValidSpec, format_digest};
 use crate::tree::{self, Sample};
 
@@ -227,7 +227,7 @@ impl Session {
                 None
             }
         };
-        // Classify every root; nothing has been changed yet. Snapshots come once the runner's logon SID is known.
+        // Classify every root; nothing has been changed yet. Snapshots come once the runner is ready.
         let mut roots: Vec<String> = Vec::new();
         let mut directories: Vec<String> = Vec::new();
         for (path, _) in &valid.grants {
@@ -277,7 +277,7 @@ impl Session {
     /// that would expose one of them (or the ledger) to its shell or put its own journal in reach of another's,
     /// journal every object with its original descriptor (another journal's entry where one covers it), register
     /// the journal, then add this launch's ACEs and its window-station ACEs.
-    fn grant(&self, logon: &Sid) -> std::result::Result<(), Refused> {
+    fn grant(&self) -> std::result::Result<(), Refused> {
         let unavailable = |what: &str, err: String| Refused::unavailable(what.to_owned(), Some(err));
         // Another launch editing descriptors past the wait: the same machine-readable answer as before concurrency.
         let _lock = exclusive::descriptors()
@@ -333,11 +333,8 @@ impl Session {
                 unavailable("another launch's journal cannot be read", format!("{}: {err}", other.journal))
             })?;
         }
-        let labeled = |path: &str| {
-            self.valid
-                .grants
-                .iter()
-                .any(|(granted, access)| granted.eq_ignore_ascii_case(path) && acl::needs_low_label(*access))
+        let granted_as = |path: &str, test: fn(spec::Access) -> bool| {
+            self.valid.grants.iter().any(|(granted, access)| granted.eq_ignore_ascii_case(path) && test(*access))
         };
         // The original of an object another journal covers is that journal's entry, when it is the same object.
         let original = |mut entry: Entry| {
@@ -348,10 +345,33 @@ impl Session {
             }
             entry
         };
+        let account = self.account.to_sddl();
         let mut roots = Vec::new();
         for path in &self.roots {
             match acl::snapshot(path) {
-                Ok(Some(entry)) => roots.push(Entry { labeled: labeled(path), ..original(entry) }),
+                Ok(Some(entry)) => {
+                    let entry = Entry {
+                        labeled: granted_as(path, acl::needs_low_label),
+                        account: granted_as(path, acl::names_account),
+                        ..original(entry)
+                    };
+                    // The last launch out removes every ACE naming the shared account from a root itself; one the
+                    // person (or a lost journal) set there before any launch would go with them. An inherited one
+                    // comes from above and is inherited again.
+                    if entry.account
+                        && dacl_part(&entry.sddl)
+                            .is_some_and(|dacl| names_explicitly(dacl, std::slice::from_ref(&account)))
+                    {
+                        return Err(Refused::unavailable(
+                            format!(
+                                "{path:?} already names the sandbox account in its permissions; remove that entry (or \
+                                 restore the launch that left it) first"
+                            ),
+                            None,
+                        ));
+                    }
+                    roots.push(entry);
+                }
                 Ok(None) => eprintln!("tau-windows-sandbox launch: {path} does not exist; no ACL change"),
                 Err(err) => return Err(unavailable("a path's ACL could not be read", err.to_string())),
             }
@@ -359,7 +379,7 @@ impl Session {
         let header = Header {
             version: JOURNAL_VERSION,
             capability_sid: self.capability_sid.clone(),
-            logon_sid: logon.to_sddl(),
+            account_sid: account,
             package_sid: self.package_sid.clone(),
             package_name: self.package_name.clone(),
             launcher_pid: unsafe { GetCurrentProcessId() },
@@ -369,8 +389,7 @@ impl Session {
         self.journaled.set(true);
         ledger::register(&self.package_name, &self.journal_path)
             .map_err(|err| unavailable("the ledger of launches cannot be written", err.to_string()))?;
-        self.apply_grants(logon)
-            .map_err(|err| unavailable("the folder permissions could not be granted", err.to_string()))
+        self.apply_grants().map_err(|err| unavailable("the folder permissions could not be granted", err.to_string()))
     }
 
     /// Undo everything this launch changed. `Ok` only when the job (if any) is empty and every descriptor
@@ -405,9 +424,12 @@ impl Session {
         if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
     }
 
-    fn apply_grants(&self, logon: &Sid) -> Result<()> {
-        let grantees =
-            acl::Grantees { logon: logon.clone(), capability: self.capability.clone(), package: self.package.clone() };
+    fn apply_grants(&self) -> Result<()> {
+        let grantees = acl::Grantees {
+            account: self.account.clone(),
+            capability: self.capability.clone(),
+            package: self.package.clone(),
+        };
         for (path, access) in &self.valid.grants {
             if !self.roots.iter().any(|root| root.eq_ignore_ascii_case(path)) {
                 continue;
@@ -415,7 +437,7 @@ impl Session {
             acl::apply(path, &acl::aces_for(*access, &grantees), acl::needs_low_label(*access))?;
         }
         if let Some(station) = &self.station
-            && let Err(err) = station.grant(&[logon, &self.capability, &self.package])
+            && let Err(err) = station.grant(&[&self.capability, &self.package])
         {
             eprintln!("tau-windows-sandbox launch: no window-station session ACE: {err}");
         }
@@ -454,16 +476,8 @@ impl Session {
                 other => break other,
             }
         };
-        let logon = match first {
-            Ok(Some(frame)) if frame.kind == frame::READY => {
-                serde_json::from_slice::<RunnerReady>(&frame.payload).map_err(|err| err.to_string()).and_then(|ready| {
-                    if ready.logon_sid.starts_with("S-1-5-5-") {
-                        Sid::parse(&ready.logon_sid).map_err(|err| err.to_string())
-                    } else {
-                        Err(format!("the runner's logon SID {} is not one", ready.logon_sid))
-                    }
-                })
-            }
+        match first {
+            Ok(Some(frame)) if frame.kind == frame::READY => {}
             other => {
                 let diagnostic = match other {
                     Ok(Some(frame)) if frame.kind == frame::RUNNER_ERROR => runner_error_text(&frame.payload),
@@ -479,12 +493,8 @@ impl Session {
                 );
             }
         };
-        // Journal and grant to the runner's logon SID, which the shell's token carries and no other launch's does.
-        let granted = match logon {
-            Ok(logon) => self.grant(&logon),
-            Err(diagnostic) => Err(Refused::unavailable("the sandbox runner failed", Some(diagnostic))),
-        };
-        if let Err(refused) = granted {
+        // Journal and grant once the runner is up, so a runner that fails costs no descriptor edit.
+        if let Err(refused) = self.grant() {
             drop(desktop);
             let cleanup = self.teardown(Some(&job));
             return self.finish_refused(&sink, refused, cleanup);

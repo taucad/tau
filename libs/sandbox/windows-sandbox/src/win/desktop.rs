@@ -3,9 +3,10 @@
 //! `launch` creates a private desktop on its own window station whose protected DACL admits the person
 //! (all access) and, as participants, the sandbox account, this launch's capability SID and its
 //! AppContainer package SID, with a Low mandatory label so the Low-integrity shell may use it. The window station
-//! is shared by every launch in the session: each adds one ACE per SID of its own (its runner's logon SID, its
-//! capability SID, its package SID) and removes exactly the ACEs naming those SIDs at teardown, so concurrent
-//! launches never undo each other's (README "Sessions").
+//! is shared by every launch in the session: each adds one ACE per SID of its own (its capability SID and its package
+//! SID, which the shell's restricted and AppContainer passes need) and removes exactly the ACEs naming those SIDs at
+//! teardown, so concurrent launches never undo each other's (README "Sessions"). The first pass needs no ACE: the
+//! runner's logon SID is the person's own, which the station already admits, and so it must never be removed.
 
 use std::ffi::c_void;
 
@@ -14,8 +15,8 @@ use windows_sys::Win32::Security::Authorization::{
     SE_WINDOW_OBJECT, SetEntriesInAclW, SetSecurityInfo, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetUserObjectSecurity, NO_INHERITANCE,
-    PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, SetUserObjectSecurity,
+    ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, DeleteAce, EqualSid, GetAce, GetSecurityDescriptorDacl,
+    GetUserObjectSecurity, NO_INHERITANCE, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
 };
 use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 use windows_sys::Win32::System::StationsAndDesktops::{
@@ -24,11 +25,9 @@ use windows_sys::Win32::System::StationsAndDesktops::{
 };
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
-use super::acl::{from_sddl, to_sddl};
 use super::sid::Sid;
 use super::util::{Error, Local, Result, check, check_status, random_u32s, wide};
 use crate::journal::WindowStationEntry;
-use crate::overlap::{dacl_part, dacl_without_all, names_any};
 
 const DESKTOP_ALL_ACCESS: u32 = 0x000F_01FF;
 /// All access but `DELETE`, `WRITE_DAC` and `WRITE_OWNER` (Codex `DESKTOP_PARTICIPANT_ACCESS`).
@@ -117,34 +116,10 @@ impl WindowStation {
         WindowStationEntry { session_id: self.session_id, name: self.name.clone() }
     }
 
-    fn dacl_sddl(&self) -> Result<String> {
-        let mut descriptor = self.descriptor()?;
-        let mut aligned = vec![0u64; descriptor.len().div_ceil(8)];
-        unsafe {
-            std::ptr::copy_nonoverlapping(descriptor.as_mut_ptr(), aligned.as_mut_ptr() as *mut u8, descriptor.len())
-        };
-        to_sddl(aligned.as_mut_ptr() as PSECURITY_DESCRIPTOR, DACL_SECURITY_INFORMATION)
-    }
-
     /// Add one session ACE per SID to the current DACL.
     pub fn grant(&self, sids: &[&Sid]) -> Result<()> {
-        let original = self.descriptor()?;
-        let mut aligned = vec![0u64; original.len().div_ceil(8)];
-        unsafe { std::ptr::copy_nonoverlapping(original.as_ptr(), aligned.as_mut_ptr() as *mut u8, original.len()) };
-        let mut present = 0;
-        let mut defaulted = 0;
-        let mut dacl: *mut ACL = std::ptr::null_mut();
-        check(
-            unsafe {
-                GetSecurityDescriptorDacl(
-                    aligned.as_mut_ptr() as PSECURITY_DESCRIPTOR,
-                    &mut present,
-                    &mut dacl,
-                    &mut defaulted,
-                )
-            },
-            "GetSecurityDescriptorDacl(window station)",
-        )?;
+        let mut original = Aligned::of(&self.descriptor()?);
+        let dacl = original.dacl()?;
         let entries: Vec<EXPLICIT_ACCESS_W> = sids
             .iter()
             .map(|sid| EXPLICIT_ACCESS_W {
@@ -166,7 +141,7 @@ impl WindowStation {
                 SetEntriesInAclW(
                     entries.len() as u32,
                     entries.as_ptr(),
-                    if present == 0 { std::ptr::null() } else { dacl },
+                    dacl.map_or(std::ptr::null(), |dacl| dacl as *const ACL),
                     &mut new_dacl,
                 )
             },
@@ -189,25 +164,107 @@ impl WindowStation {
         )
     }
 
-    /// Remove every ACE naming one of `own` and nothing else, and confirm none is left.
+    /// Remove every ACE naming one of `own` and nothing else, and confirm it. The DACL is edited where it lies in the
+    /// descriptor just read, ACE by ACE (`DeleteAce`), and written back with the same call [`grant`](Self::grant)
+    /// uses, so every other ACE keeps its exact bytes and order. Called under the person's descriptor lock, so no
+    /// other launch edits the station meanwhile and the read-back must hold exactly the others.
     pub fn revoke(&self, own: &[String]) -> Result<()> {
-        let sddl = self.dacl_sddl()?;
-        let dacl =
-            dacl_part(&sddl).ok_or_else(|| Error::msg(format!("the window station's DACL {sddl} does not parse")))?;
-        if !names_any(dacl, own) {
+        let own = own.iter().map(|sid| Sid::parse(sid)).collect::<Result<Vec<_>>>()?;
+        let mut descriptor = Aligned::of(&self.descriptor()?);
+        let Some(dacl) = descriptor.dacl()? else { return Ok(()) };
+        let before = aces(dacl)?;
+        let mut removed = 0;
+        for (index, sid) in before.iter().enumerate().rev() {
+            if sid.is_some_and(|sid| own.iter().any(|own| unsafe { EqualSid(own.as_psid(), sid) } != 0)) {
+                check(unsafe { DeleteAce(dacl, index as u32) }, "DeleteAce(window station)")?;
+                removed += 1;
+            }
+        }
+        if removed == 0 {
             return Ok(());
         }
-        let kept = dacl_without_all(dacl, own)
-            .ok_or_else(|| Error::msg(format!("the window station's DACL {sddl} does not parse")))?;
-        let sd = from_sddl(&kept)?;
-        let info = DACL_SECURITY_INFORMATION;
-        check(unsafe { SetUserObjectSecurity(self.handle, &info, sd.0) }, "SetUserObjectSecurity(window station)")?;
-        let now = self.dacl_sddl()?;
-        if dacl_part(&now).is_none_or(|dacl| names_any(dacl, own)) {
-            return Err(Error::msg(format!("the window station still names the launch ({now})")));
+        check_status(
+            unsafe {
+                SetSecurityInfo(
+                    self.handle,
+                    SE_WINDOW_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    dacl,
+                    std::ptr::null(),
+                )
+            },
+            "SetSecurityInfo(window station)",
+        )?;
+        let mut now = Aligned::of(&self.descriptor()?);
+        let after = match now.dacl()? {
+            Some(dacl) => aces(dacl)?,
+            None => Vec::new(),
+        };
+        let names_own =
+            after.iter().flatten().any(|sid| own.iter().any(|own| unsafe { EqualSid(own.as_psid(), *sid) } != 0));
+        if names_own || after.len() + removed != before.len() {
+            return Err(Error::msg(format!(
+                "the window station's DACL holds {} ACE(s) after removing {removed} of {}, and names the launch: {names_own}",
+                after.len(),
+                before.len()
+            )));
         }
         Ok(())
     }
+}
+
+/// A self-relative descriptor copied into 8-byte-aligned memory, so its DACL can be read and edited in place.
+struct Aligned(Vec<u64>);
+
+impl Aligned {
+    fn of(bytes: &[u8]) -> Self {
+        let mut aligned = vec![0u64; bytes.len().div_ceil(8)];
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), aligned.as_mut_ptr() as *mut u8, bytes.len()) };
+        Self(aligned)
+    }
+
+    /// The DACL inside the descriptor; `None` when it has none (a null DACL holds no ACE of a launch's).
+    fn dacl(&mut self) -> Result<Option<*mut ACL>> {
+        let (mut present, mut defaulted) = (0, 0);
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        check(
+            unsafe {
+                GetSecurityDescriptorDacl(
+                    self.0.as_mut_ptr() as PSECURITY_DESCRIPTOR,
+                    &mut present,
+                    &mut dacl,
+                    &mut defaulted,
+                )
+            },
+            "GetSecurityDescriptorDacl(window station)",
+        )?;
+        Ok(if present == 0 || dacl.is_null() { None } else { Some(dacl) })
+    }
+}
+
+/// `ACCESS_ALLOWED_ACE_TYPE` and `ACCESS_DENIED_ACE_TYPE`: the ACEs whose SID follows the header and mask. A launch
+/// adds only the first kind.
+const ALLOWED_ACE: u8 = 0;
+const DENIED_ACE: u8 = 1;
+
+/// The SID of each ACE of `dacl` in order, `None` for an ACE of another layout (which no launch adds).
+fn aces(dacl: *mut ACL) -> Result<Vec<Option<PSID>>> {
+    let count = unsafe { (*dacl).AceCount };
+    (0..u32::from(count))
+        .map(|index| {
+            let mut ace: *mut c_void = std::ptr::null_mut();
+            check(unsafe { GetAce(dacl, index, &mut ace) }, "GetAce(window station)")?;
+            let header = unsafe { &*(ace as *const ACE_HEADER) };
+            Ok(if header.AceType == ALLOWED_ACE || header.AceType == DENIED_ACE {
+                // `ACE_HEADER` (4 bytes), `ACCESS_MASK` (4 bytes), then `SidStart`.
+                Some(unsafe { (ace as *mut u8).add(8) } as PSID)
+            } else {
+                None
+            })
+        })
+        .collect()
 }
 
 /// A private desktop, closed on drop.

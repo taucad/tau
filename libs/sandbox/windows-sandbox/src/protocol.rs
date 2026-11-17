@@ -82,14 +82,6 @@ impl Refused {
     }
 }
 
-/// The runner's `ready` on the internal channel: its own logon SID, which the launcher grants to (the shell's token
-/// carries it as an enabled group, and it is unique to this logon, so to this launch).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RunnerReady {
-    pub logon_sid: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CleanupFailed {
     pub message: String,

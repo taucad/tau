@@ -1,14 +1,15 @@
 //! File descriptor snapshot, grant and restore (README "ACL lifecycle", "Sessions").
 //!
-//! Grants merge explicit ACEs naming only the launch's own SIDs (its runner's logon SID, its capability SID and its
-//! package SID) into a root's existing DACL with `SetEntriesInAclW` and write it with `SetNamedSecurityInfoW`, which
-//! propagates the inheritable ones to every descendant and, as a side effect, sets `SE_DACL_AUTO_INHERITED` on the
-//! root and on every descendant it rewrites. Restore runs in two steps: remove every ACE naming one of the launch's
-//! SIDs from each root and write the rest back the same way (so the propagation also strips the inherited copies,
-//! from objects created during the launch too), then give each journaled object its original control flags and
-//! label through its handle with `SetKernelObjectSecurity`, which does not propagate, where no other unrestored
-//! journal covers it, and read it back to confirm. No step writes an ACE list from a snapshot, so no step touches
-//! an ACE another launch or the person added, and none writes an owner or group.
+//! Grants merge explicit ACEs into a root's existing DACL with `SetEntriesInAclW` and write it with
+//! `SetNamedSecurityInfoW`, which propagates the inheritable ones to every descendant and, as a side effect, sets
+//! `SE_DACL_AUTO_INHERITED` on the root and on every descendant it rewrites. The ACEs name the launch's own capability
+//! and package SIDs and, for the first pass, the shared sandbox account (`Grantees`). Restore runs in two steps:
+//! remove every ACE naming one of the launch's own SIDs from each root, and those naming the account where no other
+//! unrestored journal grants the same root, and write the rest back the same way (so the propagation also strips the
+//! inherited copies, from objects created during the launch too); then give each journaled object its original
+//! control flags and label through its handle with `SetKernelObjectSecurity`, which does not propagate, where no other
+//! unrestored journal covers it, and read it back to confirm. No step writes an ACE list from a snapshot, so no step
+//! touches an ACE another launch or the person added, and none writes an owner or group.
 //!
 //! A writable root also gets a Low mandatory label (`NW`, inheritable on a directory): the shell runs in an
 //! AppContainer, whose token is Low integrity, and the default (Medium, no-write-up) policy would refuse it
@@ -40,7 +41,7 @@ use super::sid::Sid;
 use super::util::{Error, Local, Owned, Result, check, check_status, from_wide_ptr, wide};
 use crate::appcontainer::{label_aces, split_sacl};
 use crate::journal::{Entry, file_id};
-use crate::overlap::{dacl_flags, dacl_part, dacl_without_all, names_any, with_flags_of};
+use crate::overlap::{dacl_flags, dacl_part, dacl_without_all, names_any, names_explicitly, with_flags_of};
 use crate::paths::extended;
 use crate::spec::Access;
 
@@ -65,37 +66,45 @@ pub struct Ace<'a> {
     pub mask: u32,
 }
 
-/// The identities a launch grants to, all its own: its runner's logon SID (the first pass: the shell's token
-/// carries it as an enabled group, and no other launch's does), its capability SID and its AppContainer package
-/// SID. The shared sandbox account and group are never named, so removing a launch's ACEs by SID removes nothing
-/// another launch needs.
+/// The identities a launch grants to. The first pass of the shell's access check sees only the sandbox account's
+/// token groups, and none of them is the launch's own: the runner's logon SID is the person's (the secondary-logon
+/// service gives a `CreateProcessWithLogonW` logon the caller's logon SID), and Windows adds no group to a token
+/// without `SeTcbPrivilege`. So the first pass is granted to the shared `account`, and isolation rests on the other
+/// passes, which every access must also satisfy: the AppContainer pass (`package`, this launch's alone, on every
+/// access) and the restricted pass (`capability`, this launch's alone, on writes).
 pub struct Grantees {
-    pub logon: Sid,
+    pub account: Sid,
     pub capability: Sid,
     pub package: Sid,
 }
 
-/// The ACEs one planned access adds. The shell's access check has three passes, and a grant must satisfy
-/// each: the first (its logon SID), the AppContainer pass (its package SID; `ALL APPLICATION PACKAGES` is never
-/// granted) and, for writes, the restricted pass (its capability SID). A denial needs one pass only.
+/// The ACEs one planned access adds. A grant must satisfy each pass: the first (the account), the AppContainer pass
+/// (the package SID; `ALL APPLICATION PACKAGES` is never granted) and, for writes, the restricted pass (the
+/// capability SID). A denial needs one pass only: it denies the package, which every access of this launch's shell
+/// is checked against and no other launch's carries, so it is removed by SID like every other ACE of the launch's.
 pub fn aces_for(access: Access, grantees: &Grantees) -> Vec<Ace<'_>> {
     match access {
         Access::Read => vec![
-            Ace { sid: &grantees.logon, mode: Mode::Grant, mask: READ_MASK },
+            Ace { sid: &grantees.account, mode: Mode::Grant, mask: READ_MASK },
             Ace { sid: &grantees.package, mode: Mode::Grant, mask: READ_MASK },
         ],
         Access::Write => vec![
-            Ace { sid: &grantees.logon, mode: Mode::Grant, mask: WRITE_MASK },
+            Ace { sid: &grantees.account, mode: Mode::Grant, mask: WRITE_MASK },
             Ace { sid: &grantees.capability, mode: Mode::Grant, mask: WRITE_MASK },
             Ace { sid: &grantees.package, mode: Mode::Grant, mask: WRITE_MASK },
         ],
         Access::ReadOnly => vec![
-            Ace { sid: &grantees.logon, mode: Mode::Grant, mask: READ_MASK },
+            Ace { sid: &grantees.account, mode: Mode::Grant, mask: READ_MASK },
             Ace { sid: &grantees.package, mode: Mode::Grant, mask: READ_MASK },
             Ace { sid: &grantees.capability, mode: Mode::Deny, mask: DENY_WRITE_MASK },
         ],
-        Access::Denied => vec![Ace { sid: &grantees.logon, mode: Mode::Deny, mask: DENY_ALL_MASK }],
+        Access::Denied => vec![Ace { sid: &grantees.package, mode: Mode::Deny, mask: DENY_ALL_MASK }],
     }
+}
+
+/// Whether an access's ACEs name the shared sandbox account (every one but a denial).
+pub fn names_account(access: Access) -> bool {
+    access != Access::Denied
 }
 
 /// Whether an access lowers the path's mandatory label to Low so the Low-integrity shell may write there.
@@ -263,6 +272,7 @@ pub fn snapshot(path: &str) -> Result<Option<Entry>> {
         sddl: handle_sddl(&handle, path)?,
         file_id: handle_file_id(&handle),
         labeled: false,
+        account: false,
     }))
 }
 
@@ -433,7 +443,19 @@ pub fn remove_propagating(path: &str, own: &[String]) -> Result<()> {
         };
     };
     let sd = from_sddl(&kept)?;
-    set_dacl_propagating(path, dacl_of(&sd)?, protected)
+    set_dacl_propagating(path, dacl_of(&sd)?, protected)?;
+    // Read back: none of `own` may remain on the root itself. An inherited copy may, from a root above this one that
+    // is restored later (this launch's) or still granted (another's).
+    let descriptor = match read_descriptor(path) {
+        Ok(descriptor) => descriptor,
+        Err(status) if missing(status) => return Ok(()),
+        Err(status) => return Err(Error::code(format!("GetNamedSecurityInfoW({path})"), status)),
+    };
+    let now = to_sddl(descriptor.sd.0, DACL_SECURITY_INFORMATION)?;
+    if dacl_part(&now).is_none_or(|dacl| names_explicitly(dacl, own)) {
+        return Err(Error::msg(format!("{path}: its DACL still names the launch after the removal ({now})")));
+    }
+    Ok(())
 }
 
 /// Step one for a writable root's label, when no other unrestored journal's writable root covers it: write the

@@ -53,8 +53,8 @@ type Counters = {
 const createCounters = (): Counters => ({ builds: 0, renders: 0, snapshots: 0, restores: 0, renderedFrom: [] });
 
 const encoder = new TextEncoder();
-const describeProbe = () => ({
-  success: true as const,
+/** Parameter description shared by both probe kernels; each `describe` adds `success`. */
+const probeDescription = () => ({
   data: {
     parameters: {
       schema: {
@@ -94,7 +94,7 @@ const createKernel = (counters: Counters) =>
       return { resolved: [entryPath], unresolved: [] };
     },
     async describe() {
-      return describeProbe();
+      return { success: true, ...probeDescription() };
     },
     async evaluate({ parameters }) {
       counters.builds++;
@@ -144,7 +144,7 @@ const createUnserializableKernel = (counters: Counters) =>
       return { resolved: [entryPath], unresolved: [] };
     },
     async describe() {
-      return describeProbe();
+      return { success: true, ...probeDescription() };
     },
     async evaluate() {
       counters.builds++;

@@ -290,8 +290,12 @@ const materializer = (
   let temporary = 0;
   return createApplyTreeEffects({
     useFileSystem: async (_place, operation) => operation(checkout),
-    capture: async () =>
-      captureRevisionTree(checkout, { exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned }),
+    /* As the host's capture does: a mode the checkout cannot report is the basis's (`capture(place, modeBasis)`). */
+    capture: async (_place, modeBasis) =>
+      captureRevisionTree(checkout, {
+        exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned,
+        ...(modeBasis === undefined ? {} : { inheritedMode: (path: string) => modeBasis.mode(path) }),
+      }),
     onApplyingTree,
     ...(prepareTarget === undefined ? {} : { prepareTarget }),
     policy: tauRevisionPolicy.policy,
@@ -495,7 +499,10 @@ describe('a large apply', () => {
     /* One provider batch per changeset of at most 256 entries. */
     expect(context.counts.batches).toBe(Math.ceil(2000 / 256));
     expect(context.counts.writeFile).toBe(2000);
-    expect(context.counts.calls.filter((call) => call === 'setFileMode')).toHaveLength(2000);
+    /* One mode per new file, where the disk keeps modes; none where it has no seam for one (Windows). */
+    expect(context.counts.calls.filter((call) => call === 'setFileMode')).toHaveLength(
+      context.checkout.setFileMode === undefined ? 0 : 2000,
+    );
     expect(context.counts.calls.filter((call) => call === 'rename')).toHaveLength(0);
     /* Nothing staged, so nothing to sweep. */
     expect(context.counts.calls.filter((call) => call === 'unlink')).toHaveLength(0);

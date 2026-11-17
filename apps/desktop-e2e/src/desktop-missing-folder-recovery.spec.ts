@@ -2,7 +2,6 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import process from 'node:process';
 import { setTimeout as wait } from 'node:timers/promises';
-import type { Page } from 'playwright';
 import { afterEach, describe, expect, it } from 'vitest';
 import { desktopE2ECompletedArtifact } from '#support/config.js';
 import {
@@ -23,6 +22,8 @@ import {
   submitPrompt,
   waitForProjectOnDisk,
 } from '#support/scenario.js';
+
+type Page = DesktopSession['page'];
 
 /**
  * The operator's case, rehearsed (desktop resilient startup blueprint, Test plan WP12).
@@ -74,12 +75,15 @@ const readGrants = async (profile: string): Promise<readonly string[]> =>
 /** Whether the grant file names this folder, in either spelling (`/var/…` and `/private/var/…` on macOS). */
 const isGranted = async (profile: string, directory: string): Promise<boolean> => {
   const spellings = new Set([directory, await realpath(directory).catch(() => directory)]);
-  return (await readGrants(profile)).some((entry) => spellings.has(entry));
+  const grants = await readGrants(profile);
+  return grants.some((entry) => spellings.has(entry));
 };
 
 /** The furthest boot stage and mode the ledger recorded for the launch now running (D0). */
-const bootHealth = async (profile: string): Promise<BootHealth['last']> =>
-  (await readJson<BootHealth>(join(profile, 'boot-health.json')))?.last;
+const bootHealth = async (profile: string): Promise<BootHealth['last']> => {
+  const ledger = await readJson<BootHealth>(join(profile, 'boot-health.json'));
+  return ledger?.last;
+};
 
 /** What `desktop.log` gained since `offset`, the size it had before this launch. */
 const logSince = async (logPath: string, offset: number): Promise<string> => {
@@ -87,7 +91,10 @@ const logSince = async (logPath: string, offset: number): Promise<string> => {
   return contents.subarray(Math.min(offset, contents.length)).toString('utf8');
 };
 
-const sizeOf = async (path: string): Promise<number> => (await stat(path).catch(() => undefined))?.size ?? 0;
+const sizeOf = async (path: string): Promise<number> => {
+  const info = await stat(path).catch(() => undefined);
+  return info?.size ?? 0;
+};
 
 /** Every file under `root` with its size and modification time, for an "unchanged on disk" comparison. */
 const snapshotTree = async (root: string): Promise<readonly string[]> => {
@@ -149,7 +156,16 @@ const createFolderProjectWithChat = async (session: DesktopSession, folder: stri
     await waitForProjectOnDisk(folder, slug, { extension: '.scad', page });
     const project = join(folder, slug);
     await expect
-      .poll(async () => (await readdir(join(project, '.tau', 'chats')).catch(() => [])).length, { timeout: 120_000 })
+      .poll(
+        async () =>
+          readdir(join(project, '.tau', 'chats')).then(
+            (entries) => entries.length,
+            () => 0,
+          ),
+        {
+          timeout: 120_000,
+        },
+      )
       .toBeGreaterThan(0);
     await page.goto('app://tau/');
     return project;
@@ -275,7 +291,8 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
     .toBe('Create in Home');
   await expectVisible(unavailableNotice(page).first(), homeReadyTimeout);
   expect(await logSince(candidate.logPath, logOffset)).not.toContain('[FileManager] state → error');
-  expect((await readFile(grantsPath(profile))).equals(grantsBefore)).toBe(true);
+  const grantsAfter = await readFile(grantsPath(profile));
+  expect(grantsAfter.equals(grantsBefore)).toBe(true);
   await page.goto('app://tau/projects');
   await expectVisible(page.getByRole('link', { name: `Open ${homeProjectName}`, exact: true }), homeReadyTimeout);
   await expectNoStartFailure(page);
@@ -283,7 +300,9 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
   /* 4. The folders are there to act on, at the default window size. */
   await page.goto('app://tau/files');
   await expectVisible(page.getByText('Connected', { exact: true }).first(), homeReadyTimeout);
-  const notFoundGroup = page.getByRole('button', { name: new RegExp(`^Folders not found \\(${String(deletedFolders)}\\)`, 'u') });
+  const notFoundGroup = page.getByRole('button', {
+    name: new RegExp(`^Folders not found \\(${String(deletedFolders)}\\)`, 'u'),
+  });
   await expectVisible(notFoundGroup, homeReadyTimeout);
   expect(await notFoundGroup.getAttribute('aria-expanded')).toBe('false');
   await notFoundGroup.scrollIntoViewIfNeeded();
@@ -295,7 +314,7 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
   /* 5. One optional click. */
   const survivorBefore = await snapshotTree(survivorProject);
   await page.getByRole('button', { name: 'Remove all', exact: true }).click();
-  await expect.poll(async () => (await readGrants(profile)).length, { timeout: 60_000 }).toBe(1);
+  await expect.poll(async () => readGrants(profile).then((grants) => grants.length), { timeout: 60_000 }).toBe(1);
   expect(await isGranted(profile, survivor)).toBe(true);
   await expect.poll(async () => notFoundGroup.count(), { timeout: 60_000 }).toBe(0);
   expect(await snapshotTree(survivorProject)).toEqual(survivorBefore);
@@ -350,13 +369,21 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
         throw new Error('The folder project has no readable manifest.');
       }
 
-      const second = track(await launchDesktopApp({ token, profileRoot: profile, preserveProfile: true, pickedDirectories: [kept] }));
+      const second = track(
+        await launchDesktopApp({ token, profileRoot: profile, preserveProfile: true, pickedDirectories: [kept] }),
+      );
       await expectHomeReady(second);
       await expectVisible(unavailableNotice(second.page).first(), homeReadyTimeout);
       /* Remove from Tau is offered in every state but Connected (D2), so the working folder is disconnected first. */
       await second.page.goto('app://tau/files');
-      await second.page.getByRole('button', { name: /^Disconnect/u }).first().click();
-      await second.page.getByRole('button', { name: /^Remove from Tau/u }).first().click();
+      await second.page
+        .getByRole('button', { name: /^Disconnect/u })
+        .first()
+        .click();
+      await second.page
+        .getByRole('button', { name: /^Remove from Tau/u })
+        .first()
+        .click();
       await expect.poll(async () => isGranted(profile, kept), { timeout: 60_000 }).toBe(false);
       expect(await snapshotTree(chats)).toEqual(chatsBefore);
 

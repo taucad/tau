@@ -45,8 +45,12 @@ export const powerShellModuleCacheStore = 'tau-powershell-cache';
 /** The largest cache Tau keeps: a bound on what a build launch can make Tau read, far above any real cache. */
 const maximumBytes = 64 * 1024 * 1024;
 
-/** A store layout version, so a change to how the cache is built never reads an older one. */
-const layout = 'v1';
+/**
+ * A store layout version, so a change to how the cache is built never reads an older one. v2: Windows PowerShell 5.1
+ * builds with its own modules before the machine's on `PSModulePath` (`shellEnvironment`); a v1 cache built inside the
+ * AppContainer can lack them, since a machine module folder the sandbox cannot list stopped the build's walk first.
+ */
+const layout = 'v2';
 
 /**
  * Where one shell's cache lives in the store: a folder named for the layout and the shell's digest.

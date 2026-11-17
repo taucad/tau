@@ -141,12 +141,17 @@ if (process.platform !== 'win32' || process.arch !== 'x64') {
   );
 }
 ensureToolchain(crateRoot, 'the Windows sandbox helper');
-execFileSync('cargo', ['build', '--release', '--locked', '--target', target], {
-  cwd: crateRoot,
-  stdio: 'inherit',
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
-  env: { ...process.env, CARGO_TARGET_DIR: cargoTarget },
-});
+/* The helper, and the conformance row's stand-in native worker (never staged). */
+execFileSync(
+  'cargo',
+  ['build', '--release', '--locked', '--target', target, '--bins', '--example', 'tau-worker-probe'],
+  {
+    cwd: crateRoot,
+    stdio: 'inherit',
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
+    env: { ...process.env, CARGO_TARGET_DIR: cargoTarget },
+  },
+);
 const built = resolve(cargoTarget, target, 'release', executableName);
 const image = new Uint8Array(await readFile(built));
 const problem = windowsExecutableProblem(image);

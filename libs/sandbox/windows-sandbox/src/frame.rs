@@ -11,6 +11,8 @@ pub const START: u8 = 0x02;
 pub const INPUT: u8 = 0x03;
 pub const RESIZE: u8 = 0x04;
 pub const TERMINATE: u8 = 0x05;
+/// Empty: end the child's stdin (`pipes` with `input: true` only).
+pub const CLOSE_INPUT: u8 = 0x06;
 
 /// Helper to host.
 pub const READY: u8 = 0x81;

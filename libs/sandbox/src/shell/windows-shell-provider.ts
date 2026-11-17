@@ -8,8 +8,10 @@
  * descriptor is restored; `cleanup-failed`, a helper that dies without `exit`, and a protocol violation reject it, and
  * the journal stays for {@link ShellProvider.recover}, which has the helper's `restore` write the descriptors back.
  *
- * One sandbox account serves every launch, so read isolation is per account, not per session: the provider runs one
- * launch at a time and refuses another while one is live or while any earlier launch's journal is unrestored.
+ * Each launch has its own AppContainer package, but restore writes whole descriptors back, so two live launches over
+ * overlapping paths would undo each other's grants (`windows-sandbox/README.md` "Sessions"): the provider runs one
+ * launch at a time and refuses another while one is live or while any earlier launch's journal is unrestored, and the
+ * helper refuses a second launch on the computer itself.
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -33,6 +35,7 @@ import {
   decodeWindowsHelperFrame,
   encodeWindowsHostFrame,
   isShellRequirement,
+  windowsHelperEnd,
   windowsLaunchSpec,
   windowsSandboxProtocolVersion,
 } from '#shell/windows-sandbox-protocol.js';
@@ -73,10 +76,22 @@ export type WindowsShellProviderOptions = Readonly<{
   terminationMilliseconds?: number | undefined;
   /** Whether a process exists, for recovery; injectable for tests. */
   processAlive?: ((pid: number) => boolean) | undefined;
+  /**
+   * Receives each line a launch's helper writes to its diagnostic log, such as the runner's AppContainer, registry and
+   * COM checks, for the host's own log. The lines name SIDs and Windows error codes, never file contents or secrets.
+   */
+  onHelperDiagnostic?: ((line: string) => void) | undefined;
 }>;
 
 /** What the helper's `status` reports. @public */
-export type WindowsSandboxStatus = Readonly<{ installed: boolean }>;
+export type WindowsSandboxStatus = Readonly<{
+  installed: boolean;
+  /**
+   * Why a `status` run did not read as installed, when it was not a clean "no install record": the spawn error, a
+   * timeout, the exit code or signal, unparsable output and the helper's stderr (bounded). For a host's log.
+   */
+  diagnostic?: string | undefined;
+}>;
 
 /** How much of the helper's own diagnostic log a refusal or failure carries, in characters. */
 const diagnosticCharacters = 512;
@@ -282,15 +297,29 @@ type Answer =
   | Readonly<{ kind: 'failed'; message: string }>;
 
 /**
+ * What the helper answered to `start`: `started` once the shell was admitted and runs, or `refused` (after `ready`,
+ * before `started`) when the shell could not be started and the helper restored everything.
+ */
+type Launched =
+  | Readonly<{ kind: 'started' }>
+  | Readonly<{ kind: 'refused'; refusal: WindowsHelperRefusal }>
+  | Readonly<{ kind: 'failed'; message: string }>;
+
+/**
  * One helper `launch` process and its framed channel.
  *
  * @param child - The spawned helper.
  * @param stdio - The launch's stdio kind, which decides the output frames it may send.
  * @returns The channel.
  */
-const openChannel = (child: ChildProcessWithoutNullStreams, stdio: ShellLaunch['stdio']['kind']) => {
+const openChannel = (
+  child: ChildProcessWithoutNullStreams,
+  stdio: ShellLaunch['stdio']['kind'],
+  onDiagnostic?: (line: string) => void,
+) => {
   const decoder = createWindowsFrameDecoder();
   const answer = Promise.withResolvers<Answer>();
+  const launched = Promise.withResolvers<Launched>();
   const ending = Promise.withResolvers<Ending>();
   const closed = Promise.withResolvers<void>();
   const outputs = {
@@ -299,21 +328,24 @@ const openChannel = (child: ChildProcessWithoutNullStreams, stdio: ShellLaunch['
     output: createByteQueue(),
   };
   const state = {
-    phase: 'awaiting-ready' as 'awaiting-ready' | 'ready' | 'starting' | 'ended',
+    phase: 'awaiting-ready' as 'awaiting-ready' | 'ready' | 'starting' | 'running' | 'ended',
     closed: false,
   };
   let diagnostics = '';
+  let partialLine = '';
   let inputOpen = true;
   const finish = (end: Ending): void => {
     if (state.phase === 'ended') {
       return;
     }
     state.phase = 'ended';
-    /* Only a launch that ended before `ready` still waits on this; `exit` cannot arrive then. */
-    answer.resolve({
+    /* Only a launch that ended before `ready`, or before `started`, still waits on these. */
+    const failed = {
       kind: 'failed',
       message: end.kind === 'exit' ? 'the sandbox helper ended the launch.' : end.message,
-    });
+    } as const;
+    answer.resolve(failed);
+    launched.resolve(failed);
     ending.resolve(end);
     for (const queue of Object.values(outputs)) {
       queue.end();
@@ -356,10 +388,32 @@ const openChannel = (child: ChildProcessWithoutNullStreams, stdio: ShellLaunch['
       violation(`it sent ${frame.type} before start.`);
       return;
     }
-    switch (frame.type) {
-      case 'started': {
-        return;
+    if (state.phase === 'starting') {
+      switch (frame.type) {
+        case 'started': {
+          state.phase = 'running';
+          launched.resolve({ kind: 'started' });
+          return;
+        }
+        case 'refused': {
+          state.phase = 'ended';
+          launched.resolve({ kind: 'refused', refusal: frame.refusal });
+          ending.resolve({ kind: 'closed', message: frame.refusal.message });
+          for (const queue of Object.values(outputs)) {
+            queue.end();
+          }
+          return;
+        }
+        case 'cleanup-failed': {
+          break;
+        }
+        default: {
+          violation(`it sent ${frame.type} before started.`);
+          return;
+        }
       }
+    }
+    switch (frame.type) {
       case 'stdout':
       case 'stderr': {
         if (stdio !== 'pipes') {
@@ -411,6 +465,19 @@ const openChannel = (child: ChildProcessWithoutNullStreams, stdio: ShellLaunch['
   });
   child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
     diagnostics = (diagnostics + chunk).slice(-diagnosticCharacters);
+    if (onDiagnostic !== undefined) {
+      const lines = (partialLine + chunk).split(/\r?\n/u);
+      partialLine = lines.pop() ?? '';
+      for (const line of lines) {
+        onDiagnostic(line);
+      }
+    }
+  });
+  child.stderr.on('end', () => {
+    if (onDiagnostic !== undefined && partialLine !== '') {
+      onDiagnostic(partialLine);
+      partialLine = '';
+    }
   });
   child.stdin.on('error', () => {
     /* The helper closed its input; its exit or death settles the launch. */
@@ -428,7 +495,7 @@ const openChannel = (child: ChildProcessWithoutNullStreams, stdio: ShellLaunch['
   });
   child.once('close', (code, signal) => {
     onGone(
-      `The sandbox helper stopped before it reported the shell's exit (${code === null ? `signal ${String(signal)}` : `exit ${String(code)}`}).`,
+      `The sandbox helper stopped before it reported the shell's exit (${windowsHelperEnd(code ?? undefined, signal ?? undefined)}).`,
     );
   });
   return {
@@ -443,6 +510,7 @@ const openChannel = (child: ChildProcessWithoutNullStreams, stdio: ShellLaunch['
       state.phase = 'starting';
       send({ type: 'start' });
     },
+    launched: launched.promise,
     diagnostics: () => diagnostics,
   };
 };
@@ -504,6 +572,33 @@ const awaitAnswer = async (
 };
 
 /**
+ * Wait for the helper's answer to `start`, the caller's abort or the startup deadline, whichever comes first.
+ */
+const awaitLaunched = async (
+  channel: Channel,
+  signal: AbortSignal,
+  milliseconds: number,
+): Promise<Launched | 'aborted'> => {
+  const cancelled = Promise.withResolvers<'aborted'>();
+  const onAbort = (): void => {
+    cancelled.resolve('aborted');
+  };
+  signal.addEventListener('abort', onAbort, { once: true });
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<Launched>((resolve) => {
+    timer = setTimeout(() => {
+      resolve({ kind: 'failed', message: 'the sandbox helper did not start the shell in time.' });
+    }, milliseconds);
+  });
+  try {
+    return await Promise.race([channel.launched, cancelled.promise, late]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
+  }
+};
+
+/**
  * Read the helper's install record through its `status` subcommand, which never elevates.
  *
  * @public
@@ -520,42 +615,58 @@ export const readWindowsSandboxStatus = async (
 ): Promise<WindowsSandboxStatus> => {
   const run = options.spawnHelper ?? defaultSpawn(helperPath, options.environment ?? process.env);
   return new Promise((resolve) => {
+    const notInstalled = (reason: string | undefined, stderr = ''): void => {
+      const parts = [reason, stderr.trim() === '' ? undefined : `stderr: ${stderr.trim()}`].filter(
+        (part) => part !== undefined,
+      );
+      resolve(parts.length === 0 ? { installed: false } : { installed: false, diagnostic: parts.join('; ') });
+    };
     let child: ChildProcessWithoutNullStreams;
     try {
       child = run(['status']);
-    } catch {
-      resolve({ installed: false });
+    } catch (error) {
+      notInstalled(`the helper could not be started: ${String(error)}`);
       return;
     }
     let output = '';
+    let errors = '';
+    let timedOut = false;
     child.stdin.end();
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       output = (output + chunk).slice(0, 64 * 1024);
     });
-    child.stderr.resume();
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+      errors = (errors + chunk).slice(-diagnosticCharacters);
+    });
     const timer = setTimeout(() => {
+      timedOut = true;
       child.kill();
     }, 10_000);
-    child.once('error', () => {
+    child.once('error', (error) => {
       clearTimeout(timer);
-      resolve({ installed: false });
+      notInstalled(`the helper could not be started: ${error.message}`, errors);
     });
-    child.once('close', (code) => {
+    child.once('close', (code, signal) => {
       clearTimeout(timer);
+      const ended = timedOut
+        ? 'the helper did not answer within 10 s'
+        : windowsHelperEnd(code ?? undefined, signal ?? undefined);
+      let record: unknown;
       try {
-        const record: unknown = JSON.parse(output);
-        /* The install record names the sandbox account; an absent one prints `{"installed":false}`. */
-        resolve({
-          installed:
-            code === 0 &&
-            typeof record === 'object' &&
-            record !== null &&
-            !('installed' in record && record.installed === false) &&
-            'accountSid' in record &&
-            typeof record.accountSid === 'string',
-        });
+        record = JSON.parse(output);
       } catch {
-        resolve({ installed: false });
+        notInstalled(`${ended}; its output is not JSON: ${JSON.stringify(output.slice(0, 200))}`, errors);
+        return;
+      }
+      const object = typeof record === 'object' && record !== null ? record : {};
+      /* The install record names the sandbox account; an absent one prints `{"installed":false}`. */
+      const absent = 'installed' in object && object.installed === false;
+      if (code === 0 && !absent && 'accountSid' in object && typeof object.accountSid === 'string') {
+        resolve({ installed: true });
+      } else if (code === 0 && absent) {
+        notInstalled(undefined, errors);
+      } else {
+        notInstalled(`${ended}; it answered ${JSON.stringify(output.slice(0, 200))}`, errors);
       }
     });
   });
@@ -742,7 +853,7 @@ export const createWindowsShellProvider = (options: WindowsShellProviderOptions)
         message: `the Windows sandbox helper could not start: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
-    const channel = openChannel(child, launch.stdio.kind);
+    const channel = openChannel(child, launch.stdio.kind, options.onHelperDiagnostic);
     const notStarted = async (): Promise<void> => {
       channel.send({ type: 'terminate' });
       await stopHelper(child, channel, terminationMilliseconds);
@@ -802,7 +913,33 @@ export const createWindowsShellProvider = (options: WindowsShellProviderOptions)
       cancelled(launch.signal);
     }
     channel.start();
-    return { status: 'started', process: started(launch, child, channel) };
+    /* `started` is reported only for a shell the helper admitted and resumed; until then it may still refuse. */
+    const launched = await awaitLaunched(channel, launch.signal, startupMilliseconds);
+    if (launched === 'aborted') {
+      await notStarted();
+      cancelled(launch.signal);
+    }
+    if (launched.kind === 'started') {
+      return { status: 'started', process: started(launch, child, channel) };
+    }
+    await notStarted();
+    const diagnostic = channel.diagnostics().trim();
+    if (launched.kind === 'refused') {
+      const { refusal } = launched;
+      if (refusal.status === 'unsupported' && isShellRequirement(refusal.requirement)) {
+        return unsupported(refusal.requirement, refusal.message);
+      }
+      return {
+        status: 'sandbox-unavailable',
+        message: refusal.message,
+        ...(refusal.diagnostic === undefined ? {} : { diagnostic: refusal.diagnostic }),
+      };
+    }
+    return {
+      status: 'sandbox-unavailable',
+      message: launched.message,
+      ...(diagnostic === '' ? {} : { diagnostic }),
+    };
   };
 
   return {

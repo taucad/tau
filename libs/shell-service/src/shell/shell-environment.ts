@@ -65,25 +65,32 @@ export const shellEnvironment = (options: ShellEnvironmentOptions): Readonly<Rec
     const systemRoot = host['SystemRoot'] ?? String.raw`C:\Windows`;
     const system32 = win32.join(systemRoot, 'System32');
     const shellHome = win32.dirname(options.executablePath);
-    const moduleFolders = [
-      win32.join(shellHome, 'Modules'),
-      win32.join(system32, 'WindowsPowerShell', 'v1.0', 'Modules'),
-    ];
+    const windowsPowerShellHome = win32.join(system32, 'WindowsPowerShell', 'v1.0');
+    const windowsPowerShellModules = win32.join(windowsPowerShellHome, 'Modules');
+    /*
+     * `PSModulePath`: the shell's own modules first. PowerShell 7 then gets Windows PowerShell's. Windows PowerShell 5.1
+     * (its home compared without case, as Windows compares paths) gets the machine's
+     * `%ProgramFiles%\WindowsPowerShell\Modules` after its own (WIN-X64 job 133853031159, T02-ps51). 5.1's command
+     * auto-discovery stops at the first module folder it cannot list, and 5.1 inserts the machine folder *before* its
+     * home unless the variable already names it. One folder the sandbox may not read (an administrator-only module, such
+     * as the runner image's `ImageHelpers`) then hid `Microsoft.PowerShell.Utility`, and with it `Measure-Object` and
+     * `Write-Output`. Named after the home, the machine folder keeps its modules available and can no longer hide the
+     * built-in ones; a module behind such a folder still imports by name. PowerShell 7's order is unchanged: its rows
+     * pass in the same run.
+     */
+    const isWindowsPowerShell = shellHome.toLowerCase() === windowsPowerShellHome.toLowerCase();
+    const programFiles =
+      host['ProgramW6432'] ?? host['ProgramFiles'] ?? win32.join(win32.parse(systemRoot).root, 'Program Files');
+    const moduleFolders = isWindowsPowerShell
+      ? [win32.join(shellHome, 'Modules'), win32.join(programFiles, 'WindowsPowerShell', 'Modules')]
+      : [win32.join(shellHome, 'Modules'), windowsPowerShellModules];
     return {
       SystemRoot: systemRoot,
       windir: systemRoot,
       ComSpec: win32.join(system32, 'cmd.exe'),
       PATHEXT: '.COM;.EXE;.BAT;.CMD',
       PATH: [...options.toolchainBins, shellHome, system32, systemRoot, win32.join(system32, 'Wbem')].join(';'),
-      /*
-       * The shell's own modules, then Windows PowerShell's. Windows PowerShell 5.1's home is the second folder; it is
-       * named once (Windows paths compare without case), so module discovery never walks one folder twice.
-       */
-      PSModulePath: moduleFolders
-        .filter(
-          (path, index) => moduleFolders.findIndex((other) => other.toLowerCase() === path.toLowerCase()) === index,
-        )
-        .join(';'),
+      PSModulePath: moduleFolders.join(';'),
       /* The private home stands in for the profile the sandbox account is started without. */
       USERPROFILE: options.home,
       /*

@@ -5,6 +5,7 @@
 //! the job is empty and every descriptor is restored before `exit`. Anything unconfirmed is
 //! `cleanup-failed`, and the journal stays for `restore`.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -17,26 +18,31 @@ use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, STD_OU
 use windows_sys::Win32::System::Diagnostics::Debug::{SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SetErrorMode};
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessWithLogonW, GetCurrentProcessId,
-    PROCESS_INFORMATION, ResumeThread, STARTF_FORCEOFFFEEDBACK, STARTUPINFOW, WaitForSingleObject,
+    LOGON_WITH_PROFILE, PROCESS_INFORMATION, ResumeThread, STARTF_FORCEOFFFEEDBACK, STARTUPINFOW, WaitForSingleObject,
 };
 
 use super::acl::{self, Principals};
 use super::desktop::{PrivateDesktop, WindowStation, current_station_name};
+use super::exclusive::{self, Exclusive};
+use super::executable::pin;
 use super::job::Job;
+use super::lowbox::derive_package_sid;
 use super::pipe::{self, HandleIo};
+use super::profile;
 use super::restore::restore_journal;
-use super::setup::{fence, load_password, load_record};
+use super::setup::{fence, load_password, load_record, volume_roots_granted};
 use super::sid::{Sid, current_user};
 use super::util::{
     Error, Owned, Result, clear_ctrl_c_ignore, program_files, random_u32s, system_root, wide, wipe, wipe_wide,
 };
+use crate::appcontainer::package_name;
 use crate::cmdline::{capability_sid, quote_arg};
 use crate::frame::{self, Frame, read_frame, write_frame};
 use crate::install::{InstallRecord, firewall_off_message};
 use crate::journal::{Entry, Header, JOURNAL_VERSION, JournalWriter};
 use crate::paths::is_within;
 use crate::protocol::{CleanupFailed, Exit, Ready, Refused, RunnerError, RunnerSpec};
-use crate::spec::{self, ExecutableRoots, ValidSpec};
+use crate::spec::{self, ExecutableRoots, ValidSpec, format_digest};
 use crate::tree::{self, Sample};
 
 const RUNNER_EXIT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -104,11 +110,43 @@ pub fn run() -> i32 {
     if let Err(refused) = check_fence(&record) {
         return refuse(&sink, &refused);
     }
-    let session = match Session::prepare(valid, &record) {
-        Ok(session) => session,
-        Err(refused) => return refuse(&sink, &refused),
+    // A digest is checked on a handle held until the launch ends, before anything changes: nobody can then
+    // write, delete or rename the file `CreateProcessAsUserW` maps by name (`executable.rs`).
+    let pinned = match &valid.executable_digest {
+        Some(digest) => match pin(&valid.executable, digest) {
+            Ok(pinned) => Some(pinned),
+            Err(refused) => return refuse(&sink, &refused),
+        },
+        None => None,
     };
-    session.run(stdin, sink)
+    // One launch at a time: held from before the journal until teardown has restored it (`exclusive.rs`).
+    let exclusive = match exclusive::try_acquire() {
+        Ok(Some(exclusive)) => exclusive,
+        Ok(None) => {
+            return refuse(&sink, &Refused::busy(spec::requirement::EXCLUSIVE_LAUNCH, exclusive::BUSY));
+        }
+        Err(err) => {
+            return refuse(
+                &sink,
+                &Refused::unavailable(
+                    "the sandbox cannot tell whether another launch is running",
+                    Some(err.to_string()),
+                ),
+            );
+        }
+    };
+    let mut session = match Session::prepare(valid, &record) {
+        Ok(session) => session,
+        Err(refused) => {
+            drop(exclusive);
+            return refuse(&sink, &refused);
+        }
+    };
+    // Released by the teardown, before the last frame: a host that starts the next launch on `exit` finds it free.
+    session.exclusive = RefCell::new(Some(exclusive));
+    let code = session.run(stdin, sink);
+    drop(pinned);
+    code
 }
 
 /// The runner `TauSandbox` executes is the copy `setup` installed; it must be this very binary, or the
@@ -149,12 +187,16 @@ struct Session {
     person: Sid,
     journal_path: String,
     capability_sid: String,
+    package_sid: String,
+    package_name: String,
     /// The journaled roots, in application order. Their descendants are only in the journal file.
     roots: Vec<Entry>,
     /// Opened for `WRITE_DAC` when the person may change it. The session ACEs are best-effort: adding
     /// them only widens access, and Codex's shape runs without them.
     station: Option<WindowStation>,
     station_name: String,
+    /// One launch at a time (`exclusive.rs`), held until [`Session::teardown`] has restored everything.
+    exclusive: RefCell<Option<Exclusive>>,
 }
 
 impl Session {
@@ -170,9 +212,26 @@ impl Session {
         {
             return Err(Refused::unavailable("the sandbox account is missing (run setup again)", None));
         }
+        if !profile::present(&account) {
+            return Err(Refused::unavailable("the sandbox account has no profile (run setup again)", None));
+        }
+        // The shell's one capability must be granted on the system drive's root, or PowerShell cannot resolve
+        // `C:\` (`volume.rs`).
+        if !volume_roots_granted(record) {
+            return Err(Refused::unavailable(
+                "the sandbox's volume capability is not granted on the volume roots (run setup again)",
+                None,
+            ));
+        }
         let capability_text =
             capability_sid(random_u32s::<4>().map_err(unavailable("no randomness for the capability SID"))?);
         let capability = Sid::parse(&capability_text).map_err(unavailable("the capability SID is invalid"))?;
+        // A fresh AppContainer per launch: nothing granted to one launch's package reaches another's.
+        let package_label = package_name(random_u32s::<4>().map_err(unavailable("no randomness for the package"))?);
+        let package =
+            derive_package_sid(&package_label).map_err(unavailable("the AppContainer SID cannot be derived"))?;
+        let package_text = package.to_sddl();
+        eprintln!("tau-windows-sandbox launch: AppContainer {package_label} is {package_text}");
         let person = current_user().map_err(unavailable("the current user cannot be resolved"))?;
         let station_name = current_station_name().map_err(unavailable("the window station cannot be named"))?;
         let station = match WindowStation::open_current() {
@@ -221,6 +280,8 @@ impl Session {
         let header = Header {
             version: JOURNAL_VERSION,
             capability_sid: capability_text.clone(),
+            package_sid: package_text.clone(),
+            package_name: package_label.clone(),
             launcher_pid: unsafe { GetCurrentProcessId() },
             window_station: station_entry,
         };
@@ -229,13 +290,16 @@ impl Session {
         Ok(Self {
             valid,
             record: record.clone(),
-            principals: Principals { account, group, capability },
+            principals: Principals { account, group, capability, package },
             person,
             journal_path,
             capability_sid: capability_text,
+            package_sid: package_text,
+            package_name: package_label,
             roots,
             station,
             station_name,
+            exclusive: RefCell::new(None),
         })
     }
 
@@ -260,6 +324,8 @@ impl Session {
         {
             failures.push(format!("the journal could not be deleted: {err}"));
         }
+        // Restored, or kept for `restore`: either way this launch changes nothing more.
+        drop(self.exclusive.borrow_mut().take());
         if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
     }
 
@@ -268,14 +334,20 @@ impl Session {
             if !self.roots.iter().any(|e| e.path.eq_ignore_ascii_case(path)) {
                 continue;
             }
-            acl::apply(path, &acl::aces_for(*access, &self.principals))?;
+            acl::apply(path, &acl::aces_for(*access, &self.principals), acl::needs_low_label(*access))?;
         }
         if let Some(station) = &self.station
-            && let Err(err) = station.grant(&[&self.principals.account, &self.principals.capability])
+            && let Err(err) = station.grant(&self.participants())
         {
             eprintln!("tau-windows-sandbox launch: no window-station session ACE: {err}");
         }
         Ok(())
+    }
+
+    /// Who joins the private desktop and the window station besides the person: the sandbox account, the
+    /// launch's capability SID (the restricted pass) and its package SID (the AppContainer pass).
+    fn participants(&self) -> [&Sid; 3] {
+        [&self.principals.account, &self.principals.capability, &self.principals.package]
     }
 
     fn run(self, stdin: HandleIo, sink: Sink) -> i32 {
@@ -295,8 +367,16 @@ impl Session {
         let to_runner = Arc::new(Mutex::new(HandleIo(to_runner.raw())));
         let mut from_runner_io = HandleIo(from_runner.raw());
 
-        // The runner's first frame: ready, or why not.
-        match read_frame(&mut from_runner_io) {
+        // The runner's first frame other than a log line: ready, or why not.
+        let first = loop {
+            match read_frame(&mut from_runner_io) {
+                Ok(Some(frame)) if frame.kind == frame::RUNNER_LOG => {
+                    eprintln!("tau-windows-sandbox runner: {}", String::from_utf8_lossy(&frame.payload));
+                }
+                other => break other,
+            }
+        };
+        match first {
             Ok(Some(frame)) if frame.kind == frame::READY => {}
             other => {
                 let diagnostic = match other {
@@ -378,12 +458,8 @@ impl Session {
     #[allow(clippy::type_complexity)]
     fn start_runner(&self) -> std::result::Result<(PrivateDesktop, Job, Runner, Owned, Owned), (Option<Job>, Error)> {
         self.apply_grants().map_err(|err| (None, err))?;
-        let desktop = PrivateDesktop::create(
-            &self.station_name,
-            &self.person,
-            &[&self.principals.account, &self.principals.capability],
-        )
-        .map_err(|err| (None, err))?;
+        let desktop = PrivateDesktop::create(&self.station_name, &self.person, &self.participants())
+            .map_err(|err| (None, err))?;
         let names = pipe::pipe_names().map_err(|err| (None, err))?;
         let to_runner = pipe::create_server(&names.to_runner, true, &self.person, &self.principals.account)
             .map_err(|err| (None, err))?;
@@ -408,8 +484,12 @@ impl Session {
         }
         let runner_spec = RunnerSpec {
             capability_sid: self.capability_sid.clone(),
+            package_sid: self.package_sid.clone(),
+            package_name: self.package_name.clone(),
+            person_sid: self.person.to_sddl(),
             desktop: desktop.startup_name.clone(),
             executable: self.valid.executable.clone(),
+            executable_digest: self.valid.executable_digest.as_ref().map(format_digest),
             arguments: self.valid.arguments.clone(),
             working_directory: self.valid.working_directory.clone(),
             environment: with_system_root(&self.valid.environment),
@@ -531,10 +611,14 @@ fn with_system_root(environment: &BTreeMap<String, String>) -> BTreeMap<String, 
     environment
 }
 
+/// The runner's error as `<stage>: <message>`, also written to the diagnostic log so the host sees it
+/// whatever the launch then reports.
 fn runner_error_text(payload: &[u8]) -> String {
-    serde_json::from_slice::<RunnerError>(payload)
+    let text = serde_json::from_slice::<RunnerError>(payload)
         .map(|e| format!("{}: {}", e.stage, e.message))
-        .unwrap_or_else(|_| "the runner reported an unreadable error".to_owned())
+        .unwrap_or_else(|_| "the runner reported an unreadable error".to_owned());
+    eprintln!("tau-windows-sandbox runner error: {text}");
+    text
 }
 
 struct Runner {
@@ -543,7 +627,8 @@ struct Runner {
     pid: u32,
 }
 
-/// Start the installed runner as the sandbox account, suspended, without a profile.
+/// Start the installed runner as the sandbox account, suspended, with its profile loaded, so the shell's
+/// `HKCU` is the account's own hive (`profile.rs`).
 fn spawn_runner(record: &InstallRecord, names: &pipe::PipeNames) -> Result<Runner> {
     let application = wide(&record.runner);
     let mut command = wide(&format!(
@@ -573,7 +658,7 @@ fn spawn_runner(record: &InstallRecord, names: &pipe::PipeNames) -> Result<Runne
             user.as_ptr(),
             domain.as_ptr(),
             password.as_ptr(),
-            0,
+            LOGON_WITH_PROFILE,
             application.as_ptr(),
             command.as_mut_ptr(),
             CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
@@ -592,14 +677,17 @@ fn spawn_runner(record: &InstallRecord, names: &pipe::PipeNames) -> Result<Runne
     Ok(Runner { process: Owned(info.hProcess), thread: Owned(info.hThread), pid: info.dwProcessId })
 }
 
-/// Forward host frames to the runner. `terminate` or a closed stdin kills the whole job.
+/// Forward host frames to the runner: `input` for a terminal or for pipes that take input, `close-input` for
+/// the latter, `resize` for a terminal. `terminate` or a closed stdin kills the whole job.
 fn host_reader(mut stdin: HandleIo, to_runner: Sink, job: Arc<Job>, killed: Arc<AtomicBool>, stdio: spec::Stdio) {
     std::thread::spawn(move || {
         let terminal = matches!(stdio, spec::Stdio::Terminal { .. });
         while let Ok(Some(frame)) = read_frame(&mut stdin) {
             match frame.kind {
                 frame::START => send(&to_runner, &frame),
-                frame::INPUT | frame::RESIZE if terminal => send(&to_runner, &frame),
+                frame::INPUT if stdio.takes_input() => send(&to_runner, &frame),
+                frame::CLOSE_INPUT if stdio.closes_input() => send(&to_runner, &frame),
+                frame::RESIZE if terminal => send(&to_runner, &frame),
                 frame::TERMINATE => break,
                 _ => {}
             }

@@ -8,6 +8,10 @@
 //! exact original DACL and control flags through its handle with `SetKernelObjectSecurity`, which does not
 //! propagate, and read the descriptor back to confirm it. No path edits individual ACEs it did not add,
 //! and none writes an owner or group.
+//!
+//! A writable root also gets a Low mandatory label (`NW`, inheritable on a directory): the shell runs in an
+//! AppContainer, whose token is Low integrity, and the default (Medium, no-write-up) policy would refuse it
+//! every write the DACL grants. The label is journaled with the DACL and restored the same two ways.
 
 use std::ffi::c_void;
 
@@ -18,19 +22,22 @@ use windows_sys::Win32::Security::Authorization::{
     SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, GetKernelObjectSecurity, GetSecurityDescriptorControl,
-    GetSecurityDescriptorDacl, NO_INHERITANCE, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-    PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED, SUB_CONTAINERS_AND_OBJECTS_INHERIT, SetKernelObjectSecurity,
+    ACL, ACL_REVISION, DACL_SECURITY_INFORMATION, GROUP_SECURITY_INFORMATION, GetKernelObjectSecurity,
+    GetSecurityDescriptorControl, GetSecurityDescriptorDacl, GetSecurityDescriptorSacl, InitializeAcl,
+    InitializeSecurityDescriptor, LABEL_SECURITY_INFORMATION, NO_INHERITANCE, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED, SECURITY_DESCRIPTOR,
+    SUB_CONTAINERS_AND_OBJECTS_INHERIT, SetKernelObjectSecurity, SetSecurityDescriptorSacl,
     UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileInformationByHandle,
-    OPEN_EXISTING, READ_CONTROL, WRITE_DAC,
+    OPEN_EXISTING, READ_CONTROL, WRITE_DAC, WRITE_OWNER,
 };
 
 use super::sid::Sid;
 use super::util::{Error, Local, Owned, Result, check, check_status, from_wide_ptr, wide};
+use crate::appcontainer::{label_aces, restored, split_sacl};
 use crate::journal::{Entry, file_id};
 use crate::paths::extended;
 use crate::spec::Access;
@@ -56,27 +63,41 @@ pub struct Ace<'a> {
     pub mask: u32,
 }
 
-/// The identities a launch grants to: the sandbox account, its group and this launch's capability SID.
+/// The identities a launch grants to: the sandbox account, its group, this launch's capability SID and
+/// this launch's AppContainer package SID.
 pub struct Principals {
     pub account: Sid,
     pub group: Sid,
     pub capability: Sid,
+    pub package: Sid,
 }
 
-/// The ACEs one planned access adds.
+/// The ACEs one planned access adds. The shell's access check has three passes, and a grant must satisfy
+/// each: the account (its user SID), the AppContainer pass (its package SID; `ALL APPLICATION PACKAGES` is
+/// never granted) and, for writes, the restricted pass (its capability SID). A denial needs one pass only.
 pub fn aces_for(access: Access, principals: &Principals) -> Vec<Ace<'_>> {
     match access {
-        Access::Read => vec![Ace { sid: &principals.account, mode: Mode::Grant, mask: READ_MASK }],
+        Access::Read => vec![
+            Ace { sid: &principals.account, mode: Mode::Grant, mask: READ_MASK },
+            Ace { sid: &principals.package, mode: Mode::Grant, mask: READ_MASK },
+        ],
         Access::Write => vec![
             Ace { sid: &principals.account, mode: Mode::Grant, mask: WRITE_MASK },
             Ace { sid: &principals.capability, mode: Mode::Grant, mask: WRITE_MASK },
+            Ace { sid: &principals.package, mode: Mode::Grant, mask: WRITE_MASK },
         ],
         Access::ReadOnly => vec![
             Ace { sid: &principals.account, mode: Mode::Grant, mask: READ_MASK },
+            Ace { sid: &principals.package, mode: Mode::Grant, mask: READ_MASK },
             Ace { sid: &principals.capability, mode: Mode::Deny, mask: DENY_WRITE_MASK },
         ],
         Access::Denied => vec![Ace { sid: &principals.group, mode: Mode::Deny, mask: DENY_ALL_MASK }],
     }
+}
+
+/// Whether an access lowers the path's mandatory label to Low so the Low-integrity shell may write there.
+pub fn needs_low_label(access: Access) -> bool {
+    access == Access::Write
 }
 
 struct Descriptor {
@@ -117,8 +138,17 @@ fn control(sd: PSECURITY_DESCRIPTOR) -> Result<u16> {
     Ok(control)
 }
 
-/// What a snapshot and its verification read: owner, group and DACL, with the DACL's control flags.
-const SNAPSHOT_INFORMATION: u32 = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+/// What a snapshot and its verification read: owner, group and DACL, with the DACL's control flags, and the
+/// mandatory label (readable with `READ_CONTROL` alone).
+const SNAPSHOT_INFORMATION: u32 =
+    OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION;
+
+/// `SECURITY_DESCRIPTOR_REVISION`.
+const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
+
+/// A Low, no-write-up mandatory label: inheritable by everything under a directory, or for a file alone.
+const LOW_LABEL_DIRECTORY: &str = "S:(ML;OICI;NW;;;LW)";
+const LOW_LABEL_FILE: &str = "S:(ML;;NW;;;LW)";
 
 fn to_sddl(sd: PSECURITY_DESCRIPTOR, information: u32) -> Result<String> {
     let mut text: *mut u16 = std::ptr::null_mut();
@@ -243,8 +273,9 @@ fn explicit(ace: &Ace<'_>, inherit: bool) -> EXPLICIT_ACCESS_W {
     }
 }
 
-/// Merge `aces` into the path's DACL, keeping its protected state. Directories get inheritable ACEs.
-pub fn apply(path: &str, aces: &[Ace<'_>]) -> Result<()> {
+/// Merge `aces` into the path's DACL, keeping its protected state, and with `low_label` set its mandatory
+/// label to Low. Directories get inheritable ACEs and an inheritable label.
+pub fn apply(path: &str, aces: &[Ace<'_>], low_label: bool) -> Result<()> {
     let is_dir = std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false);
     let descriptor =
         read_descriptor(path).map_err(|status| Error::code(format!("GetNamedSecurityInfoW({path})"), status))?;
@@ -256,7 +287,90 @@ pub fn apply(path: &str, aces: &[Ace<'_>]) -> Result<()> {
         "SetEntriesInAclW",
     )?;
     let _free = Local(new_dacl as *mut c_void);
-    set_dacl_propagating(path, new_dacl, protected)
+    set_dacl_propagating(path, new_dacl, protected)?;
+    if low_label {
+        let label = from_sddl(if is_dir { LOW_LABEL_DIRECTORY } else { LOW_LABEL_FILE })?;
+        let sacl = Sacl::of(&label)?;
+        set_label_propagating(path, sacl.ptr())?;
+    }
+    Ok(())
+}
+
+/// The SACL of a parsed descriptor (which holds the mandatory label only, as the journal reads it), or an
+/// empty one when the descriptor has none, so writing it removes a label the journal did not record.
+struct Sacl {
+    found: *mut ACL,
+    empty: [u64; 1],
+}
+
+impl Sacl {
+    fn of(sd: &Local) -> Result<Self> {
+        let mut present = 0;
+        let mut defaulted = 0;
+        let mut found: *mut ACL = std::ptr::null_mut();
+        check(
+            unsafe { GetSecurityDescriptorSacl(sd.0, &mut present, &mut found, &mut defaulted) },
+            "GetSecurityDescriptorSacl",
+        )?;
+        let mut sacl = Self { found: if present == 0 { std::ptr::null_mut() } else { found }, empty: [0] };
+        check(
+            unsafe { InitializeAcl(sacl.empty.as_mut_ptr() as *mut ACL, size_of::<ACL>() as u32, ACL_REVISION) },
+            "InitializeAcl",
+        )?;
+        Ok(sacl)
+    }
+
+    fn ptr(&self) -> *const ACL {
+        if self.found.is_null() { self.empty.as_ptr() as *const ACL } else { self.found }
+    }
+}
+
+/// Write a mandatory label with propagation: `LABEL_SECURITY_INFORMATION` needs `WRITE_OWNER`, not
+/// `SeSecurityPrivilege`, and replaces only the label ACE.
+fn set_label_propagating(path: &str, sacl: *const ACL) -> Result<()> {
+    let path_w = wide(path);
+    check_status(
+        unsafe {
+            SetNamedSecurityInfoW(
+                path_w.as_ptr(),
+                SE_FILE_OBJECT,
+                LABEL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                sacl,
+            )
+        },
+        &format!("SetNamedSecurityInfoW({path}, label)"),
+    )
+}
+
+/// The path's current mandatory-label ACEs, as SDDL.
+fn current_label(path: &str) -> Result<Vec<String>> {
+    let path_w = wide(path);
+    let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    check_status(
+        unsafe {
+            GetNamedSecurityInfoW(
+                path_w.as_ptr(),
+                SE_FILE_OBJECT,
+                LABEL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut sd,
+            )
+        },
+        &format!("GetNamedSecurityInfoW({path}, label)"),
+    )?;
+    let sd = Local(sd);
+    let sddl = to_sddl(sd.0, LABEL_SECURITY_INFORMATION)?;
+    Ok(label_aces(split_sacl(&sddl).1).into_iter().map(str::to_owned).collect())
+}
+
+fn journaled_label(sddl: &str) -> Vec<String> {
+    label_aces(split_sacl(sddl).1).into_iter().map(str::to_owned).collect()
 }
 
 fn set_dacl_propagating(path: &str, dacl: *const ACL, protected: bool) -> Result<()> {
@@ -300,7 +414,13 @@ pub fn restore_propagating(entry: &Entry) -> Result<()> {
         "GetSecurityDescriptorDacl",
     )?;
     // A journaled "no DACL" (`present == 0`) is written back as a null DACL, exactly as it was.
-    set_dacl_propagating(&entry.path, if present == 0 { std::ptr::null() } else { dacl }, protected)
+    set_dacl_propagating(&entry.path, if present == 0 { std::ptr::null() } else { dacl }, protected)?;
+    // The label only where the launch changed it (a writable root): writing a label needs `WRITE_OWNER`,
+    // which the person may lack on a root that was only read.
+    if current_label(&entry.path)? != journaled_label(&entry.sddl) {
+        set_label_propagating(&entry.path, Sacl::of(&sd)?.ptr())?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,20 +440,26 @@ fn open_for(entry: &Entry, access: u32) -> Result<Option<Owned>> {
     open(&entry.path, access).map_err(|code| Error::code(format!("CreateFileW({})", entry.path), code))
 }
 
-/// Step two: make the object's descriptor exactly the journaled one (owner, group, DACL and control
-/// flags compared as SDDL), writing only the DACL and its control flags, without propagation. `Err` when
-/// it cannot be written or does not read back identical.
+/// Step two: make the object's descriptor the journaled one (owner, group, DACL and its control flags
+/// compared as SDDL, and the mandatory-label ACE), writing only the DACL with its control flags and, when
+/// it differs, the label, without propagation. `Err` when it cannot be written or does not read back
+/// identical (the SACL's own control flags aside: [`restored`]).
 pub fn restore_exact(entry: &Entry) -> Result<Exact> {
     let read_access = if entry.file_id.is_some() { READ_CONTROL | FILE_READ_ATTRIBUTES } else { READ_CONTROL };
     let Some(handle) = open_for(entry, read_access)? else { return Ok(Exact::Missing) };
     if entry.file_id.is_some() && handle_file_id(&handle) != entry.file_id {
         return Ok(Exact::Replaced);
     }
-    if handle_sddl(&handle, &entry.path)? == entry.sddl {
+    let before = handle_sddl(&handle, &entry.path)?;
+    if before == entry.sddl || restored(&before, &entry.sddl) {
         return Ok(Exact::Matched);
     }
     drop(handle);
-    let Some(handle) = open_for(entry, read_access | WRITE_DAC)? else { return Ok(Exact::Missing) };
+    let dacl_differs = split_sacl(&before).0 != split_sacl(&entry.sddl).0;
+    let label_differs = label_aces(split_sacl(&before).1) != label_aces(split_sacl(&entry.sddl).1);
+    // `WRITE_OWNER` only when the label must change: the person may lack it on an object it only reads.
+    let write_access = (if dacl_differs { WRITE_DAC } else { 0 }) | (if label_differs { WRITE_OWNER } else { 0 });
+    let Some(handle) = open_for(entry, read_access | write_access)? else { return Ok(Exact::Missing) };
     if entry.file_id.is_some() && handle_file_id(&handle) != entry.file_id {
         return Ok(Exact::Replaced);
     }
@@ -341,12 +467,30 @@ pub fn restore_exact(entry: &Entry) -> Result<Exact> {
     // exactly the journaled ones; `SetKernelObjectSecurity` writes the DACL with them and does not
     // propagate to children. Owner and group are not written: the launch never changed them.
     let sd = from_sddl(&entry.sddl)?;
-    check(
-        unsafe { SetKernelObjectSecurity(handle.raw(), DACL_SECURITY_INFORMATION, sd.0) },
-        &format!("SetKernelObjectSecurity({})", entry.path),
-    )?;
+    if dacl_differs {
+        check(
+            unsafe { SetKernelObjectSecurity(handle.raw(), DACL_SECURITY_INFORMATION, sd.0) },
+            &format!("SetKernelObjectSecurity({})", entry.path),
+        )?;
+    }
+    if label_differs {
+        // An absolute descriptor whose SACL is present: the journaled label, or an empty SACL that removes
+        // a label the journal did not record.
+        let sacl = Sacl::of(&sd)?;
+        let mut absolute: SECURITY_DESCRIPTOR = unsafe { std::mem::zeroed() };
+        let absolute_ptr = &mut absolute as *mut SECURITY_DESCRIPTOR as PSECURITY_DESCRIPTOR;
+        check(
+            unsafe { InitializeSecurityDescriptor(absolute_ptr, SECURITY_DESCRIPTOR_REVISION) },
+            "InitializeSecurityDescriptor",
+        )?;
+        check(unsafe { SetSecurityDescriptorSacl(absolute_ptr, 1, sacl.ptr(), 0) }, "SetSecurityDescriptorSacl")?;
+        check(
+            unsafe { SetKernelObjectSecurity(handle.raw(), LABEL_SECURITY_INFORMATION, absolute_ptr) },
+            &format!("SetKernelObjectSecurity({}, label)", entry.path),
+        )?;
+    }
     let now = handle_sddl(&handle, &entry.path)?;
-    if now == entry.sddl {
+    if restored(&now, &entry.sddl) {
         Ok(Exact::Rewritten)
     } else {
         Err(Error::msg(format!(

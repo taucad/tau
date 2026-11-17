@@ -1,7 +1,11 @@
-//! `runner`: started by `launch` as `TauSandbox` (`CreateProcessWithLogonW`, no profile). It is not itself
+//! `runner`: started by `launch` as `TauSandbox` (`CreateProcessWithLogonW`, with its profile). It is not itself
 //! restricted. It mints the write-restricted token from its own logon, prepares the job and stdio, reports
-//! `ready`, and on `start` spawns the shell with `CreateProcessAsUserW` (spike `token-runner.cs`, Codex
-//! `token.rs`, `process.rs`, `conpty/`).
+//! `ready`, and on `start` spawns the shell suspended with `CreateProcessAsUserW` and the launch's package as
+//! `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES`, so Windows derives the AppContainer token and its namespace
+//! (`lowbox.rs`). It then reads the shell's own token back, refuses anything but this launch's bare
+//! AppContainer, sets the token's default DACL, lets the person query the shell from outside, checks that the
+//! token can read its `HKCU` (`profile.rs`), logs what the token can reach, and only then resumes the shell
+//! (spike `token-runner.cs`, Codex `token.rs`, `process.rs`, `conpty/`).
 
 use std::ffi::c_void;
 use std::io::{Read, Write};
@@ -23,30 +27,41 @@ use windows_sys::Win32::Security::{
     WRITE_RESTRICTED,
 };
 use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
+use windows_sys::Win32::Storage::FileSystem::{READ_CONTROL, WRITE_DAC};
 use windows_sys::Win32::System::Console::{COORD, ClosePseudoConsole, CreatePseudoConsole, HPCON, ResizePseudoConsole};
 use windows_sys::Win32::System::Diagnostics::Debug::{SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SetErrorMode};
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
-    GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-    PROC_THREAD_ATTRIBUTE_JOB_LIST, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, STARTF_USESTDHANDLES,
-    STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, DeleteProcThreadAttributeList,
+    EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, OpenProcessToken,
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, ResumeThread,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
+use super::container::{self, Container};
+use super::environment;
 use super::job::Job;
+use super::lowbox::{self, Capabilities, grant_kernel_object, token_facts};
 use super::pipe::{self, HandleIo};
-use super::sid::{EVERYONE, Sid, open_process_token, token_logon_sid};
+use super::profile;
+use super::sid::{EVERYONE, Sid, current_user, open_process_token, token_logon_sid};
 use super::util::{Error, Local, Owned, Result, check, clear_ctrl_c_ignore, program_files, system_root, wide};
-use crate::cmdline::{command_line, environment_block, is_capability_sid};
+use super::volume;
+use crate::appcontainer::{is_package_sid, verify_token};
+use crate::cmdline::{command_line, creation_environment, environment_block, is_capability_sid};
 use crate::frame::{self, Frame, read_frame, write_frame};
 use crate::protocol::{Exit, Resize, RunnerError, RunnerSpec, Started};
 use crate::spec::{ExecutableRoots, Stdio, check_executable};
 
 /// `DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED` (0x0D).
 const TOKEN_FLAGS: u32 = DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED;
-/// `CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT` (0x80400): never `CREATE_NEW_PROCESS_GROUP`,
-/// which would stop Ctrl-C reaching the foreground pipeline.
-const SPAWN_FLAGS: u32 = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
+/// `CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT` (0x80400), plus `CREATE_SUSPENDED` so the
+/// shell's token is checked before it runs: never `CREATE_NEW_PROCESS_GROUP`, which would stop Ctrl-C
+/// reaching the foreground pipeline.
+const SPAWN_FLAGS: u32 = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED;
+/// `TOKEN_QUERY`, the only token right the person gets on the shell's token.
+const PERSON_TOKEN_ACCESS: u32 = TOKEN_QUERY;
 const REAP_TIMEOUT: Duration = Duration::from_secs(10);
 
 type Sink = Arc<Mutex<HandleIo>>;
@@ -73,9 +88,8 @@ impl<T> Stage<T> for Result<T> {
 }
 
 /// The write-restricted token: restricting SIDs are the launch's capability SID, the runner's logon SID
-/// and Everyone; default DACL gives the logon SID all access and `OWNER RIGHTS` read-control only;
-/// `SeChangeNotifyPrivilege` stays enabled.
-fn mint_token(capability: &Sid) -> Result<Owned> {
+/// and Everyone. Returns it with the logon SID.
+fn mint_restricted(capability: &Sid) -> Result<(Owned, Sid)> {
     let own = open_process_token(
         TOKEN_DUPLICATE
             | TOKEN_ASSIGN_PRIMARY
@@ -105,9 +119,14 @@ fn mint_token(capability: &Sid) -> Result<Owned> {
         },
         "CreateRestrictedToken",
     )?;
-    let token = Owned(token);
+    Ok((Owned(token), logon))
+}
 
-    let sddl = wide(&format!("D:(A;;GA;;;{})(A;;RC;;;S-1-3-4)", logon.to_sddl()));
+/// The default DACL of the shell's token: the logon SID and the package all access and `OWNER RIGHTS`
+/// read-control only, so what the shell creates without a descriptor passes all three of its own access-check
+/// passes and nothing else's.
+fn set_default_dacl(token: HANDLE, logon: &Sid, package: &Sid) -> Result<()> {
+    let sddl = wide(&format!("D:(A;;GA;;;{})(A;;GA;;;{})(A;;RC;;;S-1-3-4)", logon.to_sddl(), package.to_sddl()));
     let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
     check(
         unsafe {
@@ -132,15 +151,22 @@ fn mint_token(capability: &Sid) -> Result<Owned> {
     check(
         unsafe {
             SetTokenInformation(
-                token.raw(),
+                token,
                 TokenDefaultDacl,
                 &info as *const _ as *const c_void,
                 size_of::<TOKEN_DEFAULT_DACL>() as u32,
             )
         },
         "SetTokenInformation(TokenDefaultDacl)",
-    )?;
+    )
+}
 
+/// The base of the shell's token: the write-restricted token with the shell's default DACL and
+/// `SeChangeNotifyPrivilege` enabled. `CreateProcessAsUserW` derives the AppContainer token from it (Low
+/// integrity, the restricting SIDs kept). Returns it with the logon SID.
+fn mint_token(capability: &Sid, package: &Sid) -> Result<(Owned, Sid)> {
+    let (token, logon) = mint_restricted(capability)?;
+    set_default_dacl(token.raw(), &logon, package)?;
     let name = wide("SeChangeNotifyPrivilege");
     let mut luid = LUID { LowPart: 0, HighPart: 0 };
     check(unsafe { LookupPrivilegeValueW(std::ptr::null(), name.as_ptr(), &mut luid) }, "LookupPrivilegeValueW")?;
@@ -152,7 +178,7 @@ fn mint_token(capability: &Sid) -> Result<Owned> {
         unsafe { AdjustTokenPrivileges(token.raw(), 0, &privileges, 0, std::ptr::null_mut(), std::ptr::null_mut()) },
         "AdjustTokenPrivileges",
     )?;
-    Ok(token)
+    Ok((token, logon))
 }
 
 /// A proc-thread attribute list sized for `count` attributes, freed on drop. The values passed to
@@ -260,17 +286,34 @@ impl PseudoConsole {
 }
 
 enum Prepared {
-    Pipes { stdin: Owned, stdout_child: Owned, stderr_child: Owned, stdout: Owned, stderr: Owned },
-    Terminal { console: Arc<PseudoConsole>, input: Owned, output: Owned },
+    /// `input` is the write end of the child's stdin pipe when the launch takes input; otherwise `stdin` is `NUL`.
+    Pipes {
+        stdin: Owned,
+        input: Option<Owned>,
+        stdout_child: Owned,
+        stderr_child: Owned,
+        stdout: Owned,
+        stderr: Owned,
+    },
+    Terminal {
+        console: Arc<PseudoConsole>,
+        input: Owned,
+        output: Owned,
+    },
 }
 
 fn prepare_stdio(stdio: &Stdio) -> Result<Prepared> {
     match stdio {
-        Stdio::Pipes => {
-            let stdin = open_nul()?;
+        Stdio::Pipes { input } => {
+            let (stdin, input) = if *input {
+                let (child_reads, ours) = pipe_pair(Some(false))?;
+                (child_reads, Some(ours))
+            } else {
+                (open_nul()?, None)
+            };
             let (stdout, stdout_child) = pipe_pair(Some(true))?;
             let (stderr, stderr_child) = pipe_pair(Some(true))?;
-            Ok(Prepared::Pipes { stdin, stdout_child, stderr_child, stdout, stderr })
+            Ok(Prepared::Pipes { stdin, input, stdout_child, stderr_child, stdout, stderr })
         }
         Stdio::Terminal { columns, rows } => {
             let (in_read, input) = pipe_pair(None)?;
@@ -289,6 +332,30 @@ fn prepare_stdio(stdio: &Stdio) -> Result<Prepared> {
     }
 }
 
+/// What the host sends a child's stdin pipe.
+enum Input {
+    Bytes(Vec<u8>),
+    Close,
+}
+
+/// Write the host's input to the child's stdin on a thread of its own, so a child that does not read never
+/// stalls the runner's frame loop (and with it `terminate`). `Close`, or the end of the launch, closes the pipe:
+/// the child reads end of file. Input after a failed write (the child closed its stdin) is dropped.
+fn feed(pipe: Owned, input: std::sync::mpsc::Receiver<Input>) {
+    std::thread::spawn(move || {
+        let mut writer = HandleIo(pipe.raw());
+        let mut open = true;
+        for event in input {
+            match event {
+                Input::Bytes(bytes) if open => open = writer.write_all(&bytes).is_ok(),
+                Input::Bytes(_) => {}
+                Input::Close => break,
+            }
+        }
+        drop(pipe);
+    });
+}
+
 fn pump(mut source: HandleIo, kind: u8, sink: Sink) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut buf = vec![0u8; frame::IO_CHUNK];
@@ -301,26 +368,71 @@ fn pump(mut source: HandleIo, kind: u8, sink: Sink) -> std::thread::JoinHandle<(
     })
 }
 
+/// The shell, suspended until [`Shell::resume`]. Dropped before then, it is terminated.
 struct Shell {
     process: Owned,
-    _thread: Owned,
+    thread: Owned,
     pid: u32,
+    /// The shell's own primary token (query, duplicate), for the checks made before it runs.
+    own_token: Owned,
+    resumed: bool,
     /// The Ctrl-C diagnostic from just before the spawn, for the launcher's log.
     ctrl: String,
+    /// What the shell's own token turned out to be, for the launcher's log.
+    token: String,
 }
 
-fn spawn(spec: &RunnerSpec, token: &Owned, job: &Job, prepared: &Prepared) -> Result<Shell> {
+impl Shell {
+    fn resume(&mut self) -> Result<()> {
+        if unsafe { ResumeThread(self.thread.raw()) } == u32::MAX {
+            return Err(Error::last("ResumeThread(shell)"));
+        }
+        self.resumed = true;
+        Ok(())
+    }
+}
+
+impl Drop for Shell {
+    fn drop(&mut self) {
+        if !self.resumed {
+            unsafe { TerminateProcess(self.process.raw(), 1) };
+        }
+    }
+}
+
+/// What the shell is started with besides its spec: the base token and the AppContainer it runs in.
+struct Identity<'a> {
+    token: &'a Owned,
+    logon: &'a Sid,
+    package: &'a Sid,
+    person: &'a Sid,
+    /// The volume capability (`volume.rs`), the shell's one capability.
+    volume: &'a Sid,
+}
+
+/// Create the shell suspended in this launch's AppContainer and admit it ([`admit`]). It runs only once the
+/// caller resumes it.
+fn spawn(spec: &RunnerSpec, identity: &Identity, job: &Job, prepared: &Prepared) -> Result<Shell> {
     let mut command = wide(&command_line(&spec.executable, &spec.arguments));
     let application = wide(&spec.executable);
     let cwd = wide(&spec.working_directory);
     let mut desktop = wide(&spec.desktop);
-    let environment = environment_block(&spec.environment);
+    // Windows needs a `LOCALAPPDATA` to create an AppContainer process; `enforce` takes it away again.
+    let local_app_data = container::own_local_app_data()?;
+    let environment = environment_block(&creation_environment(&spec.environment, &local_app_data));
     let jobs = [job.raw()];
 
     let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
     startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
     startup.StartupInfo.lpDesktop = desktop.as_mut_ptr();
-    let mut attributes = AttributeList::new(2)?;
+    let capabilities = Capabilities::new(identity.package, std::slice::from_ref(identity.volume));
+    let mut attributes = AttributeList::new(3)?;
+    attributes.set(
+        PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+        capabilities.as_ptr(),
+        size_of::<windows_sys::Win32::Security::SECURITY_CAPABILITIES>(),
+        "UpdateProcThreadAttribute(SECURITY_CAPABILITIES)",
+    )?;
     attributes.set(
         PROC_THREAD_ATTRIBUTE_JOB_LIST,
         jobs.as_ptr() as *const c_void,
@@ -363,7 +475,7 @@ fn spawn(spec: &RunnerSpec, token: &Owned, job: &Job, prepared: &Prepared) -> Re
     let mut info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     let ok = unsafe {
         CreateProcessAsUserW(
-            token.raw(),
+            identity.token.raw(),
             application.as_ptr(),
             command.as_mut_ptr(),
             std::ptr::null(),
@@ -377,9 +489,48 @@ fn spawn(spec: &RunnerSpec, token: &Owned, job: &Job, prepared: &Prepared) -> Re
         )
     };
     if ok == 0 {
-        return Err(Error::code("CreateProcessAsUserW", unsafe { GetLastError() }));
+        return Err(Error::code(
+            "CreateProcessAsUserW(write-restricted token, SECURITY_CAPABILITIES for the package)",
+            unsafe { GetLastError() },
+        ));
     }
-    Ok(Shell { process: Owned(info.hProcess), _thread: Owned(info.hThread), pid: info.dwProcessId, ctrl })
+    let process = Owned(info.hProcess);
+    let thread = Owned(info.hThread);
+    // Suspended: nothing of the shell has run yet. Anything short of this launch's AppContainer kills it.
+    match admit(&process, spec, identity) {
+        Ok((own_token, token)) => {
+            Ok(Shell { process, thread, pid: info.dwProcessId, own_token, resumed: false, ctrl, token })
+        }
+        Err(err) => {
+            unsafe { TerminateProcess(process.raw(), 1) };
+            Err(Error::msg(format!("the shell was not admitted: {err}")))
+        }
+    }
+}
+
+/// Check the suspended shell's own token (the one Windows derived and assigned, not the one passed in), give
+/// it the shell's default DACL whatever `CreateProcess` set, and let the person query the shell's process and
+/// token, so the host can confirm the AppContainer from outside. Returns the token and its description.
+fn admit(process: &Owned, spec: &RunnerSpec, identity: &Identity) -> Result<(Owned, String)> {
+    let mut raw: HANDLE = std::ptr::null_mut();
+    check(
+        unsafe {
+            OpenProcessToken(
+                process.raw(),
+                TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ADJUST_DEFAULT | READ_CONTROL | WRITE_DAC,
+                &mut raw,
+            )
+        },
+        "OpenProcessToken(shell)",
+    )?;
+    let token = Owned(raw);
+    let facts = token_facts(token.raw())?;
+    verify_token(&facts, &spec.package_sid, &spec.capability_sid, &[identity.volume.to_sddl().as_str()])
+        .map_err(Error::msg)?;
+    set_default_dacl(token.raw(), identity.logon, identity.package)?;
+    grant_kernel_object(process.raw(), identity.person, PROCESS_QUERY_LIMITED_INFORMATION, "shell process")?;
+    grant_kernel_object(token.raw(), identity.person, PERSON_TOKEN_ACCESS, "shell token")?;
+    Ok((token, facts.describe()))
 }
 
 fn roots() -> Result<ExecutableRoots> {
@@ -432,14 +583,49 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
     if !is_capability_sid(&spec.capability_sid) {
         return Err(Error::msg("the capability SID is malformed")).at("spec");
     }
-    let executable =
-        roots().and_then(|roots| check_executable(&spec.executable, &roots).map_err(|r| Error::msg(r.message)));
+    if !is_package_sid(&spec.package_sid) {
+        return Err(Error::msg("the AppContainer package SID is malformed")).at("spec");
+    }
+    let person = Sid::parse(&spec.person_sid).at("spec")?;
+    // `launch` checked the digest on a handle it holds until the launch ends; the runner re-checks the path.
+    let executable = roots().and_then(|roots| {
+        check_executable(&spec.executable, spec.executable_digest.as_deref(), &roots)
+            .map(|executable| executable.path)
+            .map_err(|r| Error::msg(r.message))
+    });
     if executable.as_deref().ok() != Some(spec.executable.as_str()) {
         return Err(Error::msg("the runner refused the executable")).at("spec");
     }
 
     let capability = Sid::parse(&spec.capability_sid).at("token")?;
-    let token = mint_token(&capability).at("token")?;
+    let package = Sid::parse(&spec.package_sid).at("token")?;
+    // Register this launch's AppContainer in the sandbox account's own profile (CreateProcess resolves the
+    // package against it), after deleting what crashed launches left behind.
+    send(sink, &Frame::new(frame::RUNNER_LOG, container::sweep().into_bytes()));
+    let container = Arc::new(Container::create(&spec.package_name, &package).at("appcontainer")?);
+    send(
+        sink,
+        &Frame::new(
+            frame::RUNNER_LOG,
+            format!("AppContainer {} registered; its folder is {}", container.name, container.folder).into_bytes(),
+        ),
+    );
+    let (token, logon) = mint_token(&capability, &package).at("token")?;
+    let account = current_user().at("registry")?;
+    let volume = volume::capability_sid().at("token")?;
+    let identity = Identity { token: &token, logon: &logon, package: &package, person: &person, volume: &volume };
+    send(
+        sink,
+        &Frame::new(
+            frame::RUNNER_LOG,
+            format!(
+                "restricted token minted: {}; the shell's AppContainer is {}",
+                token_facts(token.raw()).map(|f| f.describe()).unwrap_or_else(|e| e.to_string()),
+                package.to_sddl()
+            )
+            .into_bytes(),
+        ),
+    );
     let job = Arc::new(Job::kill_on_close().at("job")?);
     let prepared = prepare_stdio(&spec.stdio).at("stdio")?;
     send(sink, &Frame::json(frame::READY, &serde_json::json!({})));
@@ -447,23 +633,47 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
     let mut prepared = Some(prepared);
     let mut console: Option<Arc<PseudoConsole>> = None;
     let mut terminal_input: Option<Owned> = None;
+    // Input for a pipes launch that takes it, queued from `ready` on and fed once the child exists.
+    let (stdin_sender, stdin_queue) = std::sync::mpsc::channel::<Input>();
+    let mut stdin_queue = Some(stdin_queue);
     while let Ok(Some(frame)) = read_frame(&mut reader) {
         match frame.kind {
             frame::START => {
                 let Some(ready) = prepared.take() else { continue };
-                let shell = spawn(&spec, &token, &job, &ready).at("spawn")?;
+                let mut shell = spawn(&spec, &identity, &job, &ready).at("spawn")?;
                 send(
                     sink,
                     &Frame::new(
                         frame::RUNNER_LOG,
-                        format!("{}; spawn flags {SPAWN_FLAGS:#x}", shell.ctrl).into_bytes(),
+                        format!("{}; spawn flags {SPAWN_FLAGS:#x}; shell token: {}", shell.ctrl, shell.token)
+                            .into_bytes(),
                     ),
                 );
+                // Windows rewrites LOCALAPPDATA, TEMP and TMP for a registered AppContainer: the launch's own
+                // environment is the contract. Refused, the suspended shell is terminated when `shell` drops.
+                let environment = environment::enforce(shell.process.raw(), &spec.environment).at("environment")?;
+                send(sink, &Frame::new(frame::RUNNER_LOG, environment.into_bytes()));
+                let namespace = lowbox::admit_namespace(shell.own_token.raw(), &logon)
+                    .unwrap_or_else(|err| format!("namespace grant failed: {err}"));
+                send(sink, &Frame::new(frame::RUNNER_LOG, namespace.into_bytes()));
+                // PowerShell cannot start when its HKCU refuses it: check the hive as the shell's own token.
+                // Refused, the suspended shell is terminated when `shell` drops.
+                let hive = profile::check_hive(&shell.own_token, &account).at("registry")?;
+                send(sink, &Frame::new(frame::RUNNER_LOG, hive.into_bytes()));
+                let (station, desktop) = spec.desktop.split_once('\\').unwrap_or(("WinSta0", spec.desktop.as_str()));
+                send(
+                    sink,
+                    &Frame::new(frame::RUNNER_LOG, lowbox::probe(shell.own_token.raw(), station, desktop).into_bytes()),
+                );
+                shell.resume().at("spawn")?;
                 send(sink, &Frame::json(frame::STARTED, &Started { shell_pid: shell.pid }));
                 let pumps = match ready {
-                    Prepared::Pipes { stdin, stdout_child, stderr_child, stdout, stderr } => {
+                    Prepared::Pipes { stdin, input, stdout_child, stderr_child, stdout, stderr } => {
                         // The child holds its own copies now; ours would keep the pipes open forever.
                         drop((stdin, stdout_child, stderr_child));
+                        if let (Some(pipe), Some(queue)) = (input, stdin_queue.take()) {
+                            feed(pipe, queue);
+                        }
                         let out = pump(HandleIo(stdout.raw()), frame::STDOUT, sink.clone());
                         let err = pump(HandleIo(stderr.raw()), frame::STDERR, sink.clone());
                         vec![(out, stdout), (err, stderr)]
@@ -474,12 +684,17 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
                         vec![(pump(HandleIo(output.raw()), frame::OUTPUT, sink.clone()), output)]
                     }
                 };
-                watch(shell, job.clone(), console.clone(), pumps, sink.clone());
+                watch(shell, job.clone(), container.clone(), console.clone(), pumps, sink.clone());
             }
             frame::INPUT => {
                 if let Some(input) = &terminal_input {
                     let _ = HandleIo(input.raw()).write_all(&frame.payload);
+                } else if spec.stdio.closes_input() {
+                    let _ = stdin_sender.send(Input::Bytes(frame.payload));
                 }
+            }
+            frame::CLOSE_INPUT if spec.stdio.closes_input() => {
+                let _ = stdin_sender.send(Input::Close);
             }
             frame::RESIZE => {
                 if let (Some(pc), Ok(size)) = (&console, serde_json::from_slice::<Resize>(&frame.payload))
@@ -495,8 +710,12 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
             _ => {}
         }
     }
-    // The launcher went away: kill the shell tree. The launcher's own job kills this process too.
-    let _ = job.terminate();
+    // The launcher went away: kill the shell tree, then delete the registration. The launcher's own job kills
+    // this process too; a registration left by that is the next launch's sweep's.
+    let _ = job.kill_and_wait(REAP_TIMEOUT);
+    if let Err(err) = container.delete() {
+        send(sink, &Frame::new(frame::RUNNER_LOG, err.to_string().into_bytes()));
+    }
     std::process::exit(0);
 }
 
@@ -504,6 +723,7 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
 fn watch(
     shell: Shell,
     job: Arc<Job>,
+    container: Arc<Container>,
     console: Option<Arc<PseudoConsole>>,
     pumps: Vec<(std::thread::JoinHandle<()>, Owned)>,
     sink: Sink,
@@ -520,6 +740,14 @@ fn watch(
         for (pump, handle) in pumps {
             let _ = pump.join();
             drop(handle);
+        }
+        // Only once nothing of the launch runs: the registration's folder is the package's.
+        if emptied {
+            let deleted = match container.delete() {
+                Ok(()) => format!("AppContainer {} deleted", container.name),
+                Err(err) => err.to_string(),
+            };
+            send(&sink, &Frame::new(frame::RUNNER_LOG, deleted.into_bytes()));
         }
         if emptied && have_code {
             send(&sink, &Frame::json(frame::EXIT, &Exit::Code { exit_code: i64::from(code) }));

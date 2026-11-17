@@ -7,16 +7,19 @@
 //! the whole journal, `end` included, before it changes any ACL. A journal without a valid `end` therefore
 //! belongs to a launch that changed nothing, and restoring it only deletes it.
 //!
-//! Each entry keeps the full descriptor (owner, group, DACL and its control flags) as SDDL and the
-//! object's file id. Restoring writes back the recorded DACL and its control flags; it never removes an
-//! ACE that was not added by the launch, because it never edits ACEs at all.
+//! Each entry keeps the full descriptor (owner, group, DACL and its control flags, and the mandatory label)
+//! as SDDL and the object's file id. Restoring writes back the recorded DACL with its control flags and the
+//! recorded label; it never removes an ACE that was not added by the launch, because it never edits ACEs
+//! at all.
 
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
-pub const JOURNAL_VERSION: u32 = 2;
+/// Version 3 added the package name and SID and the mandatory label. Older journals are refused: version 2 shipped
+/// only on unmerged branches, behind `TAU_WINDOWS_SHELL_SANDBOX`.
+pub const JOURNAL_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -33,6 +36,12 @@ pub struct WindowStationEntry {
 pub struct Header {
     pub version: u32,
     pub capability_sid: String,
+    /// The launch's AppContainer package SID (`S-1-15-2-…`): a restored root must not name it either.
+    pub package_sid: String,
+    /// The launch's AppContainer name (`tau.sandbox.<32 hex digits>`), which the runner registers in the
+    /// sandbox account's profile and deletes at the end; a leftover from a crash is deleted by the next
+    /// launch's runner or by `revoke`.
+    pub package_name: String,
     pub launcher_pid: u32,
     #[serde(default)]
     pub window_station: Option<WindowStationEntry>,
@@ -42,7 +51,8 @@ pub struct Header {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Entry {
     pub path: String,
-    /// Owner, group and DACL as SDDL (`O:…G:…D:AI(…)`), control flags included, exactly as read.
+    /// Owner, group, DACL and mandatory label as SDDL (`O:…G:…D:AI(…)S:(ML;…)`), control flags included,
+    /// exactly as read. The `S:` part is absent when the object has no explicit or inherited label.
     pub sddl: String,
     /// `<volume serial>:<file index>` in hex, to tell the journaled object from one put in its place.
     /// `None` when the object's attributes could not be read.
@@ -220,6 +230,8 @@ mod tests {
         Header {
             version: JOURNAL_VERSION,
             capability_sid: "S-1-5-21-1-2-3-4".into(),
+            package_sid: "S-1-15-2-1-2-3-4-5-6-7".into(),
+            package_name: "tau.sandbox.000000010000000200000003ffffffff".into(),
             launcher_pid: 77,
             window_station: Some(WindowStationEntry {
                 session_id: 1,
@@ -267,6 +279,7 @@ mod tests {
         assert_eq!(text.lines().count(), 6);
         assert!(text.lines().next().unwrap().contains("\"kind\":\"header\""));
         assert!(text.contains("\"capabilitySid\""));
+        assert!(text.contains("\"packageSid\":\"S-1-15-2-1-2-3-4-5-6-7\""));
         assert!(text.contains("\"fileId\":\"0000abcd:000000000000002a\""));
         assert!(text.lines().last().unwrap().contains("\"kind\":\"end\""));
         fs::remove_dir_all(&dir).unwrap();
@@ -325,8 +338,12 @@ mod tests {
             [lines[0], lines[0], lines[5]].join("\n"),
             // unknown field
             [lines[0].replace("\"launcherPid\"", "\"extra\":1,\"launcherPid\"").as_str(), lines[5]].join("\n"),
-            // other version
-            [lines[0].replace("\"version\":2", "\"version\":3").as_str(), lines[5]].join("\n"),
+            // version 2 (no package SID, no labels)
+            [lines[0].replace("\"version\":3", "\"version\":2").as_str(), lines[5]].join("\n"),
+            // a later version
+            [lines[0].replace("\"version\":3", "\"version\":4").as_str(), lines[5]].join("\n"),
+            // a version 3 header without its package SID
+            [lines[0].replace("\"packageSid\":\"S-1-15-2-1-2-3-4-5-6-7\",", "").as_str(), lines[5]].join("\n"),
         ];
         for (index, case) in cases.iter().enumerate() {
             fs::write(&path, case).unwrap();

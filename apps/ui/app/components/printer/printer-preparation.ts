@@ -2,7 +2,7 @@
 import { plateForBedType } from '#components/printer/printer-plates.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import type { PrinterProgram } from '#components/printer/printer-program.js';
-import type { PrinterFileKind } from '#components/printer/printer-file.js';
+import type { PrinterFileKind } from '#components/printer/printer-file-kind.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 

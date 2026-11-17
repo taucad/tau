@@ -4,27 +4,41 @@ import type { RuntimeKernels } from '@taucad/runtime/worker';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
+import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
+
+/**
+ * Mark a kernel worker's construction as `tau.load.kernel.worker` (progressive loading PL5): the worker script and
+ * the wasm it fetches start here, so a harness places the kernel's first request against the route's useful mark.
+ */
+const markKernelWorkerStart = (): void => {
+  const now = performance.now();
+  pageProjectOpenPerformance().record('kernel.worker', { start: now, end: now, outcome: 'ok' });
+};
 
 export type DefaultKernelId = RuntimeKernels<typeof runtime>[number]['id'];
 
 // SB4: each kernel worker's own failures are reported once, tagged `worker: kernel`.
-const createDefaultRuntimeWorker = (): Worker =>
-  reportWorkerFailures(
+const createDefaultRuntimeWorker = (): Worker => {
+  markKernelWorkerStart();
+  return reportWorkerFailures(
     new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), {
       name: 'tau-ui-runtime-worker',
       type: 'module',
     }),
     'kernel',
   );
+};
 
-const createDebugRuntimeWorker = (): Worker =>
-  reportWorkerFailures(
+const createDebugRuntimeWorker = (): Worker => {
+  markKernelWorkerStart();
+  return reportWorkerFailures(
     new Worker(new URL('../runtime/runtime-debug.worker.ts', import.meta.url), {
       name: 'tau-ui-runtime-debug-worker',
       type: 'module',
     }),
     'kernel',
   );
+};
 
 /**
  * Size the worker's compute caches by the device memory class (geometry cache result-path T5).

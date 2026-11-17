@@ -95,14 +95,19 @@ export const workspaceKernelRows = async (): Promise<
  * @param runtime - The runtime.
  * @returns The runnable kernel ids, in list order.
  */
-const runnableKernelIds = async (runtime: AnyRuntimeDefinition): Promise<ReadonlySet<string>> => {
+const unpreparedKernelIds = async (runtime: AnyRuntimeDefinition): Promise<ReadonlySet<string>> => {
   const resolved = await resolveRuntimeDefinition(runtime, undefined);
   const inspection = await inspectNativeKernels({
     deployments: nativeDeploymentsOf(resolved).map(({ deployment }) => deployment),
     store: defaultDependencyStore(),
     managed: readManagedPreparation(process.env),
   });
-  const unprepared = new Set(inspection.filter(({ answer }) => answer.status !== 'ready').map(({ kernel }) => kernel));
+  return new Set(inspection.filter(({ answer }) => answer.status !== 'ready').map(({ kernel }) => kernel));
+};
+
+const runnableKernelIds = async (runtime: AnyRuntimeDefinition): Promise<ReadonlySet<string>> => {
+  const resolved = await resolveRuntimeDefinition(runtime, undefined);
+  const unprepared = await unpreparedKernelIds(runtime);
   return new Set(resolved.kernels.map(({ id }) => id).filter((id) => !unprepared.has(id)));
 };
 
@@ -116,6 +121,9 @@ export const createWorkspaceRuntimeClient = async (
 
 /** Kernel ids the example-thumbnail runtime can evaluate on this machine. @public */
 export const exampleKernelIds = await runnableKernelIds(exampleRuntime);
+
+/** Native kernel ids the example runtime lists but this machine has not prepared (`tau prepare <kernel>`). @public */
+export const exampleUnpreparedKernelIds = await unpreparedKernelIds(exampleRuntime);
 
 /** Create an isolated Node client for one example-corpus operation. @public */
 export const createExampleRuntimeClient = async (projectPath: string): Promise<RuntimeClient<typeof exampleRuntime>> =>

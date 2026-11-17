@@ -306,9 +306,12 @@ impl Session {
                 continue;
             }
             let theirs: Vec<String> = summary.roots.iter().map(|root| root.path.clone()).collect();
-            if theirs.iter().any(|root| is_within(&self.journal_path, root)) {
+            // Only a grant would put this journal in reach of the other launch's shell. A denial over it keeps that
+            // shell out (as a launch's own denial over its own journal does, W10), and the other launch's restore
+            // only removes the ACEs it inherited there.
+            if summary.roots.iter().any(|root| root.account && is_within(&self.journal_path, &root.path)) {
                 return Err(Refused::unavailable(
-                    "this launch's journal lies inside another running or unrestored launch's paths".to_owned(),
+                    "this launch's journal lies inside a path another running or unrestored launch grants".to_owned(),
                     None,
                 ));
             }

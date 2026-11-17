@@ -1,5 +1,5 @@
 {
-  "campaign": "2026-11-17T09-23-07-567Z + 2026-11-17T09-31-13-879Z",
+  "campaign": "2026-11-17 on main 4bb39c3d: seven-model campaign plus the retained-operand fixture run",
   "host": "Intel(R) Xeon(R) Processor @ 2.30GHz",
   "models": {
     "gridfinity-box": {
@@ -62,6 +62,299 @@
           {
             "phase": "rested-transient",
             "sha256": "0c8e7eeceb0c6cc96fad00d6b1b5410a25da6aa5527f4bf668fa264be91e3507"
+          }
+        ]
+      },
+      "counts": {
+        "off": {
+          "matrix": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ],
+          "scrub": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ],
+          "agent": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ]
+        },
+        "memory": {
+          "matrix": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            }
+          ],
+          "scrub": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            }
+          ],
+          "agent": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            }
+          ]
+        },
+        "durable": {}
+      }
+    },
+    "spur-gearbox": {
+      "off": {
+        "matrix": [
+          {
+            "token": "base",
+            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18",
+            "triangles": 15300
+          },
+          {
+            "token": "A",
+            "sha256": "44576822e90d7c72b952c3a5062d1b709f6eda95d49f8f8987cf87f6c8570dd6",
+            "triangles": 15300
+          },
+          {
+            "token": "base",
+            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18",
+            "triangles": 15300
+          },
+          {
+            "token": "B",
+            "sha256": "0bd81a01cca7a4f7917e6027b96e926a696dc480f3221e626da570118df762e4",
+            "triangles": 15300
+          },
+          {
+            "token": "base",
+            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18",
+            "triangles": 15300
+          },
+          {
+            "token": "comment",
+            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18",
+            "triangles": 15300
+          },
+          {
+            "token": "literal",
+            "sha256": "d0f98d3e8081d11bb54dbf24ae89f1d454d74cd424a9f18eea858285cda56771",
+            "triangles": 15300
+          },
+          {
+            "token": "original",
+            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18",
+            "triangles": 15300
+          }
+        ],
+        "scrub": [
+          {
+            "phase": "open",
+            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18"
+          },
+          {
+            "phase": "scrub",
+            "sha256": "bb9ba6e782b8cad3bbbd458fba1cc045cd4cbb1a3d3844b0d6474a3135cbb4b4"
+          },
+          {
+            "phase": "revisit",
+            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18"
+          },
+          {
+            "phase": "rested-transient",
+            "sha256": "3581b8af45b7208f6c2361d4207fb32fb6ecad7e759ec217252959a81f5e7b1a"
           }
         ]
       },
@@ -588,6 +881,1178 @@
         "durable": {}
       }
     },
+    "stress-test": {
+      "off": {
+        "matrix": [
+          {
+            "token": "base",
+            "sha256": "4cf49b2e80d3ff8ab9e174613deb22f3a5b3f712e5a49b7b8a66b821666e7f00",
+            "triangles": 16148
+          },
+          {
+            "token": "A",
+            "sha256": "a76d327b8154a435d798d506ee76ee46d2b98618f83b2eb77ce7ca60453d18ea",
+            "triangles": 16312
+          },
+          {
+            "token": "base",
+            "sha256": "4cf49b2e80d3ff8ab9e174613deb22f3a5b3f712e5a49b7b8a66b821666e7f00",
+            "triangles": 16148
+          },
+          {
+            "token": "B",
+            "sha256": "175f3b35887c42b5600118a6a5d06118d49a94bdbb7b544f4f3c052b792f4bd9",
+            "triangles": 15886
+          },
+          {
+            "token": "base",
+            "sha256": "4cf49b2e80d3ff8ab9e174613deb22f3a5b3f712e5a49b7b8a66b821666e7f00",
+            "triangles": 16148
+          },
+          {
+            "token": "comment",
+            "sha256": "4cf49b2e80d3ff8ab9e174613deb22f3a5b3f712e5a49b7b8a66b821666e7f00",
+            "triangles": 16148
+          },
+          {
+            "token": "literal",
+            "sha256": "be468088e7a6bff0c8441206496bf94d1320e325c26ba1c07784979f83d83932",
+            "triangles": 15970
+          },
+          {
+            "token": "original",
+            "sha256": "4cf49b2e80d3ff8ab9e174613deb22f3a5b3f712e5a49b7b8a66b821666e7f00",
+            "triangles": 16148
+          }
+        ],
+        "scrub": [
+          {
+            "phase": "open",
+            "sha256": "4cf49b2e80d3ff8ab9e174613deb22f3a5b3f712e5a49b7b8a66b821666e7f00"
+          },
+          {
+            "phase": "scrub",
+            "sha256": "07c3e44e3b36551aed4d3b64c2128cef4399d54d4cc3ce7aad47124b33944738"
+          },
+          {
+            "phase": "revisit",
+            "sha256": "4cf49b2e80d3ff8ab9e174613deb22f3a5b3f712e5a49b7b8a66b821666e7f00"
+          },
+          {
+            "phase": "rested-transient",
+            "sha256": "ef5b8a3e74053d2e2b0c186086254f82d5b3875aef0af63d0e3e5d5fe9ef3ded"
+          }
+        ]
+      },
+      "counts": {
+        "off": {
+          "matrix": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ],
+          "scrub": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ],
+          "agent": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ]
+        },
+        "memory": {
+          "matrix": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            }
+          ],
+          "scrub": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            }
+          ],
+          "agent": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            }
+          ]
+        },
+        "durable": {}
+      }
+    },
+    "turbofan": {
+      "off": {
+        "matrix": [
+          {
+            "token": "base",
+            "sha256": "23b1dbb7feeb1cad1ad122142a2856ed3a4e1250cf2d68d2011405ee0c9dbd82",
+            "triangles": 125986
+          },
+          {
+            "token": "A",
+            "sha256": "cbd0c0660f0970aa2764be1110111f681cd23e14abe2757df75645b8bd98b3a9",
+            "triangles": 126010
+          },
+          {
+            "token": "base",
+            "sha256": "23b1dbb7feeb1cad1ad122142a2856ed3a4e1250cf2d68d2011405ee0c9dbd82",
+            "triangles": 125986
+          },
+          {
+            "token": "B",
+            "sha256": "cc2bef934eb0efdcd79c8867cd2593402129c503165bbe86fc4c7afa929cee49",
+            "triangles": 125986
+          },
+          {
+            "token": "base",
+            "sha256": "23b1dbb7feeb1cad1ad122142a2856ed3a4e1250cf2d68d2011405ee0c9dbd82",
+            "triangles": 125986
+          },
+          {
+            "token": "comment",
+            "sha256": "23b1dbb7feeb1cad1ad122142a2856ed3a4e1250cf2d68d2011405ee0c9dbd82",
+            "triangles": 125986
+          },
+          {
+            "token": "literal",
+            "sha256": "1978bb2f7020025c314044d5fb16398aa1b52d21dd6787e033dd771ae2b8c6fe",
+            "triangles": 125986
+          },
+          {
+            "token": "original",
+            "sha256": "23b1dbb7feeb1cad1ad122142a2856ed3a4e1250cf2d68d2011405ee0c9dbd82",
+            "triangles": 125986
+          }
+        ],
+        "scrub": [
+          {
+            "phase": "open",
+            "sha256": "23b1dbb7feeb1cad1ad122142a2856ed3a4e1250cf2d68d2011405ee0c9dbd82"
+          },
+          {
+            "phase": "scrub",
+            "sha256": "f17ae91c5428f407960340fef5946eb627dd5802d9a5dbb3708ccfc296241a14"
+          },
+          {
+            "phase": "revisit",
+            "sha256": "23b1dbb7feeb1cad1ad122142a2856ed3a4e1250cf2d68d2011405ee0c9dbd82"
+          },
+          {
+            "phase": "rested-transient",
+            "sha256": "ad1dee5d4305b0d927311eb010f3196dd6781467b39862125259c628c0171c50"
+          }
+        ]
+      },
+      "counts": {
+        "off": {
+          "matrix": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ],
+          "scrub": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ],
+          "agent": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ]
+        },
+        "memory": {
+          "matrix": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            }
+          ],
+          "scrub": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            }
+          ],
+          "agent": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            }
+          ]
+        },
+        "durable": {}
+      }
+    },
+    "bench-vise": {
+      "off": {
+        "matrix": [
+          {
+            "token": "base",
+            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88",
+            "triangles": 37384
+          },
+          {
+            "token": "A",
+            "sha256": "b9ebf58a0b8af38cc5db2b4f58952fdc521e14aadacae606e56358377f2bf39e",
+            "triangles": 37132
+          },
+          {
+            "token": "base",
+            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88",
+            "triangles": 37384
+          },
+          {
+            "token": "B",
+            "sha256": "07709fc4f08a68f37100ab5456ffb537c2f840cfe0053c53a3f13d185b6bbd64",
+            "triangles": 37508
+          },
+          {
+            "token": "base",
+            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88",
+            "triangles": 37384
+          },
+          {
+            "token": "comment",
+            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88",
+            "triangles": 37384
+          },
+          {
+            "token": "literal",
+            "sha256": "fc2fe303236ffe91bbb036bd08151ffafde0f6342584760b26af872617594e2c",
+            "triangles": 37384
+          },
+          {
+            "token": "original",
+            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88",
+            "triangles": 37384
+          }
+        ],
+        "scrub": [
+          {
+            "phase": "open",
+            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88"
+          },
+          {
+            "phase": "scrub",
+            "sha256": "12319beb5ff5c5286ec05442e91b5a63bad33d3d557ae924fce59caf7ef5e8fa"
+          },
+          {
+            "phase": "revisit",
+            "sha256": "08c6046f03ed8ef002b528c336ed6a1f793b230e8355ae0d03a2c2801a7b8a88"
+          },
+          {
+            "phase": "rested-transient",
+            "sha256": "3d7c152346da1b1e6879980c136185dbfcbdf2bdf5ff3c1d89d20e5c042aa2ad"
+          }
+        ]
+      },
+      "counts": {
+        "off": {
+          "matrix": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ],
+          "scrub": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ],
+          "agent": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ]
+        },
+        "memory": {
+          "matrix": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            }
+          ],
+          "scrub": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            }
+          ],
+          "agent": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            }
+          ]
+        },
+        "durable": {}
+      }
+    },
+    "planetary-gear-system": {
+      "off": {
+        "matrix": [
+          {
+            "token": "base",
+            "sha256": "b77910476c6c7f93dbd60fb626bbd3914bce7e6c132640ef4f58b77a8da8f3ed",
+            "triangles": 71046
+          },
+          {
+            "token": "A",
+            "sha256": "ab70cecf8d4ce9578cbf0e1197c71dce9655139fce153caa6647532a23811479",
+            "triangles": 71046
+          },
+          {
+            "token": "base",
+            "sha256": "b77910476c6c7f93dbd60fb626bbd3914bce7e6c132640ef4f58b77a8da8f3ed",
+            "triangles": 71046
+          },
+          {
+            "token": "B",
+            "sha256": "5d68b0a5de0b7debdfe0df8fbb666e841d67f91d0dcb50be830cbbc86a1590db",
+            "triangles": 71048
+          },
+          {
+            "token": "base",
+            "sha256": "b77910476c6c7f93dbd60fb626bbd3914bce7e6c132640ef4f58b77a8da8f3ed",
+            "triangles": 71046
+          },
+          {
+            "token": "comment",
+            "sha256": "b77910476c6c7f93dbd60fb626bbd3914bce7e6c132640ef4f58b77a8da8f3ed",
+            "triangles": 71046
+          },
+          {
+            "token": "literal",
+            "sha256": "3e83a9e075482f9f5ec43ec438216393eb78b621537b0b2c0d6b32fa97d7fcca",
+            "triangles": 71046
+          },
+          {
+            "token": "original",
+            "sha256": "b77910476c6c7f93dbd60fb626bbd3914bce7e6c132640ef4f58b77a8da8f3ed",
+            "triangles": 71046
+          }
+        ],
+        "scrub": [
+          {
+            "phase": "open",
+            "sha256": "b77910476c6c7f93dbd60fb626bbd3914bce7e6c132640ef4f58b77a8da8f3ed"
+          },
+          {
+            "phase": "scrub",
+            "sha256": "e2a18ab10b9ba344afec12c5f9b84549d5d0479e47a784e8da2b9619c1fcc5dc"
+          },
+          {
+            "phase": "revisit",
+            "sha256": "b77910476c6c7f93dbd60fb626bbd3914bce7e6c132640ef4f58b77a8da8f3ed"
+          },
+          {
+            "phase": "rested-transient",
+            "sha256": "96640e20e7b913e52280fb4bf47f336c6f30e74c8a65f6e0fd65257e32f5f979"
+          }
+        ]
+      },
+      "counts": {
+        "off": {
+          "matrix": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ],
+          "scrub": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ],
+          "agent": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 0
+            }
+          ]
+        },
+        "memory": {
+          "matrix": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            }
+          ],
+          "scrub": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            },
+            {
+              "modelRuns": 0,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 2
+            }
+          ],
+          "agent": [
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 1,
+              "storeWrites": 1
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            },
+            {
+              "modelRuns": 1,
+              "tessellations": 0,
+              "storeWrites": 0
+            }
+          ]
+        },
+        "durable": {}
+      }
+    },
     "retained-operand": {
       "off": {
         "matrix": [
@@ -878,299 +2343,6 @@
             }
           ]
         }
-      }
-    },
-    "spur-gearbox": {
-      "off": {
-        "matrix": [
-          {
-            "token": "base",
-            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18",
-            "triangles": 15300
-          },
-          {
-            "token": "A",
-            "sha256": "44576822e90d7c72b952c3a5062d1b709f6eda95d49f8f8987cf87f6c8570dd6",
-            "triangles": 15300
-          },
-          {
-            "token": "base",
-            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18",
-            "triangles": 15300
-          },
-          {
-            "token": "B",
-            "sha256": "0bd81a01cca7a4f7917e6027b96e926a696dc480f3221e626da570118df762e4",
-            "triangles": 15300
-          },
-          {
-            "token": "base",
-            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18",
-            "triangles": 15300
-          },
-          {
-            "token": "comment",
-            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18",
-            "triangles": 15300
-          },
-          {
-            "token": "literal",
-            "sha256": "d0f98d3e8081d11bb54dbf24ae89f1d454d74cd424a9f18eea858285cda56771",
-            "triangles": 15300
-          },
-          {
-            "token": "original",
-            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18",
-            "triangles": 15300
-          }
-        ],
-        "scrub": [
-          {
-            "phase": "open",
-            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18"
-          },
-          {
-            "phase": "scrub",
-            "sha256": "bb9ba6e782b8cad3bbbd458fba1cc045cd4cbb1a3d3844b0d6474a3135cbb4b4"
-          },
-          {
-            "phase": "revisit",
-            "sha256": "59972466f388c1bde6d9a9041dc937b4dbcb41b1408a715af54ea975fec07e18"
-          },
-          {
-            "phase": "rested-transient",
-            "sha256": "3581b8af45b7208f6c2361d4207fb32fb6ecad7e759ec217252959a81f5e7b1a"
-          }
-        ]
-      },
-      "counts": {
-        "off": {
-          "matrix": [
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            }
-          ],
-          "scrub": [
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            }
-          ],
-          "agent": [
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 0,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 0,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 0
-            }
-          ]
-        },
-        "memory": {
-          "matrix": [
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 2
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 2
-            },
-            {
-              "modelRuns": 0,
-              "tessellations": 0,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 2
-            },
-            {
-              "modelRuns": 0,
-              "tessellations": 0,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 2
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 2
-            },
-            {
-              "modelRuns": 0,
-              "tessellations": 0,
-              "storeWrites": 0
-            }
-          ],
-          "scrub": [
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 2
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 2
-            },
-            {
-              "modelRuns": 0,
-              "tessellations": 0,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 2
-            }
-          ],
-          "agent": [
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 1
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 1
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 0,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 0,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 1,
-              "storeWrites": 1
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 0,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 0,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 0,
-              "storeWrites": 0
-            },
-            {
-              "modelRuns": 1,
-              "tessellations": 0,
-              "storeWrites": 0
-            }
-          ]
-        },
-        "durable": {}
       }
     }
   }

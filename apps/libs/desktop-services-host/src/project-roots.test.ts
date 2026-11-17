@@ -1,8 +1,40 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE */
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import type * as FileSystem from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+/* Lets a case make one root's canonicalisation hang-equivalent (it throws) without touching the others. */
+const realpathOverride = vi.hoisted(() => ({ refuse: undefined as undefined | ((path: string) => boolean) }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof FileSystem>();
+  const native = (path: FileSystem.PathLike): string => {
+    if (realpathOverride.refuse?.(String(path))) {
+      throw Object.assign(new Error(`stalled mount: ${String(path)}`), { code: 'ETIMEDOUT' });
+    }
+    return actual.realpathSync.native(path);
+  };
+  const realpath = Object.assign(
+    (path: FileSystem.PathLike, options?: FileSystem.EncodingOption) => actual.realpathSync(path, options),
+    { native },
+  );
+  return { ...actual, default: { ...actual, realpathSync: realpath }, realpathSync: realpath };
+});
+
+afterEach(() => {
+  realpathOverride.refuse = undefined;
+});
 
 import { createKernelForkResolver, createProjectRootRegistry, sanitizeServicesContext } from '#project-roots.js';
 
@@ -94,6 +126,53 @@ describe('createProjectRootRegistry', () => {
     const seeded = createProjectRootRegistry({ storePath });
     seeded.admit(homeRoot);
     expect(createProjectRootRegistry({ storePath }).roots()).toEqual([homeRoot]);
+  });
+
+  it('should quarantine a damaged store, report it once and keep the copy past the next admission', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-roots-'));
+    const storePath = join(directory, 'granted-roots.json');
+    writeFileSync(storePath, '["/Volumes/Work/parts", trun');
+    const onQuarantine = vi.fn();
+    const registry = createProjectRootRegistry({ storePath, onQuarantine });
+    expect(registry.roots()).toEqual([]);
+    const quarantined = readdirSync(directory).filter((name) => /^granted-roots\.corrupt-.+\.json$/u.test(name));
+    expect(quarantined).toHaveLength(1);
+    expect(onQuarantine).toHaveBeenCalledOnce();
+    expect(onQuarantine).toHaveBeenCalledWith(join(directory, quarantined[0]!));
+    registry.admit(homeRoot);
+    expect(readFileSync(join(directory, quarantined[0]!), 'utf8')).toBe('["/Volumes/Work/parts", trun');
+    expect(JSON.parse(readFileSync(storePath, 'utf8'))).toEqual([homeRoot]);
+  });
+
+  it('should neither quarantine nor report a store that does not exist yet', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-roots-'));
+    const onQuarantine = vi.fn();
+    createProjectRootRegistry({ storePath: join(directory, 'granted-roots.json'), onQuarantine });
+    expect(onQuarantine).not.toHaveBeenCalled();
+    expect(existsSync(directory) && readdirSync(directory)).toEqual([]);
+  });
+
+  it('should answer for a path under one root without canonicalising another root', () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'tau-roots-')));
+    const rootA = join(base, 'a');
+    const rootB = join(base, 'b');
+    mkdirSync(join(rootA, 'project'), { recursive: true });
+    mkdirSync(rootB);
+    try {
+      const registry = createProjectRootRegistry();
+      registry.admit(rootB);
+      registry.admit(rootA);
+      const touched: string[] = [];
+      realpathOverride.refuse = (path) => {
+        touched.push(path);
+        return path === rootB || path.startsWith(`${rootB}/`);
+      };
+      expect(registry.isTrusted(join(rootA, 'project'))).toBe(true);
+      expect(registry.canonical(join(rootA, 'project'))).toBe(join(rootA, 'project'));
+      expect(touched.filter((path) => path === rootB || path.startsWith(`${rootB}/`))).toEqual([]);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   it('refuses a relative path outright', () => {

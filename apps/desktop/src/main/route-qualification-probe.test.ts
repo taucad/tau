@@ -2,8 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  admitRouteQualificationProbe,
   prepareRouteQualificationProbe,
   qualificationRecordReplaceBoundMilliseconds,
   replaceQualificationRecord,
@@ -199,6 +200,60 @@ describe('installed route qualification diagnostics', () => {
     expect(() => prepareRouteQualificationProbe({ ...options, arguments: [], ...request.b, pid: 102 })).toThrow(
       'stage advanced',
     );
+  });
+});
+
+describe('leftover qualification state on an ordinary launch', () => {
+  /* Each case leaves `route-qualification.state.json` behind, then breaks the request file another way. */
+  const leftover = (damage: (requestPath: string) => void) => {
+    const { options } = fixture();
+    prepareRouteQualificationProbe(options);
+    damage(join(options.profile, 'route-qualification.request.json'));
+    return options;
+  };
+  const damages: ReadonlyArray<readonly [string, (requestPath: string) => void]> = [
+    [
+      'missing',
+      (requestPath) => {
+        rmSync(requestPath);
+      },
+    ],
+    [
+      'damaged',
+      (requestPath) => {
+        writeFileSync(requestPath, '{"schemaVersion":');
+      },
+    ],
+    [
+      'changed',
+      (requestPath) => {
+        const request = JSON.parse(readFileSync(requestPath, 'utf8')) as RouteQualificationRequest;
+        writeFileSync(requestPath, JSON.stringify({ ...request, mirrorOrigin: 'https://127.0.0.1:4444' }));
+      },
+    ],
+  ];
+
+  it.each(damages)('should boot as no probe and report once for a %s request file', (_name, damage) => {
+    const options = leftover(damage);
+    const ignored = vi.fn();
+    expect(
+      admitRouteQualificationProbe(
+        [],
+        () => prepareRouteQualificationProbe({ ...options, arguments: [], mirrorOrigin: undefined }),
+        ignored,
+      ),
+    ).toBeUndefined();
+    expect(ignored).toHaveBeenCalledOnce();
+    expect(ignored.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+  });
+
+  it.each(damages)('should stay strict for a %s request file when the nonce argument is present', (_name, damage) => {
+    const options = leftover(damage);
+    const ignored = vi.fn();
+    expect(() =>
+      admitRouteQualificationProbe(options.arguments, () => prepareRouteQualificationProbe(options), ignored),
+    ).toThrow();
+    expect(ignored).not.toHaveBeenCalled();
   });
 });
 

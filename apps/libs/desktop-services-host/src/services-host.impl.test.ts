@@ -289,6 +289,46 @@ describe('createServicesHost — root admission', () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+  it('should serve Home by its published non-canonical spelling before that root settles', async () => {
+    /* Windows names the profile by its 8.3 spelling (`C:\\Users\\RUNNER~1`) and macOS `$TMPDIR` lives under
+     * `/var` for `/private/var`: main publishes that spelling, and the renderer's first request names it, before
+     * the background `realpath` has answered (packaged Windows e2e, "Refusing to serve an unadmitted filesystem
+     * root"). A symlink is the portable stand-in for either. */
+    const { promises: fsPromises } = await import('node:fs');
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-published-spelling-')));
+    const physical = join(sandbox, 'physical-home');
+    const outside = join(sandbox, 'outside');
+    const published = join(sandbox, 'published-home');
+    await Promise.all([mkdir(join(physical, 'project'), { recursive: true }), mkdir(outside)]);
+    await symlink(physical, published, 'junction');
+    await symlink(outside, join(physical, 'escape'), 'junction');
+    /* Every background `realpath` hangs, so nothing settles. */
+    const asyncRealpath = vi.spyOn(fsPromises, 'realpath').mockImplementation((async (candidate: string) => {
+      void candidate;
+      return Promise.withResolvers<string>().promise;
+    }) as typeof fsPromises.realpath);
+    const serve = vi.fn<NonNullable<ServicesHostOptions['serve']>>(() => ({
+      run: vi.fn(),
+      close: async () => undefined,
+    }));
+    const { host } = hostHarness({ serve });
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [published] }));
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+      const [, options] = serve.mock.calls[0]!;
+
+      expect(options.allowRoot(published)).toBe(true);
+      expect(options.allowRoot(join(published, 'project'))).toBe(true);
+      /* Still physical: a link under the root that leaves it is refused by either spelling. */
+      expect(options.allowRoot(join(published, 'escape'))).toBe(false);
+      expect(options.allowRoot(`${published}-evil`)).toBe(false);
+    } finally {
+      asyncRealpath.mockRestore();
+      host.dispose();
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('createServicesHost — concern ports', () => {

@@ -495,12 +495,14 @@ export const shaderEvidence = {
       'packages/viewer/src/graphics/three/node-frame-reference.browser.test.ts::should preserve display ramps, alpha and linear overlay blends in compact frame storage',
       'packages/viewer/src/graphics/three/ao-normal.browser.test.ts::should round-trip both normal hemispheres through RG8 on %s',
       'packages/viewer/src/graphics/three/ao-normal.browser.test.ts::should fetch one surface normal at texel corners, never a fold or background blend, on %s',
-      'packages/viewer/src/graphics/three/ao-denoise.browser.test.ts::should %s on a flat surface',
+      'packages/viewer/src/graphics/three/ao-denoise.browser.test.ts::should keep a one-texel contact seam on a flat surface',
+      'packages/viewer/src/graphics/three/gtao-falloff.browser.test.ts::should weight GTAO samples by the smooth 3D-distance falloff, not the hard slab, on %s',
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should occlude grid and hidden outlines through actual stencil caps',
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should keep contact AO smooth without erasing it',
     ],
     'backend-differential': [
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should keep contact AO smooth without erasing it',
+      'packages/viewer/src/graphics/three/gtao-falloff.browser.test.ts::should weight GTAO samples by the smooth 3D-distance falloff, not the hard slab, on %s',
     ],
     'real-compile': [
       'packages/viewer/src/graphics/three/webgpu-depth-sampling.browser.test.ts::should preserve sampled depth and attachment stencil through resize/recreation',

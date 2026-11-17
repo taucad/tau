@@ -28,7 +28,8 @@ type MockAoNode = {
   resolutionScale: number;
   useTemporalFiltering: boolean;
   radius: { value: number };
-  thickness: { value: number };
+  falloffEnd: { value: number };
+  falloffRange: { value: number };
   samples: { value: number };
   distanceFallOff: { value: number };
   scale: { value: number; greaterThan: (value: number) => unknown };
@@ -238,7 +239,8 @@ const mocks = vi.hoisted(() => {
       resolutionScale: 1,
       useTemporalFiltering: true,
       radius: { value: 0 },
-      thickness: { value: 0 },
+      falloffEnd: { value: 0 },
+      falloffRange: { value: 0 },
       samples: { value: 0 },
       distanceFallOff: { value: 0 },
       scale: { value: 0, greaterThan: (value: number) => ({ intensityAbove: value }) },
@@ -944,6 +946,10 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
       resolutionScale: 0.5,
       useTemporalFiltering: false,
       samples: { value: 16 },
+      // Profile H2: the patched smooth falloff ends at 22 radii over the last 0.8 of that, half step weight.
+      falloffEnd: { value: 22 },
+      falloffRange: { value: 0.8 },
+      distanceFallOff: { value: 0.5 },
     });
     expect(mocks.aoNodes[0]!.scale.value).toBe(0.75);
     expect(mocks.aoNodes[0]!.radius.value).toBeCloseTo(0.3605551275, 9);
@@ -1138,7 +1144,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     );
     const aoSource = readFileSync(require.resolve('three/addons/tsl/display/GTAONode.js'), 'utf8');
     expect(createHash('sha256').update(aoSource).digest('hex')).toBe(
-      '2786bf04e0a166e11d18153f0e26776792701c2294b9b1a9fb93ced6a22f148c',
+      'a7ddcfd4c5d81585202219a45154c1e316deefbbd79ce7e3a20d1e1273a576b2',
     );
   });
 

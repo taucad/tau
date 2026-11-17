@@ -6,7 +6,7 @@ import { scheduleCameraPreparation } from '#graphics/three/camera-preparation.js
 import type { ReactNode } from 'react';
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { NodeMaterial, QuadMesh, RenderTarget, RendererUtils, UnsignedByteType, NodeUpdateType } from 'three/webgpu';
-import type { Node, WebGPURenderer } from 'three/webgpu';
+import type { Node, UniformNode, WebGPURenderer } from 'three/webgpu';
 import {
   colorToDirection,
   directionToColor,
@@ -62,6 +62,18 @@ import { retireTransmissionCopy } from '#graphics/three/transmission-retirement.
 import { createGtaoCameraAdapter } from '#graphics/three/gtao-depth-camera.js';
 import { createLogDepthAoAdapter } from '#graphics/three/gtao-log-depth.js';
 
+/**
+ * GTAONode as Tau's three@0.184.0 patch (`tools/pnpm/patches/three@0.184.0.patch`) builds it: XeGTAO's smooth
+ * 3D-distance falloff replaces the hard thickness slab, with its end and range as uniforms. `@types/three` describes
+ * the unpatched node.
+ */
+type GtaoNode = ReturnType<typeof ao> & {
+  /** Where a horizon sample stops counting, as a multiple of `radius`, by its 3D distance from the pixel. */
+  falloffEnd: UniformNode<'float', number>;
+  /** Fraction of the falloff end over which a sample's weight falls linearly from 1 to 0. */
+  falloffRange: UniformNode<'float', number>;
+};
+
 type PostProcessingPipelineResources = Readonly<{
   camera: ThreeCamera;
   setCamera: (camera: ThreeCamera) => void;
@@ -70,7 +82,7 @@ type PostProcessingPipelineResources = Readonly<{
   renderEdges: () => void;
   prepareSurfaceReuse?: (width: number, height: number) => void;
   disposeSurfaceReuse?: () => void;
-  aoNode?: ReturnType<typeof ao>;
+  aoNode?: GtaoNode;
   denoiseNode?: ReturnType<typeof createAoDenoise>;
   denoiseInput?: ReturnType<typeof rtt>;
   depthRestore: QuadMesh;
@@ -92,9 +104,10 @@ type LinearFrame = {
   depthPrepared: boolean;
 };
 
-// Preserve the tuned GTAO depth acceptance while making both values derive from one screen-space contract.
+// GTAO's sample falloff and the denoise depth acceptance both scale with the one screen-space radius.
 const {
-  thicknessRatio: gtaoThicknessToRadiusRatio,
+  falloffEndRatio: gtaoFalloffEndRatio,
+  falloffRange: gtaoFalloffRange,
   denoiseDepthTolerance: aoDenoiseDepthTolerance,
   samples: gtaoSamples,
   resolutionScale: aoResolutionScale,
@@ -124,7 +137,6 @@ const updateGtaoSpatialScale = ({
     });
     if (resource.aoNode) {
       resource.aoNode.radius.value = radius;
-      resource.aoNode.thickness.value = radius * gtaoThicknessToRadiusRatio;
       if (resource.denoiseNode) {
         resource.denoiseNode.depthPhi.value = radius * aoDenoiseDepthTolerance;
       }
@@ -352,7 +364,7 @@ const createPipelineResources = ({
     }
   };
   let frame: LinearFrame | undefined;
-  let aoNode: ReturnType<typeof ao> | undefined;
+  let aoNode: GtaoNode | undefined;
   let denoiseNode: ReturnType<typeof createAoDenoise> | undefined;
   let denoiseInput: ReturnType<typeof rtt> | undefined;
   let outputQuad: QuadMesh | undefined;
@@ -472,13 +484,17 @@ const createPipelineResources = ({
     const aoDepth =
       logDepth?.forwardDepth ??
       sample((uv) => (gpuRenderer.reversedDepthBuffer ? loadDepth(uv).oneMinus() : loadDepth(uv)));
-    aoNode = ao(logDepth?.gtaoDepth ?? aoDepth, scenePassNormal, aoCamera.camera as Camera);
+    aoNode = ao(logDepth?.gtaoDepth ?? aoDepth, scenePassNormal, aoCamera.camera as Camera) as GtaoNode;
     aoNode.resolutionScale = aoResolutionScale;
     // Temporal direction rotation shimmers under `frameloop='demand'` because the
     // viewport never accumulates frame-to-frame.
     aoNode.useTemporalFiltering = false;
     aoNode.samples.value = gtaoSamples;
     aoNode.distanceFallOff.value = defaultPostProcessingSettings.gtaoDistanceFalloff;
+    // Tau's three patch replaces GTAO's hard thickness slab with XeGTAO's smooth 3D-distance falloff; both
+    // values are multiples of the radius uniform, so they stay fixed while the radius follows the camera.
+    aoNode.falloffEnd.value = gtaoFalloffEndRatio;
+    aoNode.falloffRange.value = gtaoFalloffRange;
 
     const aoTexture = aoNode.getTextureNode();
     // GTAO is a stochastic estimate, not a finished visibility image. FXAA cannot

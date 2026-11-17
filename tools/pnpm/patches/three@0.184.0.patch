@@ -258,6 +258,96 @@ index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..e5405d99f5691f16d5d9572402476b65
  		if ( bindingsData.layout ) {
  
  			bindingsData.layout.usedTimes --;
+diff --git a/examples/jsm/tsl/display/GTAONode.js b/examples/jsm/tsl/display/GTAONode.js
+index 50e5f242e56727625c6cfc2c963a3df22cfb8d15..8706a52a7f33044e280e1bde3bd0d145ce938d27 100644
+--- a/examples/jsm/tsl/display/GTAONode.js
++++ b/examples/jsm/tsl/display/GTAONode.js
+@@ -115,12 +115,33 @@ class GTAONode extends TempNode {
+ 		this.resolution = uniform( new Vector2() );
+ 
+ 		/**
+-		 * The thickness of the ambient occlusion.
++		 * The thickness of the ambient occlusion. Unused since Tau's patch: the smooth
++		 * distance falloff (`falloffEnd`, `falloffRange`) replaces the thickness slab.
+ 		 *
+ 		 * @type {UniformNode<float>}
+ 		 */
+ 		this.thickness = uniform( 1 );
+ 
++		/**
++		 * Where a horizon sample stops counting, as a multiple of `radius`, measured as
++		 * the 3D view-space distance from the pixel to the sample. Tau patch: XeGTAO's
++		 * smooth distance falloff replaces the hard `thickness` slab, which accepted a
++		 * sample only while its view-depth delta stayed inside the slab and so cut the
++		 * shading off on a line where an occluder's depth crossed it.
++		 *
++		 * @type {UniformNode<float>}
++		 */
++		this.falloffEnd = uniform( 22 );
++
++		/**
++		 * The fraction of `falloffEnd` over which a sample's weight falls linearly from 1
++		 * to 0: weight 1 up to `( 1 - falloffRange ) * falloffEnd * radius`, 0 from
++		 * `falloffEnd * radius`. Must lie in `(0,1]`. Tau patch.
++		 *
++		 * @type {UniformNode<float>}
++		 */
++		this.falloffRange = uniform( 0.8 );
++
+ 		/**
+ 		 * Another option to tweak the occlusion. The recommended range is
+ 		 * `[1,2]` for attenuating the AO.
+@@ -381,6 +402,22 @@ class GTAONode extends TempNode {
+ 				const tangentToNormalInSlice = cross( normalInSlice, sliceBitangent ).toVar();
+ 				const cosHorizons = vec2( dot( viewDir, tangentToNormalInSlice ), dot( viewDir, tangentToNormalInSlice.negate() ) ).toVar();
+ 
++				// Tau patch: XeGTAO's smooth distance falloff. Every sample is kept; its horizon cosine is blended
++				// toward the tangent-plane horizon by a weight on its 3D distance d from the pixel,
++				// weight = saturate( d * falloffMul + falloffAdd ), 1 up to ( 1 - range ) * end, 0 from end.
++				const tangentPlaneCosHorizons = vec2( dot( viewDir, tangentToNormalInSlice ), dot( viewDir, tangentToNormalInSlice.negate() ) ).toVar();
++				const falloffMul = float( - 1 ).div( radiusToUse.mul( this.falloffEnd.mul( this.falloffRange ) ) ).toVar();
++				const falloffAdd = float( 1 ).div( this.falloffRange ).toVar();
++
++				const raiseHorizon = ( viewDelta, side, j ) => {
++
++					const sampleDistance = sqrt( dot( viewDelta, viewDelta ) ).toVar();
++					const weight = clamp( sampleDistance.mul( falloffMul ).add( falloffAdd ), 0, 1 );
++					const sampleCosHorizon = mix( tangentPlaneCosHorizons[ side ], dot( viewDir, viewDelta.div( sampleDistance ) ), weight );
++					cosHorizons[ side ].addAssign( max( 0, mul( sampleCosHorizon.sub( cosHorizons[ side ] ), mix( 1.0, float( 2.0 ).div( float( j ).add( 2 ) ), this.distanceFallOff ) ) ) );
++
++				};
++
+ 				// For each slice, the inner loop performs ray marching to find the horizons.
+ 
+ 				Loop( { end: STEPS, type: 'int', name: 'j', condition: '<' }, ( { j } ) => {
+@@ -396,12 +433,7 @@ class GTAONode extends TempNode {
+ 					const sampleSceneViewPositionX = getViewPosition( sampleScreenPositionX, sampleDepthX, this._cameraProjectionMatrixInverse ).toVar();
+ 					const viewDeltaX = sampleSceneViewPositionX.sub( viewPosition ).toVar();
+ 
+-					If( abs( viewDeltaX.z ).lessThan( this.thickness ), () => {
+-
+-						const sampleCosHorizon = dot( viewDir, normalize( viewDeltaX ) );
+-						cosHorizons.x.addAssign( max( 0, mul( sampleCosHorizon.sub( cosHorizons.x ), mix( 1.0, float( 2.0 ).div( float( j ).add( 2 ) ), this.distanceFallOff ) ) ) );
+-
+-					} );
++					raiseHorizon( viewDeltaX, 'x', j );
+ 
+ 					// y
+ 
+@@ -410,12 +442,7 @@ class GTAONode extends TempNode {
+ 					const sampleSceneViewPositionY = getViewPosition( sampleScreenPositionY, sampleDepthY, this._cameraProjectionMatrixInverse ).toVar();
+ 					const viewDeltaY = sampleSceneViewPositionY.sub( viewPosition ).toVar();
+ 
+-					If( abs( viewDeltaY.z ).lessThan( this.thickness ), () => {
+-
+-						const sampleCosHorizon = dot( viewDir, normalize( viewDeltaY ) );
+-						cosHorizons.y.addAssign( max( 0, mul( sampleCosHorizon.sub( cosHorizons.y ), mix( 1.0, float( 2.0 ).div( float( j ).add( 2 ) ), this.distanceFallOff ) ) ) );
+-
+-					} );
++					raiseHorizon( viewDeltaY, 'y', j );
+ 
+ 				} );
+ 
 diff --git a/src/materials/nodes/manager/NodeMaterialObserver.js b/src/materials/nodes/manager/NodeMaterialObserver.js
 index 29e26ebd184194778f88326ca6a3d47da3b94c8d..02134aa617c39918887b387c800bbfe26728b405 100644
 --- a/src/materials/nodes/manager/NodeMaterialObserver.js

@@ -38,7 +38,7 @@ import type { PrinterFileKind } from '#components/printer/printer-file.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
 import { a1MiniManifest } from '#components/print/testing/machines.fixture.js';
-import { useFileContent } from '#hooks/use-file-content.js';
+import { useFileContent } from '@taucad/files-ui/hooks/use-file-content';
 import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 
 declare module 'vitest' {

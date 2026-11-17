@@ -30,7 +30,7 @@ import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { useProject } from '#hooks/use-project.js';
 import { useModelAvailability } from '#hooks/use-project-availability.js';
-import { useFileTreeMap } from '#hooks/use-file-tree.js';
+import { useFileTreeMap } from '@taucad/files-ui/hooks/use-file-tree';
 import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
 import { chooseProjection } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { Dockview } from '#components/panes/dockview.js';

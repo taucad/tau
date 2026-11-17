@@ -34,6 +34,8 @@ import { storedPublicationManifestSchema } from '#publications/publications.dto.
 import {
   materializePublication,
   materializePublishedTags,
+  publicationBlobKey,
+  publicationContentType,
   releaseManifestBlobs,
 } from '#publications/publication-materializer.js';
 import type { MaterializedPublication, MaterializerDependencies } from '#publications/publication-materializer.js';
@@ -56,7 +58,6 @@ import { ObjectStorageService, isS3ObjectMissing } from '@taucad/api-object-stor
 import type { StorageTier } from '@taucad/api-object-storage';
 import type { StorageNamespace } from '@taucad/api-object-storage/constants';
 import { concatUint8Arrays } from '@taucad/api-object-storage/concat-uint8-arrays';
-import { blobKeyFromSha256Hex } from '@taucad/api-object-storage/sha256';
 import { MetricsService } from '@taucad/api-observability/metrics';
 
 /** The shared placeholder card image every publication starts with. */
@@ -74,6 +75,28 @@ const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
   bytes.byteLength >= 12 &&
   new TextDecoder().decode(bytes.subarray(0, 4)) === 'RIFF' &&
   new TextDecoder().decode(bytes.subarray(8, 12)) === 'WEBP';
+
+/**
+ * The `blobs` key one manifest file is served from. The thumbnail's is the one
+ * its row recorded: a version materialized before the served type joined the
+ * key (#2008) holds its thumbnail at the bare digest, and its row says so.
+ *
+ * @param publication - The row, for its recorded thumbnail key.
+ * @param relativePath - The file's manifest path.
+ * @param sha256Hex - The file's digest.
+ * @returns The namespace-relative key.
+ */
+const servedKeyOf = (
+  publication: Readonly<Pick<typeof schema.publication.$inferSelect, 'thumbnailKey'>>,
+  relativePath: string,
+  sha256Hex: string,
+): string => {
+  const recorded = publication.thumbnailKey;
+  if (relativePath === 'thumbnail.webp' && recorded?.startsWith('blobs/') === true) {
+    return recorded.slice('blobs/'.length);
+  }
+  return publicationBlobKey(relativePath, sha256Hex);
+};
 
 /**
  * Split a namespace-qualified storage key (`defaults/thumb.webp`,
@@ -383,7 +406,7 @@ export class PublicationsService {
       files[relativePath] =
         publication.visibility === 'private'
           ? this.buildPublicationFileUrl(publication.id, relativePath)
-          : this.storage.publicUrl({ namespace: 'blobs', key: blobKeyFromSha256Hex(sha256Hex) });
+          : this.storage.publicUrl({ namespace: 'blobs', key: servedKeyOf(publication, relativePath, sha256Hex) });
     }
 
     const ownerSnapshot = await this.resolveOwnerSnapshot(publication);
@@ -431,7 +454,7 @@ export class PublicationsService {
     publicationId: string;
     viewerUserId?: string;
     path: string;
-  }): Promise<{ sha256Hex: string; etag: string; path: string }> {
+  }): Promise<{ sha256Hex: string; etag: string; path: string; key: string }> {
     if (!args.path) {
       throw new BadRequestException({ code: publicationApiCode.INVALID_PATH, message: 'Missing path query' });
     }
@@ -449,7 +472,7 @@ export class PublicationsService {
     const sha256Hex = this.sha256HexFromManifestRef(args.path, shaRef);
 
     await this.assertActiveProject(publication.projectId);
-    return { sha256Hex, etag: `"${sha256Hex}"`, path };
+    return { sha256Hex, etag: `"${sha256Hex}"`, path, key: servedKeyOf(publication, path, sha256Hex) };
   }
 
   /**
@@ -457,12 +480,16 @@ export class PublicationsService {
    * tier first and falls back to the public bucket as a defensive cross-tier
    * read. Authorization happened in `resolvePublicationFile` — the source
    * bucket does not affect it.
+   *
+   * `key` is the one `resolvePublicationFile` answered; without it the key is
+   * derived from the path's served type.
    */
   public async openPublicationFile(
     sha256Hex: string,
     path: string,
+    key: string = publicationBlobKey(path, sha256Hex),
   ): Promise<{ body: Readable; contentType: string; contentLength?: number }> {
-    const blob = await this.getBlobPreferPrivate({ namespace: 'blobs', key: blobKeyFromSha256Hex(sha256Hex) });
+    const blob = await this.getBlobPreferPrivate({ namespace: 'blobs', key });
     if (path !== 'thumbnail.webp' || blob.contentType === 'image/webp') {
       return {
         body: blob.body,
@@ -1140,7 +1167,7 @@ export class PublicationsService {
    * refcount GC that is explicitly out of scope.
    */
   private async reconcileStorageTier(
-    publication: { readonly id: string; readonly manifestKey: string },
+    publication: Readonly<Pick<typeof schema.publication.$inferSelect, 'id' | 'manifestKey' | 'thumbnailKey'>>,
     targetVisibility: PublicationVisibilityUpdate['visibility'],
   ): Promise<void> {
     const manifest = await this.loadStoredManifest(publication.manifestKey);
@@ -1148,23 +1175,22 @@ export class PublicationsService {
 
     await Promise.all(
       Object.entries(manifest.files).map(async ([relativePath, shaRef]) => {
-        const key = blobKeyFromSha256Hex(this.sha256HexFromManifestRef(relativePath, shaRef));
-        const contentType = relativePath === 'thumbnail.webp' ? 'image/webp' : 'application/octet-stream';
-        const existing = await this.storage.headBlob({ namespace: 'blobs', key, tier: targetTier });
-        if (existing && existing.contentType === contentType) {
+        const key = servedKeyOf(publication, relativePath, this.sha256HexFromManifestRef(relativePath, shaRef));
+        /* The key carries how the blob is served (#2008), so a key the target
+           tier already holds is never written again: another publication may
+           be serving it. */
+        if (await this.storage.headBlob({ namespace: 'blobs', key, tier: targetTier })) {
           return;
         }
 
-        const source = existing
-          ? await this.storage.getBlob({ namespace: 'blobs', key, tier: targetTier })
-          : await this.getBlobPreferPrivate({ namespace: 'blobs', key });
+        const source = await this.getBlobPreferPrivate({ namespace: 'blobs', key });
         const bytes = await this.readStreamToBuffer(source.body);
         await this.storage.putBlob({
           namespace: 'blobs',
           key,
           body: bytes,
-          contentType,
-          ...(existing ? {} : { ifNoneMatch: '*' }),
+          contentType: publicationContentType(relativePath),
+          ifNoneMatch: '*',
           cacheControl: targetTier === 'private' ? 'private, no-cache' : 'public, max-age=31536000, immutable',
           tier: targetTier,
         });

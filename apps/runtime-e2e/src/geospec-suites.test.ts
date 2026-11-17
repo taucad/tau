@@ -76,22 +76,27 @@ const runGeoSpecSuite = async (
   }
 };
 
+/** Every test that did not pass, with its diagnostic codes, so a red row names itself. */
+const unpassedTests = (
+  report: GeoSpecRunReport,
+): Array<{ test: string; status: string; codes: unknown[] | undefined }> =>
+  (report.files ?? []).flatMap(({ file, tests }) =>
+    (tests ?? [])
+      .filter(({ status }) => status !== 'passed' && status !== 'skipped')
+      .map(({ suite, name: test, status, diagnostics }) => ({
+        test: [file, ...suite, test].join(' > '),
+        status,
+        codes: diagnostics?.map(({ code }) => code),
+      })),
+  );
+
 describe('geospec example suites (regression backbone)', () => {
   it.each(['bench-vise', 'spur-gearbox', 'standing-fan', 'wheelbarrow', 'kestrel-240-quadcopter'])(
     'Community motion assembly %s geospec suite passes',
     { timeout: 1_500_000 },
     async (name) => {
       const report = await runGeoSpecSuite(`libs/tau-examples/src/kernels/replicad/${name}`);
-      const unpassed = (report.files ?? []).flatMap(({ file, tests }) =>
-        (tests ?? [])
-          .filter(({ status }) => status !== 'passed')
-          .map(({ suite, name: test, status, diagnostics }) => ({
-            test: [file, ...suite, test].join(' > '),
-            status,
-            codes: diagnostics?.map(({ code }) => code),
-          })),
-      );
-      expect(unpassed).toStrictEqual([]);
+      expect(unpassedTests(report)).toStrictEqual([]);
       expect(report.success).toBe(true);
     },
   );
@@ -110,6 +115,7 @@ describe('geospec example suites (regression backbone)', () => {
 
   it('logo-keychain geospec suite passes', { timeout: 180_000 }, async () => {
     const report = await runGeoSpecSuite('libs/tau-examples/src/kernels/replicad/logo-keychain');
+    expect(unpassedTests(report)).toStrictEqual([]);
     expect(report.failed).toBe(0);
     expect(report.success).toBe(true);
   });
@@ -177,6 +183,7 @@ describe('geospec example suites (regression backbone)', () => {
     // non-verdict watchdog; parity is exact per-test data below.
     expect(report.files).toBeDefined();
     expect(report.files).toHaveLength(9);
+    expect(unpassedTests(report)).toStrictEqual([]);
     expect(report.failed).toBe(0);
     expect(report.success).toBe(true);
   });

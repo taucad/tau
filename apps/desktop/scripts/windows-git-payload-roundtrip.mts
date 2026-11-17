@@ -21,6 +21,7 @@ const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const { git } = gitPayloadLayout(resolve(workspaceRoot, 'apps/desktop/resources/git'), 'win32-x64');
 const result = spawnSync('pnpm', ['exec', 'vitest', 'run', 'src/bundled-git.integration.test.ts'], {
   cwd: resolve(workspaceRoot, 'packages/revisions'),
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
   env: { ...process.env, TAU_BUNDLED_GIT_EXECUTABLE: git },
   stdio: 'inherit',
   shell: true,

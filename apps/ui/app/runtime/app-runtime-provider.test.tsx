@@ -12,9 +12,13 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { useSelector } from '@xstate/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createActor, createMachine } from 'xstate';
 import { AppRuntimeProvider, useAppRuntime } from '#runtime/app-runtime-provider.js';
 import { createAppRuntime, selectAppEnvironment, selectSessionsRegistry } from '#runtime/app-runtime.js';
 import type { AppRuntime } from '#runtime/app-runtime.js';
+import type * as AppRuntimeModule from '#runtime/app-runtime.js';
+import { reportBootStage, resetBootSignals } from '#lib/boot-signals.js';
+import type { BootStage } from '#lib/boot-signals.js';
 import { createFakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { FakeEnvironmentHost } from '#runtime/environment.fixture.js';
 import type * as SessionsStore from '#services/sessions-store.js';
@@ -23,6 +27,18 @@ import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import type { SessionsMachineEvent } from '#machines/sessions.machine.js';
 
 const sessionsStore = vi.hoisted(() => ({ created: 0 }));
+/* T-R12.11: a stand-in for `rootFiles` the test moves to `ready`; unset, the runtime's own is read. */
+const rootFilesStandIn = vi.hoisted(() => ({ actor: undefined as unknown }));
+
+vi.mock('#runtime/app-runtime.js', async (importOriginal) => {
+  const original = await importOriginal<typeof AppRuntimeModule>();
+  return {
+    ...original,
+    selectRuntimeRootFiles: (runtime: AppRuntime) =>
+      (rootFilesStandIn.actor as ReturnType<typeof original.selectRuntimeRootFiles> | undefined) ??
+      original.selectRuntimeRootFiles(runtime),
+  };
+});
 
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -190,6 +206,57 @@ describe('AppRuntimeProvider start boundary', () => {
     /* Delivered synchronously, so the registry was running: not queued on an actor not yet started. The library port
      * told it the epoch when it started, before anything could open (A5b). */
     expect(atSend).toEqual([['libraryEpochChanged', 'releaseMemory']]);
+    runtime.stop();
+  });
+});
+
+/** Stands in for `Page`, whose first mount reports `shell-mounted`. */
+function ShellStandIn(): ReactNode {
+  useEffect(() => {
+    reportBootStage('shell-mounted');
+  }, []);
+  return <p data-testid='shell'>shell</p>;
+}
+
+describe('AppRuntimeProvider boot signals', () => {
+  type DesktopHolder = { tau?: { boot?: { report: (stage: BootStage) => void } } };
+
+  afterEach(() => {
+    rootFilesStandIn.actor = undefined;
+    delete (globalThis as DesktopHolder).tau;
+    vi.unstubAllEnvs();
+    resetBootSignals();
+  });
+
+  it('should report shell-mounted and then home-ready once each through the desktop bridge', () => {
+    const reports: BootStage[] = [];
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    (globalThis as DesktopHolder).tau = { boot: { report: (stage) => reports.push(stage) } };
+    resetBootSignals();
+    const rootFiles = createActor(
+      createMachine({ initial: 'connecting', states: { connecting: { on: { ready: 'ready' } }, ready: {} } }),
+    ).start();
+    rootFilesStandIn.actor = rootFiles;
+    const host = createFakeEnvironmentHost();
+    const runtime = createAppRuntime({ environment: () => host });
+
+    render(
+      <StrictMode>
+        <AppRuntimeProvider runtime={runtime}>
+          <ShellStandIn />
+        </AppRuntimeProvider>
+      </StrictMode>,
+    );
+    expect(reports).toEqual(['shell-mounted']);
+
+    act(() => {
+      rootFiles.send({ type: 'ready' });
+    });
+    act(() => {
+      rootFiles.send({ type: 'ready' });
+    });
+
+    expect(reports).toEqual(['shell-mounted', 'home-ready']);
     runtime.stop();
   });
 });

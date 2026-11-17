@@ -3,7 +3,8 @@ import { awaitGeometryPresentation } from '@taucad/viewer/graphics/three/utils/g
 import { useActorRef } from '@xstate/react';
 import { asKnownArtifact } from '@taucad/runtime/types';
 import { buildViewerCaptureImageOptions, createIsometricCaptureCamera } from '@taucad/agent-tools/capture';
-import { useProject } from '#hooks/use-project.js';
+import { useMainGraphics, useProject } from '#hooks/use-project.js';
+import { awaitViewportPresented } from '#lib/await-viewport-presented.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { thumbnailMachine } from '#machines/thumbnail.machine.js';
 import type { ThumbnailResult } from '#machines/thumbnail.machine.js';
@@ -78,6 +79,7 @@ export function useThumbnailGenerator(options?: { onStored?: (bytes: Uint8Array<
   const { geometryUnits, mainEntryPath, projectId } = useProject();
   const { writeFile, deleteFile } = useFileManager();
   const imageService = useHeadlessImageService();
+  const mainGraphics = useMainGraphics();
 
   const mainCadActor = geometryUnits.get(mainEntryPath);
 
@@ -87,13 +89,15 @@ export function useThumbnailGenerator(options?: { onStored?: (bytes: Uint8Array<
   const writeFileRef = useRef(writeFile);
   const deleteFileRef = useRef(deleteFile);
   const onStoredRef = useRef(options?.onStored);
+  const mainGraphicsRef = useRef(mainGraphics);
 
   useEffect(() => {
     cadActorRef.current = mainCadActor;
     writeFileRef.current = writeFile;
     deleteFileRef.current = deleteFile;
     onStoredRef.current = options?.onStored;
-  }, [mainCadActor, writeFile, deleteFile, options?.onStored]);
+    mainGraphicsRef.current = mainGraphics;
+  }, [mainCadActor, writeFile, deleteFile, options?.onStored, mainGraphics]);
   const generationRef = useRef(0);
   const identityRef = useRef(`${projectId}:unsettled`);
   const manualResultResolversRef = useRef<Array<(result: ThumbnailResult) => void>>([]);
@@ -117,6 +121,8 @@ export function useThumbnailGenerator(options?: { onStored?: (bytes: Uint8Array<
         const generation = generationRef.current;
         if (request.kind === 'automatic-thumbnail' && artifact.mimeType === 'model/gltf-binary') {
           await awaitGeometryPresentation(artifact.content, request.signal);
+          // The first frame of the person's view comes before a background capture on the same GPU.
+          await awaitViewportPresented(mainGraphicsRef.current, request.signal);
           if (generation !== generationRef.current) {
             throw new DOMException('Thumbnail source was superseded.', 'AbortError');
           }

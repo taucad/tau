@@ -6,6 +6,7 @@ import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
+import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 
 const encoder = new TextEncoder();
 
@@ -113,7 +114,12 @@ const UserProjectThumbnailGenerationDebugRoute = (): React.JSX.Element => {
           },
         });
 
-        void navigate(`${projectUrl(project.slugs)}?graphicsBackend=webgpu`);
+        /* The fixture forwards a render tier override, so a software GPU can run the hardware tier's automatic
+         * thumbnail. */
+        const renderTier = searchParams.get(searchParameterName.renderTier);
+        void navigate(
+          `${projectUrl(project.slugs)}?graphicsBackend=webgpu${renderTier ? `&${searchParameterName.renderTier}=${encodeURIComponent(renderTier)}` : ''}`,
+        );
       } catch (seedError) {
         setError(seedError instanceof Error ? seedError.message : String(seedError));
       }

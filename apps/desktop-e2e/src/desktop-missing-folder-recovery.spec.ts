@@ -353,10 +353,8 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
 };
 
 describe('desktop missing-folder recovery (the operator rehearsal)', () => {
-  /* T-REH.1: the incident's profile, produced and opened by the candidate. Steps 1-3 and 5 pass; step 4 waits for
-   * the Files page to label the surviving folder's row "Connected" (blueprint D2), which it does not yet. */
-  // Expected-failure: @rifont until 2026-12-15
-  it.fails(
+  /* T-REH.1: the incident's profile, produced and opened by the candidate. */
+  it(
     'should start Home over 28 deleted folders with nothing forgotten automatically',
     async () => {
       await rehearse('rehearsal', undefined);

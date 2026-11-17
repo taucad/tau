@@ -62,6 +62,22 @@ describe('WorkspaceDirectoryPanel', () => {
     ).toEqual(actions);
   });
 
+  /* D2's row label for the root state `available` (T-REH.1 step 4 finds the working folder by it). */
+  it('should label a connected row Connected', () => {
+    render(
+      <WorkspaceDirectoryPanel variant='row' status='connected' workspaceName='Workshop' onDisconnect={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Connected', { exact: true })).toBeInTheDocument();
+  });
+
+  it('should not label a row Connected while its status is still being checked', () => {
+    render(<WorkspaceDirectoryPanel variant='row' status='connected' workspaceName='Workshop' isChecking />);
+
+    expect(screen.queryByText('Connected', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
   it('should remove a disconnected row from Tau', () => {
     const onRemove = vi.fn();
     render(

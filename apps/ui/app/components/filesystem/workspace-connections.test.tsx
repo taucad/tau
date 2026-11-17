@@ -455,11 +455,14 @@ describe('WorkspaceConnections', () => {
 
     /* A granted folder is not called Connected before its status is known, so no command can reach the wrong row. */
     expect(screen.queryByRole('button', { name: 'Disconnect workspace' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Connected', { exact: true })).not.toBeInTheDocument();
     state.rootStatuses = [
       { storageRootKey: `node:${kept.path}`, backend: 'node', state: 'available' },
       { storageRootKey: `node:${missing.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
     ];
     rerender(<WorkspaceConnections shouldGroupNotFound />);
+    /* Only the working folder reads Connected (D2); the lost one is in the not-found group. */
+    expect(await screen.findAllByText('Connected', { exact: true })).toHaveLength(1);
     fireEvent.click(await screen.findByRole('button', { name: 'Disconnect workspace' }));
     await waitFor(() => {
       expect(state.disconnect).toHaveBeenCalledWith(kept.path);

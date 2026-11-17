@@ -23,7 +23,7 @@ type ViewerBridge = {
   getSectionCapCompleteness():
     | { status: 'complete'; admittedSourceCount: number; exactSourceCount: number; perLoopSourceCount: number }
     | undefined;
-  getMeasureState(): { isMeasureActive: boolean; currentStart: Point | undefined };
+  getMeasureState(): { isMeasureActive: boolean; currentStart: Point | undefined; mode: 'auto' | 'point' };
   getViewSettings(): { enableGrid: boolean } | undefined;
   getCamera(): { requestedFov: number; projection: 'orthographic' | 'perspective' };
   setCamera(camera: { position: Point; target?: Point; fov?: number }): void;
@@ -236,7 +236,7 @@ describe('Viewer controls bar', () => {
     await target.click(selectors.getByRole('button', { name: /^Targets:/u }));
     await expect
       .poll(async () => {
-        const { mode }: { readonly mode: unknown } = await callBridge('getMeasureState');
+        const { mode } = await callBridge('getMeasureState');
         return mode;
       })
       .toBe('point');

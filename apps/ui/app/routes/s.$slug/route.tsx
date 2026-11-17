@@ -1,5 +1,5 @@
 import { Heading } from '@taucad/ui/components/heading';
-import { SharedProjectPassword } from '#components/share/shared-project-password.js';
+import { SharedProjectPassword } from '@taucad/publish-ui/components/share/shared-project-password';
 import { useEffect, useMemo, useState } from 'react';
 import type { MetaFunction } from 'react-router';
 import { useLoaderData, useLocation, useParams } from 'react-router';
@@ -27,7 +27,7 @@ import PublicationViewRoute, {
   publicationMeta,
 } from '#components/share/tau-publication.js';
 import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
-import type { ParsedPublication } from '#components/share/parsed-publication.js';
+import type { ParsedPublication } from '@taucad/publish-ui/components/share/parsed-publication';
 import { GithubGistManagement } from '#components/share/github-gist-management.js';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { shareProviderRegistry, withBrowserShareProviderContext } from '#lib/share-providers.js';

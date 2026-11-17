@@ -1,6 +1,7 @@
 /** Observe the native worker process tree independently of application-written diagnostic records. */
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
+import { createWindowsPowerShellEnvironment } from '#main/windows-signature.js';
 // oxlint-disable-next-line no-restricted-imports -- Native driver contract is script-owned.
 import type { QualificationProcesses } from './qualification-platform-types.mjs';
 
@@ -25,7 +26,7 @@ export const discoverQualificationProcesses = (
                   '-Command',
                   '@(Get-CimInstance Win32_Process | ForEach-Object { @{pid=[int]$_.ProcessId;parent=[int]$_.ParentProcessId;command=[string]$_.CommandLine} }) | ConvertTo-Json -Compress',
                 ],
-                { encoding: 'utf8', timeout: 30_000 },
+                { env: createWindowsPowerShellEnvironment(process.env), encoding: 'utf8', timeout: 30_000 },
               ),
             ),
           )

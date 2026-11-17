@@ -19,6 +19,8 @@ import type { Analytics } from '#hooks/use-analytics.js';
 import { fileManagerMachine, releaseFileManagerResources } from '#machines/file-manager.machine.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { fileManagerHostMachine } from '#runtime/file-manager-host.machine.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { isDesktopSafeMode } from '#runtime/root-configuration.js';
 import type { HomeBackendOutcome } from '#runtime/file-manager-host.machine.js';
 import { buildWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 
@@ -49,7 +51,23 @@ export type FileManagerHostPorts = Readonly<{
   analytics: Analytics;
   /** Read the Home engine selection; `getHomeStorageBackend` by default. */
   loadHomeBackend?: () => Promise<HomeStorageBackend>;
+  /**
+   * The engine Home starts on when the read misses its deadline: `node` on the desktop, whose Home is node by build;
+   * none on the web, which guesses nothing (row S37) and shows the retry instead. The build's by default.
+   */
+  deadlineBackend?: HomeStorageBackend;
+  /**
+   * This page load is in safe mode (D0): every file manager the host builds configures Home alone. The web's
+   * `?safe=1` passes it; the desktop shell's `tau.safeMode` sets it by default.
+   */
+  safeMode?: boolean;
 }>;
+
+/** How long the Home read may take before the start stops waiting on it (blueprint D3, B31). Milliseconds. @public */
+export const homeBackendDeadlineMilliseconds = 20_000;
+
+/** The failure a missed Home read reports on the web, where nothing may stand in for it. @public */
+export const homeBackendDeadlineMessage = "Tau's Home storage selection did not answer in time.";
 
 /** The tree options a built actor shares with the runtime. @public */
 export type FileManagerBuildOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
@@ -99,7 +117,10 @@ export type FileManagerHost = Readonly<{
 export function createFileManagerHost({
   analytics,
   loadHomeBackend = getHomeStorageBackend,
+  ...ports
 }: FileManagerHostPorts): FileManagerHost {
+  const safeMode = ports.safeMode === true || isDesktopSafeMode();
+  const deadlineBackend = 'deadlineBackend' in ports ? ports.deadlineBackend : isDesktopTarget() ? 'node' : undefined;
   let sharedWorker: Worker | undefined;
   const sharedWorkerChanges = new Topic<Worker | undefined>({ name: 'fileManagerHost.sharedWorker' });
   const setSharedWorker = (worker: Worker | undefined): void => {
@@ -112,12 +133,36 @@ export function createFileManagerHost({
   const telemetry = buildWorkspaceTelemetry(analytics);
 
   const loadBackend = createAsyncLogic<HomeBackendOutcome>({
-    run: async () => {
+    run: async ({ signal }) => {
+      /* A read that never settles (a database open that fires no event, B31) must not hold the start: at the
+       * deadline the desktop starts Home on node, its engine by build, and the web guesses nothing and offers the
+       * retry (row S37). The bound is page time, not the runtime's clock, which stays free of timers until a session
+       * arms one. */
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<HomeBackendOutcome>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(
+            deadlineBackend === undefined
+              ? { status: 'failed', message: homeBackendDeadlineMessage }
+              : { status: 'resolved', backend: deadlineBackend },
+          );
+        }, homeBackendDeadlineMilliseconds);
+      });
+      signal.addEventListener('abort', () => {
+        clearTimeout(timer);
+      });
+      const read = (async (): Promise<HomeBackendOutcome> => {
+        try {
+          return { status: 'resolved', backend: await loadHomeBackend() };
+        } catch (error) {
+          /* Keep the page mounted and offer the retry; never select a fallback engine. */
+          return { status: 'failed', message: error instanceof Error ? error.message : String(error) };
+        }
+      })();
       try {
-        return { status: 'resolved', backend: await loadHomeBackend() };
-      } catch (error) {
-        /* Keep the page mounted and offer the retry; never select a fallback engine. */
-        return { status: 'failed', message: error instanceof Error ? error.message : String(error) };
+        return await Promise.race([read, deadline]);
+      } finally {
+        clearTimeout(timer);
       }
     },
   });
@@ -145,6 +190,7 @@ export function createFileManagerHost({
     sharedWorker: worker,
     onExternalPollTelemetry: telemetry.workspaceExternalPoll,
     onRootSkipped: telemetry.workspaceRootSkipped,
+    safeMode,
     ...(backend === undefined ? { backendResolution: 'pending' } : { initialBackend: backend }),
   });
 

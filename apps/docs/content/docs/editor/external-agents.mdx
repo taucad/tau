@@ -16,13 +16,13 @@ An external agent is a coding CLI you already have installed. Tau starts it, giv
 | Claude Code | `@agentclientprotocol/claude-agent-acp` 0.70.0 | `claude` | 2.1.232     |
 | Grok Build  | Native ACP (no adapter package)                | `grok`   | 1.0.41      |
 
-An older CLI is refused before the turn starts, naming the version found.
+An older CLI is refused, naming the version found.
 
 macOS is qualified for all three, from any vendor install and from Finder. Linux is checked for discovery only; Windows is unqualified.
 
 ## Install and sign in
 
-Install each CLI on the host with its vendor's script, in table order, then sign in. macOS and Linux:
+Install each CLI with its vendor's script, then sign in. macOS and Linux:
 
 ```bash
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
@@ -44,15 +44,19 @@ irm https://x.ai/cli/install.ps1 | iex
 | Claude Code | `claude auth login` | `claude update` |
 | Grok Build  | `grok login`        | `grok update`   |
 
-`claude update` skips Homebrew and WinGet installs; use their package manager.
+`claude update` skips Homebrew and WinGet installs.
 
 Tau searches `PATH`, then each vendor's install directories, including ChatGPT.app and Claude.app on macOS, so Finder, the Start menu and a terminal find the same CLI. npm and version-manager installs are found on `PATH` only.
 
-A refused agent shows its reason and, when you can act, the install or update command. A CLI that does not answer is reported unavailable, not missing. Tau Desktop re-checks refused agents on its next listing; restart `tau serve` after installing.
+A refused agent shows its reason and, when you can act, a fix command. A CLI that does not answer is reported unavailable, not missing. Tau Desktop re-checks refused agents on its next listing; restart `tau serve` after installing.
 
 Agents run on a Tau Host: Tau Desktop, or `tau serve` paired with the browser. A browser tab with no host refuses the turn instead of answering with Tau.
 
 Each agent keeps its own configuration directory — `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or `GROK_HOME`. Tau credentials and provider API keys never reach the child process.
+
+## Permission mode
+
+A new chat starts in Auto, else Claude's Accept Edits, Codex's Approve for me or Grok's Always approve. Your pick is kept; plan modes are hidden.
 
 ## Where the agent works
 
@@ -69,6 +73,6 @@ The agent is the vendor's own client, so what it reads it may send. In direct mo
 
 ## Billing and sign-in
 
-The vendor bills the account you signed that CLI into. Tau charges no credits and quotes no price for an external turn: the chat footer names the agent, the model and the vendor's own usage report.
+The vendor bills the account you signed that CLI into. Tau charges no credits for an external turn: the chat footer names the agent, the model and the vendor's own usage report.
 
 Tau never brokers or runs a login. A logged-out agent's card lists Tau's sign-in command first, with the CLI's full path when it is outside `PATH`.

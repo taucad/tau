@@ -60,6 +60,11 @@ export type WindowsNativeSandboxOptions = Readonly<{
   spawnHelper?: WindowsNativeHelperSpawn | undefined;
   /** Whether a process exists; defaults to a signal-0 probe, which reads another account's process as alive. */
   processAlive?: ((pid: number) => boolean) | undefined;
+  /**
+   * How long, in milliseconds, a launch waits for another sandboxed launch on this computer to end (the helper runs
+   * one at a time) before it reports the helper's refusal; default 30 seconds.
+   */
+  busyWait?: number | undefined;
 }>;
 
 /** The launch the host hands the helper: the shell's spec, with the native fields of protocol version 1. @public */
@@ -68,9 +73,8 @@ export type WindowsNativeLaunchSpec = WindowsLaunchSpec &
     /** `sha256:<64 lowercase hex>`: required for an executable outside `%ProgramFiles%` and `%SystemRoot%`. */
     executableDigest: string;
     stdio: Readonly<{ kind: 'pipes'; input: true }>;
-    /** No network: the protocol's JSON `null`. */
-    // oxlint-disable-next-line typescript/no-restricted-types -- the wire value is JSON null.
-    network: null;
+    /** Never set: an omitted network is none at all (the AppContainer has no network capability). */
+    network?: undefined;
   }>;
 
 /** The host's own command for one native launch, as {@link windowsNativeLaunchVector} returns it. @public */
@@ -319,7 +323,8 @@ export const windowsNativeLaunchVector = async (request: WindowsNativeLaunchRequ
   await persistReceipt(directory, { version: 1, executionId, owner: { pid: process.pid } });
   const carried: CarriedLaunch = {
     executionId,
-    executablePath: request.executablePath,
+    /* The helper refuses a path whose final name differs (a link, a junction, an 8.3 short name): pass the long one. */
+    executablePath: await realpath(request.executablePath),
     executableSha256: request.executableSha256,
     arguments: [...request.arguments],
     readablePaths: [...request.readablePaths],
@@ -370,11 +375,25 @@ export const windowsNativeLaunchSpec = (
   environment: stringEnvironment(environment),
   stdio: { kind: 'pipes', input: true },
   filesystem: { readable: launch.readablePaths, writable: [launch.writablePath], readOnly: [], denied: [] },
-  network: null,
   journal,
 });
 
 const sandboxedChild = Symbol('tau.windowsSandboxedChild');
+
+/** How long a launch waits for another sandboxed launch on this computer to end before it reports the refusal. */
+const busyWaitMilliseconds = 30_000;
+const busyBackoffMilliseconds = 100;
+const busyBackoffCeilingMilliseconds = 2000;
+
+/**
+ * Whether the helper refused because another sandboxed launch holds the computer's descriptor lock (README,
+ * Sessions): nothing changed, so asking again once it ends is safe.
+ *
+ * @param refusal - The helper's refusal.
+ * @returns Whether to ask again.
+ */
+const isBusyRefusal = (refusal: Readonly<{ status: string; message: string }>): boolean =>
+  refusal.status === 'sandbox-unavailable' && refusal.message.startsWith('another sandboxed launch is running');
 
 /**
  * Whether a child came from {@link spawnWindowsNative}: ending it is the helper's `terminate`, so the helper still
@@ -411,8 +430,12 @@ export const spawnWindowsNative = (
     throw new Error('The Windows native sandbox is not configured for this launch vector.');
   }
   const directory = realpathSync(sandbox.journalDirectory);
-  const helper = helperSpawn(sandbox)(['launch']);
-  const decoder = createWindowsFrameDecoder();
+  const spawnHelper = helperSpawn(sandbox);
+  let helper = spawnHelper(['launch']);
+  let decoder = createWindowsFrameDecoder();
+  const firstAttempt = Date.now();
+  let busyRetries = 0;
+  let busy = false;
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   let phase: 'awaiting-ready' | 'arming' | 'starting' | 'running' | 'ended' = 'awaiting-ready';
@@ -550,6 +573,7 @@ export const spawnWindowsNative = (
         return;
       }
       case 'refused': {
+        busy = phase === 'awaiting-ready' && isBusyRefusal(frame.refusal);
         refusal = frame.refusal.diagnostic
           ? `${frame.refusal.message} (${frame.refusal.diagnostic})`
           : frame.refusal.message;
@@ -562,22 +586,7 @@ export const spawnWindowsNative = (
     }
   };
 
-  helper.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
-    try {
-      for (const raw of decoder.push(new Uint8Array(chunk))) {
-        onFrame(decodeWindowsHelperFrame(raw));
-      }
-    } catch (error) {
-      fail(error instanceof Error ? error : new Error(String(error)));
-    }
-  });
   let helperDiagnostic = '';
-  helper.stderr.setEncoding('utf8').on('data', (chunk: string) => {
-    helperDiagnostic = `${helperDiagnostic}${chunk}`.slice(-2000);
-  });
-  helper.stdin.on('error', () => {
-    // The helper closing its input first is reported through its exit.
-  });
 
   const settle = async (helperCode: number | undefined): Promise<void> => {
     phase = 'ended';
@@ -635,30 +644,78 @@ export const spawnWindowsNative = (
     child.emit('close', code, signal);
   };
 
-  helper.once('error', (error) => {
-    phase = 'ended';
-    stdout.end();
-    stderr.end();
-    // async-iife: bootstrap -- nothing ran, so only the receipt is left; the caller hears the error.
-    void (async () => {
-      await rm(receiptPath(directory, executionId), { force: true });
-      child.emit('error', error);
-    })();
-  });
-  helper.once('close', (code) => {
-    // async-iife: bootstrap -- settlement reaches the caller as this child's own exit or error.
-    void settle(code ?? undefined);
-  });
+  /*
+   * The helper runs one sandboxed launch per computer until concurrent restore lands, and refuses a second at once
+   * with nothing changed. A launch that finds it busy waits for the other to end, within a bound, by asking again.
+   */
+  const retryWhenBusy = (): boolean => {
+    const waited = Date.now() - firstAttempt;
+    if (!busy || child.killed || reported !== undefined || waited >= (sandbox.busyWait ?? busyWaitMilliseconds)) {
+      return false;
+    }
+    const retryDelayMilliseconds = Math.min(busyBackoffMilliseconds * 2 ** busyRetries, busyBackoffCeilingMilliseconds);
+    busyRetries += 1;
+    busy = false;
+    setTimeout(() => {
+      if (child.killed) {
+        void settle(undefined);
+        return;
+      }
+      refusal = undefined;
+      helperDiagnostic = '';
+      helper = spawnHelper(['launch']);
+      decoder = createWindowsFrameDecoder();
+      child.pid = helper.pid;
+      attach();
+    }, retryDelayMilliseconds).unref();
+    return true;
+  };
 
-  sendToHelper(
-    encodeWindowsHostFrame({
-      type: 'spec',
-      spec: windowsNativeLaunchSpec(
-        { ...launch, workingDirectory: options.cwd },
-        options.env,
-        journalPath(directory, executionId),
-      ),
-    }),
-  );
+  const attach = (): void => {
+    const current = helper;
+    current.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+      try {
+        for (const raw of decoder.push(new Uint8Array(chunk))) {
+          onFrame(decodeWindowsHelperFrame(raw));
+        }
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+    current.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+      helperDiagnostic = `${helperDiagnostic}${chunk}`.slice(-2000);
+    });
+    current.stdin.on('error', () => {
+      // The helper closing its input first is reported through its exit.
+    });
+    current.once('error', (error) => {
+      phase = 'ended';
+      stdout.end();
+      stderr.end();
+      // async-iife: bootstrap -- nothing ran, so only the receipt is left; the caller hears the error.
+      void (async () => {
+        await rm(receiptPath(directory, executionId), { force: true });
+        child.emit('error', error);
+      })();
+    });
+    current.once('close', (code) => {
+      if (retryWhenBusy()) {
+        return;
+      }
+      // async-iife: bootstrap -- settlement reaches the caller as this child's own exit or error.
+      void settle(code ?? undefined);
+    });
+    sendToHelper(
+      encodeWindowsHostFrame({
+        type: 'spec',
+        spec: windowsNativeLaunchSpec(
+          { ...launch, workingDirectory: options.cwd },
+          options.env,
+          journalPath(directory, executionId),
+        ),
+      }),
+    );
+  };
+  attach();
   return child as unknown as ChildProcessWithoutNullStreams;
 };

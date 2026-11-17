@@ -5,7 +5,16 @@
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,8 +63,11 @@ const events = (): Array<Record<string, unknown>> =>
         .map((line) => JSON.parse(line) as Record<string, unknown>)
     : [];
 
+let executablePath: string;
 const request = {
-  executablePath: String.raw`C:\Users\someone\AppData\Local\Tau\store\closure\python\python.exe`,
+  get executablePath(): string {
+    return executablePath;
+  },
   executableSha256: digest,
   arguments: ['-I', '-B', '-u', 'worker.py'],
   readablePaths: [String.raw`C:\Users\someone\AppData\Local\Tau\store\closure`, String.raw`C:\work\mirror`],
@@ -101,6 +113,9 @@ beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'tau-native-windows-'));
   journalDirectory = join(root, 'journals');
   logPath = join(root, 'helper.log');
+  mkdirSync(join(root, 'closure', 'python'), { recursive: true });
+  executablePath = join(root, 'closure', 'python', 'python.exe');
+  writeFileSync(executablePath, '');
 });
 
 afterEach(() => {
@@ -109,7 +124,7 @@ afterEach(() => {
 });
 
 describe('the Windows native sandbox adapter', () => {
-  it('should hand the helper a spec with the verified digest, the grants and no network, then relay the worker', async () => {
+  it('should hand the helper a spec with the resolved executable, its verified digest, the grants and no network, then relay the worker', async () => {
     const child = await launched();
     expect(isWindowsSandboxedChild(child)).toBe(true);
     child.stdin.write('hello ');
@@ -121,14 +136,13 @@ describe('the Windows native sandbox adapter', () => {
     const spec = events().find((event) => event['event'] === 'spec')!['spec'] as Record<string, unknown>;
     expect(spec).toEqual({
       version: 1,
-      executable: request.executablePath,
+      executable: realpathSync(request.executablePath),
       executableDigest: `sha256:${digest}`,
       arguments: request.arguments,
       workingDirectory: request.workingDirectory,
       environment: { SystemRoot: String.raw`C:\Windows`, TEMP: request.writablePath },
       stdio: { kind: 'pipes', input: true },
       filesystem: { readable: request.readablePaths, writable: [request.writablePath], readOnly: [], denied: [] },
-      network: null,
       journal: expect.stringMatching(/[\da-f-]{36}\.acl\.json$/u) as unknown,
     });
     // Input waits for `started`; the frames go spec, start, input…, close-input.
@@ -181,6 +195,33 @@ describe('the Windows native sandbox adapter', () => {
       'The Windows sandbox launch failed: The helper sent an unknown frame type 0x7f.',
     );
     expect(events().some((event) => event['event'] === 'frame' && event['type'] === 0x05)).toBe(true);
+    expect(readdirSync(journalDirectory)).toEqual([]);
+  });
+
+  it('should ask again while another sandboxed launch holds the computer, then run', async () => {
+    const child = await launched('busy-once');
+    child.stdin.end('after the other\n');
+
+    const result = await settled(child);
+
+    expect(result).toEqual({ code: 0, stdout: 'after the other\n', stderr: 'stdin closed\n' });
+    expect(events().filter((event) => event['event'] === 'spec')).toHaveLength(2);
+    expect(readdirSync(journalDirectory)).toEqual([]);
+  });
+
+  it('should report the busy refusal once the wait is spent, and leave no receipt', async () => {
+    configureWindowsNativeSandbox(options('busy', { busyWait: 300 }));
+    const child = spawnWindowsNative(await windowsNativeLaunchVector(request), {
+      cwd: request.workingDirectory,
+      env: {},
+    });
+
+    const result = await settled(child);
+
+    expect(result.error?.message).toMatch(
+      /^The Windows sandbox refused the native launch: another sandboxed launch is running on this computer/u,
+    );
+    expect(events().filter((event) => event['event'] === 'spec').length).toBeGreaterThan(1);
     expect(readdirSync(journalDirectory)).toEqual([]);
   });
 

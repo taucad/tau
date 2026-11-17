@@ -14,6 +14,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 import { linuxInstallation } from '#shared/linux-installation.js';
+import { createWindowsPowerShellEnvironment } from '#main/windows-signature.js';
 import { promisify } from 'node:util';
 import { defaultDependencyStore } from '@taucad/host';
 import { assertQualificationConsumerScope, fetchQualificationCandidates } from './qualification-candidates.mjs';
@@ -1027,7 +1028,7 @@ const main = async (): Promise<void> => {
             await execFileAsync(
               'powershell.exe',
               ['-NoProfile', '-NonInteractive', '-Command', 'Start-Process -FilePath $env:TAU_Q_OPEN_URI'],
-              { env: { ...process.env, TAU_Q_OPEN_URI: uri }, timeout: 30_000 },
+              { env: createWindowsPowerShellEnvironment(process.env, { TAU_Q_OPEN_URI: uri }), timeout: 30_000 },
             );
           } else if (linuxConsumer) {
             // The consumer's own session opens the link and the file, as a second instance of their running app.

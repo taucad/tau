@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { extractFile, uncache } from '@electron/asar';
 import { z } from 'zod';
-import { verifyWindowsSignature } from '#main/windows-signature.js';
+import { createWindowsPowerShellEnvironment, verifyWindowsSignature } from '#main/windows-signature.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Native qualification scripts share one driver contract. */
@@ -70,7 +70,12 @@ const powershell = (script: string, environment: Record<string, string> = {}): u
       '-EncodedCommand',
       Buffer.from(`$ErrorActionPreference='Stop'; ${script}`, 'utf16le').toString('base64'),
     ],
-    { env: { ...process.env, ...environment }, encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 },
+    {
+      env: createWindowsPowerShellEnvironment(process.env, environment),
+      encoding: 'utf8',
+      timeout: 60_000,
+      maxBuffer: 1024 * 1024,
+    },
   );
   if (result.status !== 0) {
     throw new QualificationUnavailable(`Windows observation failed: ${result.stderr || result.error?.message}`);

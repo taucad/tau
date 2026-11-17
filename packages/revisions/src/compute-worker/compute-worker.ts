@@ -399,6 +399,10 @@ export type ComputeConnection = Readonly<{
   close: (failure: (method: ComputeMethod) => Error) => void;
 }>;
 
+/* A byte view that does not cover the whole buffer behind it. */
+const isPartialView = (value: unknown): value is Uint8Array<ArrayBuffer> =>
+  value instanceof Uint8Array && value.byteLength !== value.buffer.byteLength;
+
 /**
  * The store's half of the seam over one port.
  *
@@ -444,11 +448,18 @@ export const openComputeConnection = (port: ComputePort, now: () => number = Dat
      * writer reads an object again after deflating it, a loose writer hashes then deflates),
      * unless it hands them over as consumed. */
     const [bytes] = args;
+    const transfers = transfersArguments(method, args);
+    /* A view over part of a larger buffer is sent as a copy of its own bytes, handed over: a clone
+     * carries the whole buffer behind a view, and a pack entry read out of a wide Range read would
+     * otherwise send the whole read to the worker once per entry. */
+    const sent = transfers
+      ? args
+      : args.map((argument) => (isPartialView(argument) ? new Uint8Array(argument) : argument));
+    const handed = transfers
+      ? [(bytes as Uint8Array<ArrayBuffer>).buffer]
+      : sent.flatMap((argument, at) => (argument === args[at] ? [] : [(argument as Uint8Array<ArrayBuffer>).buffer]));
     try {
-      port.postMessage(
-        { id, method, args } satisfies ComputeRequest,
-        transfersArguments(method, args) ? [(bytes as Uint8Array<ArrayBuffer>).buffer] : [],
-      );
+      port.postMessage({ id, method, args: sent } satisfies ComputeRequest, handed);
     } catch (error) {
       /* A call that never left (an uncloneable argument, a detached buffer) waits for nothing. */
       waiting.delete(id);

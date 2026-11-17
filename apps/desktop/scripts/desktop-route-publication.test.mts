@@ -750,6 +750,8 @@ const linuxProduction = platformCandidate('linux-x64');
 const linuxProductionReceipts = productionReceipts.filter((proof) => proof.target === 'linux-x64');
 const macProduction = platformCandidate('darwin-arm64');
 const macProductionReceipts = productionReceipts.filter((proof) => proof.target === 'darwin-arm64');
+const windowsProduction = platformCandidate('win32-x64');
+const windowsProductionReceipts = productionReceipts.filter((proof) => proof.target === 'win32-x64');
 assert.deepEqual(
   qualifyDesktopScopedRoutes(linuxProduction, linuxProductionReceipts, {
     trust: productionTrust,
@@ -787,7 +789,7 @@ assert.deepEqual(
 const rejectPlatform = (
   candidate: unknown,
   proofs: readonly unknown[],
-  refusal: { scope: 'all' | 'linux' | 'macos'; pattern?: RegExp },
+  refusal: { scope: 'all' | 'linux' | 'macos' | 'windows'; pattern?: RegExp },
 ): void => {
   assert.throws(
     () => qualifyDesktopScopedRoutes(candidate, proofs, { trust: productionTrust, scope: refusal.scope }),
@@ -871,6 +873,59 @@ rejectPlatform(
   linuxProductionReceipts.filter((proof) => proof.route === 'linux-apt'),
   { scope: 'linux', pattern: /Linux-only publication requires exactly/u },
 );
+// Windows (D-H5, 2026-11-17) is its own platform: exactly the NSIS installer and ZIP, with CI and VM receipts.
+assert.deepEqual(
+  qualifyDesktopScopedRoutes(windowsProduction, windowsProductionReceipts, {
+    trust: productionTrust,
+    scope: 'windows',
+  }).routes.map(({ route, target, cleanHost }) => `${target}/${route}:${cleanHost}`),
+  ['win32-x64/windows-nsis:passed'],
+);
+rejectPlatform(windowsProduction, windowsProductionReceipts, { scope: 'all', pattern: /all five in production/u });
+for (const index of windowsProductionReceipts.keys()) {
+  rejectPlatform(
+    windowsProduction,
+    windowsProductionReceipts.filter((_, other) => other !== index),
+    { scope: 'windows' },
+  );
+}
+// Windows clean-host acceptance is never pending: unlike Mac-only, a CI-only Windows promotion is refused.
+rejectPlatform(
+  windowsProduction,
+  windowsProductionReceipts.filter((proof) => proof.environment.kind === 'ci'),
+  { scope: 'windows', pattern: /vm receipt/u },
+);
+rejectPlatform(windowsProduction, [...windowsProductionReceipts, ...linuxProductionReceipts], { scope: 'windows' });
+rejectPlatform(linuxProduction, [...linuxProductionReceipts, ...windowsProductionReceipts], { scope: 'linux' });
+rejectPlatform(production, productionReceipts, {
+  scope: 'windows',
+  pattern: /Windows-only publication requires exactly the NSIS installer and ZIP/u,
+});
+rejectPlatform(windowsProduction, windowsProductionReceipts, { scope: 'macos' });
+rejectPlatform(macProduction, macProductionReceipts, { scope: 'windows' });
+rejectPlatform(
+  parseDesktopArtifactManifest({
+    ...windowsProduction,
+    artifacts: windowsProduction.artifacts.filter((artifact) => artifact.kind === 'windows-zip'),
+  }),
+  [],
+  { scope: 'windows' },
+);
+assert.throws(() =>
+  qualifyDesktopScopedRoutes(windowsProduction, windowsProductionReceipts, {
+    trust: { ...productionTrust, 'windows-nsis': '' },
+    scope: 'windows',
+  }),
+);
+for (const index of windowsProductionReceipts.keys()) {
+  rejectPlatform(
+    windowsProduction,
+    windowsProductionReceipts.map((proof, other) =>
+      other === index ? { ...proof, trust: { kind: 'release', identity: 'other-signer' } } : proof,
+    ),
+    { scope: 'windows' },
+  );
+}
 // Intel stays out of the Mac scope in production too: an Intel-only production candidate never parses.
 assert.throws(() => platformCandidate('darwin-x64'), /every supported target or one complete platform/u);
 console.log('Per-platform production promotion (D-H5) checks passed');
@@ -903,6 +958,36 @@ assert.deepEqual(desktopLaneKeys('linux'), {
 assert.equal(desktopLaneManifestKey('desktop@0.4.0', 'all'), 'releases/desktop@0.4.0/desktop-artifacts.json');
 assert.equal(desktopLaneManifestKey('desktop@0.4.0', 'macos'), 'releases/desktop@0.4.0/desktop-artifacts-macos.json');
 assert.equal(desktopLaneManifestKey('desktop@0.4.0', 'linux'), 'releases/desktop@0.4.0/desktop-artifacts-linux.json');
+assert.equal(
+  desktopLaneManifestKey('desktop@0.4.0', 'windows'),
+  'releases/desktop@0.4.0/desktop-artifacts-windows.json',
+);
+assert.deepEqual(desktopLaneKeys('windows'), {
+  intent: 'latest/installer-promotion-windows.json',
+  completion: 'latest/installer-completed-windows.json',
+  catalog: 'latest/installers-windows.json',
+});
+const windowsCatalog = createDesktopInstallerCatalog({
+  manifest: windowsProduction,
+  receipts: windowsProductionReceipts,
+  trust: productionTrust,
+  approval: {
+    ...approval,
+    tag: productionTag,
+    channel: 'production',
+    version: windowsProduction.version,
+    manifestSha256: desktopManifestDigest(windowsProduction),
+  },
+  scope: 'windows',
+});
+assert.deepEqual(
+  windowsCatalog.routes.map(({ route, qualification, artifacts }) => [
+    route,
+    qualification,
+    artifacts.map((a) => a.kind).sort(),
+  ]),
+  [['windows-nsis', { ci: true, vm: true, trust: 'release' }, ['windows-nsis', 'windows-zip']]],
+);
 const linuxOnly = composeDesktopInstallerCatalog('production', { linux: linuxCatalog });
 const composed = composeDesktopInstallerCatalog('production', { linux: linuxCatalog, macos: macProductionCatalog });
 assert.deepEqual(
@@ -910,6 +995,17 @@ assert.deepEqual(
   ['macos', 'linux'],
 );
 assert.deepEqual(desktopCatalogLanes(composed), ['macos', 'linux']);
+// A Windows lane slots between Mac and Linux in the fixed order and keeps both other platforms.
+const withWindows = composeDesktopInstallerCatalog('production', {
+  linux: linuxCatalog,
+  windows: windowsCatalog,
+  macos: macProductionCatalog,
+});
+assert.deepEqual(desktopCatalogLanes(withWindows), ['macos', 'windows', 'linux']);
+assertDesktopCatalogRetainsRoutes(composed, withWindows);
+assert.throws(() => {
+  assertDesktopCatalogRetainsRoutes(withWindows, composed);
+}, /withdraw previously promoted routes/u);
 assert.deepEqual(desktopCatalogLanes(macCatalog), ['all']);
 // Adding a platform keeps the other; dropping one, or replacing a legacy single catalog's routes, is refused.
 assertDesktopCatalogRetainsRoutes(undefined, linuxOnly);
@@ -929,6 +1025,8 @@ for (const platforms of [
   {},
   { macos: linuxCatalog },
   { linux: macProductionCatalog },
+  { windows: linuxCatalog },
+  { linux: windowsCatalog },
   { linux: { ...linuxCatalog, routes: linuxCatalog.routes.slice(1) } },
   { linux: { ...linuxCatalog, channel: 'staging' } },
 ] as const) {

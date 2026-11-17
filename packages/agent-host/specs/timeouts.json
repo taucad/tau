@@ -292,6 +292,14 @@
       "fixedBy": "outside this charter: desktop import grant delivery (a grant carried with the port request would remove the wait)"
     },
     {
+      "id": "TRUSTED-ROOT-CANONICAL",
+      "bound": "Background canonicalisation of an admitted desktop root (2 s): a root whose realpath has not settled is canonicalised by the request that needs it, and a hung one is never waited on again",
+      "site": "apps/libs/desktop-services-host/src/services-host.impl.ts",
+      "token": "trustedRootCanonicalDeadlineMilliseconds);",
+      "class": "External edge",
+      "owner": "desktop resilient startup WP1"
+    },
+    {
       "id": "B18",
       "bound": "Geometry-runner port request to main (10 s)",
       "site": "apps/libs/desktop-services-host/src/services-host.ts",

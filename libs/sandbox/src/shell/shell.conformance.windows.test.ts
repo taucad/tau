@@ -676,15 +676,18 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     const evidence = (observations[`T02-cache-${label}`] ??= { timings: {} }) as { timings: Record<string, number> };
     return evidence.timings;
   };
-  /* The service's `PSModulePath` (`shellEnvironment`): the shell's own modules, then Windows PowerShell's, once. */
+  /*
+   * The service's `PSModulePath` (`shellEnvironment`): the shell's own modules first; then Windows PowerShell's for
+   * PowerShell 7, and the machine's `%ProgramFiles%\WindowsPowerShell\Modules` for Windows PowerShell 5.1, so that no
+   * machine module folder the sandbox cannot list stops 5.1's auto-discovery before its built-in modules.
+   */
   const serviceModulePath = (executablePath: string): string => {
-    const folders = [
-      join(dirname(executablePath), 'Modules'),
-      join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
-    ];
-    return folders
-      .filter((path, index) => folders.findIndex((other) => other.toLowerCase() === path.toLowerCase()) === index)
-      .join(';');
+    const home = dirname(executablePath);
+    const windowsPowerShellHome = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0');
+    const programFiles = process.env['ProgramW6432'] ?? process.env['ProgramFiles'] ?? String.raw`C:\Program Files`;
+    return home.toLowerCase() === windowsPowerShellHome.toLowerCase()
+      ? [join(home, 'Modules'), join(programFiles, 'WindowsPowerShell', 'Modules')].join(';')
+      : [join(home, 'Modules'), join(windowsPowerShellHome, 'Modules')].join(';');
   };
   /*
    * The build's deadline here. Run 44014103911 measured 87.5 s for Windows PowerShell 5.1 and 14.2 s for PowerShell 7

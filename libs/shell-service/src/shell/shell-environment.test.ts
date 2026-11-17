@@ -93,19 +93,31 @@ describe('shellEnvironment on Windows', () => {
     });
   });
 
-  it("names Windows PowerShell's module folder once, whatever its case, and PowerShell 7's first", () => {
-    expect(
-      shellEnvironment({
-        ...windows,
-        executablePath: String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
-      })['PSModulePath'],
-    ).toBe(String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\Modules`);
+  it("gives PowerShell 7 its own modules first, then Windows PowerShell's", () => {
     expect(
       shellEnvironment({
         ...windows,
         executablePath: String.raw`C:\Program Files\PowerShell\7\pwsh.exe`,
       })['PSModulePath'],
     ).toBe(String.raw`C:\Program Files\PowerShell\7\Modules;C:\WINDOWS\System32\WindowsPowerShell\v1.0\Modules`);
+  });
+
+  it("gives Windows PowerShell 5.1 its own modules before the machine's, so no machine module folder hides them", () => {
+    /* Named after its home, the machine folder is one 5.1 does not insert again before it. */
+    expect(
+      shellEnvironment({
+        ...windows,
+        executablePath: String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+        host: { ...windows.host, ProgramW6432: String.raw`D:\Programs` },
+      })['PSModulePath'],
+    ).toBe(String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\Modules;D:\Programs\WindowsPowerShell\Modules`);
+    expect(
+      shellEnvironment({
+        ...windows,
+        executablePath: String.raw`C:\WINDOWS\system32\windowspowershell\v1.0\powershell.exe`,
+        host: { SystemRoot: String.raw`C:\Windows` },
+      })['PSModulePath'],
+    ).toBe(String.raw`C:\WINDOWS\system32\windowspowershell\v1.0\Modules;C:\Program Files\WindowsPowerShell\Modules`);
   });
 
   it('points PowerShell at a module analysis cache only when the launch has one', () => {

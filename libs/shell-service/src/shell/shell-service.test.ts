@@ -1144,8 +1144,8 @@ describe('the PowerShell module analysis cache (Windows)', () => {
     const cache = await buildPowerShellModuleCache(options, running());
 
     expect(cache).toStrictEqual({
-      directory: join(sessions, 'tau-powershell-cache', 'v1-ab12'),
-      file: join(sessions, 'tau-powershell-cache', 'v1-ab12', 'ModuleAnalysisCache'),
+      directory: join(sessions, 'tau-powershell-cache', 'v2-ab12'),
+      file: join(sessions, 'tau-powershell-cache', 'v2-ab12', 'ModuleAnalysisCache'),
     });
     await expect(readFile(cache!.file, 'utf8')).resolves.toBe('analysis');
     const [build] = options.provider.launches;
@@ -1206,7 +1206,7 @@ describe('the PowerShell module analysis cache (Windows)', () => {
     await buildPowerShellModuleCache(buildOptions(writes('analysis')), running());
     const options = buildOptions(writes('other'));
     const schedule = await powerShellModuleCacheSchedule(options);
-    expect(schedule?.current()?.directory).toBe(join(sessions, 'tau-powershell-cache', 'v1-ab12'));
+    expect(schedule?.current()?.directory).toBe(join(sessions, 'tau-powershell-cache', 'v2-ab12'));
     schedule?.start();
     await schedule?.settled();
     expect(options.provider.launches).toHaveLength(0);
@@ -1214,8 +1214,8 @@ describe('the PowerShell module analysis cache (Windows)', () => {
 
   it('grants the built cache to every later agent and Terminal launch read-only', async () => {
     const cache = {
-      directory: join(base, 'cache', 'v1-ab12'),
-      file: join(base, 'cache', 'v1-ab12', 'ModuleAnalysisCache'),
+      directory: join(base, 'cache', 'v2-ab12'),
+      file: join(base, 'cache', 'v2-ab12', 'ModuleAnalysisCache'),
     };
     const { service, provider } = harness(() => ({ status: 'started', exit: { exitCode: 0 } }), {
       powerShellModuleCache: createPowerShellModuleCacheSchedule({ initial: cache, build: async () => undefined }),
@@ -1242,8 +1242,8 @@ describe('the PowerShell module analysis cache (Windows)', () => {
 
   it('builds after startup recovery, stops the build for a launch that then runs uncached, and grants it once built', async () => {
     const cache: PowerShellModuleCache = {
-      directory: join(base, 'cache', 'v1-ab12'),
-      file: join(base, 'cache', 'v1-ab12', 'ModuleAnalysisCache'),
+      directory: join(base, 'cache', 'v2-ab12'),
+      file: join(base, 'cache', 'v2-ab12', 'ModuleAnalysisCache'),
     };
     const steps: string[] = [];
     let builds = 0;

@@ -84,8 +84,8 @@ const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undef
  *
  * Audit first-party sources: rg -n "new URL\(['\"]\.\..*\.(?:js|ts)['\"], import\.meta\.url\)" packages/
  *
- * The lists are the server environment's `resolve` options (`environments.ssr.resolve`): under React Router's
- * `future.v8_viteEnvironmentApi` the top-level `ssr.external` and `ssr.noExternal` are not honoured, and
+ * The lists are the server environment's `resolve` options (`environments.ssr.resolve`): under React Router 8's
+ * Environment API build the top-level `ssr.external` and `ssr.noExternal` are not honoured, and
  * `@taucad/runtime` was bundled into the server without a warning (React Router 8 migration RR5, round-2 finding 2).
  * `scripts/check-server-output.mts` asserts the external specifiers survive in the built server.
  */
@@ -699,8 +699,8 @@ export default defineConfig(({ command, mode }) => {
       ],
     },
     /*
-     * React Router builds the client and server environments from this one config (`future.v8_viteEnvironmentApi`,
-     * with shared config and plugins), so an option for one graph only is set on its environment.
+     * React Router 8 builds the client and server environments from this one config (the Environment API, with
+     * shared config and plugins), so an option for one graph only is set on its environment.
      */
     environments: {
       /*

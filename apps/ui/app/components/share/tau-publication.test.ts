@@ -423,8 +423,8 @@ describe('Tau publication client environment', () => {
 });
 
 /**
- * The meta function's arguments with only what it reads. React Router 7 types still require the deprecated `data`,
- * which 8 removes (B10), so the cast keeps one fixture valid on both.
+ * The meta function's arguments with only what it reads: the cast stands in for the location and matches it never
+ * reads.
  */
 const metaArgs = (loaderData: Parameters<typeof meta>[0]['loaderData']): Parameters<typeof meta>[0] =>
   ({ loaderData, params: { id: 'pub_1' }, location: {}, matches: [] }) as unknown as Parameters<typeof meta>[0];

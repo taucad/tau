@@ -45,8 +45,8 @@ export const createServerOutputAssets = (options: { clientDirectory: string }): 
   name: 'tau:server-output-assets',
   apply: 'build',
   /*
-   * The server environment, by its consumer: React Router's Environment API build (`future.v8_viteEnvironmentApi`)
-   * builds client and server from one shared config, so the config-level `isSsrBuild` is false for both.
+   * The server environment, by its consumer: React Router 8's Environment API build builds client and server from
+   * one shared config, so the config-level `isSsrBuild` is false for both.
    */
   applyToEnvironment: (environment) => environment.config.consumer === 'server',
   writeBundle: {

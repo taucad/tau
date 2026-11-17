@@ -38,32 +38,24 @@ export default {
    * open pages eight times during e2e-nightly's development tier (2026-11-12).
    * Worker entries, which no route reaches statically, are added in `vite.config.ts`.
    *
-   * `v8_passThroughRequests` is React Router 8's behaviour (blueprint B4): loaders and actions get the request as
-   * sent, so a client navigation's `request.url` is `<path>.data?_routes=…`. Anything that means the page's own URL
-   * reads the `url` argument.
-   *
-   * `v8_trailingSlashAwareDataRequests` is React Router 8's data request naming (blueprint B5, RR4): a path ending in
-   * `/` asks for `<path>_.data`, so Home's data request is `/_.data`, no longer `/_root.data`. The marketing edge
-   * function and the skew protection pin accept both names, so a tab of an earlier build still gets its data.
-   *
-   * `v8_viteEnvironmentApi` is React Router 8's build (blueprint B6, RR5): one Vite config builds the client and server
-   * environments, so server-only options live under `environments.ssr` in `vite.config.ts`, and the Netlify adapter
-   * (4.x) writes a function that imports `build/server/index.js` and the adapter's `serverless` handler.
-   *
-   * `v8_splitRouteModules` is React Router 8's default (blueprint B8, RR6): a route's `clientLoader`, `clientAction`,
-   * `clientMiddleware` and `HydrateFallback` load as their own chunks. No route has one that splits today, and
-   * `scripts/check-critical-budget.mts` fails when a split module first appears in the manifest, because split chunks
-   * load outside the patched `loadRouteModule` stale-build fallback.
+   * React Router 8 (blueprint RR8) makes the behaviour the `v8_*` flags turned on under 7 the default, and rejects
+   * the flags:
+   * - loaders and actions get the request as sent (B4), so a client navigation's `request.url` is
+   *   `<path>.data?_routes=…`. Anything that means the page's own URL reads the `url` argument;
+   * - data requests are trailing-slash aware (B5): Home's is `/_.data`, no longer `/_root.data`. The marketing edge
+   *   function and the skew protection pin accept both names, so a tab of an earlier build still gets its data;
+   * - one Vite config builds the client and server environments (B6), so server-only options live under
+   *   `environments.ssr` in `vite.config.ts`, and the Netlify adapter (4.x) writes a function that imports
+   *   `build/server/index.js` and the adapter's `serverless` handler;
+   * - middleware is always on;
+   * - route modules split (B8, `splitRouteModules` defaults to `true`): a route's `clientLoader`, `clientAction`,
+   *   `clientMiddleware` and `HydrateFallback` load as their own chunks. No route has one that splits today, and
+   *   `scripts/check-critical-budget.mts` fails when a split module first appears in the manifest, because split
+   *   chunks load outside the patched `loadRouteModule` stale-build fallback.
    */
   future: {
-    /* eslint-disable @typescript-eslint/naming-convention -- React Router's flag names. */
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag name.
     unstable_optimizeDeps: true,
-    v8_passThroughRequests: true,
-    v8_middleware: true,
-    v8_trailingSlashAwareDataRequests: true,
-    v8_viteEnvironmentApi: true,
-    v8_splitRouteModules: true,
-    /* eslint-enable @typescript-eslint/naming-convention -- The flag names end here. */
   },
   /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.

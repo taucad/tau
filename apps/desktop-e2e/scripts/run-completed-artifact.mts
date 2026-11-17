@@ -515,6 +515,7 @@ const main = async (): Promise<void> => {
       'src/desktop-converter.spec.ts',
       'src/desktop-ephemeral-isolation.spec.ts',
       'src/desktop-image-geospec.spec.ts',
+      'src/desktop-image-parity.spec.ts',
       'src/desktop-geometry-host.spec.ts',
       'src/desktop-chat-replay.spec.ts',
       'src/desktop-chat-in-project.spec.ts',

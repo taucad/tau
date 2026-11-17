@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '#components/chat-paste-handler.js';
@@ -30,6 +32,24 @@ const bmpBytes = (() => {
   view.setInt32(22, 32, true);
   view.setUint16(26, 1, true);
   view.setUint16(28, 24, true);
+  return bytes;
+})();
+
+/** A real HEIC photo: some pickers and clipboards type it `application/octet-stream`. */
+const heicBytes = new Uint8Array(
+  readFileSync(path.join(import.meta.dirname, '../../../../../libs/utils/src/image-probe.fixtures/small.heic')),
+);
+
+/** A 32×48, 8-bit Photoshop header: recognised, never stored or converted. */
+const psdBytes = (() => {
+  const bytes = new Uint8Array(26);
+  const view = new DataView(bytes.buffer);
+  bytes.set(new TextEncoder().encode('8BPS'));
+  view.setUint16(4, 1);
+  view.setUint16(12, 3);
+  view.setUint32(14, 32);
+  view.setUint32(18, 48);
+  view.setUint16(22, 8);
   return bytes;
 })();
 
@@ -267,6 +287,32 @@ describe('chat paste image handling', () => {
       expect(onImage).toHaveBeenCalledWith('data:image/bmp;base64,RAW_scan.bmp', bmp);
       expect(onRefused).toHaveBeenCalledWith({ outcome: 'refused', reason: 'unsupported-format', format: 'bmp' }, bmp);
     });
+  });
+
+  it('should read a pasted file typed application/octet-stream and let its bytes decide', async () => {
+    const heic = makeFile('IMG_0001.HEIC', 'application/octet-stream', heicBytes);
+    const psd = makeFile('layout.psd', 'application/octet-stream', psdBytes);
+    const zip = makeFile('models.zip', 'application/octet-stream', new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
+    const event = {
+      clipboardData: makeClipboardData({ items: [makeItem(heic), makeItem(psd), makeItem(zip)] }),
+      preventDefault: vi.fn(),
+    };
+    const onImage = vi.fn<(dataUrl: string, file: File) => void>();
+    const onRefused = vi.fn<(refusal: AttachmentIntakeRefusal, file: File) => void>();
+
+    expect(getClipboardImageFiles(event.clipboardData)).toEqual([heic, psd, zip]);
+    expect(handleClipboardImagePaste({ event, onImage, onRefused, loadTranscodeSources: async () => ['heic'] })).toBe(
+      true,
+    );
+
+    await waitFor(() => {
+      expect(onRefused).toHaveBeenCalledTimes(2);
+    });
+    expect(onImage.mock.calls).toEqual([['data:image/heic;base64,RAW_IMG_0001.HEIC', heic]]);
+    expect(onRefused.mock.calls).toEqual([
+      [{ outcome: 'refused', reason: 'unsupported-format', format: 'psd' }, psd],
+      [{ outcome: 'refused', reason: 'not-an-image' }, zip],
+    ]);
   });
 
   it('should leave non-image paste events to the caller fallback', () => {

@@ -1,4 +1,4 @@
-import { readAttachmentFile } from '#utils/attachment-intake.js';
+import { isUnknownDeclaredType, readAttachmentFile } from '#utils/attachment-intake.js';
 import type { AttachmentIntakeRefusal } from '#utils/attachment-intake.js';
 
 export type ClipboardPasteEvent = {
@@ -22,10 +22,10 @@ type HandleClipboardImagePasteOptions = {
 
 /**
  * Whether a clipboard file may be an image. Some sources (a file copied in a
- * file manager, some screenshot tools) give no type at all, so an untyped file
- * is read and its bytes decide.
+ * file manager, some screenshot tools) give no type at all or a generic one
+ * (`application/octet-stream`), so such a file is read and its bytes decide.
  */
-const mayBeImage = (type: string): boolean => type.startsWith('image/') || type === '';
+const mayBeImage = (type: string): boolean => type.startsWith('image/') || isUnknownDeclaredType(type);
 
 const getImageFilesFromItems = (items: DataTransferItemList | undefined): File[] => {
   if (!items) {

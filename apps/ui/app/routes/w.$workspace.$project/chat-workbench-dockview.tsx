@@ -1,5 +1,10 @@
 import { isFeatureEnabled } from '#flags/feature-flags.js';
-import { useOpenedLargeObjectPending, useProjectAvailability } from '#hooks/use-project-availability.js';
+import {
+  useCloudOpenPending,
+  useFilePaneAvailability,
+  useOpenedLargeObjectPending,
+  useProjectAvailability,
+} from '#hooks/use-project-availability.js';
 import { kernelClosure } from '@taucad/ui-core/lib/large-object-guard';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { getBrowserBridge } from '#components/browser/browser-bridge.js';
@@ -84,7 +89,7 @@ import { getEditorLanguage } from '#lib/editor-languages.js';
 import { ChatEditorTooLargeWarning } from '@taucad/project-workspace/components/chat-editor-too-large-warning';
 import { ChatEditorErrorPlaceholder } from '@taucad/project-workspace/components/chat-editor-error-placeholder';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useFileContent } from '#hooks/use-file-content.js';
+import { useFileContent, useFreshContent } from '#hooks/use-file-content.js';
 import type { FileContentSelection } from '#hooks/use-file-content.js';
 import { useVirtualDeclarationContent } from '#hooks/use-virtual-declaration-content.js';
 import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
@@ -1524,7 +1529,32 @@ export const FileEditor = memo(function ({
   // gate — there is no local "force open" state because the override is
   // expressed by re-resolving with `forceText` / `sizeLimit` options.
   const virtualDeclaration = useVirtualDeclarationContent(documentSession, filePath);
-  const fileContent = useFileContent(virtualDeclaration === undefined ? filePath : undefined);
+  /* A first view (STO-25): the entry closure's pane opens once the closure lands. Any other file may still hold the
+     previous revision's bytes, or be absent, until the open's apply lands it (D9: an unlanded path is what is on disk),
+     so its pane waits on its own file, and "File not found" for every authored file (I7). Nothing is read while the
+     pane waits, and once its gate opens it shows only a read begun after that: the change that replaced what an
+     earlier reader cached reaches the page late (I7). */
+  const absence = useProjectAvailability('absence');
+  const gate = useFilePaneAvailability(filePath, kernelClosure(mainEntryPath).includes(filePath));
+  const fresh = useFreshContent(
+    virtualDeclaration === undefined ? filePath : undefined,
+    gate === 'ready',
+    useCloudOpenPending(),
+  );
+  const availability = gate === 'ready' && fresh.state !== 'open' ? 'waiting' : gate;
+  const fileContent = useFileContent(
+    virtualDeclaration === undefined && availability === 'ready' ? filePath : undefined,
+    { retainValue: !fresh.readAfresh },
+  );
+  /* The open itself showed only the fresh read (I7); once the pane's own observation is ready, last good bytes
+   * outlive a later transient failure as for any other pane. */
+  const { readAfresh, settled: freshSettled, state: freshState } = fresh;
+  const observedReady = fileContent.observation.status === 'ready';
+  useEffect(() => {
+    if (readAfresh && freshState === 'open' && observedReady) {
+      freshSettled();
+    }
+  }, [freshSettled, freshState, observedReady, readAfresh]);
   // A declaration held in memory has nothing to observe on disk, so it is always current.
   const result = useMemo(
     (): FileContentSelection =>
@@ -1647,12 +1677,6 @@ export const FileEditor = memo(function ({
   let body: ReactNode;
   let resolvedViewer: ResolvedFileViewer | undefined;
   let viewerRequest: Omit<FileViewerRenderRequest, 'renderPane'> | undefined;
-  /* A first view (STO-25): the entry closure's pane opens once the closure lands. Any other file may still hold the
-     previous revision's bytes, or be absent, until the open's apply lands it (D9: an unlanded path is what is on disk),
-     so its pane, and "File not found", wait for every authored file (I7). */
-  const absence = useProjectAvailability('absence');
-  const closurePane = useProjectAvailability('editor');
-  const availability = kernelClosure(mainEntryPath).includes(filePath) ? closurePane : absence;
   /* One wait per pane, owned here and not by the placeholder, which is replaced when the text arrives: it runs until
      the file's text is on screen (the placeholder shows it as soon as it is read). A sync or a large object shows its
      own notice instead. */
@@ -1829,6 +1853,24 @@ export const FileEditor = memo(function ({
     </FileWorkbenchPane>
   );
 
+  if (fresh.state === 'failed') {
+    /* The fresh read failed: say so and offer it again, never the content held before (I7). */
+    return (
+      <div className='flex h-full flex-col bg-background'>
+        <div className='min-h-0 flex-1'>
+          <ChatEditorErrorPlaceholder cause={fresh.cause} />
+        </div>
+        <div className='flex justify-center pb-4'>
+          <Button variant='outline' size='sm' onClick={fresh.retry}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  if (availability === 'waiting') {
+    return <EditorPanePlaceholder label={`Waiting for ${name}`} />;
+  }
   if (availability !== 'ready') {
     return <ProjectSyncPlaceholder state={availability} />;
   }

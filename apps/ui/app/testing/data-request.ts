@@ -140,6 +140,22 @@ export const decodeDataResponse = async (response: Response): Promise<DataResult
 };
 
 /**
+ * The path of the `.data` request for a page, as React Router's client names it (`singleFetchUrl`). With
+ * trailing-slash-aware data requests (React Router 8's default) a path ending in `/` gets `<path>_.data`, so `/` asks
+ * for `/_.data`; without them `/` asks for `/_root.data` and a trailing slash is dropped.
+ *
+ * @param pathname - The page's path.
+ * @param trailingSlashAware - `future.v8_trailingSlashAwareDataRequests` of the build.
+ * @returns The data request's path.
+ */
+export const dataRequestPath = (pathname: string, trailingSlashAware: boolean): string => {
+  if (trailingSlashAware) {
+    return pathname.endsWith('/') ? `${pathname}_.data` : `${pathname}.data`;
+  }
+  return pathname === '/' ? '/_root.data' : `${pathname.replace(/\/$/u, '')}.data`;
+};
+
+/**
  * Send the `.data` request a client navigation to `url` sends, loading the given routes.
  *
  * @param handler - The request handler.
@@ -153,7 +169,8 @@ export const requestData = async (
   routeIds: readonly string[],
 ): Promise<DataResult> => {
   const target = new URL(url);
-  target.pathname = target.pathname === '/' ? '/_root.data' : `${target.pathname.replace(/\/$/u, '')}.data`;
+  // Named as the app's client names it: the app builds with trailing-slash-aware data requests (RR4).
+  target.pathname = dataRequestPath(target.pathname, true);
   target.searchParams.set('_routes', routeIds.join(','));
   return decodeDataResponse(await handler(new Request(target)));
 };

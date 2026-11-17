@@ -19,9 +19,10 @@
  *    `Document-Policy` equal the static headers the shell gets on this site (`netlify.toml` and the `_headers` the
  *    build writes for `TAU_FRONTEND_URL`).
  * 6. **Sentinel guard.** The shell's placeholder (`__shell`) appears in no rendered text, attribute or loader data.
- * 7. **Nothing left behind (edge shells).** The Home shell's prerendered `index.html` and `_root.data` are gone from the
- *    client output: Netlify's function yields to a static file, so either would answer the `/` and `/_root.data`
- *    requests the marketing edge function leaves to the function (`scripts/place-static-shells.ts`).
+ * 7. **Nothing left behind (edge shells).** The Home shell's prerendered `index.html` and root data file (`_.data`, or
+ *    `_root.data` without trailing-slash-aware data requests) are gone from the client output: Netlify's function
+ *    yields to a static file, so either would answer the `/` and root data requests the marketing edge function leaves
+ *    to the function (`scripts/place-static-shells.ts`).
  *
  * Shell invariant 7 (no early kernel) is `check-critical-budget.mts`, which reads every prerendered document.
  *

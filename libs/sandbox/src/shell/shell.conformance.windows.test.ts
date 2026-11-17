@@ -565,7 +565,15 @@ describe.runIf(enabled)('Windows shell conformance', () => {
 
   /** T02-pwsh: the language cases, decided by comparing stdout and the exit status outside the sandbox. */
   const grammar = async (executablePath: string): Promise<void> => {
-    const of = async (command: string) => run(command, { executablePath });
+    const of = async (command: string) => {
+      const started = Date.now();
+      const result = await run(command, { executablePath });
+      /* Launch time per shell, for the row's log: Windows PowerShell 5.1 has been far slower than 7 in the sandbox. */
+      console.info(
+        `[T02] ${executablePath} ${JSON.stringify(command.slice(0, 24))} ${String(Date.now() - started)} ms`,
+      );
+      return result;
+    };
     const hereString = await of("@'\nline1\nline2\n'@");
 
     expect(hereString.exitCode, hereString.stderr).toBe(0);
@@ -1121,7 +1129,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
 
         /* UTF-8 both ways: typed non-ASCII reaches the shell as the right characters, and the shell's output arrives. */
         type(`"UNI-$('café☃日本'.Length)-$([int][char]'é')-$([int][char]'☃')"\r`);
-        await waitFor('UNI-6-233-9731');
+        /* `café☃日本` is seven UTF-16 code units: c, a, f, é, ☃, 日, 本. */
+        await waitFor('UNI-7-233-9731');
         type('"OUT-$([char]0x2603)$([char]0xE9)"\r');
         await waitFor('OUT-☃é');
 

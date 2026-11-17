@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
 import { toast } from '@taucad/ui/components/sonner';
+import type { RootStatus } from '@taucad/filesystem';
+import { WorkspaceRecoveryPendingError } from '@taucad/ui-core/filesystem/workspace-errors';
 
 const state = vi.hoisted(() => ({
   paths: ['/Users/tester/Documents/Tau Workspace'],
@@ -19,7 +22,21 @@ const state = vi.hoisted(() => ({
   listWorkspaces: vi.fn<() => Promise<Workspace[]>>(),
   homeRoot: vi.fn(() => '/Users/tester/Library/Application Support/Tau/home'),
   changed: undefined as (() => void) | undefined,
+  removeWorkspace: vi.fn<(workspaceId: string) => Promise<boolean>>(),
+  rootStatuses: [] as RootStatus[],
+  fileManagerState: 'ready' as 'ready' | 'error',
+  sendToFileManager: vi.fn(),
 }));
+/** The root file manager, as far as the rows read it: its published root statuses and whether it is in `error`. */
+const fileManagerRef = {
+  getSnapshot: () => ({
+    status: 'active',
+    matches: (value: string) => value === state.fileManagerState,
+    context: { rootStatuses: state.rootStatuses },
+  }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+  send: state.sendToFileManager,
+};
 const workspace = {
   workspaceId: 'wsp_tau',
   name: 'Tau Workspace',
@@ -36,6 +53,7 @@ vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   listWorkspaces: state.listWorkspaces,
   getWorkspace: async () => undefined,
   listProjectsForWorkspace: async () => [],
+  removeWorkspace: state.removeWorkspace,
   subscribeProjectRootConfigurationChanges: (listener: () => void) => {
     state.changed = listener;
     return () => {
@@ -47,7 +65,10 @@ vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   directoryPicker: () => ({ available: true, backend: 'node' }),
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ workspace: { disposeStorageRoot: state.dispose, syncProjectRoots: state.sync } }),
+  useFileManager: () => ({
+    fileManagerRef,
+    workspace: { disposeStorageRoot: state.dispose, syncProjectRoots: state.sync },
+  }),
 }));
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
@@ -74,6 +95,9 @@ beforeEach(() => {
   state.listWorkspaces.mockResolvedValue([workspace]);
   state.connection.mockReturnValue({ phase: 'idle' });
   state.retry.mockReset();
+  state.rootStatuses = [];
+  state.fileManagerState = 'ready';
+  state.removeWorkspace.mockResolvedValue(true);
   state.disconnect.mockImplementation(async (path) => {
     state.paths = state.paths.filter((candidate) => candidate !== path);
   });
@@ -227,5 +251,98 @@ describe('WorkspaceConnections', () => {
     expect(await screen.findByRole('button', { name: 'Reconnect' })).toBeEnabled();
     unmount();
     expect(state.changed).toBeUndefined();
+  });
+  it('should label a granted folder that is not found from its published status', async () => {
+    state.rootStatuses = [
+      { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    render(<WorkspaceConnections />);
+
+    expect(await screen.findByText('Folder not found')).toBeInTheDocument();
+    expect(screen.queryByText('Workspace connected')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Disconnect workspace' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Remove from Tau' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(state.sendToFileManager).toHaveBeenCalledWith({
+      type: 'recheckRoots',
+      storageRootKeys: [`node:${workspace.path}`],
+    });
+  });
+
+  /* Locate is WP4's: the row offers it once that package wires the command, and removes this mark. */
+  it.fails('should offer Locate on a folder that is not found', async () => {
+    state.rootStatuses = [
+      { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    render(<WorkspaceConnections />);
+
+    expect(await screen.findByRole('button', { name: 'Locate…' })).toBeEnabled();
+  });
+
+  it('should remove a lost folder from Tau while the file service is in error and restart it', async () => {
+    state.rootStatuses = [
+      { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    state.fileManagerState = 'error';
+    state.dispose.mockRejectedValueOnce(new Error('The file manager is in error.'));
+    state.removeWorkspace.mockImplementation(async () => {
+      state.listWorkspaces.mockResolvedValue([]);
+      return true;
+    });
+    render(<WorkspaceConnections />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove from Tau' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Your files are still on disk');
+    await waitFor(() => {
+      expect(screen.queryByText('Tau Workspace')).not.toBeInTheDocument();
+    });
+    expect(state.disconnect).toHaveBeenCalledWith(workspace.path);
+    expect(state.removeWorkspace).toHaveBeenCalledWith(workspace.workspaceId);
+    expect(state.disconnect.mock.invocationCallOrder[0]).toBeLessThan(
+      state.removeWorkspace.mock.invocationCallOrder[0]!,
+    );
+    await waitFor(() => {
+      expect(state.sendToFileManager).toHaveBeenCalledWith({ type: 'initialize' });
+    });
+    expect(screen.queryByText(/Restart Tau/)).not.toBeInTheDocument();
+  });
+
+  it('should keep the row and say the change could not be saved when the grant cannot be revoked', async () => {
+    state.rootStatuses = [
+      { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    state.disconnect.mockRejectedValue(new Error('ENOSPC: no space left on device'));
+    render(<WorkspaceConnections />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove from Tau' }));
+
+    expect((await screen.findByRole('alert')).textContent).toMatch(/^Couldn.t save/);
+    expect(screen.getByText('Tau Workspace')).toBeInTheDocument();
+    expect(state.removeWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('should name the unfinished operation and link to its recovery when Remove is refused', async () => {
+    state.rootStatuses = [
+      { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    state.checkPending.mockRejectedValueOnce(new WorkspaceRecoveryPendingError());
+    render(
+      <MemoryRouter>
+        <WorkspaceConnections />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove from Tau' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('unfinished project operation');
+    expect(screen.getByRole('link', { name: /unfinished project operation|project recovery/i })).toHaveAttribute(
+      'href',
+      '/projects#project-recovery',
+    );
+    expect(state.disconnect).not.toHaveBeenCalled();
+    expect(state.removeWorkspace).not.toHaveBeenCalled();
   });
 });

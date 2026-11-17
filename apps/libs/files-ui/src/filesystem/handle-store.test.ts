@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for tests
 import 'fake-indexeddb/auto';
-import { IDBFactory } from 'fake-indexeddb';
+import { IDBDatabase as FakeIDBDatabase, IDBFactory } from 'fake-indexeddb';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { workspaceMarkerPath, workspaceMarkerSchemaUrl } from '@taucad/types';
 import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
@@ -1627,5 +1627,170 @@ describe('readProjectRootConfigs', () => {
 
     expect(read.degraded).toBeUndefined();
     expect(read.configuration).toEqual(await getProjectRootConfigs());
+  });
+});
+
+// ===========================================================================
+// Desktop resilient startup WP3 — Remove from Tau, creation location, overlap
+// ===========================================================================
+
+const projectId = (index: number): string => `proj_${String(index).padStart(21, '0')}`;
+
+describe('removeWorkspace', () => {
+  it('should delete the row, its handle and its bindings in one transaction without touching files', async () => {
+    const { applyProjectFileSystemConfigChanges, createWorkspace, getAllProjectFileSystemConfigs, removeWorkspace } =
+      await loadStore();
+    const handle = makeHandle('Workshop');
+    const removeEntry = vi.fn();
+    const getFileHandle = vi.spyOn(handle, 'getFileHandle');
+    const getDirectoryHandle = vi.spyOn(handle, 'getDirectoryHandle');
+    Object.defineProperty(handle, 'removeEntry', { value: removeEntry });
+    const removed = await createWorkspace(handle);
+    const kept = await createWorkspace(makeHandle('Studio'));
+    const keptBinding = {
+      projectId: projectId(3),
+      backend: 'webaccess',
+      workspaceId: kept.workspaceId,
+      providerBasePath: 'kept',
+    } as const;
+    await applyProjectFileSystemConfigChanges({
+      upserts: [
+        { projectId: projectId(1), backend: 'webaccess', workspaceId: removed.workspaceId, providerBasePath: 'one' },
+        { projectId: projectId(2), backend: 'webaccess', workspaceId: removed.workspaceId, providerBasePath: 'two' },
+        keptBinding,
+      ],
+      deletes: [],
+    });
+    const keptRow = await rawReadWorkspace(kept.workspaceId);
+    getFileHandle.mockClear();
+    getDirectoryHandle.mockClear();
+    const transaction = vi.spyOn(FakeIDBDatabase.prototype, 'transaction');
+
+    await expect(removeWorkspace(removed.workspaceId)).resolves.toBe(true);
+
+    const writes = transaction.mock.calls.filter(([, mode]) => mode === 'readwrite');
+    expect(writes).toHaveLength(1);
+    expect([writes[0]![0]].flat().toSorted()).toEqual(['configs', 'handles', 'workspaces']);
+    transaction.mockRestore();
+    expect(await rawReadWorkspace(removed.workspaceId)).toBeUndefined();
+    expect(await rawReadHandle(removed.workspaceId)).toBeUndefined();
+    expect(await getAllProjectFileSystemConfigs()).toEqual([keptBinding]);
+    expect(await rawReadWorkspace(kept.workspaceId)).toEqual(keptRow);
+    expect(await rawReadHandle(kept.workspaceId)).toBeDefined();
+    expect(removeEntry).not.toHaveBeenCalled();
+    expect(getFileHandle).not.toHaveBeenCalled();
+    expect(getDirectoryHandle).not.toHaveBeenCalled();
+  });
+
+  it('should delete the node bindings that name the removed folder and keep the others', async () => {
+    const { createNodeWorkspace, getAllProjectFileSystemConfigs, removeWorkspace, setProjectFileSystemConfig } =
+      await loadStore();
+    const removed = await createNodeWorkspace('/Users/tester/Scratch');
+    await createNodeWorkspace('/Users/tester/Studio');
+    const kept = {
+      projectId: projectId(3),
+      backend: 'node',
+      path: '/Users/tester/Studio',
+      providerBasePath: 'kept',
+    } as const;
+    const home = { projectId: projectId(4), backend: 'node', providerBasePath: 'home-project' } as const;
+    await setProjectFileSystemConfig({
+      projectId: projectId(1),
+      backend: 'node',
+      path: '/Users/tester/Scratch',
+      providerBasePath: 'one',
+    });
+    await setProjectFileSystemConfig({
+      projectId: projectId(2),
+      backend: 'node',
+      path: '/Users/tester/Scratch',
+      providerBasePath: 'two',
+    });
+    await setProjectFileSystemConfig(kept);
+    await setProjectFileSystemConfig(home);
+
+    await expect(removeWorkspace(removed.workspaceId)).resolves.toBe(true);
+
+    expect(await rawReadWorkspace(removed.workspaceId)).toBeUndefined();
+    expect(
+      (await getAllProjectFileSystemConfigs()).toSorted((left, right) => left.projectId.localeCompare(right.projectId)),
+    ).toEqual([kept, home]);
+  });
+
+  it('should report an unknown workspace without writing', async () => {
+    const { removeWorkspace } = await loadStore();
+
+    await expect(removeWorkspace('wsp_unknown')).resolves.toBe(false);
+  });
+});
+
+describe('project creation location while its folder is unavailable', () => {
+  const preferenceKey = 'project-creation-location';
+
+  it('should create in Home and keep the stored folder while that folder is not found', async () => {
+    const { createNodeWorkspace, getProjectCreationLocation, setProjectCreationLocation } = await loadStore();
+    const workspace = await createNodeWorkspace('/Users/tester/Workshop');
+    await setProjectCreationLocation({ kind: 'workspace', workspaceId: workspace.workspaceId });
+
+    await expect(
+      getProjectCreationLocation({
+        webAccessSupported: true,
+        rootStatuses: [
+          { storageRootKey: 'node:/Users/tester/Workshop', backend: 'node', state: 'notFound', code: 'ENOENT' },
+        ],
+      }),
+    ).resolves.toEqual({ location: { kind: 'home' }, repaired: 'workspace-unavailable' });
+    expect(await rawReadMeta(preferenceKey)).toEqual({
+      key: preferenceKey,
+      location: { kind: 'workspace', workspaceId: workspace.workspaceId },
+    });
+
+    await expect(
+      getProjectCreationLocation({
+        webAccessSupported: true,
+        rootStatuses: [{ storageRootKey: 'node:/Users/tester/Workshop', backend: 'node', state: 'available' }],
+      }),
+    ).resolves.toEqual({ location: { kind: 'workspace', workspaceId: workspace.workspaceId }, repaired: undefined });
+  });
+});
+
+describe('node workspace overlap', () => {
+  const homeRoot = '/Users/tester/Library/Application Support/Tau/home';
+
+  beforeEach(() => {
+    vi.stubGlobal('tau', {
+      nodeFs: { homeRoot, connect: async () => new MessageChannel().port1 },
+      directories: { list: async () => [], onChange: () => () => undefined },
+    });
+  });
+
+  it.each([
+    ['equal to Home', homeRoot],
+    ['containing Home', '/Users/tester/Library/Application Support/Tau'],
+    ['inside Home', `${homeRoot}/Nested`],
+    ['containing another workspace', '/Users/tester'],
+    ['inside another workspace', '/Users/tester/Workshop/Parts'],
+    ['inside another workspace on Windows', 'C:\\Users\\tester\\Studio\\Parts'],
+  ])('should refuse a folder %s', async (_case, path) => {
+    buildTarget.desktop = true;
+    const store = await loadStore();
+    await store.createNodeWorkspace('/Users/tester/Workshop');
+    await store.createNodeWorkspace('C:\\Users\\tester\\Studio');
+    const before = await store.listWorkspaces();
+
+    await expect(store.createNodeWorkspace(path)).rejects.toBeInstanceOf(store.WorkspaceOverlapError);
+    expect(await store.listWorkspaces()).toEqual(before);
+  });
+
+  it('should still re-adopt the same folder and admit a sibling', async () => {
+    buildTarget.desktop = true;
+    const store = await loadStore();
+    const first = await store.createNodeWorkspace('/Users/tester/Workshop');
+
+    await expect(store.createNodeWorkspace('/Users/tester/Workshop/')).resolves.toMatchObject({
+      workspaceId: first.workspaceId,
+      minted: false,
+    });
+    await expect(store.createNodeWorkspace('/Users/tester/Workshop Two')).resolves.toMatchObject({ minted: true });
   });
 });

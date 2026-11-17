@@ -1,6 +1,6 @@
 import { definitionProvider } from '@taucad/editor-ui/components/code/editor-definition';
 import { languageFeatures, promptRename } from '@taucad/editor-ui/components/code/editor-language-features';
-import { startAfterLineBreaks } from '#components/code/editor-lint.js';
+import { startAfterLineBreaks } from '@taucad/editor-ui/components/code/editor-lint';
 import type {
   CallHierarchyDirection,
   EditorLocationItem,
@@ -30,7 +30,7 @@ import type {
   TypeScriptSymbolLocation,
 } from '@taucad/lsp/typescript-worker/typescript-service';
 import type { TypeScriptWorkerCommand } from '@taucad/lsp/typescript-worker/protocol';
-import type { EditorDocument } from '#lib/editor-document.js';
+import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import type { TypeScriptService } from '#lib/typescript-language/typescript-service.js';
 
 export type TypeScriptExtensionOptions = Readonly<{

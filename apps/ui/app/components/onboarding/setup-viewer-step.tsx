@@ -22,7 +22,7 @@ import {
 import type { GizmoChoiceId } from '#components/onboarding/setup-copy.js';
 import { gizmoChoice, legendBindings, presetReason } from '#components/onboarding/setup-model.js';
 import { SetupViewerPreview } from '#components/onboarding/setup-viewer-preview.js';
-import { orbitStyleCopy } from '#components/settings/viewer/viewer-settings-copy.js';
+import { orbitStyleCopy } from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
 import { resolveViewerCameraInput } from '#routes/w.$workspace.$project/use-viewer-camera-input.js';
 
 /** What step 3 reads and writes. */

@@ -760,7 +760,7 @@
       "description": "Time inside middleware.wrap over succeeded attempt time.",
       "targets": [
         {
-          "expr": "sum(rate(tau_runtime_middleware_duration_sum{app=~\"$app\",service_name=~\"$service\"}[5m])) / sum(rate(tau_runtime_operation_duration_sum{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"succeeded\"}[5m]))",
+          "expr": "sum(rate(tau_runtime_middleware_duration_sum{app=~\"$app\",service_name=~\"$service\"}[5m])) / (sum(rate(tau_runtime_operation_duration_sum{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"succeeded\"}[5m])) > 0)",
           "refId": "A"
         }
       ],

@@ -37,6 +37,7 @@ import type { MyUIMessage, ModelInputModality, ModelSupport } from '@taucad/chat
 import { modelSupportsInput } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import { base64ToUint8Array } from 'uint8array-extras';
+import { isAttachmentMediaType } from '@taucad/agent-host/wire';
 import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '@taucad/chat-ui/utils/attachment.utils';
 import type { AttachmentKind, StoredAttachment, StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 
@@ -65,6 +66,8 @@ type AttachmentQueueEntry = {
   readonly filename?: string;
   /** An image awaiting `resizing`. */
   readonly dataUrl?: string;
+  /** An image whose format is not stored as it is, so `resizing` converts it (a HEIC to a JPEG). */
+  readonly converts?: true;
   readonly preserveOriginal: boolean;
   /** The file's declared type, for the intake counter only. */
   readonly declaredType?: string;
@@ -253,7 +256,9 @@ const queueEntryFor = (
       : { entry: { ...base, bytes: source.bytes } };
   }
   if (attachmentKind(mediaType) === 'image') {
-    return { entry: { ...base, dataUrl: source.dataUrl } };
+    return {
+      entry: { ...base, dataUrl: source.dataUrl, ...(isAttachmentMediaType(mediaType) ? {} : { converts: true }) },
+    };
   }
   const decoded = decodeDataUrl(source.dataUrl);
   return decoded ? { entry: { ...base, bytes: decoded.bytes } } : { error: notDataUrlError() };
@@ -310,6 +315,40 @@ const touch = (
 
 const withoutEdit = (edits: Record<string, MyUIMessage>, messageId: string): Record<string, MyUIMessage> =>
   Object.fromEntries(Object.entries(edits).filter(([id]) => id !== messageId));
+
+/**
+ * An image the composer shows before it is stored: its thumbnail slot is held from the drop until the stored image
+ * takes it, so the rail never grows under the pointer.
+ */
+export type PendingDraftImage = {
+  /** Its format is converted on the way (a HEIC to a JPEG), rather than stored as it is. */
+  readonly isConverting: boolean;
+};
+
+const noPendingImages: readonly PendingDraftImage[] = [];
+
+/**
+ * The images a draft is still converting or storing, in the order they will land after its stored attachments.
+ * Documents hold no thumbnail slot; an edit's images count only while that edit is open.
+ *
+ * @param context - The draft machine's context.
+ * @param target - The main draft or the open edit.
+ * @returns One entry per image in flight, or a shared empty list.
+ */
+export const pendingDraftImages = (
+  context: Pick<DraftMachineContext, 'attachmentQueue' | 'activeEditMessageId'>,
+  target: DraftTarget,
+): readonly PendingDraftImage[] => {
+  const pending = context.attachmentQueue
+    .filter(
+      (entry) =>
+        entry.target === target &&
+        attachmentKind(entry.mediaType) === 'image' &&
+        (target === 'main' || entry.editMessageId === context.activeEditMessageId),
+    )
+    .map((entry) => ({ isConverting: entry.converts === true }));
+  return pending.length === 0 ? noPendingImages : pending;
+};
 
 /** Whether the queue head is an attachment for `target` (and, for an edit, for the edit still open). */
 const headAddresses = (context: DraftMachineContext, target: DraftTarget): boolean => {

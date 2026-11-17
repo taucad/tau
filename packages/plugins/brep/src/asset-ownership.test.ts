@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(new URL('brep.kernel.ts', import.meta.url), 'utf8');
+const source = readFileSync(new URL('occt.ts', import.meta.url), 'utf8');
 const copyConfig = readFileSync(new URL('../copy-files-from-to.cjson', import.meta.url), 'utf8');
 
 describe('BRep asset ownership', () => {

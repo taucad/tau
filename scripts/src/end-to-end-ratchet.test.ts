@@ -8,8 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { consumers } from '#consumer-parity-summary.js';
 
 /*
- * The end-to-end ratchet (operator ruling 2026-11-15): an end-to-end suite that passed two consecutive e2e-nightly
- * runs is listed in its project's `test:e2e:queue` `dependsOn`, runs in ci.yml's `e2e-queue` lane (one row per suite,
+ * The end-to-end ratchet (operator ruling 2026-11-15): an end-to-end suite that passed five consecutive e2e-nightly
+ * runs (two before 2026-11-17, merge-queue defect MQ-3) is listed in its project's `test:e2e:queue` `dependsOn`, runs in ci.yml's `e2e-queue` lane (one row per suite,
  * in the merge queue, when its project is affected) and leaves the nightly matrix for good. The plan's own rows and
  * failures are pinned with the other lanes in `ci-affected-lanes.test.ts`.
  */
@@ -147,12 +147,14 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     expect(ratcheted).toEqual(expect.arrayContaining(firstBatch));
   });
 
-  it('should read a ratcheted suite consumer parity oracle from its merge-queue row, never the nightly', () => {
+  it('should read a ratcheted suite consumer parity oracle from its merge-queue row on a main commit, never the nightly', () => {
     const oracles = consumers.flatMap(({ oracles: list }) => list).filter((oracle) => oracle.kind === 'job');
     for (const suite of firstBatch) {
       const name = `Browser end-to-end (${suite.replace(':', ' ')})`;
       for (const oracle of oracles.filter(({ job }) => job === name)) {
-        expect(oracle, name).toMatchObject({ workflow: 'ci.yml', match: 'exact', scope: 'any', event: 'merge_group' });
+        // `main` scope follows a reused push to the merge-queue run on the same commit (#2296).
+        expect(oracle, name).toMatchObject({ workflow: 'ci.yml', match: 'exact', scope: 'main' });
+        expect(oracle, name).not.toHaveProperty('event');
       }
     }
     expect(oracles.map(({ job }) => job)).toContain('Browser end-to-end (agent-plugin test:e2e)');

@@ -255,3 +255,115 @@ export const revisionEngineFailureSignal = (frame: unknown): DesktopSignal | und
     contexts: { revision_engine: { code, subcommand, ...(gitError === '' ? {} : { git_error: gitError }) } },
   };
 };
+
+/* Main boot hardening (desktop resilient startup, D5 and D8). Each carries codes and names only, never a path or an
+ * error message: a failing `mkdir` or `realpath` names the profile directory, which holds the account name. */
+
+/**
+ * A system error's code (`EACCES`, `ENOSPC`, …), or `none`.
+ *
+ * @param error - Whatever was thrown.
+ * @returns The code, when it has the shape of one.
+ */
+export const errnoOf = (error: unknown): string => {
+  const code: unknown = typeof error === 'object' && error !== null ? Reflect.get(error, 'code') : undefined;
+  return typeof code === 'string' && /^E[A-Z\d]{1,31}$/u.test(code) ? code : 'none';
+};
+
+/**
+ * A thrown value's class name, or its type when it is not an `Error`.
+ *
+ * @param error - Whatever was thrown.
+ * @returns A name that cannot carry a path.
+ */
+export const errorNameOf = (error: unknown): string => {
+  const name = error instanceof Error ? error.name : typeof error;
+  return /^[A-Za-z_$][\w$]{0,63}$/u.test(name) ? name : 'unknown';
+};
+
+/** The bootstrap steps main names in a report. */
+export type BootstrapStep =
+  | 'startup'
+  | 'home-directory'
+  | 'authority-directory'
+  | 'app-protocol'
+  | 'services'
+  | 'menu'
+  | 'window'
+  | 'probe'
+  | 'updater';
+
+/**
+ * The event for a bootstrap that threw (B18), sent and flushed before the native dialog.
+ *
+ * @param step - The step bootstrap was in.
+ * @param error - What it threw.
+ * @returns The signal.
+ */
+export const bootstrapFailedSignal = (step: BootstrapStep, error: unknown): DesktopSignal => ({
+  message: `Bootstrap failed: ${step}`,
+  level: 'error',
+  fingerprint: ['desktop-bootstrap-failed', step],
+  tags: { step, errno: errnoOf(error) },
+});
+
+/** The optional bootstrap steps whose failure is skipped (B18). */
+export type OptionalBootstrapStep = 'legacy-machines' | 'machines-directory' | 'quick-look-cleanup' | 'agent-discovery';
+
+/**
+ * The event for an optional bootstrap step that failed and was skipped (B18).
+ *
+ * @param step - The step.
+ * @param error - What it threw.
+ * @returns The signal.
+ */
+export const optionalStepFailedSignal = (step: OptionalBootstrapStep, error: unknown): DesktopSignal => ({
+  message: `Optional startup step failed: ${step}`,
+  level: 'warning',
+  fingerprint: ['desktop-optional-step-failed', step],
+  tags: { step, errno: errnoOf(error) },
+});
+
+/**
+ * The event for a main-process fault no caller handled (B18).
+ *
+ * @param kind - `exception` for `uncaughtException`, `rejection` for `unhandledRejection`.
+ * @param error - What was thrown or rejected.
+ * @returns The signal.
+ */
+export const mainUncaughtSignal = (kind: 'exception' | 'rejection', error: unknown): DesktopSignal => {
+  const errorName = errorNameOf(error);
+  return {
+    message: `Main ${kind === 'exception' ? 'uncaught exception' : 'unhandled rejection'}: ${errorName}`,
+    level: 'error',
+    fingerprint: ['desktop-main-uncaught', kind, errorName],
+    tags: { kind, error_name: errorName },
+  };
+};
+
+/**
+ * The event for a probe's leftover state that an ordinary launch ignored (B23, B29).
+ *
+ * @param probe - Which probe left it.
+ * @param error - Why admission refused it.
+ * @returns The signal.
+ */
+export const probeLeftoverIgnoredSignal = (probe: 'route-qualification' | 'ota', error: unknown): DesktopSignal => ({
+  message: `Leftover ${probe} probe state ignored`,
+  level: 'warning',
+  fingerprint: ['desktop-probe-leftover-ignored', probe],
+  tags: { probe, error_name: errorNameOf(error) },
+});
+
+/**
+ * The event for a damaged store that was renamed aside instead of discarded (B10, R14).
+ *
+ * @param store - The store's name.
+ * @returns The signal.
+ */
+export const storeQuarantinedSignal = (store: 'granted-roots'): DesktopSignal => ({
+  message: `Damaged store quarantined: ${store}`,
+  level: 'warning',
+  fingerprint: ['desktop-store-quarantined', store],
+  tags: { store },
+});

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { MemoryRouter } from 'react-router';
 import { render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -50,6 +51,7 @@ describe('flag status on admission', () => {
       <PostHogAnalyticsProvider isActive options={options} isReplayEnabled={false}>
         <span />
       </PostHogAnalyticsProvider>,
+      { wrapper: MemoryRouter },
     );
     await waitFor(() => {
       expect(client.init).toHaveBeenCalled();

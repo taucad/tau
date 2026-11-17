@@ -285,7 +285,11 @@ export class ProviderRegistry {
         this._nodeFsChannel ??= this._openNodeFsChannel(this._createNodeFsPort);
         const opening = this._nodeFsChannel;
         try {
-          return new NodeFsProviderClient(await opening, scope.path);
+          const channel = await opening;
+          // The host may run in another process or on another machine: whether files
+          // keep a mode is its disk's answer, never this worker's platform.
+          const { fileModes } = await channel.describeHost();
+          return new NodeFsProviderClient(channel, scope.path, { fileModes });
         } catch (error) {
           if (this._nodeFsChannel === opening) {
             this._nodeFsChannel = undefined;

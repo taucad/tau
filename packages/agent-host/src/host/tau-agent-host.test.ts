@@ -5822,3 +5822,119 @@ describe('model attempts: charge and proceed (RA-S11, EQ1)', () => {
     await host.close();
   });
 });
+
+/*
+ * #1097: a live run's heartbeat is liveness for the other devices, so it is timed on this process's monotonic clock.
+ * The wall clock only stamps rows: a step back (a VM resume, an NTP step, a manual change) never pauses heartbeats
+ * for the size of the step, which would let another device find the run stale and take the chat over.
+ */
+describe('a live run’s heartbeat', () => {
+  const heartbeatInterval = 20;
+  /** A model that streams nothing until its run is stopped: the run is live and quiet. */
+  const quietTransport = (started: PromiseWithResolvers<void>): ModelTransport => ({
+    funding: { type: 'unfunded' },
+    async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+      started.resolve();
+      await new Promise<void>((resolve) => {
+        request.signal.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      yield { type: 'completed', stopReason: 'aborted' };
+    },
+  });
+  const heartbeatsIn = (events: readonly AgentLogEvent[]): number =>
+    events.filter((event) => event.type === 'run.heartbeat').length;
+
+  it.each([
+    ['back by an hour', -3_600_000],
+    ['forward by an hour', 3_600_000],
+  ])('should keep writing heartbeats at the interval when the wall clock steps %s mid-run', async (_name, step) => {
+    const file = createMemoryLogFile();
+    const started = Promise.withResolvers<void>();
+    let wallShift = 0;
+    const toolRegistry = tools(async () => ({
+      content: null,
+      isError: false,
+    }));
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: quietTransport(started),
+        toolRegistry,
+        idPrefix: 'beat',
+      }),
+      now: () => new Date(Date.now() + wallShift),
+      delays: { runHeartbeat: heartbeatInterval },
+      placement: {
+        ...fakePlacement({ registry: toolRegistry }).port,
+        publish: async ({ requestId }) => ({ requestId, status: 'applied' }),
+      },
+    });
+    const admission = host.admit({
+      chatId: 'chat-beat',
+      runId: 'run-beat',
+      trigger: 'submit',
+      message: { id: 'turn-beat', role: 'user', content: 'Think quietly.' },
+    });
+    await started.promise;
+    await vi.waitFor(async () => {
+      expect(heartbeatsIn(await readLog(file))).toBeGreaterThanOrEqual(1);
+    });
+
+    wallShift = step;
+    const before = heartbeatsIn(await readLog(file));
+    await vi.waitFor(
+      async () => {
+        expect(heartbeatsIn(await readLog(file)) - before).toBeGreaterThanOrEqual(3);
+      },
+      { timeout: heartbeatInterval * 50 },
+    );
+    await host.close();
+    await admission.catch(() => undefined);
+  });
+
+  it('should time liveness on the injected monotonic clock, never on the wall clock', async () => {
+    const file = createMemoryLogFile();
+    const started = Promise.withResolvers<void>();
+    let monotonic = 0;
+    const toolRegistry = tools(async () => ({ content: null, isError: false }));
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: quietTransport(started),
+        toolRegistry,
+        idPrefix: 'mono',
+      }),
+      monotonicNow: () => monotonic,
+      delays: { runHeartbeat: heartbeatInterval },
+      placement: {
+        ...fakePlacement({ registry: toolRegistry }).port,
+        publish: async ({ requestId }) => ({ requestId, status: 'applied' }),
+      },
+    });
+    const admission = host.admit({
+      chatId: 'chat-mono',
+      runId: 'run-mono',
+      trigger: 'submit',
+      message: { id: 'turn-mono', role: 'user', content: 'Think quietly.' },
+    });
+    await started.promise;
+    /* The monotonic clock stands still: every tick finds the chat's last row written just now, so writes no heartbeat. */
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, heartbeatInterval * 5);
+    });
+    expect(heartbeatsIn(await readLog(file))).toBe(0);
+
+    monotonic += heartbeatInterval;
+    await vi.waitFor(async () => {
+      expect(heartbeatsIn(await readLog(file))).toBeGreaterThanOrEqual(1);
+    });
+    await host.close();
+    await admission.catch(() => undefined);
+  });
+});

@@ -555,6 +555,11 @@
     "reason": "reads the design-system stylesheets from packages/ui"
   },
   {
+    "file": "apps/ui/app/styles/global.test.ts",
+    "target": "apps/libs/editor-ui/src/components/code/code-editor.css",
+    "reason": "checks the code editor stylesheet, which moved to editor-ui, against the app's theme tokens"
+  },
+  {
     "file": "apps/ui/app/workbench-records/view-record-session.conformance.test.ts",
     "target": "packages/camera/specs/CameraAuthority/suite.json",
     "reason": "conformance or recorded corpus read from another project's specs"
@@ -1078,5 +1083,15 @@
     "file": "tools/workspace-plugin/src/generators/plugin/generator.test.ts",
     "target": "packages/plugins/image",
     "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
+    "target": "apps/desktop/scripts/fetch-desktop-installer-candidate.mts",
+    "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
+  },
+  {
+    "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
+    "target": "apps/desktop/scripts/desktop-receipt-provenance.mts",
+    "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
   }
 ]

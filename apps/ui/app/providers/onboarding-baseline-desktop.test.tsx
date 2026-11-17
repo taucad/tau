@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
+import { MemoryRouter } from 'react-router';
 import { cleanup, render } from '@testing-library/react';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { store } from '#hooks/use-cookie.js';
@@ -49,7 +50,7 @@ describe('onboarding baseline through the desktop analytics boundary', () => {
   it('captures no baseline event while analytics are off in Data controls', async () => {
     store.remove(firstSeenStorageName);
     store.update(desktopAnalyticsStorageName, false);
-    const view = render(<DesktopAnalyticsProvider>{undefined}</DesktopAnalyticsProvider>);
+    const view = render(<DesktopAnalyticsProvider>{undefined}</DesktopAnalyticsProvider>, { wrapper: MemoryRouter });
     await new Promise((resolve) => {
       setTimeout(resolve, 50);
     });

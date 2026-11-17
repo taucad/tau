@@ -32,12 +32,14 @@ it('should require every field the ACP agent policy names on a reviewed profile'
     installCommand: Commands;
     updateCommand: Commands;
     loginCommand: string;
+    defaultModePreference: string[];
   };
   expectTypeOf<Complete>().toExtend<ReviewedAcpAgentProfile>();
   expectTypeOf<Omit<Complete, 'installCommand'>>().not.toExtend<ReviewedAcpAgentProfile>();
   expectTypeOf<Omit<Complete, 'updateCommand'>>().not.toExtend<ReviewedAcpAgentProfile>();
   expectTypeOf<Omit<Complete, 'versionSample'>>().not.toExtend<ReviewedAcpAgentProfile>();
   expectTypeOf<Omit<Complete, 'loginCommand'>>().not.toExtend<ReviewedAcpAgentProfile>();
+  expectTypeOf<Omit<Complete, 'defaultModePreference'>>().not.toExtend<ReviewedAcpAgentProfile>();
   expectTypeOf<
     Omit<Complete, 'fallbackExecutables'> & { fallbackExecutables: { darwin: string[]; linux: string[] } }
   >().not.toExtend<ReviewedAcpAgentProfile>();

@@ -20,20 +20,21 @@ export const bootReloadAction = 'reload';
 
 /**
  * The strip's markup: hidden until the script reveals it. Inline styles only, so it renders even when no stylesheet
- * loaded. Reload is a button the script wires (no inline handler, which the content security policy would report);
- * safe mode is a plain link.
+ * loaded; the flex layout sits on an inner element, because an inline `display` on the element that carries `hidden`
+ * would override it. Reload is a button the script wires (no inline handler, which the content security policy would
+ * report); safe mode is a plain link.
  *
  * @public
  */
 export const bootWatchdogStripHtml =
   `<div id="${bootStripId}" role="alert" hidden style="position:fixed;inset:auto 0 0 0;z-index:2147483647;` +
-  `display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:12px 16px;` +
   `font:14px/1.4 system-ui,sans-serif;background:#18181b;color:#fafafa">` +
+  `<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:12px;padding:12px 16px">` +
   `<span>Tau is taking longer than expected to start.</span>` +
   `<button type="button" data-boot-action="${bootReloadAction}" style="font:inherit;padding:4px 12px;` +
   `border-radius:6px;border:1px solid #52525b;background:#fafafa;color:#18181b">Reload</button>` +
   `<a href="${safeModeHref}" style="color:inherit;text-decoration:underline">Open in safe mode</a>` +
-  `</div>`;
+  `</div></div>`;
 
 /**
  * The watchdog's inline script, or `undefined` on the desktop build, which emits none.

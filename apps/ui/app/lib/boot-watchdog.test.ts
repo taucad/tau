@@ -71,6 +71,13 @@ describe('web boot watchdog', () => {
     expect(strip().hidden).toBe(true);
   });
 
+  it('should keep the hidden strip out of layout even when no stylesheet loaded', () => {
+    loadDocument();
+    /* An inline display on the element that carries `hidden` would override it and show the strip at once. */
+    expect(strip().style.display).toBe('');
+    expect(getComputedStyle(strip()).display).toBe('none');
+  });
+
   it('should emit no script on the desktop target', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
 

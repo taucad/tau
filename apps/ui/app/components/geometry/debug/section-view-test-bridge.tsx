@@ -8,13 +8,13 @@ import type {
   SectionViewTestCut,
   SectionViewTestHelperMaterialState,
   SectionViewTestHelperSummary,
-  SectionViewTestPresentedTier,
   SectionViewTestProjectedPoint,
   SectionViewTestRenderedModelComponentState,
 } from '#components/geometry/debug/section-view-test-bridge-api.js';
 import { webGpuFallbackReason } from '@taucad/viewer/graphics/graphics-backend';
 import { useViewerEnvironment } from '@taucad/viewer/environment/viewer-environment';
 import { resolveRenderTier } from '@taucad/viewer/graphics/three/render-tier';
+import type { RenderTier } from '@taucad/viewer/graphics/three/render-tier';
 import { selectPresentedRenderTier } from '@taucad/viewer/machines/canvas.machine';
 import React, { useEffect } from 'react';
 import * as THREE from 'three';
@@ -178,6 +178,50 @@ export const getSectionViewTestControlState = ({
 };
 
 /** Whether the view's cube holds the interaction lock, read when the bridge reports the camera. */
+/**
+ * Resolves `tier` once the graphics actor's canvas presents a frame with it, or `undefined` as soon as that canvas
+ * incarnation can no longer present it: the canvas is lost, fails, stops, hosts another renderer's tier, or `signal`
+ * aborts. Kept outside the bridge component so the wait reads the canvas actor as actor logic, not as a render read.
+ */
+async function whenRenderTierPresented(
+  graphicsActor: ReturnType<typeof useGraphics>,
+  tier: RenderTier,
+  signal: AbortSignal,
+): Promise<RenderTier | undefined> {
+  const canvasRef = graphicsActor.getSnapshot().context.canvas?.ref;
+  if (!canvasRef || signal.aborted) {
+    return undefined;
+  }
+  return new Promise<RenderTier | undefined>((resolve) => {
+    const settle = (presented: RenderTier | undefined): void => {
+      subscription.unsubscribe();
+      signal.removeEventListener('abort', abandon);
+      resolve(presented);
+    };
+    const abandon = (): void => {
+      settle(undefined);
+    };
+    const observe = (snapshot: ReturnType<typeof canvasRef.getSnapshot>): void => {
+      const hosted = snapshot.context.tier;
+      if (
+        snapshot.status !== 'active' ||
+        snapshot.matches('lost') ||
+        snapshot.matches('failed') ||
+        (hosted !== undefined && hosted !== tier)
+      ) {
+        settle(undefined);
+        return;
+      }
+      if (selectPresentedRenderTier(snapshot) === tier) {
+        settle(tier);
+      }
+    };
+    const subscription = canvasRef.subscribe({ next: observe, complete: abandon, error: abandon });
+    signal.addEventListener('abort', abandon, { once: true });
+    observe(canvasRef.getSnapshot());
+  });
+}
+
 const selectViewportGizmoLockActive = (graphicsActor: ReturnType<typeof useGraphics>): boolean =>
   selectGraphicsViewportGizmoLocked(graphicsActor.getSnapshot());
 
@@ -446,38 +490,8 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         // The tier is resolved once per renderer, so the canvas actor holds this very object only while it hosts this
         // bridge's renderer.
         const ownTier = resolveRenderTier(get().gl, renderTierOverride);
-        const canvasRef = graphicsActor.getSnapshot().context.canvas?.ref;
-        if (!canvasRef) {
-          return undefined;
-        }
-        return new Promise<SectionViewTestPresentedTier | undefined>((resolve) => {
-          const settle = (presented: SectionViewTestPresentedTier | undefined): void => {
-            subscription.unsubscribe();
-            unmounted.signal.removeEventListener('abort', abandon);
-            resolve(presented);
-          };
-          const abandon = (): void => {
-            settle(undefined);
-          };
-          const observe = (snapshot: ReturnType<typeof canvasRef.getSnapshot>): void => {
-            const hosted = snapshot.context.tier;
-            if (
-              snapshot.status !== 'active' ||
-              snapshot.matches('lost') ||
-              snapshot.matches('failed') ||
-              (hosted !== undefined && hosted !== ownTier)
-            ) {
-              settle(undefined);
-              return;
-            }
-            if (selectPresentedRenderTier(snapshot) === ownTier) {
-              settle({ rendererGeneration: bridge.getRendererGeneration(), tier: ownTier });
-            }
-          };
-          const subscription = canvasRef.subscribe({ next: observe, complete: abandon, error: abandon });
-          unmounted.signal.addEventListener('abort', abandon, { once: true });
-          observe(canvasRef.getSnapshot());
-        });
+        const tier = await whenRenderTierPresented(graphicsActor, ownTier, unmounted.signal);
+        return tier ? { rendererGeneration: bridge.getRendererGeneration(), tier } : undefined;
       },
       getViewSettings() {
         if (!project) {

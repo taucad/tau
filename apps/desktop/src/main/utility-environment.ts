@@ -171,6 +171,9 @@ export const utilityEnvironmentNames = [
   'TEMP',
   'TMP',
   'SystemRoot',
+  /* Windows expands `%SystemDrive%` for known folders such as ProgramData, where the Windows sandbox helper keeps its
+   * install record; without it `SHGetKnownFolderPath` fails with ERROR_PATH_NOT_FOUND in the fork and its children. */
+  'SystemDrive',
   'WINDIR',
   'LANG',
   'LC_ALL',

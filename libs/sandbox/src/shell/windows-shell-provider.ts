@@ -132,6 +132,13 @@ const helperEnvironment = (environment: Readonly<Record<string, string | undefin
   const systemRoot = chosen['SystemRoot'];
   if (systemRoot !== undefined) {
     chosen['PATH'] = win32.join(systemRoot, 'System32');
+    /* Windows expands `%SystemDrive%` for the ProgramData known folder, where the helper keeps its install record;
+       a host that passes no `SystemDrive` (the desktop services utility did not) gets the Windows directory's drive.
+       The helper completes its own environment the same way. */
+    const drive = /^[A-Za-z]:/u.exec(systemRoot)?.[0];
+    if (chosen['SystemDrive'] === undefined && drive !== undefined) {
+      chosen['SystemDrive'] = drive.toUpperCase();
+    }
   }
   return chosen;
 };

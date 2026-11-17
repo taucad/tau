@@ -14,7 +14,7 @@ import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
 import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
 import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
-import { importDiskMachine } from '#machines/import-disk.machine.js';
+import { importDiskMachine } from '@taucad/publish-ui/machines/import-disk.machine';
 import { ImportChannelError, createFromStagedImport, openImportSession } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
 import type { ImportSession } from '@taucad/ui-core/machines/import-staging';
@@ -519,6 +519,7 @@ export default function ImportRoute(): React.JSX.Element {
           const session = await importSession();
           return session.plan(source, signal === undefined ? undefined : { signal });
         },
+        pickMainFile: findMainFile,
       },
       inspect,
     },

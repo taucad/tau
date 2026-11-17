@@ -1099,8 +1099,21 @@ describe.runIf(enabled)('Windows shell conformance', () => {
         type('"SLEEP-$(3+4)"; Start-Sleep -Seconds 30\r');
         await waitFor('SLEEP-7');
         await delay(300);
+        /*
+         * Ctrl-C makes the console flush its pending input, so the next line is typed only once a fresh prompt shows the
+         * foreground `Start-Sleep` was interrupted (run 44007705346 lost a line typed straight after the 0x03).
+         */
+        const prompts = (): number =>
+          screen()
+            .split('SLEEP-7')
+            .at(-1)
+            ?.match(/PS [^\r\n>]*> /gu)?.length ?? 0;
+        const promptsBefore = prompts();
         const interruptedAt = Date.now();
         type('\u0003');
+        if (!(await waitUntil(() => prompts() > promptsBefore, 10_000))) {
+          throw new Error(`no prompt after Ctrl-C in ${JSON.stringify(screen().slice(-2000))}`);
+        }
         type('"AFTER-$(1+1)"\r');
         await waitFor('AFTER-2', 10_000);
 

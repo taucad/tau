@@ -235,16 +235,6 @@ pub fn dacl_has_root_grant(dacl: &str, sid: &str, mask: u32) -> bool {
     })
 }
 
-/// Whether a descriptor read back after a restore is the journaled one: owner, group, DACL and the DACL's
-/// control flags exactly, and the same mandatory-label ACEs. The SACL's own control flags (`S:AI`, `S:P`)
-/// are not compared: writing them needs `SACL_SECURITY_INFORMATION` and with it `SeSecurityPrivilege`,
-/// which a launch never has, and they carry no access.
-pub fn restored(now: &str, journaled: &str) -> bool {
-    let (now_rest, now_sacl) = split_sacl(now);
-    let (journaled_rest, journaled_sacl) = split_sacl(journaled);
-    now_rest == journaled_rest && label_aces(now_sacl) == label_aces(journaled_sacl)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,16 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn compares_restored_descriptors_by_dacl_and_label_aces() {
-        let journaled = "O:S-1-5-21-1G:S-1-5-21-1D:AI(A;ID;FA;;;SY)";
-        assert!(restored(journaled, journaled));
-        // A label propagation can leave the SACL's auto-inherited flag behind with no ACE in it.
-        assert!(restored("O:S-1-5-21-1G:S-1-5-21-1D:AI(A;ID;FA;;;SY)S:AI", journaled));
-        assert!(!restored("O:S-1-5-21-1G:S-1-5-21-1D:AI(A;ID;FA;;;SY)S:AI(ML;ID;NW;;;LW)", journaled));
-        assert!(!restored("O:S-1-5-21-1G:S-1-5-21-1D:PAI(A;ID;FA;;;SY)", journaled));
-        let labelled = "O:BAG:SYD:(A;;FA;;;SY)S:(ML;OICI;NW;;;LW)";
-        assert!(restored("O:BAG:SYD:(A;;FA;;;SY)S:P(ML;OICI;NW;;;LW)", labelled));
-        assert!(!restored("O:BAG:SYD:(A;;FA;;;SY)S:(ML;OICI;NW;;;ME)", labelled));
+    fn reads_label_aces_inherited_or_not() {
         assert_eq!(label_aces("S:AI(ML;OICIID;NW;;;LW)"), ["(ML;OICIID;NW;;;LW)"]);
     }
 }

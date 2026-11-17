@@ -30,7 +30,6 @@ import {
   decodeWindowsHelperFrame,
   encodeWindowsFrame,
   encodeWindowsHostFrame,
-  windowsExclusiveLaunchRequirement,
   windowsSandboxProtocolVersion,
 } from '#shell/windows-sandbox-protocol.js';
 import type { WindowsHelperFrame, WindowsLaunchSpec } from '#shell/windows-sandbox-protocol.js';
@@ -61,11 +60,6 @@ export type WindowsNativeSandboxOptions = Readonly<{
   spawnHelper?: WindowsNativeHelperSpawn | undefined;
   /** Whether a process exists; defaults to a signal-0 probe, which reads another account's process as alive. */
   processAlive?: ((pid: number) => boolean) | undefined;
-  /**
-   * How long, in milliseconds, a launch waits for another sandboxed launch on this computer to end (the helper runs
-   * one at a time) before it reports the helper's refusal; default 30 seconds.
-   */
-  busyWait?: number | undefined;
 }>;
 
 /** The launch the host hands the helper: the shell's spec, with the native fields of protocol version 1. @public */
@@ -384,21 +378,6 @@ export const windowsNativeLaunchSpec = (
 
 const sandboxedChild = Symbol('tau.windowsSandboxedChild');
 
-/** How long a launch waits for another sandboxed launch on this computer to end before it reports the refusal. */
-const busyWaitMilliseconds = 30_000;
-const busyBackoffMilliseconds = 100;
-const busyBackoffCeilingMilliseconds = 2000;
-
-/**
- * Whether the helper refused because another sandboxed launch holds the computer's descriptor lock (README,
- * Sessions; requirement `exclusive-launch`): nothing changed, so asking again once it ends is safe.
- *
- * @param refusal - The helper's refusal.
- * @returns Whether to ask again.
- */
-const isBusyRefusal = (refusal: Readonly<{ status: string; requirement?: string | undefined }>): boolean =>
-  refusal.status === 'sandbox-unavailable' && refusal.requirement === windowsExclusiveLaunchRequirement;
-
 /**
  * Whether a child came from {@link spawnWindowsNative}: ending it is the helper's `terminate`, so the helper still
  * restores permissions, never a process-tree kill of the helper.
@@ -435,11 +414,8 @@ export const spawnWindowsNative = (
   }
   const directory = realpathSync(sandbox.journalDirectory);
   const spawnHelper = helperSpawn(sandbox);
-  let helper = spawnHelper(['launch']);
-  let decoder = createWindowsFrameDecoder();
-  const firstAttempt = Date.now();
-  let busyRetries = 0;
-  let busy = false;
+  const helper = spawnHelper(['launch']);
+  const decoder = createWindowsFrameDecoder();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   let phase: 'awaiting-ready' | 'arming' | 'starting' | 'running' | 'ended' = 'awaiting-ready';
@@ -506,7 +482,13 @@ export const spawnWindowsNative = (
   });
   child.stdout = stdout as unknown as ChildProcessWithoutNullStreams['stdout'];
   child.stderr = stderr as unknown as ChildProcessWithoutNullStreams['stderr'];
-  child.stdio = [child.stdin, child.stdout, child.stderr, undefined, undefined] as never;
+  child.stdio = [
+    child.stdin,
+    child.stdout,
+    child.stderr,
+    undefined,
+    undefined,
+  ] as unknown as ChildProcessWithoutNullStreams['stdio'];
   child.pid = helper.pid;
   child.exitCode = null;
   child.signalCode = null;
@@ -577,7 +559,6 @@ export const spawnWindowsNative = (
         return;
       }
       case 'refused': {
-        busy = phase === 'awaiting-ready' && isBusyRefusal(frame.refusal);
         refusal = frame.refusal.diagnostic
           ? `${frame.refusal.message} (${frame.refusal.diagnostic})`
           : frame.refusal.message;
@@ -648,33 +629,6 @@ export const spawnWindowsNative = (
     child.emit('close', code, signal);
   };
 
-  /*
-   * The helper runs one sandboxed launch per computer until concurrent restore lands, and refuses a second at once
-   * with nothing changed. A launch that finds it busy waits for the other to end, within a bound, by asking again.
-   */
-  const retryWhenBusy = (): boolean => {
-    const waited = Date.now() - firstAttempt;
-    if (!busy || child.killed || reported !== undefined || waited >= (sandbox.busyWait ?? busyWaitMilliseconds)) {
-      return false;
-    }
-    const retryDelayMilliseconds = Math.min(busyBackoffMilliseconds * 2 ** busyRetries, busyBackoffCeilingMilliseconds);
-    busyRetries += 1;
-    busy = false;
-    setTimeout(() => {
-      if (child.killed) {
-        void settle(undefined);
-        return;
-      }
-      refusal = undefined;
-      helperDiagnostic = '';
-      helper = spawnHelper(['launch']);
-      decoder = createWindowsFrameDecoder();
-      child.pid = helper.pid;
-      attach();
-    }, retryDelayMilliseconds).unref();
-    return true;
-  };
-
   const attach = (): void => {
     const current = helper;
     current.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
@@ -703,9 +657,6 @@ export const spawnWindowsNative = (
       })();
     });
     current.once('close', (code) => {
-      if (retryWhenBusy()) {
-        return;
-      }
       // async-iife: bootstrap -- settlement reaches the caller as this child's own exit or error.
       void settle(code ?? undefined);
     });

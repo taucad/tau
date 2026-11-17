@@ -10,6 +10,7 @@ describe('workspaceDirectoryCopy', () => {
         'unreachable',
         'permission',
         'conflict',
+        'error',
         'disconnected',
         'none',
         'unsupported',

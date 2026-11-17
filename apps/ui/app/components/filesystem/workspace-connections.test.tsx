@@ -270,6 +270,27 @@ describe('WorkspaceConnections', () => {
     });
   });
 
+  it('should show an unclassified root failure as an error with its code, Try again and Remove', async () => {
+    state.rootStatuses = [{ storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'error', code: 'EBUSY' }];
+    render(<WorkspaceConnections />);
+
+    expect(await screen.findByText('Couldn’t open this folder')).toBeInTheDocument();
+    expect(screen.getByText(/EBUSY/)).toBeInTheDocument();
+    expect(screen.queryByText('Can’t use this folder')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Remove from Tau' })).toBeEnabled();
+  });
+
+  it('should keep conflict for a folder that overlaps Tau’s own data', async () => {
+    state.rootStatuses = [
+      { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'conflict', code: 'AUTHORITY_ROOT_OVERLAP' },
+    ];
+    render(<WorkspaceConnections />);
+
+    expect(await screen.findByText('Can’t use this folder')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
   /* Locate is WP4's: the row offers it once that package wires the command, and removes this mark. */
   it.fails('should offer Locate on a folder that is not found', async () => {
     state.rootStatuses = [

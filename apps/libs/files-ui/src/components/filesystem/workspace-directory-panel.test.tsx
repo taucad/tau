@@ -43,6 +43,7 @@ describe('WorkspaceDirectoryPanel', () => {
     ['unreachable', ['Try again', 'Locate…', 'Remove from Tau']],
     ['permission', ['Grant access', 'Locate…', 'Remove from Tau']],
     ['conflict', ['Locate…', 'Remove from Tau']],
+    ['error', ['Try again', 'Remove from Tau']],
     ['disconnected', ['Reconnect', 'Remove from Tau']],
   ] as const)('should offer the D2 actions on a %s row', (status, actions) => {
     /* `onConnect` is Reconnect on a disconnected row; on a connected row it would add the web's Change folder. */

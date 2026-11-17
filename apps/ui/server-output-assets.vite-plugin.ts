@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import type { Logger, Plugin } from 'vite';
+import type { Plugin } from 'vite';
 
 /** What happened to one asset the server build emitted. */
 export type ServerAssetOutcome = 'removed' | 'kept';
@@ -41,38 +41,36 @@ export const removeServerAssetCopy = (input: {
  * @param options - The client build directory the server build's assets belong to.
  * @returns A plugin that acts on the server build only.
  */
-export const createServerOutputAssets = (options: { clientDirectory: string }): Plugin => {
-  let serverDirectory: string | undefined;
-  let logger: Logger | undefined;
-  return {
-    name: 'tau:server-output-assets',
-    apply: (_config, environment) => environment.command === 'build' && environment.isSsrBuild === true,
-    configResolved(config) {
-      serverDirectory = path.resolve(config.root, config.build.outDir);
-      logger = config.logger;
-    },
-    writeBundle: {
-      order: 'post',
-      handler(_outputOptions, bundle) {
-        if (serverDirectory === undefined) {
-          throw new Error('tau:server-output-assets: the server build directory is unknown');
+export const createServerOutputAssets = (options: { clientDirectory: string }): Plugin => ({
+  name: 'tau:server-output-assets',
+  apply: 'build',
+  /*
+   * The server environment, by its consumer: React Router's Environment API build (`future.v8_viteEnvironmentApi`)
+   * builds client and server from one shared config, so the config-level `isSsrBuild` is false for both.
+   */
+  applyToEnvironment: (environment) => environment.config.consumer === 'server',
+  writeBundle: {
+    order: 'post',
+    handler(outputOptions, bundle) {
+      const serverDirectory = outputOptions.dir;
+      if (serverDirectory === undefined) {
+        throw new Error('tau:server-output-assets: the server build directory is unknown');
+      }
+      const counts: Record<ServerAssetOutcome, number> = { removed: 0, kept: 0 };
+      for (const output of Object.values(bundle)) {
+        if (output.type !== 'asset' || output.fileName.endsWith('.map') || output.fileName.startsWith('.vite/')) {
+          continue;
         }
-        const counts: Record<ServerAssetOutcome, number> = { removed: 0, kept: 0 };
-        for (const output of Object.values(bundle)) {
-          if (output.type !== 'asset' || output.fileName.endsWith('.map') || output.fileName.startsWith('.vite/')) {
-            continue;
-          }
-          const outcome = removeServerAssetCopy({
-            fileName: output.fileName,
-            serverDirectory,
-            clientDirectory: options.clientDirectory,
-          });
-          counts[outcome] += 1;
-        }
-        logger?.info(
-          `server output assets: ${counts.removed} removed (also in the client output), ${counts.kept} kept`,
-        );
-      },
+        const outcome = removeServerAssetCopy({
+          fileName: output.fileName,
+          serverDirectory,
+          clientDirectory: options.clientDirectory,
+        });
+        counts[outcome] += 1;
+      }
+      this.environment.logger.info(
+        `server output assets: ${counts.removed} removed (also in the client output), ${counts.kept} kept`,
+      );
     },
-  };
-};
+  },
+});

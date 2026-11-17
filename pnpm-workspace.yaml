@@ -83,6 +83,7 @@ catalog:
   '@nestjs/platform-fastify': ^11.2.4
   '@nestjs/terminus': ^11.1.1
   '@nestjs/testing': ^11.1.27
+  '@netlify/vite-plugin-react-router': 4.0.0
   '@nx/devkit': 22.7.12
   '@nx/eslint': 22.7.12
   '@nx/eslint-plugin': 22.7.12

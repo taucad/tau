@@ -45,6 +45,10 @@ export default {
    * `v8_trailingSlashAwareDataRequests` is React Router 8's data request naming (blueprint B5, RR4): a path ending in
    * `/` asks for `<path>_.data`, so Home's data request is `/_.data`, no longer `/_root.data`. The marketing edge
    * function and the skew protection pin accept both names, so a tab of an earlier build still gets its data.
+   *
+   * `v8_viteEnvironmentApi` is React Router 8's build (blueprint B6, RR5): one Vite config builds the client and server
+   * environments, so server-only options live under `environments.ssr` in `vite.config.ts`, and the Netlify adapter
+   * (4.x) writes a function that imports `build/server/index.js` and the adapter's `serverless` handler.
    */
   future: {
     /* eslint-disable @typescript-eslint/naming-convention -- React Router's flag names. */
@@ -52,6 +56,7 @@ export default {
     v8_passThroughRequests: true,
     v8_middleware: true,
     v8_trailingSlashAwareDataRequests: true,
+    v8_viteEnvironmentApi: true,
     /* eslint-enable @typescript-eslint/naming-convention -- The flag names end here. */
   },
   /**

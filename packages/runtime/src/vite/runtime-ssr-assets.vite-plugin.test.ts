@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { build, createServer } from 'vite';
+import { build, createBuilder, createServer } from 'vite';
 import type { Environment, Plugin, ResolvedConfig } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runtimeAssetsPlugin } from '#vite/runtime-ssr-assets.vite-plugin.js';
@@ -72,7 +72,7 @@ const transform = async ({
 const createContext = (): TransformContext => ({
   addWatchFile: vi.fn(),
   emitFile: vi.fn().mockReturnValue('asset-ref'),
-  environment: vi.fn() as unknown as Environment,
+  environment: { config: { consumer: 'client' } } as unknown as Environment,
   resolve: vi.fn().mockResolvedValue(undefined),
 });
 
@@ -385,6 +385,37 @@ describe('runtimeAssetsPlugin', () => {
     const entryPath = path.join(outputDirectory, entryOutput ?? 'missing');
     const outputCode = readFileSync(entryPath, 'utf8');
     expect(outputCode).not.toContain('ROLLUP_FILE_URL');
+    expect(outputCode).not.toContain('__TAUCAD_RUNTIME_ASSET__');
+    const builtEntry = (await import(pathToFileURL(entryPath).href)) as { readonly asset: string };
+    expect(readFileSync(fileURLToPath(builtEntry.asset), 'utf8')).toBe('fixture');
+  });
+
+  it('should emit a real consumer-owned asset from the server environment of a shared-config build', async () => {
+    // React Router's `future.v8_viteEnvironmentApi` builds client and server from one config and one plugin set.
+    const fixtureDirectory = mkdtempSync(path.resolve(tmpdir(), 'tau-runtime-shared-config-assets-'));
+    temporaryDirectories.push(fixtureDirectory);
+    const entry = path.join(fixtureDirectory, 'entry.mjs');
+    writeFileSync(entry, `export const asset = new URL('./fixture.md', import.meta.url).href;`);
+    writeFileSync(path.join(fixtureDirectory, 'fixture.md'), 'fixture');
+    const serverDirectory = path.join(fixtureDirectory, 'server');
+
+    const builder = await createBuilder({
+      configFile: false,
+      logLevel: 'silent',
+      root: fixtureDirectory,
+      plugins: [runtimeAssetsPlugin()],
+      builder: { sharedConfigBuild: true, sharedPlugins: true },
+      environments: {
+        ssr: { build: { outDir: serverDirectory, rollupOptions: { input: entry } } },
+      },
+    });
+    await builder.build(builder.environments['ssr']!);
+
+    const emitted = readdirSync(serverDirectory, { recursive: true }).map(String);
+    expect(emitted.some((file) => /fixture-[\w-]+\.md$/.test(file))).toBe(true);
+    const entryOutput = emitted.find((file) => /entry\.(?:mjs|js)$/.test(file));
+    const entryPath = path.join(serverDirectory, entryOutput ?? 'missing');
+    const outputCode = readFileSync(entryPath, 'utf8');
     expect(outputCode).not.toContain('__TAUCAD_RUNTIME_ASSET__');
     const builtEntry = (await import(pathToFileURL(entryPath).href)) as { readonly asset: string };
     expect(readFileSync(fileURLToPath(builtEntry.asset), 'utf8')).toBe('fixture');

@@ -17,7 +17,13 @@ import { pbkdf2 } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { join, sep } from 'node:path';
-import { NodeFsProvider, drainNodeFsProviderWatchClosures, nodeDiskKeepsFileModes } from '#backend/node/provider.js';
+import {
+  NodeFsProvider,
+  drainNodeFsProviderWatchClosures,
+  nodeDiskKeepsFileModes,
+  writeNodeFileCheckedWithAuthority,
+} from '#backend/node/provider.js';
+import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { BatchEntry } from '#changeset.js';
 import parcelWatcher from '@parcel/watcher';
@@ -184,6 +190,126 @@ describe('NodeFsProvider file modes', () => {
     try {
       expect(provider.getFileMode).toBeTypeOf('function');
       expect(provider.setFileMode).toBeTypeOf('function');
+    } finally {
+      provider.dispose();
+    }
+  });
+});
+
+/** Run `body` while this process reports `platform`, restoring it however `body` ends. */
+const whileOnPlatform = async <Result>(platform: NodeJS.Platform, body: () => Promise<Result>): Promise<Result> => {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  if (original === undefined) {
+    throw new Error('process.platform has no descriptor to fake.');
+  }
+  Object.defineProperty(process, 'platform', { ...original, value: platform });
+  try {
+    return await body();
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+};
+
+/** A rename that fails with `code` for its first `failures` calls, then renames. */
+const renameFailingFirst = (code: string, failures: number) => {
+  const rename = fs.rename.bind(fs);
+  let calls = 0;
+  const spy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+    calls += 1;
+    if (calls <= failures) {
+      throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+    }
+    await rename(from, to);
+  });
+  return { spy, calls: () => calls };
+};
+
+/* A Windows scanner or indexer holds a freshly written file for a moment (revisions A4, Windows run 44028941814:
+ * EPERM renaming `.gitignore`'s temporary file into place). */
+describe('NodeFsProvider atomic writes over a briefly held file on Windows', () => {
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('should retry a rename that fails with %s until it lands', async (code) => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst(code, 3);
+    try {
+      await whileOnPlatform('win32', async () => provider.writeFile('target.txt', 'new'));
+
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+      expect(calls()).toBe(4);
+      expect(temporaryFiles(root)).toEqual([]);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should give up after about a second and answer the last error', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst('EPERM', Number.POSITIVE_INFINITY);
+    const startedAt = Date.now();
+    try {
+      await expect(whileOnPlatform('win32', async () => provider.writeFile('target.txt', 'new'))).rejects.toMatchObject(
+        { code: 'EPERM' },
+      );
+
+      const elapsed = Date.now() - startedAt;
+      expect(elapsed).toBeGreaterThanOrEqual(1000);
+      expect(elapsed).toBeLessThan(3000);
+      expect(calls()).toBeGreaterThan(3);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should refuse a retry once the writer lost its claim during the backoff, publishing nothing', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst('EPERM', Number.POSITIVE_INFINITY);
+    let asked = 0;
+    const writer: NodeAuthorityWriter = {
+      lockPath: join(root, '.lock'),
+      /* Current for the write's own checks and its first rename; lost while that rename's backoff runs. */
+      assertCurrent: async () => {
+        asked += 1;
+        if (calls() > 0) {
+          throw Object.assign(new Error('Another window owns this project.'), { code: 'AUTHORITY_LOCK_UNAVAILABLE' });
+        }
+      },
+      release: async () => undefined,
+    };
+    try {
+      await expect(
+        whileOnPlatform('win32', async () =>
+          writeNodeFileCheckedWithAuthority(
+            provider,
+            { path: 'target.txt', data: 'new', preconditions: [{ path: 'target.txt', expected: 'old' }] },
+            writer,
+          ),
+        ),
+      ).rejects.toMatchObject({ code: 'AUTHORITY_LOCK_UNAVAILABLE', applicationState: 'known-not-applied' });
+
+      expect(calls()).toBe(1);
+      expect(asked).toBe(3);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+      expect(temporaryFiles(root)).toEqual([]);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should answer a rename error at once off Windows, where it is never a passing lock', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst('EPERM', 1);
+    try {
+      await expect(whileOnPlatform('linux', async () => provider.writeFile('target.txt', 'new'))).rejects.toMatchObject(
+        {
+          code: 'EPERM',
+        },
+      );
+
+      expect(calls()).toBe(1);
     } finally {
       provider.dispose();
     }
@@ -798,40 +924,45 @@ describe('NodeFsProvider atomic writes', () => {
     expect(temporaryFiles(root)).toEqual([]);
   });
 
-  // Windows keeps the writer's handle open through verification, so a later writer cannot
-  // replace the path mid-read there: its rename fails EPERM instead.
-  it.skipIf(process.platform === 'win32')(
-    'should settle a write that a later writer replaced during its verification read',
-    async () => {
-      const root = createRoot();
-      const provider = new NodeFsProvider(root);
-      const open = fs.open.bind(fs);
-      let replaced = false;
-      vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
-        const handle = await open(path, flags, mode);
-        // The provider opens the admitted real path, which differs from `root` on macOS and Windows temp dirs.
-        if (typeof flags === 'number' && String(path).endsWith('target.txt')) {
-          const read = handle.read.bind(handle);
-          vi.spyOn(handle, 'read').mockImplementation(async (...arguments_: Parameters<typeof handle.read>) => {
-            if (!replaced) {
-              // A second writer of the same bytes publishes over the path, unlinking the inode this read holds.
-              replaced = true;
-              writeFileSync(join(root, 'later.tmp'), 'new');
+  it('should settle a write that a later writer replaced during its verification read', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const open = fs.open.bind(fs);
+    let replaced: 'applied' | 'refused' | undefined;
+    let refusal: string | undefined;
+    vi.spyOn(fs, 'open').mockImplementation(async (path, flags, mode) => {
+      const handle = await open(path, flags, mode);
+      // The provider opens the admitted real path, which differs from `root` on macOS and Windows temp dirs.
+      if (typeof flags === 'number' && String(path).endsWith('target.txt')) {
+        const read = handle.read.bind(handle);
+        vi.spyOn(handle, 'read').mockImplementation(async (...arguments_: Parameters<typeof handle.read>) => {
+          if (replaced === undefined) {
+            // A second writer of the same bytes publishes over the path, unlinking the inode this read holds.
+            writeFileSync(join(root, 'later.tmp'), 'new');
+            try {
               renameSync(join(root, 'later.tmp'), join(root, 'target.txt'));
+              replaced = 'applied';
+            } catch (error) {
+              // Windows keeps the writer's handle open through verification, and refuses a
+              // rename over a name whose entry a writer still holds: the later writer fails instead.
+              refusal = (error as NodeJS.ErrnoException).code;
+              rmSync(join(root, 'later.tmp'));
+              replaced = 'refused';
             }
-            return read(...arguments_);
-          });
-        }
-        return handle;
-      });
+          }
+          return read(...arguments_);
+        });
+      }
+      return handle;
+    });
 
-      await expect(provider.writeFile('target.txt', 'new')).resolves.toBeUndefined();
+    await expect(provider.writeFile('target.txt', 'new')).resolves.toBeUndefined();
 
-      expect(replaced).toBe(true);
-      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
-      expect(temporaryFiles(root)).toEqual([]);
-    },
-  );
+    expect(replaced).toBe(process.platform === 'win32' ? 'refused' : 'applied');
+    expect(refusal).toBe(process.platform === 'win32' ? 'EPERM' : undefined);
+    expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+    expect(temporaryFiles(root)).toEqual([]);
+  });
 
   it('should settle a write whose path a later writer replaced before its verification read', async () => {
     const root = createRoot();

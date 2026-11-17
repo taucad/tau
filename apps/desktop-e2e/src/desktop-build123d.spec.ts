@@ -9,7 +9,6 @@ import { getBoundingBoxFromInspect, getInspectReport, validateGlbData } from '@t
 
 import { authenticatePackagedDesktop, desktopDescendants, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { desktopE2ECompletedArtifact } from '#support/config.js';
 import { expectFirstNativeRender } from '#support/prepared-kernels.js';
 import {
   gatewayFixtureFinalText,
@@ -528,38 +527,39 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     expect(size[1]).toBeCloseTo(12, 7);
     expect(size[2]).toBeCloseTo(10, 7);
 
+    /* A real quit on every platform, as the PicoGK row below: the fixture's own disposal is `app.exit`, which skips
+     * the shutdown that removes each worker's temporary root. The worker census reads `ps`, so Windows proves the
+     * clean exit only. */
+    const workers = nativeWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
     if (process.platform !== 'win32') {
-      const workers = nativeWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
       expect(workers.length).toBeGreaterThan(0);
-      /* A real quit, as the PicoGK row below: the fixture's own disposal is `app.exit`, which skips the shutdown
-       * that removes each worker's temporary root. */
-      const electronProcess = session.application.process();
-      await expect
-        .poll(
-          async () =>
-            page.evaluate(() => {
-              const shell = globalThis as typeof globalThis & { tau?: { quit?: { isReady(): boolean } } };
-              return shell.tau?.quit?.isReady() ?? false;
-            }),
-          { timeout: 120_000 },
-        )
-        .toBe(true);
-      await session.application.evaluate(({ app }) => {
-        app.quit();
-      });
-      await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).toBe(0);
-      expect(electronProcess.signalCode).toBeNull();
-      await session.close();
-      session = undefined;
-      await expect
-        .poll(() => workers.every(({ pid }) => !nativeWorkers().some((worker) => worker.pid === pid)), {
-          timeout: 10_000,
-        })
-        .toBe(true);
-      await expect
-        .poll(() => workers.every(({ temporaryRoot }) => !existsSync(temporaryRoot)), { timeout: 10_000 })
-        .toBe(true);
     }
+    const electronProcess = session.application.process();
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            const shell = globalThis as typeof globalThis & { tau?: { quit?: { isReady(): boolean } } };
+            return shell.tau?.quit?.isReady() ?? false;
+          }),
+        { timeout: 120_000 },
+      )
+      .toBe(true);
+    await session.application.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).toBe(0);
+    expect(electronProcess.signalCode).toBeNull();
+    await session.close();
+    session = undefined;
+    await expect
+      .poll(() => workers.every(({ pid }) => !nativeWorkers().some((worker) => worker.pid === pid)), {
+        timeout: 10_000,
+      })
+      .toBe(true);
+    await expect
+      .poll(() => workers.every(({ temporaryRoot }) => !existsSync(temporaryRoot)), { timeout: 10_000 })
+      .toBe(true);
   } catch (error) {
     await session?.capture('build123d-failure');
     throw error;
@@ -570,7 +570,8 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
   const account = tauTestAccount('replicad-preview');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
-  session = await launchDesktopApp({ token });
+  /* The package, as in the other tests here: the CSP under test is the one the packaged app serves. */
+  session = await launchDesktopApp({ token, packaged: true });
   const { page } = session;
   const rendererErrors: string[] = [];
   page.on('console', (message) => {
@@ -582,9 +583,7 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    if (desktopE2ECompletedArtifact) {
-      await authenticatePackagedDesktop(session, token);
-    }
+    await authenticatePackagedDesktop(session, token);
     await expectSignedIn(page);
     await selectKernel(page, 'Replicad');
     await connectPickedFolder(session);

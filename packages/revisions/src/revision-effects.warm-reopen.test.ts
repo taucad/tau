@@ -22,6 +22,7 @@ import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { recordedBy, testIdentity } from '#test/identity.js';
+import { diskKeepsExecutableBit, fileHeavyTimeout } from '#test/native-git-harness.js';
 import { generatedGitattributesContent, generatedGitattributesPath } from '#workspace-config.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
@@ -264,7 +265,12 @@ const mint = async (at: Session): Promise<string> => {
   return written;
 };
 
-describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', () => {
+/* Two sessions over a real store and checkout per row. On the hosted windows-2025 runner the first two rows took
+ * 2.6 s and 2.9 s (run 44012123071), 1.6 s and 1.6 s (run 44028941814), and timed out at 5 s in run 44033552647, so
+ * the 5 s default flaps there. */
+const twoSessions = { timeout: fileHeavyTimeout(5000) };
+
+describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', twoSessions, () => {
   it('should answer the comparison and the fill check without reading a file when nothing changed', async () => {
     const { session } = await fixture(files(40));
     const first = await session();
@@ -317,7 +323,8 @@ describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', 
     expect(treeId).toBe(await compare(second.walking));
   });
 
-  it('should read a file whose mode alone changed between the sessions', async () => {
+  /* A change of mode alone needs a disk with an executable bit: NTFS has none (`revision-effects.index-capture.test.ts` holds Windows' row). */
+  it.runIf(diskKeepsExecutableBit)('should read a file whose mode alone changed between the sessions', async () => {
     const { root, session } = await fixture(files(20));
     const first = await session();
     await mint(first);

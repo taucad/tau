@@ -334,6 +334,7 @@ const admitDesktopCatalog = (
 /** Routes each platform lane of a composed catalog must carry exactly (D-H5 per-platform promotion). */
 const laneRoutes = {
   macos: ['macos-zip:darwin-arm64'],
+  windows: ['windows-nsis:win32-x64'],
   linux: ['linux-apt:linux-x64', 'linux-appimage:linux-x64'],
 } as const;
 
@@ -369,13 +370,16 @@ export const createDesktopDownloadCatalog = (options: {
     for (const input of composed['platforms']) {
       const platform = catalogRecord(input, ['lane', 'catalog']);
       const { lane } = platform;
-      if ((lane !== 'macos' && lane !== 'linux') || lanes.has(lane)) {
+      if (typeof lane !== 'string' || !Object.hasOwn(laneRoutes, lane) || lanes.has(lane)) {
         throw new TypeError('Unsupported or duplicate installer platform');
       }
       lanes.add(lane);
       const admitted = admitDesktopCatalog(platform['catalog'], options.channel, immutableArtifacts);
       // Each platform is complete on its own: exactly its routes, never a partial or another platform's.
-      if (JSON.stringify([...admitted.seen].sort()) !== JSON.stringify([...laneRoutes[lane]].sort())) {
+      if (
+        JSON.stringify([...admitted.seen].sort()) !==
+        JSON.stringify([...laneRoutes[lane as keyof typeof laneRoutes]].sort())
+      ) {
         throw new TypeError('Installer platform catalog is incomplete or carries another platform');
       }
       result.push(...admitted.result);

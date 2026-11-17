@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import path from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 
 (globalThis as typeof globalThis & { __reactRouterAppDirectory?: string }).__reactRouterAppDirectory =
   import.meta.dirname;
@@ -52,5 +53,25 @@ describe('desktop route manifest', () => {
     const shareRoutes = routes.filter((entry) => entry.path === 's/:slug');
 
     expect(shareRoutes).toEqual([expect.objectContaining({ file: '../../app/routes/s.$slug/desktop-route.tsx' })]);
+  });
+
+  /* Windows: `path.relative` answers with backslashes. `flatRoutes` normalised a file's relative path but not a
+     folder's, and this manifest's out-of-tree root makes it `..\\..\\app\\routes\\<folder>`, which the default
+     dot-file ignore matches, so a Windows build dropped every folder route and served a blank Home
+     (tools/pnpm/patches/@react-router__fs-routes@7.18.5.patch). */
+  it('should keep every route when paths are resolved with Windows separators', async () => {
+    const posixRelative = path.relative;
+    const relative = vi
+      .spyOn(path, 'relative')
+      .mockImplementation((from, to) => posixRelative(from, to).replaceAll('/', '\\'));
+    try {
+      vi.resetModules();
+      const { default: windowsRoutes } = await import('./routes.js');
+
+      expect(relative).toHaveBeenCalled();
+      expect(windowsRoutes).toHaveLength(routes.length);
+    } finally {
+      relative.mockRestore();
+    }
   });
 });

@@ -9,6 +9,7 @@ import {
   forwardRendererDiagnostics,
   forwardUtilityDiagnostics,
   kernelUtilityDiagnostics,
+  pagesThatCanSave,
   watchRendererHangs,
 } from '#main/diagnostics.js';
 
@@ -296,6 +297,7 @@ describe('forwarders', () => {
       const report = vi.fn();
       const reload = vi.fn();
       const restartInSafeMode = vi.fn();
+      const endHungPage = vi.fn();
       const showMessageBox = vi.fn(typeof response === 'function' ? response : async () => ({ response }));
       let now = 0;
       const timers = new Set<Timer>();
@@ -321,6 +323,7 @@ describe('forwarders', () => {
             showMessageBox,
             reload,
             restartInSafeMode,
+            endHungPage,
           },
         },
       );
@@ -335,7 +338,7 @@ describe('forwarders', () => {
         await Promise.resolve();
         await Promise.resolve();
       };
-      return { handlers, log, report, reload, restartInSafeMode, showMessageBox, advance, timers };
+      return { handlers, log, report, reload, restartInSafeMode, endHungPage, showMessageBox, advance, timers };
     };
 
     it('should report an ongoing hang at 30 s and offer Wait, Reload and Restart in Safe Mode', async () => {
@@ -387,6 +390,22 @@ describe('forwarders', () => {
       expect(restarting.reload).not.toHaveBeenCalled();
     });
 
+    it('should end the hung page before a safe-mode restart, so the quit owner never waits on it', async () => {
+      const restarting = setup(2);
+      restarting.handlers.get('unresponsive')?.();
+      await restarting.advance(30_000);
+
+      expect(restarting.endHungPage).toHaveBeenCalledOnce();
+      expect(restarting.endHungPage.mock.invocationCallOrder[0]).toBeLessThan(
+        restarting.restartInSafeMode.mock.invocationCallOrder[0]!,
+      );
+
+      const waiting = setup(0);
+      waiting.handlers.get('unresponsive')?.();
+      await waiting.advance(30_000);
+      expect(waiting.endHungPage).not.toHaveBeenCalled();
+    });
+
     it('should ask again after another 30 s when the person waits and the page still hangs, reporting once', async () => {
       const { handlers, report, showMessageBox, advance } = setup(0);
       handlers.get('unresponsive')?.();
@@ -418,6 +437,15 @@ describe('forwarders', () => {
       expect(signal?.aborted).toBe(true);
       expect(timers.size).toBe(0);
     });
+  });
+
+  it("should leave a page that was ended or has crashed out of the quit owner's wait", () => {
+    const page = (id: number, crashed = false) => ({ webContents: { id, isCrashed: () => crashed } });
+    const live = page(1);
+    const ended = page(2);
+    const crashed = page(3, true);
+
+    expect(pagesThatCanSave([live, ended, crashed], new Set([2]))).toStrictEqual([live]);
   });
 
   it('should collapse a renderer console message repeated back-to-back', () => {

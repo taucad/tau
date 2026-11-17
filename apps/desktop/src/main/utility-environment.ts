@@ -265,6 +265,7 @@ export const compileCacheEnvironment = (userDataPath: string): Readonly<{ TAU_CO
 /** The esbuild platform executable each packaged target stages outside the ASAR (`runtime-stage.mts`). */
 const stagedEsbuildExecutables: Readonly<Record<string, string>> = {
   'darwin-arm64': '@esbuild/darwin-arm64/bin/esbuild',
+  'darwin-x64': '@esbuild/darwin-x64/bin/esbuild',
   'linux-x64': '@esbuild/linux-x64/bin/esbuild',
   'win32-x64': '@esbuild/win32-x64/esbuild.exe',
 };

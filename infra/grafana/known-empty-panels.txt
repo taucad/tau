@@ -82,8 +82,6 @@ Runtime product insights › Operation Mix (daily)
 Runtime product insights › Population Share (signed-out)
 Runtime product insights › Route Mix
 Runtime product insights › Caller Mix
-Runtime product insights › Platform Mix — sample: non-success attempts only
-Runtime product insights › OS Mix — sample: non-success attempts only
 Runtime product insights › Hosts
 Runtime product insights › Platforms
 Runtime product insights › Operating Systems

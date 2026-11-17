@@ -149,6 +149,18 @@ describe('packagedEsbuildEnvironment', () => {
     });
   });
 
+  it('should point packaged Intel macOS utilities at their staged executable', () => {
+    expect(
+      packagedEsbuildEnvironment(true, '/Applications/Tau.app/Contents/Resources', {
+        architecture: 'x64',
+        platform: 'darwin',
+      }),
+    ).toEqual({
+      ESBUILD_BINARY_PATH:
+        '/Applications/Tau.app/Contents/Resources/app.asar.unpacked/node_modules/@esbuild/darwin-x64/bin/esbuild',
+    });
+  });
+
   it('should preserve normal workspace resolution outside a packaged app', () => {
     expect(packagedEsbuildEnvironment(false, '/unused', { architecture: 'arm64', platform: 'darwin' })).toEqual({});
   });

@@ -155,9 +155,6 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   const rootStatuses = useRootStatuses(fileManager.fileManagerRef);
   const rootStatusesRef = useRef(rootStatuses);
   const isFallbackRef = useRef(false);
-  useEffect(() => {
-    rootStatusesRef.current = rootStatuses;
-  }, [rootStatuses]);
 
   const grantWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
@@ -351,9 +348,11 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
 
   const refresh = useCallback(async (): Promise<void> => loadRef.current(false), []);
 
-  /* While creation fell back to Home, a changed root status may mean the chosen folder is back: read the choice again,
-   * unless the person picked another location meanwhile. */
+  /* Keep the statuses a preference read repairs against current. While creation fell back to Home, a changed root
+   * status may mean the chosen folder is back: read the choice again, unless the person picked another location
+   * meanwhile. */
   useEffect(() => {
+    rootStatusesRef.current = rootStatuses;
     if (!isFallbackRef.current || selectedRef.current?.kind !== 'home') {
       return;
     }

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { ChevronRight, Plus } from 'lucide-react';
 import { Link } from 'react-router';
+import { useSelector } from '@xstate/react';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import { Loader } from '@taucad/ui/components/loader';
 import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
@@ -107,6 +108,7 @@ export function WorkspaceConnections({
   const { workspaceConnection } = projectManager;
   const { workspace, fileManagerRef, scopedStorage, writeFiles } = useFileManager();
   const rootStatuses = useRootStatuses(fileManagerRef);
+  const hasFileServiceFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
 
   const reloadRows = useCallback(async (): Promise<void> => {
     try {
@@ -261,7 +263,7 @@ export function WorkspaceConnections({
       } catch (error) {
         console.warn('Folder change saved; the project catalog refresh failed', error);
       }
-      if (fileManagerRef.getSnapshot().matches('error')) {
+      if (hasFileServiceFailed) {
         fileManagerRef.send({ type: 'initialize' });
       }
       try {
@@ -270,7 +272,7 @@ export function WorkspaceConnections({
         console.warn('Folder change saved; the folder list refresh failed', error);
       }
     },
-    [fileManagerRef, projectManager, reloadRows, workspace],
+    [fileManagerRef, hasFileServiceFailed, projectManager, reloadRows, workspace],
   );
 
   /**

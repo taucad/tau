@@ -933,7 +933,9 @@ describe('the entry closure of a tree write (D10)', () => {
         return checkout.applyBatch!(entries, batchOptions);
       },
     });
-    const brackets: Array<Readonly<{ purpose: string; closure?: readonly string[] }> | undefined> = [];
+    const brackets: Array<
+      Readonly<{ purpose: string; closure?: readonly string[]; manifest?: Uint8Array<ArrayBuffer> }> | undefined
+    > = [];
 
     const outcomes: unknown[] = [];
     await materializer(watched, undefined, (_place, _paths, bracket) => {
@@ -962,10 +964,33 @@ describe('the entry closure of a tree write (D10)', () => {
       arriving: true,
     });
     expect(expected.find((entry) => entry.path === 'old.scad')?.arriving).toBe(false);
-    expect(brackets).toEqual([{ purpose: 'tree', closure: ['tau.json', 'zz/main.scad'] }]);
+    /* With the closure, the `tau.json` bytes it lands: the host names which manifest the first view is (STO-25). */
+    expect(brackets).toStrictEqual([{ purpose: 'tree', closure: ['tau.json', 'zz/main.scad'], manifest }]);
     /* The closure lands in the first changeset, before the tree's other files. */
     expect(events.slice(2, 4).toSorted()).toEqual(['tau.json', 'zz/main.scad']);
     expect(events.slice(-2)).toEqual(['end', 'release']);
+  });
+
+  it('should name the files a tree write removes, so a read of one waits until it is gone (I7)', async () => {
+    const context = await project({ 'gone.scad': 'old\n', 'tau.json': '{}\n' });
+    const before = new ImmutableRevisionTree([
+      ['gone.scad', 'old\n'],
+      ['tau.json', '{}\n'],
+    ]);
+    const target = new ImmutableRevisionTree([
+      ['main.scad', 'cube(1);\n'],
+      ['tau.json', '{}\n'],
+    ]);
+    let removing: readonly string[] | undefined;
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      expectEntries: (_entries: readonly ExpectedEntry[], options?: Readonly<{ removing?: readonly string[] }>) => {
+        removing = options?.removing;
+      },
+      endExpectation: () => undefined,
+    });
+    await materializer(watched, undefined, () => () => undefined)(liveCheckout, target, { before, purpose: 'tree' });
+    expect(removing).toEqual(['gone.scad']);
   });
 
   it('should land the closure first across created and replaced files', async () => {

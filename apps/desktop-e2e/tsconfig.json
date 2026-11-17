@@ -12,10 +12,16 @@
     "paths": {
       "#support/*.js": ["./src/support/*.ts"],
       "@taucad/runtime-testing": ["../../packages/runtime-testing/src/index.ts"],
-      "@taucad/workbench": ["../../packages/workbench/src/index.ts"]
+      "@taucad/workbench": ["../../packages/workbench/src/index.ts"],
+      "#components/geometry/debug/workspace-renderer-diagnostics.js": [
+        "../ui/app/components/geometry/debug/workspace-renderer-diagnostics.ts"
+      ],
+      "@taucad/app/test-bridges/section-view": ["../ui/app/components/geometry/debug/section-view-test-bridge-api.ts"]
     }
   },
   "include": [
+    "../ui/app/components/geometry/debug/section-view-test-bridge-api.ts",
+    "../ui/app/components/geometry/debug/workspace-renderer-diagnostics.ts",
     "vitest.config.ts",
     "vitest.unit.config.ts",
     "global-setup.ts",

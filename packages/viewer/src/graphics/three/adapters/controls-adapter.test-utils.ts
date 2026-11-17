@@ -12,6 +12,7 @@ import type { CameraPresetId } from '#graphics/three/controls/camera-presets.js'
 import type { CameraInputRouting } from '#graphics/three/controls/camera-wheel-router.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { asCameraActor } from '#graphics/graphics-camera.js';
+import { hardwareRenderTier } from '#graphics/three/render-tier.js';
 
 type CameraUpdateHandler = (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
 type Ticker = Readonly<{ current: (state: RootState, delta: number) => void }>;
@@ -88,6 +89,7 @@ export const startNavigableViewer = (
   graphics.getSnapshot().context.canvas?.ref.send({
     type: 'hostCreated',
     backend: 'webgl',
+    tier: hardwareRenderTier('webgl'),
     surface: { width: 800, height: 600, pixelRatio: 1 },
     domElement: document.createElement('canvas'),
     host: createCallbackLogic(() => undefined),

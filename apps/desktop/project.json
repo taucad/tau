@@ -329,6 +329,19 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-package.test.mts"
       }
     },
+    "publish-intel-beta-dmg": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/publish-intel-beta-dmg.mts"
+      }
+    },
+    "test-intel-beta-dmg": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/publish-intel-beta-dmg.test.mts"
+      }
+    },
     "test-publish-desktop": {
       "executor": "nx:run-commands",
       "options": {

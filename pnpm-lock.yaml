@@ -4001,15 +4001,33 @@ importers:
 
   apps/libs/publish-ui:
     dependencies:
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../../packages/filesystem
+      '@taucad/share':
+        specifier: workspace:*
+        version: link:../share
       '@taucad/ui':
         specifier: workspace:*
         version: link:../../../packages/ui
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
       '@taucad/ui-kit':
         specifier: workspace:*
         version: link:../ui-kit
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.2
       lucide-react:
         specifier: 'catalog:'
         version: 0.552.0(react@19.3.1)
+      react-router:
+        specifier: 'catalog:'
+        version: 7.18.5(patch_hash=7a0912d874e66dda449c9d5b83d0ba9acf847db8ecae2be13cb246039973afe5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      xstate:
+        specifier: 'catalog:'
+        version: 6.0.0-alpha.59
     devDependencies:
       '@testing-library/jest-dom':
         specifier: 'catalog:'
@@ -4026,6 +4044,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
+      vitest-mock-extended:
+        specifier: 'catalog:'
+        version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
 
   apps/libs/settings-ui:
     dependencies:

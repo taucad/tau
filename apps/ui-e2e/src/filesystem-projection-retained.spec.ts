@@ -153,18 +153,7 @@ test('adopts independent rooted layout and view records in the retained browser 
     .poll(
       async () =>
         target.evaluate(() => {
-          const bridges =
-            (
-              globalThis as {
-                __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                  getCamera(): { position: number[]; target: number[] };
-                  getSectionState(): {
-                    isActive: boolean;
-                    cuts: Array<{ kind: string; plane?: string; offset?: number }>;
-                  };
-                }>;
-              }
-            ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+          const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
           return bridges.some((bridge) => {
             const camera = bridge.getCamera();
             const direction = camera.position.map((value, index) => value - camera.target[index]!);
@@ -192,13 +181,7 @@ export default function main() { return [{ name: 'Base', shape: makeBaseBox(20, 
   // S20: renderer state, rather than just successful filesystem writes, witnesses adoption.
   const components = async (): Promise<Array<{ id: string; name: string }>> =>
     target.evaluate(() => {
-      const bridge = (
-        globalThis as {
-          __TAU_SECTION_VIEW_TEST__?: {
-            getModelComponents(): Array<{ id: string; name: string }>;
-          };
-        }
-      ).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       return bridge?.getModelComponents() ?? [];
     });
   // The previous honeycomb manifest already has multiple nodes. Wait for the authored
@@ -230,12 +213,7 @@ export default function main() { return [{ name: 'Base', shape: makeBaseBox(20, 
     .poll(
       async () =>
         target.evaluate((id) => {
-          const bridges =
-            (
-              globalThis as {
-                __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{ getModelVisibility(): { hiddenComponentIds: string[] } }>;
-              }
-            ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+          const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
           return bridges.some((bridge) => bridge.getModelVisibility().hiddenComponentIds.includes(id));
         }, componentId),
       { timeout: 60_000 },
@@ -260,20 +238,7 @@ export default function main() { return [{ name: 'Base', shape: makeBaseBox(20, 
         async () =>
           target.evaluate(
             ({ id, otherId }) => {
-              const bridges =
-                (
-                  globalThis as {
-                    __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                      getModelVisibility(): { isolatedComponentIds: string[] };
-                      getRenderedModelComponentState(id: string): {
-                        meshCount: number;
-                        visibleMeshCount: number;
-                        surfaceMaterialOpacities: number[];
-                        edgeMaterialOpacities: number[];
-                      };
-                    }>;
-                  }
-                ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+              const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
               return bridges.some((bridge) => {
                 const chosen = bridge.getRenderedModelComponentState(id);
                 const other = bridge.getRenderedModelComponentState(otherId);
@@ -478,14 +443,7 @@ export default function main() { return [{ name: 'Base', shape: makeBaseBox(20, 
 `;
     await writeProjectionProjectFile(config, 'public/models/honeycomb.js', model);
     const components = async (): Promise<string[]> =>
-      target.evaluate(
-        () =>
-          (
-            globalThis as { __TAU_SECTION_VIEW_TEST__?: { getModelComponents(): Array<{ id: string }> } }
-          ).__TAU_SECTION_VIEW_TEST__
-            ?.getModelComponents()
-            .map(({ id }) => id) ?? [],
-      );
+      target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getModelComponents().map(({ id }) => id) ?? []);
     await expect
       .poll(
         async () => {

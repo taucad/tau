@@ -1,7 +1,7 @@
 import { HomeFileManagerNotice } from '#hooks/use-file-manager.js';
 import { Link, NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
-import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { CSSProperties, ReactNode, UIEvent } from 'react';
 import { LayoutPriority } from 'allotment';
 import { ChevronLeft } from 'lucide-react';
@@ -30,6 +30,7 @@ import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useFeatureFlags } from '#flags/use-feature.js';
 import { DesktopTitlebarControls, TitlebarNavigation } from '#components/layout/desktop-titlebar-controls.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { reportBootStage } from '#lib/boot-signals.js';
 import { useDesktopFullscreen } from '#hooks/use-desktop-fullscreen.js';
 import { sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constants';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
@@ -636,6 +637,10 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   const hasPageHeaderChrome =
     hasBreadcrumbItems || (actionMatch !== undefined && actionMatch.handle.actionsScope !== 'phone');
   const isMobile = useIsMobile();
+  /* D0 (R12): the shell is on screen and can show UI, so the boot watchdogs stand down. Once per page load. */
+  useEffect(() => {
+    reportBootStage('shell-mounted');
+  }, []);
   const { reserveHeader, isPhoneOnly, insetClass, sectionClass, phoneTopBar } = resolveHeaderLayout({
     enablePageHeader,
     isDesktopTarget: desktopTarget,

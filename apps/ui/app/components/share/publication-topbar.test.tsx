@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { describe, it, expect, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
-import type { ParsedPublication } from '#components/share/parsed-publication.js';
+import type { ParsedPublication } from '@taucad/publish-ui/components/share/parsed-publication';
 
 vi.mock('#components/share/fork-action.js', () => ({
   ForkAction: () => <button type='button'>Remix</button>,

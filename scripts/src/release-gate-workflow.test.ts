@@ -86,8 +86,21 @@ describe('release-gate.yml', () => {
     expect(gate.jobs['verdict']?.if).toBe(expression("!cancelled() && needs.reuse.result != 'skipped'"));
   });
 
+  it('should give the sweep the service addresses ci.yml gives its lanes', () => {
+    const ci = load(read('.github/workflows/ci.yml')) as Workflow;
+    const keys = ['TAU_API_URL', 'TAU_WEBSOCKET_URL', 'TAU_FRONTEND_URL'];
+    for (const key of keys) {
+      expect(gate.env?.[key], key).toBeDefined();
+      expect(gate.env?.[key], key).toBe(ci.env?.[key]);
+    }
+  });
+
   it('should read no cache, local or remote', () => {
-    expect(gate.env).toEqual({ NX_SKIP_NX_CACHE: 'true', NX_NO_CLOUD: 'true' });
+    expect(gate.env).toMatchObject({ NX_SKIP_NX_CACHE: 'true', NX_NO_CLOUD: 'true' });
+    expect(Object.keys(gate.env ?? {}).filter((key) => key.startsWith('NX_'))).toEqual([
+      'NX_SKIP_NX_CACHE',
+      'NX_NO_CLOUD',
+    ]);
     expect(gateText).not.toContain('NX_SELF_HOSTED_REMOTE_CACHE');
     expect(gateText).not.toContain('secrets.');
     expect(gateText).not.toMatch(/\bnx affected\b/u);

@@ -104,7 +104,7 @@ import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-co
 import { logWorkerTimings } from '@taucad/ui-core/lib/worker-timing-report';
 import { randomUuid } from '@taucad/utils/id';
 import { sha256BytesSync } from '@taucad/utils/hash';
-import { createFileSystemBridgePort } from '@taucad/fs-bridge';
+import { createFileSystemBridgePort, fileSystemBridgeActivity } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
 import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
@@ -2240,6 +2240,15 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         /* Round 27: a pull this device cannot make for the chats is refused, so its host stops waiting for one. */
         revisions: { actor, turns, pullsChats },
         openTools: ({ filesystem }) => createFileSystemBridgePort(filesystem),
+        /* W8 diagnostics: each admission's phases and the bridge calls it waited on, ids and milliseconds only,
+         * through the console the desktop's diagnostics log already forwards (debug, so a browser hides it). */
+        admissionTiming: {
+          activity: { bridge: fileSystemBridgeActivity },
+          report: (timing) => {
+            // oxlint-disable-next-line no-console -- Bounded operational evidence for the host's existing diagnostic sink.
+            console.debug(`[turn-placement] ${JSON.stringify(timing)}`);
+          },
+        },
       });
       return session;
     },

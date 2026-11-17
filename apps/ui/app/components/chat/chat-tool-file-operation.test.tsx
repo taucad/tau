@@ -41,7 +41,7 @@ vi.mock('#hooks/use-resize-observer.js', () => ({
 }));
 
 // Stub the code viewers so these tests stay on the tool card, not on highlighting.
-vi.mock('#components/code/code-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/code-viewer', () => ({
   CodeViewer({
     text,
     language,
@@ -63,7 +63,7 @@ vi.mock('#components/code/code-viewer.js', () => ({
   },
 }));
 
-vi.mock('#components/code/diff-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
   DiffViewer({
     originalContent,
     modifiedContent,

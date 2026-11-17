@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import { Loader } from '@taucad/ui/components/loader';
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { WorkspaceDirectoryPanel } from '@taucad/files-ui/components/filesystem/workspace-directory-panel';
 import {
   checkHandlePermission,

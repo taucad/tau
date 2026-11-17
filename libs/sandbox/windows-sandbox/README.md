@@ -23,7 +23,10 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
   a fresh per-launch package SID and exactly one capability, Tau's volume capability (below; no `internetClient`,
   nothing else). Windows derives the lowbox token from the restricted token, makes it Low integrity and keeps the
   restricting SIDs. Every access check on every securable (files, registry, named pipes, sections, ALPC ports, desktops)
-  then has three passes, and access needs all three. The first pass is the account and its groups. The second is the
+  then has three passes, and access needs all three. The first pass is the account and its groups, among them the
+  runner's logon SID. That SID is the person's own, not the launch's: the secondary-logon service gives a
+  `CreateProcessWithLogonW` logon the caller's logon SID (every launch in a run carries the same one), and no group can
+  be added to a token without `SeTcbPrivilege`, so the first pass has no SID of the launch's own. The second is the
   AppContainer pass, which matches only ACEs for the launch's package SID or for `ALL APPLICATION PACKAGES`. The third,
   for writes only, is the restricted pass, which matches only ACEs for the restricting SIDs. Mandatory integrity applies
   on top: a Low process cannot write to an unlabelled (Medium) object. So an object whose DACL grants only Everyone
@@ -100,13 +103,16 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   A host sees these lines through the provider's `onHelperDiagnostic` option; the conformance suite prints them and
   keeps them in its receipt.
 - **Reads and writes.** `TauSandbox` cannot open another account's profile (the default profile DACL). The helper grants
-  on the launch's readable and writable roots and adds deny ACEs for the denied set inside them. Every grant names the
-  package SID beside the account: nothing is granted to `ALL APPLICATION PACKAGES`, and nothing to a broad root. Per
-  path set: `readable` grants the account and the package read and execute. `writable` grants the account, the
-  capability SID and the package read, write and delete, and lowers the root's mandatory label to Low
-  (`S:(ML;OICI;NW;;;LW)` on a directory), so the Low-integrity shell may write what the DACL grants. `readOnly` grants
-  the account and the package read and denies the capability SID every write right, so a read-only path inside a
-  writable root stays read-only. `denied` denies `TauSandboxUsers` all access, which the first pass alone enforces.
+  on the launch's readable and writable roots and adds deny ACEs for the denied set inside them, once the runner is
+  ready. The first pass is granted to the shared sandbox account (no SID of the launch's own reaches it, above); the
+  AppContainer pass to the launch's package SID and the restricted pass to its capability SID, which are its alone, so
+  what a launch grants needs an ACE naming that launch. No path is granted to `ALL APPLICATION PACKAGES`, the
+  runner's logon SID (the person's) or a broad root. Per path set: `readable` grants the account and the package read
+  and execute. `writable` grants the account, the capability SID and the package read, write and delete, and lowers
+  the root's mandatory label to Low (`S:(ML;OICI;NW;;;LW)` on a directory), so the Low-integrity shell may write what
+  the DACL grants. `readOnly` grants the account and the package read and denies the capability SID every write
+  right, so a read-only path inside a writable root stays read-only. `denied` denies all access to the sandbox
+  group, which every launch's token carries in its first pass, and to the package. The group's deny is the one that holds: with a package-only deny, W03 read a denied file inside a readable root, and the AppContainer pass is not relied on for a deny; a first-pass deny stops every access, as on #2478.
   Directory ACEs and the directory label are inheritable. PowerShell 7 and Windows PowerShell 5.1 need nothing else:
   their binaries, `System32` and the .NET runtimes live under `%ProgramFiles%` and `%SystemRoot%`, which already grant
   `ALL APPLICATION PACKAGES` read and execute. The host's environment points `TEMP`, `TMP`, `USERPROFILE`, `APPDATA` and
@@ -144,22 +150,50 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   given and fails `CreateProcess` with `ERROR_ENVVAR_NOT_FOUND` (203) when there is none, so a launch without one is
   created with the sandbox account's own (where its package is registered), and the runner then gives the suspended
   process exactly the spec's environment, as for every launch (NW01 reads the worker's whole environment back).
-- **Sessions.** One launch at a time per computer, enforced by the helper itself. Read and write isolation between
-  two launches would hold (each has its own package SID, which every grant names, and its own capability SID for the
-  restricted pass; the restricting SIDs are that capability, the runner's own logon SID and Everyone, and the volume
-  capability is granted by `setup` on volume roots only, so none of these is shared state a launch adds or removes).
-  Restore is what is not safe: grants also name the shared account (the first pass needs it) and denials the shared
-  group, `SetEntriesInAclW` merges a second launch's account ACE into the first's, the Low label of a writable root is
-  shared, and restore writes back whole snapshots, roots and descendants alike, plus the window station's descriptor
-  byte for byte. Two live launches over overlapping paths would each journal the other's ACEs, and whichever restored
-  last would write the other's grants back after it ended. So `launch` holds the named mutex
-  `Global\tau.sandbox.descriptors` from before it journals until its teardown has restored everything, and `restore`
-  holds it while it writes a journal back. A second launch is refused at once, before anything changes: `refused`
-  with status `sandbox-unavailable`, `requirement: "exclusive-launch"` (what a host matches to wait and retry; the
-  TS constant is `windowsExclusiveLaunchRequirement`) and the message "another sandboxed launch is running on this computer, and Windows
-  runs one at a time; try again when it ends" (NW02). `restore` then exits 1 with the same failure and `"requirement": "exclusive-launch"` and keeps
-  the journal. A launcher that dies abandons the mutex, and the next caller takes it. The provider also serializes its
-  own launches and answers a second one `sandbox-unavailable` without running the helper.
+- **Sessions.** Launches run concurrently, over overlapping paths too (a shell and two Build123d workers sharing one
+  runtime root). Isolation: apart from the account's first-pass grant, each launch's ACEs name only its own capability
+  and package SIDs, so one launch's shell fails the AppContainer pass on what only another was granted (NW02). The
+  restricting SIDs (the launch's capability, its runner's logon SID, Everyone) and the volume capability (granted once
+  by `setup`, on volume roots only) are never added or removed by a launch, so sharing them is safe. Restore undoes
+  exactly what the launch changed, never a snapshot:
+  - **ACEs.** Each root loses every ACE naming the launch's capability or package SID and keeps every other, another
+    launch's and the person's included; propagation then strips the inherited copies.
+  - **Account ACEs.** `SetEntriesInAclW` merges two launches' grants to the account on one root into one ACE, so a
+    root keeps its account ACEs while another unrestored journal grants the same root, and the last launch granting
+    it removes every ACE naming the account from it. A launch refuses a root whose original DACL already names the
+    account itself, so that ends with the root's original ACEs. Until then the merged ACE may give the account more
+    than the remaining launches asked for (a write after a writer ended, beside a reader still running); no shell can
+    use it, since each access also needs its own package SID and, for a write, its own capability SID, but the
+    sandbox account's own unconfined processes (the runner, which runs only the helper) could.
+  - **Group ACEs.** A denial's deny for the sandbox group is shared the same way: a root keeps it while another
+    unrestored journal denies the same root, and the last launch denying it removes it; a launch refuses a denied root
+    whose original DACL already names the group. Meanwhile it denies every launch's shell, so a path one launch denies
+    is closed to another launch that would read it until the first ends: it fails closed.
+  - **Control flags and labels.** Propagation sets `SE_DACL_AUTO_INHERITED` on everything under a root, and a writable
+    root's tree gets the Low label. These are shared by every launch covering the object, so the last to end restores
+    them. A launch that journals an object another unrestored journal also holds records that journal's entry as the
+    original, so the original travels to whichever ends last. At restore, an object another unrestored journal holds
+    keeps its flags (and, under that journal's writable root, its label) for that journal to restore; every other
+    object gets its journaled flags and label back and is read back. Either exit order ends with every path exactly
+    as before both (NW02, NW03).
+  - **Window station.** Each launch adds ACEs for its capability and package SIDs and removes exactly those, by
+    deleting them from the DACL as read (`DeleteAce`), so every other ACE keeps its bytes and order. It never adds or
+    removes one for the runner's logon SID: that is the person's, which the station already admits, and removing it
+    would leave every later process of the person's unable to initialise `user32` (`STATUS_DLL_INIT_FAILED`).
+    Unrestored journals are found through the person's ledger, `%LOCALAPPDATA%\Tau\windows-sandbox\live`: one file per
+    launch naming its journal, written after the journal is fsynced and before any ACL changes, removed once the
+    journal is restored. A launch may not grant a path holding the ledger or another unrestored journal, and its own
+    journal may not lie inside another's paths: a shell could otherwise rewrite another launch's restore. A dead
+    launch's journal stays registered, so a new launch may start beside it and treats its changes like a live one's;
+    `restore` of that journal while other launches run removes only the dead launch's ACEs (NW04). `restore` refuses a
+    journal whose launcher is still running (it holds `Global\tau.sandbox.launcher.<package name>` for its life).
+    Locking: the descriptor edits themselves (reading the ledger and other journals, journaling and granting, and each
+    restore) hold the person's mutex `Global\tau.sandbox.descriptors.<person SID>`, never a whole launch. A launch or
+    restore that cannot take it within 120 seconds is refused: `refused` with status `sandbox-unavailable`,
+    `requirement: "exclusive-launch"` (what a host matches to wait and retry; the TS constant is
+    `windowsExclusiveLaunchRequirement`), and `restore` exits 1 with `"requirement": "exclusive-launch"` and keeps the
+    journal. A launcher that dies abandons the mutex, and the next caller takes it. The provider runs launches
+    concurrently too.
 - **Descendants.** The runner places the shell in a Job Object with `KILL_ON_JOB_CLOSE`, no `BREAKAWAY_OK` and no
   `SILENT_BREAKAWAY_OK`; the launcher places the runner in its own kill-on-close job. Closing either kills the tree.
   `exit` is reported only once the job reports zero active processes.
@@ -185,22 +219,26 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   package.
 - **ACL lifecycle.** Granting through `SetNamedSecurityInfoW` propagates the inheritable ACEs to every descendant and
   sets `SE_DACL_AUTO_INHERITED` on the root and on each descendant it rewrites. So before it changes any ACL the
-  launcher journals the full original descriptor (owner, group, DACL and its control flags, as SDDL) of every root and
-  of every object under a directory root, walking each tree without following reparse points (a junction or symbolic
-  link is journaled as itself and not entered), and fsyncs the journal. At exit, and in `restore` after a crash, it
-  writes each root's DACL back with propagation (which also strips the launch's ACEs from objects created during the
-  launch), then writes every journaled object's exact DACL and control flags through its handle with
-  `SetKernelObjectSecurity`, which does not propagate, and reads each back: the full SDDL must equal the journal's. It
-  never removes an ACE it did not add and never writes an owner or group (I11, E19; Q4 §7 risk 4). A granted or denied
-  path that is itself a link or junction is refused (`absolute-paths`). The journal must not already exist (a leftover
+  launcher journals the original descriptor (owner, group, DACL and its control flags, as SDDL; another unrestored
+  journal's entry where one holds the object, "Sessions") of every root and of every object under a directory root,
+  walking each tree without following reparse points (a junction or symbolic link is journaled as itself and not
+  entered), and fsyncs the journal. At exit, and in `restore` after a crash, it removes the ACEs naming the launch's
+  SIDs (and the account, as "Sessions" says) from each root, writes the rest back with propagation and reads the root
+  back (which also strips them from objects created during
+  the launch), then reads every journaled object through its handle: it must name none of them, and where no other
+  unrestored journal holds it, its DACL control flags and label are written back with `SetKernelObjectSecurity`,
+  which does not propagate, and read back. It never writes an ACE list from the journal, so it never removes or
+  restores an ACE it did not add, and never writes an owner or group (I11, E19; Q4 §7 risk 4). A granted or denied path
+  that is itself a link or junction is refused (`absolute-paths`). The journal must not already exist (a leftover
   belongs to a crashed launch: `restore` it first) and must not lie inside a granted or denied path. Journaling costs
   one handle open per object under the granted paths, the same order of work as the propagation itself.
 - **Desktop.** The launcher creates the shell's private desktop on its window station. The runner cannot: as
   `TauSandbox` it may not change `WinSta0`, and both the spike and Codex create the desktop here too. The desktop's
   protected DACL admits the person and, as participants, `TauSandbox`, the launch's capability SID and its package SID.
   The desktop carries a Low label (`S:(ML;;NW;;;LW)`) so the Low-integrity shell can attach to it. The launcher adds one
-  session ACE per participant to the window station when the person may change its DACL (best-effort: the ACE only
-  widens access), journals the original descriptor, and restores it byte for byte at teardown.
+  session ACE for each of the launch's capability and package SIDs to the shared window station when the person may
+  change its DACL (best-effort: the ACE only widens access), and removes exactly the ACEs naming those SIDs at
+  teardown ("Sessions"), so a concurrent launch's and the person's stay.
 - **Cleanup.** The AppContainer leaves no durable state once its registration is deleted (above). There is no firewall
   or loopback exemption and no permanent kernel object. The account's own profile is account-level state, created by
   `setup` and deleted by `revoke`. The named-object directory and its links are temporary objects that go away with the
@@ -232,8 +270,10 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   - The Low label on a writable root lets other Low-integrity processes of the person write there while the launch
     runs, wherever the DACL already grants the person. The restore removes the label.
   - The SACL's own control flags (`S:AI`, `S:P`) on objects under a writable root are not restored, because writing
-    them needs `SeSecurityPrivilege`. The label ACE itself is restored, and the owner, group, DACL and DACL control
-    flags are restored byte for byte as before.
+    them needs `SeSecurityPrivilege`. The label ACE itself is restored, the launch's ACEs are removed and the DACL
+    control flags restored, and owner and group are never written.
+  - An ACE the person adds or removes on a granted path during a launch is kept as they left it: restore removes only
+    the launch's own ACEs. A person who removes the launch's ACEs early only ends its access early.
 
 ## Subcommands
 
@@ -363,7 +403,7 @@ resumes it and talks to it over two one-way named pipes (`\\.\pipe\tau-sandbox-<
 `TauSandbox`. Each side checks the other's PID. The frames are the same codec: `launch` sends `spec` (an internal spec
 with the capability SID, the package SID, the person's SID, the desktop name and the `executableDigest`, which the
 runner checks for form and roots again; the launcher holds the file), then forwards `start`, `input`, `close-input`,
-`resize` and `terminate`; the runner answers `ready` (empty), `started`, `stdout`/`stderr`/`output` and `exit`, or
+`resize` and `terminate`; the runner answers `ready` (`{}`), `started`, `stdout`/`stderr`/`output` and `exit`, or
 `0xC1` `runner-error` (`{ "stage", "message" }`), or `0xC2` `runner-log` (a UTF-8 diagnostic line the launcher copies to
 its stderr, sent at any time, also before `ready`), which `launch` never forwards to the host.
 
@@ -372,8 +412,8 @@ its stderr, sent at any time, also before `ready`), which `launch` never forward
 JSON lines, streamed on write and on restore so memory stays bounded however large the granted trees are:
 
 ```text
-{"kind":"header","version":3,"capabilitySid":"S-1-5-21-…","packageSid":"S-1-15-2-…","packageName":"tau.sandbox.…","launcherPid":1234,"windowStation":{"sessionId":1,"name":"WinSta0","descriptor":"<hex self-relative SD>"}}
-{"kind":"root","path":"C:\\…\\home","sddl":"O:S-1-5-21-…G:S-1-5-21-…D:(A;OICI;FA;;;SY)…S:(ML;…)","fileId":"<volume serial>:<file index>"}
+{"kind":"header","version":6,"capabilitySid":"S-1-5-21-…","accountSid":"S-1-5-21-…","groupSid":"S-1-5-21-…","packageSid":"S-1-15-2-…","packageName":"tau.sandbox.…","launcherPid":1234,"windowStation":{"sessionId":1,"name":"WinSta0"}}
+{"kind":"root","path":"C:\\…\\home","sddl":"O:S-1-5-21-…G:S-1-5-21-…D:(A;OICI;FA;;;SY)…S:(ML;…)","fileId":"<volume serial>:<file index>","labeled":true,"account":true}
 {"kind":"child","path":"C:\\…\\home\\a.txt","sddl":"O:…G:…D:AI(A;ID;FA;;;SY)…","fileId":"…"}
 {"kind":"end","roots":1,"children":1}
 ```
@@ -383,17 +423,18 @@ directory root (a root nested in another is journaled under its own walk only), 
 journal, `end` included, is fsynced before any ACL changes, so a journal without a valid `end` belongs to a launch
 that changed nothing. `fileId` (absent when the attributes were unreadable) tells the journaled object from one put in
 its place during the launch; such a replacement is not rewritten (the root's propagating restore already removed what
-it inherited), and a replaced root only has to name none of the launch's principals (account, group, capability
-SID, package SID). Each `sddl` carries owner, group, DACL and the mandatory label (`S:` part, absent when there is
-none), read with `READ_CONTROL`. Version 1 (one JSON document) and version 2 (no package SID, no label) journals are
-refused; both only ever existed on unmerged branches behind `TAU_WINDOWS_SHELL_SANDBOX`.
+it inherited) and only has to name none of the launch's SIDs. `labeled` marks a writable root, `account` a root whose grant names the account (every one but a denial), `group` a root whose denial names the group. Each `sddl` carries owner, group, DACL and the mandatory label (`S:` part, absent when there is
+none), read with `READ_CONTROL`. Versions 1 to 5 (1 to 3 restored snapshots, 4 granted the first pass to the runner's
+logon SID, which is the person's, 5 denied the package only) are refused; they only ever existed on unmerged branches behind
+`TAU_WINDOWS_SHELL_SANDBOX`.
 
-`restore --journal <path>` restores the roots with propagation (children first, the label too where the launch changed
-it), then every journaled object and root exactly (the DACL with `WRITE_DAC`, and the label with `WRITE_OWNER` only
-where it differs), confirms each by owner, group, DACL with its control flags and label ACE, restores the window station
-when it runs in the journaled session, deletes the journal and prints `{"restored":true}`. A missing journal, or one cut
-short before its `end` line, is success. On any unconfirmed entry it prints the failures (the first few and a count),
-keeps the journal and exits 1. It is idempotent.
+`restore --journal <path>` refuses a journal whose launcher is still running, takes the descriptor lock, removes the
+launch's ACEs (and the account's and the group's, where no other journal grants or denies the same root) from the roots with propagation (children first, and the label too on a writable root no other journal's
+writable root covers), then settles every journaled object and root as "ACL lifecycle" says (the DACL flags with
+`WRITE_DAC`, the label with `WRITE_OWNER` only where it differs), removes the launch's window-station ACEs when it runs
+in the journaled session, deletes the journal, unregisters it from the ledger and prints `{"restored":true}`. A missing
+journal, or one cut short before its `end` line, is success. On any unconfirmed entry it prints the failures (the first
+few and a count), keeps the journal and exits 1. It is idempotent.
 
 ## Build
 

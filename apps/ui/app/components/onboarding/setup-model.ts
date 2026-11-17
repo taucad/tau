@@ -194,6 +194,7 @@ export const answerRows = ({
   const hasViewerAnswer =
     profile.tool !== undefined ||
     viewer.controls.preset !== undefined ||
+    viewer.controls.orbitStyle !== undefined ||
     viewer.gizmo.style !== undefined ||
     viewer.viewDefaults['display.gizmo'] !== undefined;
   const rows: AnswerRow[] = [
@@ -288,6 +289,7 @@ export const isStepAnswered = (
     case 'viewer': {
       return (
         record.viewer.controls.preset !== undefined ||
+        record.viewer.controls.orbitStyle !== undefined ||
         record.viewer.gizmo.style !== undefined ||
         record.viewer.viewDefaults['display.gizmo'] !== undefined
       );

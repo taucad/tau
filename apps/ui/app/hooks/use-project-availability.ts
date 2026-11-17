@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
 import { reachesReadiness } from '@taucad/revisions';
 import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
+import type { RevisionClient } from '#types/revision-client.types.js';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
 import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
@@ -155,6 +156,138 @@ export function useProjectAvailability(surface?: ReadinessSurface): ProjectAvail
        not know, so its arriving rows would be missing here (I7). */
     firstView: surface === undefined ? undefined : { surface, readiness: ownOpenReadiness(status) },
   });
+}
+
+/** What a file pane shows: its project's availability, or `waiting` while the open has yet to land its own file. */
+export type FilePaneAvailability = ProjectAvailability | 'waiting';
+
+/**
+ * What one file pane shows while a Tau Cloud open may still be owed (STO-25, I7).
+ *
+ * The entry closure's own pane opens on the open's first view, `entryReady`. Any other file may hold the previous
+ * revision's bytes, or be absent, until the open's write lands it (D9: an unlanded path is what is on disk), so its
+ * pane opens once every authored file has landed, or, from that same first view on, once this tab's own write has
+ * landed that very file ({@link usePathLanded}); until then it waits on its own file alone. A failed open and an
+ * account that may not open the project speak as the project does, whatever has landed.
+ *
+ * @param input - Whether the file is in the entry closure; the project's availability for the editor's first view and
+ *   for an absence (every authored file); and whether this tab's write has landed the file.
+ * @returns What the pane shows.
+ */
+export function filePaneAvailability(
+  input: Readonly<{
+    inClosure: boolean;
+    firstView: ProjectAvailability;
+    absence: ProjectAvailability;
+    landed: boolean;
+  }>,
+): FilePaneAvailability {
+  const { inClosure, firstView, absence, landed } = input;
+  if (inClosure) {
+    return firstView;
+  }
+  if (absence === 'ready') {
+    return 'ready';
+  }
+  if (firstView !== 'ready') {
+    return absence;
+  }
+  return landed ? 'ready' : 'waiting';
+}
+
+/**
+ * {@link filePaneAvailability} for one open file pane: while it waits on its own file it asks this tab's revision host
+ * to say when the open's write lands it.
+ *
+ * @param path - The pane's checkout-relative path.
+ * @param inClosure - Whether the path is in the entry closure.
+ * @returns What the pane shows.
+ */
+export function useFilePaneAvailability(path: string, inClosure: boolean): FilePaneAvailability {
+  const absence = useProjectAvailability('absence');
+  const firstView = useProjectAvailability('editor');
+  const asks = !inClosure && absence !== 'ready' && firstView === 'ready';
+  const landed = usePathLanded(asks ? path : undefined);
+  return filePaneAvailability({ inClosure, firstView, absence, landed });
+}
+
+/**
+ * Whether a Tau Cloud open is still owed for the focused project: what a pane read before it opened may be bytes the
+ * open has since replaced (I7).
+ *
+ * @returns `true` while the open is owed.
+ */
+export function useCloudOpenPending(): boolean {
+  const { projectId } = useProject();
+  return useTauCloudIntent(projectId) === 'open';
+}
+
+/* One watcher id per pane, unique in this tab whatever React root it renders in. */
+let landingWatchers = 0;
+
+/**
+ * One pane's landing watch, held by the revision client's own subscription rather than a React effect: it is said to
+ * the host while the client is connected, said again to a host the client reconnects to (whose status is absent until
+ * its first), and withdrawn when the last listener goes.
+ *
+ * @param watch - The project's revision client, the pane's watcher id and the checkout-relative path to watch.
+ * @param watch.client - The project's revision client.
+ * @param watch.watcher - The pane's watcher id.
+ * @param watch.path - The checkout-relative path to watch.
+ * @param onChange - Called on every status the client publishes.
+ * @returns Withdraws the watch and stops listening.
+ */
+function watchPathLanding(
+  { client, watcher, path }: Readonly<{ client: RevisionClient; watcher: string; path: string }>,
+  onChange: () => void,
+): () => void {
+  let said = false;
+  const say = (): void => {
+    const connected = client.status() !== undefined;
+    if (connected && !said) {
+      client.send({ command: 'watchLanding', watcher, paths: [path] });
+    }
+    said = connected;
+  };
+  say();
+  const stop = client.subscribe(() => {
+    say();
+    onChange();
+  });
+  return () => {
+    stop();
+    if (said) {
+      client.send({ command: 'watchLanding', watcher, paths: [] });
+    }
+  };
+}
+
+/**
+ * Whether this tab's own Tau Cloud open has landed one path for good (STO-25): the revision host is asked to watch it
+ * while a path is given, and its projection names it once the open's write has landed it (`landedPaths`). Absent is
+ * unknown, never landed (I7).
+ *
+ * @param path - The checkout-relative path to watch; `undefined` watches nothing.
+ * @returns `true` once the write has landed it.
+ */
+export function usePathLanded(path: string | undefined): boolean {
+  const client = useRevisionClient();
+  const [watcher] = useState(() => {
+    landingWatchers += 1;
+    return `pane-${String(landingWatchers)}`;
+  });
+  const watch = useCallback(
+    (onChange: () => void) =>
+      client === undefined || path === undefined
+        ? (): void => undefined
+        : watchPathLanding({ client, watcher, path }, onChange),
+    [client, path, watcher],
+  );
+  const landed = useCallback(() => {
+    const paths = client?.status()?.landedPaths;
+    return path !== undefined && paths !== undefined && pendingPathSet(paths).has(path);
+  }, [client, path]);
+  return useSyncExternalStore(watch, landed, () => false);
 }
 
 /**

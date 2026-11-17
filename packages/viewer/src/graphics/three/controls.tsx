@@ -11,6 +11,7 @@ import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-
 import { useCameraSelector, useGraphicsSelector } from '#hooks/use-graphics.jsx';
 import type { SecondaryMouseButtonMode } from '#graphics/three/three-viewer-properties.js';
 import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
+import type { OrbitStyle } from '#graphics/three/controls/camera-wheel-router.js';
 
 const MeasureTool = React.lazy(async () => {
   const module = await import('#graphics/three/react/measure-tool.jsx');
@@ -61,6 +62,10 @@ type ControlsProperties = {
    * The view cube's style. Absent: the rounded cube.
    */
   readonly gizmoStyle?: GizmoStyleId;
+  /**
+   * The person's orbit style: whether the view cube may roll. Absent: Turntable.
+   */
+  readonly orbitStyle?: OrbitStyle;
 };
 
 export const Controls = React.memo(function ({
@@ -71,6 +76,7 @@ export const Controls = React.memo(function ({
   zoomSpeed,
   gizmoContainer,
   gizmoStyle,
+  orbitStyle,
 }: ControlsProperties) {
   const backend = useThreeGraphicsBackend();
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
@@ -118,7 +124,12 @@ export const Controls = React.memo(function ({
       </React.Suspense>
       {/* The cube mounts with its picker, so its adapter starts once, with everything it draws. */}
       {enableGizmo && planePicker ? (
-        <ViewportGizmoCube container={gizmoContainer} planePicker={planePicker} gizmoStyle={gizmoStyle} />
+        <ViewportGizmoCube
+          container={gizmoContainer}
+          planePicker={planePicker}
+          gizmoStyle={gizmoStyle}
+          orbitStyle={orbitStyle}
+        />
       ) : null}
     </>
   );

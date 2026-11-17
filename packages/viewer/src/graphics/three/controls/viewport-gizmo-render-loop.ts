@@ -1,56 +1,36 @@
-import * as THREE from 'three';
-import type { ControlEventListener } from '#graphics/three/utils/camera-controls-adapter.js';
+import type * as THREE from 'three';
+import type { GizmoViewport } from 'three-viewport-gizmo';
 import type { SectionPlanePicker, SectionPlanePickerRenderer } from '#graphics/three/controls/section-plane-picker.js';
 
-type ToneMappingRendererLike = {
-  toneMapping?: THREE.ToneMapping;
-};
-
 type ViewportGizmoRenderLoopGizmoLike = {
-  readonly animating: boolean;
+  readonly viewport: GizmoViewport;
   render: () => void;
 };
 
-type ViewportGizmoInvalidationEventType = 'start' | 'end' | 'change' | 'hoverchange';
-
-type ViewportGizmoInvalidationTargetLike = {
-  addEventListener: (type: ViewportGizmoInvalidationEventType, listener: ControlEventListener) => void;
-  removeEventListener: (type: ViewportGizmoInvalidationEventType, listener: ControlEventListener) => void;
+/**
+ * The view cube's viewport `[x, y, width, height]` in CSS pixels, as its last `render()` measured it, in the renderer's
+ * convention (`y` from the bottom on WebGL, from the top on WebGPU). None before the first draw, and the picker then
+ * skips its draw.
+ *
+ * @param gizmo - The cube.
+ * @returns The rectangle, or `undefined` while it is empty.
+ */
+export const readGizmoViewport = (
+  gizmo: Pick<ViewportGizmoRenderLoopGizmoLike, 'viewport'>,
+): readonly [number, number, number, number] | undefined => {
+  const { x, y, width, height } = gizmo.viewport;
+  return width > 0 && height > 0 ? [x, y, width, height] : undefined;
 };
 
 /**
- * The view cube's viewport `[x, y, width, height]` in CSS pixels, as the gizmo last placed it, in the renderer's
- * convention (`y` from the bottom on WebGL, from the top on WebGPU). `three-viewport-gizmo` keeps it private; a
- * changed shape reads as none, and the picker then skips its draw.
+ * Draws the plane picker (when given) beside the cube, then the cube. The cube restores the host's viewport, scissor
+ * and depth outside its rectangle, on a render target too, and its materials are not tone mapped.
  */
-export const readGizmoViewport = (
-  gizmo: Readonly<Record<string, unknown>>,
-): readonly [number, number, number, number] | undefined => {
-  const viewport = gizmo['_viewport'];
-  if (!Array.isArray(viewport)) {
-    return undefined;
-  }
-  const values: readonly unknown[] = viewport;
-  const [x, y, width, height] = values;
-  return typeof x === 'number' &&
-    typeof y === 'number' &&
-    typeof width === 'number' &&
-    typeof height === 'number' &&
-    width > 0 &&
-    height > 0
-    ? [x, y, width, height]
-    : undefined;
-};
-
 export const renderViewportGizmoFrame = ({
   gizmo,
-  renderer,
-  invalidate,
   planePicker,
 }: {
   readonly gizmo: ViewportGizmoRenderLoopGizmoLike;
-  readonly renderer: ToneMappingRendererLike;
-  readonly invalidate: () => void;
   /** Drawn first, beside the cube, with the view camera it turns with. */
   readonly planePicker?: Readonly<{
     picker: SectionPlanePicker;
@@ -58,47 +38,9 @@ export const renderViewportGizmoFrame = ({
     camera: THREE.Camera;
   }>;
 }): void => {
-  const previousTone = renderer.toneMapping;
-  if (previousTone !== undefined) {
-    renderer.toneMapping = THREE.NoToneMapping;
+  const cubeViewport = planePicker ? readGizmoViewport(gizmo) : undefined;
+  if (planePicker && cubeViewport) {
+    planePicker.picker.render({ renderer: planePicker.renderer, camera: planePicker.camera, cubeViewport });
   }
-
-  try {
-    const cubeViewport = planePicker ? readGizmoViewport(gizmo) : undefined;
-    if (planePicker && cubeViewport) {
-      planePicker.picker.render({ renderer: planePicker.renderer, camera: planePicker.camera, cubeViewport });
-    }
-    gizmo.render();
-  } finally {
-    if (previousTone !== undefined) {
-      renderer.toneMapping = previousTone;
-    }
-  }
-
-  if (gizmo.animating) {
-    invalidate();
-  }
-};
-
-export const bindViewportGizmoInvalidationEvents = ({
-  gizmo,
-  invalidate,
-}: {
-  readonly gizmo: ViewportGizmoInvalidationTargetLike;
-  readonly invalidate: () => void;
-}): (() => void) => {
-  const handleInvalidate: ControlEventListener = () => {
-    invalidate();
-  };
-  const eventTypes = ['start', 'end', 'change', 'hoverchange'] as const;
-
-  for (const eventType of eventTypes) {
-    gizmo.addEventListener(eventType, handleInvalidate);
-  }
-
-  return () => {
-    for (const eventType of eventTypes) {
-      gizmo.removeEventListener(eventType, handleInvalidate);
-    }
-  };
+  gizmo.render();
 };

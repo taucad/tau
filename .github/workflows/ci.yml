@@ -163,6 +163,12 @@ jobs:
           # "queue": the lane runs in the merge queue only. "touched": a pull request runs the lane only
           # for the selected projects that own a file of its own diff (Nx's file-to-project map: the
           # deepest project root above the file), never for one that is affected only through a dependency.
+          # `queue` is a lane's merge-queue rule, read against the entry's own diff (`HEAD^1`), so a change to a
+          # hub (`agent-host`, `host`) no longer carries every slow lane behind it (merge-queue defects MQ-2).
+          # "touched": the lane runs for the selected projects that own a file of the diff. "any-touched": the
+          # lane runs for every selected project when the diff touches one of them, and not at all otherwise.
+          # The release gate (RG-1) runs every `formal:nightly` project and the candidate gate the full shell
+          # tier, so a dependency-only change is still proven before any release.
           LANE_SELECTORS: >-
             {"apps": {"type": "app"},
              "api": {"tags": ["scope:api"], "pr": "touched"},
@@ -171,15 +177,15 @@ jobs:
              "cli-e2e": {"targets": ["test:scenarios"], "pr": "queue"},
              "size": {"targets": ["size"]},
              "formal": {"targets": ["formal:tla"], "pr": "queue"},
-             "formal-nightly": {"targets": ["formal:nightly"], "pr": "queue"},
+             "formal-nightly": {"targets": ["formal:nightly"], "pr": "queue", "queue": "touched"},
              "geospec-examples": {"targets": ["test-geospec"], "pr": "queue"},
              "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "queue"},
-             "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue"},
-             "native-linux": {"targets": ["test:native-linux"], "pr": "queue"},
+             "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue", "queue": "touched"},
+             "native-linux": {"targets": ["test:native-linux"], "pr": "queue", "queue": "touched"},
              "native-darwin": {"targets": ["test:native-darwin"], "pr": "queue"},
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
              "desktop": {"tags": ["ci:desktop"]},
-             "shell": {"tags": ["ci:shell"], "pr": "queue"},
+             "shell": {"tags": ["ci:shell"], "pr": "queue", "queue": "any-touched"},
              "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "queue"}}
           SHELL_LANE_PATHS: >-
             [".github/workflows/shell-conformance.yml",
@@ -207,6 +213,8 @@ jobs:
                 error("lane selectors name a tag or target no project has: \($unknown_tags + $unknown_targets | join(", "))")
               elif ([$selectors[] | .pr // empty] - ["queue", "touched"]) != [] then
                 error("lane selectors name a pull-request rule other than queue or touched")
+              elif ([$selectors[] | .queue // empty] - ["touched", "any-touched"]) != [] then
+                error("lane selectors name a merge-queue rule other than touched or any-touched")
               else . end
             | $selectors | map_values(. as $selector
               | [$affected[] | . as $name | $nodes[$name] | select(. != null)
@@ -214,6 +222,11 @@ jobs:
                   | select(all($selector.tags[]?; . as $tag | $nodes[$name].data.tags // [] | index([$tag]) != null))
                   | select(all($selector.targets[]?; . as $target | $nodes[$name].data.targets // {} | has($target)))
                   | $name] | sort)' "$RUNNER_TEMP/graph.json")
+          # The project that owns a file, as Nx maps it: the deepest project root above the file, else the workspace.
+          owner_def='($graph[0].graph.nodes | with_entries({key: (.value.data.root | if . == "" then "." else rtrimstr("/") end), value: .key})) as $roots
+            | def owner: split("/") as $parts
+                | [range($parts | length; 0; -1) as $depth | $parts[:$depth] | join("/")] + ["."]
+                | map($roots[.] // empty) | first // empty;'
           # The shell lane's path check: a change to a fixture producer or to the shell workflow selects the
           # sandbox rows, whose guests install those fixtures (the reuse and pull-request rules below still apply).
           shell_paths=$(git diff --name-only --no-renames "$NX_BASE" "${NX_HEAD:-HEAD}" \
@@ -233,6 +246,22 @@ jobs:
             lanes=$(jq -c --slurpfile graph "$RUNNER_TEMP/graph.json" \
               '."native-darwin" = ([$graph[0].graph.nodes[] | select(.data.targets // {} | has("test:native-darwin")) | .name] | sort)' <<< "$lanes")
             echo "Native darwin lane paths changed: $darwin_paths"
+          fi
+          # The merge queue applies each lane's `queue` rule to the entry's own files. A shell lane path counts as
+          # touching `sandbox`, so the path checks above keep every shell project they selected.
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            lanes=$(git diff --name-only --no-renames "$NX_BASE" "${NX_HEAD:-HEAD}" \
+              | jq -cRn --argjson lanes "$lanes" --argjson selectors "$LANE_SELECTORS" \
+                  --argjson forced "$(if [ "$shell_paths" != '[]' ]; then echo '["sandbox"]'; else echo '[]'; fi)" \
+                  --slurpfile graph "$RUNNER_TEMP/graph.json" "$owner_def"'
+                ([inputs | owner] + $forced) as $touched
+                | def touched: . as $name | $touched | index([$name]) != null;
+                $lanes | with_entries(.key as $lane | $selectors[$lane].queue as $rule
+                  | if $rule == "touched" then .value |= map(select(touched))
+                    elif $rule == "any-touched" and (any(.value[]; touched) | not) then .value = []
+                    else . end)')
+            jq -r --argjson selectors "$LANE_SELECTORS" \
+              'to_entries[] | select($selectors[.key].queue != null) | "Merge queue (\($selectors[.key].queue)) \(.key): \(.value | tojson)"' <<< "$lanes"
           fi
           jq -r 'to_entries[] | "Affected \(.key): \(.value | tojson)"' <<< "$lanes"
           # What `nx affected` selected, for `lanes.json` below.
@@ -255,11 +284,7 @@ jobs:
             head=${NX_HEAD:-HEAD}
             lanes=$(git diff --name-only --no-renames --relative "$(git merge-base "$NX_BASE" "$head")" "$head" \
               | jq -cRn --argjson lanes "$lanes" --argjson selectors "$LANE_SELECTORS" \
-                  --slurpfile graph "$RUNNER_TEMP/graph.json" '
-                ($graph[0].graph.nodes | with_entries({key: (.value.data.root | if . == "" then "." else rtrimstr("/") end), value: .key})) as $roots
-                | def owner: split("/") as $parts
-                    | [range($parts | length; 0; -1) as $depth | $parts[:$depth] | join("/")] + ["."]
-                    | map($roots[.] // empty) | first // empty;
+                  --slurpfile graph "$RUNNER_TEMP/graph.json" "$owner_def"'
                 [inputs | owner] as $touched
                 | $lanes | with_entries(.key as $lane | $selectors[$lane].pr as $rule
                   | if $rule == "queue" then .value = []

@@ -868,6 +868,23 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       });
       expect(handleSubmit).not.toHaveBeenCalled();
     });
+
+    /* Home decides at adoption (ruling 2026-11-17T03:43Z): its early input carries the cancellation and the record's text. */
+    it('should cancel it with the same notice when the early input says the record holds another text', async () => {
+      const handleSubmit = vi.fn(asyncNoop);
+      const view = renderComposer('A hinge for the door', codexSession, {
+        earlyInput: { ...paintedQueued, paintedSendCancelled: { recordText: 'A hinge for the door' } },
+        handleSubmit,
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Queued send cancelled: the saved draft differs.');
+      });
+      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(handleSubmit).not.toHaveBeenCalled();
+    });
   });
 
   /* Home's creation location can still be loading at adoption (H-f): the queued send waits, shown on Send. */

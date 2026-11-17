@@ -723,6 +723,88 @@ const typeBeforeHomeHydrates = async (
   return { early, ...state };
 };
 
+/**
+ * H-f on a painted Home draft the record does not hold (ruling 2026-11-17T03:43Z): Home's record holds `homeDraft`, the
+ * draft hint another text; Enter on the painted text before hydration queues visibly, then is cancelled at adoption with
+ * the record's text shown and a status saying why, and nothing is sent.
+ */
+knownDefect(
+  'H-f (A15d, painted Home draft the record does not hold): Enter on it queues visibly, then is cancelled with the record’s text shown and a status saying why',
+  {
+    artifact: 'h-f-painted-other-wide',
+    expectedFailure: false,
+    budget: homeBudget,
+    measure: async () => {
+      const otherDraft = 'A hinge for the door';
+      await target.setViewport(viewports.wide);
+      await target.installModelCatalogFixture(catalogLatency);
+      await target.startModelCatalogApi();
+      await target.installAgentHostGatewayFixture([
+        { text: 'Started on the hinge.', usage: { inputTokens: 1, outputTokens: 1 } },
+      ]);
+      await target.navigate('/');
+      await target.expectVisible(richComposer, 60_000);
+      await target.type(richComposer, homeDraft);
+      /* The draft is in Home's composer record, and its hint, before the measured load. */
+      await target.delay(settleWindow * 2);
+      await target.evaluate((text) => {
+        const stored = JSON.parse(localStorage.getItem('tau-draft-hint') ?? '{"v":1,"projects":{}}') as {
+          home?: { text: string };
+        };
+        if (stored.home !== undefined) {
+          stored.home.text = text;
+        }
+        localStorage.setItem('tau-draft-hint', JSON.stringify(stored));
+      }, otherDraft);
+      /* Hydration waits for the Enter, not for a fixed time a loaded runner can outlast. */
+      await holdRequestsUntilReleased(entryChunk);
+      const early = await openBeforeHydration({
+        path: '/',
+        input: homeLoadProbe.composerEditor,
+        hydrated: richComposerHydrated,
+        text: '',
+        enter: true,
+        wait: 1500,
+        settle: 0,
+      });
+      const served = await target.evaluate(() => ({
+        painted: document.querySelector<HTMLTextAreaElement>('[data-hand-off-box] textarea')?.value ?? '',
+        queued: document.querySelector('[data-hand-off-box][data-queued-send]') !== null,
+      }));
+      await releaseHeldRequests();
+      await target.expectVisible(richComposer, 60_000);
+      /* A send creates a project and opens it; time for it to happen, or not. */
+      await target.delay(settleWindow * 4);
+      const state = await target.evaluate(() => ({
+        onProject: /^\/w\/[^/]+\/[^/]+/u.test(location.pathname),
+        text: document.querySelector('[aria-label="Ask Tau to build anything..."]')?.textContent.trim() ?? '',
+        status: [...document.querySelectorAll('[role=status]')].map((node) => node.textContent).join(' | '),
+      }));
+      await target.writeArtifact(
+        'home-load-gate/h-f-painted-other-wide.json',
+        `${JSON.stringify({ early: { ...early, before: undefined, after: undefined }, served, state }, null, 2)}\n`,
+      );
+      precondition(early.found, 'H-f (painted, other): the served composer was not on screen before hydration');
+      precondition(!early.hydratedBeforeAct, 'H-f (painted, other): the page had hydrated before the Enter');
+      await requireEntryChunkHeld('H-f (painted, other)');
+      return { otherDraft, served, ...state };
+    },
+    assert: ({ otherDraft, served, onProject, text, status }) => {
+      expectMeasured(
+        {
+          painted: served.painted,
+          queued: served.queued,
+          onProject,
+          text,
+          cancelledNotice: status.includes('Queued send cancelled: the saved draft differs.'),
+        },
+        'H-f (painted, other): the Enter on a painted Home draft the record does not hold was not queued visibly, or was sent, or not cancelled with the record’s text and a notice',
+        { painted: otherDraft, queued: true, onProject: false, text: homeDraft, cancelledNotice: true },
+      );
+    },
+  },
+);
+
 knownDefect(
   'H-f (A15d): Enter pressed before Home hydrates, with the entry chunk held until the typing is done, sends exactly once after adoption',
   {

@@ -274,7 +274,7 @@ const isQueuedSendPermitted = (
 export const ChatTextareaDesktop = memo(function ({
   earlyInput,
   onEarlyInputAdopted,
-  paintedSendVerdict,
+  paintedSendVerdict: ownerPaintedSendVerdict,
   className,
   enableAutoFocus = true,
   enableContextActions = true,
@@ -655,6 +655,11 @@ export const ChatTextareaDesktop = memo(function ({
   /* The queued send (above): an edit in the native input after its Enter had already cancelled it (`submitQueued` is
    * false then). It waits, still queued, while sending is not permitted, and carries the editor's text, since the
    * draft this composer was rendered with can still be the previous one; it also waits for a model and dictation. */
+  /* Home decides at adoption and says so on its early input; the project route's owner decides from the record. */
+  const paintedSendVerdict: PaintedSendVerdict | undefined =
+    earlyInput?.paintedSendCancelled === undefined
+      ? ownerPaintedSendVerdict
+      : { kind: 'cancel', recordText: earlyInput.paintedSendCancelled.recordText };
   /* An Enter on a painted draft the record does not hold is cancelled (shown as such while the queue was still live),
    * never sent; one the record holds waits for the record to be read. */
   const isPaintedSendCancelled = paintedSendVerdict?.kind === 'cancel' && isQueuedSubmitShown;

@@ -475,11 +475,12 @@ describe('Home early input: queued send and stored draft (C10)', () => {
 
   /* The record wins where the two differ (review round 1, defect 7). */
   it.each([
-    { name: 'the same draft', record: 'A bracket for the shelf', submitQueued: true },
-    { name: 'another draft', record: 'A hinge for the door', submitQueued: false },
+    { name: 'the same draft', record: 'A bracket for the shelf', cancelled: undefined },
+    /* Ruling 2026-11-17T03:43Z: the Enter stays visibly queued until the composer cancels it and says why. */
+    { name: 'another draft', record: 'A hinge for the door', cancelled: { recordText: 'A hinge for the door' } },
   ])(
-    'should not hydrate a draft the record already holds, $name, and keep Enter only on it',
-    async ({ record, submitQueued }) => {
+    'should not hydrate a draft the record already holds, $name, and send Enter only on it',
+    async ({ record, cancelled }) => {
       writeDraftHint({ kind: 'home' }, { text: 'A bracket for the shelf' });
       recordDraftText = record;
       const { content, adopted } = adopting();
@@ -487,7 +488,8 @@ describe('Home early input: queued send and stored draft (C10)', () => {
       press(input, { key: 'Enter' });
       const done = await hydrateAndAdopt(container, content);
       try {
-        expect(adopted()).toMatchObject({ prefilled: true, edited: false, submitQueued });
+        expect(adopted()).toMatchObject({ prefilled: true, edited: false, submitQueued: true });
+        expect(adopted()?.paintedSendCancelled).toEqual(cancelled);
         expect(send).not.toHaveBeenCalled();
       } finally {
         await done();

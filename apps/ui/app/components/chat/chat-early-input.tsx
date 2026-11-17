@@ -23,8 +23,12 @@ import {
   chatComposerShellClassName,
 } from '@taucad/chat-ui/components/chat-input-styles';
 
-/** What the rich composer takes over from the native input: the hand-off contract's snapshot (P4). */
-export type EarlyChatInput = HandOffSnapshot;
+/**
+ * What the rich composer takes over from the native input: the hand-off contract's snapshot (P4). Home adds
+ * `paintedSendCancelled` when an Enter queued on its painted draft is cancelled at adoption because the record holds
+ * another text (ruling 2026-11-17T03:43Z): the composer shows that text and says why.
+ */
+export type EarlyChatInput = HandOffSnapshot & { readonly paintedSendCancelled?: { readonly recordText: string } };
 
 /*
  * The hand-off recorder, served right after the whole box rather than beside the input: a browser may paint the
@@ -54,7 +58,8 @@ export type EarlyChatInputBarState = {
  * An edit is handed to the draft owner as an adopted edit. A stored draft the served page painted (and nothing typed)
  * hydrates the draft only while the draft is still empty, as the record's own load does, so the record still wins
  * where the two differ and a draft the record already loaded is kept; an Enter pressed on a painted draft the record
- * does not hold is dropped, so nothing is sent that the composer will not show.
+ * does not hold is cancelled, and the composer shows the record's text and says why, so nothing is sent that the
+ * composer will not show.
  *
  * `isHostReady` is for a host that loads the rich composer on demand: adoption hands the edit over and
  * replaces this input with `children`, so a host whose children are not loaded yet passes `false`
@@ -119,8 +124,9 @@ export function ChatEarlyInput({
       } else if (snapshot.prefilled === true && draftTextRef.current === undefined) {
         draftActorRef.send({ type: 'hydrateDraft', draft: buildDraftMessage(snapshot.text, []) });
       } else if (snapshot.prefilled === true && snapshot.submitQueued && draftTextRef.current !== snapshot.text) {
-        /* The record holds another draft, which wins: the Enter was pressed on text the composer will not hold. */
-        setAdopted({ ...snapshot, submitQueued: false });
+        /* The record holds another draft, which wins: the Enter was pressed on text the composer will not hold, so it
+         * is cancelled, and the composer says so. */
+        setAdopted({ ...snapshot, paintedSendCancelled: { recordText: draftTextRef.current ?? '' } });
         return;
       }
       setAdopted(snapshot);

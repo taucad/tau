@@ -791,7 +791,12 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
         writeFileSync(output, '');
         const result = spawnSync('bash', ['-c', step?.run ?? ''], {
           encoding: 'utf8',
-          env: { ...process.env, TIER: tier, PROJECTS: JSON.stringify(allProjects), GITHUB_OUTPUT: output },
+          env: Object.fromEntries([
+            ...Object.entries(process.env),
+            ['TIER', tier],
+            ['PROJECTS', JSON.stringify(allProjects)],
+            ['GITHUB_OUTPUT', output],
+          ]),
         });
         expect(result.status, result.stderr).toBe(0);
         const line = readFileSync(output, 'utf8')

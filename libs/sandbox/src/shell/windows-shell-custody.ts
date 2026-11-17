@@ -159,16 +159,14 @@ export const createWindowsShellCustody = (options: WindowsShellCustodyOptions): 
     return record;
   };
   const syncDirectory = async (): Promise<void> => {
-    let handle;
-    try {
-      handle = await open(await directory(), constants.O_RDONLY);
-    } catch (error) {
-      /* Windows opens no directory handle through `fs`; NTFS orders the rename after the file's own flush. */
-      if (process.platform === 'win32') {
-        return;
-      }
-      throw error;
+    /*
+     * Windows cannot flush a directory through `fs` (the open succeeds, `fsync` answers EPERM: run 44003125074); NTFS
+     * orders the rename after the file's own flush.
+     */
+    if (process.platform === 'win32') {
+      return;
     }
+    const handle = await open(await directory(), constants.O_RDONLY);
     try {
       await handle.sync();
     } finally {

@@ -35,7 +35,7 @@ import {
   useRenderFrame,
 } from '#hooks/use-graphics.jsx';
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
-import { createRaycastClipTest, raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
+import { createRaycastClipTest, isFatLineMesh, raycastFirstVisibleMeshHit } from '#graphics/three/utils/bvh-raycast.js';
 import type { MeshPick } from '#graphics/three/utils/bvh-raycast.js';
 import { resolveSectionViewRaycastClip } from '#graphics/three/use-section-view.js';
 import { measureSessionMachine } from '#machines/measure-session.machine.js';
@@ -114,18 +114,44 @@ function isSupportVisible(pick: MeshPick, ray: THREE.Ray, support: THREE.Vector3
   return hit.distance + tolerance >= distance;
 }
 
+const supportSampleCount = 16;
+
+/**
+ * The points whose visibility stands for a body's or circle's. Half are the points nearest the camera, which face it
+ * when anything does: a stride alone can land every sample in a bore or on the far side of a body whose top is in
+ * plain view. The other half keep a stride across the feature for a body seen only through a gap.
+ */
 function featureSupports(
   feature: MeshFeature,
   world: THREE.Vector3,
-  object: THREE.Object3D & { geometry: THREE.BufferGeometry },
+  view: Readonly<{ object: THREE.Object3D & { geometry: THREE.BufferGeometry }; camera: THREE.Camera }>,
 ): THREE.Vector3[] {
+  const { object, camera } = view;
   if (feature.kind === 'body' || feature.kind === 'circle') {
-    const stride = Math.max(1, Math.floor(feature.points.length / 16));
-    const supports: THREE.Vector3[] = [];
-    for (let index = 0; index < feature.points.length && supports.length < 16; index += stride) {
-      supports.push(feature.points[index]!.clone().applyMatrix4(object.matrixWorld));
+    const { points } = feature;
+    if (points.length <= supportSampleCount) {
+      return points.map((point) => point.clone().applyMatrix4(object.matrixWorld));
     }
-    return supports;
+    const toView = new THREE.Matrix4().multiplyMatrices(camera.matrixWorldInverse, object.matrixWorld);
+    const nearestCount = supportSampleCount / 2;
+    // View space looks down -z, so the nearest points have the largest z. Kept sorted, nearest first.
+    const nearest: Array<{ index: number; depth: number }> = [];
+    const scratch = new THREE.Vector3();
+    for (const [index, point] of points.entries()) {
+      const depth = scratch.copy(point).applyMatrix4(toView).z;
+      if (nearest.length === nearestCount && depth <= nearest.at(-1)!.depth) {
+        continue;
+      }
+      const at = nearest.findIndex((entry) => depth > entry.depth);
+      nearest.splice(at === -1 ? nearest.length : at, 0, { index, depth });
+      nearest.length = Math.min(nearest.length, nearestCount);
+    }
+    const chosen = new Set(nearest.map(({ index }) => index));
+    const stride = Math.floor(points.length / (supportSampleCount - nearestCount));
+    for (let index = 0; index < points.length && chosen.size < supportSampleCount; index += stride) {
+      chosen.add(index);
+    }
+    return [...chosen].map((index) => points[index]!.clone().applyMatrix4(object.matrixWorld));
   }
   if (feature.kind === 'face' && !feature.centroidOnSurface) {
     const firstTriangle = feature.triangleIndices[0];
@@ -560,7 +586,14 @@ export function MeasureTool(): React.JSX.Element {
       ) {
         return;
       }
-      if (object instanceof THREE.Mesh && object.visible && object.userData['measurementFeatures']?.kind !== 'line') {
+      if (
+        object instanceof THREE.Mesh &&
+        object.visible &&
+        // Fat edge lines are meshes to the renderer, not surfaces: as one, they occlude every edge target and stop
+        // the target catalog at a mesh with no feature graph.
+        !isFatLineMesh(object) &&
+        object.userData['measurementFeatures']?.kind !== 'line'
+      ) {
         meshes.push(object as THREE.Mesh);
       } else if (
         object.userData['measurementFeatures']?.kind === 'line' &&
@@ -666,7 +699,7 @@ export function MeasureTool(): React.JSX.Element {
         ): boolean => {
           const supportPoints =
             kind === 'center' || kind === 'centroid' || kind === 'body'
-              ? featureSupports(feature, world, mesh)
+              ? featureSupports(feature, world, { object: mesh, camera })
               : [world];
           return supportPoints.some((support) => {
             if (isKept && !isKept(support)) {
@@ -1260,7 +1293,7 @@ export function MeasureTool(): React.JSX.Element {
           checked++;
           const supportPoints =
             target.kind === 'center' || target.kind === 'centroid' || target.kind === 'body'
-              ? featureSupports(target.feature, target.position, mesh)
+              ? featureSupports(target.feature, target.position, { object: mesh, camera })
               : [target.position];
           let waitFor: Promise<void> | undefined;
           const visible = supportPoints.some((support) => {

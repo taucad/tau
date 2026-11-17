@@ -1250,11 +1250,13 @@ describe.runIf(enabled)('shell qualification', () => {
         candidateRoot = realpathSync(placed?.cwd ?? '');
         expect(candidateRoot.startsWith(`${checkoutsDirectory}/`)).toBe(true);
 
-        /* While the shell's background writer runs, its execution is held on the run's lease and nothing settled. */
+        /* While the shell's background writer runs, its execution is held on the run's lease and nothing settled.
+         * The wait is 45 s, not 20 s: on MAC-X (hosted macos-26-intel) the whole T12 row measured 11.5–30.7 s across
+         * twelve runs, and this wait alone ran out at 20 s in run 44017533915. */
         expect(
           await eventually(
             () => processesWith(marker).length > 0 && existsSync(join(candidateRoot, 'beat.txt')),
-            20_000,
+            45_000,
           ),
         ).toBe(true);
         expect(executionsOf()).toHaveLength(1);

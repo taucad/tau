@@ -44,6 +44,21 @@ describe('OpenInDesktop', () => {
     expect(screen.getByText('Opening Tau Desktop')).toBeInTheDocument();
   });
 
+  /* #2290: `/invitations` no longer carries its token in the address, so the
+     page hands the offer the path it stands for. */
+  it('hands the shell the path it was given rather than the address', async () => {
+    render(
+      <MemoryRouter initialEntries={['/invitations']}>
+        <OpenInDesktop continueLabel='Accept in the browser' path='/invitations/tok_abcdef' />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open in Tau Desktop' }));
+
+    expect(assign).toHaveBeenCalledWith('tau://invitations/tok_abcdef');
+    expect(document.body.innerHTML).not.toContain('tok_abcdef');
+  });
+
   it('opens the staging handler for a Windows browser, including the saved automatic preference', () => {
     vi.stubGlobal('location', { origin: 'https://taucad.dev', href: 'https://taucad.dev/s/direct', assign });
     vi.stubGlobal('navigator', { platform: 'Win32', userAgent: 'Windows' });

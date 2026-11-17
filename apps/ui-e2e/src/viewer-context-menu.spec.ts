@@ -297,17 +297,12 @@ test.describe('Chat viewer model component context menu', () => {
     await target.expectVisible(selectors.getByText('Opacity'));
     await target.expectVisible(opacityInput);
     await target.expectVisible(resetOpacityMenuItem);
-    if (target.currentWebGpuProfile() === 'hardware') {
-      const preview = selectors.getByRole('menu').getByCss('img[src^="blob:"]').first();
-      await target.expectVisible(preview, 15_000);
-      await expect
-        .poll(async () => target.evaluateLocator(preview, (image) => (image as HTMLImageElement).naturalWidth))
-        .toBeGreaterThan(0);
-      expect(
-        await target.evaluateLocator(preview, (image) => (image as HTMLImageElement).getBoundingClientRect().width),
-      ).toBe(24);
-    } else if (target.currentWebGpuProfile() === 'software') {
-      await target.expectVisible(selectors.getByRole('alert', { name: 'Preview status' }));
+    // The menu card names the part beside its material swatch and shows no part image: the image lives in the
+    // gallery, reached through Open preview (Tau Brain `research/thumbnail-presentation-blueprint.md`).
+    await target.expectCount(selectors.getByRole('menu').getByCss('img'), 0);
+    await target.expectVisible(selectors.getByRole('menuitem', { name: 'Open preview' }));
+    if (target.currentWebGpuProfile() === 'software') {
+      // The software renderer cannot draw part thumbnails; the failed preview is offered again from the menu.
       await target.expectVisible(selectors.getByRole('menuitem', { name: 'Retry preview' }));
     }
 

@@ -4,7 +4,6 @@
  */
 
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
-import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import type * as Os from 'node:os';
 import { join } from 'node:path';
@@ -225,24 +224,15 @@ const unresolvedRuntime = (): ProjectHostRuntimeClient => ({
 });
 
 /**
- * Remove a test's sandbox, naming what this process still holds open when Windows refuses: a directory there cannot
- * go while a handle or a process's working directory is in it.
+ * Remove a test's sandbox, retrying while Windows still holds it.
+ *
+ * A close that cannot record keeps the project for a retried close and does not wait for the work it started, so
+ * that work can still hold the workspace when the test removes it. Windows refuses to remove a directory in use
+ * (EBUSY) where POSIX removes it regardless; run 44016853439 found the refused directory removable a second later. `rm`'s
+ * own retries wait out that tail (backoff of 100 ms per attempt, ten attempts: 5.5 s at most).
  */
-const removeSandbox = async (sandbox: string): Promise<void> => {
-  try {
-    await rm(sandbox, { recursive: true, force: true });
-  } catch (error) {
-    const handles = (process as unknown as { _getActiveHandles: () => Array<Record<string, unknown>> })
-      ._getActiveHandles()
-      .map((handle) => handle.constructor.name);
-    await delay(1000);
-    const later = await rm(sandbox, { recursive: true, force: true }).then(
-      () => 'removed a second later',
-      (laterError: unknown) => `still refused a second later: ${String(laterError)}`,
-    );
-    throw new Error(`${String(error)}; open handles: ${handles.join(', ')}; ${later}`, { cause: error });
-  }
-};
+const removeSandbox = async (sandbox: string): Promise<void> =>
+  rm(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 
 /** A project host's options, composed as the desktop utility composes them. */
 const desktopProjectHostOptions = async (

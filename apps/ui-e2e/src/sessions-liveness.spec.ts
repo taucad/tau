@@ -249,7 +249,7 @@ const closeRunningProject = async (path: string): Promise<void> => {
   await target.expectVisible(close, 30_000);
   await target.click(close);
   try {
-    await target.expectVisible(selectors.getByRole('heading', { name: /^Stop 1 agent and close /u }), 30_000);
+    await target.expectVisible(selectors.getByRole('heading', { name: /^Stop 1 run and close /u }), 30_000);
   } catch (error) {
     throw new Error(
       `Running-project close confirmation did not open: ${JSON.stringify({
@@ -258,7 +258,7 @@ const closeRunningProject = async (path: string): Promise<void> => {
         row: await projectRowDescription(path),
         visibleDialogs: await target.evaluate(() =>
           [...document.querySelectorAll<HTMLElement>('[role="alertdialog"], [role="dialog"]')]
-            .filter((element) => element.offsetParent !== null)
+            .filter((element) => element.getClientRects().length > 0)
             .map((element) => element.textContent),
         ),
       })}`,
@@ -301,8 +301,16 @@ const expectProjectClosed = async (path: string): Promise<void> => {
 
 /** Start a real browser-host run against the already-installed gateway. */
 const startAgent = async (projectMarker: string): Promise<void> => {
-  if (!(await target.isVisible(selectors.getByCss(composer)))) {
-    await target.click(selectors.getByCss('[aria-label="Toggle Chat lane"]'));
+  /* The lane's own state, not the composer's visibility: the composer mounts after the lane opens, so reading it
+   * too early toggled an open lane shut. */
+  const toggle = '[aria-label="Toggle Chat lane"]';
+  await target.expectVisible(selectors.getByCss(toggle), 60_000);
+  const isOpen = await target.evaluate(
+    (selector) => document.querySelector(selector)?.getAttribute('aria-pressed') === 'true',
+    toggle,
+  );
+  if (!isOpen) {
+    await target.click(selectors.getByCss(toggle));
   }
   await target.expectVisible(selectors.getByCss(composer), 60_000);
   await target.type(composer, `Keep ${projectMarker} live while I inspect another project.`);

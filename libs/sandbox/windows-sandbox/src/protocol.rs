@@ -89,6 +89,11 @@ pub struct Resize {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunnerSpec {
     pub capability_sid: String,
+    /// The launch's fresh AppContainer package SID; the shell's lowbox token is minted for it.
+    pub package_sid: String,
+    /// The person running `launch`: the runner grants it query access to the shell's process and token, so
+    /// the host can check the token from outside.
+    pub person_sid: String,
     /// `WinSta0\<private desktop>`, created by `launch`.
     pub desktop: String,
     pub executable: String,

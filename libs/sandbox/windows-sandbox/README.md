@@ -16,14 +16,51 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
 - **Identity.** One local, non-admin sandbox account, `TauSandbox`, in the local group `TauSandboxUsers`, created once
   by an elevated `setup` (one UAC prompt, D15 "UAC applies only to trusted setup"). Its password is random, protected
   with machine-scope DPAPI and readable only by the person who ran setup, SYSTEM and Administrators.
-- **Token.** The workload runs as `TauSandbox` inside a `WRITE_RESTRICTED` token (`DISABLE_MAX_PRIVILEGE | LUA_TOKEN |
-WRITE_RESTRICTED`) whose restricting SIDs are a fresh random per-launch capability SID (`S-1-5-21-…`), the runner's
-  logon SID and Everyone. A write succeeds only where an ACE grants that launch's capability SID.
-- **Reads.** `TauSandbox` cannot open another account's profile (the default profile DACL). The helper grants it read
-  on the launch's readable and writable roots and adds deny ACEs for the denied set inside them. Per path set:
-  `readable` grants the account read and execute; `writable` grants the account and the capability SID read, write and
-  delete; `readOnly` grants the account read and denies the capability SID every write right, so a read-only path
-  inside a writable root stays read-only; `denied` denies `TauSandboxUsers` all access. Directory ACEs are inheritable.
+- **Token.** The workload runs as `TauSandbox` in an AppContainer (lowbox) token derived from a `WRITE_RESTRICTED`
+  token. The runner first mints the restricted token (`DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED`) with three
+  restricting SIDs: a fresh random per-launch capability SID (`S-1-5-21-…`), the runner's logon SID and Everyone. It
+  then derives a lowbox token from it with `NtCreateLowBoxToken`, for a fresh per-launch package SID and with no
+  capabilities (no `internetClient`, nothing else). The kernel makes the lowbox token Low integrity and keeps the
+  restricting SIDs. Every access check on every securable (files, registry, named pipes, sections, ALPC ports, desktops)
+  then has three passes, and access needs all three. The first pass is the account and its groups. The second is the
+  AppContainer pass, which matches only ACEs for the launch's package SID or for `ALL APPLICATION PACKAGES`. The third,
+  for writes only, is the restricted pass, which matches only ACEs for the restricting SIDs. Mandatory integrity applies
+  on top: a Low process cannot write to an unlabelled (Medium) object. So an object whose DACL grants only Everyone
+  (A22), or uses the default named-pipe DACL (Everyone may read), is closed to the shell. The default DACL of the
+  shell's token gives the logon SID and the package all access and `OWNER RIGHTS` read-control only.
+- **AppContainer without a profile.** The runner has no loaded profile, so it does not call `CreateAppContainerProfile`,
+  which writes `HKCU` and creates `%LOCALAPPDATA%\Packages\<name>`. It follows Chromium's lowbox route
+  (`sandbox/win/src/app_container_base.cc`, `restricted_token_utils.cc`, read as reference, not vendored). The launcher
+  derives the package SID from a random name, `tau.sandbox.<32 hex digits>`, with
+  `DeriveAppContainerSidFromAppContainerName`, a hash with no side effect. No two launches, concurrent or later, share a
+  package or any grant to it. The runner creates the package's named-object directory
+  (`\Sessions\<n>\AppContainerNamedObjects\<package SID>`), laid out as `CreateProcess` lays it out for a profile-backed
+  AppContainer. It contains `RPC Control` and the `Global`, `Local` and `Session` links. Its protected DACL names
+  SYSTEM, the runner's logon SID and the package, without `DELETE` or `WRITE_DAC`, and it carries a Low label. The
+  runner hands these handles to `NtCreateLowBoxToken`, so they live as long as a token of the package. A name the shell
+  creates lands in its own directory; a name it opens elsewhere still faces the AppContainer check.
+- **Admission.** The runner starts the shell suspended. It reads the token the kernel actually assigned to the shell and
+  refuses anything but an AppContainer token for this launch's package with zero capabilities, the launch's capability
+  SID among its restricting SIDs, and Low integrity. Any other token is killed before its first instruction, and the
+  runner reports `runner-error` at stage `spawn`. It then adds one ACE for the person to the shell's process
+  (`PROCESS_QUERY_LIMITED_INFORMATION`) and to its token (`TOKEN_QUERY`), so the host can confirm all of this from
+  outside (conformance W08), and only then resumes the shell. It logs the token through `runner-log`, for example
+  `shell token: user=… appContainer=true package=S-1-15-2-… capabilities=[] restricted=[…] integrity=S-1-16-4096`.
+- **Reads and writes.** `TauSandbox` cannot open another account's profile (the default profile DACL). The helper grants
+  on the launch's readable and writable roots and adds deny ACEs for the denied set inside them. Every grant names the
+  package SID beside the account: nothing is granted to `ALL APPLICATION PACKAGES`, and nothing to a broad root. Per
+  path set: `readable` grants the account and the package read and execute. `writable` grants the account, the
+  capability SID and the package read, write and delete, and lowers the root's mandatory label to Low
+  (`S:(ML;OICI;NW;;;LW)` on a directory), so the Low-integrity shell may write what the DACL grants. `readOnly` grants
+  the account and the package read and denies the capability SID every write right, so a read-only path inside a
+  writable root stays read-only. `denied` denies `TauSandboxUsers` all access, which the first pass alone enforces.
+  Directory ACEs and the directory label are inheritable. PowerShell 7 and Windows PowerShell 5.1 need nothing else:
+  their binaries, `System32` and the .NET runtimes live under `%ProgramFiles%` and `%SystemRoot%`, which already grant
+  `ALL APPLICATION PACKAGES` read and execute. The host's environment points `TEMP`, `TMP`, `USERPROFILE`, `APPDATA` and
+  `LOCALAPPDATA` into the writable root, so the module analysis cache, the PSReadLine history and .NET's temporary files
+  land there. The runner adds nothing to the environment and loads no `HKCU` hive. Whatever PowerShell reads from the
+  sandbox account's `HKCU` (`HKU\.DEFAULT` without a profile) the AppContainer may refuse, and PowerShell treats it as
+  unset.
 - **Sessions.** One sandbox account means read isolation is per account, not per session, so the provider serializes
   launches and answers a second concurrent one `session-limit` (A23 fallback clause).
 - **Descendants.** The runner places the shell in a Job Object with `KILL_ON_JOB_CLOSE`, no `BREAKAWAY_OK` and no
@@ -43,6 +80,12 @@ WRITE_RESTRICTED`) whose restricting SIDs are a fresh random per-launch capabili
   sandbox off the network. Turn it on, then try again.", or "the sandbox network rules are missing or disabled (run
   setup again)"). `setup` never turns the firewall on (machine policy); its output says when it is off. A launch with
   nonempty `network.domains` is `unsupported: network-isolation` until the per-launch proxy lands (Q4 §7 risk 2).
+  The AppContainer is a third, independent layer. A package without the `internetClient`, `internetClientServer` or
+  `privateNetworkClientServer` capability gets no network access from the Windows Filtering Platform filters that
+  Windows maintains for AppContainers. That includes loopback, which needs a per-package loopback exemption that is
+  never granted. The account-scoped WFP filters and firewall rules stay as they are (defence in depth). They are what
+  will admit the proxy ports once the per-launch proxy lands, which will also need a loopback exemption for the
+  package.
 - **ACL lifecycle.** Granting through `SetNamedSecurityInfoW` propagates the inheritable ACEs to every descendant and
   sets `SE_DACL_AUTO_INHERITED` on the root and on each descendant it rewrites. So before it changes any ACL the
   launcher journals the full original descriptor (owner, group, DACL and its control flags, as SDDL) of every root and
@@ -55,25 +98,44 @@ WRITE_RESTRICTED`) whose restricting SIDs are a fresh random per-launch capabili
   path that is itself a link or junction is refused (`absolute-paths`). The journal must not already exist (a leftover
   belongs to a crashed launch: `restore` it first) and must not lie inside a granted or denied path. Journaling costs
   one handle open per object under the granted paths, the same order of work as the propagation itself.
-- **Desktop.** The launcher (not the runner, which as `TauSandbox` may not change `WinSta0`; this is where both the
-  spike and Codex create it) gives the shell a private desktop on its window station whose protected DACL admits the
-  person and, as participants, `TauSandbox` and the launch's capability SID. It adds one session ACE per SID to the
-  window station when the person may change its DACL (best-effort: the ACE only widens access), journals the original
-  descriptor, and restores it byte-for-byte at teardown.
+- **Desktop.** The launcher creates the shell's private desktop on its window station. The runner cannot: as
+  `TauSandbox` it may not change `WinSta0`, and both the spike and Codex create the desktop here too. The desktop's
+  protected DACL admits the person and, as participants, `TauSandbox`, the launch's capability SID and its package SID.
+  The desktop carries a Low label (`S:(ML;;NW;;;LW)`) so the Low-integrity shell can attach to it. The launcher adds one
+  session ACE per participant to the window station when the person may change its DACL (best-effort: the ACE only
+  widens access), journals the original descriptor, and restores it byte for byte at teardown.
+- **Cleanup.** The AppContainer leaves no durable state. There is no profile, no registry key, no firewall or loopback
+  exemption and no permanent kernel object. The named-object directory and its links are temporary objects that go away
+  with the last handle, held by the runner and the lowbox token, when the launch's job ends. The ACEs for the package
+  SID and the Low labels on writable roots are journaled and restored with the rest of the ACL change. A restored root
+  that was replaced during the launch must not name the package SID either. `restore` therefore has nothing
+  AppContainer-specific to remove beyond the journal.
 - **Runner binary.** `TauSandbox` cannot read the person's profile, where the desktop app installs, so `setup` copies the
   helper to `%ProgramData%\Tau\Sandbox\bin\` (readable by `TauSandboxUsers`, writable only by SYSTEM and
   Administrators) and `launch` starts that copy. `launch` refuses `sandbox-unavailable` when the installed copy differs
   from itself, so an app update asks for `setup` again.
-- **Terminal.** The runner, not node-pty, owns the ConPTY (node-pty cannot create its pipes inside the token, spike run
-  40041468455). It spawns the shell with `0x80400` (`CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT`), never
-  `CREATE_NEW_PROCESS_GROUP`, so Ctrl-C reaches the foreground pipeline (spike run 40046797357). Every process copies
-  its parent's "ignore Ctrl-C" flag, and the launcher's chain (Node, any process-group parent) is not the spike's, so
-  both the launcher (before `CreateProcessWithLogonW`) and the runner (before `CreateProcessAsUserW`) register a
-  handler that keeps Ctrl-C and Ctrl-Break on their own console from ending them, then clear the flag with
-  `SetConsoleCtrlHandler(NULL, FALSE)`. Both log the outcome (the runner through `runner-log`) to the launcher's
-  stderr.
+- **Terminal and stdio.** The runner, not node-pty, owns the ConPTY (node-pty cannot create its pipes inside the token,
+  spike run 40041468455) and the stdio pipes. The runner opens them outside the AppContainer and passes them through the
+  explicit handle list or the pseudoconsole attribute, so the shell never opens them by name. It spawns the shell with
+  `0x80404` (`CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED`, the last for admission),
+  never `CREATE_NEW_PROCESS_GROUP`, so Ctrl-C reaches the foreground pipeline (spike run 40046797357). Every process
+  copies its parent's "ignore Ctrl-C" flag, and the launcher's chain (Node, any process-group parent) is not the
+  spike's, so both the launcher (before `CreateProcessWithLogonW`) and the runner (before `CreateProcessAsUserW`)
+  register a handler that keeps Ctrl-C and Ctrl-Break on their own console from ending them, then clear the flag with
+  `SetConsoleCtrlHandler(NULL, FALSE)`. Both log the outcome (the runner through `runner-log`) to the launcher's stderr.
 - **MXC.** `@microsoft/mxc-sdk` `processcontainer` is preferred where its PSEC probe passes. The probe failed on both
   hosted rows, so it is a later provider branch, not part of this binary.
+- **Limits.**
+  - The package is a full AppContainer, not a Low Privilege AppContainer
+    (`PROCESS_CREATION_ALL_APPLICATION_PACKAGES_OPT_OUT`). Objects that grant `ALL APPLICATION PACKAGES` stay
+    reachable within the account's own rights: system binaries, much of `HKLM`, and named objects or devices that
+    Windows opens to every app. LPAC would close that set too, but PowerShell and .NET would then need grants under
+    `%ProgramFiles%`, `%SystemRoot%` and `HKLM`, which this helper does not make.
+  - The Low label on a writable root lets other Low-integrity processes of the person write there while the launch
+    runs, wherever the DACL already grants the person. The restore removes the label.
+  - The SACL's own control flags (`S:AI`, `S:P`) on objects under a writable root are not restored, because writing
+    them needs `SeSecurityPrivilege`. The label ACE itself is restored, and the owner, group, DACL and DACL control
+    flags are restored byte for byte as before.
 
 ## Subcommands
 
@@ -186,18 +248,18 @@ confirmed it sends `cleanup-failed` instead. `exit` carries the shell's own exit
 resumes it and talks to it over two one-way named pipes (`\\.\pipe\tau-sandbox-<random>-in`/`-out`) created with
 `FILE_FLAG_FIRST_PIPE_INSTANCE`, `PIPE_REJECT_REMOTE_CLIENTS` and a protected DACL naming only the person and
 `TauSandbox`. Each side checks the other's PID. The frames are the same codec: `launch` sends `spec` (an internal spec
-with the capability SID and desktop name), then forwards `start`, `input`, `resize` and `terminate`; the runner answers
-`ready` (empty), `started`, `stdout`/`stderr`/`output` and `exit`, or `0xC1` `runner-error` (`{ "stage", "message" }`), or
-`0xC2` `runner-log` (a UTF-8 diagnostic line the launcher copies to its stderr),
-which `launch` never forwards to the host.
+with the capability SID, the package SID, the person's SID and the desktop name), then forwards `start`, `input`,
+`resize` and `terminate`; the runner answers `ready` (empty), `started`, `stdout`/`stderr`/`output` and `exit`, or
+`0xC1` `runner-error` (`{ "stage", "message" }`), or `0xC2` `runner-log` (a UTF-8 diagnostic line the launcher copies to
+its stderr, sent at any time, also before `ready`), which `launch` never forwards to the host.
 
 ## ACL journal
 
 JSON lines, streamed on write and on restore so memory stays bounded however large the granted trees are:
 
 ```text
-{"kind":"header","version":2,"capabilitySid":"S-1-5-21-…","launcherPid":1234,"windowStation":{"sessionId":1,"name":"WinSta0","descriptor":"<hex self-relative SD>"}}
-{"kind":"root","path":"C:\\…\\home","sddl":"O:S-1-5-21-…G:S-1-5-21-…D:(A;OICI;FA;;;SY)…","fileId":"<volume serial>:<file index>"}
+{"kind":"header","version":3,"capabilitySid":"S-1-5-21-…","packageSid":"S-1-15-2-…","launcherPid":1234,"windowStation":{"sessionId":1,"name":"WinSta0","descriptor":"<hex self-relative SD>"}}
+{"kind":"root","path":"C:\\…\\home","sddl":"O:S-1-5-21-…G:S-1-5-21-…D:(A;OICI;FA;;;SY)…S:(ML;…)","fileId":"<volume serial>:<file index>"}
 {"kind":"child","path":"C:\\…\\home\\a.txt","sddl":"O:…G:…D:AI(A;ID;FA;;;SY)…","fileId":"…"}
 {"kind":"end","roots":1,"children":1}
 ```
@@ -207,13 +269,17 @@ directory root (a root nested in another is journaled under its own walk only), 
 journal, `end` included, is fsynced before any ACL changes, so a journal without a valid `end` belongs to a launch
 that changed nothing. `fileId` (absent when the attributes were unreadable) tells the journaled object from one put in
 its place during the launch; such a replacement is not rewritten (the root's propagating restore already removed what
-it inherited), and a replaced root only has to name none of the launch's principals. Version 1 journals (one JSON
-document) are refused.
+it inherited), and a replaced root only has to name none of the launch's principals (account, group, capability
+SID, package SID). Each `sddl` carries owner, group, DACL and the mandatory label (`S:` part, absent when there is
+none), read with `READ_CONTROL`. Version 1 (one JSON document) and version 2 (no package SID, no label) journals are
+refused; both only ever existed on unmerged branches behind `TAU_WINDOWS_SHELL_SANDBOX`.
 
-`restore --journal <path>` restores the roots with propagation (children first), then every journaled object and root
-exactly, confirms each by full SDDL, restores the window station when it runs in the journaled session, deletes the
-journal and prints `{"restored":true}`. A missing journal, or one cut short before its `end` line, is success. On any
-unconfirmed entry it prints the failures (the first few and a count), keeps the journal and exits 1. It is idempotent.
+`restore --journal <path>` restores the roots with propagation (children first, the label too where the launch changed
+it), then every journaled object and root exactly (the DACL with `WRITE_DAC`, and the label with `WRITE_OWNER` only
+where it differs), confirms each by owner, group, DACL with its control flags and label ACE, restores the window station
+when it runs in the journaled session, deletes the journal and prints `{"restored":true}`. A missing journal, or one cut
+short before its `end` line, is success. On any unconfirmed entry it prints the failures (the first few and a count),
+keeps the journal and exits 1. It is idempotent.
 
 ## Build
 

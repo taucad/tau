@@ -7,6 +7,7 @@
 // The portable modules exist for the Windows subcommands; on other hosts only their tests use them.
 #![cfg_attr(not(windows), allow(dead_code))]
 
+mod appcontainer;
 mod cli;
 mod cmdline;
 mod frame;

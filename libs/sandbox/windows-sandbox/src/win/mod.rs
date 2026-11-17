@@ -7,6 +7,7 @@ pub mod dpapi;
 pub mod firewall;
 pub mod job;
 pub mod launch;
+pub mod lowbox;
 pub mod pipe;
 pub mod restore;
 pub mod runner;

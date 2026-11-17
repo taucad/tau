@@ -19,7 +19,9 @@ use crate::tree::Sample;
 /// 3. The window station is restored when this runs in the journaled session.
 ///
 /// A journal without its `end` line was cut short before any ACL changed: there is nothing to restore.
-/// `account_sids` are the sandbox account and group, when known; the capability SID comes from the journal.
+/// `account_sids` are the sandbox account and group, when known; the capability and package SIDs come from
+/// the journal. The package has no other state to remove: no profile, registry key or durable named object
+/// exists for it (`lowbox.rs`).
 pub fn restore_journal(path: &Path, account_sids: &[String]) -> Vec<String> {
     let summary = match journal::read_summary(path) {
         Ok(summary) => summary,
@@ -29,7 +31,7 @@ pub fn restore_journal(path: &Path, account_sids: &[String]) -> Vec<String> {
         eprintln!("tau-windows-sandbox: the journal was cut short before any ACL changed; nothing to restore");
         return Vec::new();
     }
-    let mut principals = vec![summary.header.capability_sid.clone()];
+    let mut principals = vec![summary.header.capability_sid.clone(), summary.header.package_sid.clone()];
     principals.extend(account_sids.iter().cloned());
     let mut failures = Sample::default();
 

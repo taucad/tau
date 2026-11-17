@@ -1,7 +1,8 @@
 //! The launch's private desktop and its window-station ACE (spike `fallback.ps1`, Codex `desktop.rs`).
 //!
 //! `launch` creates a private desktop on its own window station whose protected DACL admits the person
-//! (all access) and, as participants, the sandbox account and this launch's capability SID. It adds one
+//! (all access) and, as participants, the sandbox account, this launch's capability SID and its
+//! AppContainer package SID, with a Low mandatory label so the Low-integrity shell may use it. It adds one
 //! ACE per session SID to the window station and restores the window station's original descriptor byte
 //! for byte at teardown.
 
@@ -222,6 +223,9 @@ impl PrivateDesktop {
         for sid in participants {
             sddl.push_str(&format!("(A;;0x{DESKTOP_PARTICIPANT_ACCESS:x};;;{})", sid.to_sddl()));
         }
+        // An AppContainer token is Low integrity; without a label the desktop is Medium no-write-up, and the
+        // shell could not attach to it.
+        sddl.push_str("S:(ML;;NW;;;LW)");
         let sddl_w = wide(&sddl);
         let mut sd: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
         check(

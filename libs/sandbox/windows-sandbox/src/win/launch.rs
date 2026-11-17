@@ -23,6 +23,7 @@ use windows_sys::Win32::System::Threading::{
 use super::acl::{self, Principals};
 use super::desktop::{PrivateDesktop, WindowStation, current_station_name};
 use super::job::Job;
+use super::lowbox::derive_package_sid;
 use super::pipe::{self, HandleIo};
 use super::restore::restore_journal;
 use super::setup::{fence, load_password, load_record};
@@ -30,6 +31,7 @@ use super::sid::{Sid, current_user};
 use super::util::{
     Error, Owned, Result, clear_ctrl_c_ignore, program_files, random_u32s, system_root, wide, wipe, wipe_wide,
 };
+use crate::appcontainer::package_name;
 use crate::cmdline::{capability_sid, quote_arg};
 use crate::frame::{self, Frame, read_frame, write_frame};
 use crate::install::{InstallRecord, firewall_off_message};
@@ -149,6 +151,7 @@ struct Session {
     person: Sid,
     journal_path: String,
     capability_sid: String,
+    package_sid: String,
     /// The journaled roots, in application order. Their descendants are only in the journal file.
     roots: Vec<Entry>,
     /// Opened for `WRITE_DAC` when the person may change it. The session ACEs are best-effort: adding
@@ -173,6 +176,12 @@ impl Session {
         let capability_text =
             capability_sid(random_u32s::<4>().map_err(unavailable("no randomness for the capability SID"))?);
         let capability = Sid::parse(&capability_text).map_err(unavailable("the capability SID is invalid"))?;
+        // A fresh AppContainer per launch: nothing granted to one launch's package reaches another's.
+        let package_label = package_name(random_u32s::<4>().map_err(unavailable("no randomness for the package"))?);
+        let package =
+            derive_package_sid(&package_label).map_err(unavailable("the AppContainer SID cannot be derived"))?;
+        let package_text = package.to_sddl();
+        eprintln!("tau-windows-sandbox launch: AppContainer {package_label} is {package_text}");
         let person = current_user().map_err(unavailable("the current user cannot be resolved"))?;
         let station_name = current_station_name().map_err(unavailable("the window station cannot be named"))?;
         let station = match WindowStation::open_current() {
@@ -221,6 +230,7 @@ impl Session {
         let header = Header {
             version: JOURNAL_VERSION,
             capability_sid: capability_text.clone(),
+            package_sid: package_text.clone(),
             launcher_pid: unsafe { GetCurrentProcessId() },
             window_station: station_entry,
         };
@@ -229,10 +239,11 @@ impl Session {
         Ok(Self {
             valid,
             record: record.clone(),
-            principals: Principals { account, group, capability },
+            principals: Principals { account, group, capability, package },
             person,
             journal_path,
             capability_sid: capability_text,
+            package_sid: package_text,
             roots,
             station,
             station_name,
@@ -268,14 +279,20 @@ impl Session {
             if !self.roots.iter().any(|e| e.path.eq_ignore_ascii_case(path)) {
                 continue;
             }
-            acl::apply(path, &acl::aces_for(*access, &self.principals))?;
+            acl::apply(path, &acl::aces_for(*access, &self.principals), acl::needs_low_label(*access))?;
         }
         if let Some(station) = &self.station
-            && let Err(err) = station.grant(&[&self.principals.account, &self.principals.capability])
+            && let Err(err) = station.grant(&self.participants())
         {
             eprintln!("tau-windows-sandbox launch: no window-station session ACE: {err}");
         }
         Ok(())
+    }
+
+    /// Who joins the private desktop and the window station besides the person: the sandbox account, the
+    /// launch's capability SID (the restricted pass) and its package SID (the AppContainer pass).
+    fn participants(&self) -> [&Sid; 3] {
+        [&self.principals.account, &self.principals.capability, &self.principals.package]
     }
 
     fn run(self, stdin: HandleIo, sink: Sink) -> i32 {
@@ -295,8 +312,16 @@ impl Session {
         let to_runner = Arc::new(Mutex::new(HandleIo(to_runner.raw())));
         let mut from_runner_io = HandleIo(from_runner.raw());
 
-        // The runner's first frame: ready, or why not.
-        match read_frame(&mut from_runner_io) {
+        // The runner's first frame other than a log line: ready, or why not.
+        let first = loop {
+            match read_frame(&mut from_runner_io) {
+                Ok(Some(frame)) if frame.kind == frame::RUNNER_LOG => {
+                    eprintln!("tau-windows-sandbox runner: {}", String::from_utf8_lossy(&frame.payload));
+                }
+                other => break other,
+            }
+        };
+        match first {
             Ok(Some(frame)) if frame.kind == frame::READY => {}
             other => {
                 let diagnostic = match other {
@@ -378,12 +403,8 @@ impl Session {
     #[allow(clippy::type_complexity)]
     fn start_runner(&self) -> std::result::Result<(PrivateDesktop, Job, Runner, Owned, Owned), (Option<Job>, Error)> {
         self.apply_grants().map_err(|err| (None, err))?;
-        let desktop = PrivateDesktop::create(
-            &self.station_name,
-            &self.person,
-            &[&self.principals.account, &self.principals.capability],
-        )
-        .map_err(|err| (None, err))?;
+        let desktop = PrivateDesktop::create(&self.station_name, &self.person, &self.participants())
+            .map_err(|err| (None, err))?;
         let names = pipe::pipe_names().map_err(|err| (None, err))?;
         let to_runner = pipe::create_server(&names.to_runner, true, &self.person, &self.principals.account)
             .map_err(|err| (None, err))?;
@@ -408,6 +429,8 @@ impl Session {
         }
         let runner_spec = RunnerSpec {
             capability_sid: self.capability_sid.clone(),
+            package_sid: self.package_sid.clone(),
+            person_sid: self.person.to_sddl(),
             desktop: desktop.startup_name.clone(),
             executable: self.valid.executable.clone(),
             arguments: self.valid.arguments.clone(),

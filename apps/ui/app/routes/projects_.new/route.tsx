@@ -36,6 +36,7 @@ import {
 import { projectUrl } from '#utils/project-url.utils.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { focusProjectNameScript } from '#routes/projects_.new/focus-project-name-script.js';
+import { reportProjectCreationFailure } from '#lib/project-creation-failure-reporting.js';
 
 const homeLocationLabel = projectLocationFullLabel(projectLocationDescriptor({ kind: 'home' }));
 
@@ -192,6 +193,7 @@ export default function ProjectsNew(): React.JSX.Element {
         }
         return;
       }
+      reportProjectCreationFailure(error);
       toast.error('Failed to create project. Please try again.');
     }
   }, [createProject, kernel, location, presentLocationError, projectDescription, projectName]);

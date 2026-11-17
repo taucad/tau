@@ -1,7 +1,6 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Page } from 'playwright';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
@@ -20,6 +19,9 @@ import { expectVisible, parkPointer } from '#support/scenario.js';
  */
 
 /** The folders Files lists: as many as the incident's profile, more than any short window shows. */
+/** The renderer page, typed through the harness so this spec stays outside the direct browser-driver boundary. */
+type Page = DesktopSession['page'];
+
 const folderCount = 30;
 const floor = { width: 400, height: 300 } as const;
 const folderName = (index: number): string => `scroll-folder-${String(index + 1).padStart(2, '0')}`;

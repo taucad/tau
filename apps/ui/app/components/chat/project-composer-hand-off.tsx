@@ -57,8 +57,9 @@ export function useProjectComposerHandOff(pathname?: string): HandOffTarget {
  * A15d (guest edit, programme control's ruling of 2026-11-16T22:06Z): the input sits in a hand-off box, so the served
  * recorder paints the project's stored draft (the draft hint) into it before first paint as prefilled text, draws a
  * queued send (Send pending, and the status said aloud) and cancels it on Escape or an edit. An Enter on a painted
- * draft nobody edited is not queued, since the chat's record may hold another draft. Under the input is the composer's
- * bar at rest: each control the rich bar draws has its final box (ruling 2026-11-16T13:30Z), so adoption moves none.
+ * draft nobody edited queues the same way; the composer replays it only when the chat's record holds that text, and
+ * otherwise cancels it and says why (ruling 2026-11-17T03:28Z). Under the input is the composer's bar at rest: each
+ * control the rich bar draws has its final box (ruling 2026-11-16T13:30Z), so adoption moves none.
  *
  * @param props - The hand-off target the frame serves.
  * @returns The input, its status and the bar.

@@ -8,6 +8,7 @@ import { readDraftHint } from '#lib/frame-hint-draft.js';
 import { HandOffSlot } from '#components/hand-off/hand-off-slot.js';
 import { resetHandOffStoreForTest } from '#components/hand-off/hand-off-store.js';
 import type { HandOffElement } from '#components/hand-off/hand-off.js';
+import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 
 const mocks = vi.hoisted(() => {
   const cadRef = { getSnapshot: () => ({ context: { geometry: { format: 'gltf' } } }) };
@@ -33,6 +34,7 @@ const mocks = vi.hoisted(() => {
     onEarlyInputAdopted: undefined as (() => boolean) | undefined,
     draftSend: vi.fn(),
     isRecordUnread: true,
+    isHome: false,
     recordDraft: undefined as string | undefined,
     recordDraftFile: false,
     paintedSendVerdict: undefined as unknown,
@@ -118,37 +120,37 @@ vi.mock('#hooks/use-chat-records.js', () => ({ useChatRecords: () => ({ chats: [
 vi.mock('#hooks/use-chat.js', () => ({
   useDraftActions: () => ({ setDraftText: vi.fn(), setEditDraftText: vi.fn() }),
 }));
+/** The composer record the mock serves: a chat's under a session, or Home's own. */
+const recordRefMock = {
+  getSnapshot: () => ({
+    matches: () => mocks.isRecordUnread,
+    context: {
+      record:
+        mocks.recordDraft === undefined
+          ? undefined
+          : {
+              version: 1,
+              draft: {
+                id: 'd',
+                role: 'user',
+                parts: [
+                  { type: 'text', text: mocks.recordDraft },
+                  ...(mocks.recordDraftFile
+                    ? [{ type: 'file', mediaType: 'image/png', url: 'tau-attachment://photo' }]
+                    : []),
+                ],
+              },
+            },
+    },
+  }),
+};
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
     session:
       mocks.activeChatId === undefined
         ? undefined
-        : {
-            activeChatId: mocks.activeChatId,
-            composerRecordRef: {
-              getSnapshot: () => ({
-                matches: () => mocks.isRecordUnread,
-                context: {
-                  record:
-                    mocks.recordDraft === undefined
-                      ? undefined
-                      : {
-                          version: 1,
-                          draft: {
-                            id: 'd',
-                            role: 'user',
-                            parts: [
-                              { type: 'text', text: mocks.recordDraft },
-                              ...(mocks.recordDraftFile
-                                ? [{ type: 'file', mediaType: 'image/png', url: 'tau-attachment://photo' }]
-                                : []),
-                            ],
-                          },
-                        },
-                },
-              }),
-            },
-          },
+        : { activeChatId: mocks.activeChatId, composerRecordRef: recordRefMock },
+    homeRecordRef: mocks.isHome ? recordRefMock : undefined,
     execution: { execution: { kind: 'native' } },
     runElsewhere: mocks.runElsewhere,
     draftActorRef: { send: mocks.draftSend, getSnapshot: () => ({ context: { draftText: mocks.inputText } }) },
@@ -431,6 +433,52 @@ describe('ChatTextarea Enter queued on a painted draft', () => {
       expect(mocks.paintedSendVerdict).toEqual(verdict);
     },
   );
+
+  /* Ruling 2026-11-17T03:43Z: Home's painted draft is decided from Home's record the same way (review round 22: a
+   * record read with no draft, or one still unread, let the Enter send the painted text). */
+  it.each([
+    { name: 'the record is unread', isRecordUnread: true, recordDraft: undefined, verdict: { kind: 'wait' } },
+    {
+      name: 'the record holds no draft',
+      isRecordUnread: false,
+      recordDraft: undefined,
+      verdict: { kind: 'cancel', recordText: '' },
+    },
+    {
+      name: 'the record holds the same text',
+      isRecordUnread: false,
+      recordDraft: 'Fillet it',
+      verdict: { kind: 'send' },
+    },
+    {
+      name: 'the record holds another text',
+      isRecordUnread: false,
+      recordDraft: 'Chamfer it',
+      verdict: { kind: 'cancel', recordText: 'Chamfer it' },
+    },
+  ])('should decide a queued send on Home’s painted draft when $name', ({ isRecordUnread, recordDraft, verdict }) => {
+    mocks.activeChatId = undefined;
+    mocks.isHome = true;
+    mocks.isRecordUnread = isRecordUnread;
+    mocks.recordDraft = recordDraft;
+    onTestFinished(() => {
+      mocks.isHome = false;
+    });
+    const adopted: EarlyChatInput = {
+      text: 'Fillet it',
+      edited: false,
+      focused: true,
+      focusUnclaimed: false,
+      start: 9,
+      end: 9,
+      direction: 'none',
+      scrollTop: 0,
+      submitQueued: true,
+      prefilled: true,
+    };
+    render(<ChatTextarea onSubmit={vi.fn()} adoptedEarlyInput={adopted} />);
+    expect(mocks.paintedSendVerdict).toEqual(verdict);
+  });
 
   it('should leave an edited Enter to the composer', () => {
     render(<HandOffSlot surface='project-composer' scope='acme/bracket' label='Chat message' placeholder='Ask Tau' />);

@@ -178,20 +178,22 @@ export const ChatTextarea = memo(function ({
    * draft (`hydrateDraft`, which leaves an untouched draft open to the record, so the record still wins when it lands),
    * so the text does not leave the box and come back. A record already read is the draft as it stands, empty or not
    * (the hint may be older: sent on another device), and a draft of another chat is not this one's. */
-  const { session: composerSession } = useChatComposer();
+  const { session: composerSession, homeRecordRef } = useChatComposer();
+  /* The record this composer's draft persists to: the chat's, or Home's own. */
+  const composerRecordRef = composerSession?.composerRecordRef ?? homeRecordRef;
   /* Set in the adoption's own commit, so the editor reads it at its handover. */
   const [isPaintedDraftTaken, setIsPaintedDraftTaken] = useState(false);
-  const isRecordLoading = useSelector(composerSession?.composerRecordRef, (state) =>
+  const isRecordLoading = useSelector(composerRecordRef, (state) =>
     state ? state.matches({ lifecycle: 'loading' }) : false,
   );
   /* The text of the draft the chat's record held when it was read, or undefined while it is unread (or there is no
    * record to read). */
-  const recordDraftText = useSelector(composerSession?.composerRecordRef, (state) =>
+  const recordDraftText = useSelector(composerRecordRef, (state) =>
     state === undefined || state.matches({ lifecycle: 'loading' })
       ? undefined
       : recordedDraftText(state.context.record),
   );
-  const recordDraftHasMore = useSelector(composerSession?.composerRecordRef, (state) =>
+  const recordDraftHasMore = useSelector(composerRecordRef, (state) =>
     state === undefined ? false : recordedDraftHasMore(state.context.record),
   );
   /* An Enter pressed on a painted draft nobody edited (ruling 2026-11-17T03:28Z): it queued visibly as any Enter, and
@@ -228,12 +230,12 @@ export const ChatTextarea = memo(function ({
   const paintedSendVerdict = useMemo(
     () =>
       paintedSendVerdictOf(paintedSend, {
-        hasRecord: composerSession !== undefined,
+        hasRecord: composerRecordRef !== undefined,
         recordDraftText,
         recordDraftHasMore,
         activeChatId: composerSession?.activeChatId,
       }),
-    [paintedSend, composerSession, recordDraftText, recordDraftHasMore],
+    [paintedSend, composerRecordRef, composerSession, recordDraftText, recordDraftHasMore],
   );
   const handOff = useHandOffAdoption(
     handOffTarget(handOffTargetProperty, adoptedEarlyInput, enableEarlyInput),
@@ -502,13 +504,25 @@ export const ChatTextarea = memo(function ({
       </>
     ) : undefined;
 
+  /* Home's painted draft (its host hands the early input over): an Enter on it nobody edited is decided from Home's
+   * record as the project route's is from the chat's (ruling 2026-11-17T03:43Z), waiting while it is unread, so one
+   * read with no draft (an older hint) cancels it rather than sending text the record does not hold. */
+  const homePaintedSendVerdictOf = (earlyInput: EarlyChatInput | undefined): PaintedSendVerdict | undefined =>
+    paintedSendVerdictOf(
+      earlyInput?.prefilled === true && earlyInput.submitQueued && !earlyInput.edited
+        ? { text: earlyInput.text }
+        : undefined,
+      { hasRecord: composerRecordRef !== undefined, recordDraftText, recordDraftHasMore },
+    );
   const content = (earlyInput?: EarlyChatInput, onEarlyInputAdopted?: () => boolean): React.ReactNode => (
     <>
       {composerNotices}
       <ChatTextareaDesktop
         earlyInput={earlyInput}
         onEarlyInputAdopted={onEarlyInputAdopted}
-        paintedSendVerdict={onEarlyInputAdopted === undefined ? undefined : paintedSendVerdict}
+        paintedSendVerdict={
+          onEarlyInputAdopted === undefined ? homePaintedSendVerdictOf(earlyInput) : paintedSendVerdict
+        }
         className={className}
         enableAutoFocus={enableAutoFocus}
         enableContextActions={enableContextActions}

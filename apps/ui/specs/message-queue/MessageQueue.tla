@@ -154,8 +154,8 @@
 \* A15d (early input, on PL6's hand-off): while the chat's record is unread (read through a selector, never a
 \* snapshot in the component), the composer takes a painted draft through `hydrateDraft`, which skips a touched draft.
 \* PL6's queued submit is shown until it is sent or cancelled, and Escape cancels it as an edit does. An Enter queued on
-\* a painted draft nobody edited waits for the chat's record and is replayed only when the record holds that text and
-\* nothing more;
+\* a painted draft nobody edited waits for the composer's record (the chat's, or Home's own) and is replayed only when
+\* the record holds that text and nothing more;
 \* otherwise it is cancelled and never sent. A send still enters the queue only through the composer's submit, so
 \* admission, delivery, persistence and the queue barrier are unchanged, and no action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC

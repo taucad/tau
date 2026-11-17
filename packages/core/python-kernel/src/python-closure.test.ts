@@ -6,7 +6,13 @@ import type { NativeSandboxCommand, NativeSandboxCommandResult } from '@taucad/n
 import type { ClosureReceipt, InstalledFile, SealClosureInput } from '@taucad/runtime/preparation/node';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createPythonSeal, pythonLaunchSet, pythonOptionsFromClosure } from '#python-closure.js';
+import {
+  createPythonSeal,
+  pythonInterpreterPath,
+  pythonLaunchSet,
+  pythonOptionsFromClosure,
+  shippedBytecodeExclusion,
+} from '#python-closure.js';
 import { pythonKernelOptionsSchema } from '#python-kernel.js';
 import type { PythonKernelWorker } from '#python-kernel.js';
 
@@ -200,7 +206,7 @@ describe('createPythonSeal', () => {
       '-e',
       input.root,
       '-x',
-      `(?:${`${input.root}/python/lib/python3.13/encodings/aliases.py`.replaceAll('.', String.raw`\.`)})$`,
+      shippedBytecodeExclusion(input.root, ['python/lib/python3.13/encodings/aliases.py']),
       input.root,
     ]);
     expect(selfTest).toMatchObject({
@@ -293,5 +299,53 @@ describe('createPythonSeal', () => {
       code: 'EXTRACTION_REFUSED',
       message: expect.stringMatching(message) as string,
     });
+  });
+});
+
+describe('pythonInterpreterPath', () => {
+  it('should name python-build-standalone bin/python3 on macOS and Linux and python.exe at the prefix on Windows', () => {
+    expect(pythonInterpreterPath('darwin')).toBe('python/bin/python3');
+    expect(pythonInterpreterPath('linux')).toBe('python/bin/python3');
+    expect(pythonInterpreterPath('win32')).toBe('python/python.exe');
+  });
+});
+
+describe('shippedBytecodeExclusion', () => {
+  // compileall searches each path it visits with `re.search`; these patterns use only syntax JavaScript reads alike.
+  const matches = (pattern: string, path: string): boolean => new RegExp(pattern, 'u').test(path);
+
+  it('should match exactly the shipped sources under the root, by either separator', () => {
+    const pattern = shippedBytecodeExclusion(String.raw`C:\Users\RUNNER~1\store\c+1`, [
+      'python/Lib/os.py',
+      'python/Lib/encodings/aliases.py',
+      'python/Lib/encodings/utf_8.py',
+    ]);
+
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\os.py`)).toBe(true);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\encodings\utf_8.py`)).toBe(true);
+    expect(matches(pattern, 'C:/Users/RUNNER~1/store/c+1/python/Lib/encodings/aliases.py')).toBe(true);
+    // Not shipped, a prefix of a shipped name, another directory, another root, or not the source itself.
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\encodings\idna.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\o.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\encodings\os.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c11\python\Lib\os.py`)).toBe(false);
+    expect(matches(pattern, String.raw`D:\x\C:\Users\RUNNER~1\store\c+1\python\Lib\os.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\os.pyc`)).toBe(false);
+  });
+
+  it("should stay far under Windows' 32,767-character command line for the interpreter's 566 shipped sources", () => {
+    const sources = Array.from(
+      { length: 566 },
+      (_, index) => `python/Lib/site-packages/pip/_vendor/package_${String(index % 40)}/module_${String(index)}.py`,
+    );
+    const pattern = shippedBytecodeExclusion(String.raw`C:\Users\someone\AppData\Roaming\Tau\store\closure`, sources);
+
+    expect(pattern.length).toBeLessThan(16_000);
+    expect(
+      matches(
+        pattern,
+        `${String.raw`C:\Users\someone\AppData\Roaming\Tau\store\closure`}\\${sources[7]!.replaceAll('/', '\\')}`,
+      ),
+    ).toBe(true);
   });
 });

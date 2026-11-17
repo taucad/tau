@@ -15,8 +15,16 @@ import type {
 import { pythonSupportModules } from '#python-kernel.js';
 import type { PythonClosure, PythonKernelWorker } from '#python-kernel.js';
 
-/** Closure-relative POSIX path of the interpreter python-build-standalone ships. */
-const pythonPath = 'python/bin/python3';
+/**
+ * Closure-relative POSIX path of the interpreter python-build-standalone's `install_only` archive ships: `bin/python3`
+ * on macOS and Linux, `python.exe` at the prefix on Windows. A closure is always the host's own, so the host decides.
+ * @param platform - The host platform.
+ * @returns The interpreter's closure-relative path.
+ * @public
+ */
+export const pythonInterpreterPath = (platform: NodeJS.Platform = process.platform): string =>
+  platform === 'win32' ? 'python/python.exe' : 'python/bin/python3';
+const pythonPath = pythonInterpreterPath();
 /** Closure-relative directory the worker, its support modules and `tau_kernel` unpack into. */
 const workerDirectory = 'tau-worker';
 const bytecodePattern = /(?:^|\/)__pycache__\/[^/]+\.cpython-\d+\.pyc$/u;
@@ -95,6 +103,36 @@ export const pythonOptionsFromClosure = (
 export type PythonSandboxRunner = (command: NativeSandboxCommand) => Promise<NativeSandboxCommandResult>;
 
 const escapeRegExp = (text: string): string => text.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
+
+/** Either separator: compileall joins with the host's own, and Windows' is `\\`. */
+const separatorPattern = String.raw`[\\/]`;
+
+/**
+ * compileall's `-x` pattern for the sources whose bytecode a dependency file ships, grouped by directory so it stays
+ * short: Windows' interpreter ships hundreds (its standard library and pip), and one absolute path each would pass the
+ * 32,767-character command-line limit.
+ * @param root - The closure's real root, as compileall is handed it.
+ * @param sources - Closure-relative POSIX paths of the sources to skip.
+ * @returns A pattern compileall searches each visited path with.
+ */
+export const shippedBytecodeExclusion = (root: string, sources: readonly string[]): string => {
+  const byDirectory = new Map<string, string[]>();
+  for (const source of sources) {
+    const slash = source.lastIndexOf('/');
+    const directory = source.slice(0, slash + 1);
+    const names = byDirectory.get(directory) ?? [];
+    names.push(source.slice(slash + 1, -'.py'.length));
+    byDirectory.set(directory, names);
+  }
+  const directories = [...byDirectory.entries()]
+    .toSorted(([left], [right]) => (left < right ? -1 : 1))
+    .map(([directory, names]) => {
+      const prefix = directory.split('/').map(escapeRegExp).join(separatorPattern);
+      return `${prefix}(?:${names.toSorted().map(escapeRegExp).join('|')})`;
+    });
+  const rootPattern = root.split(/[\\/]/u).map(escapeRegExp).join(separatorPattern);
+  return `^${rootPattern}${separatorPattern}(?:${directories.join('|')})\\.py$`;
+};
 
 /**
  * The `.py` sources whose bytecode a dependency file already ships, as closure-relative POSIX paths.
@@ -179,9 +217,7 @@ export const createPythonSeal =
           root,
           '-e',
           root,
-          ...(shipped.length === 0
-            ? []
-            : ['-x', `(?:${shipped.map((path) => escapeRegExp(`${root}/${path}`)).join('|')})$`]),
+          ...(shipped.length === 0 ? [] : ['-x', shippedBytecodeExclusion(root, shipped)]),
           root,
         ],
         readablePaths: [root],

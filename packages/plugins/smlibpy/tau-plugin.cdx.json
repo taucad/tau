@@ -170,6 +170,36 @@
       ]
     },
     {
+      "bom-ref": "63d263ab0162f34a241a56dc5b283c22d6e131f5516117e6a921350c69ba7d4f",
+      "type": "platform",
+      "name": "cpython",
+      "version": "3.13.15",
+      "purl": "pkg:github/astral-sh/python-build-standalone@20260901?file_name=cpython-3.13.15%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "63d263ab0162f34a241a56dc5b283c22d6e131f5516117e6a921350c69ba7d4f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "PSF-2.0"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
       "bom-ref": "70a210c2149a6ede7068635fb071db1754af8f755f4cdd330b490f743558659a",
       "type": "file",
       "name": "tau-worker/tau_kernel/analyzer.py",
@@ -200,6 +230,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -232,6 +266,38 @@
         {
           "name": "taucad:target",
           "value": "darwin-arm64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "85aaccb24182c25df891ad0ec333585967e115269d5f1b17f2c9ae005bc96657",
+      "type": "library",
+      "name": "numpy",
+      "version": "2.5.2",
+      "purl": "pkg:pypi/numpy@2.5.2?file_name=numpy-2.5.2-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "85aaccb24182c25df891ad0ec333585967e115269d5f1b17f2c9ae005bc96657"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/15/20/f3489f86d81ea460b2bcdceaed094142ca6579f6be0ec527b781d39afe68/numpy-2.5.2-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -298,6 +364,38 @@
       ]
     },
     {
+      "bom-ref": "943a6230701d27ca4c9db1ddc035ce7290292e5e2d411e34721fe9ad2b5f39c0",
+      "type": "library",
+      "name": "smlibpy",
+      "version": "0.6.2",
+      "purl": "pkg:pypi/smlibpy@0.6.2?file_name=smlibpy-0.6.2-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "943a6230701d27ca4c9db1ddc035ce7290292e5e2d411e34721fe9ad2b5f39c0"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "MIT AND Apache-2.0 AND OFL-1.1"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/b0/ce/243e0eab2f490ccba0866a120935446578eb79f8edcbb00bf4c98bd13b84/smlibpy-0.6.2-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
       "bom-ref": "981a651f543f2854abd3b5fcb3263aac581b18209be49863ba575de6edf4c14d",
       "type": "library",
       "name": "coverage",
@@ -360,6 +458,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -426,6 +528,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -460,6 +566,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -528,6 +638,38 @@
       ]
     },
     {
+      "bom-ref": "cac0fdca17b036af3881a9d2729a850b76553f3f716ccb0360ad4dbc06b3b843",
+      "type": "library",
+      "name": "coverage",
+      "version": "7.10.7",
+      "purl": "pkg:pypi/coverage@7.10.7?file_name=coverage-7.10.7-cp313-cp313-win_amd64.whl",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cac0fdca17b036af3881a9d2729a850b76553f3f716ccb0360ad4dbc06b3b843"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "Apache-2.0"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://files.pythonhosted.org/packages/b1/b1/a75fd25df44eab52d1931e89980d1ada46824c7a3210be0d3c88a44aaa99/coverage-7.10.7-cp313-cp313-win_amd64.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
+        }
+      ]
+    },
+    {
       "bom-ref": "cb4c08d14be89cabfb0d437e7e1a799e97335f4cf46271b820b070982ac982ec",
       "type": "library",
       "name": "smlibpy",
@@ -590,6 +732,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -686,6 +832,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },
@@ -720,6 +870,10 @@
         {
           "name": "taucad:target",
           "value": "linux-x64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "win32-x64"
         }
       ]
     },

@@ -8,8 +8,10 @@
  * descriptor is restored; `cleanup-failed`, a helper that dies without `exit`, and a protocol violation reject it, and
  * the journal stays for {@link ShellProvider.recover}, which has the helper's `restore` write the descriptors back.
  *
- * One sandbox account serves every launch, so read isolation is per account, not per session: the provider runs one
- * launch at a time and refuses another while one is live or while any earlier launch's journal is unrestored.
+ * Each launch has its own AppContainer package, but restore writes whole descriptors back, so two live launches over
+ * overlapping paths would undo each other's grants (`windows-sandbox/README.md` "Sessions"): the provider runs one
+ * launch at a time and refuses another while one is live or while any earlier launch's journal is unrestored, and the
+ * helper refuses a second launch on the computer itself.
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';

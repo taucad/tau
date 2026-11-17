@@ -54,7 +54,8 @@ import {
 } from '#shell/shell-identity.js';
 import type { ShellExecutable } from '#shell/shell-identity.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellProcess, ShellProvider } from '#shell/shell-provider.js';
-import { nativeWorkerConformance } from '#shell/windows-native-worker.fixture.js';
+import { launchExclusionConformance, nativeWorkerConformance } from '#shell/windows-native-worker.fixture.js';
+import type { NativeWorkerContext } from '#shell/windows-native-worker.fixture.js';
 import { createWindowsShellProvider } from '#shell/windows-shell-provider.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
@@ -1614,23 +1615,30 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     },
   );
 
+  const nativeWorkerContext = (): NativeWorkerContext => ({
+    root,
+    helperPath,
+    workerProbe,
+    systemRoot,
+    recordHelperDiagnostic,
+    sddlOf,
+    interfaceAddress,
+    tcpCanary,
+    tcpControl,
+    waitUntil,
+    pause: delay,
+  });
+
   conformanceWithin(180_000)(
     'NW01',
     'a native worker outside Program Files runs pinned to its digest, loads from its unwritable runtime root, writes only its artifacts, has no network and reads stdin to close-input',
-    async () =>
-      nativeWorkerConformance({
-        root,
-        helperPath,
-        workerProbe,
-        systemRoot,
-        recordHelperDiagnostic,
-        sddlOf,
-        interfaceAddress,
-        tcpCanary,
-        tcpControl,
-        waitUntil,
-        pause: delay,
-      }),
+    async () => nativeWorkerConformance(nativeWorkerContext()),
+  );
+
+  conformanceWithin(180_000)(
+    'NW02',
+    'the helper runs one launch at a time: a second launch and a restore are refused while a worker is live, and the next launch runs as soon as it exits',
+    async () => launchExclusionConformance(nativeWorkerContext()),
   );
 
   conformance('W07', 'after every launch, each path the suite touched has exactly its original ACL', async () => {

@@ -117,6 +117,19 @@ pub fn run(path: &str) -> i32 {
             return 1;
         }
     }
+    // Never beside a live launch: its snapshot and this journal's would each undo the other (`exclusive.rs`).
+    let _exclusive = match super::exclusive::try_acquire() {
+        Ok(Some(exclusive)) => exclusive,
+        Ok(None) => {
+            eprintln!("tau-windows-sandbox restore: {}; the journal is kept", super::exclusive::BUSY);
+            println!("{}", serde_json::json!({ "restored": false, "failures": [super::exclusive::BUSY] }));
+            return 1;
+        }
+        Err(err) => {
+            eprintln!("tau-windows-sandbox restore: {err}; the journal is kept");
+            return 1;
+        }
+    };
     let failures = restore_journal(path, &account_sids());
     if failures.is_empty() {
         if let Err(err) = std::fs::remove_file(path)

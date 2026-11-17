@@ -5,6 +5,7 @@
 //! the job is empty and every descriptor is restored before `exit`. Anything unconfirmed is
 //! `cleanup-failed`, and the journal stays for `restore`.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -22,6 +23,7 @@ use windows_sys::Win32::System::Threading::{
 
 use super::acl::{self, Principals};
 use super::desktop::{PrivateDesktop, WindowStation, current_station_name};
+use super::exclusive::{self, Exclusive};
 use super::executable::pin;
 use super::job::Job;
 use super::lowbox::derive_package_sid;
@@ -117,10 +119,29 @@ pub fn run() -> i32 {
         },
         None => None,
     };
-    let session = match Session::prepare(valid, &record) {
-        Ok(session) => session,
-        Err(refused) => return refuse(&sink, &refused),
+    // One launch at a time: held from before the journal until teardown has restored it (`exclusive.rs`).
+    let exclusive = match exclusive::try_acquire() {
+        Ok(Some(exclusive)) => exclusive,
+        Ok(None) => return refuse(&sink, &Refused::unavailable(exclusive::BUSY, None)),
+        Err(err) => {
+            return refuse(
+                &sink,
+                &Refused::unavailable(
+                    "the sandbox cannot tell whether another launch is running",
+                    Some(err.to_string()),
+                ),
+            );
+        }
     };
+    let mut session = match Session::prepare(valid, &record) {
+        Ok(session) => session,
+        Err(refused) => {
+            drop(exclusive);
+            return refuse(&sink, &refused);
+        }
+    };
+    // Released by the teardown, before the last frame: a host that starts the next launch on `exit` finds it free.
+    session.exclusive = RefCell::new(Some(exclusive));
     let code = session.run(stdin, sink);
     drop(pinned);
     code
@@ -172,6 +193,8 @@ struct Session {
     /// them only widens access, and Codex's shape runs without them.
     station: Option<WindowStation>,
     station_name: String,
+    /// One launch at a time (`exclusive.rs`), held until [`Session::teardown`] has restored everything.
+    exclusive: RefCell<Option<Exclusive>>,
 }
 
 impl Session {
@@ -274,6 +297,7 @@ impl Session {
             roots,
             station,
             station_name,
+            exclusive: RefCell::new(None),
         })
     }
 
@@ -298,6 +322,8 @@ impl Session {
         {
             failures.push(format!("the journal could not be deleted: {err}"));
         }
+        // Restored, or kept for `restore`: either way this launch changes nothing more.
+        drop(self.exclusive.borrow_mut().take());
         if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
     }
 

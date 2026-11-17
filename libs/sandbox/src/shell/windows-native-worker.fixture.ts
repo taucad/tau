@@ -15,8 +15,10 @@ import {
   openSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import type { Server } from 'node:net';
 import { join } from 'node:path';
@@ -248,4 +250,112 @@ export const nativeWorkerConformance = async (context: NativeWorkerContext): Pro
   assert.deepEqual(JSON.parse(quiet.stdout().trim()), { op: 'eof', lines: 0 });
   assert.deepEqual(sddlOf(watched), before);
   assert.equal(existsSync(journal), false);
+};
+
+/**
+ * Run NW02: the helper runs one launch at a time on the computer (`windows-sandbox/README.md`, "Sessions"). While a
+ * worker is live, a second launch is refused before anything changes and `restore` keeps the journal it is given;
+ * once the first has ended and restored, the second runs, and both leave every ACL exactly as it was.
+ *
+ * @param context - The suite's root, helper, probe and outside observers.
+ */
+export const launchExclusionConformance = async (context: NativeWorkerContext): Promise<void> => {
+  const { root, helperPath, workerProbe, systemRoot, recordHelperDiagnostic, sddlOf, waitUntil } = context;
+  const runtime = join(root, 'exclusion-runtime');
+  const firstArtifacts = join(root, 'exclusion-first');
+  const secondArtifacts = join(root, 'exclusion-second');
+  const journals = join(root, 'exclusion-journal');
+  for (const directory of [runtime, firstArtifacts, secondArtifacts, journals]) {
+    mkdirSync(directory, { recursive: true });
+  }
+  const runtimeRoot = realpathSync.native(runtime);
+  const worker = join(runtimeRoot, 'tau-worker-probe.exe');
+  copyFileSync(workerProbe, worker);
+  const digest = `sha256:${createHash('sha256').update(readFileSync(worker)).digest('hex')}`;
+  const watched = [runtimeRoot, worker, firstArtifacts, secondArtifacts];
+  const before = sddlOf(watched);
+  const specOf = (artifacts: string, journal: string): WindowsLaunchSpec => ({
+    version: 1,
+    executable: worker,
+    executableDigest: digest,
+    arguments: [],
+    workingDirectory: artifacts,
+    environment: Object.fromEntries([['SystemRoot', systemRoot]]),
+    stdio: { kind: 'pipes', input: true },
+    filesystem: { readable: [runtimeRoot], writable: [artifacts], readOnly: [], denied: [] },
+    journal,
+  });
+  const firstJournal = join(journals, 'first.acl.json');
+  const secondJournal = join(journals, 'second.acl.json');
+  const open = () => openWindowsHelperSession(helperPath, recordHelperDiagnostic);
+  const settled = (frame: WindowsHelperFrame): boolean =>
+    frame.type === 'ready' || frame.type === 'refused' || frame.type === 'cleanup-failed';
+  const ended = (frame: WindowsHelperFrame): boolean => frame.type === 'exit' || frame.type === 'cleanup-failed';
+
+  const first = open();
+  first.send({ type: 'spec', spec: specOf(firstArtifacts, firstJournal) });
+  const firstReady = await first.frame(settled, 60_000);
+
+  assert.equal(firstReady.type, 'ready', JSON.stringify(firstReady));
+  first.send({ type: 'start' });
+  const firstStarted = await first.frame((frame) => frame.type === 'started' || ended(frame), 60_000);
+
+  assert.equal(firstStarted.type, 'started', JSON.stringify(firstStarted));
+  /* The first worker is live: its journal exists and its grant is on its folder. */
+  assert.equal(existsSync(firstJournal), true);
+  assert.notEqual(sddlOf([firstArtifacts])[firstArtifacts], before[firstArtifacts]);
+
+  const secondSddl = sddlOf([secondArtifacts]);
+  const refused = open();
+  refused.send({ type: 'spec', spec: specOf(secondArtifacts, secondJournal) });
+  const refusal = await refused.frame(settled, 60_000);
+  refused.end();
+  await refused.closed;
+
+  assert.equal(refusal.type, 'refused', JSON.stringify(refusal));
+  assert.equal(refusal.refusal.status, 'sandbox-unavailable');
+  assert.match(refusal.refusal.message, /one at a time/u);
+  /* Refused before anything changed. */
+  assert.equal(existsSync(secondJournal), false);
+  assert.deepEqual(sddlOf([secondArtifacts]), secondSddl);
+
+  /* `restore` waits for no one either: it keeps a journal while a launch is live. Its content is never read. */
+  const stray = join(journals, 'stray.acl.json');
+  writeFileSync(stray, '');
+  const restore = spawnSync(helperPath, ['restore', '--journal', stray], { encoding: 'utf8', windowsHide: true });
+  for (const line of restore.stderr.split(/\r?\n/u).filter((text) => text !== '')) {
+    recordHelperDiagnostic(line);
+  }
+
+  assert.equal(restore.status, 1, restore.stdout);
+  assert.match(restore.stdout, /one at a time/u);
+  assert.equal(existsSync(stray), true);
+  rmSync(stray);
+
+  /* The first worker is unaffected, and its end releases the computer: restored, journal gone. */
+  first.send({ type: 'input', bytes: new TextEncoder().encode(`${JSON.stringify({ op: 'echo', value: 1 })}\n`) });
+  assert.equal(await waitUntil(() => first.stdout().includes('"op":"echo"'), 30_000), true, first.stdout());
+  first.send({ type: 'close-input' });
+  const firstExit = await first.frame(ended, 60_000);
+
+  assert.deepEqual(firstExit, { type: 'exit', exit: { exitCode: 0 } });
+  assert.equal(existsSync(firstJournal), false);
+  assert.deepEqual(sddlOf(watched), before);
+
+  /* Taken at once on `exit`, before the first helper has even ended: it released the computer before that frame. */
+  const second = open();
+  second.send({ type: 'spec', spec: specOf(secondArtifacts, secondJournal) });
+  const secondReady = await second.frame(settled, 60_000);
+
+  assert.equal(secondReady.type, 'ready', JSON.stringify(secondReady));
+  await first.closed;
+  second.send({ type: 'start' });
+  second.send({ type: 'close-input' });
+  const secondExit = await second.frame(ended, 60_000);
+  await second.closed;
+
+  assert.deepEqual(secondExit, { type: 'exit', exit: { exitCode: 0 } });
+  assert.deepEqual(JSON.parse(second.stdout().trim()), { op: 'eof', lines: 0 });
+  assert.equal(existsSync(secondJournal), false);
+  assert.deepEqual(sddlOf(watched), before);
 };

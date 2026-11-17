@@ -44,6 +44,35 @@ import type { AcpSession } from '#acp/session.js';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 import type { ExternalAgentDescriptor, ExternalAgentRefusalCode } from '@taucad/agent-host/wire';
 
+/**
+ * One config option cut to the wire's keys: an adapter's own extras (codex-acp puts `_meta` on every mode value) would
+ * fail the strict descriptor schema and drop the whole option, which left Codex with no Mode control.
+ */
+function wireConfigOption(option: SessionConfigOption): Record<string, unknown> {
+  const base = {
+    id: option.id,
+    name: option.name,
+    category: option.category,
+    description: option.description,
+    type: option.type,
+    currentValue: option.currentValue,
+  };
+  if (option.type !== 'select') {
+    return base;
+  }
+  const value = (entry: { value: string; name: string; description?: string | null }) => ({
+    value: entry.value,
+    name: entry.name,
+    description: entry.description,
+  });
+  return {
+    ...base,
+    options: option.options.map((entry) =>
+      'group' in entry ? { group: entry.group, name: entry.name, options: entry.options.map(value) } : value(entry),
+    ),
+  };
+}
+
 const execFileAsync = promisify(execFile);
 
 /** Milliseconds one `<cli> --version` probe may take before the agent is refused. @public */
@@ -803,13 +832,18 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
     const thoughtLevelOf = (option: Extract<SessionConfigOption, { type: 'select' }> | undefined) =>
       option === undefined
         ? undefined
-        : externalAgentDescriptorSchema.shape.thoughtLevel.safeParse({ ...option, category: 'thought_level' }).data;
+        : externalAgentDescriptorSchema.shape.thoughtLevel.safeParse({
+            ...wireConfigOption(option),
+            category: 'thought_level',
+          }).data;
     const thoughtLevel = thoughtLevelOf(thoughtOption);
     /* What a new chat will run: plan values gone, the mode set to the default its first turn chooses (PR5). */
     const configOptions = discoveredModeOptions(session.configOptions ?? [], adapter.defaultModePreference)
       .filter((option) => option.category !== 'model' && option.category !== 'thought_level')
       .flatMap((option) => {
-        const parsed = externalAgentDescriptorSchema.shape.configOptions.unwrap().element.safeParse(option);
+        const parsed = externalAgentDescriptorSchema.shape.configOptions
+          .unwrap()
+          .element.safeParse(wireConfigOption(option));
         return parsed.success ? [parsed.data] : [];
       })
       .slice(0, 32);

@@ -388,6 +388,19 @@ describe('probeAcpAgentModels', () => {
     });
   });
 
+  it('keeps a mode option whose values carry adapter `_meta`, as codex-acp 1.7.0 sends them', async () => {
+    const probed = await probeAcpAgentModels(
+      { agents: [fixtureAdapter('value-meta')], refused: [] },
+      { modelProbeTimeout: 20_000 },
+    );
+
+    const offered = probed.agents[0]?.configOptions?.find((option) => option.category === 'mode');
+    expect(offered).toMatchObject({ id: 'mode', currentValue: 'auto' });
+    expect(
+      offered?.type === 'select' && offered.options.flatMap((entry) => ('value' in entry ? [entry] : [])),
+    ).toContainEqual({ value: 'auto', name: 'Auto' });
+  });
+
   it('flattens a grouped select, because Tau’s picker is one list', async () => {
     const probed = await probeAcpAgentModels(
       { agents: [fixtureAdapter('grouped')], refused: [] },

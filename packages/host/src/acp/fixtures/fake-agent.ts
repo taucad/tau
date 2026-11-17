@@ -48,6 +48,7 @@
  * | Mode | Behaviour |
  * | --- | --- |
  * | `grouped` | `configOptions` offers the models as `SessionConfigSelectGroup[]` rather than a flat list |
+ * | `value-meta` | every mode value carries `_meta: { kind }`, as codex-acp 1.7.0 sends it |
  * | `pushed-models` | `session/new` offers two models, then Grok's `_x.ai/models/update` lists four a moment later, as grok 1.0.52 does after starting on a renewable sign-in; every later answer offers all four |
  * | `auth-required` | `initialize` advertises codex-acp 1.7.0's own methods (`api-key`, `chat-gpt`, and `chat-gpt-device-code` to a client that advertised `elicitation.url`), none with a terminal command, and `session/new` errors `-32000` |
  * | `claude-terminal-auth` | `initialize` advertises claude-agent-acp 0.70.0's two methods to a client that sent `_meta['terminal-auth']`, each naming *this* process (`process.execPath` and `process.argv.slice(1)`) as its command, exactly as the real adapter does |
@@ -437,7 +438,11 @@ const configOptionsOf = (session: SessionState): readonly unknown[] => {
       category: 'mode',
       type: 'select',
       currentValue: String(session.config['mode']),
-      options: modesOf(session.model).map((value) => ({ value, name: modeNames[value] ?? value })),
+      options: modesOf(session.model).map((value) => ({
+        value,
+        name: modeNames[value] ?? value,
+        ...(inMode('value-meta') ? { _meta: { kind: value } } : {}),
+      })),
     },
     {
       id: 'thought_level',

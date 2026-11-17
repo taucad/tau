@@ -25,7 +25,7 @@ import { resolveTauCloudBuildEnabled } from '../../build-environment.js';
  * "single RR config" reconsider item), which is a change to
  * `apps/ui/desktop/**` and therefore not this lane's to make.
  */
-export default flatRoutes({
+const routes: RouteConfigEntry[] = await flatRoutes({
   rootDirectory: '../../app/routes',
   ignoredRouteFiles: [
     // Co-located route tests would otherwise become live routes (and generate
@@ -69,5 +69,19 @@ export default flatRoutes({
     '../../app/routes/[[]__e2e[]].*/**',
     '../../app/routes/[[]__debug[]].observability/**',
   ],
-  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- explicit module boundary required here.
-}) as Promise<RouteConfigEntry[]>;
+});
+
+/**
+ * Paths served from a different module. `/invitations/:token` is a server
+ * redirect on the web that moves the token out of the address (#2290); a
+ * daemon-served page has no server, so it takes the renderer module the
+ * desktop shell uses, which does the same before the router commits.
+ */
+const spaRouteFiles = new Map<string, string>([
+  ['../../app/routes/invitations.$token', '../../app/routes/invitations.$token/desktop-route.tsx'],
+]);
+
+export default routes.map((entry) => {
+  const file = spaRouteFiles.get(entry.id ?? '');
+  return file === undefined ? entry : { ...entry, file };
+});

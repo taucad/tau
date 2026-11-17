@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.14.0 (2026-11-17)
+
+### Features
+
+- feat(filesystem): Settle each project root on its own with a status (WP1) (#2384) (cdc8f73c2)
+- feat(types): Catalogue the native CAD formats cadmpeg reads (#2376) (42d170e28)
+- feat(heif): Add @taucad/heif so HEIC photos convert to JPEG in the composer, desktop and CLI (#2337) (b388a4315)
+- feat(api-llm-gateway): Add Gemini 4 Hydrogen and retire Gemini 3 (#2329) (297731779)
+- feat(ui): Convert composer images in a runtime worker and refuse by format (#2336) (66bd84d6e)
+- feat(host): Convert ACP agent images the chat cannot store as sent (#2335) (0b98b03c9)
+- feat(ui): Replay editor text a reload left unsaved, and keep a refused close cut owed (A7e) (#2317) (35858af88)
+- feat(agent-host): Decide what every host stores with one attachment storage policy (#2319) (52b874e3d)
+- feat(image)!: Add raster transcoder and rename transcoder ids to render, svg, raster (#2316) (ac237eec9)
+- feat(ui): Guard the critical path before changing it (progressive loading PL0) (#2306) (2f827b7fd)
+- feat(agent-observability): Label tool facts and report resumed runs (LW17, LU14) (#2205) (afdc792de)
+
+### Fixes
+
+- fix(agent-host): Write chat logs and attachments on Windows without a directory fsync (#2420) (4e83b1db7)
+- fix(agent-tools): Report a refused main entry in model results (#2368) (8a9228f32)
+- fix(api-git-core): Keep one lease host's boot sweep off another's leases (#2362) (3be870333)
+- fix(revisions): Flush a large-object fill by its own paths (SP4-fill) (#2357) (92041b491)
+- fix(ui): Show arriving files in a tree listed before its apply (SP4-tree) (#2355) (2cc515c6d)
+- fix(ui): Render the model once its own files are here, not every large object (#2263) (d08c7460e)
+- fix(revisions): Retry LFS downloads on the held action and verify a fill flush by its written paths (#2326) (44a6024cb)
+- fix(ui): Keep an approval's opening in its stream and let a paused run be stopped (#2327) (6ef27a031)
+- fix(api-billing): Admit Together model ids and refuse bad admission fields as 400 (#2311) (947cdfd45)
+- fix(agent-host): Label chat attachments from their bytes on every host (#2310) (0bd33827a)
+- fix(host): Refresh Grok's model list from its \_x.ai/models/update push (#2277) (541ff9fb5)
+- fix(api): Keep runtime counts across restarts and stop the crash-loop alert counting deploys (#2273) (9050cdda1)
+- fix(revisions): Answer a warm reopen from a comparison record instead of re-reading the checkout (#2270) (067bb7a80)
+
+### Performance
+
+- perf(revisions): Pipeline a cold open's blobs and read whole trees in parallel (SP5) (#2386) (c771da099)
+- perf(ui): Open a file pane on its own landing during a cloud open (SP4-panes) (#2365) (6ddf74179)
+- perf(ui): Open chats, Agents and a new chat before the whole download (SP2h) (#2354) (d1c44b336)
+- perf(filesystem): Net the change-event flood of a replacement and scope overflow resets (SP2g) (#2352) (23d2ecd9d)
+- perf(ui): Open the file tree and editor before the whole download (SP2f) (#2343) (9edf272da)
+- perf(ui): Cut the AI SDK and Home's three.js from the runtime entry (PL1) (#2332) (1f2bce237)
+
+### Other changes
+
+- test(api-git-core): Push the last released UI's commits through the pre-receive hook (#2434) (df3a4ba97)
+- refactor(api): Remove the old kernel instruments and the runtime dual-write (#2427) (687c7ea0b)
+- test(api): Grade L2 entries from compact results and add a library-first task (#2371) (b0a671b44)
+- refactor(runtime)!: Derive transcoded route fidelity from edge formats (#2301) (8447753cd)
+- ci(root): Run nightly-green e2e suites in the merge queue when affected (#2299) (084b1ad9c)
+
 ## 0.13.0 (2026-11-15)
 
 ### Features

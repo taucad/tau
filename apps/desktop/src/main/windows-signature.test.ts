@@ -45,12 +45,12 @@ describe('Windows Authenticode verdict', () => {
     }).toThrow();
   });
 
-  it('should drop an inherited PowerShell 7 module path in any casing and keep the additions', () => {
-    const environment = createWindowsPowerShellEnvironment(
-      { PSModulePath: String.raw`C:\Program Files\PowerShell\7\Modules`, psmodulepath: 'x', Path: 'C:\\Windows' },
-      { TAU_SIGNATURE_FILE: path },
-    );
+  it('should drop an inherited PowerShell 7 module path in any casing', () => {
+    const parent: NodeJS.ProcessEnv = {};
+    parent['PSModulePath'] = String.raw`C:\Program Files\PowerShell\7\Modules`;
+    parent['psmodulepath'] = 'x';
+    parent['Path'] = String.raw`C:\Windows`;
 
-    expect(environment).toEqual({ Path: 'C:\\Windows', TAU_SIGNATURE_FILE: path });
+    expect(Object.entries(createWindowsPowerShellEnvironment(parent))).toEqual([['Path', String.raw`C:\Windows`]]);
   });
 });

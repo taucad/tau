@@ -71,7 +71,7 @@ const powershell = (script: string, environment: Record<string, string> = {}): u
       Buffer.from(`$ErrorActionPreference='Stop'; ${script}`, 'utf16le').toString('base64'),
     ],
     {
-      env: createWindowsPowerShellEnvironment(process.env, environment),
+      env: { ...createWindowsPowerShellEnvironment(process.env), ...environment },
       encoding: 'utf8',
       timeout: 60_000,
       maxBuffer: 1024 * 1024,

@@ -1028,7 +1028,7 @@ const main = async (): Promise<void> => {
             await execFileAsync(
               'powershell.exe',
               ['-NoProfile', '-NonInteractive', '-Command', 'Start-Process -FilePath $env:TAU_Q_OPEN_URI'],
-              { env: createWindowsPowerShellEnvironment(process.env, { TAU_Q_OPEN_URI: uri }), timeout: 30_000 },
+              { env: { ...createWindowsPowerShellEnvironment(process.env), TAU_Q_OPEN_URI: uri }, timeout: 30_000 },
             );
           } else if (linuxConsumer) {
             // The consumer's own session opens the link and the file, as a second instance of their running app.

@@ -1933,6 +1933,26 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     expect(options.credential()).toEqual({ mode: 'session', principal: 'user_2' });
   });
 
+  /* PR-7 follow-up (AR-W6-02): desktop sync telemetry follows the consent main relays, read per attempt. */
+  it("should give each project host the renderer's consent as main relays it, and unknown until then", async () => {
+    const { host, workspaceRoot } = await configuredHost();
+    connect(host, workspaceRoot);
+    await vi.waitFor(() => {
+      expect(projectHostCalls).toHaveLength(1);
+    });
+    const options = projectHostCalls[0]!.host();
+    expect(options.syncTelemetryPlacement).toBe('desktop');
+    /* Nothing said yet: the host's sync reporter sends nothing. */
+    expect(options.syncTelemetryConsent?.()).toBe('unknown');
+    host.handleMessage(frame({ type: 'telemetryConsent', consent: 'granted' }));
+    expect(options.syncTelemetryConsent?.()).toBe('granted');
+    /* Telemetry off, or GPC, resolves to denied in the renderer; main relays it as such. */
+    host.handleMessage(frame({ type: 'telemetryConsent', consent: 'denied' }));
+    expect(options.syncTelemetryConsent?.()).toBe('denied');
+    host.handleMessage(frame({ type: 'telemetryConsent', consent: 'yes' }));
+    expect(options.syncTelemetryConsent?.()).toBe('unknown');
+  });
+
   /* W6.r1 round 3: the funded transport names the same account, read per invocation. */
   it("should give the funded transport the signed-in session's user id as its principal", async () => {
     const { host, workspaceRoot } = await configuredHost();

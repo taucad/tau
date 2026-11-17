@@ -36,6 +36,7 @@ import {
   buildCaptureExportOptions,
   canonicalCaptureViews,
   describeCaptureSection,
+  planarMultiAngleNotice,
   resolveCaptureSectionKeep,
 } from '#capture/capture-views.js';
 import { workbenchViewCamera, workbenchViewSections } from '#capture/capture-workbench-view.js';
@@ -856,11 +857,7 @@ export const createRuntimeAgentClients = (
             context?.signal?.throwIfAborted();
             /* A 2D drawing has one canonical view, so each note tells the agent why the 3D-only parts of its request did not apply. */
             const notes = [
-              ...(captureInput.mode === 'multi_angle'
-                ? [
-                    `View ${rendering.view} is a 2D drawing with one canonical view, so multi_angle returned one image; its six camera angles apply to 3D views only.`,
-                  ]
-                : []),
+              ...(captureInput.mode === 'multi_angle' ? [planarMultiAngleNotice(rendering.view)] : []),
               ...(captureInput.workbenchView === undefined
                 ? []
                 : [

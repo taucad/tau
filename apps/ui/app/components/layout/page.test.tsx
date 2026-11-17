@@ -446,7 +446,8 @@ describe('Page auth-aware wrapper contract', () => {
 
 /* T-A1.1 (D4.1): every route scrolls at the shell, wrapped or wrapperless, unless it declares `scroll: 'contained'`. */
 describe('Page scroll contract', () => {
-  const scroller = (): HTMLElement | null => screen.getByText('Page content').closest<HTMLElement>('.overflow-y-auto');
+  const scroller = (): HTMLElement | undefined =>
+    screen.getByText('Page content').closest<HTMLElement>('.overflow-y-auto') ?? undefined;
 
   it.each([
     ['inside the application shell', undefined],
@@ -455,7 +456,7 @@ describe('Page scroll contract', () => {
     state.enablePageWrapper = enablePageWrapper;
     render(<Page />);
 
-    expect(scroller()).not.toBeNull();
+    expect(scroller()).toBeDefined();
     expect(scroller()).toHaveClass('overflow-x-auto');
   });
 
@@ -469,7 +470,7 @@ describe('Page scroll contract', () => {
       state.scroll = 'contained';
       render(<Page />);
 
-      expect(scroller()).toBeNull();
+      expect(scroller()).toBeUndefined();
     },
   );
 });

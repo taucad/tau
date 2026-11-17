@@ -24,6 +24,8 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
 export const handle: Handle = {
   ...projectRouteHandle,
   providers: () => RouteProvider,
+  // The workbench owns its panes' scrollers (D4.2, reviewed contained list).
+  scroll: 'contained',
 };
 
 type EditorState =

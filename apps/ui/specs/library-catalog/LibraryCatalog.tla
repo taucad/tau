@@ -96,6 +96,9 @@
 \* to `@taucad/files-ui`; the four sources only re-point their imports. No action or correspondence changes.
 \* Project name fit (2026-11-16): `ProjectCommands` keeps a generated name's first line and fits it, and a duplicate's
 \* name, to the manifest's 200 code units before the create is journaled. No action or correspondence changes.
+\* Database recovery (WP9, 2026-11-17): when the journal store cannot open (`VersionError`, a blocked upgrade, an open
+\* timeout or `UnknownError`), `ProjectLibrary` lists discovery alone, answers route access from disk, and refuses a
+\* mutation before it is journaled. That state is outside the model; no action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

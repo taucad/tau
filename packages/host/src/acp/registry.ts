@@ -36,6 +36,7 @@ import { promisify } from 'node:util';
 import type { SessionConfigOption } from '@agentclientprotocol/sdk';
 
 import { modelChoice } from '#acp/session.js';
+import { discoveredModeOptions, grokNoAutoFallback } from '#acp/acp-modes.js';
 import { openAcpSession } from '#acp/acp-session.js';
 import { acpLocateContext, locateAcpCli } from '#acp/locate.js';
 import type { AcpExecutableFileSystem } from '#acp/locate.js';
@@ -165,6 +166,14 @@ export type AcpAgentProfile = {
    * CLI found outside PATH by its absolute path instead.
    */
   readonly loginCommand?: string | undefined;
+  /**
+   * Mode ids, best first, a new chat starts in (ruling PR5): `auto`, then the
+   * most permissive mode that still keeps a vendor safety boundary, so the
+   * agent edits workspace files without asking but does not lift every check.
+   * Plan and bypass ids are excluded (`acp-modes.ts`). The first one the agent
+   * or its model offers wins; none offered keeps the agent's own mode.
+   */
+  readonly defaultModePreference?: readonly string[] | undefined;
 } & (
   | {
       /** Npm package holding the ACP adapter. */
@@ -215,6 +224,7 @@ export type ReviewedAcpAgentProfile = AcpAgentProfile & {
   readonly installCommand: AcpShellCommand;
   readonly updateCommand: AcpShellCommand;
   readonly loginCommand: string;
+  readonly defaultModePreference: readonly string[];
 };
 
 /**
@@ -272,6 +282,10 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     updateCommand: { posix: 'claude update', windows: 'claude update' },
     /* From code.claude.com/docs/en/cli-reference, read 2026-11-15. */
     loginCommand: 'claude auth login',
+    /* The claude-agent-acp 0.70.0 `buildAvailableModes` (dist/acp-agent.js:5393) offers `auto` only when
+     * `ModelInfo.supportsAutoMode === true`; `acceptEdits` ("Auto-accept file edit operations") is
+     * the most permissive mode left that still asks before commands. */
+    defaultModePreference: ['auto', 'acceptEdits'],
   },
   {
     id: 'codex',
@@ -317,6 +331,10 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     /* Listed by `codex --help` on the operator's Mac, 2026-11-15. */
     updateCommand: { posix: 'codex update', windows: 'codex update' },
     loginCommand: 'codex login',
+    /* The codex-acp 1.7.0 `AgentMode` (dist/index.js:27297-27339) offers no `auto`: `agent`
+     * ("Approve for me", kind `auto_review`) is its classifier-reviewed mode and its own default,
+     * then `read-only` ("Ask for approval", still workspace-write). `agent-full-access` is a bypass. */
+    defaultModePreference: ['auto', 'agent', 'read-only'],
   },
   {
     id: 'grok',
@@ -353,6 +371,10 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     },
     updateCommand: { posix: 'grok update', windows: 'grok update' },
     loginCommand: 'grok login',
+    /* Grok's Tau-owned permission select (`grokControlOptions`) offers `auto` only when Grok reports
+     * it enabled; its other modes are `ask` (its own default) and `always-approve` (yolo). Without
+     * `auto` the chat starts in `grokNoAutoFallback` (PR5 amendment, operator 2026-11-17T03:42Z). */
+    defaultModePreference: ['auto', grokNoAutoFallback],
   },
 ];
 
@@ -783,7 +805,8 @@ const probeAgentModels = async (adapter: AcpAdapter, modelProbeTimeout: number):
         ? undefined
         : externalAgentDescriptorSchema.shape.thoughtLevel.safeParse({ ...option, category: 'thought_level' }).data;
     const thoughtLevel = thoughtLevelOf(thoughtOption);
-    const configOptions = (session.configOptions ?? [])
+    /* What a new chat will run: plan values gone, the mode set to the default its first turn chooses (PR5). */
+    const configOptions = discoveredModeOptions(session.configOptions ?? [], adapter.defaultModePreference)
       .filter((option) => option.category !== 'model' && option.category !== 'thought_level')
       .flatMap((option) => {
         const parsed = externalAgentDescriptorSchema.shape.configOptions.unwrap().element.safeParse(option);

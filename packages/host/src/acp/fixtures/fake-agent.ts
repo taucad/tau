@@ -396,6 +396,30 @@ const promptText = (blocks: readonly unknown[]): string =>
  * @param session - Session whose current values these are.
  * @returns The full option set, as `session/new` and friends must return it.
  */
+/** The adapter's own mode names, as claude-agent-acp 0.70.0 `buildAvailableModes` spells them. */
+const modeNames: Readonly<Record<string, string>> = {
+  auto: 'Auto',
+  default: 'Manual',
+  acceptEdits: 'Accept Edits',
+  plan: 'Plan Mode',
+  bypassPermissions: 'Bypass Permissions',
+};
+
+/**
+ * Modes offered on a model, Claude-shaped: `auto` only on the first model, as
+ * claude-agent-acp offers it only where `supportsAutoMode` is true.
+ *
+ * @param model - The session's model.
+ * @returns The mode ids, in the adapter's order.
+ */
+const modesOf = (model: string): string[] => [
+  ...(model === models[0] ? ['auto'] : []),
+  'default',
+  'acceptEdits',
+  'plan',
+  'bypassPermissions',
+];
+
 const configOptionsOf = (session: SessionState): readonly unknown[] => {
   const options = [...models, ...(modelsPushed ? pushedModels : [])].map((value) => ({ value, name: value }));
   return [
@@ -413,10 +437,7 @@ const configOptionsOf = (session: SessionState): readonly unknown[] => {
       category: 'mode',
       type: 'select',
       currentValue: String(session.config['mode']),
-      options: [
-        { value: 'default', name: 'Default' },
-        { value: 'plan', name: 'Plan' },
-      ],
+      options: modesOf(session.model).map((value) => ({ value, name: modeNames[value] ?? value })),
     },
     {
       id: 'thought_level',
@@ -1205,6 +1226,10 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
       const configId = asString(params['configId']);
       if (configId === 'model') {
         session.model = asString(params['value'], session.model);
+        /* A model without the current mode clamps it to `default`, as claude-agent-acp does. */
+        if (!modesOf(session.model).includes(String(session.config['mode']))) {
+          session.config['mode'] = 'default';
+        }
         saveSessions();
       } else if (
         configId in session.config &&
@@ -1286,9 +1311,15 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
         if (limit !== undefined) {
           await textChunk(promptSessionId, `${limit.title}\n\n`);
         }
-        process.stderr.write(
-          `[SYSTEM_ERROR] Prompt for session ${promptSessionId} failed: RequestError: Internal error\n    at fake-agent\n`,
-        );
+        /* Flushed, and a beat given, before the rejection: the client reads stderr and stdout on separate pipes. */
+        await new Promise<void>((resolve) => {
+          process.stderr.write(
+            `[SYSTEM_ERROR] Prompt for session ${promptSessionId} failed: RequestError: Internal error\n    at fake-agent\n`,
+            () => {
+              setTimeout(resolve, 20);
+            },
+          );
+        });
         fail(-32_603, 'Internal error');
         return;
       }

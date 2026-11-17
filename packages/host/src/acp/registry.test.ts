@@ -373,6 +373,14 @@ describe('probeAcpAgentModels', () => {
     expect(probed.agents[0]?.models?.[1]?.thoughtLevel?.currentValue).toBe('medium');
     expect(probed.agents[0]?.defaultModel).toBe('gpt-5.3-codex-spark');
     expect(probed.agents[0]?.configOptions?.map((option) => option.id)).toEqual(['mode', 'web_search']);
+    /* PR5: a new chat is shown the mode its first turn chooses, and no plan. */
+    expect(probed.agents[0]?.configOptions?.[0]).toMatchObject({
+      currentValue: 'auto',
+    });
+    const offered = probed.agents[0]?.configOptions?.[0];
+    expect(
+      offered?.type === 'select' && offered.options.flatMap((entry) => ('value' in entry ? [entry.value] : [])),
+    ).toEqual(['auto', 'default', 'acceptEdits', 'bypassPermissions']);
     expect(probed.agents[0]?.thoughtLevel).toMatchObject({
       id: 'thought_level',
       currentValue: 'medium',

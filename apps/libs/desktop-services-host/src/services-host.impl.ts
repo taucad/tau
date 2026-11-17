@@ -698,6 +698,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (!isAbsolute(root)) {
       return false;
     }
+    /* The exact spelling main published is admitted as is. Its physical
+     * spelling can differ before the background `realpath` settles: Windows
+     * short names (`C:\\Users\\RUNNER~1`) and macOS `/var` → `/private/var`. */
+    if (trustedRoots.has(resolve(root))) {
+      return true;
+    }
     const candidate = canonicalPath(root);
     const spelled = resolve(root);
     /* Descendants are admitted because projects live inside Home

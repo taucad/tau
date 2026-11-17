@@ -3629,6 +3629,70 @@ importers:
         specifier: workspace:*
         version: link:../../../libs/sandbox
 
+  apps/libs/editor-ui:
+    dependencies:
+      '@codemirror/autocomplete':
+        specifier: 'catalog:'
+        version: 6.20.4
+      '@codemirror/language':
+        specifier: 'catalog:'
+        version: 6.13.1
+      '@codemirror/search':
+        specifier: 'catalog:'
+        version: 6.7.2
+      '@codemirror/state':
+        specifier: 'catalog:'
+        version: 6.7.6
+      '@codemirror/view':
+        specifier: 'catalog:'
+        version: 6.43.15
+      '@taucad/grammars':
+        specifier: workspace:*
+        version: link:../../../libs/grammars
+      '@taucad/ui':
+        specifier: workspace:*
+        version: link:../../../packages/ui
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
+      class-variance-authority:
+        specifier: 'catalog:'
+        version: 0.7.1
+      clsx:
+        specifier: 'catalog:'
+        version: 2.1.1
+      diff:
+        specifier: ^8.0.4
+        version: 8.0.4
+      rehype-sanitize:
+        specifier: 'catalog:'
+        version: 6.0.0
+      rehype-stringify:
+        specifier: 'catalog:'
+        version: 10.0.1
+      remark-parse:
+        specifier: 'catalog:'
+        version: 11.0.0
+      remark-rehype:
+        specifier: 'catalog:'
+        version: 11.1.2
+      unified:
+        specifier: 'catalog:'
+        version: 11.0.5
+    devDependencies:
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.6.3
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.2)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.1(react@19.3.1)
+
   apps/libs/files-ui:
     dependencies:
       '@taucad/agent-host':
@@ -4479,6 +4543,9 @@ importers:
       '@taucad/csharp-language':
         specifier: workspace:*
         version: link:../libs/csharp-language
+      '@taucad/editor-ui':
+        specifier: workspace:*
+        version: link:../libs/editor-ui
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild

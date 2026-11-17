@@ -1,0 +1,75 @@
+{
+  "name": "@taucad/editor-ui",
+  "version": "0.1.0-beta.0",
+  "description": "Tau UI app editor feature: the code and diff viewers, the editor pane placeholder and the CodeMirror extension builders that read no app state",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/editor-ui"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/editor-ui#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "react",
+    "ui",
+    "editor",
+    "codemirror"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./components/code/code-block": "./src/components/code/code-block.tsx",
+    "./components/code/code-viewer": "./src/components/code/code-viewer.tsx",
+    "./components/code/diff-viewer": "./src/components/code/diff-viewer.tsx",
+    "./components/code/editor-completion-icon": "./src/components/code/editor-completion-icon.ts",
+    "./components/code/editor-definition": "./src/components/code/editor-definition.ts",
+    "./components/code/editor-documentation": "./src/components/code/editor-documentation.ts",
+    "./components/code/editor-language-features": "./src/components/code/editor-language-features.ts",
+    "./components/code/editor-pane-placeholder": "./src/components/code/editor-pane-placeholder.tsx",
+    "./components/code/editor-search-panel": "./src/components/code/editor-search-panel.tsx",
+    "./components/code/editor-surface-theme": "./src/components/code/editor-surface-theme.ts",
+    "./components/code/highlighted-line": "./src/components/code/highlighted-line.tsx",
+    "./components/code/json-depth-highlighting": "./src/components/code/json-depth-highlighting.ts",
+    "./components/code/use-highlighted-lines": "./src/components/code/use-highlighted-lines.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*": "./src/*"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "catalog:",
+    "@codemirror/language": "catalog:",
+    "@codemirror/search": "catalog:",
+    "@codemirror/state": "catalog:",
+    "@codemirror/view": "catalog:",
+    "@taucad/grammars": "workspace:*",
+    "@taucad/ui": "workspace:*",
+    "@taucad/ui-core": "workspace:*",
+    "class-variance-authority": "catalog:",
+    "clsx": "catalog:",
+    "diff": "^8.0.4",
+    "rehype-sanitize": "catalog:",
+    "rehype-stringify": "catalog:",
+    "remark-parse": "catalog:",
+    "remark-rehype": "catalog:",
+    "unified": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  }
+}

@@ -42,7 +42,6 @@ export const meta: MetaFunction = () => [{ title: 'Usage · Tau' }, { name: 'rob
 
 export const handle: Handle = {
   title: 'Tau usage',
-  enableOverflowY: true,
 };
 
 const formatInstant = (value: string): string => new Date(value).toLocaleString();

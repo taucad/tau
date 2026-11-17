@@ -72,6 +72,7 @@ function ImagePreview({ src, alt, label, onError, children, dialogProps }: Image
             />
             <DialogContent
               {...dialogProps}
+              scroll='contained'
               className='z-1 flex h-[80vh]! max-h-none! w-auto! max-w-none! items-center justify-center overflow-visible rounded-lg border bg-background p-2 shadow-lg *:data-[slot=dialog-close]:bg-background'
             >
               <div className='relative h-full'>

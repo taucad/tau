@@ -24,7 +24,7 @@ import {
   symbolCompletion,
 } from '#lib/kcl-language/kcl-codemirror.js';
 import { indexKclProgram } from '#lib/kcl-language/kcl-bindings.js';
-import { languageFeatures } from '#components/code/editor-language-features.js';
+import { languageFeatures } from '@taucad/editor-ui/components/code/editor-language-features';
 
 describe('KCL pending worker requests', () => {
   it('observes a rejected semantic refresh and keeps the editor usable', async () => {

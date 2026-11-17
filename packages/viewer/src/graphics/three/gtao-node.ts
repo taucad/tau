@@ -1,3 +1,6 @@
+/* oxlint-disable typescript-eslint/ban-ts-comment -- port of three r184 GTAONode; its TSL graph body exhausts tsgo's union budget (TS2590) across dependent programs */
+// @ts-nocheck -- port of three r184 GTAONode (see the header below); the TSL graph body is checked by its browser pixel tests, not tsgo
+
 /**
  * Tau's copy of three r184's GTAONode (`examples/jsm/tsl/display/GTAONode.js`, MIT), changed in one place: the hard
  * thickness slab is replaced by XeGTAO's smooth 3D-distance falloff (`falloffEnd`, `falloffRange`; AO profile H2).

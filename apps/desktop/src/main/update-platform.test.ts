@@ -11,6 +11,7 @@ import {
   fetchUpdateDescriptor,
   launchWindowsUpdate,
   relaunchAppImage,
+  relaunchSelf,
   relaunchSwitches,
   verifyDownloadedUpdate,
   startPlatformUpdater,
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   markHealthy: vi.fn(),
   checkForUpdates: vi.fn(),
   managed: vi.fn().mockResolvedValue(false),
+  relaunch: vi.fn(),
 }));
 /* eslint-disable @typescript-eslint/naming-convention -- Mirror the upstream constructor export names. */
 // oxlint-disable-next-line typescript/no-extraneous-class -- Mock actual constructor identities used by extends and instanceof.
@@ -40,7 +42,10 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof files>();
   return { ...original, readFile: vi.fn(original.readFile), realpath: vi.fn(original.realpath) };
 });
-vi.mock('electron', () => ({ app: { getAppPath: () => '/app' }, net: { fetch: mocks.fetch } }));
+vi.mock('electron', () => ({
+  app: { getAppPath: () => '/app', relaunch: mocks.relaunch },
+  net: { fetch: mocks.fetch },
+}));
 vi.mock('node:child_process', async (importOriginal) => ({
   ...(await importOriginal<typeof ChildProcess>()),
   spawn: mocks.spawn,
@@ -69,6 +74,38 @@ describe('platform update transport and launch', () => {
       '--enable-unsafe-swiftshader',
       '--tau-route-qualification=nonce',
     ]);
+  });
+
+  it('drops --safe-mode, so the launch after an update is a normal one (T-R12.8)', () => {
+    expect(relaunchSwitches(['/usr/bin/tau', '--safe-mode', '--ozone-platform=x11'])).toEqual(['--ozone-platform=x11']);
+  });
+
+  it('restarts with switches through the AppImage relauncher when APPIMAGE is set, and app.relaunch otherwise (T-R12.8)', async () => {
+    // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
+    const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+    mocks.spawn.mockReturnValue(child);
+    vi.stubEnv('APPIMAGE', '/home/tau/Tau.AppImage');
+    try {
+      const relaunched = relaunchSelf(['--safe-mode'], ['/tmp/.mount/tau', '--safe-mode', '--no-sandbox', 'file.step']);
+      child.emit('spawn');
+      await relaunched;
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      '/bin/bash',
+      ['-c', appImageRelaunchScript, 'tau-relaunch', '/home/tau/Tau.AppImage', '--no-sandbox', '--safe-mode'],
+      expect.anything(),
+    );
+    expect(mocks.relaunch).not.toHaveBeenCalled();
+
+    vi.stubEnv('APPIMAGE', undefined);
+    try {
+      await relaunchSelf([], ['/Applications/Tau.app/Contents/MacOS/Tau', '--safe-mode', '--enable-logging']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(mocks.relaunch).toHaveBeenCalledExactlyOnceWith({ args: ['--enable-logging'] });
   });
 
   it.each([

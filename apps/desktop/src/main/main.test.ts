@@ -236,6 +236,8 @@ const app = {
   once: vi.fn(),
   quit: vi.fn(),
   exit: vi.fn(),
+  relaunch: vi.fn(),
+  disableHardwareAcceleration: vi.fn(),
   setName: vi.fn(),
   setAppUserModelId: vi.fn(),
 };
@@ -269,7 +271,9 @@ const fakeWindow = {
   isFullScreen: vi.fn(() => false),
   restore: vi.fn(),
   loadURL: vi.fn(async () => undefined),
+  loadFile: vi.fn(async () => undefined),
   reload: vi.fn(),
+  close: vi.fn(),
   show: vi.fn(),
   focus: vi.fn(),
   once: vi.fn(),
@@ -2599,3 +2603,335 @@ describe('desktop main boot hardening (WP5)', () => {
   );
 });
 /* eslint-enable @typescript-eslint/naming-convention -- End WP5 boot hardening rows. */
+
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are snake_case. */
+describe('desktop main boot health and safe mode (WP6)', () => {
+  const bootMilliseconds = 30_000;
+  /** This test build's identity, as main computes it: version `test`, no stamped commit, unpackaged. */
+  const testBuild = 'test+unknown+unpackaged';
+
+  const boot = async (before?: (userData: string) => Promise<void>, argv: readonly string[] = []): Promise<void> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-boot-health-'));
+    await before?.(state.userData);
+    const original = process.argv;
+    process.argv = [...original, ...argv];
+    try {
+      await import('#main/main.js');
+    } finally {
+      process.argv = original;
+    }
+  };
+  const booted = async (before?: (userData: string) => Promise<void>, argv: readonly string[] = []): Promise<void> => {
+    await boot(before, argv);
+    await vi.waitFor(() => {
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+    });
+  };
+  const ledgerPath = (): string => join(state.userData, 'boot-health.json');
+  const readLedger = async (): Promise<Record<string, unknown> & { last?: Record<string, unknown> }> =>
+    JSON.parse(await readFile(ledgerPath(), 'utf8')) as Record<string, unknown> & { last?: Record<string, unknown> };
+  const seedLedger = (unhealthyCount: number) => async (userData: string) => {
+    await writeFile(
+      join(userData, 'boot-health.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        build: testBuild,
+        unhealthyCount,
+        last: { launchId: 'previous', mode: 'normal', stage: 'shell-mounted', deadlinePassed: true },
+      }),
+    );
+  };
+  const signals = (name: string): Array<{ tags: Record<string, string> }> =>
+    state.reportSignal.mock.calls
+      .map(([signal]) => signal as { fingerprint?: readonly string[]; tags: Record<string, string> } | undefined)
+      .filter((signal) => signal?.fingerprint?.[0] === name) as Array<{ tags: Record<string, string> }>;
+  const bootstrapArgument = async (): Promise<Record<string, unknown>> => {
+    const { BrowserWindow } = await import('electron');
+    const options = vi.mocked(BrowserWindow).mock.calls[0]?.[0] as
+      | { webPreferences?: { additionalArguments?: string[] } }
+      | undefined;
+    const argument = options?.webPreferences?.additionalArguments?.find((value) =>
+      value.startsWith('--tau-bootstrap='),
+    );
+    return JSON.parse(argument!.slice('--tau-bootstrap='.length)) as Record<string, unknown>;
+  };
+  const reportStage = (stage: string): void => {
+    for (const listener of state.ipcListeners.get('tau:boot:stage') ?? []) {
+      listener({ sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame }, stage);
+    }
+  };
+  const troubleshooting = (): UpdateMenuItem[] => {
+    const entry = state.installedHelpMenuItems.find((item) => item.label === 'Troubleshooting');
+    return (entry?.submenu ?? []) as UpdateMenuItem[];
+  };
+
+  it(
+    'should neither read nor write the ledger in a launch that does not hold the single-instance lock (T-R12.4)',
+    async () => {
+      app.requestSingleInstanceLock.mockReturnValueOnce(false);
+      await boot(seedLedger(2));
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalled();
+      });
+      expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+      expect((await readLedger()).last).toEqual(expect.objectContaining({ launchId: 'previous' }));
+      expect((await readLedger()).unhealthyCount).toBe(2);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should neither read nor write the ledger in a probe launch (T-R12.4)',
+    async () => {
+      vi.doMock('#main/ota-probe.js', () => ({
+        admitOtaProbe: vi.fn(() => ({ candidateTag: 'v0.0.0', complete: vi.fn() })),
+      }));
+      try {
+        await booted(seedLedger(2));
+      } finally {
+        vi.doUnmock('#main/ota-probe.js');
+      }
+      expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+      expect((await readLedger()).last).toEqual(expect.objectContaining({ launchId: 'previous' }));
+      expect(existsSync(join(state.userData, 'boot-health.json.tmp'))).toBe(false);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should record this launch at main-started and advance it through the renderer stages',
+    async () => {
+      await booted();
+      const first = await readLedger();
+      expect(first).toEqual(expect.objectContaining({ schemaVersion: 1, build: testBuild, unhealthyCount: 0 }));
+      expect(first.last).toEqual(expect.objectContaining({ mode: 'normal', deadlinePassed: false }));
+      reportStage('shell-mounted');
+      expect((await readLedger()).last?.['stage']).toBe('shell-mounted');
+      reportStage('main-started');
+      reportStage('home-ready');
+      expect((await readLedger()).last?.['stage']).toBe('home-ready');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should start in safe mode with --safe-mode: no hardware acceleration before ready, the bootstrap names it, and the optional subsystems stay off (T-R12.8)',
+    async () => {
+      await booted(undefined, ['--safe-mode']);
+      expect(app.disableHardwareAcceleration).toHaveBeenCalledOnce();
+      expect(app.disableHardwareAcceleration.mock.invocationCallOrder[0]).toBeLessThan(
+        app.whenReady.mock.invocationCallOrder[0]!,
+      );
+      expect(await bootstrapArgument()).toEqual(expect.objectContaining({ safeMode: { reason: 'requested' } }));
+      const { removeStaleQuickLookSessions } = await import('#main/quick-look.js');
+      const { installBrowserHost } = await import('#main/browser-host.js');
+      const { discoverAcpAgents } = await import('@taucad/host');
+      const { createBambuStudioService } = await import('#main/bambu-studio-service.js');
+      expect(removeStaleQuickLookSessions).not.toHaveBeenCalled();
+      expect(installBrowserHost).not.toHaveBeenCalled();
+      expect(discoverAcpAgents).not.toHaveBeenCalled();
+      expect(createBambuStudioService).not.toHaveBeenCalled();
+      expect(state.utilityEnvironmentAdditions.some((additions) => 'TAU_DESKTOP_MACHINES_DIR' in additions)).toBe(
+        false,
+      );
+      expect((await readLedger()).last).toEqual(expect.objectContaining({ mode: 'safe-requested' }));
+      expect(signals('desktop-safe-mode')).toEqual([
+        expect.objectContaining({ tags: { trigger: 'requested', count: '0' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should start in safe mode by itself after two unhealthy launches of this build (T-R12.8)',
+    async () => {
+      await booted(seedLedger(1));
+      expect(app.disableHardwareAcceleration).toHaveBeenCalledOnce();
+      expect(await bootstrapArgument()).toEqual(
+        expect.objectContaining({ safeMode: { reason: 'unhealthy-launches' } }),
+      );
+      expect((await readLedger()).unhealthyCount).toBe(2);
+      expect(signals('desktop-boot-unhealthy')).toEqual([
+        expect.objectContaining({ tags: { stage: 'shell-mounted', ended: 'none', count: '2', mode: 'normal' } }),
+      ]);
+      expect(signals('desktop-safe-mode')).toEqual([
+        expect.objectContaining({ tags: { trigger: 'unhealthy-launches', count: '2' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should start normally with no safe mode in the bootstrap',
+    async () => {
+      await booted();
+      expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+      expect(await bootstrapArgument()).not.toHaveProperty('safeMode');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should not wait for the page to save when a restart is asked for before shell-mounted (T-R12.8)',
+    async () => {
+      state.autoQuiesce = false;
+      await booted();
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toContain('Restart in Safe Mode');
+      });
+      troubleshooting().find((item) => item.label === 'Restart in Safe Mode')!.click!();
+      await vi.waitFor(() => {
+        expect(app.relaunch).toHaveBeenCalledOnce();
+      });
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(app.relaunch.mock.calls[0]![0]).toEqual({ args: expect.arrayContaining(['--safe-mode']) });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should still wait for the page to save once the shell has mounted',
+    async () => {
+      await booted();
+      reportStage('shell-mounted');
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toContain('Restart in Safe Mode');
+      });
+      troubleshooting().find((item) => item.label === 'Restart in Safe Mode')!.click!();
+      await vi.waitFor(() => {
+        expect(app.relaunch).toHaveBeenCalledOnce();
+      });
+      expect(state.sentToRenderer).toContain(quitChannels.ask);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should ask once, in a native prompt, when a second launch carries --safe-mode (T-R12.8)',
+    async () => {
+      await booted();
+      dialog.showMessageBox.mockClear();
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+      const secondInstance = state.appListeners.get('second-instance')!.at(-1)!;
+      secondInstance({}, ['tau', '--safe-mode']);
+      secondInstance({}, ['tau', '--safe-mode']);
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]![0].buttons).toEqual(['Restart in Safe Mode', 'Not Now']);
+      expect(app.relaunch).not.toHaveBeenCalled();
+      secondInstance({}, ['tau']);
+      expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should report a GPU process that exited and not count the launch healthy for it (T-B26.1)',
+    async () => {
+      await booted();
+      const gone = state.appListeners.get('child-process-gone')!.at(-1)!;
+      gone({}, { type: 'GPU', reason: 'crashed', exitCode: 133 });
+      expect(signals('desktop-gpu-process-gone')).toEqual([
+        expect.objectContaining({ tags: { reason: 'crashed', exit_code: '133', safe_mode: 'false' } }),
+      ]);
+      const last = (await readLedger()).last;
+      expect(last?.['stage']).not.toBe('home-ready');
+      expect(last?.['gpuProcessGone']).toBe(true);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should open the recovery window in its own partition when the first load fails',
+    async () => {
+      fakeWindow.loadURL.mockRejectedValueOnce(Object.assign(new Error('ERR_FILE_NOT_FOUND'), { errno: -6 }));
+      await booted();
+      const { BrowserWindow } = await import('electron');
+      await vi.waitFor(() => {
+        expect(vi.mocked(BrowserWindow).mock.calls).toHaveLength(2);
+      });
+      expect(vi.mocked(BrowserWindow).mock.calls[1]![0]).toEqual(
+        expect.objectContaining({ webPreferences: expect.objectContaining({ partition: 'tau-recovery' }) }),
+      );
+      expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
+      expect(signals('desktop-recovery-shown')).toEqual([
+        expect.objectContaining({ tags: { surface: 'window', trigger: 'load-failed' } }),
+      ]);
+      expect(app.exit).not.toHaveBeenCalled();
+      expect(fakeWindow.reload).not.toHaveBeenCalled();
+      expect(fakeWindow.close).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should apply a pending reset at the next start before the window, and never delete it',
+    async () => {
+      await booted(async (userData) => {
+        await writeFile(join(userData, 'granted-roots.json'), JSON.stringify([join(userData, 'gone')]));
+        await mkdir(join(userData, 'recovery'), { recursive: true });
+        await writeFile(
+          join(userData, 'recovery', 'pending-resets.json'),
+          JSON.stringify({ schemaVersion: 1, stores: ['folder-list'] }),
+        );
+      });
+      expect(existsSync(join(state.userData, 'recovery', 'pending-resets.json'))).toBe(false);
+      const { readdir } = await import('node:fs/promises');
+      const quarantines = (await readdir(join(state.userData, 'recovery'))).filter(
+        (name) => name !== 'pending-resets.json',
+      );
+      expect(quarantines).toHaveLength(1);
+      expect(
+        JSON.parse(await readFile(join(state.userData, 'recovery', quarantines[0]!, 'granted-roots.json'), 'utf8')),
+      ).toEqual([join(state.userData, 'gone')]);
+      expect(signals('desktop-store-reset')).toEqual([
+        expect.objectContaining({ tags: { store: 'folder-list', outcome: 'moved' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should accept a boot stage only from a trusted main frame',
+    async () => {
+      await booted();
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      vi.mocked(isTrustedSender).mockReturnValue(false);
+      try {
+        reportStage('shell-mounted');
+      } finally {
+        vi.mocked(isTrustedSender).mockReturnValue(true);
+      }
+      expect((await readLedger()).last?.['stage']).not.toBe('shell-mounted');
+      for (const listener of state.ipcListeners.get('tau:boot:stage') ?? []) {
+        listener({ sender: fakeWindow.webContents, senderFrame: { url: 'app://tau/frame' } }, 'shell-mounted');
+      }
+      expect((await readLedger()).last?.['stage']).not.toBe('shell-mounted');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should put the boot-health ledger in Copy Diagnostics',
+    async () => {
+      await booted(seedLedger(1));
+      const { clipboard } = await import('electron');
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toContain('Copy Diagnostics');
+      });
+      troubleshooting().find((item) => item.label === 'Copy Diagnostics')!.click!();
+      await vi.waitFor(() => {
+        expect(clipboard.writeText).toHaveBeenCalledOnce();
+      });
+      const text = vi.mocked(clipboard.writeText).mock.calls[0]![0];
+      expect(text).toContain('Boot health:');
+      expect(text).toContain('Mode: safe-auto');
+      expect(text).toContain('Unhealthy launches: 2');
+      expect(text).toContain('Previous launch: unhealthy (stage shell-mounted');
+    },
+    bootMilliseconds,
+  );
+});
+/* eslint-enable @typescript-eslint/naming-convention -- End WP6 boot health rows. */

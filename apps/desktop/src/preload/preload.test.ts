@@ -9,7 +9,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import {
   agentHostRatingChannel,
+  bootChannels,
+  bootstrapArgumentPrefix,
   directoryGrantChannels,
+  recoveryChannels,
   hostHandOffChannel,
   openDirectoryChannel,
   revealPathChannel,
@@ -367,5 +370,67 @@ describe('desktop native kernel preload bridge', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(desktopNativeKernelChannels.cancel, 'build123d');
     unsubscribe();
     expect(state.listeners.get(desktopNativeKernelChannels.progress)).toEqual([]);
+  });
+});
+
+describe('desktop boot and troubleshooting bridge (T-R12.9)', () => {
+  type BootApi = Readonly<{ report(stage: unknown): void }>;
+  type TroubleshootingApi = Readonly<{
+    showLogs(): Promise<void>;
+    open(): Promise<void>;
+    restartInSafeMode(): Promise<void>;
+    restartNormally(): Promise<void>;
+    copyDiagnostics(): Promise<void>;
+  }>;
+  const tau = (): {
+    readonly boot: BootApi;
+    readonly troubleshooting: TroubleshootingApi;
+    readonly safeMode?: unknown;
+  } => state.exposed.get('tau') as never;
+
+  it('should expose tau.boot.report and send only the two stage names on tau:boot:stage', () => {
+    vi.mocked(ipcRenderer.send).mockClear();
+    tau().boot.report('shell-mounted');
+    tau().boot.report('home-ready');
+    tau().boot.report('main-started');
+    tau().boot.report({ stage: 'home-ready' });
+    expect(vi.mocked(ipcRenderer.send).mock.calls).toEqual([
+      [bootChannels.stage, 'shell-mounted'],
+      [bootChannels.stage, 'home-ready'],
+    ]);
+    expect(bootChannels.stage).toBe('tau:boot:stage');
+  });
+
+  it('should send each troubleshooting call as a fixed recovery action', async () => {
+    vi.mocked(ipcRenderer.invoke).mockClear();
+    await tau().troubleshooting.showLogs();
+    await tau().troubleshooting.open();
+    await tau().troubleshooting.restartInSafeMode();
+    await tau().troubleshooting.restartNormally();
+    await tau().troubleshooting.copyDiagnostics();
+    expect(vi.mocked(ipcRenderer.invoke).mock.calls).toEqual([
+      [recoveryChannels.action, { type: 'show-logs' }],
+      [recoveryChannels.action, { type: 'open-recovery-window' }],
+      [recoveryChannels.action, { type: 'restart', mode: 'safe' }],
+      [recoveryChannels.action, { type: 'restart', mode: 'normal' }],
+      [recoveryChannels.action, { type: 'copy-diagnostics' }],
+    ]);
+  });
+
+  it('should carry safe mode from the bootstrap argument and leave it absent in a normal launch', async () => {
+    expect(tau().safeMode).toBeUndefined();
+    const argv = process.argv;
+    process.argv = [
+      ...argv,
+      `${bootstrapArgumentPrefix}${JSON.stringify({ env: {}, homeRoot: '/home', safeMode: { reason: 'unhealthy-launches' } })}`,
+    ];
+    try {
+      state.exposed.clear();
+      vi.resetModules();
+      await import('./preload.js');
+    } finally {
+      process.argv = argv;
+    }
+    expect(tau().safeMode).toEqual({ reason: 'unhealthy-launches' });
   });
 });

@@ -273,6 +273,8 @@ const agentHostOver = async (
     logPath?: string;
     custody?: Readonly<{ appData: string; sessions: string }>;
     toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }>;
+    /** Prefix for this host's ids; a host reopening another host's log needs its own, or its rows collide. */
+    idPrefix?: string;
   }> = {},
 ) => {
   const logPath = options.logPath ?? join(root, `${label}-events.jsonl`);
@@ -302,7 +304,7 @@ const agentHostOver = async (
     toolRegistry,
     placement: placementOver(toolRegistry),
     openEventLog: async () => createNodeEventLog({ filePath: logPath, access: 'write' }),
-    createId: () => `${label}-${String(id++)}`,
+    createId: () => `${options.idPrefix ?? label}-${String(id++)}`,
     createLeaderEpoch: () => `epoch-${label}`,
     now: () => new Date(Date.UTC(2026, 9, 25, 0, 0, tick++)),
   });
@@ -2006,7 +2008,13 @@ describe.runIf(enabled)('shell qualification', () => {
       expect(statSync(beat).size).toBe(size);
 
       const counting = countingProvider({ custody: crash });
-      const recovered = await agentHostOver('e11', [], { counting, logPath, custody: crash });
+      const recovered = await agentHostOver('e11', [], {
+        counting,
+        logPath,
+        custody: crash,
+        /* The crashed host wrote `e11-<n>` ids to this log; reusing them would make recovery's rows duplicates. */
+        idPrefix: 'e11-recovered',
+      });
       try {
         await recovered.host.resume(recovered.chatId).catch(() => undefined);
         const message = await recovered.toolOutput('e11-call');

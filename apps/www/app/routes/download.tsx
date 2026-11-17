@@ -44,15 +44,21 @@ export const content = (): React.JSX.Element => (
       aside: (
         <div className='actions download-actions'>
           <div>
-            <SiteLink
-              className='button primary'
-              href='#downloads'
-              data-host-download='direct'
-              data-event='download'
-              data-placement='download'
-            >
-              Choose your download {down}
-            </SiteLink>
+            <div className='download-title'>
+              <SiteLink
+                className='button primary'
+                href='#downloads'
+                data-host-download='direct'
+                data-event='download'
+                data-placement='download'
+              >
+                Choose your download {down}
+              </SiteLink>
+              {/* Shown only when the detected host's recommended build is beta. */}
+              <Badge variant='secondary' data-host-beta hidden>
+                Beta
+              </Badge>
+            </div>
             <p className='fine' data-download-detail='host'>
               macOS · Windows · Linux
             </p>

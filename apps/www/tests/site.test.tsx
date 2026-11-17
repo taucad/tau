@@ -254,7 +254,9 @@ test('should render download CTAs and every archive before JavaScript', () => {
   const badged = [...downloads.matchAll(/<div class="download-title">(.*?)<\/div>/gu)]
     .filter(([row]) => /data-slot="badge"[^>]*>Beta</u.test(row))
     .map(([row]) => /<span>(Download [^<]+)<\/span>/u.exec(row)?.[1]);
-  expect(badged).toEqual(['Download ZIP for Intel Mac', 'Download for Windows']);
+  expect(badged).toEqual([undefined, 'Download ZIP for Intel Mac', 'Download for Windows']);
+  // The host recommendation's badge renders hidden; the client shows it only for a beta host build.
+  expect(downloads).toMatch(/<span data-slot="badge"[^>]*data-host-beta="true"[^>]*hidden=""[^>]*>Beta<\/span>/u);
   expect(downloads).toContain('Download for Linux');
   expect(downloads).not.toContain('DMG');
   expect(downloads).not.toContain('No installer is published');

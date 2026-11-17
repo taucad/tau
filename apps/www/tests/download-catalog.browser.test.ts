@@ -231,6 +231,11 @@ describe('shipping installer catalog browser behavior', () => {
       'Tau-macos-x64.dmg',
     );
     expect(await page.locator('[data-download-platform="windows"]').getAttribute('href')).toContain('.exe');
+    // The signed Windows installer keeps its Beta badge; a Mac host's recommendation carries none.
+    expect(
+      await page.locator('.download-title:has([data-download-platform="windows"]) [data-slot="badge"]').isVisible(),
+    ).toBe(true);
+    expect(await page.locator('[data-host-beta]').isVisible()).toBe(false);
     expect(await page.locator('[data-download-platform="linux"]').getAttribute('href')).toBe(
       '/download/#linux-installation',
     );
@@ -325,6 +330,21 @@ describe('shipping installer catalog browser behavior', () => {
     expect(note).toContain('staging channel');
     expect(note).not.toMatch(/notari[sz]|without/iu);
     await close();
+  }, 60_000);
+
+  it('marks a Windows host recommendation as beta, before and after the catalog admits the installer', async () => {
+    const { page, before, close } = await open({ platform: 'Win32', enabled: false });
+    expect(
+      before.links.find((link) => link.text === 'Download for Windows' && link.href.endsWith('.zip')),
+    ).toBeDefined();
+    expect(await page.locator('[data-host-beta]').isVisible()).toBe(true);
+    await close();
+    const upgraded = await open({ platform: 'Win32' });
+    await upgraded.page.waitForFunction(() =>
+      document.querySelector('a[data-host-download="direct"]')?.getAttribute('href')?.endsWith('.exe'),
+    );
+    expect(await upgraded.page.locator('[data-host-beta]').isVisible()).toBe(true);
+    await upgraded.close();
   }, 60_000);
 
   it('drops the Intel Mac entries when a staging catalog publishes only the Apple silicon DMG', async () => {

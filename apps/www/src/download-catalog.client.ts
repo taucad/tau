@@ -35,6 +35,9 @@ export const initializeHostDownload = (hostname: string): void => {
     return;
   }
   const download = archiveDownloads[hostPlatform];
+  for (const badge of document.querySelectorAll<HTMLElement>('[data-host-beta]')) {
+    badge.hidden = !download.beta;
+  }
   const detail = document.querySelector('[data-download-detail="host"]');
   const instructions = document.querySelector('[data-install-instructions]');
   const note = document.querySelector('[data-platform-note]');

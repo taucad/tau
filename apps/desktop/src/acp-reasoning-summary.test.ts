@@ -113,6 +113,9 @@ it('should preserve Codex summary identity through the shipped ACP adapter witho
       running.signal('SIGTERM');
       await exited;
     }
-    await rm(home, { recursive: true, force: true });
+    /* Windows holds the home directory while the adapter's Codex tree (cmd.exe, the stub, Node), whose cwd it
+     * is, notices its closed stdin and exits after the adapter: rmdir answers EBUSY until then (windows-2025,
+     * run 44001117649), so removal retries for up to 5 s. */
+    await rm(home, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
   }
 }, 20_000);

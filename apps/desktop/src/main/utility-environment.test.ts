@@ -79,7 +79,7 @@ describe('compileCacheEnvironment', () => {
 
   it('should keep the compile cache out of the signed bundle', () => {
     const { TAU_COMPILE_CACHE_DIR: directory } = compileCacheEnvironment(userData);
-    expect(directory.startsWith(`${userData}${sep}`)).toBe(true);
+    expect(directory.startsWith(join(userData, sep))).toBe(true);
     expect(directory.startsWith(bundle)).toBe(false);
     expect(directory).not.toContain('app.asar');
   });

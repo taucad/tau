@@ -424,8 +424,11 @@ vi.mock('#main/services-broker.js', () => ({
       retainAgentHost: state.servicesRetainAgentHost,
       releaseAgentHost: state.servicesReleaseAgentHost,
       send: state.servicesSend,
-      computeProjectRoot: (root: string) =>
-        root.includes('/.tau/checkouts/') ? root.slice(0, root.indexOf('/.tau/checkouts/')) : undefined,
+      computeProjectRoot: (root: string) => {
+        /* Main hands over resolved roots, so a checkout is spelled with the host separator. */
+        const checkouts = root.search(/[/\\]\.tau[/\\]checkouts[/\\]/u);
+        return checkouts === -1 ? undefined : root.slice(0, checkouts);
+      },
     };
   }),
 }));

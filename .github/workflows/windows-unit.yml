@@ -1,0 +1,140 @@
+# The Windows unit lane (Windows desktop production readiness R2): the `test` target of every affected
+# `tag:ci:windows-unit` project on `windows-2025`, one job per project. These are the projects whose source
+# has win32 branches the Linux and macOS lanes never execute: the desktop main process, the host (ACP
+# external-agent registry, locate and spawn), the filesystem authority writer, revisions, the native
+# process core and the agent plugin. A project joins by adding the tag.
+#
+# Placement:
+# - `ci.yml` calls this workflow (`workflow_call`) with the affected projects as `projects` (its plan lane
+#   `windows-unit`): on a pull request for the projects that own a file of its diff, in the merge queue for
+#   every affected one. The required check fails when a row does.
+# - A pull request carrying the `windows-unit` label also runs the affected rows directly, drafts included,
+#   for early signal while a Windows fix is iterated. A dispatch runs every tagged project.
+#
+# When called, `ref` is set: the plan takes the rows from the caller instead of selecting them.
+name: Windows unit
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    branches-ignore:
+      - production
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit the rows check out (the pull request's, the queue's or a push's).
+        type: string
+        required: true
+      projects:
+        description: The `tag:ci:windows-unit` projects to run, as a JSON array; `[]` runs no row.
+        type: string
+        required: true
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:
+        description: Read token of the Nx remote cache; without it every build dependency runs
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  pnpm_config_verify_deps_before_run: warn
+  NX_NO_CLOUD: 'true'
+  NX_DAEMON: 'false'
+  # Read token only, as in `native-darwin.yml`: no job here can write the remote cache.
+  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+
+# The group names this workflow literally: called, `github.workflow` is the caller's, and a group equal to
+# the caller's would cancel the call. A called run gets a group of its own and is never cancelled by
+# another; a labelled pull request's newer push cancels its outdated run, and another label added to it
+# starts a run whose jobs skip, in a group of its own.
+concurrency:
+  group: windows-unit-${{ inputs.ref != '' && github.run_id || format('{0}-{1}', github.event_name, github.event.pull_request.number || github.ref) }}${{ github.event.action == 'labeled' && github.event.label.name != 'windows-unit' && '-other-label' || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    name: Select the Windows unit rows
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'windows-unit') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'windows-unit') &&
+      github.triggering_actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      projects: ${{ steps.called.outputs.projects || steps.select.outputs.projects }}
+    steps:
+      - name: Return the caller's rows
+        id: called
+        if: inputs.ref != ''
+        env:
+          CALLED_PROJECTS: ${{ inputs.projects }}
+        run: echo "projects=$CALLED_PROJECTS" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: inputs.ref == ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        if: inputs.ref == ''
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # Every tagged project on a dispatch, the affected ones on a labelled pull request.
+      # `pipefail` so a failing `nx show projects` fails the step; `tail -1` drops Nx's log lines.
+      - name: Select the tag:ci:windows-unit projects
+        if: inputs.ref == ''
+        id: select
+        run: |
+          set -o pipefail
+          case "$GITHUB_EVENT_NAME" in
+            workflow_dispatch) projects=$(pnpm nx show projects --projects 'tag:ci:windows-unit' --json | tail -1) ;;
+            *) projects=$(pnpm nx show projects --affected --projects 'tag:ci:windows-unit' --json | tail -1) ;;
+          esac
+          echo "Windows unit rows: $projects"
+          echo "projects=$(jq -c . <<< "$projects")" >> "$GITHUB_OUTPUT"
+
+  unit:
+    name: Windows unit (${{ matrix.project }})
+    needs: plan
+    if: needs.plan.outputs.projects != '' && needs.plan.outputs.projects != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.plan.outputs.projects) }}
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      # The hosted image checks text out with CRLF (`core.autocrlf true`), which no other lane sees and which
+      # turns fixture and snapshot comparisons into false failures. Long paths: the pnpm store nests deeply.
+      - name: Check out text as committed
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Test ${{ matrix.project }} on Windows
+        shell: bash
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: pnpm nx run "$PROJECT:test" --outputStyle=static

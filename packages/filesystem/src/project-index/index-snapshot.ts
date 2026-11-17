@@ -278,9 +278,10 @@ const withIndexLock = async <T>(name: string, operation: () => Promise<T>): Prom
  * stored a newer snapshot. `incomparable` stores the joined vector marked
  * `rescan`, so neither writer's partial view is trusted at the next load. A
  * lock another holder has is never waited for (`'busy'`): the caller retries later.
+ * An aborted `signal` stops it at its next await before the disk (`'skipped'`).
  *
- * @param options - The provider and root, the lock name, and the snapshot to store.
- * @returns `'written'`, `'stale'` or `'busy'`.
+ * @param options - The provider and root, the lock name, the snapshot to store, and what stops it.
+ * @returns `'written'`, `'stale'`, `'busy'` or `'skipped'`.
  * @internal
  */
 export const writeIndexSnapshot = async (options: {
@@ -288,10 +289,17 @@ export const writeIndexSnapshot = async (options: {
   providerRoot: string;
   lockName: string;
   snapshot: () => IndexSnapshot;
-}): Promise<'written' | 'stale' | 'busy'> => {
-  const { provider, providerRoot, lockName } = options;
+  /* Aborted: write nothing more, at the next await before the disk. */
+  signal?: AbortSignal;
+}): Promise<'written' | 'stale' | 'busy' | 'skipped'> => {
+  const { provider, providerRoot, lockName, signal } = options;
+  /* Read afresh after each await: the signal can abort at any of them. */
+  const stopped = (): boolean => signal?.aborted === true;
   return withIndexLock(lockName, async () => {
     const stored = await readIndexSnapshot(provider, providerRoot);
+    if (stopped()) {
+      return 'skipped';
+    }
     const ours = options.snapshot();
     let next = ours;
     if (stored !== undefined) {
@@ -305,6 +313,9 @@ export const writeIndexSnapshot = async (options: {
     }
     const directory = `${providerRoot === '' ? '' : `${providerRoot}/`}${projectIndexDirectory}`;
     await provider.mkdir(directory, { recursive: true });
+    if (stopped()) {
+      return 'skipped';
+    }
     await provider.writeFile(snapshotPath(providerRoot), serializeIndexSnapshot(next));
     return 'written';
   });

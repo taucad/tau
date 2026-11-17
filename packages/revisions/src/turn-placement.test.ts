@@ -75,7 +75,7 @@ const createProject = async (withAuthority = false): Promise<Project> => {
     });
     filesystem = service.createRootedFileSystem('/');
     stops.push(async () => {
-      service.dispose();
+      await service.close();
       await stop();
       port2.close();
     });

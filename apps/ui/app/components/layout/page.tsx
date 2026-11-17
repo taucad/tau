@@ -1,7 +1,7 @@
 import { HomeFileManagerNotice } from '#hooks/use-file-manager.js';
 import { Link, NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
-import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { CSSProperties, ReactNode, UIEvent } from 'react';
 import { LayoutPriority } from 'allotment';
 import { ChevronLeft } from 'lucide-react';
@@ -35,6 +35,7 @@ import { sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constan
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { WorkspaceFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { useWorkspaceFrameState } from '#components/layout/use-workspace-frame-state.js';
+import { reportBootStage } from '#lib/boot-signals.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 export const desktopHeaderHeight = 'calc(var(--spacing) * 9)';
@@ -633,6 +634,10 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   const hasPageHeaderChrome =
     hasBreadcrumbItems || (actionMatch !== undefined && actionMatch.handle.actionsScope !== 'phone');
   const isMobile = useIsMobile();
+  /* D0 (R12): the shell is on screen and can show UI, so the boot watchdogs stand down. Once per page load. */
+  useEffect(() => {
+    reportBootStage('shell-mounted');
+  }, []);
   const { reserveHeader, isPhoneOnly, insetClass, sectionClass, phoneTopBar } = resolveHeaderLayout({
     enablePageHeader,
     isDesktopTarget: desktopTarget,

@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router';
+import type * as ReactRouter from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const projectHost = vi.hoisted(() => ({ renders: 0, shouldThrow: true }));
@@ -39,7 +40,7 @@ vi.mock('#providers/headless-image-provider.js', () => ({
 }));
 /* The document's framework parts need `HydratedRouter`'s context, which a memory router does not give. */
 vi.mock('react-router', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('react-router')>()),
+  ...(await importOriginal<typeof ReactRouter>()),
   Links: (): React.ReactNode => null,
   Meta: (): React.ReactNode => null,
   Scripts: (): React.ReactNode => null,

@@ -89,7 +89,7 @@ describe('boot signals', () => {
   });
 
   it('should narrow a configuration to Home, its projects and no checkouts', () => {
-    const handle = {} as FileSystemDirectoryHandle;
+    const handle = Object.create(null) as FileSystemDirectoryHandle;
     const home = { projectId: 'p1', backend: 'opfs', providerBasePath: 'one' } as const;
     expect(
       homeOnlyConfiguration({

@@ -12,7 +12,7 @@ test('shows the boot strip without the bundle and opens Home in safe mode for on
   await target.navigate('/');
 
   const strip = selectors.getByCss('#tau-boot-strip');
-  await target.expectHidden(strip, 5_000);
+  await target.expectHidden(strip, 5000);
   await target.expectVisible(strip, 30_000);
   await target.expectVisible(strip.getByRole('button', { name: 'Reload' }));
 

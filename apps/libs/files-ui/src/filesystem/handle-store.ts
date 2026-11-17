@@ -294,7 +294,8 @@ const upgradeBlockedError = (): Error =>
  * database panel cannot tell from an unreadable database (desktop resilient startup blueprint D3, T-B5.7).
  */
 let upgradeBlocked = false;
-const waitingOpens = new Set<() => void>();
+/** Each open still waiting subscribes; a blocked upgrade emits, failing them all as blocked. */
+const upgradeBlockedOpens = new Topic<void>({ name: 'HandleStore.upgradeBlockedOpens' });
 
 async function openHandleDbRaw(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -306,16 +307,15 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
     let blocked = false;
     /* An open that fires no event at all must not hold the start (B31): it rejects at the deadline. */
     const deadline = armDatabaseOpenDeadline(request, dbName, reject);
-    const failBlocked = (): void => {
-      waitingOpens.delete(failBlocked);
+    const stopWaiting = upgradeBlockedOpens.subscribe(() => {
+      stopWaiting();
       blocked = true;
       deadline.clear();
       reject(upgradeBlockedError());
-    };
-    waitingOpens.add(failBlocked);
+    });
     /* The open has its answer: an upgrade it was waiting behind, its own included, is no longer pending. */
     const settle = (): void => {
-      waitingOpens.delete(failBlocked);
+      stopWaiting();
       upgradeBlocked = false;
     };
 
@@ -376,9 +376,7 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
     // "Opening Home" shell for as long as the other tab lives. Fail loudly instead.
     request.addEventListener('blocked', () => {
       upgradeBlocked = true;
-      for (const fail of waitingOpens) {
-        fail();
-      }
+      upgradeBlockedOpens.emit();
     });
 
     request.addEventListener('success', () => {

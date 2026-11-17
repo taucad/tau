@@ -2,7 +2,7 @@ import { memo } from 'react';
 import type React from 'react';
 import { CircleAlert, Mail } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { CodeViewer } from '#components/code/code-viewer.js';
+import { CodeViewer } from '@taucad/editor-ui/components/code/code-viewer';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 import { ChatErrorDetails } from '#routes/w.$workspace.$project/chat-error-details.js';
 

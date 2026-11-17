@@ -7,7 +7,7 @@ import {
   CodeBlockAction,
   CodeBlockContent,
   Pre,
-} from '#components/code/code-block.js';
+} from '@taucad/editor-ui/components/code/code-block';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';

@@ -2,7 +2,7 @@
 
 The core of the Tau UI app that reads no app state: utilities, constants, typed helpers, the XState helpers every app machine uses, the import staging machines, and the agent-host placement, evidence and system-skills workers. Private and source-consumed (`scope:ui type:app-lib layer:data-access`): `apps/ui` and the UI feature libraries import it; it imports only app-libs of its layer or below and packages, never `apps/ui`.
 
-Cut from `apps/ui/app/{lib,utils,constants,types,services,workers}` in UI wave E (CI decomposition blueprint, Part 3 P2 row E). It is the leaf the wave D feature libraries (`files-ui`, `editor`, `revisions-ui`, `publish`, `billing-ui`) build on, so it was cut before them.
+Cut from `apps/ui/app/{lib,utils,constants,types,services,workers}` in UI wave E (CI decomposition blueprint, Part 3 P2 row E). It is the leaf the wave D feature libraries (`files-ui`, `editor-ui`, `revisions-ui`, `publish`, `billing-ui`) build on, so it was cut before them.
 
 ## Entrypoints
 

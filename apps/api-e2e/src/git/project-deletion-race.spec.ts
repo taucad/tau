@@ -327,9 +327,10 @@ describe('admitted deletion races through two built HTTP API processes', () => {
         .poll(async () => waiter(gitE2ESecondaryApiUrl), { timeout: 3000, interval: 20 })
         .toEqual(expect.any(Number));
       const deletingPid = await waiter(gitE2ESecondaryApiUrl);
-      accepting = fetch(`${gitE2EApiUrl}/v1/invitations/${invitation.token}`, {
+      accepting = fetch(`${gitE2EApiUrl}/v1/invitations/accept`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${invitee.token}` },
+        headers: { authorization: `Bearer ${invitee.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ token: invitation.token }),
         signal: AbortSignal.timeout(15_000),
       });
       await expect.poll(async () => waiter(gitE2EApiUrl), { timeout: 3000, interval: 20 }).toEqual(expect.any(Number));

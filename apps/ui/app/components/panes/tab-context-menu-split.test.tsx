@@ -73,6 +73,7 @@ const createTabFixture = ({
     close: vi.fn(),
     moveTo: clickedMoveTo,
     onDidTitleChange: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidGroupChange: vi.fn(() => ({ dispose: vi.fn() })),
   });
   const siblingApi = mock<DockviewPanelApi>({
     id: 'active-sibling',

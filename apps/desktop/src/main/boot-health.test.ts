@@ -255,3 +255,28 @@ describe('boot-health storage (T-R12.3)', () => {
     expect(readBootHealth(path)?.last?.ended).toBe('user-closed-window');
   });
 });
+
+describe('boot-health automatic install record (T-N1.2)', () => {
+  it('should block the target of an automatic install that did not take, and forget one that did', async () => {
+    const path = join(await profile(), bootHealthFileName);
+    const first = startBootHealth({ path, build, version: '1.15.0', safeModeRequested: false, launchId: 'one' });
+    expect(first.blockedAutoInstallTarget).toBeUndefined();
+    first.noteAutoInstall('1.15.1');
+    expect(readBootHealth(path)?.autoInstall).toEqual({ fromBuild: build, targetVersion: '1.15.1' });
+    /* The installer failed quietly: the same build starts again. */
+    const again = startBootHealth({ path, build, version: '1.15.0', safeModeRequested: false, launchId: 'two' });
+    expect(again.blockedAutoInstallTarget).toBe('1.15.1');
+    expect(readBootHealth(path)?.autoInstall).toEqual({ fromBuild: build, targetVersion: '1.15.1' });
+    /* The update took: the target runs, and nothing is blocked. */
+    const updated = buildIdentity({ version: '1.15.1', sourceCommit: '4b1d2e3', packaged: true });
+    const next = startBootHealth({
+      path,
+      build: updated,
+      version: '1.15.1',
+      safeModeRequested: false,
+      launchId: 'three',
+    });
+    expect(next.blockedAutoInstallTarget).toBeUndefined();
+    expect(readBootHealth(path)?.autoInstall).toBeUndefined();
+  });
+});

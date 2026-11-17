@@ -15,6 +15,7 @@ const ready: DesktopUpdateSnapshot = {
   version: '1.0.75',
   channel: 'staging',
   releasePage: 'https://github.com/taucad/tau/releases/tag/desktop-staging%400.1.0-staging.75',
+  downloadPage: 'https://github.com/taucad/tau/releases/tag/desktop-staging%400.1.0-staging.75',
 };
 const fixture = (initial: Promise<DesktopUpdateSnapshot> = Promise.resolve(ready)) => {
   let listener: ((snapshot: DesktopUpdateSnapshot) => void) | undefined;
@@ -261,5 +262,58 @@ describe('desktop update control', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Download' }));
     expect(source.bridge.download).toHaveBeenCalledOnce();
     expect(source.bridge.install).not.toHaveBeenCalled();
+  });
+  it('should name the clock and offer to check again and Download Tau when the clock refused an update (T-B25.1)', async () => {
+    const source = fixture(
+      Promise.resolve({
+        ...ready,
+        phase: 'error',
+        blockedReason: 'clock',
+        version: undefined,
+        releasePage: undefined,
+        downloadPage: 'https://github.com/taucad/tau/releases',
+      }),
+    );
+    render(
+      <SidebarProvider>
+        <DesktopUpdateControl bridge={source.bridge} />
+      </SidebarProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Check your date and time' }));
+    expect(await screen.findByText(/computer’s date and time/u)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Download Tau/u })).toHaveAttribute(
+      'href',
+      'https://github.com/taucad/tau/releases',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    await waitFor(() => {
+      expect(source.bridge.check).toHaveBeenCalledOnce();
+    });
+    expect(source.bridge.install).not.toHaveBeenCalled();
+  });
+  it('should say this copy cannot update itself and offer only Download Tau when its installation is damaged (T-B27.1)', async () => {
+    const source = fixture(
+      Promise.resolve({
+        ...ready,
+        phase: 'disabled',
+        blockedReason: 'installation-marker',
+        version: undefined,
+        releasePage: undefined,
+        downloadPage: 'https://github.com/taucad/tau/releases/latest',
+        detail: undefined,
+      }),
+    );
+    render(
+      <SidebarProvider>
+        <DesktopUpdateControl bridge={source.bridge} />
+      </SidebarProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'This copy of Tau can’t update itself' }));
+    expect(await screen.findByText(/Download Tau and install it again/u)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Download Tau/u })).toHaveAttribute(
+      'href',
+      'https://github.com/taucad/tau/releases/latest',
+    );
+    expect(screen.queryByRole('button', { name: /Retry|Check again|Restart/u })).not.toBeInTheDocument();
   });
 });

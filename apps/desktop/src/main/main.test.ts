@@ -2945,3 +2945,155 @@ describe('desktop main boot health and safe mode (WP6)', () => {
   );
 });
 /* eslint-enable @typescript-eslint/naming-convention -- End WP6 boot health rows. */
+
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are snake_case. */
+describe('desktop main update path without a renderer (WP7)', () => {
+  const bootMilliseconds = 30_000;
+
+  const boot = async (): Promise<void> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-update-path-'));
+    if (app.isPackaged) {
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: state.userData });
+    }
+    await import('#main/main.js');
+  };
+  const booted = async (): Promise<void> => {
+    await boot();
+    await vi.waitFor(() => {
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+    });
+  };
+  const signals = (name: string): Array<{ tags: Record<string, string> }> =>
+    state.reportSignal.mock.calls
+      .map(([signal]) => signal as { fingerprint?: readonly string[]; tags: Record<string, string> } | undefined)
+      .filter((signal) => signal?.fingerprint?.[0] === name) as Array<{ tags: Record<string, string> }>;
+  const reportStage = (stage: string): void => {
+    for (const listener of state.ipcListeners.get('tau:boot:stage') ?? []) {
+      listener({ sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame }, stage);
+    }
+  };
+  const recoveryAction = async (action: unknown): Promise<unknown> =>
+    state.handlers.get('tau:recovery:action')!(
+      { sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame },
+      action,
+    );
+  const windowsCreated = async (): Promise<Array<{ webPreferences?: { partition?: string } } | undefined>> => {
+    const { BrowserWindow } = await import('electron');
+    return vi
+      .mocked(BrowserWindow)
+      .mock.calls.map(([options]) => options as { webPreferences?: { partition?: string } } | undefined);
+  };
+  const checkForUpdatesItem = (): UpdateMenuItem =>
+    state.installedUpdateMenuItems.find((item) => item.label === 'Check for Updates…')!;
+
+  it(
+    'should open the recovery window, not a renderer window, for Check for Updates… before any window has mounted (T-B22.3)',
+    async () => {
+      await booted();
+      state.updaterCheck.mockClear();
+      getWindows.mockReturnValue([]);
+      checkForUpdatesItem().click!();
+      await vi.waitFor(async () => {
+        expect(await windowsCreated()).toHaveLength(2);
+      });
+      const created = await windowsCreated();
+      expect(created[1]?.webPreferences?.partition).toBe('tau-recovery');
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
+      await vi.waitFor(() => {
+        expect(state.updaterCheck).toHaveBeenCalledWith(true);
+      });
+      expect(signals('desktop-recovery-shown')).toEqual([
+        expect.objectContaining({ tags: { surface: 'window', trigger: 'check-for-updates' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should still bring up the app window for Check for Updates… once the shell has mounted',
+    async () => {
+      await booted();
+      reportStage('shell-mounted');
+      getWindows.mockReturnValue([]);
+      checkForUpdatesItem().click!();
+      await vi.waitFor(async () => {
+        expect(await windowsCreated()).toHaveLength(2);
+      });
+      expect((await windowsCreated())[1]?.webPreferences?.partition).not.toBe('tau-recovery');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should install from the recovery window's Install update and restart (T-B22.3)",
+    async () => {
+      await booted();
+      await recoveryAction({ type: 'open-recovery-window' });
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
+      });
+      await recoveryAction({ type: 'install-update' });
+      expect(state.updaterInstall).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should run exactly one update check when home-ready arrives (T-B22.3)',
+    async () => {
+      await booted();
+      state.updaterCheck.mockClear();
+      reportStage('shell-mounted');
+      reportStage('home-ready');
+      reportStage('home-ready');
+      await vi.waitFor(() => {
+        expect(state.updaterCheck).toHaveBeenCalledOnce();
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(state.updaterCheck).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    "should say this copy can't update itself, with a download page and one report, when the installation marker is damaged (T-B27.1)",
+    async () => {
+      app.isPackaged = true;
+      vi.doMock('#main/update-platform.js', () => ({
+        startPlatformUpdater: vi.fn(async () => {
+          throw new TypeError('Installed update route disagrees with the running app');
+        }),
+        relaunchSelf: vi.fn(async () => undefined),
+      }));
+      try {
+        await booted();
+        const snapshot = state.handlers.get('tau:updates:snapshot')!;
+        await vi.waitFor(async () => {
+          expect(await snapshot({ senderFrame: {} })).toEqual(
+            expect.objectContaining({
+              blockedReason: 'installation-marker',
+              downloadPage: 'https://github.com/taucad/tau/releases/latest',
+            }),
+          );
+        });
+        const blocked = (await snapshot({ senderFrame: {} })) as { phase: string; detail?: string };
+        expect(blocked.detail).toMatch(/can.t update itself/u);
+        expect(blocked.detail).not.toMatch(/Update failed/u);
+        const check = state.handlers.get('tau:updates:check')!;
+        await check({ senderFrame: {} });
+        await check({ senderFrame: {} });
+        expect(signals('desktop-update-blocked')).toEqual([
+          expect.objectContaining({ tags: { reason: 'installation-marker', route: process.platform } }),
+        ]);
+      } finally {
+        vi.doUnmock('#main/update-platform.js');
+      }
+    },
+    bootMilliseconds,
+  );
+});
+/* eslint-enable @typescript-eslint/naming-convention -- End WP7 update path rows. */

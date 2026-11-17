@@ -32,7 +32,7 @@ import type {
   FileStat,
   FileStatEntry,
 } from '@taucad/types';
-import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
+import { assertRootedPath, joinRelativePath, normalizePath, resolveAuthorityPath } from '@taucad/utils/path';
 import type {
   ContentFacts,
   DirectoryEntry,
@@ -264,6 +264,11 @@ export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'de
     entriesLanded?(paths: readonly string[]): boolean | undefined;
     /** End this root's expectation: the tree write is over, and `failed` when it did not land every path. */
     endExpectation?(options?: Readonly<{ failed?: boolean }>): void;
+    /**
+     * Be told as this root's tree write ends, `failed` when it did not land every path: from a failure until the
+     * root's next expectation or end, `entriesLanded` answers `false` (I7).
+     */
+    onExpectationEnd?(listener: (outcome: Readonly<{ failed: boolean }>) => void): () => void;
     /**
      * Lazy content facts (D4): from the index while they still describe the
      * bytes, otherwise measured from one read within `byteCap` and recorded.
@@ -1466,6 +1471,12 @@ export class RootedViews {
         this._projectIndexes.endExpectation(root, options);
         relistArriving(arriving);
       },
+      onExpectationEnd: (listener: (outcome: Readonly<{ failed: boolean }>) => void): (() => void) =>
+        this._projectIndexes.onExpectationEnd((ended, failed) => {
+          if (ended === normalizePath(root)) {
+            listener({ failed });
+          }
+        }),
       facts,
       compareIndex,
       changedSince,

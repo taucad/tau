@@ -968,13 +968,19 @@ describe('a tree write over pending entries (D9, D10, I7)', () => {
     expect(await view.stat('models/new.step')).not.toHaveProperty('pending');
   });
 
-  it('should forget a failed tree write’s entries, so its paths answer as they are on disk', async () => {
+  it('should forget a failed tree write’s entries once its rollback ends, so its paths answer as they are on disk', async () => {
     service.setPendingObjectSource(objects);
     const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
     const view = service.createRootedFileSystem(route);
     /* The new tree says the path is a small text file; the write fails before it lands. */
     await raw.expectEntries!([{ path: 'models/part.step', size: pointer.byteLength, arriving: true }]);
     raw.endExpectation!({ failed: true });
+    /* Until the root's next expectation or end (its rollback's), what the failure left is neither tree. */
+    expect(await rejectionOf(Promise.allSettled([view.stat('models/part.step')]))).toMatchObject({
+      code: 'PENDING',
+      reason: 'failed',
+    });
+    raw.endExpectation!();
     expect(await view.stat('models/part.step')).toMatchObject({ size: part.byteLength, pending: true });
     expect(await view.readFile('models/part.step')).toStrictEqual(part);
   });
@@ -1137,6 +1143,132 @@ describe('reads of a tree write still landing (D10, I7)', () => {
     expect(await settledYet(imported)).toBe(false);
     await raw.writeFile('lib/gear.scad', next);
     await expect(imported).resolves.toBe(true);
+    raw.endExpectation!();
+  });
+
+  it('should keep refusing what a failed write still owed until its rollback ends, and say none of it landed', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    const tree = encoder.encode('include <lib/gear.scad>;');
+    const ended: Array<Readonly<{ failed: boolean }>> = [];
+    const stop = raw.onExpectationEnd!((outcome) => {
+      ended.push(outcome);
+    });
+    await raw.expectEntries!([
+      { path: 'main.scad', size: tree.byteLength, arriving: true },
+      { path: 'lib/gear.scad', size: next.byteLength, arriving: true },
+    ]);
+    await raw.writeFile('main.scad', tree);
+    expect(raw.entriesLanded!(['main.scad'])).toBe(true);
+    raw.endExpectation!({ failed: true });
+    /* Inside the window: the write failed, and its rollback has yet to end. A read made now refuses too. */
+    expect(await rejectionOf(Promise.allSettled([view.readFile('lib/gear.scad')]))).toMatchObject({
+      code: 'PENDING',
+      reason: 'failed',
+    });
+    expect(await rejectionOf(Promise.allSettled([view.readdir('lib')]))).toMatchObject({ reason: 'failed' });
+    /* What it had landed is no tree either: the root's readiness may not read it landed. */
+    expect(raw.entriesLanded!(['main.scad'])).toBe(false);
+    expect(ended).toStrictEqual([{ failed: true }]);
+    /* What it never owed answers as ever. */
+    await expect(view.stat('models/part.step')).resolves.toMatchObject({ pending: true });
+    /* The rollback announces the prior tree and lands it; its end lets the root answer as it is. */
+    await raw.expectEntries!([{ path: 'main.scad', size: 27, arriving: true }]);
+    await raw.writeFile('main.scad', 'import("models/part.step");');
+    raw.endExpectation!();
+    await expect(view.readFile('main.scad', 'utf8')).resolves.toBe('import("models/part.step");');
+    await expect(view.exists('lib/gear.scad')).resolves.toBe(false);
+    expect(ended).toStrictEqual([{ failed: true }, { failed: false }]);
+    stop();
+  });
+
+  it('should not land a path on a failed step’s move-back, nor read a removed path gone once it is put back', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.writeFile('old.scad', 'old();');
+    await raw.expectEntries!([{ path: 'main.scad', size: next.byteLength, arriving: true }], {
+      removing: ['old.scad'],
+    });
+    const read = view.readFile('main.scad', 'utf8');
+    const outcome = Promise.allSettled([read]);
+    /* The publish moves the old file aside, fails, and puts it back: the old bytes are at the path again. */
+    await raw.rename('main.scad', '.main.scad.backup');
+    await raw.rename('.main.scad.backup', 'main.scad');
+    expect(await settledYet(read)).toBe(false);
+    /* The removal moved its file aside and back, as `moveAsideVerified` does when a moved file changed. */
+    await raw.rename('old.scad', '.old.scad.backup');
+    await raw.rename('.old.scad.backup', 'old.scad');
+    const gone = view.exists('old.scad');
+    expect(await settledYet(gone)).toBe(false);
+    raw.endExpectation!({ failed: true });
+    expect(await rejectionOf(outcome)).toMatchObject({ reason: 'failed' });
+    expect(await rejectionOf(Promise.allSettled([gone]))).toMatchObject({ reason: 'failed' });
+    raw.endExpectation!();
+    await expect(view.readFile('main.scad', 'utf8')).resolves.toBe('import("models/part.step");');
+  });
+
+  it('should hold a stat of a folder the write empties until it is gone', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.writeFile('old/part.scad', 'old();');
+    await raw.expectEntries!([{ path: 'main.scad', size: 27, arriving: false }], { removing: ['old/part.scad'] });
+    const folder = view.exists('old');
+    expect(await settledYet(folder)).toBe(false);
+    await raw.unlink('old/part.scad');
+    expect(await settledYet(folder)).toBe(false);
+    await raw.rmdir('old');
+    await expect(folder).resolves.toBe(false);
+    raw.endExpectation!();
+  });
+
+  it('should hold a listing while a child it would list has yet to be created', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.expectEntries!([
+      { path: 'main.scad', size: 27, arriving: false },
+      { path: 'gear.scad', size: next.byteLength, arriving: true },
+    ]);
+    const listing = view.readdir('');
+    expect(await settledYet(listing)).toBe(false);
+    await raw.writeFile('gear.scad', next);
+    expect(await listing).toContain('gear.scad');
+    raw.endExpectation!();
+  });
+
+  it('should stop holding a listing when its caller aborts', async () => {
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const indexes = (service as unknown as { _projectIndexes: ProjectIndexes })._projectIndexes;
+    await raw.expectEntries!([{ path: 'lib/gear.scad', size: next.byteLength, arriving: true }]);
+    const controller = new AbortController();
+    const listing = indexes.untilLanded(`${route}/lib`, { listing: true, signal: controller.signal });
+    expect(await settledYet(listing)).toBe(false);
+    controller.abort(new Error('closed'));
+    await expect(listing).rejects.toThrow('closed');
+    raw.endExpectation!();
+  });
+
+  it('should count as progress only the owing write’s own landings, so unrelated writes never hold a read past the bound', async () => {
+    service.dispose();
+    service = await createService(120);
+    const raw = service.createRootedFileSystem(route, undefined, { placeholders: 'raw' });
+    const view = service.createRootedFileSystem(route);
+    await raw.expectEntries!([
+      { path: 'main.scad', size: next.byteLength, arriving: true },
+      { path: 'lib/gear.scad', size: next.byteLength, arriving: true },
+    ]);
+    const read = Promise.allSettled([view.readFile('main.scad')]);
+    const writing = new AbortController();
+    const unrelated = (async (): Promise<void> => {
+      for (let count = 0; !writing.signal.aborted; count += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one unrelated write after another, as a preview's outputs land.
+        await raw.writeFile('notes.txt', String(count));
+        // oxlint-disable-next-line no-await-in-loop -- paced well inside the bound.
+        await tick(20);
+      }
+    })();
+    expect(await rejectionOf(read)).toMatchObject({ reason: 'stalled' });
+    writing.abort();
+    await unrelated;
     raw.endExpectation!();
   });
 

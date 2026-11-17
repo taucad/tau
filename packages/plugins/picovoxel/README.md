@@ -193,7 +193,8 @@ Each kernel worker compiles each build's WebAssembly module once (or instantiate
 compiled for the same URL) and keeps one warm PicoVoxel runtime per build (the multi build's thread
 pool included); every render opens a fresh session on it and disposes it, together with any session
 the model created itself, when the render ends. A runtime is replaced after a WebAssembly trap or once
-its heap passes `recycleHeapBytes` (1.5 GiB by default; a phone host passes less); the replacement instantiates the module already compiled. Renders are
+its heap, plus what the grid pager parked outside it, passes `recycleHeapBytes` (1.5 GiB by default; a phone
+host passes less); the replacement instantiates the module already compiled. Renders are
 cancelled cooperatively: a superseded render stops at its next PicoVoxel call.
 
 The binaries and the pthread worker script load from explicit URLs of picovoxel's asset subpaths
@@ -203,6 +204,26 @@ emits as files; in Node the worker script is passed as a filesystem path.
 If the multi build runs out of memory, the render is rebuilt once on the serial build and the result
 carries a `RESOURCE_LIMIT` warning naming the remedy (a coarser `voxelSize`). If it cannot start, the
 same rebuild carries a `KERNEL_CAPABILITY_MISSING` warning.
+
+### Memory
+
+Each PicoVoxel build has one 32-bit WebAssembly heap of at most 4 GiB. Three things keep a model inside it:
+
+- **Grid pager.** PicoVoxel's pager runs at its default budget: when a runtime's resident Voxels grids
+  exceed 2 GiB, the heap's headroom, the least recently used are compressed into memory outside the heap
+  and restored on their next use. Below the budget nothing is parked, and exact bytes are the same with it
+  on or off. Parked grids go to RAM, never to disk. Each session's memory log reports `heap=` and `far=`
+  (the bytes parked outside the heap), and the recycle threshold counts both.
+- **Streamed meshing.** A uniform mesh, which every exact build and so every export uses, is read out of
+  the heap in batches of 128³-voxel nodes (`voxels.streamMesh`) rather than built whole beside its grid.
+  The joined arrays are `toMesh()`'s, element for element. An adaptive mesh has no streamed form: it is
+  built whole, copied out and freed at once.
+- **Out of memory.** Every out-of-memory failure, the pager's included, arrives as `PICO_OUT_OF_MEMORY`.
+  It is reported as `RESOURCE_LIMIT` with the code in `details.picoCode`, and the runtime is recycled.
+
+Exports have no fixed triangle cap. Each STL file is one buffer of 84 + 50 bytes per triangle, so the
+largest `ArrayBuffer` a host allows bounds a part: 2,145,386,496 bytes, or 42,907,728 triangles, in
+Chromium. GLB and glTF write the whole model into one buffer, so the same limit applies to the model.
 
 ### WebAssembly build
 

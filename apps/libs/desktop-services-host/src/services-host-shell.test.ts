@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile, readdir } from 'node:fs/promises';
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile, readdir } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -12,9 +13,11 @@ import { createFakeShellProvider } from '@taucad/native-process-core/shell';
 
 import {
   bundledGitToolchain,
+  bundledWindowsSandboxHelper,
   createDesktopShell,
   desktopShellCustody,
   desktopShellProvider,
+  setUpWindowsShellSandbox,
 } from '#services-host-shell.js';
 
 let base = '';
@@ -60,6 +63,18 @@ describe('bundledGitToolchain', () => {
     });
     expect(bundledGitToolchain(undefined)).toBeUndefined();
     expect(bundledGitToolchain('')).toBeUndefined();
+  });
+
+  it('finds git-lfs.exe in the MinGit exec path of the Windows payload', async () => {
+    const payload = join(base, 'resources', 'git', 'win32-x64');
+    await mkdir(join(payload, 'bin'), { recursive: true });
+    await mkdir(join(payload, 'mingw64', 'libexec', 'git-core'), { recursive: true });
+    await writeFile(join(payload, 'mingw64', 'libexec', 'git-core', 'git-lfs.exe'), '');
+
+    expect(bundledGitToolchain(join(payload, 'bin', 'git.exe'))).toStrictEqual({
+      roots: [payload],
+      bins: [join(payload, 'bin'), join(payload, 'mingw64', 'libexec', 'git-core')],
+    });
   });
 });
 
@@ -255,6 +270,160 @@ describe('desktopShellProvider', () => {
   it('builds the sandbox provider on Linux and macOS', () => {
     expect(desktopShellProvider({ platform: 'linux', bwrapPath: '/opt/tau/sandbox/bwrap' })?.name).toMatch(/^srt-/u);
     expect(desktopShellProvider({ platform: 'darwin' })?.name).toMatch(/^srt-/u);
+  });
+
+  describe('Windows shell sandbox flag', () => {
+    /* A stand-in helper that answers `status` only; it never launches anything. */
+    const statusHelper = async (installed: boolean): Promise<string> => {
+      const helper = join(base, 'tau-windows-sandbox');
+      const record = installed
+        ? JSON.stringify({ version: 1, account: 'TauSandbox', accountSid: 'S-1-5-21-1-2-3-1001' })
+        : JSON.stringify({ installed: false });
+      await writeFile(helper, `#!/bin/sh\nprintf '%s' '${record}'\n`);
+      await chmod(helper, 0o755);
+      return helper;
+    };
+
+    it('keeps the Windows answer unchanged while the flag is off, even with a helper present', async () => {
+      const environment = { TAU_WINDOWS_SANDBOX_HELPER: await statusHelper(true) };
+
+      expect(desktopShellProvider({ platform: 'win32', environment })).toBeUndefined();
+      await expect(
+        createDesktopShell({ appDataRoots: [], platform: 'win32', environment }).probe(),
+      ).resolves.toStrictEqual({
+        status: 'unavailable',
+        code: 'sandbox-unavailable',
+        message: 'The Windows shell sandbox is not part of this Tau build.',
+        recovery: 'Use Tau on macOS or Linux for the shell and Terminal until the Windows sandbox ships.',
+      });
+    });
+
+    it('composes the restricted-token provider when the flag is on and the helper exists', async () => {
+      const environment = { TAU_WINDOWS_SHELL_SANDBOX: '1', TAU_WINDOWS_SANDBOX_HELPER: await statusHelper(true) };
+
+      expect(desktopShellProvider({ platform: 'win32', environment, appDataRoots: [appData] })?.name).toBe(
+        'tau-windows-restricted-token-1',
+      );
+    });
+
+    it('has no provider when the flag is on but the helper is missing', () => {
+      const environment = { TAU_WINDOWS_SHELL_SANDBOX: '1', TAU_WINDOWS_SANDBOX_HELPER: join(base, 'absent.exe') };
+
+      expect(desktopShellProvider({ platform: 'win32', environment })).toBeUndefined();
+    });
+
+    it.skipIf(process.platform === 'win32')(
+      'asks for the one administrator approval while the helper reports no install record',
+      async () => {
+        const environment = { TAU_WINDOWS_SHELL_SANDBOX: '1', TAU_WINDOWS_SANDBOX_HELPER: await statusHelper(false) };
+
+        await expect(
+          createDesktopShell({ appDataRoots: [appData], platform: 'win32', environment }).probe(),
+        ).resolves.toStrictEqual({
+          status: 'unavailable',
+          code: 'sandbox-unavailable',
+          message: 'The Windows shell sandbox is not set up on this device.',
+          recovery:
+            'Tau needs one administrator approval to set up the Windows shell sandbox. Approve the Windows prompt when Tau asks, then open the shell again.',
+        });
+      },
+    );
+  });
+});
+
+describe('bundledWindowsSandboxHelper', () => {
+  it('prefers TAU_WINDOWS_SANDBOX_HELPER', () => {
+    expect(
+      bundledWindowsSandboxHelper({
+        environment: { TAU_WINDOWS_SANDBOX_HELPER: String.raw`D:\tau\helper.exe` },
+        source: false,
+      }),
+    ).toBe(String.raw`D:\tau\helper.exe`);
+  });
+
+  it('runs the release build from the sandbox library in source execution', () => {
+    const helper = bundledWindowsSandboxHelper({ environment: {}, source: true });
+
+    expect(helper).toBe(
+      fileURLToPath(
+        new URL(
+          '../../../../libs/sandbox/windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe',
+          import.meta.url,
+        ),
+      ),
+    );
+  });
+
+  it('runs the packaged helper from the resources folder', () => {
+    expect(
+      bundledWindowsSandboxHelper({
+        environment: {},
+        source: false,
+        resourcesPath: String.raw`C:\Program Files\Tau\resources`,
+      }),
+    ).toBe(String.raw`C:\Program Files\Tau\resources\sandbox\tau-windows-sandbox.exe`);
+    expect(bundledWindowsSandboxHelper({ environment: {}, source: false, resourcesPath: '' })).toBeUndefined();
+  });
+});
+
+describe('setUpWindowsShellSandbox', () => {
+  const environment = { SystemRoot: String.raw`C:\Windows` };
+  const helper = String.raw`C:\Program Files\Tau's Build\resources\sandbox\tau-windows-sandbox.exe`;
+
+  const recorder = (answers: { whoami: () => Promise<string>; powershell: () => Promise<string> }) => {
+    const calls: Array<Readonly<{ file: string; arguments_: readonly string[] }>> = [];
+    const run = async (file: string, arguments_: readonly string[]): Promise<string> => {
+      calls.push({ file, arguments_ });
+      return file.endsWith('whoami.exe') ? answers.whoami() : answers.powershell();
+    };
+    return { calls, run };
+  };
+
+  it("runs the helper's setup for the current person, elevated through the fixed Windows PowerShell", async () => {
+    const { calls, run } = recorder({
+      whoami: async () => `${String.raw`"desktop-1\person","S-1-5-21-111-222-333-1001"`}\r\n`,
+      powershell: async () => '',
+    });
+
+    await expect(setUpWindowsShellSandbox(helper, { environment, run })).resolves.toStrictEqual({ status: 'set-up' });
+
+    expect(calls).toStrictEqual([
+      { file: String.raw`C:\Windows\System32\whoami.exe`, arguments_: ['/user', '/fo', 'csv', '/nh'] },
+      {
+        file: String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+        arguments_: [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          String.raw`$ErrorActionPreference = 'Stop'; $setup = Start-Process -FilePath 'C:\Program Files\Tau''s Build\resources\sandbox\tau-windows-sandbox.exe' -ArgumentList @('setup', '--for-user', 'S-1-5-21-111-222-333-1001') -Verb RunAs -Wait -PassThru; exit $setup.ExitCode`,
+        ],
+      },
+    ]);
+  });
+
+  it('answers failed without elevating when the account cannot be read', async () => {
+    const { calls, run } = recorder({ whoami: async () => 'unexpected', powershell: async () => '' });
+
+    await expect(setUpWindowsShellSandbox(helper, { environment, run })).resolves.toStrictEqual({
+      status: 'failed',
+      message: 'Tau could not read your Windows account.',
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('answers failed when the person declines the administrator prompt', async () => {
+    const { run } = recorder({
+      whoami: async () => String.raw`"desktop-1\person","S-1-5-21-111-222-333-1001"`,
+      powershell: async () => {
+        throw new Error('The operation was canceled by the user.');
+      },
+    });
+
+    await expect(setUpWindowsShellSandbox(helper, { environment, run })).resolves.toStrictEqual({
+      status: 'failed',
+      message: 'The Windows shell sandbox was not set up: The operation was canceled by the user.',
+    });
   });
 });
 

@@ -10,9 +10,11 @@
  *
  * @module
  */
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, win32 } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { probeHostShell } from '@taucad/shell-service';
 import type {
@@ -25,8 +27,15 @@ import type {
   ShellRunRequest,
   ShellUnavailable,
 } from '@taucad/shell-service';
-import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
+import {
+  createSandboxShellProvider,
+  createWindowsShellProvider,
+  readWindowsSandboxStatus,
+} from '@taucad/native-process-core/shell';
 import type { SandboxShellProviderOptions, ShellProvider } from '@taucad/native-process-core/shell';
+
+/** The host environment, as far as shell composition reads it. */
+type HostEnvironment = Readonly<Record<string, string | undefined>>;
 
 /** @public */
 export type DesktopShellOptions = Readonly<{
@@ -56,6 +65,11 @@ export type DesktopShellOptions = Readonly<{
   toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }> | undefined;
   /** Injected for tests; otherwise {@link desktopShellProvider}. */
   provider?: ShellProvider | undefined;
+  /**
+   * The environment composition reads: `TAU_WINDOWS_SHELL_SANDBOX` and `TAU_WINDOWS_SANDBOX_HELPER` on Windows.
+   * Defaults to `process.env`.
+   */
+  environment?: HostEnvironment | undefined;
   log?: ((event: string, detail?: unknown, level?: 'info' | 'warn') => void) | undefined;
 }>;
 
@@ -109,11 +123,12 @@ export const bundledGitToolchain = (
   }
   const bin = dirname(gitExecutable);
   const payload = dirname(bin);
-  const execPath = join(payload, 'libexec', 'git-core');
-  return {
-    roots: [payload],
-    bins: existsSync(join(execPath, 'git-lfs')) ? [bin, execPath] : [bin],
-  };
+  /* MinGit keeps its exec path, and so `git-lfs.exe`, under `mingw64` (the Windows payload, OQ3). */
+  const execPath = [
+    { path: join(payload, 'libexec', 'git-core'), lfs: 'git-lfs' },
+    { path: join(payload, 'mingw64', 'libexec', 'git-core'), lfs: 'git-lfs.exe' },
+  ].find((candidate) => existsSync(join(candidate.path, candidate.lfs)))?.path;
+  return { roots: [payload], bins: execPath === undefined ? [bin] : [bin, execPath] };
 };
 
 /**
@@ -133,15 +148,168 @@ export const bundledShellSupervisor = (): SandboxShellProviderOptions['superviso
   return { executablePath: process.execPath, arguments: [join(dirname(entry), 'shell-supervisor.js')] };
 };
 
+/** The helper's file name, packaged under `<resources>/sandbox/` and built by `sandbox:build:windows-sandbox`. */
+const windowsSandboxHelperName = 'tau-windows-sandbox.exe';
+
+/**
+ * Where the Windows shell sandbox helper is: `TAU_WINDOWS_SANDBOX_HELPER` when set; in source execution, the release
+ * build in the sandbox library's Cargo target; packaged, `<resources>/sandbox/tau-windows-sandbox.exe`. It does not
+ * check that the file exists.
+ *
+ * @param input - The environment, Electron's resources folder and whether this module runs from source; each defaults
+ *   to this process's own.
+ * @returns The helper path, or `undefined` for a bundled module with no resources folder.
+ */
+export const bundledWindowsSandboxHelper = (
+  input: Readonly<{
+    environment?: HostEnvironment | undefined;
+    resourcesPath?: string | undefined;
+    source?: boolean | undefined;
+  }> = {},
+): string | undefined => {
+  const override = (input.environment ?? process.env)['TAU_WINDOWS_SANDBOX_HELPER'];
+  if (override !== undefined && override !== '') {
+    return override;
+  }
+  if (input.source ?? import.meta.url.endsWith('.ts')) {
+    return fileURLToPath(
+      new URL(
+        `../../../../libs/sandbox/windows-sandbox/target/x86_64-pc-windows-msvc/release/${windowsSandboxHelperName}`,
+        import.meta.url,
+      ),
+    );
+  }
+  const resources = input.resourcesPath ?? (Reflect.get(process, 'resourcesPath') as string | undefined);
+  return resources === undefined || resources === ''
+    ? undefined
+    : win32.join(resources, 'sandbox', windowsSandboxHelperName);
+};
+
+/**
+ * The Windows sandbox helper this host composes, or `undefined` while the sandbox is off: only with
+ * `TAU_WINDOWS_SHELL_SANDBOX=1` (until the WIN-X64 conformance row is green on a merged head, Q15) and a helper that
+ * exists.
+ *
+ * @param environment - The host environment.
+ * @returns The helper path.
+ */
+const enabledWindowsSandboxHelper = (environment: HostEnvironment): string | undefined => {
+  if (environment['TAU_WINDOWS_SHELL_SANDBOX'] !== '1') {
+    return undefined;
+  }
+  const helper = bundledWindowsSandboxHelper({ environment });
+  return helper !== undefined && existsSync(helper) ? helper : undefined;
+};
+
+/** The outcome of {@link setUpWindowsShellSandbox}. @public */
+export type WindowsShellSandboxSetup = Readonly<{ status: 'set-up' }> | Readonly<{ status: 'failed'; message: string }>;
+
+/** Run one program and answer its standard output; rejects on a nonzero exit. */
+type RunProgram = (
+  file: string,
+  arguments_: readonly string[],
+  options: Readonly<{ timeoutMilliseconds: number }>,
+) => Promise<string>;
+
+const runProgram: RunProgram = async (file, arguments_, { timeoutMilliseconds }) =>
+  new Promise((resolve, reject) => {
+    execFile(
+      file,
+      [...arguments_],
+      { windowsHide: true, timeout: timeoutMilliseconds, maxBuffer: 64 * 1024 },
+      (error, stdout, stderr) => {
+        if (error === null) {
+          resolve(stdout);
+        } else {
+          reject(new Error(`${error.message} ${stderr}`.trim(), { cause: error }));
+        }
+      },
+    );
+  });
+
+/** A PowerShell single-quoted literal. */
+const powerShellLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+
+/**
+ * Run the Windows shell sandbox's one-time setup: the helper's `setup --for-user <SID>`, elevated through the fixed
+ * Windows PowerShell's `Start-Process -Verb RunAs -Wait`, so Windows shows one administrator prompt (D15). The SID is the
+ * current person's, read with System32's `whoami /user`; their host is the one that may read the sandbox password.
+ * Nothing calls it yet; the Terminal's setup affordance will.
+ *
+ * @public
+ * @param helperPath - The helper ({@link bundledWindowsSandboxHelper}).
+ * @param options - The host environment, for `SystemRoot`, and the program runner; injectable for tests.
+ * @returns Whether setup completed; a declined prompt or a failed setup answers `failed`.
+ */
+export const setUpWindowsShellSandbox = async (
+  helperPath: string,
+  options: Readonly<{
+    environment?: HostEnvironment | undefined;
+    run?: RunProgram | undefined;
+  }> = {},
+): Promise<WindowsShellSandboxSetup> => {
+  const environment = options.environment ?? process.env;
+  const run = options.run ?? runProgram;
+  const systemRoot = environment['SystemRoot'] ?? environment['SYSTEMROOT'] ?? String.raw`C:\Windows`;
+  const system32 = win32.join(systemRoot, 'System32');
+  let sid: string;
+  try {
+    const identity = await run(win32.join(system32, 'whoami.exe'), ['/user', '/fo', 'csv', '/nh'], {
+      timeoutMilliseconds: 10_000,
+    });
+    const match = /"(S-1-5-21(?:-\d+)+)"\s*$/u.exec(identity.trim());
+    if (match?.[1] === undefined) {
+      return {
+        status: 'failed',
+        message: 'Tau could not read your Windows account.',
+      };
+    }
+    sid = match[1];
+  } catch (error) {
+    return {
+      status: 'failed',
+      message: `Tau could not read your Windows account: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$setup = Start-Process -FilePath ${powerShellLiteral(helperPath)} -ArgumentList @('setup', '--for-user', ${powerShellLiteral(sid)}) -Verb RunAs -Wait -PassThru`,
+    'exit $setup.ExitCode',
+  ].join('; ');
+  try {
+    await run(
+      win32.join(system32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      { timeoutMilliseconds: 10 * 60_000 },
+    );
+    return { status: 'set-up' };
+  } catch (error) {
+    return {
+      status: 'failed',
+      message: `The Windows shell sandbox was not set up: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+};
+
+/** Why an enabled Windows sandbox has no shell yet: its one-time elevated setup has not run. */
+const windowsSetupNeeded: ShellUnavailable = {
+  status: 'unavailable',
+  code: 'sandbox-unavailable',
+  message: 'The Windows shell sandbox is not set up on this device.',
+  recovery:
+    'Tau needs one administrator approval to set up the Windows shell sandbox. Approve the Windows prompt when Tau asks, then open the shell again.',
+};
+
 /**
  * The one provider for this platform, chosen once (D3). macOS ships its Terminal with the PTY rows unverified (operator
- * ruling 2026-10-24T20:45Z). Windows has no provider in this build (Q15 adds its branch here).
+ * ruling 2026-10-24T20:45Z). Windows composes the restricted-token provider only with `TAU_WINDOWS_SHELL_SANDBOX=1` and
+ * the helper present (Q15); otherwise it has none.
  *
- * @param options - The platform, bubblewrap and home.
+ * @param options - The platform, bubblewrap, home and, on Windows, the environment that enables the sandbox.
  * @returns The provider, or `undefined` when this platform has none.
  */
 export const desktopShellProvider = (
-  options: Pick<DesktopShellOptions, 'bwrapPath' | 'home' | 'standInJournal' | 'storeGuardPath'> &
+  options: Pick<DesktopShellOptions, 'bwrapPath' | 'home' | 'standInJournal' | 'storeGuardPath' | 'environment'> &
     Partial<Pick<DesktopShellOptions, 'appDataRoots'>> &
     Readonly<{ platform: NodeJS.Platform }>,
 ): ShellProvider | undefined => {
@@ -164,6 +332,16 @@ export const desktopShellProvider = (
     case 'darwin': {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- the provider's own option name.
       return createSandboxShellProvider({ ...shared, macOSTerminal: true });
+    }
+    case 'win32': {
+      const helperPath = enabledWindowsSandboxHelper(options.environment ?? process.env);
+      return helperPath === undefined
+        ? undefined
+        : createWindowsShellProvider({
+            helperPath,
+            ...(options.home === undefined ? {} : { home: options.home }),
+            ...(custody === undefined ? {} : { custody }),
+          });
     }
     default: {
       return undefined;
@@ -282,6 +460,7 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
 
   const probe = async (): Promise<ShellProbe> => {
     probing ??= (async (): Promise<ShellProbe> => {
+      const environment = options.environment ?? process.env;
       const provider =
         options.provider ??
         desktopShellProvider({
@@ -291,11 +470,21 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
           appDataRoots: options.appDataRoots,
           standInJournal: options.standInJournal,
           storeGuardPath: options.storeGuardPath,
+          environment,
         });
+      /* An enabled Windows sandbox runs nothing until its one elevated setup has written the install record. */
+      const windowsHelper =
+        platform === 'win32' && options.provider === undefined ? enabledWindowsSandboxHelper(environment) : undefined;
+      const windowsStatus =
+        windowsHelper === undefined ? undefined : await readWindowsSandboxStatus(windowsHelper, { environment });
+      const notSetUp = windowsStatus?.installed === false ? windowsSetupNeeded : undefined;
       const outcome =
         provider === undefined
           ? noProvider(platform)
-          : await probeHostShell({
+          : (notSetUp ??
+            (await probeHostShell({
+              /* One sandbox account serves every Windows launch: one Terminal, and agent calls one at a time (A23). */
+              ...(platform === 'win32' ? { maxTerminals: 1, maxExecutions: 1 } : {}),
               provider,
               checkouts,
               appDataRoots: options.appDataRoots,
@@ -316,7 +505,7 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
                 message: `The shell sandbox could not be checked: ${error instanceof Error ? error.message : String(error)}`,
                 recovery: 'Restart Tau. If it happens again, reinstall Tau to restore its sandbox components.',
               }),
-            );
+            )));
       recording =
         outcome.status === 'available'
           ? {

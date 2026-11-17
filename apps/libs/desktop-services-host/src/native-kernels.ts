@@ -21,6 +21,7 @@ import type { NativeClosureResolver } from '@taucad/native-process-core/store';
 
 import { nativeKernelsFrameType } from '#native-kernels-frame.js';
 import type { NativeKernelsFrame } from '#native-kernels-frame.js';
+import { installDesktopWindowsNativeSandbox } from '#windows-native-sandbox.js';
 
 /*
  * Desktop host policy for every native request (D-DT-02). The kernels default to
@@ -115,12 +116,15 @@ export const desktopClosureResolver =
   };
 
 /**
- * Bind this utility's native kernels to main's frame: install the closure resolver every native kernel initializes
- * through and, when the frame names a sealed closure, the re-verifier. Called once the frame arrives, before the
+ * Bind this utility's native kernels to main's frame: on Windows, the sandbox helper main named; the closure resolver
+ * every native kernel initializes through; and, when the frame names a sealed closure, the re-verifier. Called once the frame arrives, before the
  * runtime composes.
  * @param frame - What main posted.
  */
 export const installDesktopNativeKernels = (frame: NativeKernelsFrame): void => {
+  if (frame.windowsSandbox !== undefined) {
+    installDesktopWindowsNativeSandbox(frame.windowsSandbox);
+  }
   installNativeClosureResolver(desktopClosureResolver(frame));
   if (frame.kernels.some(({ closure }) => closure !== undefined)) {
     installNativeRuntimeVerifier(verifyDesktopClosure);

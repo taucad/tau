@@ -1602,11 +1602,14 @@ describe('desktop main compute owner', () => {
 describe('desktop main admission gates', () => {
   const bootMilliseconds = 30_000;
 
+  /* T-R11.2 (D7): only a locked release owns `Tau Staging`. A staging build that honours overrides and is started
+   * without `--user-data-dir` uses `Tau Staging Dev`, so a development or test run can never default into the
+   * installed app's profile. */
   it.each([
-    { overrides: true, explicitProfile: true, usesChannelProfile: false },
-    { overrides: true, explicitProfile: false, usesChannelProfile: true },
-    { overrides: false, explicitProfile: true, usesChannelProfile: true },
-    { overrides: false, explicitProfile: false, usesChannelProfile: true },
+    { overrides: true, explicitProfile: true, profile: undefined },
+    { overrides: true, explicitProfile: false, profile: 'Tau Staging Dev' },
+    { overrides: false, explicitProfile: true, profile: 'Tau Staging' },
+    { overrides: false, explicitProfile: false, profile: 'Tau Staging' },
   ])(
     'should isolate a staging profile according to $overrides/$explicitProfile',
     async (options) => {
@@ -1621,10 +1624,10 @@ describe('desktop main admission gates', () => {
       );
       await import('#main/main.js');
       const profileCall = app.setPath.mock.calls.find(([name]) => name === 'userData');
-      if (options.usesChannelProfile) {
-        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', 'Tau Staging')]);
-      } else {
+      if (options.profile === undefined) {
         expect(profileCall).toBeUndefined();
+      } else {
+        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', options.profile)]);
       }
       expect(app.setPath).toHaveBeenCalledWith('sessionData', state.userData);
     },

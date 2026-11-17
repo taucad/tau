@@ -80,19 +80,21 @@ const {
  * The features a rasterizer runs. A software rasterizer draws every pass on the CPU, where the WebGPU AO graph (normal
  * attachment, GTAO, denoise), the speculative alternate-camera render and the FXAA shader (whose compile alone holds
  * SwiftShader's GPU process for over thirty seconds) starve the page's compositor, and a large environment cubemap
- * costs seconds per capture. WebGL's composer is unaffected by the first three, which only the WebGPU composition reads.
+ * costs seconds per capture. The classic WebGL composer is unaffected by the first three, which only the node
+ * composition reads, on either of the node renderer's backends (WebGPU, or WebGL 2 where WebGPU is unavailable).
  *
- * @param backend - The renderer's graphics API.
+ * @param family - The renderer family: `webgpu` for the node renderer on either backend, `webgl` for the classic one
+ *   (the material family `useThreeGraphicsBackend` reports).
  * @param rasterizer - The rasterizer whose features run.
  * @returns The features.
  * @public
  */
 export const renderTierFeatures = (
-  backend: ResolvedGraphicsBackend,
+  family: ResolvedGraphicsBackend,
   rasterizer: RenderTier['rasterizer'],
 ): RenderTierFeatures => {
   const reduced = rasterizer === 'software';
-  const reducedComposition = reduced && backend === 'webgpu';
+  const reducedComposition = reduced && family === 'webgpu';
   return {
     ambientOcclusion: !reducedComposition,
     antialias: !reducedComposition,
@@ -150,13 +152,15 @@ export const resolveRenderTier = (renderer: unknown, override?: RenderTierOverri
   if (known) {
     return known;
   }
+  // The node renderer reports its backend's coordinate system: WebGPU's, or WebGL's on its WebGL 2 fallback.
   const backend: ResolvedGraphicsBackend =
     key && 'coordinateSystem' in key && key.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl';
+  const nodeRenderer = key !== undefined && 'isWebGPURenderer' in key && key.isWebGPURenderer === true;
   const rasterizer = rendererUsesSoftwareRasterizer(renderer) ? 'software' : 'hardware';
   const tier: RenderTier = {
     backend,
     rasterizer,
-    features: overriddenFeatures(backend, rasterizer, override),
+    features: overriddenFeatures(nodeRenderer ? 'webgpu' : backend, rasterizer, override),
     fallbackReason: webGpuFallbackReason(),
     overridden: override !== undefined,
   };

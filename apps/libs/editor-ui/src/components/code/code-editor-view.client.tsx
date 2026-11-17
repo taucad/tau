@@ -1,21 +1,17 @@
 import { tauHighlighter } from '@taucad/grammars';
-import { createEditorSearchPanel } from '@taucad/editor-ui/components/code/editor-search-panel';
-import { editorSurfaceTheme } from '@taucad/editor-ui/components/code/editor-surface-theme';
+import { createEditorSearchPanel } from '#components/code/editor-search-panel.js';
+import { editorSurfaceTheme } from '#components/code/editor-surface-theme.js';
 import '@vscode/codicons/dist/codicon.css';
 import '#components/code/code-editor.css';
-import { renderCompletionIcon } from '@taucad/editor-ui/components/code/editor-completion-icon';
-import {
-  definitionNavigation,
-  goToDefinition,
-  hasDefinitionProvider,
-} from '@taucad/editor-ui/components/code/editor-definition';
+import { renderCompletionIcon } from '#components/code/editor-completion-icon.js';
+import { definitionNavigation, goToDefinition, hasDefinitionProvider } from '#components/code/editor-definition.js';
 import {
   availableLanguageActions,
   languageFeatureNavigation,
   symbolPathListener,
-} from '@taucad/editor-ui/components/code/editor-language-features';
+} from '#components/code/editor-language-features.js';
 import { storeDiagnostics } from '#components/code/editor-lint.js';
-import type { AvailableLanguageAction } from '@taucad/editor-ui/components/code/editor-language-features';
+import type { AvailableLanguageAction } from '#components/code/editor-language-features.js';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EditorState, Compartment, Prec } from '@codemirror/state';
 import type { ViewUpdate } from '@codemirror/view';
@@ -57,7 +53,7 @@ import {
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { markCodeEditorMilestone } from '#components/code/code-editor.client.js';
 import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
-import { jsonDepthHighlighting } from '@taucad/editor-ui/components/code/json-depth-highlighting';
+import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
 import type { CodeEditorProps } from '#components/code/code-editor.client.js';
 import type { DocumentChange, EditorDocument, TextChange } from '#lib/editor-document.js';
 

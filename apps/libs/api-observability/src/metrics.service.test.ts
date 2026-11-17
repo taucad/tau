@@ -145,31 +145,15 @@ describe('MetricsService', () => {
     });
   });
 
-  describe('Client-reported metrics', () => {
-    it('should create kernelExecutionDuration histogram', () => {
-      expect(service.kernelExecutionDuration).toBeDefined();
-    });
-
-    it('should create kernelExecutions counter', () => {
-      expect(service.kernelExecutions).toBeDefined();
-    });
-
-    it('should create kernelExportDuration histogram', () => {
-      expect(service.kernelExportDuration).toBeDefined();
-    });
-  });
-
   describe('metric operations', () => {
     it('should record values on histograms without error', () => {
       expect(() => service.wsMessageSize.record(512)).not.toThrow();
       expect(() => service.genAiTokenUsage.record(100)).not.toThrow();
-      expect(() => service.kernelExecutionDuration.record(1.2)).not.toThrow();
     });
 
     it('should add values on counters without error', () => {
       expect(() => service.wsDisconnections.add(1)).not.toThrow();
       expect(() => service.genAiCost.add(0.01)).not.toThrow();
-      expect(() => service.kernelExecutions.add(1)).not.toThrow();
       expect(() => service.publicationViewsTotal.add(1)).not.toThrow();
       expect(() => service.publicationViewsRejectedTotal.add(1)).not.toThrow();
     });

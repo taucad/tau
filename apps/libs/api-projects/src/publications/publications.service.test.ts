@@ -28,7 +28,7 @@ import { leaseGitRunner } from '#testing/lease-git-runner.fixture.js';
 import type { MaterializerDependencies } from '#publications/publication-materializer.js';
 import { resolveLfsObjectLocation, tenantLfsObjectKey } from '@taucad/api-git-core/lfs-keys';
 import type { ObjectStorageServiceContract, PutBlobResult } from '@taucad/api-object-storage';
-import { blobKeyFromSha256Hex, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
+import { blobKeyFromSha256Hex, servedBlobKey, sha256HexFromBytes } from '@taucad/api-object-storage/sha256';
 import * as schema from '@taucad/api-database/schema';
 
 type PublicationsServiceDeps = ConstructorParameters<typeof PublicationsService>;
@@ -2132,15 +2132,22 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
     expect(blobCalls).toContainEqual(expect.objectContaining({ body: thumbnail, contentType: 'image/webp' }));
   });
 
-  it('should repair stale same-key thumbnail metadata without changing bytes', async () => {
+  /* #2008: the bare digest key may be another publication's plain file, so a
+     thumbnail never repairs it; it goes to its own served key. */
+  it('should write a thumbnail to its own served key rather than rewrite the shared digest key', async () => {
     const thumbnail = validWebpSignature();
+    const sha = sha256HexFromBytes(thumbnail);
     const storage = createStorageStub();
-    vi.mocked(storage.headBlob).mockResolvedValue({
-      contentType: 'application/octet-stream',
-      size: thumbnail.byteLength,
-      etag: 'etag',
-      cacheControl: 'private, no-cache',
-    });
+    vi.mocked(storage.headBlob).mockImplementation(async (args) =>
+      args.key === blobKeyFromSha256Hex(sha)
+        ? {
+            contentType: 'application/octet-stream',
+            size: thumbnail.byteLength,
+            etag: 'etag',
+            cacheControl: '',
+          }
+        : undefined,
+    );
     const { service, repositoryPath } = createPublishHarness({
       storage,
       files: new Map([
@@ -2151,15 +2158,19 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
 
     await service.publishFromRevision({ ownerId: 'user_1', request: publishRequest(repositoryPath) });
 
-    const thumbnailWrites = vi
+    const blobWrites = vi
       .mocked(storage.putBlob)
       .mock.calls.map(([callArgs]) => callArgs)
-      .filter((callArgs) => callArgs.namespace === 'blobs' && callArgs.contentType === 'image/webp');
-    expect(thumbnailWrites).toHaveLength(1);
-    expect(thumbnailWrites[0]?.body).toStrictEqual(thumbnail);
-    // The object is already there under this digest, so the write repairs the
-    // content type rather than claiming the key.
-    expect(thumbnailWrites[0]).not.toHaveProperty('ifNoneMatch');
+      .filter((callArgs) => callArgs.namespace === 'blobs');
+    expect(blobWrites.map((callArgs) => callArgs.key)).not.toContain(blobKeyFromSha256Hex(sha));
+    expect(blobWrites).toContainEqual(
+      expect.objectContaining({
+        key: servedBlobKey(sha, 'image/webp'),
+        body: thumbnail,
+        contentType: 'image/webp',
+        ifNoneMatch: '*',
+      }),
+    );
   });
 
   it('should upsert blob refcounts inside the publish transaction, aggregated per sha', async () => {
@@ -2578,15 +2589,29 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
       path: 'main.ts',
     });
 
-    expect(resolved).toEqual({ sha256Hex: testManifestSha, etag: `"${testManifestSha}"`, path: 'main.ts' });
+    expect(resolved).toEqual({
+      sha256Hex: testManifestSha,
+      etag: `"${testManifestSha}"`,
+      path: 'main.ts',
+      key: blobKeyFromSha256Hex(testManifestSha),
+    });
   });
 
   it('should resolve for an active email grantee', async () => {
     const { service } = createFileService({ database: createGranteeDatabase({ accessRows: [{ id: 'pva_1' }] }) });
 
     await expect(
-      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_friend', path: 'main.ts' }),
-    ).resolves.toEqual({ sha256Hex: testManifestSha, etag: `"${testManifestSha}"`, path: 'main.ts' });
+      service.resolvePublicationFile({
+        publicationId: 'pub_test',
+        viewerUserId: 'user_friend',
+        path: 'main.ts',
+      }),
+    ).resolves.toEqual({
+      sha256Hex: testManifestSha,
+      etag: `"${testManifestSha}"`,
+      path: 'main.ts',
+      key: blobKeyFromSha256Hex(testManifestSha),
+    });
   });
 
   it('should reject anonymous private requests with 401 before touching storage', async () => {
@@ -2641,6 +2666,7 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
       sha256Hex: testManifestSha,
       etag: `"${testManifestSha}"`,
       path: 'main.ts',
+      key: blobKeyFromSha256Hex(testManifestSha),
     });
   });
 
@@ -2648,8 +2674,17 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
     const { service } = createFileService({ database: createDatabaseChainReturning([privateRow]) });
 
     await expect(
-      service.resolvePublicationFile({ publicationId: 'pub_test', viewerUserId: 'user_owner', path: './main.ts' }),
-    ).resolves.toEqual({ sha256Hex: testManifestSha, etag: `"${testManifestSha}"`, path: 'main.ts' });
+      service.resolvePublicationFile({
+        publicationId: 'pub_test',
+        viewerUserId: 'user_owner',
+        path: './main.ts',
+      }),
+    ).resolves.toEqual({
+      sha256Hex: testManifestSha,
+      etag: `"${testManifestSha}"`,
+      path: 'main.ts',
+      key: blobKeyFromSha256Hex(testManifestSha),
+    });
   });
 
   it('should serve repeat resolutions from the manifest cache without re-reading storage', async () => {
@@ -2830,6 +2865,32 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
     const result = await service.getPublicationForViewer({ publicationId: 'pub_test' });
 
     expect(result.files['main.ts']).toBe('https://example.invalid/public');
+    expect(vi.mocked(storage.publicUrl)).toHaveBeenCalledWith({
+      namespace: 'blobs',
+      key: blobKeyFromSha256Hex(testManifestSha),
+    });
+  });
+
+  /* #2008: the thumbnail is served from its own key; a version materialized
+     before that holds it at the bare digest, which its row recorded. */
+  it.each([
+    ['a version materialized with served keys', `blobs/${servedBlobKey('c'.repeat(64), 'image/webp')}`],
+    ['a version materialized before them', `blobs/${blobKeyFromSha256Hex('c'.repeat(64))}`],
+  ])('should serve the public thumbnail from the key its row recorded, for %s', async (_case, thumbnailKey) => {
+    const { service, storage } = createViewerService({
+      row: { ...baseRow, visibility: 'public', thumbnailKey },
+      manifestFiles: {
+        'main.ts': `sha256:${testManifestSha}`,
+        'thumbnail.webp': `sha256:${'c'.repeat(64)}`,
+      },
+    });
+
+    await service.getPublicationForViewer({ publicationId: 'pub_test' });
+
+    expect(vi.mocked(storage.publicUrl)).toHaveBeenCalledWith({
+      namespace: 'blobs',
+      key: thumbnailKey.slice('blobs/'.length),
+    });
     expect(vi.mocked(storage.publicUrl)).toHaveBeenCalledWith({
       namespace: 'blobs',
       key: blobKeyFromSha256Hex(testManifestSha),

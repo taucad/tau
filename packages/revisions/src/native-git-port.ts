@@ -26,7 +26,7 @@ import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { RecordedProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
-import { CommandAbortedError, runGitCommand } from '#git-command.js';
+import { CommandAbortedError, gitCommandActivity, runGitCommand } from '#git-command.js';
 import type { GitCommandResult } from '#git-command.js';
 import { parseTransportValue } from '#native-git-adapter.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
@@ -2514,7 +2514,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * one made.
      */
     init: async (input: InitRevisionStoreInput): Promise<void> =>
-      refQueue.queueFor('init', async () => initStore(input)),
+      gitCommandActivity.during('open', async () => refQueue.queueFor('init', async () => initStore(input))),
 
     ignoredPaths: async (root?: string, paths?: readonly string[]): Promise<readonly string[] | undefined> => {
       /* Git's own answer, on every repository: the checkout's nested ignore

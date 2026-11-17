@@ -107,7 +107,6 @@
     "@taucad/workbench-panes": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
-    "@vscode/codicons": "catalog:",
     "better-auth": "catalog:",
     "bowser": "catalog:",
     "camera-controls": "3.1.2",

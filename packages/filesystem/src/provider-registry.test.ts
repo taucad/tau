@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ProviderRegistry } from '#provider-registry.js';
 import { isMissingWorkspaceHandleError } from '#workspace-errors.js';
 import type { FileSystemProvider } from '#types.js';
 import type { WorkspaceScope } from '#mount-table.js';
+import { serveNodeFsProvider } from '#backend/node/host.js';
+import { tauPathPolicy } from '#path-registry.js';
 
 const directIdbInitialize = vi.hoisted(() => vi.fn<() => Promise<void>>(async () => undefined));
 
@@ -359,6 +361,53 @@ describe('ProviderRegistry', () => {
 
   describe('node backend', () => {
     const nodeScope: WorkspaceScope = { backend: 'node', path: '/tmp/tau-root' };
+    const hosts: Array<() => Promise<void>> = [];
+
+    /** The host half on `port`: it answers the connect-time description; no root is admitted. */
+    const serveHost = (port: MessagePort): void => {
+      hosts.push(serveNodeFsProvider(port, { policy: tauPathPolicy, allowRoot: () => false }).close);
+    };
+
+    /** Run `body` while this process reports `platform`, as a host on that disk would. */
+    const onPlatform = async (platform: NodeJS.Platform, body: () => Promise<void>): Promise<void> => {
+      const original = Object.getOwnPropertyDescriptor(process, 'platform');
+      if (original === undefined) {
+        throw new Error('process.platform has no descriptor to fake.');
+      }
+      Object.defineProperty(process, 'platform', { ...original, value: platform });
+      try {
+        await body();
+      } finally {
+        Object.defineProperty(process, 'platform', original);
+      }
+    };
+
+    afterEach(async () => {
+      await Promise.all(hosts.splice(0).map(async (close) => close()));
+    });
+
+    it("should take file modes from the host's disk, not the worker's platform", async () => {
+      const connectTo = async (hostPlatform: NodeJS.Platform): Promise<FileSystemProvider> => {
+        const { port1, port2 } = new MessageChannel();
+        serveHost(port2);
+        const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort: async () => port1 });
+        let provider: FileSystemProvider | undefined;
+        // Only the host answers under the faked platform; the registry passes on what it was told.
+        await onPlatform(hostPlatform, async () => {
+          provider = await nodeRegistry.getProvider(nodeScope);
+        });
+        port1.close();
+        return provider!;
+      };
+
+      const windowsHost = await connectTo('win32');
+      expect(windowsHost.getFileMode).toBeUndefined();
+      expect(windowsHost.setFileMode).toBeUndefined();
+
+      const posixHost = await connectTo('linux');
+      expect(posixHost.getFileMode).toBeTypeOf('function');
+      expect(posixHost.setFileMode).toBeTypeOf('function');
+    });
 
     it('retries a refused services port on the next provider resolution', async () => {
       const { port1, port2 } = new MessageChannel();
@@ -366,6 +415,7 @@ describe('ProviderRegistry', () => {
         .fn<() => Promise<MessagePort>>()
         .mockRejectedValueOnce(new Error('services broker is quiescing'))
         .mockResolvedValueOnce(port1);
+      serveHost(port2);
       const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort });
       await expect(nodeRegistry.getProvider(nodeScope)).rejects.toThrow('services broker is quiescing');
       await expect(nodeRegistry.getProvider(nodeScope)).resolves.toBeDefined();
@@ -378,6 +428,7 @@ describe('ProviderRegistry', () => {
       const createNodeFsPort = vi.fn(async () => {
         const { port1, port2 } = new MessageChannel();
         ports.push(port2);
+        serveHost(port2);
         return port1;
       });
       const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort });

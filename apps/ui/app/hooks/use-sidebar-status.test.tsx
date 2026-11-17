@@ -513,6 +513,27 @@ const agentStateRows: ReadonlyArray<{
     sentence: 'Failed · kernel crashed while meshing',
   },
   {
+    /* IS3: a coded refusal is named in the card's own words; the gateway's sentence never renders, not even sr-only. */
+    signal: 'run.lifecycle: failed on a paused model route',
+    target: 'chat',
+    events: [
+      {
+        type: 'runLifecycle',
+        phase: 'failed',
+        reason: JSON.stringify({
+          category: 'generic',
+          title: 'Error',
+          message: "This model route is paused by Tau's operators.",
+          code: 'MODEL_ROUTE_PAUSED',
+        }),
+      },
+    ],
+    state: 'failed',
+    label: 'Failed · This model is paused',
+    mark: 'failed',
+    sentence: 'Failed · This model is paused',
+  },
+  {
     signal: 'run.lifecycle: cancelled',
     target: 'chat',
     events: [{ type: 'runLifecycle', phase: 'cancelled' }],
@@ -1273,6 +1294,7 @@ const compiledHooks = await (async () => {
     react: await import('react'),
     'react/compiler-runtime': await import('react/compiler-runtime'),
     '@taucad/chat-ui/utils/question-tool': questionTool,
+    '@taucad/chat-ui/utils/error.utils': await import('@taucad/chat-ui/utils/error.utils'),
     '#machines/sessions.machine.js': await import('#machines/sessions.machine.js'),
     '#services/sessions-store.js': await import('#services/sessions-store.js'),
     '#services/revision-client-registry.js': await import('#services/revision-client-registry.js'),

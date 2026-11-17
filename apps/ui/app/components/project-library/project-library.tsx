@@ -226,7 +226,7 @@ export function ProjectLibrary({
   const [repairTarget, setRepairTarget] = useState<WorkspaceBindingRepairGroup | undefined>();
   /* Everything this device holds, the Trash included — one listing under the
      same query key — so a trashed project is never offered as Tau Cloud's alone. */
-  const { projects: heldProjects } = useProjects({ includeDeleted: true });
+  const { projects: heldProjects } = useProjects({ scope: 'all' });
   const {
     projects,
     conflicts,
@@ -244,7 +244,7 @@ export function ProjectLibrary({
     chooseProjectDirectory,
     updateName,
     isLoading,
-  } = useProjects({ includeDeleted: showDeleted });
+  } = useProjects({ scope: showDeleted ? 'trash' : 'live' });
   const degradedProjects = projects.filter(
     (project) => project.manifestIssue !== undefined && project.deletedAt === undefined,
   );

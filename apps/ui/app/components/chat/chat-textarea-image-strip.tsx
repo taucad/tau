@@ -138,7 +138,9 @@ export const ChatTextareaAttachmentRail = memo(function ({
                   type='button'
                   aria-label={`Open uploaded image ${imageIndex + 1}`}
                   className={cn(
-                    'overflow-hidden rounded-md border bg-background hover:bg-accent',
+                    // `block`: an inline-block button sits on the wrapper's text line, whose descender space would add
+                    // height under the thumbnail that the pending tile does not have, moving the composer as it lands.
+                    'block overflow-hidden rounded-md border bg-background hover:bg-accent',
                     'outline-none focus-visible:focus-outline',
                     thumbnailSize[size],
                   )}

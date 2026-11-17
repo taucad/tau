@@ -66,7 +66,7 @@ export const cloudProjectStub = (entry: CloudProject): CreateProjectOptions => (
  * @public
  */
 export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) => {
-  const { projects } = useProjects({ includeDeleted: true });
+  const { projects } = useProjects({ scope: 'all' });
   const { createProject, getProjects } = useProjectManager();
   const navigate = useNavigate();
 

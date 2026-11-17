@@ -67,7 +67,7 @@ export type SlugResolution<T> =
 /** Canonical slugs for a project id, for redirects and URL correction. */
 export function useProjectSlugs(projectId: string | undefined): SlugResolution<ProjectSlugs> {
   // Trashed projects still resolve: the route gate owns the "restore" UI.
-  const { projects, isLoading } = useProjects({ includeDeleted: true });
+  const { projects, isLoading } = useProjects({ scope: 'all' });
   if (isLoading) {
     return { status: 'resolving' };
   }
@@ -129,7 +129,7 @@ export function useCanonicalProjectUrlCorrection(
 
 /** `proj_` id addressed by slug or id segments in the `/w/` grammar. */
 export function useProjectIdBySlugs(workspaceSlug: string, projectSlug: string): SlugResolution<string> {
-  const { projects, isLoading } = useProjects({ includeDeleted: true });
+  const { projects, isLoading } = useProjects({ scope: 'all' });
   if (isLoading) {
     return { status: 'resolving' };
   }

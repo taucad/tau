@@ -323,7 +323,7 @@ export default function ImportRoute(): React.JSX.Element {
       routeActiveRef.current = false;
     };
   }, [holdHostGrants]);
-  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ includeDeleted: true });
+  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ scope: 'all' });
   const presentLocationError = useProjectCreationLocationError();
   const [linkedSelection, setLinkedSelection] = useState<GithubRepositorySelection>();
   const [linkedMainFile, setLinkedMainFile] = useState('');

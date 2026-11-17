@@ -71,15 +71,19 @@ const createUseProjectsResult = () => ({
   chooseProjectDirectory: vi.fn(async () => undefined),
 });
 let mockUseProjectsResult = createUseProjectsResult();
-/** Projects in this device's Trash: answered only to a listing that includes them. */
+/** Projects in this device's Trash: answered only to a listing whose scope holds them. */
 let mockTrashedProjects: ProjectListItem[] = [];
 
 /** What `useProjects` was last asked for, so the trashed view is observable. */
-const useProjectsOptions: Array<{ includeDeleted: boolean }> = [];
+const useProjectsOptions: Array<{ scope?: 'live' | 'trash' | 'all' } | undefined> = [];
 vi.mock('#hooks/use-projects.js', () => ({
-  useProjects: (options: { includeDeleted: boolean }) => {
+  useProjects: (options?: { scope?: 'live' | 'trash' | 'all' }) => {
     useProjectsOptions.push(options);
-    return options.includeDeleted
+    const scope = options?.scope ?? 'live';
+    if (scope === 'trash') {
+      return { ...mockUseProjectsResult, projects: mockTrashedProjects };
+    }
+    return scope === 'all'
       ? { ...mockUseProjectsResult, projects: [...mockUseProjectsResult.projects, ...mockTrashedProjects] }
       : mockUseProjectsResult;
   },
@@ -1827,7 +1831,7 @@ describe('ProjectLibrary', () => {
       useProjectsOptions.length = 0;
       renderAt('/projects?trash=1');
 
-      expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: true });
+      expect(useProjectsOptions.at(-1)).toEqual({ scope: 'trash' });
     });
 
     it('does not offer permanent deletion while a run cannot be verified quiescent', async () => {
@@ -1852,7 +1856,7 @@ describe('ProjectLibrary', () => {
       useProjectsOptions.length = 0;
       renderAt('/projects');
 
-      expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: false });
+      expect(useProjectsOptions.at(-1)).toEqual({ scope: 'live' });
     });
 
     /* R15: the Trash toggle is a filter, so it lives in the sort menu rather than behind a gear. */
@@ -1866,7 +1870,7 @@ describe('ProjectLibrary', () => {
       fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Show trashed projects' }));
 
       await waitFor(() => {
-        expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: true });
+        expect(useProjectsOptions.at(-1)).toEqual({ scope: 'trash' });
       });
       /* The write merges: an unrelated parameter is not collateral damage. */
       expect(route.search()).toContain('trash=1');
@@ -1876,7 +1880,7 @@ describe('ProjectLibrary', () => {
       fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Show trashed projects' }));
 
       await waitFor(() => {
-        expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: false });
+        expect(useProjectsOptions.at(-1)).toEqual({ scope: 'live' });
       });
       /* The fallback deletes the parameter, so the default view has a clean URL. */
       expect(route.search()).not.toContain('trash');

@@ -61,7 +61,8 @@ const descriptorSchema = z.strictObject({
   size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   sha512: z.string().regex(/^[A-Za-z\d+/]{85}[AQgw]==$/u),
   issuedAt: z.iso.datetime(),
-  expiresAt: z.iso.datetime(),
+  // Not enforced: update descriptors no longer expire. Publication still writes it for 0.4.0 clients, which require it.
+  expiresAt: z.iso.datetime().optional(),
 });
 export type DesktopUpdateDescriptor = z.infer<typeof descriptorSchema>;
 const envelopeSchema = z.strictObject({
@@ -98,13 +99,13 @@ export const verifyDesktopDescriptor = (input: unknown, keys: Readonly<Record<st
 };
 
 /**
- * An update refused only because the computer's clock puts the descriptor outside its validity window: issued more than
- * five minutes in the local future, or already expired by the local clock (B25). Main says "Check your computer's date
+ * An update refused only because the computer's clock puts the descriptor's issue time more than five minutes in the
+ * local future (B25). Main says "Check your computer's date
  * and time" for it instead of the generic refusal.
  */
 export class UpdateClockError extends Error {
   public constructor() {
-    super('Update descriptor is outside its validity period by this computer’s clock');
+    super('Update descriptor was issued in the future by this computer’s clock');
     this.name = 'UpdateClockError';
   }
 }
@@ -127,7 +128,6 @@ export const parseDesktopUpdateDescriptor = (
   const descriptor = descriptorSchema.parse(input);
   const identity = desktopReleaseIdentity(descriptor.tag);
   const issued = Date.parse(descriptor.issuedAt);
-  const descriptorExpires = Date.parse(descriptor.expiresAt);
   const artifact = desktopArtifactName({
     kind: descriptor.route === 'windows-nsis' ? 'windows-nsis' : 'linux-appimage',
     channel: descriptor.channel,
@@ -139,17 +139,16 @@ export const parseDesktopUpdateDescriptor = (
     descriptor.channel !== installation.channel ||
     identity.channel !== descriptor.channel ||
     identity.version !== descriptor.version ||
-    descriptor.path !== `releases/${encodeURIComponent(descriptor.tag)}/${artifact}` ||
-    descriptorExpires <= issued ||
-    descriptorExpires - issued > 7 * 24 * 60 * 60 * 1000
+    descriptor.path !== `releases/${encodeURIComponent(descriptor.tag)}/${artifact}`
   ) {
-    throw new Error('Update descriptor identity, path or validity period is invalid');
+    throw new Error('Update descriptor identity or path is invalid');
   }
   if (descriptor.version !== installation.version && !isNewerVersion(descriptor.version, installation.version)) {
     throw new Error('Update descriptor would downgrade the installed app');
   }
-  /* Only these two checks read the local clock: when they are the only ones that fail, the clock is the cause. */
-  if (issued > now + 300_000 || descriptorExpires <= now) {
+  /* Only this check reads the local clock (descriptors no longer expire): when it is the only one that fails, the
+   * clock is the cause. */
+  if (issued > now + 300_000) {
     throw new UpdateClockError();
   }
   return descriptor;

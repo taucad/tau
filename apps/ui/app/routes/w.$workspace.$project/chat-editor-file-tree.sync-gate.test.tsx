@@ -41,7 +41,7 @@ vi.mock('@taucad/fs-client/react/use-directory-listing', () => ({
   useDirectoryListing: () => ({ kind: 'ready', path: '', entries: [] }),
 }));
 
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeMap: () => tree.current,
   useFileTreeSelector: <T,>(select: (snapshot: typeof tree.current) => T): T => select(tree.current),
   useFileTreeEntry: () => undefined,

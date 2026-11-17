@@ -77,12 +77,18 @@ describe('installed update identity', () => {
       { arch: 'arm64' },
       { path: 'latest/Tau-win32-x64.exe' },
       { sha512: 'invalid' },
-      { expiresAt: '2026-10-20T00:00:00Z' },
       { issuedAt: '2026-10-22T00:00:00Z' },
-      { expiresAt: '2026-11-21T00:00:00Z' },
       { schemaVersion: 2 },
     ]) {
       expect(() => parseDesktopUpdateDescriptor({ ...descriptor, ...change }, installed, now)).toThrow();
+    }
+    // Descriptors no longer expire: an old or long-dated one, or one without expiresAt, is still admitted.
+    for (const change of [
+      { expiresAt: '2026-10-20T00:00:00Z' },
+      { expiresAt: '2027-11-21T00:00:00Z' },
+      { expiresAt: undefined },
+    ]) {
+      expect(parseDesktopUpdateDescriptor({ ...descriptor, ...change }, installed, now).version).toBe('0.2.0');
     }
     expect(() =>
       parseDesktopUpdateDescriptor(
@@ -136,23 +142,23 @@ describe('installed update identity', () => {
 
 describe('update refusals by the local clock (T-B25.1)', () => {
   const installed = parseDesktopInstallation(marker, expected);
+  /* This computer's clock runs ten minutes slow, so the descriptor looks issued ten minutes in the future. */
+  const early = Date.parse('2026-10-20T23:50:00Z');
   it('should name the clock when a descriptor is issued ten minutes in the local future', () => {
-    const early = Date.parse('2026-10-20T23:50:00Z');
     expect(() => parseDesktopUpdateDescriptor(descriptor, installed, early)).toThrow(UpdateClockError);
   });
 
-  it('should name the clock when a descriptor has already expired by the local clock', () => {
-    const late = Date.parse('2026-10-22T00:00:01Z');
-    expect(() => parseDesktopUpdateDescriptor(descriptor, installed, late)).toThrow(UpdateClockError);
+  it('should not refuse a descriptor that is old by the local clock, since descriptors no longer expire', () => {
+    const late = Date.parse('2027-10-22T00:00:01Z');
+    expect(parseDesktopUpdateDescriptor(descriptor, installed, late).version).toBe('0.2.0');
   });
 
   it('should keep the existing error for every other mismatch, even when the clock is also wrong', () => {
-    const late = Date.parse('2026-10-22T00:00:01Z');
     for (const [change, at] of [
       [{ path: 'latest/Tau-win32-x64.exe' }, now],
-      [{ path: 'latest/Tau-win32-x64.exe' }, late],
-      [{ expiresAt: '2026-10-29T00:00:01Z' }, now],
-      [{ channel: 'staging' }, late],
+      [{ path: 'latest/Tau-win32-x64.exe' }, early],
+      [{ channel: 'staging' }, early],
+      [{ version: '0.0.1', tag: 'desktop@0.0.1', path: 'releases/desktop%400.0.1/Tau-win32-x64.exe' }, early],
     ] as const) {
       let thrown: unknown;
       try {

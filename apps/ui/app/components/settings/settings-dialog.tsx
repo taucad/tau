@@ -290,6 +290,7 @@ export function SettingsSurface({
 
   return (
     <Content
+      scroll='contained'
       className={cn(
         'h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input]]:bg-card [&_[data-slot=select-trigger]]:bg-card [&_[data-slot=slider-input]]:bg-card [&_[data-slot=textarea]]:bg-card',
         // Phones get a full-screen sheet; its headers carry a 40px close in place of the corner glyph.

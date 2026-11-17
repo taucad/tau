@@ -12,7 +12,8 @@ import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { useSelector } from '@xstate/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createActor, createMachine } from 'xstate';
+import { createActor, setup } from 'xstate';
+import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { AppRuntimeProvider, useAppRuntime } from '#runtime/app-runtime-provider.js';
 import { createAppRuntime, selectAppEnvironment, selectSessionsRegistry } from '#runtime/app-runtime.js';
 import type { AppRuntime } from '#runtime/app-runtime.js';
@@ -210,6 +211,12 @@ describe('AppRuntimeProvider start boundary', () => {
   });
 });
 
+/** A stand-in for `rootFiles`: `connecting` until it is told it is ready. */
+const rootFilesMachine = setup({ schemas: { events: eventSchemas<{ type: 'ready' }>() } }).createMachine({
+  initial: 'connecting',
+  states: { connecting: { on: { ready: { target: 'ready' } } }, ready: {} },
+});
+
 /** Stands in for `Page`, whose first mount reports `shell-mounted`. */
 function ShellStandIn(): ReactNode {
   useEffect(() => {
@@ -233,9 +240,7 @@ describe('AppRuntimeProvider boot signals', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     (globalThis as DesktopHolder).tau = { boot: { report: (stage) => reports.push(stage) } };
     resetBootSignals();
-    const rootFiles = createActor(
-      createMachine({ initial: 'connecting', states: { connecting: { on: { ready: 'ready' } }, ready: {} } }),
-    ).start();
+    const rootFiles = createActor(rootFilesMachine).start();
     rootFilesStandIn.actor = rootFiles;
     const host = createFakeEnvironmentHost();
     const runtime = createAppRuntime({ environment: () => host });

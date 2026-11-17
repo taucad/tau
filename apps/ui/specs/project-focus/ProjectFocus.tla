@@ -144,6 +144,10 @@
 \* render under a data router. No action or verdict changes.
 \* PL1 (runtime entry cut): `SessionProjectProvider` moved to `hooks/project-provider.tsx` so Home's graph stops at
 \* the hook; the live sessions import it from there. Only an import path changes. No action or verdict changes.
+\* STO-25 (SP5-model): a live project's binding reads its manifest again once a tree write lands `tau.json`
+\* (`entryManifest`), so the model surfaces know from the first view which manifest the project holds. That is
+\* the session's own manifest observation, environment here; focus, the route state and the mounted live set are
+\* unchanged, so no action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

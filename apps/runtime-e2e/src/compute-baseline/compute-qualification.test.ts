@@ -198,3 +198,43 @@ describe.each(ciModels)('compute reuse qualification: %s', (model) => {
     }
   });
 });
+
+/**
+ * Known red on `main` (audit F12): with the Replicad operation adapter on, spur-gearbox renders different bytes
+ * from reuse off on every rebuilt step, a comment-only edit included, and the bytes depend on what the cache
+ * held. The suite keeps the gate and declares it failing; when the adapter is switched off (R2) or replaced,
+ * this test fails and must become an ordinary `it`.
+ */
+describe('compute reuse qualification, known red on main: spur-gearbox', () => {
+  const model = 'spur-gearbox';
+  let workspace: string;
+  let off: QualifyReport;
+  let memory: QualifyReport;
+
+  beforeAll(async () => {
+    workspace = await qualifyScratch(model);
+    const results = await runAll(
+      [
+        { model, arm: 'off', scenario: 'matrix' },
+        { model, arm: 'memory', scenario: 'matrix' },
+      ],
+      workspace,
+    );
+    off = results[0]!;
+    memory = results[1]!;
+  }, 1_800_000);
+
+  afterAll(async () => {
+    if (workspace) {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('should render the pinned reuse-off bytes on every matrix step', () => {
+    expect(hashes(off)).toEqual(pins.models[model]!.off.matrix.map((step) => step.sha256));
+  });
+
+  it.fails('should render every matrix step with reuse on byte-equal to reuse off', () => {
+    expect(hashes(memory)).toEqual(hashes(off));
+  });
+});

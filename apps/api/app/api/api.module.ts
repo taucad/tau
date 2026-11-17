@@ -4,6 +4,7 @@ import type { DynamicModule } from '@nestjs/common';
 import { HostsModule } from '@taucad/api-hosts';
 import { ChatModule } from '@taucad/api-chat/chat.module';
 import { CollaborationModule } from '#api/collaboration/collaboration.module.js';
+import { DeploymentModule } from '#api/deployment/deployment.module.js';
 import { GitModule } from '#api/git/git.module.js';
 import { HealthModule } from '#api/health/health.module.js';
 import { LlmModule, ModelModule, ProviderModule } from '@taucad/api-llm-gateway';
@@ -39,6 +40,7 @@ export class ApiModule {
         HostsModule,
         ChatModule,
         CollaborationModule,
+        DeploymentModule.forRoot(options),
         DurableEventsModule,
         EmailDeliverabilityApiModule,
         GitModule,

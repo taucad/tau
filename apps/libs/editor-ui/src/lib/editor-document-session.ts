@@ -14,10 +14,10 @@ import { randomUuid } from '@taucad/utils/id';
 import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
 import { URI } from 'vscode-uri';
 import { decodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
-import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
-import type { DocumentChange, DocumentTransaction } from '@taucad/editor-ui/lib/editor-document';
-import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
-import { isVirtualDeclarationPath } from '@taucad/editor-ui/lib/virtual-declarations';
+import { EditorDocument } from '#lib/editor-document.js';
+import type { DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
+import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
+import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
 
 const encoder = new TextEncoder();
 const parameterCodec = { read: requireParameterRecord, serialize: serializeParameterRecord };

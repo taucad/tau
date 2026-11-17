@@ -2607,6 +2607,24 @@ it('should use only the selected host session controls for the same agent', () =
   expect(latestAcpSessionData(messages, 'grok', 'C')).toBeUndefined();
 });
 
+it('should read an unstamped session record for the desktop placement only', () => {
+  const messages: MyUIMessage[] = [
+    {
+      id: 'session-local',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'data-acp-session',
+          data: { type: 'acp-session', id: 'local', agentId: 'claude', commands: [], configOptions: [] },
+        },
+      ],
+    },
+  ];
+  /* The desktop launcher records no host, while the composer names `desktop`; the label read the requested mode. */
+  expect(latestAcpSessionData(messages, 'claude', 'desktop')?.id).toBe('local');
+  expect(latestAcpSessionData(messages, 'claude', 'origin')).toBeUndefined();
+});
+
 it('should preserve the selected provider option when replaying a resolved permission', () => {
   expect(
     projectAgentHostEvent({

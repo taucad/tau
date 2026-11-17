@@ -30,6 +30,7 @@ import {
   decodeWindowsHelperFrame,
   encodeWindowsFrame,
   encodeWindowsHostFrame,
+  windowsExclusiveLaunchRequirement,
   windowsSandboxProtocolVersion,
 } from '#shell/windows-sandbox-protocol.js';
 import type { WindowsHelperFrame, WindowsLaunchSpec } from '#shell/windows-sandbox-protocol.js';
@@ -390,13 +391,13 @@ const busyBackoffCeilingMilliseconds = 2000;
 
 /**
  * Whether the helper refused because another sandboxed launch holds the computer's descriptor lock (README,
- * Sessions): nothing changed, so asking again once it ends is safe.
+ * Sessions; requirement `exclusive-launch`): nothing changed, so asking again once it ends is safe.
  *
  * @param refusal - The helper's refusal.
  * @returns Whether to ask again.
  */
-const isBusyRefusal = (refusal: Readonly<{ status: string; message: string }>): boolean =>
-  refusal.status === 'sandbox-unavailable' && refusal.message.startsWith('another sandboxed launch is running');
+const isBusyRefusal = (refusal: Readonly<{ status: string; requirement?: string | undefined }>): boolean =>
+  refusal.status === 'sandbox-unavailable' && refusal.requirement === windowsExclusiveLaunchRequirement;
 
 /**
  * Whether a child came from {@link spawnWindowsNative}: ending it is the helper's `terminate`, so the helper still

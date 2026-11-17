@@ -91,6 +91,7 @@ export const useAgentConfig = (
   if (pending.owner !== owner) {
     setPending({ owner, confirmed, values: {}, submitted: {} });
   }
+  const inFlight = status === 'submitted' || status === 'streaming';
   const previousStatus = useRef(status);
   const previousSession = useRef<AcpSessionData | undefined>(undefined);
   useEffect(() => {
@@ -115,7 +116,8 @@ export const useAgentConfig = (
       ),
     );
     setPending({ owner, confirmed, values: retained, submitted: settled || sessionReplaced ? {} : pending.submitted });
-    if (liveSession) {
+    /* Mid-turn records can predate the mode Tau sets for the turn; the turn's own settle writes what it confirmed. */
+    if (liveSession && !inFlight) {
       const actual = Object.fromEntries(confirmedOptions.map((option) => [option.id, option.currentValue]));
       const { config: _config, ...selection } = execution;
       const selectedReasoning = liveModel
@@ -133,6 +135,7 @@ export const useAgentConfig = (
     confirmed,
     confirmedOptions,
     discoveredOptions,
+    inFlight,
     execution,
     liveModel,
     liveSession,
@@ -142,7 +145,6 @@ export const useAgentConfig = (
     setActiveExecution,
     status,
   ]);
-  const inFlight = status === 'submitted' || status === 'streaming';
   const pendingValues = pending.owner === owner && pending.confirmed === confirmed ? pending.values : {};
   const options = liveSession
     ? [

@@ -93,6 +93,8 @@ describe('useAgentConfig', () => {
       return option && view.result.current.valueOf(option);
     };
     expect(valueOf()).toBe('auto');
+    /* Nor is the stale record copied into the execution the next turn would send. */
+    expect(setActiveExecution).not.toHaveBeenCalled();
     const { hostId: _settledHost, ...settled } = session([mode('auto')], { agentId: 'claude' });
     view.rerender({ sessionData: settled, status: 'ready', discoveredOptions: [mode('auto')] });
     expect(valueOf()).toBe('auto');

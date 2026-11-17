@@ -2,8 +2,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are wire names. */
 /**
  * A server error in a loader reaches Sentry through the real entry (`handleError` and `handleRequest`) and React
- * Router's own request handler, with the app's future flags (SB10, blueprint RR2). Under `v8_passThroughRequests`
- * `handleError` gets the raw request, so a client navigation's error arrives on `/<path>.data?_routes=…`.
+ * Router's own request handler (SB10, blueprint RR2). React Router 8 passes `handleError` the raw request, so a client
+ * navigation's error arrives on `/<path>.data?_routes=…`.
  */
 import type { ErrorEvent } from '@sentry/node';
 import { Outlet } from 'react-router';
@@ -11,8 +11,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as entry from '#entry.server.js';
 import { createTestRequestHandler, requestData } from '#testing/data-request.js';
 import type * as EnvironmentConfig from '#environment.config.js';
-// oxlint-disable-next-line eslint/no-restricted-imports -- the build configuration lives one directory above the app alias root.
-import config from '../react-router.config.js';
 
 type Captured = { readonly error: unknown; readonly tags: Record<string, string>; readonly event: ErrorEvent };
 
@@ -74,7 +72,6 @@ const handler = createTestRequestHandler({
       module: await import('#routes/[__debug].observability/route.js'),
     },
   ],
-  future: config.future,
   entry,
 });
 

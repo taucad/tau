@@ -596,7 +596,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
             typecheck) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
-            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output --graph="$graph" > /dev/null ;;
+            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch --graph="$graph" > /dev/null ;;
             pkgcheck-*) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
             test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
@@ -666,6 +666,9 @@ jobs:
       # (React Router 8 migration RR0, RD8): no server output of the web, desktop, `tau serve`
       # or docs build holds a .wasm file, a worker bundle or a client asset. The ui check adds
       # `ui:build:serve` to the lane; its other builds are already here.
+      # `check-route-module-patch` selects `ui:check-route-module-patch` (RR8, RD4): the web,
+      # desktop and `tau serve` client builds ship React Router's route-module loader with
+      # Tau's local patch.
       - name: Run the lane's tasks
         if: steps.queue.outputs.run-id == ''
         env:
@@ -675,7 +678,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --parallel=1 ;;
             typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
-            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output --parallel=1 ;;
+            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch --parallel=1 ;;
             pkgcheck-*)
               # The three package-check shards deal the affected projects with a package
               # check by measured uncached `pkgcheck` seconds, with the test shards' dealer

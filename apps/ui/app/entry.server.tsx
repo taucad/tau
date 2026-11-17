@@ -111,7 +111,13 @@ export default function handleRequest(
   return new Promise<Response>((resolve: (value: Response) => void, reject: (reason: unknown) => void) => {
     let shellRendered = false;
     const userAgent = request.headers.get('user-agent');
-    const isBotAgent = userAgent ? isbot(userAgent) : false;
+    /*
+     * A prerender is not a bot. React Router 8 prerenders over HTTP through a Vite preview server, whose `fetch` sends
+     * `User-Agent: node`, which `isbot` matches; the shells must stream as the function's document does for a browser
+     * (shell invariant 1). React Router sets `IS_RR_BUILD_REQUEST` for the whole prerender pass.
+     */
+    const isBuildRequest = process.env['IS_RR_BUILD_REQUEST'] === 'yes';
+    const isBotAgent = userAgent && !isBuildRequest ? isbot(userAgent) : false;
     const readyOption: keyof RenderToPipeableStreamOptions =
       isBotAgent || routerContext.isSpaMode ? 'onAllReady' : 'onShellReady';
 

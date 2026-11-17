@@ -1651,7 +1651,8 @@ describe('startHostDaemon', () => {
           throw new TypeError('Expected the daemon to open a project host.');
         }
         expect(project.credential()).toMatchObject({ mode });
-        const stream = project.modelTransport.stream({
+        /* A call is made only on its run's transport; the mode does not change how the call authenticates. */
+        const stream = project.modelTransport.deployment!.forRun('unfunded').stream({
           attemptId: 'attempt-model-auth',
           invocationPurpose: 'generation',
           modelId: 'fixture-model',
@@ -1723,7 +1724,7 @@ describe('startHostDaemon', () => {
         if (!project) {
           throw new TypeError('Expected the daemon to open a project host.');
         }
-        const stream = project.modelTransport.stream({
+        const stream = project.modelTransport.deployment!.forRun(tauCloudEnabled ? 'funded' : 'unfunded').stream({
           attemptId: 'attempt-host-labels',
           invocationPurpose: 'generation',
           modelId: 'fixture-model',
@@ -1740,6 +1741,71 @@ describe('startHostDaemon', () => {
         };
         await expect(consume()).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
         expect(labels.at(-1)).toEqual({ host: 'daemon', build: '1.2.3', kernel: undefined, model: 'fixture-model' });
+      } finally {
+        await daemon.close();
+      }
+    },
+    30_000,
+  );
+
+  /* D1: the gateway API's deployment answer, not TAU_CLOUD_ENABLED, chooses each run's billing mode; only a 404 or an
+   * explicit answer is unfunded, and a failure is unknown (I1, I2). */
+  it.each([
+    {
+      tauCloudEnabled: undefined,
+      status: 200,
+      body: { version: 1, edition: 'cloud', billing: { funded: true }, maxAgeSeconds: 300 },
+      expected: 'funded',
+    },
+    {
+      tauCloudEnabled: true,
+      status: 200,
+      body: { version: 1, edition: 'self-host', billing: { funded: false }, maxAgeSeconds: 300 },
+      expected: 'unfunded',
+    },
+    { tauCloudEnabled: true, status: 404, body: { message: 'Not Found' }, expected: 'unfunded' },
+    { tauCloudEnabled: false, status: 503, body: { message: 'unavailable' }, expected: 'unknown' },
+  ] as const)(
+    "should take a run's billing mode from the gateway's deployment answer ($status) with tauCloudEnabled=$tauCloudEnabled",
+    async ({ tauCloudEnabled, status, body, expected }) => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-deployment-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      const paths: Array<string | undefined> = [];
+      const gateway = createServer((request, response) => {
+        paths.push(request.url);
+        response.writeHead(status, { 'content-type': 'application/json' });
+        response.end(JSON.stringify(body));
+      });
+      resources.push(gateway);
+      await new Promise<void>((resolve) => {
+        gateway.listen(0, '127.0.0.1', resolve);
+      });
+      const address = gateway.address();
+      if (!address || typeof address === 'string') {
+        throw new TypeError('Expected a TCP gateway address.');
+      }
+      projectHostSpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        relay: false,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: {
+          ...(await agentOptionsIn(temporaryDirectory)),
+          ...(tauCloudEnabled === undefined ? {} : { tauCloudEnabled }),
+          gatewayBaseUrl: `http://127.0.0.1:${String(address.port)}/v1/llm`,
+        },
+      });
+      try {
+        await daemon.ready;
+        const project = projectHostSpy.mock.calls.at(-1)?.[0];
+        if (!project) {
+          throw new TypeError('Expected the daemon to open a project host.');
+        }
+
+        await expect(project.modelTransport.deployment?.resolve()).resolves.toBe(expected);
+        expect(paths).toEqual(['/v1/deployment']);
       } finally {
         await daemon.close();
       }

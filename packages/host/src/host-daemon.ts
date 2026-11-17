@@ -7,7 +7,7 @@ import { MessageChannel } from 'node:worker_threads';
 
 import { WebSocket } from 'ws';
 
-import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import { createGatewayModelTransport } from '@taucad/agent-host';
 import type { AgentSessionModel } from '@taucad/agent-host';
 import { credentialPrincipal } from '@taucad/agent-host/launcher';
 import type { AgentLauncher, CredentialState } from '@taucad/agent-host/launcher';
@@ -28,6 +28,7 @@ import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtim
 import { nodeGrepMatcherWorker } from '@taucad/runtime/filesystem/node';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 import type { RevisionUserActor } from '@taucad/revisions';
+import { createDeploymentModeResolver } from '@taucad/utils/deployment-mode';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
 
@@ -71,6 +72,13 @@ import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
 import type { RuntimeChildHandle, RuntimeChildNativeKernels } from '#runtime-child-supervisor.js';
 import type { ReportingConsent } from '#telemetry.js';
+
+/**
+ * The API's deployment answer, asked at each run's admission (D1): it, not this process's environment, chooses whether
+ * a run carries the billing layer, so a Cloud host the provisioner started without `TAU_CLOUD_ENABLED` is funded too.
+ * One per process, in memory, keyed by the gateway's origin.
+ */
+const deployment = createDeploymentModeResolver();
 
 /** Milliseconds. */
 const socketOpenTimeout = 15_000;
@@ -185,7 +193,11 @@ export type HostDaemonEvent =
  * @public
  */
 export type HostDaemonAgentOptions = {
-  /** Enables Tau-funded operation binding for a managed Cloud host. */
+  /**
+   * A managed Cloud host: a local-only (`relay: false`) daemon then still authenticates model calls with its paired
+   * device credential rather than the CLI account session. It no longer selects the billing layer: the gateway API's
+   * deployment answer does, per run (D1).
+   */
   readonly tauCloudEnabled?: boolean | undefined;
   /** Absolute workspace root; `.tau/chats/<chatId>/events.jsonl` lives under it. */
   readonly workspaceRoot: string;
@@ -1068,25 +1080,22 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       model: agent.model,
       systemPrompt: agent.systemPrompt,
       /* The bearer is read per request from the credential state, never captured: pairing replaces it. */
-      modelTransport:
-        agent.tauCloudEnabled === true
-          ? createTauCloudGatewayModelTransport({
-              baseUrl: agent.gatewayBaseUrl,
-              model: agent.model,
-              auth: bearer,
-              principal: () => credentialPrincipal(credentialState),
-              /* No `projectId`: a `tau serve` workspace is a directory, not a
-               * cloud project, so its receipts name no project by design. */
-              ...(agent.hostLabels === undefined ? {} : { hostLabels: agent.hostLabels }),
-            })
-          : createGatewayModelTransport({
-              baseUrl: agent.gatewayBaseUrl,
-              model: agent.model,
-              // Local-only serving does not pair a device. Use its CLI account session;
-              // relayed hosts retain their live device credential, including revocation.
-              auth: localAccountSession === undefined ? bearer : () => localAccountSession,
-              ...(agent.hostLabels === undefined ? {} : { hostLabels: agent.hostLabels }),
-            }),
+      modelTransport: createGatewayModelTransport({
+        baseUrl: agent.gatewayBaseUrl,
+        model: agent.model,
+        // Local-only serving does not pair a device. Use its CLI account session;
+        // relayed hosts retain their live device credential, including revocation.
+        auth: localAccountSession === undefined ? bearer : () => localAccountSession,
+        /* No `projectId`: a `tau serve` workspace is a directory, not a
+         * cloud project, so its receipts name no project by design. */
+        ...(agent.hostLabels === undefined ? {} : { hostLabels: agent.hostLabels }),
+        billing: {
+          /* The gateway's API answers whether a run is funded; an unknown answer refuses the run (I1). */
+          deployment: async () => deployment.mode(agent.gatewayBaseUrl),
+          /* The account the credential port names: the paired device's, or none on the CLI account session. */
+          principal: () => (localAccountSession === undefined ? credentialPrincipal(credentialState) : undefined),
+        },
+      }),
       credential: () => (localAccountSession === undefined ? credentialState : { mode: 'session' }),
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
       /* The host's own decision, not a resolution accident: `false` withholds

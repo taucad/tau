@@ -177,7 +177,6 @@ const cloudBoundarySpecifiers = new Set([
   '#cloud/commercial-features.js',
   '#cloud/environment-billing.js',
   '#cloud/financial-purge.js',
-  '#cloud/gateway-model-transport.js',
   '#cloud/nav-billing.js',
   '#cloud/kernel-commerce.js',
   '#cloud/root-billing.js',

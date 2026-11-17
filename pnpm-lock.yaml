@@ -3585,6 +3585,9 @@ importers:
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
       '@taucad/zoo':
         specifier: workspace:*
         version: link:../../../packages/plugins/zoo

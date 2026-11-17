@@ -153,6 +153,19 @@ function codedErrorCard({
   const rawDetail = error.raw ? tryFormatJson(error.raw) : undefined;
   const raw = rawDetail === undefined ? {} : { raw: rawDetail };
 
+  /* I1: the host could not learn whether this server funds model calls, so the run made none; it resumes once the
+   * server answers. */
+  if (category === 'deploymentUnknown') {
+    return (
+      <ChatErrorServiceUnavailable
+        className={className}
+        resumable={resumable}
+        title="Couldn't confirm how this server bills model calls"
+        description='The app could not confirm how this Tau server bills model calls, so it made none. Check your connection, then resume.'
+      />
+    );
+  }
+
   if (category === 'providerAccount') {
     return <ChatErrorProviderAccount className={className} description={error.message} details={error.details} />;
   }

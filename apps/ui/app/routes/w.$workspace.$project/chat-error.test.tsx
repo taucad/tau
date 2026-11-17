@@ -485,6 +485,27 @@ describe('ChatError', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
+  /* I1: a run whose server's billing mode is unknown made no model call; it resumes once the server answers. */
+  it('should name a server whose billing mode could not be confirmed and offer Resume', () => {
+    projected({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'The deployment answer for this API is unknown.',
+      code: 'DEPLOYMENT_UNKNOWN',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText("Couldn't confirm how this server bills model calls")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'The app could not confirm how this Tau server bills model calls, so it made none. Check your connection, then resume.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
   /* The masked in-stream failure arrives on an HTTP 200, so its category reads
    * `generic`; only the code says the turn survived it (S1, S2, S7, S10). */
   it('should keep a lost connection concise and disclose the provider words only in Tau Debug', async () => {

@@ -79,6 +79,7 @@
     "@taucad/smlibpy": "workspace:*",
     "@taucad/tscircuit": "workspace:*",
     "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "geospec": "catalog:",

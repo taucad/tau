@@ -189,6 +189,10 @@ jobs:
         working-directory: apps/desktop-e2e
         env:
           TAU_E2E_SERVICES: host
+          # Trace screenshots come from a screencast: the GPU process composites and encodes frames continuously, and
+          # on this GPU-less runner (WARP) that held about 3 of its 4 cores through the Build123d test's opening
+          # minutes (run 44088812001), slowing every git process the app ran. Snapshots stay on for failure evidence.
+          TAU_E2E_TRACE_SCREENSHOTS: 'false'
           # The API listens on IPv4 only. On windows-2025 the packaged app's services process failed every gateway
           # call to `localhost:4014` with a network error while the renderer reached it (run 44008138089), so name
           # the loopback address the API binds.

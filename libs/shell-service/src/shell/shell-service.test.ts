@@ -17,9 +17,12 @@ import type { FakeShellScript, ShellExecutable, ShellExit, ShellLaunch } from '@
 import { isShellError, shellLimits } from '#shell/shell-contract.js';
 import { createShellGitView } from '#shell/shell-git-view.js';
 import type { PermissionMode, ShellApprovalPayload, ShellInput, ShellOutput } from '#shell/shell-contract.js';
+import { createPowerShellModuleCacheSchedule } from '#shell/shell-module-cache.js';
+import type { PowerShellModuleCache } from '#shell/shell-module-cache.js';
 import {
+  buildPowerShellModuleCache,
   createShellService,
-  preparePowerShellModuleCache,
+  powerShellModuleCacheSchedule,
   probeHostShell,
   shellApprovalKey,
 } from '#shell/shell-service.js';
@@ -1122,11 +1125,11 @@ describe('the PowerShell module analysis cache (Windows)', () => {
       }
       return { status: 'started', exit: exit ?? { exitCode: 0 } };
     };
-  type PrepareOptions = Parameters<typeof preparePowerShellModuleCache>[0];
-  const prepareOptions = (
+  type BuildOptions = Parameters<typeof buildPowerShellModuleCache>[0];
+  const buildOptions = (
     script: (launch: ShellLaunch) => FakeShellScript,
     platform: NodeJS.Platform = 'win32',
-  ): PrepareOptions & Readonly<{ provider: ReturnType<typeof createFakeShellProvider> }> => ({
+  ): BuildOptions & Readonly<{ provider: ReturnType<typeof createFakeShellProvider> }> => ({
     provider: createFakeShellProvider(script),
     executable: powershell,
     platform,
@@ -1134,10 +1137,11 @@ describe('the PowerShell module analysis cache (Windows)', () => {
     appDataRoots: [appData],
     sessionBase: sessions,
   });
+  const running = (): AbortSignal => new AbortController().signal;
 
   it('builds it once, in a launch that reaches only its own private roots, and finds it after', async () => {
-    const options = prepareOptions(writes('analysis'));
-    const cache = await preparePowerShellModuleCache(options);
+    const options = buildOptions(writes('analysis'));
+    const cache = await buildPowerShellModuleCache(options, running());
 
     expect(cache).toStrictEqual({
       directory: join(sessions, 'tau-powershell-cache', 'v1-ab12'),
@@ -1159,8 +1163,8 @@ describe('the PowerShell module analysis cache (Windows)', () => {
     await expect(readdir(sessions)).resolves.toStrictEqual(['tau-powershell-cache']);
     expect(options.provider.executions.size).toBe(0);
 
-    const again = prepareOptions(writes('other'));
-    await expect(preparePowerShellModuleCache(again)).resolves.toStrictEqual(cache);
+    const again = buildOptions(writes('other'));
+    await expect(buildPowerShellModuleCache(again, running())).resolves.toStrictEqual(cache);
     expect(again.provider.launches).toHaveLength(0);
   });
 
@@ -1169,32 +1173,52 @@ describe('the PowerShell module analysis cache (Windows)', () => {
       writes('analysis', { exitCode: 1 }),
       writes('analysis', { signal: 'SIGKILL' }),
       writes(''),
-      (): FakeShellScript => ({
-        status: 'sandbox-unavailable',
-        message: 'busy',
-      }),
+      (): FakeShellScript => ({ status: 'sandbox-unavailable', message: 'busy' }),
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one build at a time, as on Windows.
-      await expect(preparePowerShellModuleCache(prepareOptions(script))).resolves.toBeUndefined();
+      await expect(buildPowerShellModuleCache(buildOptions(script), running())).resolves.toBeUndefined();
     }
     await expect(readdir(sessions)).resolves.toStrictEqual([]);
   });
 
-  it('builds nothing for Bash or off Windows', async () => {
-    const bash = { ...prepareOptions(writes('analysis')), executable };
-    await expect(preparePowerShellModuleCache(bash)).resolves.toBeUndefined();
-    const linux = prepareOptions(writes('analysis'), 'linux');
-    await expect(preparePowerShellModuleCache(linux)).resolves.toBeUndefined();
-    expect([...bash.provider.launches, ...linux.provider.launches]).toHaveLength(0);
+  it('stops a build when a launch claims the sandbox or its deadline passes, keeping nothing', async () => {
+    /* A build that never exits by itself: it ends only when its launch is stopped. */
+    const endless = (launch: ShellLaunch): FakeShellScript => {
+      writes('partial')(launch);
+      return { status: 'started' };
+    };
+    const claimed = new AbortController();
+    const stopped = buildPowerShellModuleCache(buildOptions(endless), claimed.signal);
+    claimed.abort();
+    await expect(stopped).resolves.toBeUndefined();
+    await expect(buildPowerShellModuleCache(buildOptions(endless), running(), 10)).resolves.toBeUndefined();
+    await expect(readdir(sessions)).resolves.toStrictEqual([]);
   });
 
-  it('grants the cache to every agent and Terminal launch read-only', async () => {
+  it('schedules nothing for Bash or off Windows, and grants a cache already in the store from the first launch', async () => {
+    await expect(
+      powerShellModuleCacheSchedule({ ...buildOptions(writes('analysis')), executable }),
+    ).resolves.toBeUndefined();
+    await expect(powerShellModuleCacheSchedule(buildOptions(writes('analysis'), 'linux'))).resolves.toBeUndefined();
+    const unbuilt = await powerShellModuleCacheSchedule(buildOptions(writes('a')));
+    expect(unbuilt?.current()).toBeUndefined();
+
+    await buildPowerShellModuleCache(buildOptions(writes('analysis')), running());
+    const options = buildOptions(writes('other'));
+    const schedule = await powerShellModuleCacheSchedule(options);
+    expect(schedule?.current()?.directory).toBe(join(sessions, 'tau-powershell-cache', 'v1-ab12'));
+    schedule?.start();
+    await schedule?.settled();
+    expect(options.provider.launches).toHaveLength(0);
+  });
+
+  it('grants the built cache to every later agent and Terminal launch read-only', async () => {
     const cache = {
       directory: join(base, 'cache', 'v1-ab12'),
       file: join(base, 'cache', 'v1-ab12', 'ModuleAnalysisCache'),
     };
     const { service, provider } = harness(() => ({ status: 'started', exit: { exitCode: 0 } }), {
-      powerShellModuleCache: cache,
+      powerShellModuleCache: createPowerShellModuleCacheSchedule({ initial: cache, build: async () => undefined }),
     });
     await service.run(call({ command: 'true' }));
     const opened = await service.openTerminal({
@@ -1214,5 +1238,49 @@ describe('the PowerShell module analysis cache (Windows)', () => {
     const plain = harness();
     await plain.service.run(call({ command: 'true' }));
     expect(plain.provider.launches[0]!.filesystem.readable).not.toContain(cache.directory);
+  });
+
+  it('builds after startup recovery, stops the build for a launch that then runs uncached, and grants it once built', async () => {
+    const cache: PowerShellModuleCache = {
+      directory: join(base, 'cache', 'v1-ab12'),
+      file: join(base, 'cache', 'v1-ab12', 'ModuleAnalysisCache'),
+    };
+    const steps: string[] = [];
+    let builds = 0;
+    const build = vi.fn(
+      async (signal: AbortSignal): Promise<PowerShellModuleCache | undefined> =>
+        new Promise((resolve) => {
+          builds += 1;
+          steps.push(`build ${String(builds)}`);
+          if (builds > 1) {
+            resolve(cache);
+            return;
+          }
+          signal.addEventListener('abort', () => {
+            steps.push('build stopped');
+            resolve(undefined);
+          });
+        }),
+    );
+    const schedule = createPowerShellModuleCacheSchedule({ build, idleDelay: 0 });
+    const { service, provider } = harness(
+      () => {
+        steps.push('launch');
+        return { status: 'started', exit: { exitCode: 0 } };
+      },
+      { powerShellModuleCache: schedule },
+    );
+    await vi.waitFor(() => {
+      expect(build).toHaveBeenCalledOnce();
+    });
+    await service.run(call({ command: 'true' }));
+    expect(steps.slice(0, 3)).toStrictEqual(['build 1', 'build stopped', 'launch']);
+    expect(provider.launches[0]!.filesystem.readable).not.toContain(cache.directory);
+    await vi.waitFor(() => {
+      expect(schedule.current()).toStrictEqual(cache);
+    });
+    await service.run(call({ command: 'true' }));
+    expect(provider.launches[1]!.filesystem.readable).toContain(cache.directory);
+    expect(build).toHaveBeenCalledTimes(2);
   });
 });

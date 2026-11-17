@@ -571,15 +571,107 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     expect(provider.name.length).toBeGreaterThan(0);
   });
 
-  /** T02-pwsh: the language cases, decided by comparing stdout and the exit status outside the sandbox. */
-  const grammar = async (executablePath: string): Promise<void> => {
+  /*
+   * Module analysis cache (shell-service `shell-module-cache.ts`). A session reads its shell's cache read-only from a
+   * folder the host made, with the service's `PSModulePath`; the T02 rows run that way, as a real session does. Each
+   * shell's cache is built once in this suite, in one build launch running the service's build command, and the host
+   * copies it outside every writable root. Timings are logged (`[T02]`, `[T02-cache]`) and kept in the receipt.
+   */
+  type ModuleCacheGrant = Readonly<{ modulePath: string; directory: string; file: string; digest: string }>;
+  const moduleCaches = new Map<string, Promise<ModuleCacheGrant>>();
+  const timingsOf = (label: string): Record<string, number> => {
+    const evidence = (observations[`T02-cache-${label}`] ??= { timings: {} }) as { timings: Record<string, number> };
+    return evidence.timings;
+  };
+  /* The service's `PSModulePath` (`shellEnvironment`): the shell's own modules, then Windows PowerShell's, once. */
+  const serviceModulePath = (executablePath: string): string => {
+    const folders = [
+      join(dirname(executablePath), 'Modules'),
+      join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+    ];
+    return folders
+      .filter((path, index) => folders.findIndex((other) => other.toLowerCase() === path.toLowerCase()) === index)
+      .join(';');
+  };
+  /*
+   * The build's deadline here. Run 44014103911 measured 87.5 s for Windows PowerShell 5.1 and 14.2 s for PowerShell 7
+   * on this hosted runner; 240 s is about 2.7 times the slower one. (The service allows 600 s, since a build there never
+   * delays a launch.)
+   */
+  const buildMilliseconds = 240_000;
+  const buildModuleCache = async (executablePath: string, label: string): Promise<ModuleCacheGrant> => {
+    const modulePath = serviceModulePath(executablePath);
+    const build = join(work, `module-cache-${label}`);
+    mkdirSync(build, { recursive: true });
+    const written = join(build, powerShellModuleCacheFile);
+    const started = Date.now();
+    const built = await run(powerShellModuleCacheCommand, {
+      executablePath,
+      environment: { ...baseEnvironment(), PSModulePath: modulePath, [powerShellModuleCacheVariable]: written },
+      signal: AbortSignal.timeout(buildMilliseconds),
+    });
+    timingsOf(label)['build'] = Date.now() - started;
+    console.info(`[T02-cache] ${executablePath} build ${String(timingsOf(label)['build'])} ms`);
+
+    expect(built.exitCode, built.stderr).toBe(0);
+    expect(sizeOf(written), 'the build wrote no module analysis cache').toBeGreaterThan(0);
+    (observations[`T02-cache-${label}`] as Record<string, unknown>)['bytes'] = sizeOf(written);
+    const directory = join(root, `module-cache-${label}`);
+    const file = join(directory, powerShellModuleCacheFile);
+    mkdirSync(directory, { recursive: true });
+    copyFileSync(written, file);
+    return { modulePath, directory, file, digest: digestOf(file) };
+  };
+  /** The shell's cache, built on first use; a failed build fails every row that reads it. */
+  const moduleCacheOf = async (executablePath: string, label: string): Promise<ModuleCacheGrant> => {
+    let grant = moduleCaches.get(executablePath);
+    if (grant === undefined) {
+      grant = buildModuleCache(executablePath, label);
+      moduleCaches.set(executablePath, grant);
+    }
+    return grant;
+  };
+  /** A session's launch: the service's `PSModulePath` and the cache folder readable and read-only. */
+  const session = (grant: ModuleCacheGrant, extraModules: readonly string[] = []): Partial<ShellLaunch> => ({
+    environment: {
+      ...baseEnvironment(),
+      PSModulePath: [grant.modulePath, ...extraModules].join(';'),
+      [powerShellModuleCacheVariable]: grant.file,
+    },
+    filesystem: {
+      ...defaultFilesystem(),
+      readable: [...defaultFilesystem().readable, grant.directory, ...extraModules],
+      readOnly: [grant.directory],
+    },
+  });
+  /** Neither a session nor a launch that missed the cache may change it or add to its folder. */
+  const expectCacheUnchanged = (grant: ModuleCacheGrant): void => {
+    expect(digestOf(grant.file), 'a session changed the read-only cache').toBe(grant.digest);
+    expect(readdirSync(grant.directory)).toStrictEqual([powerShellModuleCacheFile]);
+  };
+  /*
+   * A session launch's bound. Run 44014103911 (hosted windows-2025) measured cached launches at 0.33 to 3.4 s: Windows
+   * PowerShell 5.1's slowest a launch that missed the cache (3.4 s), its cmdlet-resolving ones 1.95 s, PowerShell 7's
+   * slowest 1.5 s. Uncached, 5.1 took 22.5 s for the pipeline. 10 s is about three times the slowest cached launch,
+   * room for hosted-runner noise, and under half the uncached one, so a cache that stops working fails the row.
+   */
+  const sessionMilliseconds = 10_000;
+  /*
+   * Rows that may build a cache: the build's 240 s deadline, one uncached pipeline (22.5 s measured), and up to five
+   * session launches at their 10 s bound: 240 + 22.5 + 50 = 312.5 s, so these rows get 330 s.
+   */
+  const cacheConformance = conformanceWithin(330_000);
+
+  /** T02: the language cases in a session's launch, decided by comparing stdout and the exit status outside the sandbox. */
+  const grammar = async (executablePath: string, label: string): Promise<void> => {
+    const grant = await moduleCacheOf(executablePath, label);
     const of = async (command: string) => {
       const started = Date.now();
-      const result = await run(command, { executablePath });
-      /* Launch time per shell, for the row's log: Windows PowerShell 5.1 has been far slower than 7 in the sandbox. */
-      console.info(
-        `[T02] ${executablePath} ${JSON.stringify(command.slice(0, 24))} ${String(Date.now() - started)} ms`,
-      );
+      const result = await run(command, { executablePath, ...session(grant) });
+      const elapsed = Date.now() - started;
+      console.info(`[T02] ${executablePath} ${JSON.stringify(command.slice(0, 24))} ${String(elapsed)} ms`);
+
+      expect(elapsed, `${command.slice(0, 24)} took ${String(elapsed)} ms`).toBeLessThan(sessionMilliseconds);
       return result;
     };
     const hereString = await of("@'\nline1\nline2\n'@");
@@ -602,148 +694,61 @@ describe.runIf(enabled)('Windows shell conformance', () => {
 
     expect(utf8.exitCode, utf8.stderr).toBe(0);
     expect(utf8.stdout).toBe('é☃-5');
+    expectCacheUnchanged(grant);
   };
 
-  conformance('T02-pwsh', 'PowerShell grammar: here-string, pipeline, subexpression, exit status, UTF-8', async () => {
-    await grammar(shell.path);
-  });
-
-  if (windowsPowerShellPresent) {
-    conformance('T02-ps51', 'the same grammar on Windows PowerShell 5.1 at its fixed path', async () => {
-      if (windowsPowerShellIdentity === undefined) {
-        /* The resolved shell is 5.1 itself; T02-pwsh already ran on it. */
-        expect(shell.realPath.toLowerCase()).toBe(realpathSync(windowsPowerShell).toLowerCase());
-        return;
-      }
-      await grammar(windowsPowerShell);
-    });
-  }
-
   /**
-   * T02-cache: PowerShell's module analysis cache as the shell service uses it (`shell-module-cache.ts` in
-   * `@taucad/shell-service`): the service's `PSModulePath`, one build launch running the service's build command into
-   * a writable root, a copy the host makes, then launches that read that copy and may not write it. The verdicts are
-   * that the build writes the cache, that a cached launch still answers correctly, and that neither those launches nor
-   * one that misses the cache (a module the build never saw) change the copy or report trouble with it. Every timing is
-   * logged (`[T02-cache]`) and kept in the receipt, with what the sandboxed shell reports about its own folders, for
-   * the evidence only: no bound is asserted until a run has measured a stable figure.
+   * T02-cache: the cache itself. An uncached launch with the service's `PSModulePath` is the baseline (logged, and
+   * required to answer correctly); then the build, and session launches that must answer correctly within their bound.
+   * A launch whose `PSModulePath` adds a module the build never saw makes PowerShell analyse it and try to write the
+   * cache back: that must fail quietly and leave the cache as it was.
    */
   const moduleCache = async (executablePath: string, label: string): Promise<void> => {
-    const system32 = join(systemRoot, 'System32');
-    /* The service's `PSModulePath` (`shellEnvironment`): the shell's own modules, then Windows PowerShell's, once. */
-    const folders = [join(dirname(executablePath), 'Modules'), join(system32, 'WindowsPowerShell', 'v1.0', 'Modules')];
-    const modulePath = folders
-      .filter((path, index) => folders.findIndex((other) => other.toLowerCase() === path.toLowerCase()) === index)
-      .join(';');
-    const timings: Record<string, number> = {};
-    const evidence: Record<string, unknown> = { timings };
-    observations[`T02-cache-${label}`] = evidence;
-    const timed = async (phase: string, command: string, overrides: Partial<ShellLaunch> = {}) => {
+    const timings = timingsOf(label);
+    const timed = async (phase: string, command: string, overrides: Partial<ShellLaunch>) => {
       const started = Date.now();
       const result = await run(command, { executablePath, ...overrides });
       timings[phase] = Date.now() - started;
       console.info(`[T02-cache] ${executablePath} ${phase} ${String(timings[phase])} ms`);
       return result;
     };
-
-    /* Context: how the T02 launches above, with no `PSModulePath` of Tau's, found their modules and their cache. */
-    const diagnostics = await timed(
-      'diagnostics',
-      [
-        '$watch = [System.Diagnostics.Stopwatch]::StartNew()',
-        '$null = Get-Command -Name Measure-Object',
-        '$resolveMs = $watch.ElapsedMilliseconds',
-        "$local = [Environment]::GetFolderPath('LocalApplicationData')",
-        String.raw`$defaultCache = if ($local) { [IO.Path]::Combine($local, 'Microsoft\Windows\PowerShell\ModuleAnalysisCache') } else { '' }`,
-        "$folders = @(foreach ($path in ($env:PSModulePath -split ';')) { if ($path) { [ordered]@{ path = $path; modules = $(if ([IO.Directory]::Exists($path)) { [IO.Directory]::GetDirectories($path).Count } else { -1 }) } } })",
-        "[ordered]@{ resolveMs = $resolveMs; localApplicationData = $local; myDocuments = [Environment]::GetFolderPath('MyDocuments'); defaultCache = $defaultCache; defaultCacheExists = [bool]($defaultCache -and [IO.File]::Exists($defaultCache)); psModulePath = $folders; executionPolicy = [string](Get-ExecutionPolicy) } | ConvertTo-Json -Compress -Depth 4",
-      ].join('\n'),
-    );
-    try {
-      evidence['diagnostics'] = JSON.parse(diagnostics.stdout.trim()) as unknown;
-    } catch {
-      evidence['diagnostics'] = {
-        stdout: diagnostics.stdout.slice(0, 2048),
-        stderr: diagnostics.stderr.slice(0, 2048),
-      };
-    }
-
-    const environment = { ...baseEnvironment(), PSModulePath: modulePath };
     const pipeline = "'a b c' -split ' ' | Measure-Object | ForEach-Object Count";
-    /* The service's `PSModulePath` alone, with no cache: separates its effect from the cache's. */
-    const cold = await timed('cold', pipeline, { environment });
-
-    expect(cold.stdout.trim(), cold.stderr).toBe('3');
-
-    const build = join(work, `module-cache-${label}`);
-    mkdirSync(build, { recursive: true });
-    const written = join(build, powerShellModuleCacheFile);
-    const built = await timed('build', powerShellModuleCacheCommand, {
-      environment: { ...environment, [powerShellModuleCacheVariable]: written },
-      /* The service's own bound on a build (`moduleCacheMilliseconds`). */
-      signal: AbortSignal.timeout(120_000),
+    const cold = await timed('cold', pipeline, {
+      environment: { ...baseEnvironment(), PSModulePath: serviceModulePath(executablePath) },
     });
 
-    expect(built.exitCode, built.stderr).toBe(0);
-    expect(sizeOf(written), 'the build wrote no module analysis cache').toBeGreaterThan(0);
-    evidence['bytes'] = sizeOf(written);
-
-    /* The host's own copy, outside every writable root, granted read-only. */
-    const cacheDirectory = join(root, `module-cache-${label}`);
-    const cached = join(cacheDirectory, powerShellModuleCacheFile);
-    mkdirSync(cacheDirectory, { recursive: true });
-    copyFileSync(written, cached);
-    const digest = digestOf(cached);
+    expect(cold.stdout.trim(), cold.stderr).toBe('3');
+    const grant = await moduleCacheOf(executablePath, label);
     const modules = join(root, `module-probe-${label}`);
     mkdirSync(join(modules, 'TauConformanceProbe'), { recursive: true });
     writeFileSync(
       join(modules, 'TauConformanceProbe', 'TauConformanceProbe.psd1'),
       "@{ ModuleVersion = '1.0'; FunctionsToExport = @(); CmdletsToExport = @(); AliasesToExport = @(); VariablesToExport = @() }\n",
     );
-    const reading = (extra: readonly string[] = []): Partial<ShellLaunch> => ({
-      environment: {
-        ...environment,
-        PSModulePath: [modulePath, ...extra].join(';'),
-        [powerShellModuleCacheVariable]: cached,
+    const cases = [
+      { phase: 'cached-here-string', command: "@'\nline1\nline2\n'@", expected: 'line1\nline2', extra: [] },
+      { phase: 'cached-pipeline', command: pipeline, expected: '3', extra: [] },
+      { phase: 'cached-subexpression', command: 'Write-Output "val=$(2 + 3)"', expected: 'val=5', extra: [] },
+      {
+        phase: 'cached-miss',
+        command: "Get-Command -Name Tau-NoSuchCommand -ErrorAction SilentlyContinue; 'done'",
+        expected: 'done',
+        extra: [modules],
       },
-      filesystem: {
-        ...defaultFilesystem(),
-        readable: [...defaultFilesystem().readable, cacheDirectory, ...extra],
-        readOnly: [cacheDirectory],
-      },
-    });
+    ];
+    for (const { phase, command, expected, extra } of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- the provider admits one launch at a time.
+      const result = await timed(phase, command, session(grant, extra));
 
-    const hereString = await timed('cached-here-string', "@'\nline1\nline2\n'@", reading());
-
-    expect(hereString.stdout.trim(), hereString.stderr).toBe('line1\nline2');
-    const cachedPipeline = await timed('cached-pipeline', pipeline, reading());
-
-    expect(cachedPipeline.stdout.trim(), cachedPipeline.stderr).toBe('3');
-    const subexpression = await timed('cached-subexpression', 'Write-Output "val=$(2 + 3)"', reading());
-
-    expect(subexpression.stdout.trim(), subexpression.stderr).toBe('val=5');
-    /* A module the build never saw: PowerShell analyses it and tries to write the cache back, which must fail quietly. */
-    const missed = await timed(
-      'cached-miss',
-      "Get-Command -Name Tau-NoSuchCommand -ErrorAction SilentlyContinue; 'done'",
-      reading([modules]),
-    );
-    evidence['missStderr'] = missed.stderr.slice(0, 2048);
-
-    expect(missed.exitCode, missed.stderr).toBe(0);
-    expect(missed.stdout.trim(), missed.stderr).toBe('done');
-    expect(missed.stderr).not.toMatch(/ModuleAnalysisCache|UnauthorizedAccess|Access to the path/iu);
-    expect(digestOf(cached), 'a cached launch changed the read-only cache').toBe(digest);
-    expect(readdirSync(cacheDirectory)).toStrictEqual([powerShellModuleCacheFile]);
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(result.stdout.trim(), result.stderr).toBe(expected);
+      expect(result.stderr).not.toMatch(/ModuleAnalysisCache|UnauthorizedAccess|Access to the path/iu);
+      expect(timings[phase], `${phase} took ${String(timings[phase])} ms`).toBeLessThan(sessionMilliseconds);
+    }
+    expectCacheUnchanged(grant);
   };
 
-  /*
-   * Each cache row runs one cold diagnostics launch and one cold pipeline (WIN-X64 run 44009882001 measured up to 26 s
-   * for one cold cmdlet resolution on Windows PowerShell 5.1), a build bounded at 120 s, and four cached launches that
-   * would each be cold again if the cache failed: 2 x 26 + 120 + 4 x 26 = 276 s, so the row gets 300 s.
-   */
-  const cacheConformance = conformanceWithin(300_000);
-
+  /* The cache rows run first: they hold the uncached baseline and build the caches the grammar rows then read. */
   cacheConformance(
     'T02-cache',
     'a module analysis cache built once is read, read-only, by later launches of the resolved shell',
@@ -765,6 +770,25 @@ describe.runIf(enabled)('Windows shell conformance', () => {
         await moduleCache(windowsPowerShell, 'ps51');
       },
     );
+  }
+
+  cacheConformance(
+    'T02-pwsh',
+    'PowerShell grammar: here-string, pipeline, subexpression, exit status, UTF-8',
+    async () => {
+      await grammar(shell.path, 'shell');
+    },
+  );
+
+  if (windowsPowerShellPresent) {
+    cacheConformance('T02-ps51', 'the same grammar on Windows PowerShell 5.1 at its fixed path', async () => {
+      if (windowsPowerShellIdentity === undefined) {
+        /* The resolved shell is 5.1 itself; T02-pwsh already ran on it. */
+        expect(shell.realPath.toLowerCase()).toBe(realpathSync(windowsPowerShell).toLowerCase());
+        return;
+      }
+      await grammar(windowsPowerShell, 'ps51');
+    });
   }
 
   conformance(

@@ -61,10 +61,11 @@ import type { ShellGrantHost, ShellProjectProtected, ShellResolvedAccess } from 
 import {
   adoptPowerShellModuleCache,
   builtPowerShellModuleCache,
+  createPowerShellModuleCacheSchedule,
   powerShellModuleCacheLocation,
   powerShellModuleCacheStore,
 } from '#shell/shell-module-cache.js';
-import type { PowerShellModuleCache } from '#shell/shell-module-cache.js';
+import type { PowerShellModuleCache, PowerShellModuleCacheSchedule } from '#shell/shell-module-cache.js';
 import { createShellCapture } from '#shell/shell-output.js';
 
 /**
@@ -248,10 +249,12 @@ export type ShellServiceOptions = Readonly<{
   /** Where private HOME and temporary roots are created; the system temporary directory by default. */
   sessionDirectory?: string | undefined;
   /**
-   * On Windows, the PowerShell module analysis cache {@link probeHostShell} built for this shell: every launch reads it
-   * and none writes it. Absent, each launch analyses the modules it resolves a command from again.
+   * On Windows, when {@link probeHostShell} builds PowerShell's module analysis cache for this shell
+   * (`shell-module-cache.ts`): the service starts it once its startup recovery is done, holds it off for every launch,
+   * and grants each launch the cache built by then, read-only. Absent, or until one is built, each launch analyses the
+   * modules it resolves a command from again.
    */
-  powerShellModuleCache?: PowerShellModuleCache | undefined;
+  powerShellModuleCache?: PowerShellModuleCacheSchedule | undefined;
   /** Agent executions running at once; later calls wait their turn. */
   maxExecutions?: number | undefined;
   /** Human Terminal sessions open at once; more are refused `session-limit`. */
@@ -537,7 +540,36 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
   const sessionBase = options.sessionDirectory ?? tmpdir();
   const now = options.now ?? (() => performance.now());
   const { executable, provider } = options;
-  const moduleCacheRoots = options.powerShellModuleCache === undefined ? [] : [options.powerShellModuleCache.directory];
+  const moduleCache = options.powerShellModuleCache;
+  /**
+   * Launch with any cache build held off until the launch has ended: a build never runs beside a launch, and one already
+   * running is stopped first.
+   */
+  const launchHeld = async (launch: ShellLaunch): Promise<ShellLaunchOutcome> => {
+    const release = (await moduleCache?.claim()) ?? (() => undefined);
+    try {
+      const outcome = await provider.launch(launch);
+      if (outcome.status === 'started') {
+        const { exited } = outcome.process;
+        /* async-iife: bootstrap -- the launch's own caller awaits `exited`; this only releases the hold after it. */
+        void (async (): Promise<void> => {
+          try {
+            await exited;
+          } catch {
+            /* The caller sees the rejection; the hold is released either way. */
+          } finally {
+            release();
+          }
+        })();
+      } else {
+        release();
+      }
+      return outcome;
+    } catch (error) {
+      release();
+      throw error;
+    }
+  };
   const executions = createGate(options.maxExecutions ?? 8);
   const maxTerminals = options.maxTerminals ?? 4;
   let terminals = 0;
@@ -672,6 +704,17 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       await provider.release({ executionId: row.executionId }).catch(() => undefined);
     }
     await reconcile();
+  })();
+  /*
+   * The cache build starts once startup recovery has claimed every earlier receipt, so recovery never meets a live
+   * build, and never while custody is unreadable, since then nothing may run.
+   */
+  /* async-iife: bootstrap -- the schedule owns the builds it starts; `recovered` itself never rejects. */
+  void (async (): Promise<void> => {
+    await recovered;
+    if (inventoryFailure === undefined) {
+      moduleCache?.start();
+    }
   })();
 
   const grantHost = (): ShellGrantHost => ({
@@ -911,6 +954,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         platform === 'win32'
           ? undefined
           : await createShellGitView(admitted.root, session.root, session.temporary).catch(() => undefined);
+      /* One read per launch, so its grant and its environment name the same cache. */
+      const cache = moduleCache?.current();
       const filesystem = await compileShellFilesystem({
         checkout: admitted.root,
         checkoutProtected: admitted.checkoutProtected,
@@ -919,7 +964,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         access: admitted.access,
         host: admitted.host,
         git,
-        caches: moduleCacheRoots,
+        caches: cache === undefined ? [] : [cache.directory],
       });
       if (!(await unchanged(request, admitted.checkout, fingerprints))) {
         return didNotStart(
@@ -995,7 +1040,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           host: environment,
           terminal: false,
           git,
-          powerShellModuleCache: options.powerShellModuleCache?.file,
+          powerShellModuleCache: cache?.file,
         }),
         stdio: { kind: 'pipes' },
         signal: controller.signal,
@@ -1003,7 +1048,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       const started = now();
       let outcome: ShellLaunchOutcome;
       try {
-        outcome = await provider.launch(launch);
+        outcome = await launchHeld(launch);
       } catch (error) {
         request.signal.removeEventListener('abort', onAbort);
         return didNotStart(
@@ -1195,6 +1240,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       if (sessionGitConfig !== '') {
         await writeFile(join(session.home, '.gitconfig'), sessionGitConfig, { mode: 0o600 }).catch(() => undefined);
       }
+      const cache = moduleCache?.current();
       const filesystem = await compileShellFilesystem({
         checkout: root,
         checkoutProtected,
@@ -1202,10 +1248,10 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         toolchain: options.toolchain?.roots ?? [],
         access,
         host,
-        caches: moduleCacheRoots,
+        caches: cache === undefined ? [] : [cache.directory],
       });
       const { terminalZsh } = options;
-      outcome = await provider.launch({
+      outcome = await launchHeld({
         executionId,
         executablePath: terminalZsh?.path ?? executable.path,
         arguments: terminalZsh === undefined ? shellInteractiveArguments(executable.kind) : terminalZshArguments,
@@ -1225,7 +1271,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
           host: environment,
           terminal: true,
           terminalGit,
-          powerShellModuleCache: options.powerShellModuleCache?.file,
+          powerShellModuleCache: cache?.file,
         }),
         stdio: { kind: 'terminal', size: request.size },
         signal: request.signal,
@@ -1307,39 +1353,45 @@ export type ProbeHostShellOptions = Omit<
 >;
 
 /**
- * How long the one launch that builds PowerShell's module analysis cache may run. A single command that analysed the
- * modules took up to 26 seconds on Windows PowerShell 5.1 (WIN-X64 run 44009882001); the build analyses every module
- * and then waits up to 30 seconds for PowerShell to write the file, so it gets twice their sum.
+ * How long the one launch that builds PowerShell's module analysis cache may run. Windows PowerShell 5.1's build took
+ * 87.5 seconds on a hosted windows-2025 runner (WIN-X64 run 44014103911; PowerShell 7's took 14.2 seconds); a slower
+ * machine, a cold disk or an antivirus scan of every module can take several times that, and the build never delays a
+ * launch ({@link PowerShellModuleCacheSchedule}), so it gets ten minutes, about seven times the measurement.
  */
-const moduleCacheMilliseconds = 120_000;
+const moduleCacheMilliseconds = 600_000;
+
+/** @public */
+export type PowerShellModuleCacheOptions = Readonly<{
+  provider: ShellProvider;
+  executable: ShellExecutable;
+  platform: NodeJS.Platform;
+  environment: Readonly<Record<string, string | undefined>>;
+  appDataRoots: readonly string[];
+  sessionBase: string;
+}>;
 
 /**
- * Build, or find, the PowerShell module analysis cache for this shell (`shell-module-cache.ts`): on Windows only, in one
- * sandboxed launch that runs {@link powerShellModuleCacheCommand} and no user code, with nothing readable beyond the
- * system and its own private roots. A build that fails or times out leaves the shell without a cache, so each launch
- * analyses modules as before; the next probe tries again.
+ * Build the PowerShell module analysis cache for this shell (`shell-module-cache.ts`) in one sandboxed launch that
+ * runs {@link powerShellModuleCacheCommand} and no user code, with nothing readable beyond the system and its own
+ * private roots, and copy it into the store. A cache another build already put in place is answered as it is.
  *
  * @param options - The provider, the shell and what the probe launch itself was given.
- * @returns The cache every launch is granted, or `undefined`.
+ * @param signal - Stops the build: a launch claimed the sandbox, or the host is closing.
+ * @param milliseconds - The build's deadline; {@link moduleCacheMilliseconds} by default.
+ * @returns The cache, or `undefined` when this build made none.
  */
-export const preparePowerShellModuleCache = async (
-  options: Readonly<{
-    provider: ShellProvider;
-    executable: ShellExecutable;
-    platform: NodeJS.Platform;
-    environment: Readonly<Record<string, string | undefined>>;
-    appDataRoots: readonly string[];
-    sessionBase: string;
-    milliseconds?: number | undefined;
-  }>,
+export const buildPowerShellModuleCache = async (
+  options: PowerShellModuleCacheOptions,
+  signal: AbortSignal,
+  milliseconds = moduleCacheMilliseconds,
 ): Promise<PowerShellModuleCache | undefined> => {
   const { provider, executable, platform, sessionBase } = options;
-  if (platform !== 'win32' || executable.kind !== 'powershell') {
-    return undefined;
-  }
   const cache = powerShellModuleCacheLocation(join(sessionBase, powerShellModuleCacheStore), executable);
   if (await builtPowerShellModuleCache(cache)) {
     return cache;
+  }
+  if (signal.aborted) {
+    return undefined;
   }
   const session = await createSessionRoots(sessionBase, platform);
   /* The build writes into its own temporary root; Tau copies the file out before that root is deleted. */
@@ -1356,11 +1408,7 @@ export const preparePowerShellModuleCache = async (
       arguments: shellCommandArguments(executable.kind, powerShellModuleCacheCommand),
       workingDirectory: session.home,
       commandId: 'shell:module-cache',
-      filesystem: {
-        readable: [],
-        writable: [session.home, session.temporary],
-        denied: [...options.appDataRoots],
-      },
+      filesystem: { readable: [], writable: [session.home, session.temporary], denied: [...options.appDataRoots] },
       network: { domains: [] },
       environment: shellEnvironment({
         platform,
@@ -1373,7 +1421,7 @@ export const preparePowerShellModuleCache = async (
         powerShellModuleCache: written,
       }),
       stdio: { kind: 'pipes' },
-      signal: AbortSignal.timeout(options.milliseconds ?? moduleCacheMilliseconds),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(milliseconds)]),
     });
     if (outcome.status !== 'started') {
       return undefined;
@@ -1390,7 +1438,7 @@ export const preparePowerShellModuleCache = async (
       }
     };
     const [exit] = await Promise.all([exited, discard(stdout), discard(stderr)]);
-    /* A build stopped at its deadline may have stopped mid-write, so only one that exited by itself is kept. */
+    /* A build stopped by a launch or its deadline may have stopped mid-write: only one that exited by itself is kept. */
     if (exit.exitCode !== 0) {
       return undefined;
     }
@@ -1407,6 +1455,30 @@ export const preparePowerShellModuleCache = async (
           holds: undefined,
         }));
   }
+};
+
+/**
+ * The cache schedule for this shell, on Windows only: a cache already in the store is granted from the first launch;
+ * otherwise the shell is offered at once, uncached, and the cache is built in the background while the shell is idle.
+ *
+ * @public
+ * @param options - The provider, the shell and what the probe launch itself was given.
+ * @returns The schedule, or `undefined` off Windows or for a shell that is not PowerShell.
+ */
+export const powerShellModuleCacheSchedule = async (
+  options: PowerShellModuleCacheOptions,
+): Promise<PowerShellModuleCacheSchedule | undefined> => {
+  if (options.platform !== 'win32' || options.executable.kind !== 'powershell') {
+    return undefined;
+  }
+  const cache = powerShellModuleCacheLocation(
+    join(options.sessionBase, powerShellModuleCacheStore),
+    options.executable,
+  );
+  return createPowerShellModuleCacheSchedule({
+    initial: (await builtPowerShellModuleCache(cache)) ? cache : undefined,
+    build: async (signal) => buildPowerShellModuleCache(options, signal),
+  });
 };
 
 /**
@@ -1553,8 +1625,8 @@ export const probeHostShell = async (options: ProbeHostShellOptions): Promise<Sh
           holds: undefined,
         }));
   }
-  /* One sandbox account serves every Windows launch, one at a time: the build starts once the probe's launch is gone. */
-  const powerShellModuleCache = await preparePowerShellModuleCache({
+  /* Never waits on a build: only on reading whether this shell's cache is already in the store. */
+  const powerShellModuleCache = await powerShellModuleCacheSchedule({
     provider: options.provider,
     executable,
     platform,

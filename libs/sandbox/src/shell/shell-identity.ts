@@ -240,10 +240,10 @@ export const terminalZshArguments: readonly string[] = ['-l', '-i'];
 
 /**
  * The environment variable that names PowerShell's module analysis cache file, read by Windows PowerShell 5.1 and
- * PowerShell 7 alike. Without it PowerShell keeps the cache under the account's `LocalApplicationData` known folder,
- * which it resolves from the account's profile rather than from `LOCALAPPDATA`; the sandbox account runs without its
- * profile and every launch's roots are new, so no launch reuses a cache and each command that resolves a cmdlet
- * analyses the modules on `PSModulePath` again (the WIN-X64 row T02-cache records where that folder resolves).
+ * PowerShell 7 alike. Without it PowerShell keeps the cache under the `LocalApplicationData` known folder, which for
+ * the sandbox account, started without its profile, resolves inside the launch's `USERPROFILE` (WIN-X64 run
+ * 44014103911): the private home, new every launch. No launch reuses a cache, so each command that resolves a cmdlet
+ * analyses the modules on `PSModulePath` again.
  *
  * @public
  */

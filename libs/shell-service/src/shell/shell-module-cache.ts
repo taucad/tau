@@ -2,10 +2,10 @@
  * PowerShell's module analysis cache, built once per shell and read by every later launch (Windows only).
  *
  * Resolving a cmdlet that is not yet loaded makes PowerShell read, for every module on `PSModulePath`, the commands it
- * exports, from its module analysis cache when an entry is current and by analysing the module otherwise. A launch's
- * private home is new every time and the sandbox account runs without its profile, so no launch finds a cache it can
- * keep: in WIN-X64 run 44009882001 Windows PowerShell 5.1, whose own module folder holds dozens of modules, took 18 to
- * 26 seconds for each command that resolved a cmdlet and 0.3 seconds for `exit 7`, which resolves none.
+ * exports, from its module analysis cache when an entry is current and by analysing the module otherwise. PowerShell
+ * keeps that cache under the sandbox account's `LocalApplicationData`, which resolves inside the launch's private home,
+ * new every time, so no launch reuses one. In WIN-X64 run 44014103911 Windows PowerShell 5.1 took 22.5 seconds for a
+ * pipeline that resolves `Measure-Object` with Tau's `PSModulePath` and no cache, and 2.0 seconds with this cache.
  *
  * The cache is therefore built by Tau, once per shell digest, in one sandboxed launch that runs no user code and writes
  * it into that launch's own private root. Tau copies the bytes into a file it creates itself in the store, so the
@@ -14,9 +14,12 @@
  * build analyses that module again and PowerShell's write-back of the cache fails, which it ignores (the WIN-X64 row
  * T02-cache checks that a read-only cache neither errors nor changes); a changed shell digest builds a new cache.
  *
- * The store is `tau-powershell-cache` in the session directory (the system temporary directory), outside Tau's app data
- * because the build's own writable roots may not lie in a denied path. Clearing it costs one more build at the next
- * probe.
+ * The build took 87.5 seconds for Windows PowerShell 5.1 in that run, so it never stands between the person and the
+ * shell: the shell is offered uncached, the build runs only while no launch does, a launch stops it, and launches read
+ * the cache from the moment it exists ({@link createPowerShellModuleCacheSchedule}).
+ *
+ * The store is `tau-powershell-cache` in the session directory (the system temporary directory), outside Tau's app data,
+ * which every launch denies whole. Clearing it costs one more background build.
  *
  * @module
  */
@@ -116,4 +119,137 @@ export const adoptPowerShellModuleCache = async (written: string, cache: PowerSh
     await rm(staging, { recursive: true, force: true }).catch(() => undefined);
     return builtPowerShellModuleCache(cache);
   }
+};
+
+/**
+ * Build one cache, stopping when `signal` aborts. Resolves `undefined` for a build that did not produce a cache.
+ *
+ * @public
+ */
+export type PowerShellModuleCacheBuild = (signal: AbortSignal) => Promise<PowerShellModuleCache | undefined>;
+
+/**
+ * When the cache is built, and which one a launch reads. A build never delays a launch: it starts only while no launch
+ * runs, and a launch that arrives during one stops it (and waits only for its sandbox teardown) and runs without the
+ * cache; the build starts again once every launch has ended. Windows runs one sandboxed launch at a time, so a build
+ * running beside a launch is never an option.
+ *
+ * @public
+ */
+export type PowerShellModuleCacheSchedule = Readonly<{
+  /** The cache a launch starting now reads, once one is built. */
+  current: () => PowerShellModuleCache | undefined;
+  /** Allow builds from now on; the host calls it once its startup recovery is done. */
+  start: () => void;
+  /**
+   * Hold off builds for one launch: stop a running build and resolve once it has stopped. Call the answer once the
+   * launch has ended, or did not start.
+   */
+  claim: () => Promise<() => void>;
+  /** Resolves once no build is running; for tests and orderly shutdown. */
+  settled: () => Promise<void>;
+}>;
+
+/** @public */
+export type PowerShellModuleCacheScheduleOptions = Readonly<{
+  build: PowerShellModuleCacheBuild;
+  /** A cache already built, by this host before or by another; nothing is then built. */
+  initial?: PowerShellModuleCache | undefined;
+  /**
+   * How long the shell stays idle before a build starts, so a build does not start between an agent's back-to-back
+   * commands only to be stopped by the next one. Milliseconds; ten seconds by default.
+   */
+  idleDelay?: number | undefined;
+  /** Builds that may fail (a stopped one does not count) before this host stops trying; two by default. */
+  attempts?: number | undefined;
+}>;
+
+/**
+ * Schedule the cache's build around the launches that read it ({@link PowerShellModuleCacheSchedule}).
+ *
+ * @public
+ * @param options - The build, a cache already in place, and the idle delay and attempt budget.
+ * @returns The schedule.
+ */
+export const createPowerShellModuleCacheSchedule = (
+  options: PowerShellModuleCacheScheduleOptions,
+): PowerShellModuleCacheSchedule => {
+  const idleDelay = options.idleDelay ?? 10_000;
+  const attempts = options.attempts ?? 2;
+  const state: {
+    current: PowerShellModuleCache | undefined;
+    started: boolean;
+    active: number;
+    failures: number;
+    running: Readonly<{ controller: AbortController; done: Promise<void> }> | undefined;
+    timer: NodeJS.Timeout | undefined;
+  } = { current: options.initial, started: false, active: 0, failures: 0, running: undefined, timer: undefined };
+  const wanted = (): boolean =>
+    state.started &&
+    state.current === undefined &&
+    state.running === undefined &&
+    state.active === 0 &&
+    state.failures < attempts;
+  const schedule = (startDelay: number): void => {
+    clearTimeout(state.timer);
+    state.timer = undefined;
+    if (wanted()) {
+      // oxlint-disable-next-line no-use-before-define -- `run` schedules again once its build settles.
+      state.timer = setTimeout(run, startDelay);
+      state.timer.unref();
+    }
+  };
+  const run = (): void => {
+    state.timer = undefined;
+    if (!wanted()) {
+      return;
+    }
+    const controller = new AbortController();
+    const attempt = async (): Promise<void> => {
+      /* Yields first, so `running` names this build before the build can settle. */
+      await Promise.resolve();
+      let built: PowerShellModuleCache | undefined;
+      try {
+        built = await options.build(controller.signal);
+      } catch {
+        built = undefined;
+      }
+      if (built !== undefined) {
+        state.current = built;
+      } else if (!controller.signal.aborted) {
+        state.failures += 1;
+      }
+      state.running = undefined;
+      schedule(idleDelay);
+    };
+    state.running = { controller, done: attempt() };
+  };
+  return {
+    current: () => state.current,
+    start: () => {
+      state.started = true;
+      schedule(0);
+    },
+    claim: async () => {
+      state.active += 1;
+      clearTimeout(state.timer);
+      state.timer = undefined;
+      const { running } = state;
+      if (running !== undefined) {
+        running.controller.abort();
+        await running.done;
+      }
+      let released = false;
+      return () => {
+        if (!released) {
+          released = true;
+          state.active -= 1;
+          schedule(idleDelay);
+        }
+      };
+    },
+    settled: async () => {
+      await state.running?.done;
+    },
+  };
 };

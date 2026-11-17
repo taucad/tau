@@ -5,7 +5,7 @@ import { CodeEditor, markCodeEditorMilestone } from '@taucad/editor-ui/component
 import { useEditorDocument, useEditorLanguageEnvironment } from '#hooks/use-editor-document-session.js';
 import { useProject } from '#hooks/use-project.js';
 import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
-import { registerEditorView } from '#lib/editor-navigation-service.js';
+import { registerEditorView } from '@taucad/editor-ui/lib/editor-navigation-service';
 import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 import { Button } from '@taucad/ui/components/button';
 import { useEditorSymbolPathReporter } from '#routes/w.$workspace.$project/editor-symbol-path.js';

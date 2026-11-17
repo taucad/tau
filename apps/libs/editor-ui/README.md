@@ -2,7 +2,7 @@
 
 The editor feature of the Tau UI app: the CodeMirror source editor (`CodeEditor` and its lazily loaded view), the document, diagnostics and syntax models it edits, the read-only code and diff viewers, the editor pane placeholder and the CodeMirror extension builders (language features, go-to-definition, lint, search panel, surface theme, JSON depth highlighting) that read no app state. Private and source-consumed (`scope:ui type:app-lib layer:feature`): `apps/ui` imports it; it imports only app-libs and packages, never `apps/ui`.
 
-Cut from `apps/ui/app/components/code` and `apps/ui/app/lib` in UI wave D (CI decomposition blueprint, Part 3 P2 row D, the `editor` row), in two slices (tau #2378, then the source editor and its models). It grows as the modules it waits on leave the app.
+Cut from `apps/ui/app/components/code` and `apps/ui/app/lib` in UI wave D (CI decomposition blueprint, Part 3 P2 row D, the `editor` row), in three slices (tau #2378, tau #2438 with the source editor and its models, then the document session and the navigation service). It grows as the modules it waits on leave the app.
 
 ## Entrypoints
 
@@ -22,6 +22,8 @@ One subpath per module, pinned by `src/exports.test.ts`. Audience: `apps/ui` (th
 | `./components/code/code-editor-view.client`                        | The CodeMirror view behind `CodeEditor`, with `code-editor.css`                                                               |
 | `./components/code/editor-lint`                                    | Diagnostics into CodeMirror lint state (`storeDiagnostics`)                                                                   |
 | `./lib/editor-document`                                            | The editable document model (`EditorDocument`, transactions and changes)                                                      |
+| `./lib/editor-document-session`                                    | Open documents over the file content service (`EditorDocumentSession`): load, save, conflicts and revisions                   |
+| `./lib/editor-navigation-service`                                  | Go-to-location requests to the mounted editor view (`requestEditorNavigation`)                                                |
 | `./lib/editor-diagnostics`                                         | Per-file diagnostics store (`EditorDiagnostics`)                                                                              |
 | `./lib/editor-syntax`                                              | Lazy Lezer syntax loading per language; `./lib/editor-syntax.fixtures` holds its sample sources                               |
 | `./lib/editor-languages`                                           | Runtime-free file-to-language metadata                                                                                        |
@@ -32,9 +34,8 @@ The CodeMirror extension modules, `code-editor-view.client`, `editor-lint` and `
 
 ## Still in the app
 
-- `lib/editor-document-session` and its five suites, and `lib/editor-navigation-service`: they qualify, but the session has about 20 app importers (the project runtime, the revision session and the editor hooks), so they are the next slice.
 - `code-surfaces.test.tsx`: it covers moved viewers together with `components/markdown/markdown-viewer`. It moves with the markdown slice.
-- `code-editor.browser.test.tsx` and its browser config: `use-theme`, `lib/editor-document-session`, `lib/editor-language-environment`, the TypeScript language service and the app's Vite config.
+- `code-editor.browser.test.tsx` and its browser config: `use-theme`, `lib/editor-language-environment`, the TypeScript language service and the app's Vite config.
 - `lib/editor-language-environment`, `lib/editor-language-runtime`, `lib/editor-workspace-edits` and the `*-codemirror` language modules: the file-manager machine types reach `#environment.config`; `typescript-codemirror` also reads `#environment.config`, `csharp-codemirror` the `tauCsharpLanguageAssets` define, and `kcl-lsp-worker` a `?url` import.
 - `machines/editor.machine`, `hooks/use-editor-document-session` and `components/panes/editor-tab-context-menu`: the app runtime, the workbench records, `use-file-manager`, `use-project` and the revision client registry.
 

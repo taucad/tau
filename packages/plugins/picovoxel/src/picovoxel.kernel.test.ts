@@ -10,7 +10,15 @@ import { createNodeIo } from '@taucad/geometry-core';
 import type { TauCadTopologyRoot } from '@taucad/geometry-core';
 import { createMockKernelRuntime, expectKernelProjectionOrder, glbToDocument } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import type { CreatePicoOptions, CreatePicoRuntimeOptions, Mesh, Pico, PicoRuntime, Voxels } from 'picovoxel';
+import type {
+  CreatePicoOptions,
+  CreatePicoRuntimeOptions,
+  Mesh,
+  Pico,
+  PicoRuntime,
+  SdfExpression,
+  Voxels,
+} from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
 
 import { picovoxelBuild } from '#picovoxel-build.js';
@@ -841,6 +849,83 @@ describe('picovoxel kernel', () => {
           lane: 'fast',
           artifact: 'serial',
         },
+      });
+    });
+
+    describe('SDF tape limit (T05)', () => {
+      const tapeMaximum = 65_536;
+      // 11 operations: three products, two sums and the square root.
+      const radius: SdfExpression = ['sqrt', ['+', ['*', 'x', 'x'], ['*', 'y', 'y'], ['*', 'z', 'z']]];
+      /**
+       * A radius-2 sphere whose tape is exactly `operations` long: a 14-operation base (`radius - 2`), or 15 with an
+       * `abs` that changes nothing, then two operations (a constant and an add) per `+ 0`.
+       */
+      const sphereTape = (operations: number): SdfExpression => {
+        const [base, baseOperations]: [SdfExpression, number] =
+          operations % 2 === 0 ? [['-', radius, 2], 14] : [['-', ['abs', radius], 2], 15];
+        const zeros = (operations - baseOperations) / 2;
+        expect(Number.isInteger(zeros)).toBe(true);
+        return ['+', base, ...Array.from({ length: zeros }, () => 0)];
+      };
+      const tapeModel = (operations: number) => ({
+        defaultParams: { voxelSize: 1 },
+        default: (pico: Pico): Voxels =>
+          pico.createVoxels({
+            shape: 'implicit',
+            sdf: sphereTape(operations),
+            boundsMin: [-3, -3, -3],
+            boundsMax: [3, 3, 3],
+          }),
+      });
+
+      it.each([tapeMaximum - 1, tapeMaximum])(
+        'should build a tape of %i instructions',
+        async (operations) => {
+          const { context, result } = await evaluate({ module: tapeModel(operations) });
+          try {
+            expect((result.issues ?? []).filter((issue) => issue.severity === 'error')).toEqual([]);
+            expect(result.handle.shapes).toHaveLength(1);
+          } finally {
+            await definition.onDispose!(context);
+          }
+        },
+        60_000,
+      );
+
+      it('should refuse one instruction past the maximum as a typed capacity limit', async () => {
+        const issues = await buildIssues(evaluate({ module: tapeModel(tapeMaximum + 1) }).then(({ result }) => result));
+
+        expect(issues[0]).toMatchObject({
+          code: 'RESOURCE_LIMIT',
+          details: {
+            producer: { kernelId: 'picovoxel' },
+            picoCode: 'PICO_INVALID_ARGUMENT',
+            limit: 'picovoxel.tape.instructions',
+            unit: '{instruction}',
+            maximum: tapeMaximum,
+            demand: { kind: 'unknown' },
+            origin: 'default',
+          },
+        });
+      }, 60_000);
+
+      it('should keep any other invalid SDF expression a runtime issue without a limit', async () => {
+        const issues = await buildIssues(
+          evaluate({
+            module: {
+              default: (pico: Pico): Voxels =>
+                pico.createVoxels({
+                  shape: 'implicit',
+                  sdf: ['tan', 'x'] as unknown as SdfExpression,
+                  boundsMin: [-3, -3, -3],
+                  boundsMax: [3, 3, 3],
+                }),
+            },
+          }).then(({ result }) => result),
+        );
+
+        expect(issues[0]).toMatchObject({ code: 'RUNTIME', details: { picoCode: 'PICO_INVALID_ARGUMENT' } });
+        expect(issues[0]!.details).not.toHaveProperty('limit');
       });
     });
 

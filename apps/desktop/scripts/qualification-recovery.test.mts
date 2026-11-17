@@ -31,6 +31,15 @@ const a = { tag: 'desktop-staging@0.9.0-staging.10', version: '0.9.0', sourceCom
 const b = { tag: 'desktop-staging@0.9.1-staging.11', version: '0.9.1', sourceCommit: 'b'.repeat(40) };
 const line = (event: string, detail?: unknown, level = 'INFO'): string =>
   `2026-11-17T10:00:00.000Z ${level} ${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`;
+/** Move a log line `seconds` after the fixture's clock start. */
+const at = (seconds: number, text: string): string =>
+  text.replace(
+    '2026-11-17T10:00:00.000Z',
+    new Date(Date.parse('2026-11-17T10:00:00.000Z') + seconds * 1000).toISOString(),
+  );
+/** N1's install starts when the 10 s countdown, and with it the Cancel, has run out. */
+const startedAfter = (seconds: number): string =>
+  at(seconds, line('updater.auto-install-started', { targetVersion: b.version }, 'WARN'));
 const launchOf = (version: string, pid: number): string => line('main.ready', { packaged: true, version, pid });
 const ledgerOf = (version: string, sourceCommit: string, stage: string) => ({
   schemaVersion: 1,
@@ -46,10 +55,10 @@ const healthyRecovery = [
   line('main.recovery-opened', { trigger: 'shell-deadline' }, 'WARN'),
   line('main.recovery-shown', { trigger: 'shell-deadline' }, 'WARN'),
   line('updater.auto-install-countdown', { targetVersion: b.version, mode: 'normal' }, 'WARN'),
-  line('updater.auto-install-started', { targetVersion: b.version }, 'WARN'),
-  launchOf(b.version, 5200),
-  line('main.boot-stage', { stage: 'shell-mounted' }),
-  line('main.boot-stage', { stage: 'home-ready' }),
+  startedAfter(10),
+  at(14, launchOf(b.version, 5200)),
+  at(15, line('main.boot-stage', { stage: 'shell-mounted' })),
+  at(16, line('main.boot-stage', { stage: 'home-ready' })),
 ].join('\n');
 
 const tests: Array<[string, () => Promise<void> | void]> = [
@@ -265,6 +274,12 @@ const tests: Array<[string, () => Promise<void> | void]> = [
         () => assessRecovery({ log: without('updater.auto-install-countdown'), ledger, a, b }),
         /no automatic-install countdown for 0\.9\.1/u,
       );
+      for (const early of [0, 2, 9.9]) {
+        assert.throws(
+          () => assessRecovery({ log: healthyRecovery.replace(startedAfter(10), startedAfter(early)), ledger, a, b }),
+          /started the automatic install \d+ ms after its countdown, before the 10 s Cancel window ran out/u,
+        );
+      }
       assert.throws(
         () => assessRecovery({ log: without('updater.auto-install-started'), ledger, a, b }),
         /did not start the automatic install of 0\.9\.1/u,
@@ -289,10 +304,10 @@ const tests: Array<[string, () => Promise<void> | void]> = [
         () =>
           assessRecovery({
             log: healthyRecovery.replace(
-              line('updater.auto-install-started', { targetVersion: b.version }, 'WARN'),
+              startedAfter(10),
               [
-                line('updater.auto-install-stopped', { reason: 'cancelled', targetVersion: b.version }),
-                line('updater.auto-install-started', { targetVersion: b.version }, 'WARN'),
+                at(4, line('updater.auto-install-stopped', { reason: 'cancelled', targetVersion: b.version })),
+                startedAfter(10),
               ].join('\n'),
             ),
             ledger,

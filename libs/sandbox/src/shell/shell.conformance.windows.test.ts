@@ -8,8 +8,7 @@
  * Every row starts with a positive control that must succeed inside the same sandbox, then the negatives, and every
  * deny verdict is decided outside the sandbox: file digests, canaries and ACLs the test process placed and reads back,
  * listeners and a named-pipe server that count their own clients, and the process table. What the sandboxed command
- * prints is recorded as context only. Launches run one at a time because the provider admits one session at a time
- * (A23 fallback clause); only the A23 row overlaps two on purpose.
+ * prints is recorded as context only. Launches run one at a time unless a row overlaps them on purpose (A23, NW02-NW04).
  *
  * Off unless `TAU_SHELL_CONFORMANCE=1`, which only `sandbox:test:shell-conformance:windows` sets. On any platform but
  * win32 the suite fails rather than skips. `TAU_SHELL_CONFORMANCE_ROW` names the row (WIN-X64),
@@ -20,8 +19,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { createSocket } from 'node:dgram';
-import type { Socket as DatagramSocket } from 'node:dgram';
 import {
   copyFileSync,
   existsSync,
@@ -34,13 +31,12 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { connect, createServer } from 'node:net';
-import type { AddressInfo, Server } from 'node:net';
+import { connect } from 'node:net';
 import { arch, homedir, networkInterfaces, platform, release, tmpdir, version } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import {
@@ -54,6 +50,14 @@ import {
 } from '#shell/shell-identity.js';
 import type { ShellExecutable } from '#shell/shell-identity.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellProcess, ShellProvider } from '#shell/shell-provider.js';
+import {
+  nativeWorkerRows,
+  personSession,
+  statusWithoutSystemEnvironment,
+} from '#shell/windows-native-worker.fixture.js';
+import type { NativeWorkerContext, PersonSession } from '#shell/windows-native-worker.fixture.js';
+import { atomicWrite, pipeObserverScript } from '#shell/windows-conformance-scripts.fixture.js';
+import { tcpCanary, tcpControl, udpCanary, udpControl } from '#shell/windows-conformance-network.fixture.js';
 import { createWindowsShellProvider } from '#shell/windows-shell-provider.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
@@ -62,6 +66,15 @@ const helperPath =
   process.env['TAU_SHELL_CONFORMANCE_WINDOWS_HELPER'] ??
   fileURLToPath(
     new URL('../../windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe', import.meta.url),
+  );
+/** NW01's stand-in native worker (`windows-sandbox/examples/tau_worker_probe.rs`), built beside the helper. */
+const workerProbe =
+  process.env['TAU_SHELL_CONFORMANCE_WINDOWS_WORKER_PROBE'] ??
+  fileURLToPath(
+    new URL(
+      '../../windows-sandbox/target/x86_64-pc-windows-msvc/release/examples/tau-worker-probe.exe',
+      import.meta.url,
+    ),
   );
 const systemRoot = process.env['SystemRoot'] ?? process.env['SYSTEMROOT'] ?? String.raw`C:\Windows`;
 /** Windows PowerShell 5.1 at its fixed path; T02 runs on it too when present beside PowerShell 7. */
@@ -78,6 +91,19 @@ type RowResult = Readonly<{
 const results: RowResult[] = [];
 /** Context the sandboxed commands printed, kept for the receipt only; no verdict reads it. */
 const observations: Record<string, unknown> = {};
+/** The helper's own diagnostic lines (the runner's AppContainer, registry and COM checks), kept for the receipt. */
+const helperDiagnostics: string[] = [];
+const helperDiagnosticLimit = 400;
+const recordHelperDiagnostic = (line: string): void => {
+  if (line.trim() === '') {
+    return;
+  }
+  // Printed as it arrives so a failing CI run carries it in its log, not only in the receipt artifact.
+  console.info(`[helper] ${line}`);
+  if (helperDiagnostics.length < helperDiagnosticLimit) {
+    helperDiagnostics.push(line);
+  }
+};
 
 /** Conformance rows with one time bound: each outcome lands in the receipt whether it passes or fails. */
 const conformanceWithin =
@@ -127,7 +153,6 @@ const delay = async (milliseconds: number): Promise<void> =>
 
 /** A PowerShell single-quoted literal. */
 const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`;
-
 /** `-EncodedCommand` text: UTF-16LE, base64, so a nested script survives every command line it passes through. */
 const encoded = (script: string): string => Buffer.from(script, 'utf16le').toString('base64');
 
@@ -255,57 +280,6 @@ const interfaceAddress = (): string | undefined =>
     .flat()
     .find((entry) => entry?.family === 'IPv4' && !entry.internal)?.address;
 
-/** A TCP listener outside the sandbox on one address that counts every connection it ever sees. */
-const tcpCanary = async (address: string): Promise<{ server: Server; port: number; connections: () => number }> => {
-  let connections = 0;
-  const server = createServer((socket) => {
-    connections += 1;
-    socket.end('HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n');
-  });
-  await new Promise<void>((resolve) => {
-    server.listen(0, address, resolve);
-  });
-  const { port } = server.address() as AddressInfo;
-  return { server, port, connections: () => connections };
-};
-
-/** A UDP socket outside the sandbox on one address that counts every datagram it receives. */
-const udpCanary = async (
-  address: string,
-): Promise<{ socket: DatagramSocket; port: number; datagrams: () => number }> => {
-  let datagrams = 0;
-  const socket = createSocket('udp4');
-  socket.on('message', () => {
-    datagrams += 1;
-  });
-  await new Promise<void>((resolve) => {
-    socket.bind(0, address, resolve);
-  });
-  return { socket, port: socket.address().port, datagrams: () => datagrams };
-};
-
-const tcpControl = async (address: string, port: number): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const socket = connect({ host: address, port }, () => {
-      socket.end();
-      resolve();
-    });
-    socket.on('error', reject);
-  });
-
-const udpControl = async (address: string, port: number): Promise<void> =>
-  new Promise((resolve, reject) => {
-    const socket = createSocket('udp4');
-    socket.send(Buffer.from('control'), port, address, (error) => {
-      socket.close();
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    });
-  });
-
 const waitUntil = async (condition: () => boolean, milliseconds: number): Promise<boolean> => {
   for (const deadline = Date.now() + milliseconds; !condition(); ) {
     if (Date.now() > deadline) {
@@ -318,59 +292,34 @@ const waitUntil = async (condition: () => boolean, milliseconds: number): Promis
 };
 
 /**
- * A named-pipe server outside the sandbox whose DACL grants Everyone full control (A22), so only the sandbox can keep
- * a sandboxed client out. It keeps four instances listening and writes the number of clients it ever accepted.
+ * A named-pipe server outside the sandbox that keeps four instances listening and writes the number of clients it ever
+ * accepted. With `everyone` its DACL grants Everyone full control (A22), so only the sandbox can keep a sandboxed client
+ * out; with `default` it is created with no security descriptor at all, so it carries the default named-pipe DACL the
+ * person's token gives it (full control for the person, SYSTEM and Administrators, read for Everyone and Anonymous).
  */
-const pipeServer = async (): Promise<{ name: string; connections: () => number; stop: () => Promise<void> }> => {
+const pipeServer = async (
+  dacl: 'everyone' | 'default',
+): Promise<{ name: string; connections: () => number; stop: () => Promise<void> }> => {
   const name = `tau-conformance-${randomUUID()}`;
   const directory = mkdtempSync(join(custodyRoot, 'pipe-'));
   const count = join(directory, 'count');
   const listening = join(directory, 'listening');
   const stop = join(directory, 'stop');
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    '$security = [System.IO.Pipes.PipeSecurity]::new()',
-    "$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')",
-    '$self = [System.Security.Principal.WindowsIdentity]::GetCurrent().User',
-    "$security.AddAccessRule([System.IO.Pipes.PipeAccessRule]::new($everyone, 'FullControl', 'Allow'))",
-    "$security.AddAccessRule([System.IO.Pipes.PipeAccessRule]::new($self, 'FullControl', 'Allow'))",
-    'function New-Instance {',
-    '  if ($PSVersionTable.PSVersion.Major -ge 6) {',
-    "    [System.IO.Pipes.NamedPipeServerStreamAcl]::Create($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous', 0, 0, $security)",
-    '  } else {',
-    "    [System.IO.Pipes.NamedPipeServerStream]::new($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous', 0, 0, $security)",
-    '  }',
-    '}',
-    '$servers = @(1..4 | ForEach-Object { New-Instance })',
-    '$waits = @($servers | ForEach-Object { $_.WaitForConnectionAsync() })',
-    '$accepted = 0',
-    'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_COUNT -Value 0 -NoNewline',
-    'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_LISTENING -Value 1 -NoNewline',
-    'while (-not (Test-Path -LiteralPath $env:CONFORMANCE_PIPE_STOP)) {',
-    '  for ($i = 0; $i -lt $servers.Count; $i++) {',
-    '    if ($waits[$i].IsCompleted) {',
-    "      if ($waits[$i].Status -eq 'RanToCompletion') {",
-    '        $accepted++',
-    '        Set-Content -LiteralPath $env:CONFORMANCE_PIPE_COUNT -Value $accepted -NoNewline',
-    '      }',
-    '      $servers[$i].Dispose()',
-    '      $servers[$i] = New-Instance',
-    '      $waits[$i] = $servers[$i].WaitForConnectionAsync()',
-    '    }',
-    '  }',
-    '  Start-Sleep -Milliseconds 20',
-    '}',
-  ].join('\n');
-  const child: ChildProcess = spawn(shell.path, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
-    env: {
-      ...process.env,
-      CONFORMANCE_PIPE: name,
-      CONFORMANCE_PIPE_COUNT: count,
-      CONFORMANCE_PIPE_LISTENING: listening,
-      CONFORMANCE_PIPE_STOP: stop,
+  const child: ChildProcess = spawn(
+    shell.path,
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', pipeObserverScript],
+    {
+      env: {
+        ...process.env,
+        CONFORMANCE_PIPE: name,
+        CONFORMANCE_PIPE_DACL: dacl,
+        CONFORMANCE_PIPE_COUNT: count,
+        CONFORMANCE_PIPE_LISTENING: listening,
+        CONFORMANCE_PIPE_STOP: stop,
+      },
+      stdio: 'ignore',
     },
-    stdio: 'ignore',
-  });
+  );
   const exited = new Promise<void>((resolve) => {
     child.once('exit', () => {
       resolve();
@@ -400,6 +349,78 @@ const pipeControl = async (name: string): Promise<void> =>
     });
     socket.on('error', reject);
   });
+
+/**
+ * What a process's token is, read outside the sandbox by the test user: the runner grants the person
+ * `PROCESS_QUERY_LIMITED_INFORMATION` on the shell and `TOKEN_QUERY` on its token, nothing more, so this opens exactly
+ * those and reads the user, image, AppContainer state, package SID, capabilities, restricting SIDs and integrity level.
+ */
+type ShellToken = Readonly<{
+  user: string;
+  image: string;
+  isAppContainer: boolean;
+  /** Absent when the token has no package SID. */
+  package?: string;
+  capabilities: string[];
+  restricted: string[];
+  integrity: string;
+}>;
+
+const tokenObserver = [
+  'using System; using System.Collections; using System.ComponentModel; using System.Runtime.InteropServices;',
+  'using System.Security.Principal; using System.Text;',
+  'public static class TauShellToken {',
+  '  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);',
+  '  [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr handle);',
+  '  [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]',
+  '  static extern bool QueryFullProcessImageNameW(IntPtr process, int flags, StringBuilder name, ref int size);',
+  '  [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);',
+  '  [DllImport("advapi32.dll", SetLastError = true)]',
+  '  static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr buffer, int length, out int needed);',
+  '  static IntPtr Read(IntPtr token, int kind) {',
+  '    int needed; GetTokenInformation(token, kind, IntPtr.Zero, 0, out needed);',
+  '    if (needed == 0) { throw new Win32Exception(Marshal.GetLastWin32Error(), "GetTokenInformation " + kind); }',
+  '    IntPtr buffer = Marshal.AllocHGlobal(needed);',
+  '    if (!GetTokenInformation(token, kind, buffer, needed, out needed)) { int error = Marshal.GetLastWin32Error(); Marshal.FreeHGlobal(buffer); throw new Win32Exception(error, "GetTokenInformation " + kind); }',
+  '    return buffer; }',
+  '  static string Sid(IntPtr sid) { return sid == IntPtr.Zero ? null : new SecurityIdentifier(sid).Value; }',
+  '  static string First(IntPtr token, int kind) { IntPtr b = Read(token, kind); try { return Sid(Marshal.ReadIntPtr(b)); } finally { Marshal.FreeHGlobal(b); } }',
+  '  static ArrayList Groups(IntPtr token, int kind) {',
+  '    IntPtr b = Read(token, kind); var list = new ArrayList();',
+  '    try { int count = Marshal.ReadInt32(b); for (int i = 0; i < count; i++) { list.Add(Sid(Marshal.ReadIntPtr(b, IntPtr.Size + i * 2 * IntPtr.Size))); } }',
+  '    finally { Marshal.FreeHGlobal(b); } return list; }',
+  '  public static Hashtable Describe(int pid) {',
+  '    IntPtr process = OpenProcess(0x1000, false, pid);',
+  '    if (process == IntPtr.Zero) { throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcess " + pid); }',
+  '    try {',
+  '      var name = new StringBuilder(32768); int size = name.Capacity;',
+  '      if (!QueryFullProcessImageNameW(process, 0, name, ref size)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "QueryFullProcessImageName"); }',
+  '      IntPtr token; if (!OpenProcessToken(process, 0x0008, out token)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcessToken"); }',
+  '      try {',
+  '        IntPtr flag = Read(token, 29); int isAppContainer; try { isAppContainer = Marshal.ReadInt32(flag); } finally { Marshal.FreeHGlobal(flag); }',
+  '        var result = new Hashtable();',
+  '        result["user"] = First(token, 1); result["image"] = name.ToString(0, size);',
+  '        result["isAppContainer"] = isAppContainer != 0; result["package"] = First(token, 31);',
+  '        result["capabilities"] = Groups(token, 30); result["restricted"] = Groups(token, 11);',
+  '        result["integrity"] = First(token, 25);',
+  '        return result;',
+  '      } finally { CloseHandle(token); }',
+  '    } finally { CloseHandle(process); } } }',
+].join('\n');
+
+const shellTokenOf = (pid: number): ShellToken =>
+  JSON.parse(
+    observe(
+      [
+        "$ErrorActionPreference = 'Stop'",
+        'Add-Type -TypeDefinition $env:CONFORMANCE_TOKEN_OBSERVER',
+        '[TauShellToken]::Describe([int]$env:CONFORMANCE_TOKEN_PID) | ConvertTo-Json -Compress',
+      ].join('\n'),
+      { CONFORMANCE_TOKEN_OBSERVER: tokenObserver, CONFORMANCE_TOKEN_PID: String(pid) },
+    ),
+    /* A token without a package SID reads back as JSON null: leave the field absent instead. */
+    (_key, value: unknown) => value ?? undefined,
+  ) as ShellToken;
 
 /** Strip VT control sequences ConPTY interleaves with text, so a marker is matched on what the screen shows. */
 const vtSequence =
@@ -439,10 +460,12 @@ const receipt = (): Record<string, unknown> => {
     },
     shell: { ...shell, version: shellVersion },
     windowsPowerShell: windowsPowerShellIdentity,
-    observations,
+    observations: { ...observations, helperDiagnostics },
     results,
   };
 };
+
+let sessionBefore: PersonSession | undefined;
 
 describe.runIf(enabled)('Windows shell conformance', () => {
   beforeAll(async () => {
@@ -456,6 +479,10 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     if (helperStatus['installed'] === false) {
       throw new Error('the Windows sandbox is not set up on this machine; run the helper `setup --for-user` elevated.');
     }
+    sessionBefore = personSession(workerProbe);
+    /* Chromium's GPU process needs exactly this; a session that refuses it before any row is not a baseline. */
+    expect(sessionBefore.restrictedChild).toStrictEqual({ stage: 'exit', exitCode: '0x00000000' });
+    observations['session'] = sessionBefore;
     proxyPorts = Array.isArray(helperStatus['proxyPorts']) ? (helperStatus['proxyPorts'] as number[]) : [];
     const resolved = await resolveShellExecutable({ platform: 'win32', environment: process.env });
     if ('status' in resolved) {
@@ -524,8 +551,16 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     provider = createWindowsShellProvider({
       helperPath,
       custody: { directory: join(custodyRoot, 'records'), sessionDirectory: join(custodyRoot, 'sessions') },
+      onHelperDiagnostic: recordHelperDiagnostic,
     });
     ready = true;
+  });
+
+  /* Every row ends with the person's session as it began: the same window-station, desktop and volume-root DACLs (as
+     `setup` left them), a new process of theirs that starts and creates a window, and a Chromium-style restricted,
+     Low-integrity child of theirs on an alternate desktop that starts and creates one too. */
+  afterEach(() => {
+    expect(personSession(workerProbe)).toStrictEqual(sessionBefore);
   });
 
   afterAll(() => {
@@ -548,6 +583,59 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     expect(result.stdout.trim()).toMatch(/^\d+\.\d+/u);
     shellVersion = result.stdout.trim();
   });
+
+  conformance(
+    'W09',
+    'status, quick and full, reads the install record with no SystemDrive, SystemRoot, windir, ProgramData or ALLUSERSPROFILE',
+    async () => {
+      statusWithoutSystemEnvironment(shell.path, helperPath, helperStatus['accountSid']);
+    },
+  );
+
+  conformance(
+    'W10',
+    "a journal kept in denied app data under the person's profile on the system drive: the launch runs, the shell cannot read it, and it is restored",
+    async () => {
+      /* Tau's desktop keeps custody in Electron's userData (under the profile, on the system drive) and denies it whole. */
+      const appData = mkdtempSync(join(homedir(), 'AppData', 'Local', 'tau-conformance-appdata-'));
+      try {
+        expect(appData.slice(0, 2).toUpperCase()).toBe((process.env['SystemDrive'] ?? 'C:').toUpperCase());
+        const custody = join(appData, 'shell-custody');
+        mkdirSync(custody);
+        const kept = join(appData, 'kept.txt');
+        writeFileSync(kept, 'APP-DATA\n');
+        const before = sddlOf([appData, custody]);
+        const through = createWindowsShellProvider({
+          helperPath,
+          custody: { directory: custody, sessionDirectory: join(custodyRoot, 'sessions') },
+        });
+        const filesystem = defaultFilesystem();
+        const process_ = await start(
+          launchOf(
+            `[Console]::Write('ran;'); try { [void][IO.File]::ReadAllText(${quote(kept)}); [Console]::Write('read') } catch { [Console]::Write('denied') }`,
+            { filesystem: { ...filesystem, denied: [...filesystem.denied, appData] } },
+          ),
+          through,
+        );
+        if (process_.kind !== 'pipes') {
+          throw new Error('expected a pipes launch');
+        }
+        const [stdout, stderr, exit] = await Promise.all([
+          text(process_.stdout),
+          text(process_.stderr),
+          process_.exited,
+        ]);
+
+        expect(exit, stderr).toStrictEqual({ exitCode: 0 });
+        expect(stdout).toBe('ran;denied');
+        /* The journal is gone once restored, and the denied root reads back as it was. */
+        expect(readdirSync(custody).filter((name) => name.endsWith('.acl.json'))).toStrictEqual([]);
+        expect(sddlOf([appData, custody])).toStrictEqual(before);
+      } finally {
+        rmSync(appData, { recursive: true, force: true });
+      }
+    },
+  );
 
   conformance('W02', 'the receipt binds the shell kind, fixed path, real path and digest (I12)', async () => {
     const programFiles = process.env['ProgramFiles'] ?? String.raw`C:\Program Files`;
@@ -583,15 +671,18 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     const evidence = (observations[`T02-cache-${label}`] ??= { timings: {} }) as { timings: Record<string, number> };
     return evidence.timings;
   };
-  /* The service's `PSModulePath` (`shellEnvironment`): the shell's own modules, then Windows PowerShell's, once. */
+  /*
+   * The service's `PSModulePath` (`shellEnvironment`): the shell's own modules first; then Windows PowerShell's for
+   * PowerShell 7, and the machine's `%ProgramFiles%\WindowsPowerShell\Modules` for Windows PowerShell 5.1, so that no
+   * machine module folder the sandbox cannot list stops 5.1's auto-discovery before its built-in modules.
+   */
   const serviceModulePath = (executablePath: string): string => {
-    const folders = [
-      join(dirname(executablePath), 'Modules'),
-      join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
-    ];
-    return folders
-      .filter((path, index) => folders.findIndex((other) => other.toLowerCase() === path.toLowerCase()) === index)
-      .join(';');
+    const home = dirname(executablePath);
+    const windowsPowerShellHome = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0');
+    const programFiles = process.env['ProgramW6432'] ?? process.env['ProgramFiles'] ?? String.raw`C:\Program Files`;
+    return home.toLowerCase() === windowsPowerShellHome.toLowerCase()
+      ? [join(home, 'Modules'), join(programFiles, 'WindowsPowerShell', 'Modules')].join(';')
+      : [join(home, 'Modules'), join(windowsPowerShellHome, 'Modules')].join(';');
   };
   /*
    * The build's deadline here. Run 44014103911 measured 87.5 s for Windows PowerShell 5.1 and 14.2 s for PowerShell 7
@@ -662,6 +753,49 @@ describe.runIf(enabled)('Windows shell conformance', () => {
    */
   const cacheConformance = conformanceWithin(330_000);
 
+  /**
+   * Context for a pipeline that could not find `Measure-Object`: `module-diagnostics.fixture.ps1`, which only reads and
+   * prints what decides whether command discovery finds `Microsoft.PowerShell.Utility`, run in the failing launch's
+   * sandbox, again there with no cache, and with no cache outside the sandbox as the test user. No variant can write a
+   * cache: the session one reads the read-only cache, and the cold ones name a path under the shell's executable file.
+   */
+  const moduleDiagnosticsScript = readFileSync(join(import.meta.dirname, 'module-diagnostics.fixture.ps1'), 'utf8');
+  const moduleDiagnostics = async (executablePath: string, overrides: Partial<ShellLaunch>): Promise<string> => {
+    const environment = overrides.environment ?? baseEnvironment();
+    /*
+     * A cache "inside" the shell's own executable file: PowerShell finds no cache, and neither its folder creation nor
+     * its write can succeed, since a file already holds that folder's name.
+     */
+    const cold = { ...environment, [powerShellModuleCacheVariable]: join(executablePath, powerShellModuleCacheFile) };
+    const diagnose = async (label: string, launch: Partial<ShellLaunch>): Promise<string> => {
+      try {
+        const result = await run(moduleDiagnosticsScript, { executablePath, ...launch });
+        return `[module diagnostics, ${label}, exit ${String(result.exitCode)}]\n${result.stdout.trim()}\n${result.stderr.trim()}`;
+      } catch (error) {
+        return `[module diagnostics, ${label}, failed] ${error instanceof Error ? error.message : String(error)}`;
+      }
+    };
+    /* One after another: the provider runs one sandboxed shell at a time. */
+    const sections: string[] = [];
+    if (environment[powerShellModuleCacheVariable] !== undefined) {
+      sections.push(await diagnose('session', overrides));
+    }
+    sections.push(await diagnose('cold', { ...overrides, environment: cold }));
+    try {
+      const outside = execFileSync(
+        executablePath,
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', moduleDiagnosticsScript],
+        { encoding: 'utf8', env: cold, stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000 },
+      );
+      sections.push(`[module diagnostics, cold, outside the sandbox]\n${outside.trim()}`);
+    } catch (error) {
+      sections.push(
+        `[module diagnostics, cold, outside the sandbox, failed] ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return sections.join('\n');
+  };
+
   /** T02: the language cases in a session's launch, decided by comparing stdout and the exit status outside the sandbox. */
   const grammar = async (executablePath: string, label: string): Promise<void> => {
     const grant = await moduleCacheOf(executablePath, label);
@@ -680,7 +814,12 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     expect(hereString.stdout.trim()).toBe('line1\nline2');
     const pipeline = await of("'a b c' -split ' ' | Measure-Object | ForEach-Object Count");
 
-    expect(pipeline.stdout.trim()).toBe('3');
+    expect(
+      pipeline.stdout.trim(),
+      pipeline.stdout.trim() === '3'
+        ? pipeline.stderr
+        : `${pipeline.stderr}\n${await moduleDiagnostics(executablePath, session(grant))}`,
+    ).toBe('3');
     const subexpression = await of('Write-Output "val=$(2 + 3)"');
 
     expect(subexpression.stdout.trim()).toBe('val=5');
@@ -717,7 +856,14 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       environment: { ...baseEnvironment(), PSModulePath: serviceModulePath(executablePath) },
     });
 
-    expect(cold.stdout.trim(), cold.stderr).toBe('3');
+    expect(
+      cold.stdout.trim(),
+      cold.stdout.trim() === '3'
+        ? cold.stderr
+        : `${cold.stderr}\n${await moduleDiagnostics(executablePath, {
+            environment: { ...baseEnvironment(), PSModulePath: serviceModulePath(executablePath) },
+          })}`,
+    ).toBe('3');
     const grant = await moduleCacheOf(executablePath, label);
     const modules = join(root, `module-probe-${label}`);
     mkdirSync(join(modules, 'TauConformanceProbe'), { recursive: true });
@@ -932,23 +1078,28 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     },
   );
 
+  /** Every way a sandboxed PowerShell opens a pipe client; the server outside counts what got through. */
+  const pipeProbe = async (name: string, marker: string): Promise<{ stderr: string }> => {
+    const client = (direction: string): string =>
+      `try { $p = [System.IO.Pipes.NamedPipeClientStream]::new('.', ${quote(name)}, '${direction}'); $p.Connect(3000); $p.Dispose() } catch { }`;
+    return run(
+      [
+        client('InOut'),
+        client('In'),
+        client('Out'),
+        `try { $f = [System.IO.File]::Open(${quote(`\\\\.\\pipe\\${name}`)}, 'Open', 'Read'); $f.Dispose() } catch { }`,
+        `Set-Content -LiteralPath ${quote(join(work, marker))} -Value ran -NoNewline`,
+      ].join('\n'),
+    );
+  };
+
   conformance('A22', 'a named pipe whose DACL grants Everyone is never reached from the sandbox', async () => {
-    const server = await pipeServer();
+    const server = await pipeServer('everyone');
     try {
       await pipeControl(server.name);
 
       expect(await waitUntil(() => server.connections() === 1, 5000)).toBe(true);
-      const client = (direction: string): string =>
-        `try { $p = [System.IO.Pipes.NamedPipeClientStream]::new('.', ${quote(server.name)}, '${direction}'); $p.Connect(3000); $p.Dispose() } catch { }`;
-      const result = await run(
-        [
-          client('InOut'),
-          client('In'),
-          client('Out'),
-          `try { $f = [System.IO.File]::Open(${quote(`\\\\.\\pipe\\${server.name}`)}, 'Open', 'Read'); $f.Dispose() } catch { }`,
-          `Set-Content -LiteralPath ${quote(join(work, 'pipe-ran.txt'))} -Value ran -NoNewline`,
-        ].join('\n'),
-      );
+      const result = await pipeProbe(server.name, 'pipe-ran.txt');
       await delay(1000);
 
       expect(readFileSync(join(work, 'pipe-ran.txt'), 'utf8'), result.stderr).toBe('ran');
@@ -958,6 +1109,105 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       await server.stop();
     }
   });
+
+  conformance(
+    'A22-default',
+    "a named pipe with the person's default DACL (Everyone may read) is never reached from the sandbox",
+    async () => {
+      const server = await pipeServer('default');
+      try {
+        await pipeControl(server.name);
+
+        expect(await waitUntil(() => server.connections() === 1, 5000)).toBe(true);
+        const result = await pipeProbe(server.name, 'pipe-default-ran.txt');
+        await delay(1000);
+
+        expect(readFileSync(join(work, 'pipe-default-ran.txt'), 'utf8'), result.stderr).toBe('ran');
+        expect(server.connections()).toBe(1);
+      } finally {
+        await server.stop();
+      }
+    },
+  );
+
+  conformance(
+    'W08',
+    'the shell runs in a fresh AppContainer per launch: lowbox token, only the volume capability, write-restricted, Low integrity',
+    async () => {
+      const { accountSid, volumeCapabilitySid, volumeRootsGranted } = helperStatus;
+
+      expect(typeof accountSid).toBe('string');
+      /* The volume capability: a capability SID derived from Tau's fixed name, granted on the volume roots. */
+      expect(volumeCapabilitySid).toMatch(/^S-1-15-3-1024(?:-\d+){8}$/u);
+      expect(volumeRootsGranted).toBe(true);
+      /* One launch that parks once it has recorded its PID and the environment it sees, so its token is read live. */
+      const observeLaunch = async (
+        tag: string,
+      ): Promise<{
+        token: ShellToken;
+        seen: Record<string, string | number>;
+        ended: Awaited<ReturnType<typeof run>>;
+      }> => {
+        const sync = join(work, `w08-${tag}`);
+        mkdirSync(sync, { recursive: true });
+        const parked = run(
+          [
+            `$seen = @{ pid = $PID; TEMP = $env:TEMP; LOCALAPPDATA = $env:LOCALAPPDATA; APPDATA = $env:APPDATA } | ConvertTo-Json -Compress`,
+            atomicWrite(quote(join(sync, 'seen.json')), '$seen'),
+            `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
+          ].join('\n'),
+          { commandId: `conformance#w08-${tag}` },
+        );
+        const release = async (): Promise<Awaited<ReturnType<typeof run>>> => {
+          writeFileSync(join(sync, 'release'), '');
+          return parked;
+        };
+        try {
+          await Promise.race([waitUntil(() => existsSync(join(sync, 'seen.json')), 30_000), parked]);
+          if (!existsSync(join(sync, 'seen.json'))) {
+            throw new Error(`the ${tag} launch recorded no PID: ${JSON.stringify(await release())}`);
+          }
+          const seen = JSON.parse(readFileSync(join(sync, 'seen.json'), 'utf8')) as Record<string, string | number>;
+          const token = shellTokenOf(Number(seen['pid']));
+          return { token, seen, ended: await release() };
+        } catch (error) {
+          await release().catch(() => undefined);
+          throw error;
+        }
+      };
+      const first = await observeLaunch('first');
+      const second = await observeLaunch('second');
+      observations['W08-token'] = first.token;
+      observations['W08-environment'] = first.seen;
+
+      for (const { token, ended } of [first, second]) {
+        expect(ended.exitCode, ended.stderr).toBe(0);
+        /* The process the PID names is this sandbox's shell: the sandbox account running the fixed-path PowerShell. */
+        expect(token.user).toBe(accountSid);
+        expect(token.image.toLowerCase()).toBe(shell.path.toLowerCase());
+        expect(token.isAppContainer).toBe(true);
+        expect(token.package).toMatch(/^S-1-15-2(?:-\d+){7}$/u);
+        /* Exactly one capability: Tau's volume capability, granted on the volume roots by `setup`. */
+        expect(token.capabilities).toStrictEqual([volumeCapabilitySid]);
+        /* Still write-restricted: the launch's capability SID, the runner's logon SID and Everyone. */
+        expect(token.restricted).toHaveLength(3);
+        expect(token.restricted).toContain('S-1-1-0');
+        expect(token.restricted.filter((sid) => /^S-1-5-21(?:-\d+){4}$/u.test(sid))).toHaveLength(1);
+        expect(token.restricted.filter((sid) => /^S-1-5-5-\d+-\d+$/u.test(sid))).toHaveLength(1);
+        expect(token.integrity).toBe('S-1-16-4096');
+      }
+      /* Per launch: nothing granted to one launch's package reaches the next. */
+      expect(second.token.package).not.toBe(first.token.package);
+      /* The AppContainer does not redirect the environment the host gave the shell. */
+      const given = baseEnvironment();
+
+      const names = ['TEMP', 'LOCALAPPDATA', 'APPDATA'] as const;
+
+      expect(Object.fromEntries(names.map((name) => [name, first.seen[name]]))).toStrictEqual(
+        Object.fromEntries(names.map((name) => [name, given[name]])),
+      );
+    },
+  );
 
   /**
    * A24's escape set: a detached `Start-Process`, a `Start-Job`, a `CREATE_BREAKAWAY_FROM_JOB` child and a WMI
@@ -970,7 +1220,7 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     const sentinels = Object.fromEntries(names.map((name) => [name, join(work, `${prefix}-${name}.beat`)]));
     const pids = Object.fromEntries(names.map((name) => [name, join(work, `${prefix}-${name}.pid`)]));
     const writer = (name: (typeof names)[number]): string =>
-      `Set-Content -LiteralPath ${quote(pids[name]!)} -Value $PID -NoNewline; while ($true) { Add-Content -LiteralPath ${quote(sentinels[name]!)} -Value b -NoNewline; Start-Sleep -Milliseconds 100 }`;
+      `${atomicWrite(quote(pids[name]!), '"$PID"')}; while ($true) { Add-Content -LiteralPath ${quote(sentinels[name]!)} -Value b -NoNewline; Start-Sleep -Milliseconds 100 }`;
     const argumentsOf = (name: (typeof names)[number]): string =>
       `-NoLogo -NoProfile -NonInteractive -EncodedCommand ${encoded(writer(name))}`;
     const breakaway = [
@@ -1003,6 +1253,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       /* Wait, bounded, for the two writers that must start; the escapes get a few more seconds to show themselves. */
       `$deadline = (Get-Date).AddSeconds(25); while ((Get-Date) -lt $deadline -and -not (${started('detached')} -and ${started('job')})) { Start-Sleep -Milliseconds 100 }`,
       `$deadline = (Get-Date).AddSeconds(3); while ((Get-Date) -lt $deadline -and -not (${started('breakaway')} -and ${started('wmi')})) { Start-Sleep -Milliseconds 100 }`,
+      /* Context only, for a job that never ran: its state and the reason PowerShell gives. */
+      `Write-Output ('job ' + $job.State + ' ' + $job.ChildJobs[0].JobStateInfo.Reason)`,
     ].join('\n');
     return { sentinels, pids, command };
   };
@@ -1030,7 +1282,10 @@ describe.runIf(enabled)('Windows shell conformance', () => {
 
       expect(result.exitCode, result.stderr).toBe(0);
       /* Positive controls: the detached process and the job really ran inside the session. */
-      expect([settled['detached']! > 0, settled['job']! > 0], JSON.stringify(settled)).toStrictEqual([true, true]);
+      expect(
+        [settled['detached']! > 0, settled['job']! > 0],
+        `${JSON.stringify(settled)} ${result.stdout}`,
+      ).toStrictEqual([true, true]);
       await delay(1500);
 
       expect(sizesOf(exited.sentinels)).toStrictEqual(settled);
@@ -1072,46 +1327,41 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     expect(escapePids(aborted.pids, output).filter((pid) => alive(pid))).toStrictEqual([]);
   });
 
-  conformance('A23', 'a second concurrent launch is refused while the first runs to completion', async () => {
-    const sync = join(work, 'a23');
-    mkdirSync(sync, { recursive: true });
-    const first = run(
-      [
-        `Set-Content -LiteralPath ${quote(join(sync, 'ready'))} -Value ready -NoNewline`,
-        `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
-        `Set-Content -LiteralPath ${quote(join(sync, 'first-done'))} -Value done -NoNewline`,
-      ].join('\n'),
-      { commandId: 'conformance#a23-first' },
-    );
-    try {
-      expect(await waitUntil(() => existsSync(join(sync, 'ready')), 30_000)).toBe(true);
-      const second = await prepared(
-        launchOf(`Set-Content -LiteralPath ${quote(join(sync, 'second-ran'))} -Value ran`, {
-          commandId: 'conformance#a23-second',
-        }),
+  conformance(
+    'A23',
+    'a second launch runs to completion beside a live first one, over the same workspace',
+    async () => {
+      const sync = join(work, 'a23');
+      mkdirSync(sync, { recursive: true });
+      const first = run(
+        [
+          `Set-Content -LiteralPath ${quote(join(sync, 'ready'))} -Value ready -NoNewline`,
+          `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
+          `Set-Content -LiteralPath ${quote(join(sync, 'first-done'))} -Value done -NoNewline`,
+        ].join('\n'),
+        { commandId: 'conformance#a23-first' },
       );
+      try {
+        expect(await waitUntil(() => existsSync(join(sync, 'ready')), 30_000)).toBe(true);
+        /* Concurrent launches (README "Sessions"): the second grants the same workspace and ends first. */
+        const second = await run(`Set-Content -LiteralPath ${quote(join(sync, 'second-ran'))} -Value ran -NoNewline`, {
+          commandId: 'conformance#a23-second',
+        });
 
-      /*
-       * The provider answers an overlapping launch `sandbox-unavailable` with nothing started; the desktop's shell
-       * service turns the same overlap into `session-limit` before it reaches the provider (`maxExecutions: 1`).
-       */
-      expect(second).toMatchObject({ status: 'sandbox-unavailable' });
-      expect(JSON.stringify(second)).toMatch(/one sandboxed shell at a time/u);
-      expect(existsSync(join(sync, 'second-ran'))).toBe(false);
-    } finally {
-      writeFileSync(join(sync, 'release'), '');
-      await first.catch(() => undefined);
-    }
-    const ended = await first;
+        expect(second.exitCode, second.stderr).toBe(0);
+        expect(readFileSync(join(sync, 'second-ran'), 'utf8')).toBe('ran');
+        /* The second's restore left the first's grants: it still writes where it was granted. */
+        expect(existsSync(join(sync, 'first-done'))).toBe(false);
+      } finally {
+        writeFileSync(join(sync, 'release'), '');
+        await first.catch(() => undefined);
+      }
+      const ended = await first;
 
-    expect(ended.exitCode, ended.stderr).toBe(0);
-    expect(readFileSync(join(sync, 'first-done'), 'utf8')).toBe('done');
-    /* The limit is about overlap only: once the first settled, the next launch runs. */
-    const after = await run(`Set-Content -LiteralPath ${quote(join(sync, 'after'))} -Value after -NoNewline`);
-
-    expect(after.exitCode, after.stderr).toBe(0);
-    expect(readFileSync(join(sync, 'after'), 'utf8')).toBe('after');
-  });
+      expect(ended.exitCode, ended.stderr).toBe(0);
+      expect(readFileSync(join(sync, 'first-done'), 'utf8')).toBe('done');
+    },
+  );
 
   conformance(
     'A26',
@@ -1345,6 +1595,24 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       }
     },
   );
+
+  const nativeWorkerContext = (): NativeWorkerContext => ({
+    root,
+    helperPath,
+    workerProbe,
+    systemRoot,
+    recordHelperDiagnostic,
+    sddlOf,
+    interfaceAddress,
+    tcpCanary,
+    tcpControl,
+    waitUntil,
+    pause: delay,
+  });
+
+  for (const [id, title, body] of nativeWorkerRows(nativeWorkerContext)) {
+    conformanceWithin(180_000)(id, title, body);
+  }
 
   conformance('W07', 'after every launch, each path the suite touched has exactly its original ACL', async () => {
     expect(sddlOf(aclPaths)).toStrictEqual(aclBaseline);

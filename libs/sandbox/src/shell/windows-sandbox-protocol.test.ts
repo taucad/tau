@@ -10,6 +10,8 @@ import {
   encodeWindowsHostFrame,
   isShellRequirement,
   windowsFramePayloadLimit,
+  windowsExclusiveLaunchRequirement,
+  windowsHelperEnd,
   windowsLaunchSpec,
 } from '#shell/windows-sandbox-protocol.js';
 
@@ -30,6 +32,7 @@ describe('windows sandbox frames', () => {
   it('should encode each host frame with its contract type', () => {
     expect([...encodeWindowsHostFrame({ type: 'start' })]).toStrictEqual([0x02, 0, 0, 0, 0]);
     expect([...encodeWindowsHostFrame({ type: 'terminate' })]).toStrictEqual([0x05, 0, 0, 0, 0]);
+    expect([...encodeWindowsHostFrame({ type: 'close-input' })]).toStrictEqual([0x06, 0, 0, 0, 0]);
     expect([
       ...encodeWindowsHostFrame({
         type: 'input',
@@ -45,6 +48,33 @@ describe('windows sandbox frames', () => {
       columns: 120,
       rows: 40,
     });
+  });
+
+  it('should carry a native worker spec with its digest, stdin and network on the wire as written', () => {
+    const spec = {
+      version: 1,
+      executable: String.raw`C:\Users\person\AppData\Local\Tau\python\pythonw.exe`,
+      executableDigest: `sha256:${'ab'.repeat(32)}`,
+      arguments: ['-I', '-m', 'tau_worker'],
+      workingDirectory: String.raw`C:\Projects\gear\.tau\out`,
+      environment: {},
+      stdio: { kind: 'pipes', input: true },
+      filesystem: {
+        readable: [String.raw`C:\Users\person\AppData\Local\Tau\python`],
+        writable: [String.raw`C:\Projects\gear\.tau\out`],
+        readOnly: [],
+        denied: [],
+      },
+      network: { domains: [] },
+      journal: String.raw`C:\custody\worker.acl.json`,
+    } as const;
+    const frame = encodeWindowsHostFrame({ type: 'spec', spec });
+
+    expect(frame[0]).toBe(0x01);
+    expect(JSON.parse(text(frame.subarray(5)))).toStrictEqual(spec);
+    expect(
+      JSON.parse(text(encodeWindowsHostFrame({ type: 'spec', spec: { ...spec, network: undefined } }).subarray(5))),
+    ).not.toHaveProperty('network');
   });
 
   it('should refuse a frame type that is not one byte', () => {
@@ -151,6 +181,14 @@ describe('windows helper frames', () => {
       type: 'refused',
       refusal: { status: 'sandbox-unavailable', message: 'missing' },
     });
+    expect(
+      decodeWindowsHelperFrame(
+        raw(0x86, { status: 'sandbox-unavailable', requirement: windowsExclusiveLaunchRequirement, message: 'busy' }),
+      ),
+    ).toStrictEqual({
+      type: 'refused',
+      refusal: { status: 'sandbox-unavailable', requirement: 'exclusive-launch', message: 'busy' },
+    });
   });
 
   it('should pass output bytes through untouched', () => {
@@ -238,5 +276,18 @@ describe('windowsLaunchSpec', () => {
       columns: 100,
       rows: 30,
     });
+  });
+});
+
+describe('windowsHelperEnd', () => {
+  it('should name an NTSTATUS a helper dies with before it can report, and leave other exits as they are', () => {
+    expect(windowsHelperEnd(3_221_225_794, undefined)).toMatch(
+      /^exit 3221225794, 0xC0000142 STATUS_DLL_INIT_FAILED: Windows could not start it/u,
+    );
+    expect(windowsHelperEnd(-1_073_741_502, undefined)).toMatch(
+      /^exit -1073741502, 0xC0000142 STATUS_DLL_INIT_FAILED/u,
+    );
+    expect(windowsHelperEnd(9, undefined)).toBe('exit 9');
+    expect(windowsHelperEnd(undefined, 'SIGKILL')).toBe('signal SIGKILL');
   });
 });

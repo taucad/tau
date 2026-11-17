@@ -7,11 +7,13 @@
 // The portable modules exist for the Windows subcommands; on other hosts only their tests use them.
 #![cfg_attr(not(windows), allow(dead_code))]
 
+mod appcontainer;
 mod cli;
 mod cmdline;
 mod frame;
 mod install;
 mod journal;
+mod overlap;
 mod paths;
 mod protocol;
 mod spec;
@@ -30,13 +32,17 @@ fn main() {
             std::process::exit(2);
         }
     };
+    #[cfg(windows)]
+    if let Err(err) = win::util::ensure_system_environment() {
+        eprintln!("tau-windows-sandbox: the system environment cannot be completed: {err}");
+    }
     std::process::exit(dispatch(command));
 }
 
 #[cfg(windows)]
 fn dispatch(command: Command) -> i32 {
     match command {
-        Command::Status => win::setup::status(),
+        Command::Status { quick } => win::setup::status(quick),
         Command::Setup { for_user, proxy_ports } => {
             match win::setup::setup(&win::setup::SetupOptions { for_user, proxy_ports }) {
                 Ok(record) => {
@@ -85,7 +91,7 @@ fn dispatch(command: Command) -> i32 {
 #[cfg(not(windows))]
 fn dispatch(command: Command) -> i32 {
     match command {
-        Command::Status => {
+        Command::Status { .. } => {
             println!("{{\"installed\":false}}");
             0
         }

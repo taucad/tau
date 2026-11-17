@@ -19,6 +19,7 @@ export const windowsHostFrameType = {
   input: 0x03,
   resize: 0x04,
   terminate: 0x05,
+  closeInput: 0x06,
 } as const;
 
 /** Helper-to-host frame types. @public */
@@ -62,16 +63,30 @@ export class WindowsSandboxProtocolError extends Error {
 export type WindowsLaunchSpec = Readonly<{
   version: typeof windowsSandboxProtocolVersion;
   executable: string;
+  /**
+   * `sha256:<64 lowercase hex>` of the executable. Required for an executable outside `%ProgramFiles%` and
+   * `%SystemRoot%` (a native worker's), whose folder must then be readable and never writable; checked when given for
+   * one inside them.
+   */
+  executableDigest?: string | undefined;
   arguments: readonly string[];
   workingDirectory: string;
   environment: Readonly<Record<string, string>>;
-  stdio: Readonly<{ kind: 'pipes' }> | Readonly<{ kind: 'terminal'; columns: number; rows: number }>;
+  /** `input: true` gives a pipes launch a stdin the host writes with `input` frames and ends with `close-input`. */
+  stdio:
+    | Readonly<{ kind: 'pipes'; input?: boolean | undefined }>
+    | Readonly<{ kind: 'terminal'; columns: number; rows: number }>;
   filesystem: Readonly<{
     readable: readonly string[];
     writable: readonly string[];
     readOnly: readonly string[];
     denied: readonly string[];
   }>;
+  /**
+   * The launch's network. Omitted or `{ domains: [] }` (the helper also reads `null` so): none at all (the AppContainer has no network
+   * capability). Named domains are refused with `network-isolation` until the helper has the sandbox proxy.
+   */
+  network?: Readonly<{ domains: readonly string[] }> | undefined;
   /** Where the helper journals each descriptor it changes before it changes it. */
   journal: string;
 }>;
@@ -82,7 +97,8 @@ export type WindowsHostFrame =
   | Readonly<{ type: 'start' }>
   | Readonly<{ type: 'input'; bytes: Uint8Array<ArrayBuffer> }>
   | Readonly<{ type: 'resize'; size: ShellTerminalSize }>
-  | Readonly<{ type: 'terminate' }>;
+  | Readonly<{ type: 'terminate' }>
+  | Readonly<{ type: 'close-input' }>;
 
 /** The helper's `ready` payload (`0x81`). @public */
 export type WindowsHelperReady = Readonly<{
@@ -92,9 +108,16 @@ export type WindowsHelperReady = Readonly<{
   journal: string;
 }>;
 
+/**
+ * The `requirement` of a `sandbox-unavailable` refusal sent while another launch holds the sandbox: nothing changed,
+ * and the same launch may be retried once that one has ended. Match it, never the message. @public
+ */
+export const windowsExclusiveLaunchRequirement = 'exclusive-launch';
+
 /** The helper's `refused` payload (`0x86`); nothing ran. @public */
 export type WindowsHelperRefusal = Readonly<{
   status: 'sandbox-unavailable' | 'unsupported';
+  /** For `unsupported`, what cannot be enforced; for `sandbox-unavailable`, {@link windowsExclusiveLaunchRequirement} or absent. */
   requirement?: string | undefined;
   message: string;
   diagnostic?: string | undefined;
@@ -174,6 +197,9 @@ export const encodeWindowsHostFrame = (frame: WindowsHostFrame): Uint8Array<Arra
     }
     case 'terminate': {
       return encodeWindowsFrame(windowsHostFrameType.terminate);
+    }
+    case 'close-input': {
+      return encodeWindowsFrame(windowsHostFrameType.closeInput);
     }
   }
 };
@@ -395,3 +421,37 @@ export const windowsLaunchSpec = (
   },
   journal: extra.journal,
 });
+
+/**
+ * Exit codes a Windows process can end with before any of its own code runs (NTSTATUS values, as Node reports them),
+ * and what each says about the helper.
+ */
+const windowsProcessFailures: ReadonlyMap<number, string> = new Map([
+  [
+    0xc0_00_01_42,
+    'STATUS_DLL_INIT_FAILED: Windows could not start it, so it could not say why; a window station or desktop that no longer admits the person is the usual cause',
+  ],
+  [0xc0_00_01_35, 'STATUS_DLL_NOT_FOUND: a DLL it needs is missing'],
+  [0xc0_00_00_05, 'STATUS_ACCESS_VIOLATION: it crashed'],
+  [0xc0_00_04_09, 'STATUS_STACK_BUFFER_OVERRUN: it aborted'],
+]);
+
+/**
+ * How a helper that ended without a frame ended: its exit code, in hex with the NTSTATUS name and meaning when it is
+ * one Windows ends a process with before the process can report anything, or the signal.
+ *
+ * @param code - The exit code Node reported, or `undefined` with a signal.
+ * @param signal - The signal Node reported, or `undefined` with a code.
+ * @returns Text for a refusal's message.
+ */
+export const windowsHelperEnd = (code: number | undefined, signal: string | undefined): string => {
+  if (code === undefined) {
+    return `signal ${String(signal)}`;
+  }
+  /* Node may report an NTSTATUS as a negative 32-bit value. */
+  const status = code < 0 ? code + 2 ** 32 : code;
+  const known = windowsProcessFailures.get(status);
+  return known === undefined
+    ? `exit ${String(code)}`
+    : `exit ${String(code)}, 0x${status.toString(16).toUpperCase()} ${known}`;
+};

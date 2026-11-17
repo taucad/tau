@@ -1,7 +1,16 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 // @vitest-environment node
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -261,6 +270,49 @@ describe('createWindowsShellProvider', () => {
     });
   });
 
+  describe('refusals after start', () => {
+    it('should report started only once the helper reports the shell started', async () => {
+      const h = harness('hang');
+      const execution = await prepare(h);
+
+      const outcome = await h.provider.launch(launchOf(execution.executionId));
+
+      expect(outcome.status).toBe('started');
+      expect(h.events().some((event) => event['event'] === 'start')).toBe(true);
+      await pipesOf(outcome).terminate();
+    });
+
+    it('should turn a refusal between start and started into a clean refusal with the runner diagnostic', async () => {
+      const lines: string[] = [];
+      const h = harness('refuse-after-start', { onHelperDiagnostic: (line) => lines.push(line) });
+      const execution = await prepare(h);
+
+      const outcome = await h.provider.launch(launchOf(execution.executionId));
+
+      expect(outcome).toStrictEqual({
+        status: 'sandbox-unavailable',
+        message: 'the shell could not be started',
+        diagnostic: 'spawn: CreateProcessAsUserW (error 87)',
+      });
+      await expect
+        .poll(() => lines)
+        .toStrictEqual(['tau-windows-sandbox runner error: spawn: CreateProcessAsUserW (error 87)']);
+      expect(await finish(h, execution)).toMatchObject({ status: 'stopped' });
+    });
+
+    it('should treat output before started as a protocol violation and start nothing', async () => {
+      const h = harness('output-before-started');
+      const execution = await prepare(h);
+
+      const outcome = await h.provider.launch(launchOf(execution.executionId));
+
+      expect(outcome).toMatchObject({
+        status: 'sandbox-unavailable',
+        message: expect.stringContaining('it sent stdout before started') as unknown,
+      });
+    });
+  });
+
   describe('refusals before start', () => {
     it('should map an unsupported refusal to its requirement without starting anything', async () => {
       const h = harness('refuse-unsupported');
@@ -301,6 +353,16 @@ describe('createWindowsShellProvider', () => {
         message: expect.stringContaining('stopped before it reported') as unknown,
         diagnostic: 'boom: the runner could not be created',
       });
+    });
+
+    it('should hand each helper diagnostic line to the host, the unterminated last one included', async () => {
+      const lines: string[] = [];
+      const h = harness('die-before-ready', { onHelperDiagnostic: (line) => lines.push(line) });
+      const execution = await prepare(h);
+
+      await h.provider.launch(launchOf(execution.executionId));
+
+      await expect.poll(() => lines).toStrictEqual(['boom: the runner could not be created']);
     });
 
     it('should answer sandbox-unavailable when the helper never gets ready', async () => {
@@ -594,27 +656,22 @@ describe('createWindowsShellProvider', () => {
     });
   });
 
-  describe('session serialization', () => {
-    it('should refuse a second launch while one is live and admit it once the first is recovered', async () => {
+  describe('concurrency', () => {
+    it('should run a second launch while one is live', async () => {
       const h = harness('hang');
       const first = await prepare(h);
       const second = await prepare(h);
       const child = pipesOf(await h.provider.launch(launchOf(first.executionId)));
-
-      const refused = await h.provider.launch(launchOf(second.executionId));
-
-      expect(refused).toStrictEqual({
-        status: 'sandbox-unavailable',
-        message: 'Windows runs one sandboxed shell at a time and another one is running; close it, then try again.',
-      });
-      await child.terminate();
-      await finish(h, first);
       h.setScenario('echo');
+
       const again = pipesOf(await h.provider.launch(launchOf(second.executionId)));
+
       await expect(again.exited).resolves.toStrictEqual({ exitCode: 0 });
+      await child.terminate();
+      expect(await finish(h, first)).toMatchObject({ status: 'stopped' });
     });
 
-    it('should refuse a launch while an earlier launch journal is unrestored', async () => {
+    it('should launch beside an earlier launch journal that is unrestored, which recovery still restores', async () => {
       const h = harness('cleanup-failed');
       const first = await prepare(h);
       const child = pipesOf(await h.provider.launch(launchOf(first.executionId)));
@@ -622,15 +679,22 @@ describe('createWindowsShellProvider', () => {
       const second = await prepare(h);
       h.setScenario('echo');
 
-      const refused = await h.provider.launch(launchOf(second.executionId));
+      const again = pipesOf(await h.provider.launch(launchOf(second.executionId)));
+
+      await expect(again.exited).resolves.toStrictEqual({ exitCode: 0 });
+      expect(await finish(h, first)).toMatchObject({ status: 'stopped' });
+    });
+
+    it('should answer the helper exclusive-launch refusal sandbox-unavailable with nothing started', async () => {
+      const h = harness('busy');
+      const first = await prepare(h);
+
+      const refused = await h.provider.launch(launchOf(first.executionId));
 
       expect(refused).toMatchObject({
         status: 'sandbox-unavailable',
-        message: expect.stringContaining('has not finished restoring its folder permissions') as unknown,
+        message: expect.stringContaining('locked for over 120 seconds') as unknown,
       });
-      expect(await finish(h, first)).toMatchObject({ status: 'stopped' });
-      const again = pipesOf(await h.provider.launch(launchOf(second.executionId)));
-      await expect(again.exited).resolves.toStrictEqual({ exitCode: 0 });
     });
   });
 
@@ -783,12 +847,15 @@ describe('readWindowsSandboxStatus', () => {
         env: { ...process.env, TAU_FIXTURE_SCENARIO: scenario },
       });
 
-  it('should read an install record as installed', async () => {
-    await expect(
-      readWindowsSandboxStatus('helper.exe', {
-        spawnHelper: statusSpawn('installed'),
-      }),
-    ).resolves.toStrictEqual({ installed: true });
+  it('should read an install record as installed, asking only the quick question', async () => {
+    const asked: string[][] = [];
+    const spawnHelper: WindowsSandboxHelperSpawn = (arguments_) => {
+      asked.push([...arguments_]);
+      return statusSpawn('installed')(arguments_);
+    };
+
+    await expect(readWindowsSandboxStatus('helper.exe', { spawnHelper })).resolves.toStrictEqual({ installed: true });
+    expect(asked).toStrictEqual([['status', '--quick']]);
   });
 
   it('should read an absent install record as not installed', async () => {
@@ -801,11 +868,51 @@ describe('readWindowsSandboxStatus', () => {
     });
   });
 
-  it('should read a helper that cannot run as not installed', async () => {
+  it('should read a helper that cannot run as not installed, and say why', async () => {
+    const status = await readWindowsSandboxStatus(join(tmpdir(), 'tau-no-such-helper.exe'), {
+      environment: {},
+    });
+
+    expect(status.installed).toBe(false);
+    expect(status.diagnostic).toMatch(/^the helper could not be started: .*ENOENT/u);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    "should give the helper the Windows directory's drive as SystemDrive when the host passes none",
+    async () => {
+      /* A stand-in helper that reads as installed only when it was given the drive and nothing else of the host's. */
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), 'tau-status-')));
+      const helper = join(directory, 'helper');
+      writeFileSync(
+        helper,
+        `#!/bin/sh\nif [ "$SystemDrive" = "D:" ] && [ -z "$ProgramData" ]; then printf '%s' '{"accountSid":"S-1-5-21-1"}'; else printf '%s' "{\\"installed\\":false}"; fi\n`,
+      );
+      chmodSync(helper, 0o755);
+      try {
+        await expect(
+          readWindowsSandboxStatus(helper, { environment: { SystemRoot: String.raw`d:\Windows`, HOME: '/nowhere' } }),
+        ).resolves.toStrictEqual({ installed: true });
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('should carry the helper stderr when it cannot read its install record', async () => {
     await expect(
-      readWindowsSandboxStatus(join(tmpdir(), 'tau-no-such-helper.exe'), {
-        environment: {},
-      }),
-    ).resolves.toStrictEqual({ installed: false });
+      readWindowsSandboxStatus('helper.exe', { spawnHelper: statusSpawn('status-unreadable') }),
+    ).resolves.toStrictEqual({
+      installed: false,
+      diagnostic: 'stderr: tau-windows-sandbox status: Access is denied. (os error 5)',
+    });
+  });
+
+  it('should carry the exit code, the output and stderr of a helper that failed', async () => {
+    await expect(
+      readWindowsSandboxStatus('helper.exe', { spawnHelper: statusSpawn('status-crash') }),
+    ).resolves.toStrictEqual({
+      installed: false,
+      diagnostic: 'exit 3; its output is not JSON: "{\\"accountSid\\":"; stderr: thread main panicked',
+    });
   });
 });

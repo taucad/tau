@@ -39,15 +39,15 @@ afterEach(async () => {
 describe('PowerShell module analysis cache store', () => {
   it('keeps one folder per shell digest and store layout', () => {
     expect(powerShellModuleCacheLocation(store, executable)).toStrictEqual({
-      directory: join(store, 'v1-ab12'),
-      file: join(store, 'v1-ab12', 'ModuleAnalysisCache'),
+      directory: join(store, 'v2-ab12'),
+      file: join(store, 'v2-ab12', 'ModuleAnalysisCache'),
     });
     expect(
       powerShellModuleCacheLocation(store, {
         ...executable,
         digest: 'sha256:cd34',
       }).directory,
-    ).not.toBe(join(store, 'v1-ab12'));
+    ).not.toBe(join(store, 'v2-ab12'));
   });
 
   it('copies what the build wrote into a file of its own, leaving no staging folder', async () => {
@@ -59,7 +59,7 @@ describe('PowerShell module analysis cache store', () => {
 
     await expect(readFile(cache.file, 'utf8')).resolves.toBe('analysis');
     await expect(builtPowerShellModuleCache(cache)).resolves.toBe(true);
-    await expect(readdir(store)).resolves.toStrictEqual(['v1-ab12']);
+    await expect(readdir(store)).resolves.toStrictEqual(['v2-ab12']);
     /* The copy is not the build's file: changing that one later changes nothing in the store. */
     await writeFile(written, 'changed');
     await expect(readFile(cache.file, 'utf8')).resolves.toBe('analysis');
@@ -74,7 +74,7 @@ describe('PowerShell module analysis cache store', () => {
     await expect(adoptPowerShellModuleCache(written, cache)).resolves.toBe(true);
 
     await expect(readFile(cache.file, 'utf8')).resolves.toBe('first');
-    await expect(readdir(store)).resolves.toStrictEqual(['v1-ab12']);
+    await expect(readdir(store)).resolves.toStrictEqual(['v2-ab12']);
   });
 
   it('replaces a cache folder left without its file', async () => {
@@ -119,8 +119,8 @@ describe('PowerShell module analysis cache store', () => {
 
 describe('PowerShell module analysis cache schedule', () => {
   const cache: PowerShellModuleCache = {
-    directory: 'C:\\cache\\v1-ab12',
-    file: 'C:\\cache\\v1-ab12\\ModuleAnalysisCache',
+    directory: 'C:\\cache\\v2-ab12',
+    file: 'C:\\cache\\v2-ab12\\ModuleAnalysisCache',
   };
   /** A build that settles only when told to, or with `undefined` when stopped. */
   const controlled = () => {

@@ -50,6 +50,19 @@ const die = (code: number): void => {
 const text = (bytes: Uint8Array<ArrayBuffer>): string => Buffer.from(bytes).toString('utf8');
 
 const status = (): void => {
+  if (scenario === 'status-unreadable') {
+    /* The helper's own answer when it cannot read its install record. */
+    process.stderr.write('tau-windows-sandbox status: Access is denied. (os error 5)\n');
+    process.stdout.write(JSON.stringify({ installed: false }));
+    leave(0);
+    return;
+  }
+  if (scenario === 'status-crash') {
+    process.stdout.write('{"accountSid":');
+    process.stderr.write('thread main panicked\n');
+    leave(3);
+    return;
+  }
   process.stdout.write(
     scenario === 'installed'
       ? JSON.stringify({
@@ -100,6 +113,25 @@ const launch = (): void => {
 
   /** What the shell does once the start barrier opens. */
   const afterStart = (): void => {
+    if (scenario === 'refuse-after-start') {
+      /* The runner could not start the shell: the helper restores, logs why and refuses, never `started`. */
+      ended = true;
+      if (journal !== undefined) {
+        rmSync(journal, { force: true });
+      }
+      process.stderr.write('tau-windows-sandbox runner error: spawn: CreateProcessAsUserW (error 87)\n');
+      json(0x86, {
+        status: 'sandbox-unavailable',
+        message: 'the shell could not be started',
+        diagnostic: 'spawn: CreateProcessAsUserW (error 87)',
+      });
+      leave(0);
+      return;
+    }
+    if (scenario === 'output-before-started') {
+      frame(0x82, 'too soon');
+      return;
+    }
     json(0x87, { shellPid: process.pid });
     switch (scenario) {
       case 'echo': {
@@ -165,6 +197,16 @@ const launch = (): void => {
             status: 'unsupported',
             requirement: 'filesystem-mask',
             message: 'a denied path cannot be masked',
+          });
+          ended = true;
+          leave(0);
+          return;
+        }
+        case 'busy': {
+          json(0x86, {
+            status: 'sandbox-unavailable',
+            requirement: 'exclusive-launch',
+            message: 'another sandboxed launch kept its folder permissions locked for over 120 seconds',
           });
           ended = true;
           leave(0);

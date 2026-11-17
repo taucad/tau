@@ -41,17 +41,21 @@
       "cache": true,
       "inputs": [
         "{projectRoot}/windows-sandbox/src/**/*",
+        "{projectRoot}/windows-sandbox/examples/**/*",
         "{projectRoot}/windows-sandbox/Cargo.toml",
         "{projectRoot}/windows-sandbox/Cargo.lock",
         "{projectRoot}/windows-sandbox/rust-toolchain.toml"
       ],
-      "outputs": ["{projectRoot}/windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe"],
+      "outputs": [
+        "{projectRoot}/windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe",
+        "{projectRoot}/windows-sandbox/target/x86_64-pc-windows-msvc/release/examples/tau-worker-probe.exe"
+      ],
       "metadata": {
-        "description": "Build the Windows shell sandbox helper (windows-sandbox/, Rust) as tau-windows-sandbox.exe for x86_64-pc-windows-msvc. Windows only: it links against the MSVC toolchain. Elsewhere use `cargo check --target x86_64-pc-windows-msvc` in the crate."
+        "description": "Build the Windows shell sandbox helper (windows-sandbox/, Rust) as tau-windows-sandbox.exe for x86_64-pc-windows-msvc, and the conformance row's stand-in native worker (examples/tau-worker-probe.exe, never installed). Windows only: it links against the MSVC toolchain. Elsewhere use `cargo check --target x86_64-pc-windows-msvc` in the crate."
       },
       "options": {
         "cwd": "{workspaceRoot}/libs/sandbox/windows-sandbox",
-        "command": "cargo build --release --locked --target x86_64-pc-windows-msvc"
+        "command": "cargo build --release --locked --target x86_64-pc-windows-msvc --bin tau-windows-sandbox --example tau-worker-probe"
       }
     },
     "test:windows-sandbox": {

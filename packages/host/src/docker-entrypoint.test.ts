@@ -108,7 +108,10 @@ describe('docker-entrypoint.sh', () => {
       const daemonLines = await readFile(join(root, 'daemon.txt'), 'utf8');
       const [token, ...argv] = daemonLines.trimEnd().split('\n');
       expect(token).toBe(pushCredential);
-      expect(argv).toEqual(expect.arrayContaining(['serve', `--workspace=${clone}`, `--relay=${apiUrl}`]));
+      /* The entrypoint is a POSIX script: it appends the project with `/` whatever the workspace's own spelling. */
+      expect(argv).toEqual(
+        expect.arrayContaining(['serve', `--workspace=${join(root, 'workspace')}/${projectId}`, `--relay=${apiUrl}`]),
+      );
       /* The entrypoint alone makes a cloud host: the agent channel is on without
        * an image `ENV`, and a revoked host exits instead of pairing (FX7 D3). */
       expect(argv).toEqual(expect.arrayContaining(['--agentPort=0', '--no-pair']));

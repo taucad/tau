@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -1450,7 +1450,10 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
 
       /* The store is this project's own `.git`, and git itself says so. */
       expect(
-        execFileSync('git', ['-C', workspaceRoot, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(),
+        /* Git names it with `/` on Windows; `resolve` spells it as this platform does. */
+        resolve(
+          execFileSync('git', ['-C', workspaceRoot, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(),
+        ),
       ).toBe(await realpath(workspaceRoot));
       /* With the two generated, versioned files beside it (S16, S35, D24). */
       expect(await readFile(join(workspaceRoot, '.gitignore'), 'utf8')).toContain('/.tau/runs/');

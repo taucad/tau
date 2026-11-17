@@ -31,16 +31,25 @@ type WatchListener = nodeFs.WatchListener<string>;
 /* Every listener the host hands `fs.watch`, so a row can speak for the platform, and the path it watches. */
 const watched = vi.hoisted((): WatchListener[] => []);
 const watchedPaths = vi.hoisted((): string[] => []);
+/* What the platform reported, in order, so a failed row names what the watcher saw. */
+const reported = vi.hoisted((): string[] => []);
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof nodeFs>();
   const recorded = (...arguments_: Parameters<typeof nodeFs.watch>): ReturnType<typeof nodeFs.watch> => {
     const listener = arguments_.at(-1);
     watchedPaths.push(String(arguments_[0]));
-    if (typeof listener === 'function') {
-      watched.push(listener as WatchListener);
+    if (typeof listener !== 'function') {
+      return actual.watch(...arguments_);
     }
-    return actual.watch(...arguments_);
+    watched.push(listener as WatchListener);
+    const report: WatchListener = (event, filename) => {
+      reported.push(`${event}:${String(filename)}`);
+      (listener as WatchListener)(event, filename);
+    };
+    const watcher = actual.watch(...(arguments_.slice(0, -1) as [string, nodeFs.WatchOptions]), report);
+    watcher.on('error', (error) => reported.push(`error:${String(error)}`));
+    return watcher;
   };
   return { ...actual, watch: recorded };
 });
@@ -53,6 +62,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
   watched.length = 0;
   watchedPaths.length = 0;
+  reported.length = 0;
 });
 
 const fileCount = 40;
@@ -117,7 +127,7 @@ describe('the disk host’s change feed (E1)', () => {
     /* Asked at once: the watcher's event for that write is still on its way. */
     const head = await host.save();
 
-    expect(host.reads).toEqual(['f7.txt']);
+    expect(host.reads, reported.join(' ')).toEqual(['f7.txt']);
     expect(await host.contentAt(head, 'f7.txt')).toBe('edited\n');
   }, 60_000);
 

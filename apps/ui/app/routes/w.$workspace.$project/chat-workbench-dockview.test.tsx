@@ -2273,7 +2273,7 @@ describe('workbench adapter record apply (A0.3)', () => {
 
   // A0.3 row 3, Y7/I10: a record apply waits in `pendingRecordNodeRef` for its file to open. The person rearranges
   // the panes before it lands; when the file opens, the late apply must not revert the person's arrangement.
-  // expected-failure: @rifont until 2026-12-15
+  // Expected-failure: @rifont until 2026-12-15
   it.fails("I10: should not land a record apply computed before the person's edit over that edit", () => {
     const dockview = createTestDockview([panel('utility')]);
     const subscribe = () => ({ dispose: vi.fn() });

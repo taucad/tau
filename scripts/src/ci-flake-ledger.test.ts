@@ -345,13 +345,13 @@ describe('scanExpectedFailureMarkers', () => {
   const fails = ['', 'fails('].join('.');
   const text = [
     '/** Rows stay `it.fails` until fixed. */',
-    '// expected-failure: @rifont until 2026-12-01',
+    '// Expected-failure: @rifont until 2026-12-01',
     `it${fails}'I10: holds', () => {});`,
     `test${fails}'unlabelled', () => {});`,
-    '// expected-failure: intended, proves the guard fails a test',
+    '// Expected-failure: intended, proves the guard fails a test',
     `it${fails}'guard', () => {});`,
     'knownDefect("F6", {',
-    '  // expected-failure: @rifont until 2026-11-01',
+    '  // Expected-failure: @rifont until 2026-11-01',
     `  expectedFailure: ${String(true)},`,
     '  expectedFailure: false,',
     '});',

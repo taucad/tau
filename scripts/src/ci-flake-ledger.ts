@@ -366,7 +366,7 @@ export const expiredLedgerEntries = (ledger: Ledger, now: Date): LedgerEntry[] =
 /**
  * An expected-failure marker in a test source: a Vitest `it.fails` / `test.fails`, or a known-defect row's
  * `expectedFailure: true` (ui-e2e `cloudDefectRow`, `knownDefectRows`). Each must carry, on the line directly
- * above it, a comment `expected-failure: @<owner> until YYYY-MM-DD`.
+ * above it, a comment `// Expected-failure: @<owner> until YYYY-MM-DD` (capitalised for `capitalized-comments`).
  */
 export type ExpectedFailureMarker = {
   readonly path: string;
@@ -374,7 +374,7 @@ export type ExpectedFailureMarker = {
   readonly owner?: string;
   readonly until?: string;
   /**
-   * `// expected-failure: intended, <reason>`: the failure is the behaviour under test (a test of a test helper
+   * `// Expected-failure: intended, <reason>`: the failure is the behaviour under test (a test of a test helper
    * that must fail the test it guards), not a standing defect, so it has no owner or expiry.
    */
   readonly intended?: true;
@@ -382,8 +382,8 @@ export type ExpectedFailureMarker = {
 
 /** `it.fails(`, `test.fails(`, `it.runIf(x).fails(`, or a known-defect row's `expectedFailure: true`. */
 const markerSite = /(?:\.fails\s*\(|\bexpectedFailure:\s*true\b)/u;
-const markerLabel = /expected-failure:\s*@([A-Za-z0-9-]+)\s+until\s+(\d{4}-\d{2}-\d{2})/u;
-const intendedLabel = /expected-failure:\s*intended,\s*\S/u;
+const markerLabel = /Expected-failure:\s*@([A-Za-z0-9-]+)\s+until\s+(\d{4}-\d{2}-\d{2})/u;
+const intendedLabel = /Expected-failure:\s*intended,\s*\S/u;
 /** A comment or JSDoc line, so a mention of `it.fails` in prose is not a marker. */
 const commentLine = /^\s*(?:\/\/|\/\*|\*)/u;
 

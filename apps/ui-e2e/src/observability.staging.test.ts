@@ -193,7 +193,7 @@ const sentryRead = async (path: string, token: string): Promise<unknown> => {
 };
 
 describe('R9 desktop boot signals on staging (T-R9.3)', () => {
-  // expected-failure: @rifont until 2026-12-15
+  // Expected-failure: @rifont until 2026-12-15
   it.fails('should receive one file_service.start_failed and one desktop-boot-unhealthy for the release with no path and fire both alerts', async () => {
     const token = process.env['SENTRY_E2E_READ_TOKEN'] ?? '';
     expect(Boolean(token), 'Configure staging SENTRY_E2E_READ_TOKEN').toBe(true);

@@ -3,7 +3,7 @@
  *
  * A marker is a Vitest `it.fails` / `test.fails`, or a known-defect row's `expectedFailure: true` (ui-e2e
  * `cloudDefectRow`, `knownDefectRows`). The line directly above it must read
- * `// expected-failure: @<owner> until YYYY-MM-DD`, no more than 28 days ahead. The weekly CI health report
+ * `// Expected-failure: @<owner> until YYYY-MM-DD`, no more than 28 days ahead. The weekly CI health report
  * (`ci-queue-health-cli.ts`) raises a marker or a `flake-ledger.json` entry once its day has passed; this check
  * only holds the shape, and a label it accepts once it keeps accepting.
  *
@@ -31,7 +31,7 @@ const main = (): number => {
   const markers = scanExpectedFailureMarkers(files);
   const problems = unlabelledMarkers(markers).map(
     (marker) =>
-      `${marker.path}:${marker.line}: an expected failure needs "// expected-failure: @<owner> until YYYY-MM-DD" on the line above it`,
+      `${marker.path}:${marker.line}: an expected failure needs "// Expected-failure: @<owner> until YYYY-MM-DD" on the line above it`,
   );
   problems.push(
     ...overlongMarkers(markers, new Date()).map(

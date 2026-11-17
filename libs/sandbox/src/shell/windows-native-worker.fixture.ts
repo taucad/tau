@@ -529,3 +529,34 @@ export const nativeWorkerRows = (
     async () => crashRecoveryConformance(context()),
   ],
 ];
+
+/** The person's GUI session as a process of theirs sees it: what every launch must leave unchanged. */
+export type PersonSession = Readonly<{
+  /** The window station's DACL, as SDDL. */
+  station: string;
+  /** The thread desktop's DACL, as SDDL. */
+  desktop: string;
+  /** Whether the process could create a window on that desktop. */
+  window: boolean;
+  windowError?: string | undefined;
+}>;
+
+/**
+ * Start the probe as the person, outside any sandbox, and read their session: the window station's and desktop's DACLs
+ * and whether a window can be created. Starting it at all proves `user32` still initialises for a new process of
+ * theirs; a window station that no longer admits them ends it with `STATUS_DLL_INIT_FAILED` before it answers.
+ *
+ * @param workerProbe - The built probe.
+ * @returns The session as the probe read it.
+ */
+export const personSession = (workerProbe: string): PersonSession => {
+  const run = spawnSync(workerProbe, [], { input: '{"op":"session"}\n', encoding: 'utf8', timeout: 30_000 });
+  const reply = run.stdout.split('\n')[0] ?? '';
+  assert.ok(
+    run.status === 0 && reply.startsWith('{'),
+    `a process of the person's could not start or answer (status ${String(run.status)}, ${String(run.error)}): ${run.stderr}`,
+  );
+  const answer = JSON.parse(reply) as { ok: boolean; error?: string; value?: PersonSession };
+  assert.ok(answer.ok && answer.value !== undefined, answer.error);
+  return answer.value;
+};

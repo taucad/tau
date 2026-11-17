@@ -48,6 +48,29 @@ export const loadProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
   return pending;
 };
 
+/**
+ * The session module focus waits for as it opens a project; once it has loaded, the layout that project will mount once
+ * live is warmed through it (STO-25 SP5), so the layout's chunk graph loads while the session starts instead of after
+ * it. The warm-up is the session module's own export, so this module, which the app runtime imports, names no layout
+ * and carries none of their preload lists (G3). A link's intent warms only the shell ({@link warmProjectWorkspace}).
+ *
+ * @returns The workspace shell import, as {@link loadProjectWorkspace} shares it.
+ */
+// oxlint-disable-next-line @typescript-eslint/promise-function-async -- the shared tagged promise itself, as `loadProjectWorkspace` returns it.
+export const openProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
+  const shell = loadProjectWorkspace();
+  // async-iife: bootstrap -- a hint after the shell; focus waits on the shell alone and the route reports its failure.
+  void (async () => {
+    try {
+      const workspace = await shell;
+      workspace.warmWorkspaceLayout();
+    } catch {
+      // A failed shell is the route's to report; the warm-up itself never throws.
+    }
+  })();
+  return shell;
+};
+
 /** Start the workspace shell import when a project link shows intent or a project route mounts. */
 export const warmProjectWorkspace = (): void => {
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- absent during SSR

@@ -21,8 +21,8 @@ import {
   resetToTauDefault,
   viewDefaultCopy,
   viewDefaultsInfo,
-} from '#components/settings/viewer/viewer-settings-copy.js';
-import type { ViewDefaultLeaf } from '#components/settings/viewer/viewer-settings-copy.js';
+} from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
+import type { ViewDefaultLeaf } from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
 import type { SectionWriteResult } from '#preferences/section-store.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
 

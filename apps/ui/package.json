@@ -86,6 +86,7 @@
     "@taucad/replicad": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/settings-ui": "workspace:*",
     "@taucad/share": "workspace:*",
     "@taucad/skills": "workspace:*",
     "@taucad/slicer": "workspace:*",

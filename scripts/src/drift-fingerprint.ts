@@ -39,6 +39,7 @@ export const runnerWorkflows: Readonly<Record<string, readonly DriftWorkflow[]>>
   'ubuntu-24.04-arm': ['native-hosts.yml'],
   'macos-26': ['shell-conformance.yml'],
   'macos-26-intel': ['shell-conformance.yml', 'native-hosts.yml'],
+  'windows-2025': ['shell-conformance.yml'],
 };
 
 /** The stock Linux guests of the shell rows; their packages feed `shell-conformance.yml` only. */

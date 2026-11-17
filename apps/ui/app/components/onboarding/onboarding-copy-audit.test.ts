@@ -27,8 +27,8 @@ import { kernelConfigurations } from '@taucad/types/constants';
 import * as setupCopy from '#components/onboarding/setup-copy.js';
 import * as tourCopy from '#components/tour/tour-copy.js';
 import type { TourCopyInput } from '#components/tour/tour-copy.js';
-import * as viewerSettingsCopy from '#components/settings/viewer/viewer-settings-copy.js';
-import { setupAnswersCopy } from '#components/settings/setup-answers-copy.js';
+import * as viewerSettingsCopy from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
+import { setupAnswersCopy } from '@taucad/settings-ui/components/settings/setup-answers-copy';
 
 /** One rendered string and where it came from. */
 type CopyString = Readonly<{ path: string; text: string }>;

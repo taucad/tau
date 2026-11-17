@@ -4,9 +4,15 @@ import { tauMcpKernelProfile } from '@taucad/chat/prompts';
 
 /**
  * The L2 tasks of the automatic kernel selection eval (blueprint AKS-3b, Appendix E): eight full turns on the host tool
- * registry `tau mcp` builds, each judged by a GeoSpec oracle the agent never sees. L1 asks which kernel a turn
- * chooses; L2 asks whether the chosen kernel then succeeds. Two tasks are computational engineering. Zoo is excluded,
- * because its benchmarking terms are unchecked (Appendix F), so the host is the `tau mcp` profile, which has no Zoo.
+ * registry `tau mcp` builds, each judged by a GeoSpec oracle the agent never sees, and a ninth whose model is two files.
+ * L1 asks which kernel a turn chooses; L2 asks whether the chosen kernel then succeeds. Two tasks are computational
+ * engineering. Zoo is excluded, because its benchmarking terms are unchecked (Appendix F), so the host is the
+ * `tau mcp` profile, which has no Zoo.
+ *
+ * The ninth task asks for a library file that renders on its own and a main file that uses it, and for the library to
+ * be checked first. An entry-less project adopts the first model `evaluate_model` renders or `test_model` loads (D3),
+ * so a turn that checks the library before rendering its entry adopts the library, and the oracle judges a single
+ * tooth instead of the comb. It measures the prompt's entry-adoption sentence.
  *
  * Each oracle states the request's own numbers and nothing kernel-specific, so any kernel that meets the request
  * passes. `reference` and `wrong` are the instrument's own proof: the reference model, written in one acceptable
@@ -40,6 +46,8 @@ export type L2Task = Readonly<{
   oracle: L2Oracle;
   reference: L2ModelFile;
   wrong: L2ModelFile;
+  /** A library file the reference and wrong entries use, written before them; it renders on its own as a part. */
+  library?: L2ModelFile;
 }>;
 
 /** The kernels a standalone `tau mcp` host runs: every catalog kernel but Zoo. */
@@ -71,7 +79,7 @@ const wrongPicovoxel: L2ModelFile = {
   kernel: 'picovoxel',
 };
 
-/** The eight tasks, in family order. @public */
+/** The nine tasks, in family order. @public */
 export const l2Tasks: readonly L2Task[] = [
   {
     id: 'l2-u1-spacer',
@@ -111,6 +119,30 @@ export const l2Tasks: readonly L2Task[] = [
       kernel: 'openscad',
     },
     wrong: wrongOpenscad(),
+  },
+  {
+    id: 'l2-u1-cable-comb',
+    family: 'U1',
+    prompt:
+      'A desk cable comb to print, split into two files: a library file defining one tooth, a 4 × 4 mm square post 15 mm tall, that shows a single tooth when opened on its own, and a main file that uses it to stand five teeth on top of a 60 × 12 × 3 mm base lying on the XY plane, 12 mm apart along X and centred on the base. Check the tooth on its own first, then the whole comb.',
+    acceptable: acceptableIn('U1'),
+    oracle: {
+      boundingBox: { size: { x: 60, y: 12, z: 18 }, tolerance: 0.3 },
+      volume: { value: 3360, relativeTolerance: 0.01 },
+      singlePiece: true,
+      watertight: true,
+    },
+    reference: {
+      path: 'main.scad',
+      source: 'use <tooth.scad>\n\ncube([60, 12, 3]);\nfor (i = [0 : 4]) translate([4 + 12 * i, 4, 3]) tooth();\n',
+      kernel: 'openscad',
+    },
+    wrong: wrongOpenscad(),
+    library: {
+      path: 'tooth.scad',
+      source: 'module tooth() {\n  cube([4, 4, 15]);\n}\n\ntooth();\n',
+      kernel: 'openscad',
+    },
   },
   {
     id: 'l2-u2-open-box',

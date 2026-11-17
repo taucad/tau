@@ -7,8 +7,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
 import type { CreateTauAgentHostOptions } from '#host/tau-agent-host.js';
-import { createMemoryLogFile, hostOptions, readLog, tools } from '#host/tau-agent-host.fixture.js';
-import type { MemoryLogFile } from '#host/tau-agent-host.fixture.js';
+import { createMemoryLogFile, hostOptions, readLog, seedLog, tools } from '#host/tau-agent-host.fixture.js';
+import type { MemoryLogFile, SeededLogEvent } from '#host/tau-agent-host.fixture.js';
 import { emptyChatLedger, foldChatLedger, unresolvedInvocations } from '#log/chat-ledger.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 import { isResumableRunFailure } from '#log/resumable.js';
@@ -318,5 +318,89 @@ describe('per-run billing mode from the deployment answer', () => {
     ]);
     expect(lifecycleOf(events, 'run-new')[0]).toMatchObject({ state: 'admitted', deployment: 'funded' });
     expect(unresolvedInvocations(foldChatLedger(emptyChatLedger, events))).toEqual([]);
+  });
+
+  /**
+   * A run that ended resumably with every call it made shown, so no attempt is left to resolve: what Resume reopens
+   * depends on the recorded mode alone.
+   *
+   * @param runId - The run.
+   * @param modes - The `deployment` of its admitted row, then of its running row (`undefined` records none).
+   */
+  const shownRun = (runId: string, modes: readonly [string | undefined, string | undefined]): SeededLogEvent[] => [
+    { type: 'message.appended', runId, message: { id: `turn-${runId}`, role: 'user', content: 'Say hello.' } },
+    {
+      type: 'run.lifecycle',
+      runId,
+      state: 'admitted',
+      ...(modes[0] === undefined ? {} : { deployment: modes[0] }),
+    },
+    {
+      type: 'run.lifecycle',
+      runId,
+      state: 'running',
+      ...(modes[1] === undefined ? {} : { deployment: modes[1] }),
+    },
+    {
+      type: 'run.lifecycle',
+      runId,
+      state: 'failed',
+      detail: { message: 'Tau model gateway request failed.', code: 'NETWORK_ERROR' },
+    },
+  ];
+
+  it('refuses to resume a funded run on a transport that cannot fund it, with no call made (I1, I3)', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, shownRun('run-shown', ['funded', undefined]));
+    const gateway = fakeGateway(['plain']);
+    const plain = createGatewayModelTransport({ baseUrl: 'https://api.example/', fetch: gateway.fetch });
+    const host = hostOver({ file, transport: plain, idPrefix: 'mismatch' });
+    try {
+      await host.resume('chat-shown');
+      const snapshot = await host.snapshot('chat-shown');
+      expect(snapshot).toMatchObject({ state: 'failed', failure: { code: 'DEPLOYMENT_UNKNOWN' } });
+      expect(snapshot.failure && isResumableRunFailure(snapshot.failure)).toBe(true);
+    } finally {
+      await host.close();
+    }
+    expect(gateway.fetch).not.toHaveBeenCalled();
+  });
+
+  it('refuses every Resume of a run recorded under a mode this build cannot read', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, shownRun('run-future', ['metered', undefined]));
+    const gateway = fakeGateway([]);
+    const deployment = vi.fn(async (): Promise<DeploymentModeAnswer> => 'funded');
+    const host = hostOver({ file, transport: unifiedTransport(gateway, deployment), idPrefix: 'future' });
+    try {
+      for (const _ of [1, 2]) {
+        // oxlint-disable-next-line no-await-in-loop -- one Resume after the other.
+        await host.resume('chat-future');
+        // oxlint-disable-next-line no-await-in-loop -- as above.
+        const snapshot = await host.snapshot('chat-future');
+        expect(snapshot).toMatchObject({ state: 'failed', failure: { code: 'DEPLOYMENT_UNKNOWN' } });
+        expect(snapshot.failure?.message).toMatch(/update Tau/u);
+      }
+    } finally {
+      await host.close();
+    }
+    expect(deployment).not.toHaveBeenCalled();
+    expect(gateway.fetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the first mode a run recorded when a later row names another (I3)', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, shownRun('run-first', ['funded', 'unfunded']));
+    const gateway = fakeGateway(['funded']);
+    const host = hostOver({ file, transport: unifiedTransport(gateway, async () => 'unfunded'), idPrefix: 'first' });
+    try {
+      await host.resume('chat-first');
+      await expect(host.snapshot('chat-first')).resolves.toMatchObject({ state: 'completed' });
+    } finally {
+      await host.close();
+    }
+    const events = await readLog(file);
+    expect(rowsOf(events, 'model.invocation-prepared', 'run-first')).toMatchObject([{ attemptId: 'run-first:2:0' }]);
+    expect(rowsOf(events, 'model.invocation-bound', 'run-first')).toHaveLength(1);
   });
 });

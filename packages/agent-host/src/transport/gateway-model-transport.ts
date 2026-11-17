@@ -290,9 +290,11 @@ export type GatewayBillingOptions = {
   /**
    * The deployment answer for this transport's API origin, asked at a run's admission. The host owns fetching and
    * caching it; `unfunded` only for an explicit answer (a `funded: false` body or a `404` for the route, I2), and
-   * `unknown` for a timeout, a `5xx`, a malformed body or a refused connection, which ends the run (I1).
+   * `unknown` for a timeout, a `5xx`, a malformed body or a refused connection, which ends the run (I1). The signal
+   * aborts once the run is stopped or the transport's 10 s bound passes; the answer is then `unknown` whatever the port
+   * does.
    */
-  readonly deployment: () => Promise<DeploymentModeAnswer>;
+  readonly deployment: (signal: AbortSignal) => Promise<DeploymentModeAnswer>;
   /**
    * The account the gateway charges, read from the host's credential port on every prepare (W6 RH-S6; W11 GI-Q6).
    * Absent or `undefined`, the host cannot check an attempt's account.
@@ -1785,6 +1787,47 @@ const fundedTransport = (
   },
 });
 
+/** A run's admission waits on the deployment answer, so the transport bounds it; past it the answer is `unknown` (I1). */
+const deploymentAnswerTimeout = 10_000;
+
+/**
+ * Ask the host's deployment port once, bounded, and read only the two modes as known (I1, I2).
+ *
+ * @param deployment - The host's port.
+ * @param signal - The run's stop, when its owner has one.
+ * @returns The mode, or `unknown`.
+ */
+const resolveDeployment = async (
+  deployment: GatewayBillingOptions['deployment'],
+  signal: AbortSignal | undefined,
+): Promise<DeploymentModeAnswer> => {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => {
+    deadline.abort(new DOMException('The deployment answer timed out.', 'TimeoutError'));
+  }, deploymentAnswerTimeout);
+  const bounded = signal === undefined ? deadline.signal : AbortSignal.any([signal, deadline.signal]);
+  try {
+    if (bounded.aborted) {
+      return 'unknown';
+    }
+    const ended = new Promise<'unknown'>((resolve) => {
+      bounded.addEventListener(
+        'abort',
+        () => {
+          resolve('unknown');
+        },
+        { once: true },
+      );
+    });
+    const answer: unknown = await Promise.race([deployment(bounded), ended]);
+    return answer === 'funded' || answer === 'unfunded' ? answer : 'unknown';
+  } catch {
+    return 'unknown';
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const deploymentUnknown = (message: string): Error =>
   Object.assign(new Error(message), { code: 'DEPLOYMENT_UNKNOWN' satisfies RefusalCode });
 
@@ -1817,14 +1860,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
       throw deploymentUnknown('This model call was made outside a run whose billing mode is known.');
     },
     deployment: {
-      resolve: async () => {
-        try {
-          const answer: unknown = await billing.deployment();
-          return answer === 'funded' || answer === 'unfunded' ? answer : 'unknown';
-        } catch {
-          return 'unknown';
-        }
-      },
+      resolve: async (signal) => resolveDeployment(billing.deployment, signal),
       forRun: (mode) => (mode === 'funded' ? funded : unfunded),
     },
   };

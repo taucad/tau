@@ -46,6 +46,9 @@ const drain = async (stream: AsyncIterable<ModelStreamEvent>): Promise<ModelStre
   return events;
 };
 
+/** A deployment port that never answers. */
+const neverSettles = async (): Promise<DeploymentModeAnswer> => Promise.withResolvers<DeploymentModeAnswer>().promise;
+
 const unified = (
   deployment: () => Promise<DeploymentModeAnswer>,
   fetch: typeof globalThis.fetch = vi.fn(async () => sse({ 'x-tau-operation-id': 'operation-1' })),
@@ -76,6 +79,27 @@ describe('createGatewayModelTransport with a billing layer', () => {
     ['no answer', async () => undefined as unknown as DeploymentModeAnswer],
   ])('never reads %s as unfunded (I1, I2)', async (_label, deployment) => {
     await expect(unified(deployment).deployment?.resolve()).resolves.toBe('unknown');
+  });
+
+  it('answers unknown once a port that never settles passes its 10 s bound, and not before', async () => {
+    vi.useFakeTimers();
+    try {
+      const resolving = unified(neverSettles).deployment!.resolve();
+      const pending = Symbol('pending');
+      await vi.advanceTimersByTimeAsync(9999);
+      await expect(Promise.race([resolving, Promise.resolve(pending)])).resolves.toBe(pending);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(resolving).resolves.toBe('unknown');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('answers unknown at once when the run is stopped while the port is asked', async () => {
+    const stop = new AbortController();
+    const resolving = unified(neverSettles).deployment!.resolve(stop.signal);
+    stop.abort(new DOMException('The run was stopped.', 'AbortError'));
+    await expect(resolving).resolves.toBe('unknown');
   });
 
   it('refuses DEPLOYMENT_UNKNOWN before any fetch when a call is made on no run mode (I1)', async () => {

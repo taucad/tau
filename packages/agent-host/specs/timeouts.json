@@ -687,6 +687,14 @@
       "owner": "W11"
     },
     {
+      "id": "E41",
+      "bound": "Deployment answer at a run's admission or reopening (ModelDeployment.resolve), 10 s or the run's Stop, then `unknown`: the run ends DEPLOYMENT_UNKNOWN before any call (I1)",
+      "site": "packages/agent-host/src/transport/gateway-model-transport.ts",
+      "token": "deploymentAnswerTimeout",
+      "class": "External edge",
+      "owner": "unified-model-transport W3"
+    },
+    {
       "id": "N1",
       "bound": "Not a timer: a parameter named after",
       "site": "packages/agent-host/src/harness/compaction.ts",

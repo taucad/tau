@@ -732,12 +732,13 @@ const coded = (code: string, message: string, fields: Readonly<Record<string, un
   Object.assign(new Error(message), { code, ...fields });
 
 /**
- * The billing mode a run recorded (I3): the `deployment` of its latest `run.lifecycle` row that names one. A value this
- * build does not know reads as recorded, so the run is never re-asked under another mode.
+ * The billing mode a run recorded (I3): the `deployment` of its first `run.lifecycle` row that names one, so a later row
+ * can never change it. A value this build does not know reads as recorded, so the run is never re-asked under another
+ * mode.
  */
 const recordedDeploymentOf = (events: readonly AgentLogEvent[], runId: string): string | undefined =>
   (
-    events.findLast(
+    events.find(
       (event) =>
         event.runId === runId &&
         event.type === 'run.lifecycle' &&
@@ -750,26 +751,41 @@ const recordedDeploymentOf = (events: readonly AgentLogEvent[], runId: string): 
  * `run.lifecycle` row records (D1, I3). Nothing is recorded for a transport with no deployment, or for an unknown
  * answer: the run's driver then ends it `DEPLOYMENT_UNKNOWN` before any call (I1).
  */
-const deploymentFieldOf = async (transport: ModelTransport): Promise<Readonly<{ deployment?: RunBillingMode }>> => {
-  const answer = await transport.deployment?.resolve();
+const deploymentFieldOf = async (
+  transport: ModelTransport,
+  stop?: AbortSignal,
+): Promise<Readonly<{ deployment?: RunBillingMode }>> => {
+  /* Bounded by the transport (10 s, then `unknown`), and by the run's Stop where its owner holds one. */
+  const answer = await transport.deployment?.resolve(stop);
   return answer === 'funded' || answer === 'unfunded' ? { deployment: answer } : {};
 };
 
 /**
- * The transport one run's calls use: a deployment-following transport's own for the run's recorded mode (I3), and
- * any other transport as it is.
+ * The transport one run's calls use (I1, I3): a deployment-following transport's own for the run's recorded mode, and
+ * any other transport as it is, unless the run recorded `funded` and that transport cannot fund it. A mode this build
+ * cannot read refuses the run whatever the transport.
  */
 const runTransportOf = (transport: ModelTransport, events: readonly AgentLogEvent[], runId: string): ModelTransport => {
-  if (transport.deployment === undefined) {
-    return transport;
-  }
   const recorded = recordedDeploymentOf(events, runId);
-  if (recorded !== 'funded' && recorded !== 'unfunded') {
+  if (recorded !== undefined && recorded !== 'funded' && recorded !== 'unfunded') {
     throw coded(
       'DEPLOYMENT_UNKNOWN' satisfies RefusalCode,
-      recorded === undefined
-        ? "Tau could not learn whether this chat's model calls are funded, so it made none; resume once Tau is reachable."
-        : 'This run was started under a billing mode this build cannot read; update Tau, then resume.',
+      'This run was started under a billing mode this build cannot read; update Tau, then resume.',
+    );
+  }
+  if (transport.deployment === undefined) {
+    if (recorded === 'funded' && transport.funding.type !== 'funded') {
+      throw coded(
+        'DEPLOYMENT_UNKNOWN' satisfies RefusalCode,
+        "This run's model calls are funded, and this Tau host cannot fund them, so it made none; resume it in a Tau build that can.",
+      );
+    }
+    return transport;
+  }
+  if (recorded === undefined) {
+    throw coded(
+      'DEPLOYMENT_UNKNOWN' satisfies RefusalCode,
+      "Tau could not learn whether this chat's model calls are funded, so it made none; resume once Tau is reachable.",
     );
   }
   return transport.deployment.forRun(recorded);
@@ -2733,15 +2749,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       }
       /* I3: a run keeps the mode it recorded; one admitted with none (an earlier build, or an unknown answer) is asked
        * now and records it on this reopening row. */
-      const reopening = async (): Promise<LogRowBody> =>
-        recordedDeploymentOf(events, runId) === undefined
-          ? ({
-              type: 'run.lifecycle',
-              state: 'running',
-              ...selection,
-              ...(await deploymentFieldOf(options.modelTransport)),
-            } as unknown as LogRowBody)
-          : running;
+      const reopening = async (): Promise<LogRowBody> => {
+        if (recordedDeploymentOf(events, runId) !== undefined) {
+          return running;
+        }
+        /* A Stop while the answer is asked ends the ask (`unknown`), as it ends the wait on an attempt (W2). */
+        store.resumeWait = resumeWait;
+        try {
+          const deployment = await deploymentFieldOf(options.modelTransport, resumeWait.stop.signal);
+          return { type: 'run.lifecycle', state: 'running', ...selection, ...deployment } as unknown as LogRowBody;
+        } finally {
+          if (store.resumeWait === resumeWait) {
+            store.resumeWait = undefined;
+          }
+        }
+      };
       if (entry?.committed !== true && admittedRowOf(events, runId)?.admission !== undefined) {
         /* The turn never committed: the journaled admission is replayed (RA-R3). */
         return {

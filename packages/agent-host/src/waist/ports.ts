@@ -269,8 +269,11 @@ export type DeploymentModeAnswer = RunBillingMode | 'unknown';
  * mode at admission, records it, and drives the run on {@link ModelDeployment.forRun}'s transport. @public
  */
 export type ModelDeployment = {
-  /** Ask the host's deployment port. A port that throws or answers outside the vocabulary answers `unknown`. */
-  resolve(): Promise<DeploymentModeAnswer>;
+  /**
+   * Ask the host's deployment port, bounded at 10 s. A port that throws, answers outside the vocabulary, passes the
+   * bound or is stopped through `signal` answers `unknown`.
+   */
+  resolve(signal?: AbortSignal): Promise<DeploymentModeAnswer>;
   /** The transport every call of a run under this mode uses; it carries no `deployment` of its own. */
   forRun(mode: RunBillingMode): ModelTransport;
 };

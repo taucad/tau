@@ -310,10 +310,14 @@ const waitUntil = async (condition: () => boolean, milliseconds: number): Promis
 };
 
 /**
- * A named-pipe server outside the sandbox whose DACL grants Everyone full control (A22), so only the sandbox can keep
- * a sandboxed client out. It keeps four instances listening and writes the number of clients it ever accepted.
+ * A named-pipe server outside the sandbox that keeps four instances listening and writes the number of clients it ever
+ * accepted. With `everyone` its DACL grants Everyone full control (A22), so only the sandbox can keep a sandboxed client
+ * out; with `default` it is created with no security descriptor at all, so it carries the default named-pipe DACL the
+ * person's token gives it (full control for the person, SYSTEM and Administrators, read for Everyone and Anonymous).
  */
-const pipeServer = async (): Promise<{ name: string; connections: () => number; stop: () => Promise<void> }> => {
+const pipeServer = async (
+  dacl: 'everyone' | 'default',
+): Promise<{ name: string; connections: () => number; stop: () => Promise<void> }> => {
   const name = `tau-conformance-${randomUUID()}`;
   const directory = mkdtempSync(join(custodyRoot, 'pipe-'));
   const count = join(directory, 'count');
@@ -327,7 +331,9 @@ const pipeServer = async (): Promise<{ name: string; connections: () => number; 
     "$security.AddAccessRule([System.IO.Pipes.PipeAccessRule]::new($everyone, 'FullControl', 'Allow'))",
     "$security.AddAccessRule([System.IO.Pipes.PipeAccessRule]::new($self, 'FullControl', 'Allow'))",
     'function New-Instance {',
-    '  if ($PSVersionTable.PSVersion.Major -ge 6) {',
+    "  if ($env:CONFORMANCE_PIPE_DACL -eq 'default') {",
+    "    [System.IO.Pipes.NamedPipeServerStream]::new($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous')",
+    '  } elseif ($PSVersionTable.PSVersion.Major -ge 6) {',
     "    [System.IO.Pipes.NamedPipeServerStreamAcl]::Create($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous', 0, 0, $security)",
     '  } else {',
     "    [System.IO.Pipes.NamedPipeServerStream]::new($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous', 0, 0, $security)",
@@ -357,6 +363,7 @@ const pipeServer = async (): Promise<{ name: string; connections: () => number; 
     env: {
       ...process.env,
       CONFORMANCE_PIPE: name,
+      CONFORMANCE_PIPE_DACL: dacl,
       CONFORMANCE_PIPE_COUNT: count,
       CONFORMANCE_PIPE_LISTENING: listening,
       CONFORMANCE_PIPE_STOP: stop,
@@ -392,6 +399,78 @@ const pipeControl = async (name: string): Promise<void> =>
     });
     socket.on('error', reject);
   });
+
+/**
+ * What a process's token is, read outside the sandbox by the test user: the runner grants the person
+ * `PROCESS_QUERY_LIMITED_INFORMATION` on the shell and `TOKEN_QUERY` on its token, nothing more, so this opens exactly
+ * those and reads the user, image, AppContainer state, package SID, capabilities, restricting SIDs and integrity level.
+ */
+type ShellToken = Readonly<{
+  user: string;
+  image: string;
+  isAppContainer: boolean;
+  /** Absent when the token has no package SID. */
+  package?: string;
+  capabilities: string[];
+  restricted: string[];
+  integrity: string;
+}>;
+
+const tokenObserver = [
+  'using System; using System.Collections; using System.ComponentModel; using System.Runtime.InteropServices;',
+  'using System.Security.Principal; using System.Text;',
+  'public static class TauShellToken {',
+  '  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);',
+  '  [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr handle);',
+  '  [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]',
+  '  static extern bool QueryFullProcessImageNameW(IntPtr process, int flags, StringBuilder name, ref int size);',
+  '  [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);',
+  '  [DllImport("advapi32.dll", SetLastError = true)]',
+  '  static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr buffer, int length, out int needed);',
+  '  static IntPtr Read(IntPtr token, int kind) {',
+  '    int needed; GetTokenInformation(token, kind, IntPtr.Zero, 0, out needed);',
+  '    if (needed == 0) { throw new Win32Exception(Marshal.GetLastWin32Error(), "GetTokenInformation " + kind); }',
+  '    IntPtr buffer = Marshal.AllocHGlobal(needed);',
+  '    if (!GetTokenInformation(token, kind, buffer, needed, out needed)) { int error = Marshal.GetLastWin32Error(); Marshal.FreeHGlobal(buffer); throw new Win32Exception(error, "GetTokenInformation " + kind); }',
+  '    return buffer; }',
+  '  static string Sid(IntPtr sid) { return sid == IntPtr.Zero ? null : new SecurityIdentifier(sid).Value; }',
+  '  static string First(IntPtr token, int kind) { IntPtr b = Read(token, kind); try { return Sid(Marshal.ReadIntPtr(b)); } finally { Marshal.FreeHGlobal(b); } }',
+  '  static ArrayList Groups(IntPtr token, int kind) {',
+  '    IntPtr b = Read(token, kind); var list = new ArrayList();',
+  '    try { int count = Marshal.ReadInt32(b); for (int i = 0; i < count; i++) { list.Add(Sid(Marshal.ReadIntPtr(b, IntPtr.Size + i * 2 * IntPtr.Size))); } }',
+  '    finally { Marshal.FreeHGlobal(b); } return list; }',
+  '  public static Hashtable Describe(int pid) {',
+  '    IntPtr process = OpenProcess(0x1000, false, pid);',
+  '    if (process == IntPtr.Zero) { throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcess " + pid); }',
+  '    try {',
+  '      var name = new StringBuilder(32768); int size = name.Capacity;',
+  '      if (!QueryFullProcessImageNameW(process, 0, name, ref size)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "QueryFullProcessImageName"); }',
+  '      IntPtr token; if (!OpenProcessToken(process, 0x0008, out token)) { throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcessToken"); }',
+  '      try {',
+  '        IntPtr flag = Read(token, 29); int isAppContainer; try { isAppContainer = Marshal.ReadInt32(flag); } finally { Marshal.FreeHGlobal(flag); }',
+  '        var result = new Hashtable();',
+  '        result["user"] = First(token, 1); result["image"] = name.ToString(0, size);',
+  '        result["isAppContainer"] = isAppContainer != 0; result["package"] = First(token, 31);',
+  '        result["capabilities"] = Groups(token, 30); result["restricted"] = Groups(token, 11);',
+  '        result["integrity"] = First(token, 25);',
+  '        return result;',
+  '      } finally { CloseHandle(token); }',
+  '    } finally { CloseHandle(process); } } }',
+].join('\n');
+
+const shellTokenOf = (pid: number): ShellToken =>
+  JSON.parse(
+    observe(
+      [
+        "$ErrorActionPreference = 'Stop'",
+        'Add-Type -TypeDefinition $env:CONFORMANCE_TOKEN_OBSERVER',
+        '[TauShellToken]::Describe([int]$env:CONFORMANCE_TOKEN_PID) | ConvertTo-Json -Compress',
+      ].join('\n'),
+      { CONFORMANCE_TOKEN_OBSERVER: tokenObserver, CONFORMANCE_TOKEN_PID: String(pid) },
+    ),
+    /* A token without a package SID reads back as JSON null: leave the field absent instead. */
+    (_key, value: unknown) => value ?? undefined,
+  ) as ShellToken;
 
 /** Strip VT control sequences ConPTY interleaves with text, so a marker is matched on what the screen shows. */
 const vtSequence =
@@ -744,23 +823,28 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     },
   );
 
+  /** Every way a sandboxed PowerShell opens a pipe client; the server outside counts what got through. */
+  const pipeProbe = async (name: string, marker: string): Promise<{ stderr: string }> => {
+    const client = (direction: string): string =>
+      `try { $p = [System.IO.Pipes.NamedPipeClientStream]::new('.', ${quote(name)}, '${direction}'); $p.Connect(3000); $p.Dispose() } catch { }`;
+    return run(
+      [
+        client('InOut'),
+        client('In'),
+        client('Out'),
+        `try { $f = [System.IO.File]::Open(${quote(`\\\\.\\pipe\\${name}`)}, 'Open', 'Read'); $f.Dispose() } catch { }`,
+        `Set-Content -LiteralPath ${quote(join(work, marker))} -Value ran -NoNewline`,
+      ].join('\n'),
+    );
+  };
+
   conformance('A22', 'a named pipe whose DACL grants Everyone is never reached from the sandbox', async () => {
-    const server = await pipeServer();
+    const server = await pipeServer('everyone');
     try {
       await pipeControl(server.name);
 
       expect(await waitUntil(() => server.connections() === 1, 5000)).toBe(true);
-      const client = (direction: string): string =>
-        `try { $p = [System.IO.Pipes.NamedPipeClientStream]::new('.', ${quote(server.name)}, '${direction}'); $p.Connect(3000); $p.Dispose() } catch { }`;
-      const result = await run(
-        [
-          client('InOut'),
-          client('In'),
-          client('Out'),
-          `try { $f = [System.IO.File]::Open(${quote(`\\\\.\\pipe\\${server.name}`)}, 'Open', 'Read'); $f.Dispose() } catch { }`,
-          `Set-Content -LiteralPath ${quote(join(work, 'pipe-ran.txt'))} -Value ran -NoNewline`,
-        ].join('\n'),
-      );
+      const result = await pipeProbe(server.name, 'pipe-ran.txt');
       await delay(1000);
 
       expect(readFileSync(join(work, 'pipe-ran.txt'), 'utf8'), result.stderr).toBe('ran');
@@ -770,6 +854,99 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       await server.stop();
     }
   });
+
+  conformance(
+    'A22-default',
+    "a named pipe with the person's default DACL (Everyone may read) is never reached from the sandbox",
+    async () => {
+      const server = await pipeServer('default');
+      try {
+        await pipeControl(server.name);
+
+        expect(await waitUntil(() => server.connections() === 1, 5000)).toBe(true);
+        const result = await pipeProbe(server.name, 'pipe-default-ran.txt');
+        await delay(1000);
+
+        expect(readFileSync(join(work, 'pipe-default-ran.txt'), 'utf8'), result.stderr).toBe('ran');
+        expect(server.connections()).toBe(1);
+      } finally {
+        await server.stop();
+      }
+    },
+  );
+
+  conformance(
+    'W08',
+    'the shell runs in a fresh AppContainer per launch: lowbox token, no capability, write-restricted, Low integrity',
+    async () => {
+      const { accountSid } = helperStatus;
+
+      expect(typeof accountSid).toBe('string');
+      /* One launch that parks once it has recorded its PID and the environment it sees, so its token is read live. */
+      const observeLaunch = async (
+        tag: string,
+      ): Promise<{
+        token: ShellToken;
+        seen: Record<string, string | number>;
+        ended: Awaited<ReturnType<typeof run>>;
+      }> => {
+        const sync = join(work, `w08-${tag}`);
+        mkdirSync(sync, { recursive: true });
+        const parked = run(
+          [
+            `@{ pid = $PID; TEMP = $env:TEMP; LOCALAPPDATA = $env:LOCALAPPDATA; APPDATA = $env:APPDATA } | ConvertTo-Json -Compress | Set-Content -LiteralPath ${quote(join(sync, 'seen.json'))} -NoNewline`,
+            `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
+          ].join('\n'),
+          { commandId: `conformance#w08-${tag}` },
+        );
+        const release = async (): Promise<Awaited<ReturnType<typeof run>>> => {
+          writeFileSync(join(sync, 'release'), '');
+          return parked;
+        };
+        try {
+          if (!(await waitUntil(() => existsSync(join(sync, 'seen.json')), 30_000))) {
+            throw new Error(`the ${tag} launch never recorded its PID`);
+          }
+          const seen = JSON.parse(readFileSync(join(sync, 'seen.json'), 'utf8')) as Record<string, string | number>;
+          const token = shellTokenOf(Number(seen['pid']));
+          return { token, seen, ended: await release() };
+        } catch (error) {
+          await release().catch(() => undefined);
+          throw error;
+        }
+      };
+      const first = await observeLaunch('first');
+      const second = await observeLaunch('second');
+      observations['W08-token'] = first.token;
+      observations['W08-environment'] = first.seen;
+
+      for (const { token, ended } of [first, second]) {
+        expect(ended.exitCode, ended.stderr).toBe(0);
+        /* The process the PID names is this sandbox's shell: the sandbox account running the fixed-path PowerShell. */
+        expect(token.user).toBe(accountSid);
+        expect(token.image.toLowerCase()).toBe(shell.path.toLowerCase());
+        expect(token.isAppContainer).toBe(true);
+        expect(token.package).toMatch(/^S-1-15-2(?:-\d+){7}$/u);
+        expect(token.capabilities).toStrictEqual([]);
+        /* Still write-restricted: the launch's capability SID, the runner's logon SID and Everyone. */
+        expect(token.restricted).toHaveLength(3);
+        expect(token.restricted).toContain('S-1-1-0');
+        expect(token.restricted.filter((sid) => /^S-1-5-21(?:-\d+){4}$/u.test(sid))).toHaveLength(1);
+        expect(token.restricted.filter((sid) => /^S-1-5-5-\d+-\d+$/u.test(sid))).toHaveLength(1);
+        expect(token.integrity).toBe('S-1-16-4096');
+      }
+      /* Per launch: nothing granted to one launch's package reaches the next. */
+      expect(second.token.package).not.toBe(first.token.package);
+      /* The AppContainer does not redirect the environment the host gave the shell. */
+      const given = baseEnvironment();
+
+      const names = ['TEMP', 'LOCALAPPDATA', 'APPDATA'] as const;
+
+      expect(Object.fromEntries(names.map((name) => [name, first.seen[name]]))).toStrictEqual(
+        Object.fromEntries(names.map((name) => [name, given[name]])),
+      );
+    },
+  );
 
   /**
    * A24's escape set: a detached `Start-Process`, a `Start-Job`, a `CREATE_BREAKAWAY_FROM_JOB` child and a WMI

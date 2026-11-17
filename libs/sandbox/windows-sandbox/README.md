@@ -180,7 +180,9 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
     Unrestored journals are found through the person's ledger, `%LOCALAPPDATA%\Tau\windows-sandbox\live`: one file per
     launch naming its journal, written after the journal is fsynced and before any ACL changes, removed once the
     journal is restored. A launch may not grant a path holding the ledger or another unrestored journal, and its own
-    journal may not lie inside another's paths: a shell could otherwise rewrite another launch's restore. A dead
+    journal may not lie inside a path another grants: that launch's shell could otherwise rewrite this launch's restore.
+    Inside a path another only denies, it may (the denial keeps that shell out, and that launch's restore only removes
+    the ACEs the journal inherited there; NW05). A dead
     launch's journal stays registered, so a new launch may start beside it and treats its changes like a live one's;
     `restore` of that journal while other launches run removes only the dead launch's ACEs (NW04). `restore` refuses a
     journal whose launcher is still running (it holds `Global\tau.sandbox.launcher.<package name>` for its life).

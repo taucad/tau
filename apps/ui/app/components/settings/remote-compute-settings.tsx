@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Cpu, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { approveRemoteHostPairing, listRemoteHosts, revokeRemoteHost } from '#lib/remote-host-client.js';

@@ -102,6 +102,16 @@ export const reportDesktopSignal = (signal: DesktopSignal | undefined): void => 
   });
 };
 
+/**
+ * Wait for queued events to leave, so a report sent just before the process ends or blocks on a dialog is not lost
+ * (B18). Resolves at once while Sentry is not initialized.
+ *
+ * @param timeoutMilliseconds - The longest wait.
+ * @returns Whether the queue drained in time.
+ */
+export const flushDesktopErrorReporting = async (timeoutMilliseconds = 2000): Promise<boolean> =>
+  Sentry.isInitialized() ? Sentry.flush(timeoutMilliseconds) : true;
+
 /** Milliseconds during which one revision-engine failure, by its redacted message, is sent once. */
 export const revisionEngineFailureWindow = 10 * 60_000;
 

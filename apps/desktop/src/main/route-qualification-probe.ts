@@ -125,6 +125,35 @@ const writeJson = (path: string, value: unknown): void => {
   replaceQualificationRecord(`${path}.tmp`, path);
 };
 
+/**
+ * Admit the route qualification probe for this launch, without letting leftover state stop an ordinary launch (B23).
+ *
+ * A launch that carries `--tau-route-qualification=` is a CI run and stays strict: any failure in `admit` throws. A
+ * launch without it treats any failure, in admission itself or in the reads main makes before it, as "not a probe":
+ * it hands the error to `onLeftoverIgnored` and boots normally.
+ *
+ * @param argv - This launch's arguments.
+ * @param admit - Main's admission, from its pre-reads through {@link prepareRouteQualificationProbe}.
+ * @param onLeftoverIgnored - Told once why leftover state was ignored.
+ * @returns The probe, or `undefined` when this launch is not one.
+ */
+export const admitRouteQualificationProbe = <Probe>(
+  argv: readonly string[],
+  admit: () => Probe | undefined,
+  onLeftoverIgnored: (error: unknown) => void,
+): Probe | undefined => {
+  const strict = argv.some((value) => value.startsWith('--tau-route-qualification='));
+  try {
+    return admit();
+  } catch (error) {
+    if (strict) {
+      throw error;
+    }
+    onLeftoverIgnored(error);
+    return undefined;
+  }
+};
+
 /** Activate solely through a nonce-bound CLI or an existing disposable-profile run. */
 export const prepareRouteQualificationProbe = (options: {
   arguments: readonly string[];

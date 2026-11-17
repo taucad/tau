@@ -273,7 +273,7 @@ type Worker = Readonly<{
   session: WindowsHelperSession;
 }>;
 
-/** The shared setup of NW02-NW04: one runtime root every worker reads, holding the probe and a data file. */
+/** The shared setup of NW02-NW05: one runtime root every worker reads, holding the probe and a data file. */
 const concurrencySetup = (context: NativeWorkerContext, row: string) => {
   const { root, helperPath, workerProbe, systemRoot, recordHelperDiagnostic, waitUntil } = context;
   const base = join(root, row);
@@ -303,24 +303,16 @@ const concurrencySetup = (context: NativeWorkerContext, row: string) => {
     watched.push(own, secret, artifacts);
     return { own, artifacts, secret, nonce };
   };
-  /** Start a worker that reads the runtime root and its own folder and writes its own artifacts; `started` awaited. */
-  const start = async (name: string, made: ReturnType<typeof folders>): Promise<Worker> => {
-    const journal = join(journals, `${name}.acl.json`);
-    const session = openWindowsHelperSession(helperPath, recordHelperDiagnostic);
-    session.send({
-      type: 'spec',
-      spec: {
-        version: 1,
-        executable: worker,
-        executableDigest: digest,
-        arguments: [],
-        workingDirectory: made.artifacts,
-        environment: Object.fromEntries([['SystemRoot', systemRoot]]),
-        stdio: { kind: 'pipes', input: true },
-        filesystem: { readable: [runtimeRoot, made.own], writable: [made.artifacts], readOnly: [], denied: [] },
-        journal,
-      },
-    });
+  /**
+   * Start a worker that reads the runtime root and its own folder and writes its own artifacts; `started` awaited.
+   * `options.denied` adds denied paths, and `options.journal` puts the journal somewhere other than `journals`.
+   */
+  const start = async (
+    name: string,
+    made: ReturnType<typeof folders>,
+    options: { denied?: string[]; journal?: string } = {},
+  ): Promise<Worker> => {
+    const session = launch(name, made, options);
     const ready = await session.frame((frame) => frame.type !== 'stderr' && frame.type !== 'stdout', 60_000);
 
     assert.equal(ready.type, 'ready', JSON.stringify(ready));
@@ -335,8 +327,47 @@ const concurrencySetup = (context: NativeWorkerContext, row: string) => {
     );
 
     assert.equal(started.type, 'started', JSON.stringify(started));
+    const journal = options.journal ?? join(journals, `${name}.acl.json`);
     assert.equal(existsSync(journal), true);
     return { name, secret: made.secret, nonce: made.nonce, artifacts: made.artifacts, journal, session };
+  };
+  /** Open a helper session and send the spec. */
+  const launch = (name: string, made: ReturnType<typeof folders>, options: { denied?: string[]; journal?: string }) => {
+    const journal = options.journal ?? join(journals, `${name}.acl.json`);
+    const session = openWindowsHelperSession(helperPath, recordHelperDiagnostic);
+    session.send({
+      type: 'spec',
+      spec: {
+        version: 1,
+        executable: worker,
+        executableDigest: digest,
+        arguments: [],
+        workingDirectory: made.artifacts,
+        environment: Object.fromEntries([['SystemRoot', systemRoot]]),
+        stdio: { kind: 'pipes', input: true },
+        filesystem: {
+          readable: [runtimeRoot, made.own],
+          writable: [made.artifacts],
+          readOnly: [],
+          denied: options.denied ?? [],
+        },
+        journal,
+      },
+    });
+    return session;
+  };
+  /** A worker that must be refused before it is ready, so before anything changes; returns the refusal's text. */
+  const refuse = async (
+    name: string,
+    made: ReturnType<typeof folders>,
+    options: { denied?: string[]; journal?: string },
+  ): Promise<string> => {
+    const session = launch(name, made, options);
+    const refused = await session.frame((frame) => frame.type !== 'stderr' && frame.type !== 'stdout', 60_000);
+    await session.closed;
+
+    assert.equal(refused.type, 'refused', JSON.stringify(refused));
+    return JSON.stringify(refused);
   };
   /** Send requests and wait for exactly their answers (after every earlier one). */
   const ask = async (
@@ -392,7 +423,7 @@ const concurrencySetup = (context: NativeWorkerContext, row: string) => {
     assert.deepEqual(exit, { type: 'exit', exit: { exitCode: 0 } });
     assert.equal(existsSync(worker_.journal), false);
   };
-  return { runtimeRoot, data, shared, watched, folders, start, ask, isolated, finish };
+  return { base, runtimeRoot, data, shared, watched, folders, start, refuse, ask, isolated, finish };
 };
 
 /**
@@ -507,10 +538,45 @@ export const crashRecoveryConformance = async (context: NativeWorkerContext): Pr
 };
 
 /**
+ * Run NW05: a launch's journal inside another live launch's denied path. Tau keeps a native worker's journals under its
+ * user data, which a shell launch denies; the worker still starts, the denying launch's worker cannot read its
+ * journal, and either exit order leaves every path as before. A journal inside a path another live launch grants is
+ * refused before anything changes, since that launch's worker could rewrite it.
+ *
+ * @param context - The suite's root, helper, probe and outside observers.
+ */
+export const journalUnderDenialConformance = async (context: NativeWorkerContext): Promise<void> => {
+  const { sddlOf, workerProbe } = context;
+  const setup = concurrencySetup(context, 'nw05');
+  const madeA = setup.folders('a');
+  const madeB = setup.folders('b');
+  const madeC = setup.folders('c');
+  mkdirSync(join(setup.base, 'state'), { recursive: true });
+  const state = realpathSync.native(join(setup.base, 'state'));
+  const watched = [...setup.watched, state];
+  const before = sddlOf(watched);
+  const session = personSession(workerProbe);
+  const a = await setup.start('a', madeA, { denied: [state] });
+  const b = await setup.start('b', madeB, { journal: join(state, 'b.acl.json') });
+
+  assertMatches(await setup.ask(a, [{ op: 'read', path: b.journal }]), [{ op: 'read', ok: false }]);
+  const refused = await setup.refuse('c', madeC, { journal: join(madeA.own, 'c.acl.json') });
+
+  assert.match(refused, /journal lies inside a path another running or unrestored launch grants/u);
+  assert.equal(existsSync(join(madeA.own, 'c.acl.json')), false);
+  assert.deepEqual(personSession(workerProbe), session);
+  await setup.finish(a);
+  assertMatches(await setup.ask(b, [{ op: 'read', path: b.secret }]), [{ op: 'read', ok: true, text: b.nonce }]);
+  await setup.finish(b);
+
+  assert.deepEqual(sddlOf(watched), before);
+};
+
+/**
  * The WIN-X64 native-worker rows, as `[id, title, body]`, for the conformance suite to register.
  *
  * @param context - Builds the suite's context when a row runs (its root exists only then).
- * @returns NW01-NW04.
+ * @returns NW01-NW05.
  */
 export const nativeWorkerRows = (
   context: () => NativeWorkerContext,
@@ -534,6 +600,11 @@ export const nativeWorkerRows = (
     'NW04',
     'a crashed worker is restored by restore while another worker over the same runtime root stays live and keeps its grants',
     async () => crashRecoveryConformance(context()),
+  ],
+  [
+    'NW05',
+    "a worker's journal inside another live worker's denied path starts and restores in either order; inside a granted one it is refused",
+    async () => journalUnderDenialConformance(context()),
   ],
 ];
 

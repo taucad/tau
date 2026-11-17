@@ -25,7 +25,7 @@ Settings grew one card at a time, each with its own layout and a paragraph expla
 
 ### 1. One Registry Entry, One Row
 
-Every setting has one entry in `settingsCatalog` (`apps/ui/app/components/settings/settings-registry.ts`) and renders as one `SettingsRow` with that `settingId`. The row title and the registry `label` are the same string; the row description and the registry `description` say the same thing.
+Every setting has one entry in the settings catalogue (`apps/libs/settings-ui/src/components/settings/settings-catalogue.ts`; the app's `settings-registry.ts` gates it for the deployment) and renders as one `SettingsRow` with that `settingId`. The row title and the registry `label` are the same string; the row description and the registry `description` say the same thing.
 
 **Why**: The registry drives navigation and search; a row without an entry cannot be found, and an entry whose wording drifts from its row sends users to something that looks different.
 
@@ -171,6 +171,7 @@ While a settings page or a group of rows loads, draw the rows that are about to 
 
 ## References
 
-- Primitives: `apps/ui/app/components/settings/settings-item.tsx`
-- Registry: `apps/ui/app/components/settings/settings-registry.ts`
+- Primitives: `apps/libs/settings-ui/src/components/settings/settings-item.tsx`
+- Catalogue and search: `apps/libs/settings-ui/src/components/settings/settings-catalogue.ts`
+- Deployment gates: `apps/ui/app/components/settings/settings-registry.ts`
 - Related: `docs/policy/ux-policy.md`, `docs/policy/ui-policy.md`, `docs/policy/accessibility-policy.md`, `docs/policy/agent-observability-policy.md`

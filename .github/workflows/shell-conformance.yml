@@ -43,8 +43,9 @@ name: Shell conformance
 # Tiers (shell split blueprint PR 4): the nightly, a dispatch, the label and the candidate gate pass no
 # `tier` and run the `full` tier, every row and target. The merge queue calls the `semantics` tier from
 # `ci.yml` with the affected `tag:ci:shell` projects: the Linux guests skip the Electron build, its transfer
-# and the application tier, and each row runs only the listed projects' targets. `tier` and `projects` are
-# `workflow_call` inputs only, so every run of this workflow the promotion lookup can find is a full run.
+# and the application tier, MAC-X does not run (MAC-A covers macOS), and each row runs only the listed
+# projects' targets. `tier` and `projects` are `workflow_call` inputs only, so every run of this workflow
+# the promotion lookup can find is a full run.
 on:
   workflow_dispatch:
   workflow_call:
@@ -99,6 +100,7 @@ jobs:
     outputs:
       tier: ${{ steps.select.outputs.tier }}
       projects: ${{ steps.select.outputs.projects }}
+      macos-rows: ${{ steps.select.outputs.macos-rows }}
     steps:
       - name: Normalize the tier and the projects
         id: select
@@ -113,8 +115,14 @@ jobs:
             | type == "array" and length > 0 and all(.[]; type == "string" and (. as $name | $known | index([$name]) != null))
           ' <<< "$PROJECTS" > /dev/null || { echo "::error::projects must be a non-empty JSON array of shell projects: $PROJECTS"; exit 1; }
           projects=$(jq -c . <<< "$PROJECTS")
-          echo "Shell tier $TIER, projects $projects"
-          { echo "tier=$TIER"; echo "projects=$projects"; } >> "$GITHUB_OUTPUT"
+          # MAC-X (`macos-26-intel`) runs in the full tier only: the candidate gate, a dispatch, the drift check
+          # and the label. In the merge queue's semantics tier it took 23 min at p50 and timed out at 60, and
+          # each timeout ejected a batch. The candidate gate still blocks every desktop candidate on it (CI
+          # throughput review, merge-queue defects MQ-1).
+          macos_rows='[{"runner":"macos-26","row":"MAC-A"},{"runner":"macos-26-intel","row":"MAC-X"}]'
+          if [ "$TIER" = semantics ]; then macos_rows=$(jq -c 'map(select(.row != "MAC-X"))' <<< "$macos_rows"); fi
+          echo "Shell tier $TIER, projects $projects, macOS rows $macos_rows"
+          { echo "tier=$TIER"; echo "projects=$projects"; echo "macos-rows=$macos_rows"; } >> "$GITHUB_OUTPUT"
 
   linux:
     name: Shell conformance on ${{ matrix.row }} (stock ${{ matrix.distro }} guest)
@@ -209,11 +217,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-26
-            row: MAC-A
-          - runner: macos-26-intel
-            row: MAC-X
+        include: ${{ fromJSON(needs.select.outputs.macos-rows) }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

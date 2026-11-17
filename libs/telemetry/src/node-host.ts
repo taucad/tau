@@ -237,6 +237,8 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
   let serverPreferenceLoad: Promise<void> | undefined;
   /** The identity re-read under way while a signed-out answer is all that keeps this host from reporting. */
   let signedOutRecheck: Promise<TauIdentity> | undefined;
+  /** Entries waiting on that re-read; a shutdown waits for them (within its bound) before it looks for the reporter. */
+  const recheckRecords = new Set<Promise<void>>();
   /** Settles once the first resolved identity read has drained the hold. */
   const drained = Promise.withResolvers<void>();
   const held: Array<Readonly<{ heldAt: number; entry: RuntimeIngestEntry }>> = [];
@@ -416,7 +418,7 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
   };
 
   /** One shared identity re-read for a host a signed-out answer keeps off; `entry` is recorded if it now qualifies. */
-  const recordAfterRecheck = async (entry: RuntimeIngestEntry): Promise<void> => {
+  const recordAfterRecheck = async (entry: RuntimeIngestEntry, settled: () => void): Promise<void> => {
     try {
       signedOutRecheck ??= identityAtSend();
       const recheck = signedOutRecheck;
@@ -430,6 +432,8 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
       ensureReporter()?.record(entry);
     } catch {
       /* Telemetry never throws into a host. */
+    } finally {
+      settled();
     }
   };
 
@@ -454,7 +458,12 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
       }
       /* Off only because the last read was signed out: read again, so a later sign-in reports without a restart. */
       if (lastPrincipal === undefined && isCloudHost({ ...deployment(), signedIn: true }) && consent() !== 'denied') {
-        void recordAfterRecheck(entry);
+        const pending = Promise.withResolvers<void>();
+        recheckRecords.add(pending.promise);
+        void recordAfterRecheck(entry, () => {
+          recheckRecords.delete(pending.promise);
+          pending.resolve();
+        });
       }
     } catch {
       /* Telemetry never throws into a host. */
@@ -560,6 +569,10 @@ export const createNodeHostTelemetry = (input: NodeHostTelemetryInput): NodeHost
         }
         if (resolvedOnce && held.length > 0) {
           drain();
+        }
+        /* Entries recorded while signed out wait on an identity re-read; a sign-in just before exit still sends them. */
+        if (recheckRecords.size > 0 && (await within(Promise.all(recheckRecords))) === 'expired') {
+          return;
         }
         const target = reporter;
         if (target === undefined || consent() === 'denied') {

@@ -211,7 +211,12 @@ export const parseJobLog = (log: string): LogFailures => {
       tests.add(task ? `${task} › ${failure[1]}` : failure[1]);
     }
   }
-  return { tasks: [...tasks].sort(), tests: [...tests].sort() };
+  /* Vitest repeats each failure in its summary after Nx closes the task's group; keep the copy under its task. */
+  const tasked = new Set(
+    [...tests].filter((test) => test.includes(' › ')).map((test) => test.slice(test.indexOf(' › ') + 3)),
+  );
+  const unique = [...tests].filter((test) => test.includes(' › ') || !tasked.has(test));
+  return { tasks: [...tasks].sort(), tests: unique.sort() };
 };
 
 /** The test file of a test key, without its task or title: `src/a.test.ts` from `x:test › src/a.test.ts > t`. */

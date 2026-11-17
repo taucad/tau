@@ -262,7 +262,7 @@ describe('parseJobLog', () => {
     ].join('\n');
     expect(parseJobLog(log)).toEqual({
       tasks: ['files-ui:test'],
-      tests: ['files-ui:test › src/a.test.tsx > A > clicks', 'src/a.test.tsx > A > clicks'],
+      tests: ['files-ui:test › src/a.test.tsx > A > clicks'],
     });
   });
 });

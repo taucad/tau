@@ -27,7 +27,9 @@ use super::pipe::{self, HandleIo};
 use super::restore::restore_journal;
 use super::setup::{fence, load_password, load_record};
 use super::sid::{Sid, current_user};
-use super::util::{Error, Owned, Result, program_files, random_u32s, system_root, wide, wipe, wipe_wide};
+use super::util::{
+    Error, Owned, Result, clear_ctrl_c_ignore, program_files, random_u32s, system_root, wide, wipe, wipe_wide,
+};
 use crate::cmdline::{capability_sid, quote_arg};
 use crate::frame::{self, Frame, read_frame, write_frame};
 use crate::install::{InstallRecord, firewall_off_message};
@@ -335,6 +337,9 @@ impl Session {
                 }
                 frame::EXIT => exit = serde_json::from_slice(&frame.payload).ok(),
                 frame::RUNNER_ERROR => runner_error = Some(runner_error_text(&frame.payload)),
+                frame::RUNNER_LOG => {
+                    eprintln!("tau-windows-sandbox runner: {}", String::from_utf8_lossy(&frame.payload))
+                }
                 _ => {}
             }
         }
@@ -555,6 +560,9 @@ fn spawn_runner(record: &InstallRecord, names: &pipe::PipeNames) -> Result<Runne
     let mut password: Vec<u16> = String::from_utf8_lossy(&secret).encode_utf16().chain(std::iter::once(0)).collect();
     wipe(&mut secret);
 
+    // The runner, and through it the shell, copies this process's "ignore Ctrl-C" flag; whatever started
+    // the launcher may have set it (Node, a process-group parent). Clear it here as well as in the runner.
+    eprintln!("tau-windows-sandbox launch: {}", clear_ctrl_c_ignore());
     let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
     startup.cb = size_of::<STARTUPINFOW>() as u32;
     startup.dwFlags = STARTF_FORCEOFFFEEDBACK;

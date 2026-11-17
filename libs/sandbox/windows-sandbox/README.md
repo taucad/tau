@@ -65,9 +65,13 @@ WRITE_RESTRICTED`) whose restricting SIDs are a fresh random per-launch capabili
   Administrators) and `launch` starts that copy. `launch` refuses `sandbox-unavailable` when the installed copy differs
   from itself, so an app update asks for `setup` again.
 - **Terminal.** The runner, not node-pty, owns the ConPTY (node-pty cannot create its pipes inside the token, spike run
-  40041468455). It calls `SetConsoleCtrlHandler(NULL, FALSE)` before spawning and spawns with `0x80400`
-  (`CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT`), never `CREATE_NEW_PROCESS_GROUP`, so Ctrl-C reaches the
-  foreground pipeline (spike run 40046797357).
+  40041468455). It spawns the shell with `0x80400` (`CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT`), never
+  `CREATE_NEW_PROCESS_GROUP`, so Ctrl-C reaches the foreground pipeline (spike run 40046797357). Every process copies
+  its parent's "ignore Ctrl-C" flag, and the launcher's chain (Node, any process-group parent) is not the spike's, so
+  both the launcher (before `CreateProcessWithLogonW`) and the runner (before `CreateProcessAsUserW`) register a
+  handler that keeps Ctrl-C and Ctrl-Break on their own console from ending them, then clear the flag with
+  `SetConsoleCtrlHandler(NULL, FALSE)`. Both log the outcome (the runner through `runner-log`) to the launcher's
+  stderr.
 - **MXC.** `@microsoft/mxc-sdk` `processcontainer` is preferred where its PSEC probe passes. The probe failed on both
   hosted rows, so it is a later provider branch, not part of this binary.
 
@@ -183,7 +187,8 @@ resumes it and talks to it over two one-way named pipes (`\\.\pipe\tau-sandbox-<
 `FILE_FLAG_FIRST_PIPE_INSTANCE`, `PIPE_REJECT_REMOTE_CLIENTS` and a protected DACL naming only the person and
 `TauSandbox`. Each side checks the other's PID. The frames are the same codec: `launch` sends `spec` (an internal spec
 with the capability SID and desktop name), then forwards `start`, `input`, `resize` and `terminate`; the runner answers
-`ready` (empty), `started`, `stdout`/`stderr`/`output` and `exit`, or `0xC1` `runner-error` (`{ "stage", "message" }`),
+`ready` (empty), `started`, `stdout`/`stderr`/`output` and `exit`, or `0xC1` `runner-error` (`{ "stage", "message" }`), or
+`0xC2` `runner-log` (a UTF-8 diagnostic line the launcher copies to its stderr),
 which `launch` never forwards to the host.
 
 ## ACL journal

@@ -24,6 +24,8 @@ pub const CLEANUP_FAILED: u8 = 0x88;
 
 /// Runner to launcher only, never forwarded to the host: the runner could not prepare or start the shell.
 pub const RUNNER_ERROR: u8 = 0xC1;
+/// Runner to launcher only: a UTF-8 diagnostic line for the launcher's stderr (the host log).
+pub const RUNNER_LOG: u8 = 0xC2;
 
 /// The largest payload either side accepts. A spec or an I/O chunk is far smaller; a larger length is a
 /// corrupt or hostile stream, refused before any allocation.

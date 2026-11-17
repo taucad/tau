@@ -23,9 +23,7 @@ use windows_sys::Win32::Security::{
     WRITE_RESTRICTED,
 };
 use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
-use windows_sys::Win32::System::Console::{
-    COORD, ClosePseudoConsole, CreatePseudoConsole, HPCON, ResizePseudoConsole, SetConsoleCtrlHandler,
-};
+use windows_sys::Win32::System::Console::{COORD, ClosePseudoConsole, CreatePseudoConsole, HPCON, ResizePseudoConsole};
 use windows_sys::Win32::System::Diagnostics::Debug::{SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SetErrorMode};
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
@@ -38,7 +36,7 @@ use windows_sys::Win32::System::Threading::{
 use super::job::Job;
 use super::pipe::{self, HandleIo};
 use super::sid::{EVERYONE, Sid, open_process_token, token_logon_sid};
-use super::util::{Error, Local, Owned, Result, check, program_files, system_root, wide};
+use super::util::{Error, Local, Owned, Result, check, clear_ctrl_c_ignore, program_files, system_root, wide};
 use crate::cmdline::{command_line, environment_block, is_capability_sid};
 use crate::frame::{self, Frame, read_frame, write_frame};
 use crate::protocol::{Exit, Resize, RunnerError, RunnerSpec, Started};
@@ -307,6 +305,8 @@ struct Shell {
     process: Owned,
     _thread: Owned,
     pid: u32,
+    /// The Ctrl-C diagnostic from just before the spawn, for the launcher's log.
+    ctrl: String,
 }
 
 fn spawn(spec: &RunnerSpec, token: &Owned, job: &Job, prepared: &Prepared) -> Result<Shell> {
@@ -359,7 +359,7 @@ fn spawn(spec: &RunnerSpec, token: &Owned, job: &Job, prepared: &Prepared) -> Re
     startup.lpAttributeList = attributes.ptr();
 
     // The "ignore Ctrl-C" console flag is inherited; clear it so 0x03 interrupts the foreground pipeline.
-    unsafe { SetConsoleCtrlHandler(None, 0) };
+    let ctrl = clear_ctrl_c_ignore();
     let mut info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     let ok = unsafe {
         CreateProcessAsUserW(
@@ -379,7 +379,7 @@ fn spawn(spec: &RunnerSpec, token: &Owned, job: &Job, prepared: &Prepared) -> Re
     if ok == 0 {
         return Err(Error::code("CreateProcessAsUserW", unsafe { GetLastError() }));
     }
-    Ok(Shell { process: Owned(info.hProcess), _thread: Owned(info.hThread), pid: info.dwProcessId })
+    Ok(Shell { process: Owned(info.hProcess), _thread: Owned(info.hThread), pid: info.dwProcessId, ctrl })
 }
 
 fn roots() -> Result<ExecutableRoots> {
@@ -452,6 +452,13 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
             frame::START => {
                 let Some(ready) = prepared.take() else { continue };
                 let shell = spawn(&spec, &token, &job, &ready).at("spawn")?;
+                send(
+                    sink,
+                    &Frame::new(
+                        frame::RUNNER_LOG,
+                        format!("{}; spawn flags {SPAWN_FLAGS:#x}", shell.ctrl).into_bytes(),
+                    ),
+                );
                 send(sink, &Frame::json(frame::STARTED, &Started { shell_pid: shell.pid }));
                 let pumps = match ready {
                     Prepared::Pipes { stdin, stdout_child, stderr_child, stdout, stderr } => {

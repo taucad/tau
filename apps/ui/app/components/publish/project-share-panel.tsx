@@ -39,9 +39,12 @@ import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import { versionNumberOfTag } from '@taucad/revisions';
 import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';
-import { PublicationAccessPanel } from '#components/publish/publication-access-panel.js';
-import type { PublicationAccessGrant } from '#components/publish/publication-access-panel.js';
+import {
+  PublicationEmailTagsField,
+  getPublicationEmailTagsError,
+} from '@taucad/publish-ui/components/publish/publication-email-tags';
+import { PublicationAccessPanel } from '@taucad/publish-ui/components/publish/publication-access-panel';
+import type { PublicationAccessGrant } from '@taucad/publish-ui/components/publish/publication-access-panel';
 import { ENV } from '#environment.config.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { CommercialUpgradeLabel, useCommercialFeatures } from '#cloud/commercial-features.js';

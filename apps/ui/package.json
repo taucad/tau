@@ -57,6 +57,7 @@
     "@taucad/esbuild": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/files-ui": "workspace:*",
+    "@taucad/publish-ui": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/fs-client": "workspace:*",

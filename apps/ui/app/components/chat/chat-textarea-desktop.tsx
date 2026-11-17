@@ -369,6 +369,13 @@ export const ChatTextareaDesktop = memo(function ({
     queuedSubmitRef.current = false;
     setIsQueuedSubmitShown(false);
   }, []);
+  /* A painted draft that changed under its queued Enter before the send could go (Home's record read after adoption
+   * with another text or an attachment): the Enter was not for this draft, so it is cancelled, and says so. */
+  const [isPaintedDraftReplaced, setIsPaintedDraftReplaced] = useState(false);
+  const cancelReplacedPaintedSend = useCallback((): void => {
+    queuedSubmitRef.current = false;
+    setIsPaintedDraftReplaced(true);
+  }, []);
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
       cancelQueuedSubmit();
@@ -662,7 +669,8 @@ export const ChatTextareaDesktop = memo(function ({
       : { kind: 'cancel', recordText: earlyInput.paintedSendCancelled.recordText };
   /* An Enter on a painted draft the record does not hold is cancelled (shown as such while the queue was still live),
    * never sent; one the record holds waits for the record to be read. */
-  const isPaintedSendCancelled = paintedSendVerdict?.kind === 'cancel' && isQueuedSubmitShown;
+  const isPaintedSendCancelled =
+    (paintedSendVerdict?.kind === 'cancel' || isPaintedDraftReplaced) && isQueuedSubmitShown;
   const isQueuedSendShown = isQueuedSubmitShown && !isPaintedSendCancelled;
   const isQueuedSubmitPermitted = isQueuedSendPermitted({
     dictationPhase: dictation.phase,
@@ -689,8 +697,16 @@ export const ChatTextareaDesktop = memo(function ({
     if (paintedSendVerdict?.kind === 'wait' || !isQueuedSubmitPermitted) {
       return;
     }
-    queuedSubmitRef.current = false;
     const content = extractContent(editor);
+    if (
+      earlyInput?.prefilled === true &&
+      !earlyInput.edited &&
+      (content.text !== earlyInput.text || attachments.length > 0)
+    ) {
+      cancelReplacedPaintedSend();
+      return;
+    }
+    queuedSubmitRef.current = false;
     /* Shown as queued until the send it replays has gone: Send's own pending state follows it. */
     const replay = async (): Promise<void> => {
       try {
@@ -700,7 +716,16 @@ export const ChatTextareaDesktop = memo(function ({
       }
     };
     void replay();
-  }, [editor, isQueuedSubmitPermitted, paintedSendVerdict, setDraftText, submitWithReferences]);
+  }, [
+    editor,
+    isQueuedSubmitPermitted,
+    paintedSendVerdict,
+    setDraftText,
+    submitWithReferences,
+    earlyInput,
+    attachments,
+    cancelReplacedPaintedSend,
+  ]);
 
   const cancelQueuedSubmitOnEscape = useCallback(
     (event: React.KeyboardEvent): void => {

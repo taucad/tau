@@ -869,6 +869,33 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       expect(handleSubmit).not.toHaveBeenCalled();
     });
 
+    /* Review round 21: Home's record can still be unread at adoption; one that loads another text before the send is
+     * permitted replaces the painted draft, and the queued Enter must not send that text. */
+    it('should cancel it with the notice when the draft changes to another text before the send is permitted', async () => {
+      const handleSubmit = vi.fn(asyncNoop);
+      const view = renderComposer('Fillet it', codexSession, {
+        earlyInput: paintedQueued,
+        handleSubmit,
+        isSubmitDisabled: true,
+      });
+      await waitFor(() => {
+        expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+      });
+      view.rerenderWith(codexSession, 'A hinge for the door', true);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      view.rerenderWith(codexSession, 'A hinge for the door', false);
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Queued send cancelled: the saved draft differs.');
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(handleSubmit).not.toHaveBeenCalled();
+      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+    });
+
     /* Home decides at adoption (ruling 2026-11-17T03:43Z): its early input carries the cancellation and the record's text. */
     it('should cancel it with the same notice when the early input says the record holds another text', async () => {
       const handleSubmit = vi.fn(asyncNoop);

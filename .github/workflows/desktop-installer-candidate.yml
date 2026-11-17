@@ -4,17 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: All platforms, or one platform candidate (Linux APT/AppImage, or Apple silicon ZIP/DMG) on either channel (D-H5)
+        description: All platforms, or one platform candidate (Linux APT/AppImage, Apple silicon ZIP/DMG, or Windows NSIS/ZIP) on either channel (D-H5)
         required: true
         default: all
         type: choice
-        options: [all, linux, macos]
+        options: [all, linux, macos, windows]
       tag:
         description: Existing desktop release tag built by the trusted archive run
         required: true
         type: string
       release_run_id:
-        description: Exact-tag release-build.yml run; a platform scope verifies only its own prerequisite jobs (Linux may start before the run finishes)
+        description: Exact-tag release-build.yml run; a platform scope verifies only its own prerequisite jobs (Linux and Windows may start before the run finishes)
         required: true
         type: string
 
@@ -23,7 +23,7 @@ permissions:
   actions: read
 
 # Keyed by scope as well as tag: candidate runs write only their own run's artifacts (no release, R2 or shared state), so
-# a Linux-only candidate never queues behind a Mac-only or full candidate for the same tag.
+# a platform candidate never queues behind another platform's or a full candidate for the same tag.
 concurrency:
   group: desktop-installer-candidate-${{ inputs.tag }}-${{ inputs.scope }}
   cancel-in-progress: false
@@ -56,17 +56,17 @@ jobs:
           DESKTOP_RELEASE_RUN_ID: ${{ inputs.release_run_id }}
         run: pnpm nx run desktop:installer-candidate --args=resolve
 
-      # A Linux-only candidate never reads release metadata: it exists only after every platform (including macOS
-      # signing and notarization) is attached. The Linux job binds the release run's archive artifact instead.
+      # A Linux-only or Windows-only candidate never reads release metadata: it exists only after every platform
+      # (including macOS signing and notarization) is attached. Those jobs bind the release run's archive artifact instead.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        if: inputs.scope != 'linux'
+        if: inputs.scope == 'all' || inputs.scope == 'macos'
         with:
           name: release-metadata
           run-id: ${{ inputs.release_run_id }}
           github-token: ${{ github.token }}
           path: out/installer-preflight
       - name: Require the selected scope's archive coverage without changing staging defaults
-        if: inputs.scope != 'linux'
+        if: inputs.scope == 'all' || inputs.scope == 'macos'
         env:
           DESKTOP_RELEASE_TAG: ${{ steps.identity.outputs.tag }}
           TAU_DESKTOP_SOURCE_SHA: ${{ steps.identity.outputs.source }}
@@ -74,7 +74,7 @@ jobs:
         run: pnpm nx run desktop:installer-candidate --args=preflight
 
   macos:
-    if: inputs.scope != 'linux'
+    if: inputs.scope == 'all' || inputs.scope == 'macos'
     needs: resolve
     runs-on: macos-26
     timeout-minutes: 90
@@ -193,7 +193,7 @@ jobs:
           rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/AuthKey.p8"
 
   windows:
-    if: inputs.scope == 'all'
+    if: inputs.scope == 'all' || inputs.scope == 'windows'
     needs: resolve
     runs-on: windows-2025
     timeout-minutes: 90
@@ -216,13 +216,17 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
+      # Full candidates bind the archive to the attached release metadata. A Windows-only candidate instead has the
+      # stage step fetch the exact release run's archive artifact and check its GitHub digest itself.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: inputs.scope == 'all'
         with:
           name: desktop-win32-x64
           run-id: ${{ inputs.release_run_id }}
           github-token: ${{ github.token }}
           path: out/installer-input
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: inputs.scope == 'all'
         with:
           name: release-metadata
           run-id: ${{ inputs.release_run_id }}
@@ -230,6 +234,9 @@ jobs:
           path: out/installer-input
       - name: Verify and extract the finalized application
         id: stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESKTOP_RELEASE_RUN_ID: ${{ inputs.release_run_id }}
         run: pnpm nx run desktop:installer-candidate --args=stage
       - name: Install digest-pinned Microsoft signing tools
         shell: pwsh
@@ -277,7 +284,7 @@ jobs:
           retention-days: 30
 
   linux:
-    if: inputs.scope != 'macos'
+    if: inputs.scope == 'all' || inputs.scope == 'linux'
     needs: resolve
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -355,6 +362,7 @@ jobs:
       always() && !cancelled() && needs.resolve.result == 'success' &&
       ((inputs.scope == 'linux' && needs.linux.result == 'success' && needs.macos.result == 'skipped' && needs.windows.result == 'skipped') ||
        (inputs.scope == 'macos' && needs.macos.result == 'success' && needs.windows.result == 'skipped' && needs.linux.result == 'skipped') ||
+       (inputs.scope == 'windows' && needs.windows.result == 'success' && needs.macos.result == 'skipped' && needs.linux.result == 'skipped') ||
        (inputs.scope == 'all' && needs.macos.result == 'success' && needs.windows.result == 'success' && needs.linux.result == 'success'))
     needs: [resolve, macos, windows, linux]
     runs-on: ubuntu-24.04
@@ -391,9 +399,10 @@ jobs:
           };
           visit('out/installer-parts');
           NODE
-      # A Mac-only candidate has no AppImage descriptor or APT snapshot, so it never loads Linux signing material.
+      # A Mac-only or Windows-only candidate has no AppImage descriptor or APT snapshot, so it never loads Linux signing
+      # material. The Windows update descriptor is Authenticode-bound and needs no descriptor key.
       - name: Admit the approved descriptor signing key
-        if: inputs.scope != 'macos'
+        if: inputs.scope == 'all' || inputs.scope == 'linux'
         env:
           TAU_APPIMAGE_PRIVATE_KEY_FILE: ${{ runner.temp }}/appimage-private.pem
           PRIVATE_KEY: ${{ secrets.TAU_APPIMAGE_PRIVATE_KEY }}
@@ -419,7 +428,7 @@ jobs:
         if: inputs.scope != 'all'
         run: pnpm nx run desktop:installer-candidate --args=admit-scope
       - name: Prepare the signed qualification APT snapshot
-        if: inputs.scope != 'macos'
+        if: inputs.scope == 'all' || inputs.scope == 'linux'
         env:
           GNUPGHOME: ${{ runner.temp }}/qualification-apt-keys
           TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
@@ -434,7 +443,7 @@ jobs:
           pnpm nx run desktop:qualification-apt-snapshot --args=--prepare
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ${{ inputs.scope == 'linux' && 'desktop-linux-installer-candidate' || inputs.scope == 'macos' && 'desktop-macos-installer-candidate' || 'desktop-installer-candidate' }}
+          name: ${{ inputs.scope == 'all' && 'desktop-installer-candidate' || format('desktop-{0}-installer-candidate', inputs.scope) }}
           path: out/installer-candidate/*
           if-no-files-found: error
           retention-days: 30

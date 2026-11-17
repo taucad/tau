@@ -599,23 +599,25 @@ try {
   assert.throws(() => {
     assertQualificationSource({ ...admitted, scope: 'all' });
   }, /exact source/u);
-  // D-H5: platform-scoped production evidence; Linux may still test a trusted ancestor, Windows stays staging-only.
+  // D-H5: platform-scoped production evidence; Linux and Windows may test a trusted ancestor on either channel.
   assertQualificationSource({ ...admitted, channel: 'production' });
   assertQualificationSource({ ...admitted, channel: 'production', kind: 'vm' });
+  assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'windows', channel: 'production' });
+  for (const channel of ['staging', 'production']) {
+    for (const kind of ['ci', 'vm'] as const) {
+      assertQualificationSource({ ...admitted, scope: 'windows', channel, kind });
+    }
+  }
   assert.throws(() => {
-    assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'windows', channel: 'production' });
+    assertQualificationSource({ ...admitted, scope: 'windows', channel: 'preview' });
   }, /scope\/channel/u);
   assert.throws(() => {
     assertQualificationSource({ ...admitted, scope: 'unknown' });
   }, /scope\/channel/u);
   // Staging Mac CI and clean-host (vm) may test an ancestor; their publisher requires an authenticated binding.
-  // Windows clean-host remains exact-source.
   assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos' });
   assertQualificationSource({ ...admitted, scope: 'macos' });
   assertQualificationSource({ ...admitted, scope: 'macos', kind: 'vm' });
-  assert.throws(() => {
-    assertQualificationSource({ ...admitted, scope: 'windows', kind: 'vm' });
-  }, /exact source/u);
   // Production Mac binds an ancestor source through the same authenticated sidecar; all-platform stays exact.
   assertQualificationSource({ ...admitted, sourceCommit: workflowCommit, scope: 'macos', channel: 'production' });
   assertQualificationSource({ ...admitted, scope: 'macos', channel: 'production' });
@@ -640,14 +642,44 @@ try {
 }
 console.log('PASS real Git ancestry, Linux staging pinning and unchanged all-platform/production exact-source guards');
 
+// A Windows platform candidate is exactly the win32-x64 NSIS installer and ZIP (D-H5).
+const windowsOnly = (() => {
+  const base = fixture();
+  const nsis = base.candidate.artifacts.find((artifact) => artifact.kind === 'windows-nsis')!;
+  const candidate = parseDesktopArtifactManifest({
+    ...base.candidate,
+    artifacts: [
+      nsis,
+      {
+        ...nsis,
+        kind: 'windows-zip',
+        name: desktopArtifactName({ kind: 'windows-zip', channel: 'staging', version: '1.0.3', arch: 'x64' }),
+        format: desktopArtifactKinds['windows-zip'].format,
+        roles: desktopArtifactKinds['windows-zip'].roles,
+        sha256: 'e'.repeat(64),
+      },
+    ],
+  });
+  return { ...base, candidate, rows: base.rows.filter((row) => row.id === 'windows-nsis-x64') };
+})();
+// Windows CI evidence from hosted windows-2025 is collected like Mac and Linux CI rows.
+assert.deepEqual(
+  collectQualificationRows({ ...windowsOnly, scope: 'windows' }).hostMatrix.map(({ id }) => id),
+  ['windows-nsis-x64'],
+);
+// A full candidate is never a Windows platform candidate, and the scope admits no other platform's rows.
 const consumerScope = fixture();
 consumerScope.rows = consumerScope.rows.filter((row) => row.id === 'windows-nsis-x64');
-assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'windows' }), /consumer VM/u);
-assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'windows', kind: 'vm' }));
-assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'all', kind: 'vm' }));
-assert.throws(() => collectQualificationRows({ ...consumerScope, scope: 'windows', kind: 'vm', rows: [] }));
+assert.throws(
+  () => collectQualificationRows({ ...consumerScope, scope: 'windows' }),
+  /Windows-only publication|Incomplete installer route/u,
+);
+assert.throws(() => collectQualificationRows({ ...windowsOnly, scope: 'windows', kind: 'vm' }));
+assert.throws(() => collectQualificationRows({ ...windowsOnly, scope: 'all', kind: 'vm' }));
+assert.throws(() => collectQualificationRows({ ...windowsOnly, scope: 'windows', rows: [] }));
+assert.throws(() => collectQualificationRows({ ...windowsOnly, scope: 'windows', rows: fixture().rows }));
 
-const windowsRow = consumerScope.rows[0]!;
+const windowsRow = windowsOnly.rows[0]!;
 const windowsReceipt: DesktopAcceptanceReceipt = {
   ...windowsRow.receipts[0]!,
   suite: 'clean-host-route-a-b-c-v1',
@@ -688,7 +720,7 @@ const windowsReceipt: DesktopAcceptanceReceipt = {
   },
 };
 const windowsInput = {
-  ...consumerScope,
+  ...windowsOnly,
   scope: 'windows',
   kind: 'vm',
   rows: [{ id: windowsRow.id, receipts: [windowsReceipt] }],

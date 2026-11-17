@@ -35,7 +35,7 @@ const execution: { current: ChatComposerContextValue['execution']['execution'] }
 const setActiveExecution = vi.fn();
 /* The chat whose draft the composer edits; the composer stays mounted when the person moves to another chat. */
 const draftOwner: { current: unknown } = { current: undefined };
-const placements: { current: readonly AgentHostPlacementTarget[] } = { current: [] };
+const placements: { current: readonly AgentHostPlacementTarget[]; loading: boolean } = { current: [], loading: false };
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
@@ -104,7 +104,7 @@ vi.mock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
 }));
 
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
-  useAgentHostPlacements: () => ({ targets: placements.current, loading: false }),
+  useAgentHostPlacements: () => ({ targets: placements.current, loading: placements.loading }),
 }));
 
 const { ChatTextareaBar, ChatTextareaDesktop, acpCommandToSlashCommand } =
@@ -606,6 +606,36 @@ describe('ChatTextareaDesktop draft rehydration', () => {
         expect(submit).toHaveBeenCalledOnce();
       });
       expect(submit.mock.calls[0]?.[0]).toBe('Make a bracket.');
+    });
+
+    /* STO-25 SP5: the composer mounts and takes the native input while the account's answers are still out (the host
+     * directory, `GET /v1/agents`, and the catalog that names a model); only the send waits for them. */
+    it('should mount the editor before the host directory and the catalog answer, and send only once they have', async () => {
+      const submit = vi.fn(async (_text?: string) => undefined);
+      placements.loading = true;
+      execution.current = { kind: 'tau', model: '' };
+      try {
+        const view = renderComposer('Make a bracket.', codexSession, {
+          handleSubmit: submit,
+          earlyInput: queued('Make a bracket.'),
+        });
+        expect(await screen.findByRole('textbox')).toHaveTextContent('Make a bracket.');
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(submit).not.toHaveBeenCalled();
+
+        placements.loading = false;
+        execution.current = { kind: 'tau', model: 'm' };
+        view.rerenderWith(codexSession);
+
+        await vi.waitFor(() => {
+          expect(submit).toHaveBeenCalledOnce();
+        });
+      } finally {
+        placements.loading = false;
+        execution.current = { kind: 'tau', model: 'm' };
+      }
     });
 
     /* Any edit after the Enter cancels it, as in the native input: an edit undone back to the same text included. */

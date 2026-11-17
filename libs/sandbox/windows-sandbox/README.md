@@ -28,10 +28,10 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
   on top: a Low process cannot write to an unlabelled (Medium) object. So an object whose DACL grants only Everyone
   (A22), or uses the default named-pipe DACL (Everyone may read), is closed to the shell. The default DACL of the
   shell's token gives the logon SID and the package all access and `OWNER RIGHTS` read-control only.
-- **AppContainer without a profile.** The runner has no loaded profile, so it does not call `CreateAppContainerProfile`,
-  which writes `HKCU` and creates `%LOCALAPPDATA%\Packages\<name>`. It follows Chromium's lowbox route
-  (`sandbox/win/src/app_container_base.cc`, `restricted_token_utils.cc`, read as reference, not vendored). The launcher
-  derives the package SID from a random name, `tau.sandbox.<32 hex digits>`, with
+- **AppContainer without an AppContainer profile.** The runner does not call `CreateAppContainerProfile`, which would
+  write per-package `HKCU` state and create `%LOCALAPPDATA%\Packages\<name>` for every launch. It follows Chromium's
+  lowbox route (`sandbox/win/src/app_container_base.cc`, `restricted_token_utils.cc`, read as reference, not vendored).
+  The launcher derives the package SID from a random name, `tau.sandbox.<32 hex digits>`, with
   `DeriveAppContainerSidFromAppContainerName`, a hash with no side effect. No two launches, concurrent or later, share a
   package or any grant to it. The runner creates the package's named-object directory
   (`\Sessions\<n>\AppContainerNamedObjects\<package SID>`), laid out as `CreateProcess` lays it out for a profile-backed
@@ -58,9 +58,21 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
   their binaries, `System32` and the .NET runtimes live under `%ProgramFiles%` and `%SystemRoot%`, which already grant
   `ALL APPLICATION PACKAGES` read and execute. The host's environment points `TEMP`, `TMP`, `USERPROFILE`, `APPDATA` and
   `LOCALAPPDATA` into the writable root, so the module analysis cache, the PSReadLine history and .NET's temporary files
-  land there. The runner adds nothing to the environment and loads no `HKCU` hive. Whatever PowerShell reads from the
-  sandbox account's `HKCU` (`HKU\.DEFAULT` without a profile) the AppContainer may refuse, and PowerShell treats it as
-  unset.
+  land there. The runner adds nothing to the environment.
+- **HKCU.** PowerShell 7 and 5.1 open `HKCU` while their host starts (policy settings, console, regional and, in 5.1,
+  execution-policy keys). A missing key is harmless to them, but `ERROR_ACCESS_DENIED` is fatal: "The shell cannot be
+  started. A failure occurred during initialization: Requested registry access is not allowed" (WIN-X64 run
+  44012660365). Without a loaded profile the account's `HKCU` falls back to `HKU\.DEFAULT`, whose root admits no
+  AppContainer. So `setup` creates `TauSandbox`'s own user profile once (`CreateProfile`, from the Default user
+  template like any account), and `launch` starts the runner with `LOGON_WITH_PROFILE`. The secondary-logon service
+  then loads that hive as `HKU\<account SID>` for the launch and unloads it afterwards. The template's hive grants
+  `ALL APPLICATION PACKAGES` read as every account's does, so Tau grants nothing in the registry. The hive holds nothing
+  of the person's. The shell cannot write it, because the restricted pass finds none of its restricting SIDs there, so
+  no registry state carries over between launches. Before it starts the shell, the runner impersonates the lowbox
+  token, opens the hive root and the keys PowerShell reads, and logs each as `read`, `absent` or `error <code>`
+  through `runner-log`. If the root cannot be opened, the runner refuses at stage `registry` with that line, and the
+  shell never starts. `launch` refuses "the sandbox account has no profile (run setup again)" when the profile is not
+  registered. `revoke` deletes the profile before the account.
 - **Sessions.** One sandbox account means read isolation is per account, not per session, so the provider serializes
   launches and answers a second concurrent one `session-limit` (A23 fallback clause).
 - **Descendants.** The runner places the shell in a Job Object with `KILL_ON_JOB_CLOSE`, no `BREAKAWAY_OK` and no
@@ -104,12 +116,13 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
   The desktop carries a Low label (`S:(ML;;NW;;;LW)`) so the Low-integrity shell can attach to it. The launcher adds one
   session ACE per participant to the window station when the person may change its DACL (best-effort: the ACE only
   widens access), journals the original descriptor, and restores it byte for byte at teardown.
-- **Cleanup.** The AppContainer leaves no durable state. There is no profile, no registry key, no firewall or loopback
-  exemption and no permanent kernel object. The named-object directory and its links are temporary objects that go away
-  with the last handle, held by the runner and the lowbox token, when the launch's job ends. The ACEs for the package
-  SID and the Low labels on writable roots are journaled and restored with the rest of the ACL change. A restored root
-  that was replaced during the launch must not name the package SID either. `restore` therefore has nothing
-  AppContainer-specific to remove beyond the journal.
+- **Cleanup.** The AppContainer leaves no durable state. There is no AppContainer profile, no registry key, no firewall
+  or loopback exemption and no permanent kernel object. The account's own profile is account-level state, created by
+  `setup` and deleted by `revoke`. The named-object directory and its links are temporary objects that go away with the
+  last handle, held by the runner and the lowbox token, when the launch's job ends. The ACEs for the package SID and the
+  Low labels on writable roots are journaled and restored with the rest of the ACL change. A restored root that was
+  replaced during the launch must not name the package SID either. `restore` therefore has nothing AppContainer-specific
+  to remove beyond the journal.
 - **Runner binary.** `TauSandbox` cannot read the person's profile, where the desktop app installs, so `setup` copies the
   helper to `%ProgramData%\Tau\Sandbox\bin\` (readable by `TauSandboxUsers`, writable only by SYSTEM and
   Administrators) and `launch` starts that copy. `launch` refuses `sandbox-unavailable` when the installed copy differs
@@ -139,14 +152,14 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
 
 ## Subcommands
 
-| Command                    | Runs as             | Purpose                                                                                                                                                                                         |
-| -------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `status`                   | the person          | Print the install record as JSON with `"installed":true`, `{"installed":false}` when absent or unreadable, plus `firewallEnabled` and `rulesPresent` (below). Never elevates.                   |
-| `setup`                    | Administrator (UAC) | Create or repair the account, group, password file, firewall rules and WFP filters; write the install record. Idempotent. `--for-user <SID>` names the person whose host may read the password. |
-| `revoke`                   | Administrator (UAC) | Remove the firewall rules, the WFP filters, sublayer and provider, the account, the group, the password file and the install record. Idempotent.                                                |
-| `launch`                   | the person          | Speak the framed protocol below on stdin/stdout: apply and journal ACLs, start the runner as `TauSandbox`, relay I/O, restore ACLs.                                                             |
-| `runner`                   | `TauSandbox`        | Internal. Started by `launch` with `CreateProcessWithLogonW` (no profile). Builds the token, job and stdio, then starts the shell on the launcher's private desktop.                            |
-| `restore --journal <path>` | the person          | Restore the descriptors a crashed `launch` journaled, then delete the journal. Idempotent.                                                                                                      |
+| Command                    | Runs as             | Purpose                                                                                                                                                                                                      |
+| -------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `status`                   | the person          | Print the install record as JSON with `"installed":true`, `{"installed":false}` when absent or unreadable, plus `firewallEnabled` and `rulesPresent` (below). Never elevates.                                |
+| `setup`                    | Administrator (UAC) | Create or repair the account, its profile, group, password file, firewall rules and WFP filters; write the install record. Idempotent. `--for-user <SID>` names the person whose host may read the password. |
+| `revoke`                   | Administrator (UAC) | Remove the firewall rules, the WFP filters, sublayer and provider, the account's profile, the account, the group, the password file and the install record. Idempotent.                                      |
+| `launch`                   | the person          | Speak the framed protocol below on stdin/stdout: apply and journal ACLs, start the runner as `TauSandbox`, relay I/O, restore ACLs.                                                                          |
+| `runner`                   | `TauSandbox`        | Internal. Started by `launch` with `CreateProcessWithLogonW` (`LOGON_WITH_PROFILE`). Builds the token, job and stdio, then starts the shell on the launcher's private desktop.                               |
+| `restore --journal <path>` | the person          | Restore the descriptors a crashed `launch` journaled, then delete the journal. Idempotent.                                                                                                                   |
 
 Install record: `%ProgramData%\Tau\Sandbox\install.json`, with `password.bin` beside it and the runner copy in `bin\`.
 The directory's DACL is protected: SYSTEM and Administrators full control, the `--for-user` person read. `setup` also
@@ -169,10 +182,10 @@ takes `--proxy-ports <list or a-b block>` (default `47311,47312`) and prints the
 }
 ```
 
-`status` adds two booleans: `firewallEnabled` (Windows Firewall is on for every profile in `CurrentProfileTypes`) and
-`rulesPresent` (the four firewall rules exist, are enabled, block, apply to every profile and name the account, and
-every WFP filter for the recorded proxy ports exists). Either is `false` when it cannot be read; the reasons go to
-stderr. `launch` refuses unless both are `true`.
+`status` adds `profilePresent` when installed (the account's profile is registered) and two booleans: `firewallEnabled`
+(Windows Firewall is on for every profile in `CurrentProfileTypes`) and `rulesPresent` (the four firewall rules exist,
+are enabled, block, apply to every profile and name the account, and every WFP filter for the recorded proxy ports
+exists). Either is `false` when it cannot be read; the reasons go to stderr. `launch` refuses unless both are `true`.
 
 ## Launch protocol
 

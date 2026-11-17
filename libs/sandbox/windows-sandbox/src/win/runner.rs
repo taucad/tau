@@ -1,4 +1,4 @@
-//! `runner`: started by `launch` as `TauSandbox` (`CreateProcessWithLogonW`, no profile). It is not itself
+//! `runner`: started by `launch` as `TauSandbox` (`CreateProcessWithLogonW`, with its profile). It is not itself
 //! restricted. It mints the write-restricted token from its own logon, derives the launch's AppContainer
 //! (lowbox) token from it (`lowbox.rs`), prepares the job and stdio, reports `ready`, and on `start` spawns
 //! the shell suspended with `CreateProcessAsUserW`, reads the shell's own token back, refuses anything but
@@ -41,7 +41,8 @@ use super::desktop::current_session;
 use super::job::Job;
 use super::lowbox::{self, LowBox, grant_kernel_object, token_facts};
 use super::pipe::{self, HandleIo};
-use super::sid::{EVERYONE, Sid, open_process_token, token_logon_sid};
+use super::profile;
+use super::sid::{EVERYONE, Sid, current_user, open_process_token, token_logon_sid};
 use super::util::{Error, Local, Owned, Result, check, clear_ctrl_c_ignore, program_files, system_root, wide};
 use crate::appcontainer::{is_package_sid, verify_token};
 use crate::cmdline::{command_line, environment_block, is_capability_sid};
@@ -510,6 +511,10 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
             .into_bytes(),
         ),
     );
+    // PowerShell cannot start when its HKCU refuses it: check the hive as the shell will see it.
+    let account = current_user().at("registry")?;
+    let hive = profile::check_hive(&lowbox.token, &account).at("registry")?;
+    send(sink, &Frame::new(frame::RUNNER_LOG, hive.into_bytes()));
     let job = Arc::new(Job::kill_on_close().at("job")?);
     let prepared = prepare_stdio(&spec.stdio).at("stdio")?;
     send(sink, &Frame::json(frame::READY, &serde_json::json!({})));

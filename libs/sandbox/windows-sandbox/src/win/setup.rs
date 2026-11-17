@@ -18,6 +18,7 @@ use super::account;
 use super::dpapi;
 use super::firewall;
 use super::pipe::HandleIo;
+use super::profile;
 use super::sid::{ADMINISTRATORS, Sid};
 use super::util::{Error, Local, Owned, Result, check, check_status, program_data, random_bytes, wide, wipe};
 use super::wfp;
@@ -101,6 +102,8 @@ pub fn status() -> i32 {
         Ok(Some(record)) => {
             let mut value = serde_json::to_value(&record).unwrap_or_default();
             value["installed"] = true.into();
+            value["profilePresent"] =
+                Sid::parse(&record.account_sid).map(|sid| profile::present(&sid)).unwrap_or(false).into();
             with_fence(value, Some(&record))
         }
         Ok(None) => with_fence(serde_json::json!({ "installed": false }), None),
@@ -231,6 +234,8 @@ pub fn setup(options: &SetupOptions) -> Result<InstallRecord> {
     account::hide_from_sign_in(ACCOUNT)?;
     let account_sid = Sid::lookup(ACCOUNT)?.ok_or_else(|| Error::msg("the sandbox account has no SID"))?;
     let group_sid = Sid::lookup(GROUP)?.ok_or_else(|| Error::msg("the sandbox group has no SID"))?;
+    // The account's own profile, so its HKCU is its own hive and not `HKU\.DEFAULT` (`profile.rs`).
+    profile::ensure(&account_sid, ACCOUNT)?;
 
     let dir = install_dir()?;
     fs::create_dir_all(&dir)?;
@@ -295,6 +300,11 @@ pub fn revoke() -> Result<()> {
     }
     note(firewall::remove_rules(&names));
     note(wfp::remove());
+    match Sid::lookup(ACCOUNT) {
+        Ok(Some(sid)) => note(profile::remove(&sid)),
+        Ok(None) => {}
+        Err(err) => note(Err(err)),
+    }
     note(account::delete_user(ACCOUNT));
     note(account::delete_group(GROUP));
     note(account::unhide(ACCOUNT));

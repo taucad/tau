@@ -20,7 +20,7 @@ use crate::tree::Sample;
 ///
 /// A journal without its `end` line was cut short before any ACL changed: there is nothing to restore.
 /// `account_sids` are the sandbox account and group, when known; the capability and package SIDs come from
-/// the journal. The package has no other state to remove: no profile, registry key or durable named object
+/// the journal. The package has no other state to remove: no AppContainer profile, registry key or durable named object
 /// exists for it (`lowbox.rs`).
 pub fn restore_journal(path: &Path, account_sids: &[String]) -> Vec<String> {
     let summary = match journal::read_summary(path) {

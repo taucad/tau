@@ -9,6 +9,7 @@ pub mod job;
 pub mod launch;
 pub mod lowbox;
 pub mod pipe;
+pub mod profile;
 pub mod restore;
 pub mod runner;
 pub mod setup;

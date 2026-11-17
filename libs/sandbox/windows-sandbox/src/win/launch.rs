@@ -17,7 +17,7 @@ use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, STD_OU
 use windows_sys::Win32::System::Diagnostics::Debug::{SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SetErrorMode};
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessWithLogonW, GetCurrentProcessId,
-    PROCESS_INFORMATION, ResumeThread, STARTF_FORCEOFFFEEDBACK, STARTUPINFOW, WaitForSingleObject,
+    LOGON_WITH_PROFILE, PROCESS_INFORMATION, ResumeThread, STARTF_FORCEOFFFEEDBACK, STARTUPINFOW, WaitForSingleObject,
 };
 
 use super::acl::{self, Principals};
@@ -25,6 +25,7 @@ use super::desktop::{PrivateDesktop, WindowStation, current_station_name};
 use super::job::Job;
 use super::lowbox::derive_package_sid;
 use super::pipe::{self, HandleIo};
+use super::profile;
 use super::restore::restore_journal;
 use super::setup::{fence, load_password, load_record};
 use super::sid::{Sid, current_user};
@@ -172,6 +173,9 @@ impl Session {
             != Some(&account)
         {
             return Err(Refused::unavailable("the sandbox account is missing (run setup again)", None));
+        }
+        if !profile::present(&account) {
+            return Err(Refused::unavailable("the sandbox account has no profile (run setup again)", None));
         }
         let capability_text =
             capability_sid(random_u32s::<4>().map_err(unavailable("no randomness for the capability SID"))?);
@@ -566,7 +570,8 @@ struct Runner {
     pid: u32,
 }
 
-/// Start the installed runner as the sandbox account, suspended, without a profile.
+/// Start the installed runner as the sandbox account, suspended, with its profile loaded, so the shell's
+/// `HKCU` is the account's own hive (`profile.rs`).
 fn spawn_runner(record: &InstallRecord, names: &pipe::PipeNames) -> Result<Runner> {
     let application = wide(&record.runner);
     let mut command = wide(&format!(
@@ -596,7 +601,7 @@ fn spawn_runner(record: &InstallRecord, names: &pipe::PipeNames) -> Result<Runne
             user.as_ptr(),
             domain.as_ptr(),
             password.as_ptr(),
-            0,
+            LOGON_WITH_PROFILE,
             application.as_ptr(),
             command.as_mut_ptr(),
             CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,

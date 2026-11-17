@@ -1,8 +1,7 @@
 //! The shell's AppContainer (lowbox) token, minted without an AppContainer profile.
 //!
-//! The runner is `TauSandbox` started through `CreateProcessWithLogonW` without a profile, so the
-//! profile-backed path (`CreateAppContainerProfile`, which writes the runner's `HKCU` and creates
-//! `%LOCALAPPDATA%\Packages\<name>`) is not available to it, and would leave per-launch state behind. It
+//! The profile-backed path (`CreateAppContainerProfile`, which writes per-package state into the runner's
+//! `HKCU` and creates `%LOCALAPPDATA%\Packages\<name>`) would leave per-launch state behind. The runner
 //! takes the route Chromium's sandbox takes for its lowbox policy (`sandbox/win/src/app_container_base.cc`,
 //! `restricted_token_utils.cc`, read as reference and not vendored): the launcher derives a fresh package
 //! SID from a random name (`DeriveAppContainerSidFromAppContainerName`, a hash with no side effect), and

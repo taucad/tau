@@ -421,6 +421,9 @@ describe.runIf(['darwin', 'linux', 'win32'].includes(process.platform))('Node au
     });
   });
 
+  // POSIX only by design: Windows opens no `authority.writer.lock` file, it owns the named pipe
+  // `\\.\pipe\tau-filesystem-authority-<dev>-<ino>` (`acquireWindowsAuthorityWriter`), so there is no final
+  // lock component to swap. The Windows-side exclusion, case-alias, replaced-directory and abort cases above cover it.
   it.runIf(process.platform !== 'win32')('should refuse a symbolic-link final lock component', async () => {
     const authorityRoot = await root();
     const outside = await root('outside-file-');

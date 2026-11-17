@@ -2604,7 +2604,7 @@ describe('restoring a session a cold start lost', () => {
     /* The note is a durable row like any other: the log refuses one its schema does not admit. */
     const envelope = { version: 1, leaderEpoch: 'epoch', recordedAt: 'now', runId: 'run-lost' };
     for (const [sequence, event] of appended.entries()) {
-      expect(() => parseLogEvent({ ...envelope, sequence, ...event })).not.toThrow();
+      expect(() => parseLogEvent({ ...event, ...envelope, sequence })).not.toThrow();
     }
   }, 30_000);
 });

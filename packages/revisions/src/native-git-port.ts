@@ -228,16 +228,6 @@ const gitDirectoryName = '.git';
 const ignorePathspecBatch = 512;
 const liveCheckoutId = 'live';
 /**
- * A hooks path that is not a directory, so neither Git nor git-lfs can put a
- * hook there. git-lfs installs its hooks under `core.hooksPath` whenever its
- * filter runs (a `worktree add` over tracked large files), and joins a path
- * that is not absolute to the checkout: `/dev/null` has no drive on Windows,
- * so there it planted `dev/null/post-checkout` and three more inside the
- * checkout. The Win32 device namespace's `NUL` is absolute on Windows.
- */
-const disabledHooksPath = process.platform === 'win32' ? String.raw`\\.\NUL` : '/dev/null';
-
-/**
  * Configuration this port pins on every command, ahead of the subcommand.
  *
  * The environment scrub takes care of `GIT_*`; these three reach git from the
@@ -260,7 +250,7 @@ const pinnedConfiguration: readonly string[] = Object.freeze([
   '-c',
   'core.autocrlf=false',
   '-c',
-  `core.hooksPath=${disabledHooksPath}`,
+  'core.hooksPath=/dev/null',
   '-c',
   'core.fsmonitor=false',
   '-c',
@@ -2401,7 +2391,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * checkout and planted `dev/null/pre-push` and three more inside the
      * project, an untracked folder every cut then saw as unsaved work. */
     if (!(await isAdopted())) {
-      await run(['lfs', 'install', '--local', '--skip-repo']);
+      await run(['lfs', 'install', '--local']);
     }
     /* Every project an older build recorded has no index at all, so this open
      * heals it. An existing index is left alone: in a repository Tau adopted

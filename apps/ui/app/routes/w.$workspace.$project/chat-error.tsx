@@ -6,10 +6,10 @@ import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
-import { CodeViewer } from '#components/code/code-viewer.js';
+import { CodeViewer } from '@taucad/editor-ui/components/code/code-viewer';
 import { cn } from '@taucad/ui/utils/cn';
 import { chatHistoryTidyFailureMessage } from '@taucad/chat-ui/utils/error.utils';
-import { cardOf } from '@taucad/chat-ui/utils/chat-error-card';
+import { cardOf, pageHeadlineOf } from '@taucad/chat-ui/utils/chat-error-card';
 import {
   autoResumableProviderUnavailableCode,
   nextProviderUnavailableRetry,
@@ -279,7 +279,7 @@ function codedErrorCard({
     return (
       <ChatErrorPausedTurn
         className={className}
-        title='This model is paused'
+        title={pageHeadlineOf(code)}
         reason="Tau's operators have paused this model. Switch to another model to continue."
         resumable={false}
         canSwitchModel
@@ -294,7 +294,7 @@ function codedErrorCard({
     return (
       <ChatErrorPausedTurn
         className={className}
-        title='This model cannot continue this chat'
+        title={pageHeadlineOf(code)}
         reason='The model provider refused reasoning from earlier in this chat. Switch to another model to continue.'
         resumable={false}
         canSwitchModel

@@ -8,6 +8,7 @@ import { observeLongAnimationFrames } from '@taucad/viewer/lib/renderer-telemetr
 import { startErrorReporting } from '#lib/error-reporting.js';
 import { readRouteId, routePathInstrumentation } from '#lib/sentry-context.lib.js';
 import { routeClassOfRouteId } from '#lib/route-classes.js';
+import { scheduleNextStepWarm } from '#lib/warm-next-step.js';
 import { reactRootErrorHooks } from '#lib/react-root-errors.js';
 import { projectRouteId, registerEagerRouteModules } from '#lib/eager-route-modules.js';
 import * as projectRouteModule from '#routes/w.$workspace.$project/route.js';
@@ -81,4 +82,13 @@ startTransition(() => {
     // deploy stopped serving goes to the recovery instead. React's console output stays.
     reactRootErrorHooks,
   );
+});
+
+// PL8 (LB9): once Home is loaded and idle, prefetch the project route's interactive tier, so opening a project
+// downloads no module. Nothing under Save-Data, and only the files the warm manifest lists.
+scheduleNextStepWarm({
+  readRouteClass: () => {
+    const routeId = readRouteId();
+    return routeId === undefined ? undefined : routeClassOfRouteId(routeId);
+  },
 });

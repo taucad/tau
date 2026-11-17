@@ -232,6 +232,7 @@ function Sidebar({
     return (
       <Sheet open={openMobile} onOpenChange={setOpenMobile} {...properties}>
         <SheetContent
+          scroll='contained'
           data-sidebar='sidebar'
           data-slot='sidebar'
           data-mobile='true'

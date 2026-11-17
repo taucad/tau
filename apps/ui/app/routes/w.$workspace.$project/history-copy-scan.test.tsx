@@ -64,8 +64,8 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel: vi.fn() }),
 }));
 vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ updateProject: vi.fn() }) }));
-vi.mock('#components/code/code-editor.client.js', () => ({ CodeEditor: () => <pre /> }));
-vi.mock('#components/code/diff-viewer.js', () => ({ DiffViewer: () => <pre /> }));
+vi.mock('@taucad/editor-ui/components/code/code-editor.client', () => ({ CodeEditor: () => <pre /> }));
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({ DiffViewer: () => <pre /> }));
 
 const events = vi.hoisted(() => new Set<(event: WorkerRevisionEvent) => void>());
 vi.mock('#hooks/use-revision-status.js', async () => {

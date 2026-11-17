@@ -838,6 +838,23 @@ describe('createProjectHost', () => {
     expect(seams.closes).toBe(2);
   }, 30_000);
 
+  /* A remount after a failed close: the fresh host must find the chat's writer let go (WRITER_LOCKED, M1 Mac). */
+  it('should let go of every chat writer even when the launcher close fails', async () => {
+    const options = await desktopProjectHostOptions();
+    const first = createProjectHost(options);
+    const claimed = await first.launcher.host.claim('chat-lock');
+    expect(claimed).not.toHaveProperty('refused');
+    seams.closeFailures = 1;
+    cleanups.push(async () => {
+      seams.closeFailures = 0;
+    });
+    await expect(first.close()).rejects.toThrow('The launcher could not close.');
+
+    const second = createProjectHost(options);
+    cleanups.push(async () => second.close());
+    expect(await second.launcher.host.claim('chat-lock')).not.toHaveProperty('refused');
+  }, 30_000);
+
   /* W6.r1 Low (library-API §11): a Node watch that ends with its channel is closed, not reset. */
   it('should close, not reset, a parameter watch whose authority channel closed', async () => {
     const options = await desktopProjectHostOptions();

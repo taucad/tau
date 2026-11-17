@@ -15,14 +15,14 @@ import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { SliderInput } from '@taucad/ui/components/slider-input';
 import { Switch } from '@taucad/ui/components/switch';
-import type { SettingId } from '#components/settings/settings-registry.js';
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import type { SettingId } from '@taucad/settings-ui/components/settings/settings-catalogue';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import {
   resetToTauDefault,
   viewDefaultCopy,
   viewDefaultsInfo,
-} from '#components/settings/viewer/viewer-settings-copy.js';
-import type { ViewDefaultLeaf } from '#components/settings/viewer/viewer-settings-copy.js';
+} from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
+import type { ViewDefaultLeaf } from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
 import type { SectionWriteResult } from '#preferences/section-store.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
 

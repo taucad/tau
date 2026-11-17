@@ -23,6 +23,7 @@ import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@
 import { isRecord } from '@taucad/utils/schema';
 import { externalToolOutputText } from '#utils/external-tool-output.js';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
+import { isRecordedOnHost } from '#utils/chat-execution.js';
 import { normalizedErrorCategoryOf } from '#utils/chat-error-card.js';
 
 /** Presentation consumes canonical rows or distinct validated compact events. */
@@ -607,7 +608,7 @@ const messageChunks = (
   }
 };
 
-/** Read the latest ACP session record for the selected agent from durable UI messages. @public */
+/** Read the latest ACP session record for the selected agent and placement from durable UI messages. @public */
 export const latestAcpSessionData = (
   messages: readonly MyUIMessage[],
   agentId: string,
@@ -620,7 +621,7 @@ export const latestAcpSessionData = (
       if (
         part?.type === 'data-acp-session' &&
         part.data.agentId === agentId &&
-        (hostId === undefined || part.data.hostId === hostId)
+        (hostId === undefined || isRecordedOnHost(part.data.hostId, hostId))
       ) {
         return part.data;
       }

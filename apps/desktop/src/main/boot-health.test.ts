@@ -225,6 +225,26 @@ describe('boot-health storage (T-R12.3)', () => {
     }).not.toThrow();
   });
 
+  it('should decide as for an empty ledger when the first write fails, keeping an explicit --safe-mode', async () => {
+    const userData = await profile();
+    const path = join(userData, bootHealthFileName);
+    /* Two unhealthy launches on record: a writable profile would start this one in safe mode. */
+    await writeFile(
+      path,
+      JSON.stringify(ledger({ unhealthyCount: 1, last: record({ stage: 'shell-mounted', deadlinePassed: true }) })),
+    );
+    const unwritable = (): never => {
+      throw new Error('EROFS');
+    };
+    const start = (safeModeRequested: boolean) =>
+      startBootHealth({ path, build, version: '1.15.0', safeModeRequested, launchId: 'id', writeFile: unwritable });
+    const automatic = start(false);
+    expect(automatic.mode).toBe('normal');
+    expect(automatic.unhealthyCount).toBe(0);
+    expect(automatic.previousOutcome).toBeUndefined();
+    expect(start(true).mode).toBe('safe-requested');
+  });
+
   it('should not read the wall clock anywhere in the module', async () => {
     const source = await readFile(join(import.meta.dirname, 'boot-health.ts'), 'utf8');
     expect(source).not.toMatch(/Date\.now|new Date\b|performance\.timeOrigin|Date\(\)/u);

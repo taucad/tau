@@ -508,7 +508,13 @@ test('retries a failed export preference write with the same pending choice in t
   }
 });
 
-test('projects independent persistent directory mutations and exposes the browser machine-host boundary', async () => {
+/*
+ * The ui-e2e build uses production's flag defaults, and `machines` is off in production (`TAU_MACHINES_ENABLED`
+ * unset, `flag.constants.ts`), so a `?settings=machines` link opens General with no Machines section. The browser
+ * runtime's own boundary with the flag on ("Machines are unavailable in this runtime (unsupported).") is asserted
+ * where the flag is declared, in `apps/ui/app/components/settings/machines-settings.test.tsx` (#2292).
+ */
+test('projects independent persistent directory mutations and keeps Machines absent at the production flag default', async () => {
   const config = await openFixture();
   try {
     const path = 'public/models/observation-peer.js';
@@ -520,10 +526,12 @@ test('projects independent persistent directory mutations and exposes the browse
     const settings = new URL(await target.currentUrl());
     settings.searchParams.set('settings', 'machines');
     await target.navigate(settings.href);
-    await target.expectVisible(
-      selectors.getByText('Machines are unavailable in this runtime (unsupported).', { exact: true }),
-      30_000,
-    );
+    await target.expectVisible(selectors.getByRole('dialog', { name: 'Settings' }), 60_000);
+    const settingsSection = (name: string) =>
+      selectors.getByRole('navigation', { name: 'Settings navigation' }).getByRole('button', { name, exact: true });
+    await target.expectVisible(settingsSection('General'), 30_000);
+    await target.expectCount(settingsSection('Machines'), 0);
+    await target.expectCount(selectors.getByText(/^Machines are unavailable in this runtime/u), 0);
     await target.expectCount(selectors.getByRole('button', { name: 'Add simulated X1C', exact: true }), 0);
   } finally {
     await restoreWorkbenchObservation();

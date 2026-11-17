@@ -1,8 +1,8 @@
-import { definitionLinkMarkdown } from '#components/code/editor-documentation.js';
+import { definitionLinkMarkdown } from '@taucad/editor-ui/components/code/editor-documentation';
 import { URI, Utils } from 'vscode-uri';
 import type { KclValueView } from '@taucad/kcl-wasm-lib/bindings/KclValueView';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
-import type { EditorDocument } from '#lib/editor-document.js';
+import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import {
   kclCallAt,
@@ -10,16 +10,16 @@ import {
   kclOccurrenceAt,
   kclOutline,
   kclRelatedOccurrences,
-} from '#lib/kcl-language/kcl-bindings.js';
+} from '@taucad/editor-ui/lib/kcl-language/kcl-bindings';
 import type {
   KclBindingKind,
   KclIndex,
   KclOccurrence,
   KclOutlineSymbol,
   KclParameter,
-} from '#lib/kcl-language/kcl-bindings.js';
-import { loadKclStdlib } from '#lib/kcl-language/kcl-stdlib.js';
-import type { KclStdlib, KclStdlibEntry } from '#lib/kcl-language/kcl-stdlib.js';
+} from '@taucad/editor-ui/lib/kcl-language/kcl-bindings';
+import { loadKclStdlib } from '@taucad/editor-ui/lib/kcl-language/kcl-stdlib';
+import type { KclStdlib, KclStdlibEntry } from '@taucad/editor-ui/lib/kcl-language/kcl-stdlib';
 import type { KclSymbolService } from '#lib/kcl-language/lsp/kcl-symbol-service.js';
 import { decodeTextFile } from '@taucad/ui-core/utils/filesystem.utils';
 

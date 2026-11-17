@@ -11,18 +11,18 @@ import type * as LSP from 'vscode-languageserver-protocol';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { FileEntry, FileStatEntry } from '@taucad/types';
-import { goToDefinitionAt } from '#components/code/editor-definition.js';
+import { goToDefinitionAt } from '@taucad/editor-ui/components/code/editor-definition';
 import {
   formatDocument,
   languageFeatureNavigation,
   quickFix,
   renameSymbol,
   triggerParameterHints,
-} from '#components/code/editor-language-features.js';
-import { EditorDocument } from '#lib/editor-document.js';
-import { EditorDocumentSession } from '#lib/editor-document-session.js';
-import type { TextChange } from '#lib/editor-document.js';
-import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
+} from '@taucad/editor-ui/components/code/editor-language-features';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import { EditorDocumentSession } from '@taucad/editor-ui/lib/editor-document-session';
+import type { TextChange } from '@taucad/editor-ui/lib/editor-document';
+import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import {
   acquireCsharpLanguage,

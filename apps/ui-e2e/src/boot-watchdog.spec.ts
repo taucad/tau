@@ -5,10 +5,11 @@
  *
  * The blueprint row also asserts that safe mode polls no workspace. Home-only narrowing belongs to WP2, which owns the
  * root file manager and the root configuration read (`homeOnlyConfiguration` in `lib/boot-signals.ts` is the narrowing
- * it applies), so that assertion is its own expected-failure row below; WP2 removes the mark.
+ * it applies), so that assertion is the defect of the row below; WP2 flips its `expectedFailure`.
  */
 import { test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
+import { cloudDefectRow } from '#support/cloud-stand-ins.js';
 import * as target from '#support/external-target.js';
 
 test('shows the boot strip without the bundle and opens Home in safe mode for one page load', async () => {
@@ -81,26 +82,37 @@ const installWorkspaceWithProject = async (): Promise<void> => {
 };
 
 /* Expected failure, owned by WP2 (R12 web, Home-only narrowing): safe mode still publishes every connected root, so the
- * workspace's project is listed and its folder is polled. WP2 applies `homeOnlyConfiguration` and removes `.fails`. */
-test.fails('lists and polls no connected workspace in safe mode', async () => {
-  await installWorkspaceWithProject();
-  await target.navigate('/files');
-  await target.click(selectors.getByRole('button', { name: 'Add Workspace' }));
-  await target.expectVisible(selectors.getByText(/^1 projects? ready$/u), 30_000);
+ * workspace's project is listed and its folder is polled. Only the final exclusion is the defect: every step before it
+ * fails the row. WP2 applies `homeOnlyConfiguration` and sets `expectedFailure` to false. */
+cloudDefectRow(
+  {
+    api: test,
+    // Expected-failure: @rifont until 2026-12-15
+    expectedFailure: true,
+    title: 'R12-safe-home: lists and polls no connected workspace in safe mode',
+  },
+  async (defect) => {
+    await installWorkspaceWithProject();
+    await target.navigate('/files');
+    await target.click(selectors.getByRole('button', { name: 'Add Workspace' }));
+    await target.expectVisible(selectors.getByText(/^1 projects? ready$/u), 30_000);
 
-  await target.navigate('/projects/new');
-  await target.expectVisible(selectors.getByRole('button', { name: 'Create in Home' }), 60_000);
-  await target.fill(selectors.getByLabelText('Project Name *'), homeProjectName);
-  await target.click(selectors.getByRole('button', { name: /Create Project/u }));
-  await target.expectUrl(/\/w\/home\/[^/]+$/u, 60_000);
+    await target.navigate('/projects/new');
+    await target.expectVisible(selectors.getByRole('button', { name: 'Create in Home' }), 60_000);
+    await target.fill(selectors.getByLabelText('Project Name *'), homeProjectName);
+    await target.click(selectors.getByRole('button', { name: /Create Project/u }));
+    await target.expectUrl(/\/w\/home\/[^/]+$/u, 60_000);
 
-  /* Control: a normal start lists both projects. */
-  await target.navigate('/projects');
-  await target.expectVisible(selectors.getByText(workspaceProjectName, { exact: true }).first(), 60_000);
+    /* Control: a normal start lists both projects. */
+    await target.navigate('/projects');
+    await target.expectVisible(selectors.getByText(workspaceProjectName, { exact: true }).first(), 60_000);
 
-  await target.navigate('/?safe=1');
-  await target.expectVisible(selectors.getByCss('[data-slot="safe-mode-bar"]'), 60_000);
-  await target.click(selectors.getByRole('link', { name: 'Projects', exact: true }).first());
-  await target.expectVisible(selectors.getByText(homeProjectName, { exact: true }).first(), 60_000);
-  await target.expectCount(selectors.getByText(workspaceProjectName, { exact: true }), 0, 10_000);
-});
+    await target.navigate('/?safe=1');
+    await target.expectVisible(selectors.getByCss('[data-slot="safe-mode-bar"]'), 60_000);
+    await target.click(selectors.getByRole('link', { name: 'Projects', exact: true }).first());
+    await target.expectVisible(selectors.getByText(homeProjectName, { exact: true }).first(), 60_000);
+    await defect(async () => {
+      await target.expectCount(selectors.getByText(workspaceProjectName, { exact: true }), 0, 10_000);
+    });
+  },
+);

@@ -75,7 +75,7 @@ vi.mock('#routes/w.$workspace.$project/chat-error-agent-stop.js', () => ({
   ),
 }));
 
-vi.mock('#components/code/code-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/code-viewer', () => ({
   CodeViewer: ({ text }: { readonly text: string }) => <pre data-testid='code-viewer'>{text}</pre>,
 }));
 

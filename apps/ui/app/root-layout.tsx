@@ -25,8 +25,8 @@ import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { buildFrameHintScript } from '#lib/frame-hint.js';
 import { buildBootWatchdogScript, bootWatchdogStripHtml } from '#lib/boot-watchdog.js';
 import { safeModeHref } from '#lib/boot-signals.js';
-import { DesktopSafeModeActions, SafeModeBar } from '#components/layout/safe-mode-bar.js';
-import { desktopSafeMode } from '#lib/desktop-safe-mode.js';
+import { SafeModeNotice } from '#components/layout/safe-mode-bar.js';
+import { documentScrollClass } from '#components/layout/document-scroll.js';
 import { Page } from '#components/layout/page.js';
 import { useDocumentFact } from '#lib/client-facts.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -239,16 +239,12 @@ export function ProductApp(): React.JSX.Element {
   const { pathname } = useLocation();
   const runtime = useOptionalAppRuntime();
   const isSafeMode = runtime !== undefined && selectRuntimeSafeMode(runtime);
-  /* Desktop safe mode is main's, with its reason and the recovery window behind the bar (D0). */
-  const desktopSafe = desktopSafeMode();
+  /* Desktop safe mode is main's, with its reason and the recovery window behind the bar (D0). Both are read in the
+   * browser only, so the bar mounts after hydration. */
   const shell = (
     <>
       <ProductShell />
-      {isSafeMode || desktopSafe !== undefined ? (
-        <SafeModeBar reason={desktopSafe?.reason ?? 'requested'}>
-          {desktopSafe === undefined ? undefined : <DesktopSafeModeActions />}
-        </SafeModeBar>
-      ) : undefined}
+      <SafeModeNotice isRequested={isSafeMode} />
     </>
   );
   if (isRemoteHostHarness(data?.env.TAU_DEBUG, pathname)) {
@@ -321,7 +317,7 @@ export function RootErrorBoundary(): React.JSX.Element {
   /* A refusal or a missing page is not a failed start; safe mode would not help with it. */
   const offersSafeMode = !isRouteErrorResponse(error) || error.status >= 500;
   return (
-    <div data-slot='root-error-document' className='flex h-dvh flex-col overflow-x-auto overflow-y-auto'>
+    <div data-slot='root-error-document' className={cn('flex flex-col', documentScrollClass)}>
       <ErrorPage />
       {offersSafeMode ? (
         <p className='px-4 pb-8 text-center text-sm text-muted-foreground'>

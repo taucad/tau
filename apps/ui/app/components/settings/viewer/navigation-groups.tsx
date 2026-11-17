@@ -27,7 +27,7 @@ import type {
   PersonProfile,
   ViewerPreferences,
 } from '@taucad/preferences';
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import {
   gizmoStyleCopy,
   linuxAltNote,
@@ -37,8 +37,8 @@ import {
   resetToTauDefault,
   suggestedLabel,
   viewerControlCopy,
-} from '#components/settings/viewer/viewer-settings-copy.js';
-import { setViewerPersonProperties } from '#components/settings/viewer/viewer-person-properties.js';
+} from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
+import { setViewerPersonProperties } from '@taucad/settings-ui/components/settings/viewer/viewer-person-properties';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import type { SectionWriteResult } from '#preferences/section-store.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';

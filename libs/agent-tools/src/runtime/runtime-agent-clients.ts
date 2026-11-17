@@ -36,6 +36,7 @@ import {
   buildCaptureExportOptions,
   canonicalCaptureViews,
   describeCaptureSection,
+  planarMultiAngleNotice,
   resolveCaptureSectionKeep,
 } from '#capture/capture-views.js';
 import { workbenchViewCamera, workbenchViewSections } from '#capture/capture-workbench-view.js';
@@ -854,15 +855,20 @@ export const createRuntimeAgentClients = (
               { count: 1, mimeType: 'image/png' },
             );
             context?.signal?.throwIfAborted();
+            /* A 2D drawing has one canonical view, so each note tells the agent why the 3D-only parts of its request did not apply. */
+            const notes = [
+              ...(captureInput.mode === 'multi_angle' ? [planarMultiAngleNotice(rendering.view)] : []),
+              ...(captureInput.workbenchView === undefined
+                ? []
+                : [
+                    `Workbench view ${captureInput.workbenchView.id} selects the 2D view ${rendering.view}; its camera, cuts and display apply to 3D views only.`,
+                  ]),
+            ];
             return {
               success: true,
               images: [{ ...echo, dataUrl: captureFilesToDataUrls(files)[0]! }],
               ...provenance,
-              ...(captureInput.workbenchView === undefined
-                ? {}
-                : {
-                    message: `Workbench view ${captureInput.workbenchView.id} selects the 2D view ${rendering.view}; its camera, cuts and display apply to 3D views only.`,
-                  }),
+              ...(notes.length === 0 ? {} : { message: notes.join(' ') }),
             };
           }
           assertGlb(artifact.content);

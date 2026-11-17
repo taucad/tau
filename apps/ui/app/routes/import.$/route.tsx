@@ -75,7 +75,6 @@ import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {
   title: 'Import',
-  enableOverflowY: true,
 };
 
 const readSplatPath = (params: Record<string, string | undefined>): string => params['*'] ?? '';
@@ -324,7 +323,7 @@ export default function ImportRoute(): React.JSX.Element {
       routeActiveRef.current = false;
     };
   }, [holdHostGrants]);
-  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ includeDeleted: true });
+  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ scope: 'all' });
   const presentLocationError = useProjectCreationLocationError();
   const [linkedSelection, setLinkedSelection] = useState<GithubRepositorySelection>();
   const [linkedMainFile, setLinkedMainFile] = useState('');

@@ -136,6 +136,21 @@ describe('recovery resets (T-R12.7)', () => {
     expect(fs.existsSync(join(root, 'granted-roots.json'))).toBe(true);
   });
 
+  it('should apply nothing when the request file cannot be removed, so no reset can run twice', async () => {
+    const root = await profile();
+    await seed(root);
+    requestReset(root, 'folder-list');
+    vi.mocked(fs.renameSync).mockClear();
+    vi.mocked(fs.unlinkSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error('EPERM: operation not permitted, unlink'), { code: 'EPERM' });
+    });
+    const run = options(root);
+    expect(applyPendingResets(run)).toEqual([]);
+    expect(fs.existsSync(join(root, 'granted-roots.json'))).toBe(true);
+    expect(fs.renameSync).not.toHaveBeenCalled();
+    expect(run.log).toHaveBeenCalledWith('warn', 'main.pending-resets-unremovable', { errno: 'EPERM' });
+  });
+
   it('should skip a store that is absent, and touch only the cache directories it names', async () => {
     const root = await profile();
     requestReset(root, 'caches');

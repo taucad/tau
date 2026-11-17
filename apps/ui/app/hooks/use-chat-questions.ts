@@ -12,7 +12,7 @@ import {
   isQuestionAnswerValid,
 } from '@taucad/chat';
 import type { AnswersFile, Ask, AskAnswers, QuestionReply } from '@taucad/chat';
-import { useFileContent } from '#hooks/use-file-content.js';
+import { useFileContent } from '@taucad/files-ui/hooks/use-file-content';
 import { useFileManager } from '#hooks/use-file-manager.js';
 
 /** The chat's questions and the person's answers, live from `.tau/chats/<chatId>/`. @public */

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { IDockviewPanelHeaderProps } from 'dockview-react';
+import type { DockviewGroupPanel, IDockviewPanelHeaderProps } from 'dockview-react';
 import { Box } from 'lucide-react';
 import { WorkbenchTab } from '@taucad/workbench-panes/components/workbench-tab';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
@@ -85,10 +85,25 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
     };
   }, [api]);
 
+  /* A tab moved to another group keeps this content but gets a new `.dv-tab`, which Dockview names by the bare title.
+   * Dockview reports the new group before it builds that tab, so the naming effect reads the group the panel sits in
+   * and runs after the move has been committed: a moved tab keeps its full path (#2291). */
+  const [group, setGroup] = useState<DockviewGroupPanel | undefined>(api.group);
+  useEffect(() => {
+    const disposable = api.onDidGroupChange(() => {
+      setGroup(api.group);
+    });
+
+    return () => {
+      disposable.dispose();
+    };
+  }, [api]);
+
   // Dockview owns the actual keyboard-focus target outside this React root.
   useEffect(() => {
     const tab = closeRef.current?.closest<HTMLElement>('.dv-tab');
-    if (!tab) {
+    // A panel outside any group has no tab of its own to name.
+    if (!tab || group === undefined) {
       return;
     }
 
@@ -100,7 +115,7 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
         tab.removeAttribute('aria-label');
       }
     };
-  }, [fullTitle]);
+  }, [fullTitle, group]);
 
   /*
    * Dockview listens natively on `.dv-tab`, which sits between this portal and

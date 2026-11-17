@@ -270,6 +270,9 @@ const fakeWindow = {
   isDestroyed: vi.fn(() => false),
   isMinimized: vi.fn(() => false),
   isFullScreen: vi.fn(() => false),
+  getSize: vi.fn((): [number, number] => [1216, 859]),
+  getContentSize: vi.fn((): [number, number] => [1200, 800]),
+  setMinimumSize: vi.fn(),
   restore: vi.fn(),
   loadURL: vi.fn(async () => undefined),
   loadFile: vi.fn(async () => undefined),
@@ -905,6 +908,34 @@ describe('desktop main compute owner', () => {
       fakeWindow.isFullScreen.mockReturnValue(false);
       leave?.();
       expect(fakeWindow.webContents.send).toHaveBeenLastCalledWith(windowFullscreenChannel, false);
+    },
+    bootMilliseconds,
+  );
+
+  /* T-A2.1 (D4.6): the floor is a 400 × 300 content area, so the minimum set on the frame adds the frame's own size,
+   * measured after creation and again whenever full screen changes the chrome. */
+  it(
+    'should hold the window to a 400 x 300 content floor through its frame, and measure again after full screen',
+    async () => {
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1216, 859]);
+      fakeWindow.getContentSize.mockReturnValue([1200, 800]);
+      await bootstrap();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(416, 359);
+
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1440, 900]);
+      fakeWindow.getContentSize.mockReturnValue([1440, 900]);
+      const enter = fakeWindow.on.mock.calls.findLast(([name]) => name === 'enter-full-screen')?.[1];
+      enter?.();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(400, 300);
+
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1216, 859]);
+      fakeWindow.getContentSize.mockReturnValue([1200, 800]);
+      const leave = fakeWindow.on.mock.calls.findLast(([name]) => name === 'leave-full-screen')?.[1];
+      leave?.();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(416, 359);
     },
     bootMilliseconds,
   );
@@ -1631,11 +1662,14 @@ describe('desktop main compute owner', () => {
 describe('desktop main admission gates', () => {
   const bootMilliseconds = 30_000;
 
+  /* T-R11.2 (D7): only a locked release owns `Tau Staging`. A staging build that honours overrides and is started
+   * without `--user-data-dir` uses `Tau Staging Dev`, so a development or test run can never default into the
+   * installed app's profile. */
   it.each([
-    { overrides: true, explicitProfile: true, usesChannelProfile: false },
-    { overrides: true, explicitProfile: false, usesChannelProfile: true },
-    { overrides: false, explicitProfile: true, usesChannelProfile: true },
-    { overrides: false, explicitProfile: false, usesChannelProfile: true },
+    { overrides: true, explicitProfile: true, profile: undefined },
+    { overrides: true, explicitProfile: false, profile: 'Tau Staging Dev' },
+    { overrides: false, explicitProfile: true, profile: 'Tau Staging' },
+    { overrides: false, explicitProfile: false, profile: 'Tau Staging' },
   ])(
     'should isolate a staging profile according to $overrides/$explicitProfile',
     async (options) => {
@@ -1650,10 +1684,10 @@ describe('desktop main admission gates', () => {
       );
       await import('#main/main.js');
       const profileCall = app.setPath.mock.calls.find(([name]) => name === 'userData');
-      if (options.usesChannelProfile) {
-        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', 'Tau Staging')]);
-      } else {
+      if (options.profile === undefined) {
         expect(profileCall).toBeUndefined();
+      } else {
+        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', options.profile)]);
       }
       expect(app.setPath).toHaveBeenCalledWith('sessionData', state.userData);
     },
@@ -2863,12 +2897,12 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       fakeWindow.loadURL.mockRejectedValueOnce(Object.assign(new Error('ERR_FILE_NOT_FOUND'), { errno: -6 }));
       await booted();
       const { BrowserWindow } = await import('electron');
+      const partitions = (): unknown[] =>
+        vi.mocked(BrowserWindow).mock.calls.map(([options]) => options?.webPreferences?.partition);
+      /* Counted by partition, not by position: a slow host may create the app's windows at other times. */
       await vi.waitFor(() => {
-        expect(vi.mocked(BrowserWindow).mock.calls).toHaveLength(2);
+        expect(partitions().filter((partition) => partition === 'tau-recovery')).toHaveLength(1);
       });
-      expect(vi.mocked(BrowserWindow).mock.calls[1]![0]).toEqual(
-        expect.objectContaining({ webPreferences: expect.objectContaining({ partition: 'tau-recovery' }) as unknown }),
-      );
       expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
       expect(signals('desktop-recovery-shown')).toEqual([
         expect.objectContaining({ tags: { surface: 'window', trigger: 'load-failed' } }),

@@ -1,21 +1,28 @@
-import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
-import { definitionProvider } from '#components/code/editor-definition.js';
-import { definitionLinkMarkdown, renderEditorDocumentation } from '#components/code/editor-documentation.js';
-import { languageFeatures, promptRename, triggerParameterHints } from '#components/code/editor-language-features.js';
+import { completionTypeFromLsp } from '@taucad/editor-ui/components/code/editor-completion-icon';
+import { definitionProvider } from '@taucad/editor-ui/components/code/editor-definition';
+import {
+  definitionLinkMarkdown,
+  renderEditorDocumentation,
+} from '@taucad/editor-ui/components/code/editor-documentation';
+import {
+  languageFeatures,
+  promptRename,
+  triggerParameterHints,
+} from '@taucad/editor-ui/components/code/editor-language-features';
 import type {
   CallHierarchyDirection,
   EditorLocationItem,
   EditorOccurrence,
   EditorSignature,
   EditorSymbol,
-} from '#components/code/editor-language-features.js';
+} from '@taucad/editor-ui/components/code/editor-language-features';
 import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import { autocompletion } from '@codemirror/autocomplete';
 import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 import { Decoration, EditorView, hoverTooltip, showDialog, ViewPlugin } from '@codemirror/view';
 import type { ViewUpdate } from '@codemirror/view';
-import { storeDiagnostics } from '#components/code/editor-lint.js';
+import { storeDiagnostics } from '@taucad/editor-ui/components/code/editor-lint';
 import { foldService, getIndentUnit, indentUnit } from '@codemirror/language';
 import type * as LSP from 'vscode-languageserver-protocol';
 import { URI } from 'vscode-uri';
@@ -24,7 +31,7 @@ import { Topic } from '@taucad/events';
 import { OpenscadLanguageClient } from '@taucad/openscad-language/client';
 import { openscadBuiltinsUri, openscadWorkspaceLimits } from '@taucad/openscad-language/protocol';
 import type { OpenscadLanguageAssets } from '@taucad/openscad-language/protocol';
-import type { EditorDocument, DocumentChange } from '#lib/editor-document.js';
+import type { EditorDocument, DocumentChange } from '@taucad/editor-ui/lib/editor-document';
 import type { EditorLanguageEnvironment, EditorNavigationTarget } from '#lib/editor-language-environment.js';
 import { applyLspCompletion } from '@taucad/ui-core/lib/lsp-completion-apply';
 import { applyLspWorkspaceEdit, captureLspEditBasis } from '#lib/lsp-workspace-edit.js';

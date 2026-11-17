@@ -1,12 +1,17 @@
 import { EventEmitter } from 'node:events';
 import type { BrowserWindow, WebContents, WebContentsDidStartNavigationEventParams } from 'electron';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { _electron as electron } from 'playwright';
 import { describe, expect, it, vi } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
-import { desktopDescendants, launchDesktopApp, observeDesktopNavigation } from '#support/desktop-app.js';
+import {
+  createPickedDirectories,
+  desktopDescendants,
+  launchDesktopApp,
+  observeDesktopNavigation,
+} from '#support/desktop-app.js';
 
 describe('desktop process ownership', () => {
   const snapshot =
@@ -76,6 +81,7 @@ describe('explicit manual desktop window identity', () => {
       const on = vi.fn();
       const ownedWindow = { setTitle, on };
       const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+      application.evaluate.mockResolvedValueOnce(profileRoot);
       application.browserWindow.mockResolvedValue(mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>());
       application.process.mockReturnValue(mockDeep<ReturnType<typeof application.process>>());
       application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
@@ -140,6 +146,7 @@ describe('explicit automated trace snapshot accommodation', () => {
       const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-trace-test-'));
       const stopped = new Error('Fixture stops at trace initialization.');
       const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+      application.evaluate.mockResolvedValueOnce(profileRoot);
       application.browserWindow.mockResolvedValue(mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>());
       application.process.mockReturnValue(mockDeep<ReturnType<typeof application.process>>());
       application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
@@ -192,6 +199,7 @@ describe('initial main navigation readiness', () => {
       const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
       const child = mockDeep<ReturnType<typeof application.process>>({ exitCode: 0 });
       application.evaluate.mockResolvedValue(undefined);
+      application.evaluate.mockResolvedValueOnce(profileRoot);
       application.process.mockReturnValue(child);
       application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
       application.browserWindow.mockResolvedValue(mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>());
@@ -249,6 +257,7 @@ describe('initial main navigation readiness', () => {
     const loaded = Promise.withResolvers<void>();
     const stopped = new Error('Fixture stops after initial load readiness.');
     const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+    application.evaluate.mockResolvedValueOnce(profileRoot);
     const navigationHandle = mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>();
     navigationHandle.evaluate.mockReturnValue(Promise.withResolvers<string>().promise);
     application.browserWindow.mockResolvedValue(navigationHandle);
@@ -286,7 +295,8 @@ describe('initial main navigation readiness', () => {
       expect(acceptUrl(new URL('https://foreign.example/'))).toBe(false);
       expect(loadOptions).toEqual({ waitUntil: 'load' });
       expect(page.waitForLoadState).toHaveBeenCalledWith('domcontentloaded');
-      expect(application.evaluate).not.toHaveBeenCalled();
+      /* Only the profile check (R11) has run in main; the test overrides wait for the load. */
+      expect(application.evaluate).toHaveBeenCalledOnce();
       expect(context.tracing.start).not.toHaveBeenCalled();
       loaded.resolve();
       const outcome = await pending;
@@ -295,11 +305,166 @@ describe('initial main navigation readiness', () => {
         throw new TypeError('Expected the fixture trace stop.');
       }
       expect(outcome.message).toContain('The desktop shell did not survive launch.');
-      expect(application.evaluate).toHaveBeenCalledOnce();
+      expect(application.evaluate).toHaveBeenCalledTimes(2);
       expect(context.tracing.start).toHaveBeenCalledOnce();
     } finally {
       loaded.resolve();
       await pending;
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      launch.mockRestore();
+      await rm(profileRoot, { recursive: true, force: true });
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+    }
+  });
+});
+
+describe('effective profile assertion', () => {
+  /* T-R11.1 (D7): whatever the build does with `--user-data-dir`, a run that landed in another profile stops before
+   * it touches the page, so test folders can never again be granted in a person's real profile. */
+  it('should close an app whose userData is not the profile this run created and throw before touching the page', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-profile-test-'));
+    const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+    const child = mockDeep<ReturnType<typeof application.process>>({ exitCode: null, signalCode: null });
+    application.process.mockReturnValue(child);
+    application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
+    application.evaluate.mockResolvedValue(join(tmpdir(), 'elsewhere', 'Tau Staging'));
+    const page = mockDeep<Awaited<ReturnType<typeof application.firstWindow>>>();
+    application.firstWindow.mockResolvedValue(page);
+    const launch = vi.spyOn(electron, 'launch').mockResolvedValueOnce(application);
+    try {
+      await expect(launchDesktopApp({ token: 'fixture-token', profileRoot })).rejects.toThrow(
+        /is not the temporary profile this run created/u,
+      );
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(application.firstWindow).not.toHaveBeenCalled();
+      expect(page.waitForLoadState).not.toHaveBeenCalled();
+      expect(page.reload).not.toHaveBeenCalled();
+      expect(application.evaluate).toHaveBeenCalledOnce();
+    } finally {
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      launch.mockRestore();
+      await rm(profileRoot, { recursive: true, force: true });
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('should accept the profile it created when the app reports it through a symbolic link', async () => {
+    const parent = await mkdtemp(join(tmpdir(), 'tau-desktop-profile-link-test-'));
+    const profileRoot = join(parent, 'profile');
+    await mkdir(profileRoot);
+    const linked = join(parent, 'linked');
+    await symlink(profileRoot, linked);
+    const stopped = new Error('Fixture stops after the profile check.');
+    const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+    const child = mockDeep<ReturnType<typeof application.process>>({ exitCode: null, signalCode: null });
+    application.process.mockReturnValue(child);
+    application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
+    application.evaluate.mockResolvedValue(linked);
+    application.firstWindow.mockRejectedValue(stopped);
+    const launch = vi.spyOn(electron, 'launch').mockResolvedValueOnce(application);
+    try {
+      await expect(launchDesktopApp({ token: 'fixture-token', profileRoot })).rejects.toThrow(
+        'The desktop shell did not survive launch.',
+      );
+      expect(application.firstWindow).toHaveBeenCalledOnce();
+    } finally {
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      launch.mockRestore();
+      await rm(parent, { recursive: true, force: true });
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+    }
+  });
+});
+
+describe('picked directories and the launched build', () => {
+  it('should answer each pick with the next folder, repeat the last, and leave caller-owned folders in place', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-picks-test-'));
+    const picked = await createPickedDirectories(3);
+    const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+    const child = mockDeep<ReturnType<typeof application.process>>({ exitCode: 0 });
+    application.evaluate.mockResolvedValue(undefined);
+    application.evaluate.mockResolvedValueOnce(profileRoot);
+    application.process.mockReturnValue(child);
+    application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
+    application.browserWindow.mockResolvedValue(mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>());
+    const page = mockDeep<Awaited<ReturnType<typeof application.firstWindow>>>();
+    page.url.mockReturnValue('app://tau/');
+    const context = mockDeep<ReturnType<typeof page.context>>();
+    context.tracing.stop.mockResolvedValue();
+    page.context.mockReturnValue(context);
+    application.firstWindow.mockResolvedValue(page);
+    const launch = vi.spyOn(electron, 'launch').mockResolvedValueOnce(application);
+    try {
+      expect(picked.directories).toHaveLength(3);
+      for (const directory of picked.directories) {
+        expect(directory).toMatch(/tau-desktop-e2e-pick-[^/]+\/tau-desktop-workspace$/u);
+      }
+      const session = await launchDesktopApp({
+        token: 'fixture-token',
+        profileRoot,
+        preserveProfile: true,
+        pickedDirectories: picked.directories,
+      });
+      expect(session.profileRoot).toBe(profileRoot);
+      expect(session.pickedDirectory).toBe(picked.directories[0]);
+      expect(session.pickedDirectories).toEqual(picked.directories);
+      /* A development build answers every pick with the seed before the stub is reached, so several folders leave it unset. */
+      expect(launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY']).toBeUndefined();
+      const overrides = application.evaluate.mock.calls.find(([, argument]) => Array.isArray(argument));
+      if (!overrides || typeof overrides[0] !== 'function') {
+        throw new TypeError('Expected the main-process override installation.');
+      }
+      const dialog: Record<string, unknown> = {};
+      Reflect.apply(overrides[0], undefined, [{ dialog, shell: {} }, overrides[1]]);
+      const showOpenDialog = dialog['showOpenDialog'] as () => Promise<{ filePaths: string[] }>;
+      const answers: string[] = [];
+      for (let pick = 0; pick < 4; pick++) {
+        // oxlint-disable-next-line no-await-in-loop -- Picks are answered in order.
+        const answer = await showOpenDialog();
+        answers.push(...answer.filePaths);
+      }
+      expect(answers).toEqual([...picked.directories, picked.directories[2]]);
+      await session.close();
+      for (const directory of picked.directories) {
+        // oxlint-disable-next-line no-await-in-loop -- Each folder is checked in turn.
+        await expect(readdir(directory)).resolves.toEqual([]);
+      }
+    } finally {
+      launch.mockRestore();
+      await picked.remove();
+      await rm(profileRoot, { recursive: true, force: true });
+    }
+    for (const directory of picked.directories) {
+      // oxlint-disable-next-line no-await-in-loop -- Each folder is checked in turn.
+      await expect(readdir(directory)).rejects.toThrow(/ENOENT/u);
+    }
+  }, 20_000);
+
+  it('should launch the unpackaged build and UI bundle under desktopRoot', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-root-test-'));
+    const baseRoot = join(tmpdir(), 'tau-base-worktree', 'apps', 'desktop');
+    const stopped = new Error('Fixture stops before launching Electron.');
+    const launch = vi.spyOn(electron, 'launch').mockRejectedValueOnce(stopped);
+    try {
+      await expect(launchDesktopApp({ token: 'fixture-token', profileRoot, desktopRoot: baseRoot })).rejects.toBe(
+        stopped,
+      );
+      const launched = launch.mock.calls[0]![0]!;
+      expect(launched.args?.[0]).toBe(baseRoot);
+      expect(launched.cwd).toBe(baseRoot);
+      expect(launched.executablePath).toBeUndefined();
+      expect(launched.env?.['TAU_DESKTOP_CLIENT_ROOT']).toBe(join(baseRoot, '../ui/desktop/build/client'));
+      await expect(
+        launchDesktopApp({ token: 'fixture-token', profileRoot, desktopRoot: baseRoot, packaged: true }),
+      ).rejects.toThrow('desktopRoot launches an unpackaged build');
+      expect(launch).toHaveBeenCalledOnce();
+    } finally {
       const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
       launch.mockRestore();
       await rm(profileRoot, { recursive: true, force: true });
@@ -322,6 +487,7 @@ describe('desktop shutdown', () => {
       return child;
     });
     application.evaluate.mockResolvedValue(undefined);
+    application.evaluate.mockResolvedValueOnce(profileRoot);
     application.process.mockReturnValue(child);
     application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
     application.browserWindow.mockResolvedValue(mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>());

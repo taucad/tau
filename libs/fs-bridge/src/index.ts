@@ -17,6 +17,7 @@ export {
 
 export type {
   BridgeChangeEventBus,
+  BridgeRootStatusEvents,
   ChangeEventCoalescer,
   CoalescerFactory,
   ExposeFileSystemHandle,

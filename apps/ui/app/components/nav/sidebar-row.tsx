@@ -62,29 +62,48 @@ export const sidebarRowEditorClass =
 /** A 24 px icon control inside a row. @public */
 export const sidebarRowButtonClass = nestedActionVariants({ className: 'size-6 shrink-0 text-muted-foreground' });
 
+/** The classes that show a row's actions only once the row is reached (I3). */
+const revealOnReach =
+  'hidden group-focus-within/row:flex group-hover/row:flex has-[:is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]]:flex pointer-coarse:flex';
+
 /**
  * The actions slot, over the dissolved tail of the name (D13, D15).
  *
- * @param props - The row's controls.
+ * A row's standing status (a project's sync exception) sits in the same slot and stays shown at rest; the actions
+ * join it once the row is reached. Either way the slot is over the name, so nothing it shows moves the name.
+ *
+ * @param props - The row's controls, and its standing status, if any.
  * @returns The slot.
  * @public
  */
-export function SidebarRowActions({ children }: { readonly children: ReactNode }): React.JSX.Element {
+export function SidebarRowActions({
+  children,
+  status,
+}: {
+  readonly children: ReactNode;
+  readonly status?: ReactNode;
+}): React.JSX.Element {
   /* An action is not the row: its clicks — and those of a menu it opens, which
    * bubble back through the portal — never select, open or rename the row. */
   const stop = (event: React.SyntheticEvent): void => {
     event.stopPropagation();
   };
+  const hasStatus = status !== undefined && status !== null && status !== false;
   return (
     /* An open menu moves focus into its portal and the pointer off the row; the
      * slot stays shown so the menu keeps an anchor instead of jumping to (0,0). */
     <span
       data-slot='row-actions'
-      className='fade-action absolute inset-y-0 right-0.5 hidden items-center rounded-r-md bg-(--fade-scrim-into) group-focus-within/row:flex group-hover/row:flex has-[:is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]]:flex pointer-coarse:flex'
+      className={cn(
+        'fade-action absolute inset-y-0 right-0.5 items-center rounded-r-md bg-(--fade-scrim-into)',
+        hasStatus ? 'flex' : revealOnReach,
+      )}
       onClick={stop}
       onDoubleClick={stop}
     >
-      {children}
+      {hasStatus ? status : null}
+      {/* One wrapper either way, so a status coming or going never remounts the actions. */}
+      <span className={cn('items-center', hasStatus ? revealOnReach : 'flex')}>{children}</span>
     </span>
   );
 }

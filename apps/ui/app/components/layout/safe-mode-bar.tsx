@@ -4,11 +4,10 @@
  * next normal start drops the bar.
  */
 import { ShieldAlert } from 'lucide-react';
+import { useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import { desktopTroubleshooting } from '#lib/desktop-safe-mode.js';
-
-/** Why this load started in safe mode. `requested`: the person asked for it; `unhealthy-launches`: the watchdog did. */
-export type SafeModeReason = 'requested' | 'unhealthy-launches';
+import { desktopSafeMode, desktopTroubleshooting } from '#lib/desktop-safe-mode.js';
+import type { SafeModeReason } from '#lib/desktop-safe-mode.js';
 
 const reasonCopy: Record<SafeModeReason, string> = {
   requested: 'You started Tau in safe mode. Only Home is open; other folders are not connected.',
@@ -85,5 +84,33 @@ export function DesktopSafeModeActions(): React.JSX.Element {
         </button>
       )}
     </>
+  );
+}
+
+/* Safe mode is fixed for the page load, so there is nothing to subscribe to. */
+const subscribeNever = (): (() => void) => () => undefined;
+
+/**
+ * The bar for this page load, when it started in safe mode: desktop's reason from the preload, else `requested` for
+ * `?safe=1`. Both are read in the browser only, so the server document and the hydrating render carry no bar and
+ * hydration agrees; React renders the bar right after (the `useClientFact` pattern of `#lib/client-facts`).
+ *
+ * @param props - Whether this runtime was started with `?safe=1`.
+ * @returns The bar, or nothing for a normal load and before hydration.
+ * @public
+ */
+export function SafeModeNotice({ isRequested }: { readonly isRequested: boolean }): React.JSX.Element | undefined {
+  const reason = useSyncExternalStore(
+    subscribeNever,
+    (): SafeModeReason | undefined => desktopSafeMode()?.reason ?? (isRequested ? 'requested' : undefined),
+    () => undefined,
+  );
+  if (reason === undefined) {
+    return undefined;
+  }
+  return (
+    <SafeModeBar reason={reason}>
+      {desktopSafeMode() === undefined ? undefined : <DesktopSafeModeActions />}
+    </SafeModeBar>
   );
 }

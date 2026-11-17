@@ -9,11 +9,14 @@ import type { HighlightLanguage } from '@taucad/grammars';
 import { grammarFixtures } from '@taucad/grammars/fixtures';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { describe, expect, it } from 'vitest';
-import { CodeViewer } from '#components/code/code-viewer.js';
-import { DiffViewer } from '#components/code/diff-viewer.js';
-import { paintHighlightedCode, renderEditorDocumentation } from '#components/code/editor-documentation.js';
+import { CodeViewer } from '@taucad/editor-ui/components/code/code-viewer';
+import { DiffViewer } from '@taucad/editor-ui/components/code/diff-viewer';
+import {
+  paintHighlightedCode,
+  renderEditorDocumentation,
+} from '@taucad/editor-ui/components/code/editor-documentation';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
-import { loadEditorSyntax } from '#lib/editor-syntax.js';
+import { loadEditorSyntax } from '@taucad/editor-ui/lib/editor-syntax';
 
 /**
  * Every code surface highlights every language through the one grammar registry and token classes.

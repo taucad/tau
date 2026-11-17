@@ -43,7 +43,7 @@ vi.mock('#environment.config.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   requireClientEnvironmentUrl: () => 'https://api.test',
 }));
-vi.mock('#components/code/diff-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
   DiffViewer: ({
     originalContent,
     modifiedContent,

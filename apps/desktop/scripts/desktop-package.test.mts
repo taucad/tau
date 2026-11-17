@@ -186,12 +186,12 @@ assert.ok(
   ),
 );
 assert.ok(
-  desktopPackageOmissions(windows, { git: false, gitResourceRoot: 'C:\\r\\git\\win32-x64' }).some((line) =>
-    line.startsWith('git payload: prepare-git builds git from kernel.org source'),
+  desktopPackageOmissions(windows, { git: false, gitResourceRoot: String.raw`C:\r\git\win32-x64` }).includes(
+    String.raw`git payload: none at C:\r\git\win32-x64; this package records with the machine's own git and git-lfs.`,
   ),
 );
 assert.equal(linux.gitPayloadSupported, true);
-assert.equal(windows.gitPayloadSupported, false);
+assert.equal(windows.gitPayloadSupported, true);
 assert.ok(
   desktopPackageOmissions(linux, {
     git: true,
@@ -238,7 +238,15 @@ console.log('✓ a Linux release refuses to assemble without the store guard');
   const complete = { git: true, gitLfs: true, gitResourceRoot };
   assert.equal(desktopGitPayloadRefusal(linux, true, complete), undefined);
   assert.equal(desktopGitPayloadRefusal(linux, false, { git: false, gitLfs: false, gitResourceRoot }), undefined);
-  assert.equal(desktopGitPayloadRefusal(windows, true, { git: false, gitLfs: false, gitResourceRoot }), undefined);
+  assert.equal(
+    desktopGitPayloadRefusal(windows, true, {
+      git: false,
+      gitLfs: false,
+      gitResourceRoot: String.raw`C:\r\git\win32-x64`,
+    }),
+    String.raw`A win32-x64 release package must ship an executable bundled git and git-lfs; git and git-lfs missing at C:\r\git\win32-x64 (OQ3). Run prepare-git first.`,
+  );
+  assert.equal(desktopGitPayloadRefusal(windows, false, { git: false, gitLfs: false, gitResourceRoot }), undefined);
   assert.equal(
     desktopGitPayloadRefusal(linux, true, { git: false, gitLfs: false, gitResourceRoot }),
     'A linux-x64 release package must ship an executable bundled git and git-lfs; git and git-lfs missing at /r/git/linux-x64 (OQ3). Run prepare-git first.',
@@ -282,7 +290,7 @@ console.log('✓ a Linux release refuses to assemble without the store guard');
     await rm(resourceRoot, { recursive: true, force: true });
   }
 }
-console.log('✓ a Linux release refuses to assemble without an executable git and git-lfs');
+console.log('✓ a Linux or Windows release refuses to assemble without an executable git and git-lfs');
 
 /* Archives: GNU/bsd tar on Linux; the inbox bsdtar on Windows, which writes ZIP. */
 assert.deepEqual(desktopArchiveCommand(linux, '/out', undefined), {

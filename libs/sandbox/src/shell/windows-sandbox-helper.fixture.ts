@@ -100,6 +100,25 @@ const launch = (): void => {
 
   /** What the shell does once the start barrier opens. */
   const afterStart = (): void => {
+    if (scenario === 'refuse-after-start') {
+      /* The runner could not start the shell: the helper restores, logs why and refuses, never `started`. */
+      ended = true;
+      if (journal !== undefined) {
+        rmSync(journal, { force: true });
+      }
+      process.stderr.write('tau-windows-sandbox runner error: spawn: CreateProcessAsUserW (error 87)\n');
+      json(0x86, {
+        status: 'sandbox-unavailable',
+        message: 'the shell could not be started',
+        diagnostic: 'spawn: CreateProcessAsUserW (error 87)',
+      });
+      leave(0);
+      return;
+    }
+    if (scenario === 'output-before-started') {
+      frame(0x82, 'too soon');
+      return;
+    }
     json(0x87, { shellPid: process.pid });
     switch (scenario) {
       case 'echo': {

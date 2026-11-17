@@ -263,7 +263,11 @@ The helper fails closed: an unknown field anywhere in the spec is refused. `unsu
 Ordering. `refused` normally comes instead of `ready`. If the runner reported `ready` but the shell then could not be
 started (for example `CreateProcessAsUserW` failed), the helper restores the ACLs and sends `refused`
 (`sandbox-unavailable`, with the runner's `diagnostic`) after `ready`, never `started`; if that cleanup cannot be
-confirmed it sends `cleanup-failed` instead. `exit` carries the shell's own exit code when it ended by itself and
+confirmed it sends `cleanup-failed` instead. `started` comes only once the runner has admitted the shell's token,
+granted its namespace, checked its `HKCU` and resumed it. The provider waits for `started` (or that `refused`) before
+it reports a launch as started, and treats any other frame between `start` and `started` as a protocol violation.
+The runner's `runner-log` lines and its `runner-error` (`<stage>: <message>`) are also written to the helper's
+stderr at every stage. `exit` carries the shell's own exit code when it ended by itself and
 `{ "signal": "SIGKILL" }` when the job was killed (`terminate`, closed stdin, or a runner that died).
 
 ## Internal runner channel

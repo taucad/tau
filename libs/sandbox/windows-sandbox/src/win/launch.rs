@@ -558,10 +558,14 @@ fn with_system_root(environment: &BTreeMap<String, String>) -> BTreeMap<String, 
     environment
 }
 
+/// The runner's error as `<stage>: <message>`, also written to the diagnostic log so the host sees it
+/// whatever the launch then reports.
 fn runner_error_text(payload: &[u8]) -> String {
-    serde_json::from_slice::<RunnerError>(payload)
+    let text = serde_json::from_slice::<RunnerError>(payload)
         .map(|e| format!("{}: {}", e.stage, e.message))
-        .unwrap_or_else(|_| "the runner reported an unreadable error".to_owned())
+        .unwrap_or_else(|_| "the runner reported an unreadable error".to_owned());
+    eprintln!("tau-windows-sandbox runner error: {text}");
+    text
 }
 
 struct Runner {

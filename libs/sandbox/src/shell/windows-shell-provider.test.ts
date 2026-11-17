@@ -261,6 +261,49 @@ describe('createWindowsShellProvider', () => {
     });
   });
 
+  describe('refusals after start', () => {
+    it('should report started only once the helper reports the shell started', async () => {
+      const h = harness('hang');
+      const execution = await prepare(h);
+
+      const outcome = await h.provider.launch(launchOf(execution.executionId));
+
+      expect(outcome.status).toBe('started');
+      expect(h.events().some((event) => event['event'] === 'start')).toBe(true);
+      await pipesOf(outcome).terminate();
+    });
+
+    it('should turn a refusal between start and started into a clean refusal with the runner diagnostic', async () => {
+      const lines: string[] = [];
+      const h = harness('refuse-after-start', { onHelperDiagnostic: (line) => lines.push(line) });
+      const execution = await prepare(h);
+
+      const outcome = await h.provider.launch(launchOf(execution.executionId));
+
+      expect(outcome).toStrictEqual({
+        status: 'sandbox-unavailable',
+        message: 'the shell could not be started',
+        diagnostic: 'spawn: CreateProcessAsUserW (error 87)',
+      });
+      await expect
+        .poll(() => lines)
+        .toStrictEqual(['tau-windows-sandbox runner error: spawn: CreateProcessAsUserW (error 87)']);
+      expect(await finish(h, execution)).toMatchObject({ status: 'stopped' });
+    });
+
+    it('should treat output before started as a protocol violation and start nothing', async () => {
+      const h = harness('output-before-started');
+      const execution = await prepare(h);
+
+      const outcome = await h.provider.launch(launchOf(execution.executionId));
+
+      expect(outcome).toMatchObject({
+        status: 'sandbox-unavailable',
+        message: expect.stringContaining('it sent stdout before started') as unknown,
+      });
+    });
+  });
+
   describe('refusals before start', () => {
     it('should map an unsupported refusal to its requirement without starting anything', async () => {
       const h = harness('refuse-unsupported');

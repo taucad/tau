@@ -287,6 +287,15 @@ type Answer =
   | Readonly<{ kind: 'failed'; message: string }>;
 
 /**
+ * What the helper answered to `start`: `started` once the shell was admitted and runs, or `refused` (after `ready`,
+ * before `started`) when the shell could not be started and the helper restored everything.
+ */
+type Launched =
+  | Readonly<{ kind: 'started' }>
+  | Readonly<{ kind: 'refused'; refusal: WindowsHelperRefusal }>
+  | Readonly<{ kind: 'failed'; message: string }>;
+
+/**
  * One helper `launch` process and its framed channel.
  *
  * @param child - The spawned helper.
@@ -300,6 +309,7 @@ const openChannel = (
 ) => {
   const decoder = createWindowsFrameDecoder();
   const answer = Promise.withResolvers<Answer>();
+  const launched = Promise.withResolvers<Launched>();
   const ending = Promise.withResolvers<Ending>();
   const closed = Promise.withResolvers<void>();
   const outputs = {
@@ -308,7 +318,7 @@ const openChannel = (
     output: createByteQueue(),
   };
   const state = {
-    phase: 'awaiting-ready' as 'awaiting-ready' | 'ready' | 'starting' | 'ended',
+    phase: 'awaiting-ready' as 'awaiting-ready' | 'ready' | 'starting' | 'running' | 'ended',
     closed: false,
   };
   let diagnostics = '';
@@ -319,11 +329,13 @@ const openChannel = (
       return;
     }
     state.phase = 'ended';
-    /* Only a launch that ended before `ready` still waits on this; `exit` cannot arrive then. */
-    answer.resolve({
+    /* Only a launch that ended before `ready`, or before `started`, still waits on these. */
+    const failed = {
       kind: 'failed',
       message: end.kind === 'exit' ? 'the sandbox helper ended the launch.' : end.message,
-    });
+    } as const;
+    answer.resolve(failed);
+    launched.resolve(failed);
     ending.resolve(end);
     for (const queue of Object.values(outputs)) {
       queue.end();
@@ -366,10 +378,32 @@ const openChannel = (
       violation(`it sent ${frame.type} before start.`);
       return;
     }
-    switch (frame.type) {
-      case 'started': {
-        return;
+    if (state.phase === 'starting') {
+      switch (frame.type) {
+        case 'started': {
+          state.phase = 'running';
+          launched.resolve({ kind: 'started' });
+          return;
+        }
+        case 'refused': {
+          state.phase = 'ended';
+          launched.resolve({ kind: 'refused', refusal: frame.refusal });
+          ending.resolve({ kind: 'closed', message: frame.refusal.message });
+          for (const queue of Object.values(outputs)) {
+            queue.end();
+          }
+          return;
+        }
+        case 'cleanup-failed': {
+          break;
+        }
+        default: {
+          violation(`it sent ${frame.type} before started.`);
+          return;
+        }
       }
+    }
+    switch (frame.type) {
       case 'stdout':
       case 'stderr': {
         if (stdio !== 'pipes') {
@@ -466,6 +500,7 @@ const openChannel = (
       state.phase = 'starting';
       send({ type: 'start' });
     },
+    launched: launched.promise,
     diagnostics: () => diagnostics,
   };
 };
@@ -520,6 +555,33 @@ const awaitAnswer = async (
   });
   try {
     return await Promise.race([channel.answer, cancelled.promise, late]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', onAbort);
+  }
+};
+
+/**
+ * Wait for the helper's answer to `start`, the caller's abort or the startup deadline, whichever comes first.
+ */
+const awaitLaunched = async (
+  channel: Channel,
+  signal: AbortSignal,
+  milliseconds: number,
+): Promise<Launched | 'aborted'> => {
+  const cancelled = Promise.withResolvers<'aborted'>();
+  const onAbort = (): void => {
+    cancelled.resolve('aborted');
+  };
+  signal.addEventListener('abort', onAbort, { once: true });
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<Launched>((resolve) => {
+    timer = setTimeout(() => {
+      resolve({ kind: 'failed', message: 'the sandbox helper did not start the shell in time.' });
+    }, milliseconds);
+  });
+  try {
+    return await Promise.race([channel.launched, cancelled.promise, late]);
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', onAbort);
@@ -825,7 +887,33 @@ export const createWindowsShellProvider = (options: WindowsShellProviderOptions)
       cancelled(launch.signal);
     }
     channel.start();
-    return { status: 'started', process: started(launch, child, channel) };
+    /* `started` is reported only for a shell the helper admitted and resumed; until then it may still refuse. */
+    const launched = await awaitLaunched(channel, launch.signal, startupMilliseconds);
+    if (launched === 'aborted') {
+      await notStarted();
+      cancelled(launch.signal);
+    }
+    if (launched.kind === 'started') {
+      return { status: 'started', process: started(launch, child, channel) };
+    }
+    await notStarted();
+    const diagnostic = channel.diagnostics().trim();
+    if (launched.kind === 'refused') {
+      const { refusal } = launched;
+      if (refusal.status === 'unsupported' && isShellRequirement(refusal.requirement)) {
+        return unsupported(refusal.requirement, refusal.message);
+      }
+      return {
+        status: 'sandbox-unavailable',
+        message: refusal.message,
+        ...(refusal.diagnostic === undefined ? {} : { diagnostic: refusal.diagnostic }),
+      };
+    }
+    return {
+      status: 'sandbox-unavailable',
+      message: launched.message,
+      ...(diagnostic === '' ? {} : { diagnostic }),
+    };
   };
 
   return {

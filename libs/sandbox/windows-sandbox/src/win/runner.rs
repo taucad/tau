@@ -441,7 +441,10 @@ fn spawn(spec: &RunnerSpec, identity: &Identity, job: &Job, prepared: &Prepared)
         )
     };
     if ok == 0 {
-        return Err(Error::code("CreateProcessAsUserW", unsafe { GetLastError() }));
+        return Err(Error::code(
+            "CreateProcessAsUserW(write-restricted token, SECURITY_CAPABILITIES for the package)",
+            unsafe { GetLastError() },
+        ));
     }
     let process = Owned(info.hProcess);
     let thread = Owned(info.hThread);
@@ -452,7 +455,7 @@ fn spawn(spec: &RunnerSpec, identity: &Identity, job: &Job, prepared: &Prepared)
         }
         Err(err) => {
             unsafe { TerminateProcess(process.raw(), 1) };
-            Err(err)
+            Err(Error::msg(format!("the shell was not admitted: {err}")))
         }
     }
 }
@@ -546,6 +549,18 @@ fn serve(from_launcher: Owned, sink: &Sink) -> std::result::Result<i32, Failure>
     let (token, logon) = mint_token(&capability, &package).at("token")?;
     let account = current_user().at("registry")?;
     let identity = Identity { token: &token, logon: &logon, package: &package, person: &person };
+    send(
+        sink,
+        &Frame::new(
+            frame::RUNNER_LOG,
+            format!(
+                "restricted token minted: {}; the shell's AppContainer is {}",
+                token_facts(token.raw()).map(|f| f.describe()).unwrap_or_else(|e| e.to_string()),
+                package.to_sddl()
+            )
+            .into_bytes(),
+        ),
+    );
     let job = Arc::new(Job::kill_on_close().at("job")?);
     let prepared = prepare_stdio(&spec.stdio).at("stdio")?;
     send(sink, &Frame::json(frame::READY, &serde_json::json!({})));

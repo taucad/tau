@@ -81,11 +81,22 @@ export const readPendingInvitation = (): string | undefined => {
   }
 };
 
-/** Forget the waiting token on both hosts, once the API has accepted or refused it for good. */
-export const clearPendingInvitation = (): void => {
-  Cookies.remove(pendingInvitationCookieName, { path: pendingInvitationPath });
+/**
+ * Forget a token on both hosts, once the API has accepted or refused it for good.
+ *
+ * Only the token this page answered for: another tab may have opened a newer
+ * link while this one's accept was in flight, and that one must survive.
+ *
+ * @param token - The token the API has just answered for.
+ */
+export const clearPendingInvitation = (token: string): void => {
+  if (Cookies.get(pendingInvitationCookieName) === token) {
+    Cookies.remove(pendingInvitationCookieName, { path: pendingInvitationPath });
+  }
   try {
-    globalThis.sessionStorage.removeItem(pendingInvitationStorageKey);
+    if (globalThis.sessionStorage.getItem(pendingInvitationStorageKey) === token) {
+      globalThis.sessionStorage.removeItem(pendingInvitationStorageKey);
+    }
   } catch {
     // Nothing was held there.
   }

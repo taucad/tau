@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { urlCarriesCredential } from '@taucad/ui-core/lib/url-credential.lib';
 import { loader } from '#routes/invitations.$token/route.js';
 
 type LoaderArguments = Parameters<typeof loader>[0];
 
 const land = (url: string, token: string): Response =>
-  loader({
-    params: { token },
-    request: new Request(url),
-  } as unknown as LoaderArguments);
+  loader(mock<LoaderArguments>({ params: { token }, request: new Request(url) }));
 
 /* #2290: an invitation link is a bearer credential, and no page may render at
    an address that holds one. */

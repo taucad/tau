@@ -10,6 +10,24 @@
 const invitationTokenPattern = /(\/|%2F)invitations(\/|%2F)[^/?#&%\s"']+/giu;
 
 /**
+ * One parameter name as a browser's `URLSearchParams` would read it: every
+ * character either literal or percent-encoded, once (`%74oken`) or, inside an
+ * encoded `?redirectTo=`, twice (`%2574oken`). A page reads `?%74oken=` as
+ * `token`, so a pattern that knew only the literal spelling would let a live
+ * credential through.
+ *
+ * @param name - The decoded parameter name.
+ * @returns A pattern source matching every spelling of it.
+ */
+const anySpelling = (name: string): string =>
+  [...name]
+    .map((character) => {
+      const hex = character.codePointAt(0)!.toString(16).padStart(2, '0');
+      return `(?:${character}|%(?:25)?${hex})`;
+    })
+    .join('');
+
+/**
  * A sign-in credential carried as a query parameter, plain or percent-encoded.
  *
  * Magic-link, password-reset and email-verification pages read `?token=`, OAuth
@@ -17,7 +35,10 @@ const invitationTokenPattern = /(\/|%2F)invitations(\/|%2F)[^/?#&%\s"']+/giu;
  * ends at the next parameter (`&` or `%26`), the fragment, or whitespace and quotes,
  * so the same pass covers a bare URL and one nested inside `?redirectTo=`.
  */
-const queryCredentialPattern = /([?&]|%3F|%26)(token|code|user_code)(=|%3D)(?:(?!%26)[^&#\s"'])+/giu;
+const queryCredentialPattern = new RegExp(
+  `([?&]|%3F|%26)(${['token', 'code', 'user_code'].map((name) => anySpelling(name)).join('|')})(=|%3D)(?:(?!%26)[^&#\\s"'])+`,
+  'giu',
+);
 
 /**
  * Strip every credential that lives in a URL out of one string.

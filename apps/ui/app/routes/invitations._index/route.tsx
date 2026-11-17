@@ -176,13 +176,13 @@ export default function AcceptInvitation(): React.JSX.Element {
           /* A spent token never works again; the other refusals are fixed by
              another account or a verified address, and keep it for the retry. */
           if (refusal.kind === 'spent') {
-            clearPendingInvitation();
+            clearPendingInvitation(token);
           }
           setOutcome(refusal);
           return;
         }
         setOutcome({ kind: 'accepted' });
-        clearPendingInvitation();
+        clearPendingInvitation(token);
         const accepted = (await response.json()) as Readonly<{
           projectId?: unknown;
         }>;

@@ -55,6 +55,7 @@ describe('session replay at a credential address', () => {
     '/invitations/AbC-123_xyz',
     '/auth/sign-in?redirectTo=%2Finvitations%2FAbC-123_xyz',
     '/auth/reset-password?token=abc.DEF-123',
+    '/auth/reset-password?%74oken=abc.DEF-123',
   ])('cannot start recording on %s', async (path) => {
     mountAt(path);
 

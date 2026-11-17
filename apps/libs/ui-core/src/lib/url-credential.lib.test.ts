@@ -35,6 +35,15 @@ describe('redactUrlCredentials', () => {
     expect(redactUrlCredentials('/auth/cli?user_code=ABCD-EFGH')).toBe('/auth/cli?user_code=[redacted]');
   });
 
+  it('removes a sign-in token whose parameter name is percent-encoded', () => {
+    expect(redactUrlCredentials('/auth/reset-password?%74oken=abc.DEF-123')).toBe(
+      '/auth/reset-password?%74oken=[redacted]',
+    );
+    expect(redactUrlCredentials('/auth/cli?USER%5FCODE=ABCD')).toBe('/auth/cli?USER%5FCODE=[redacted]');
+    // `codec=` is a different parameter and stays legible.
+    expect(redactUrlCredentials('/convert?codec=h264')).toBe('/convert?codec=h264');
+  });
+
   it('removes a sign-in token nested inside an encoded redirect', () => {
     expect(redactUrlCredentials('/auth/sign-in?redirectTo=%2Fauth%2Fmagic%3Ftoken%3Dabc%26next%3D1')).toBe(
       '/auth/sign-in?redirectTo=%2Fauth%2Fmagic%3Ftoken%3D[redacted]%26next%3D1',
@@ -55,6 +64,10 @@ describe('urlCarriesCredential', () => {
     '/auth/reset-password?token=abc.DEF-123',
     '/api/auth/callback/github?code=gho_1&state=s',
     '/auth/cli?user_code=ABCD-EFGH',
+    // A browser reads a percent-encoded name as the plain one.
+    '/auth/reset-password?%74oken=abc.DEF-123',
+    '/auth/cli?user%5Fcode=ABCD-EFGH',
+    '/auth/sign-in?redirectTo=%2Fauth%2Freset-password%3F%2574oken%3Dabc',
   ])('answers true for %s', (url) => {
     expect(urlCarriesCredential(url)).toBe(true);
   });

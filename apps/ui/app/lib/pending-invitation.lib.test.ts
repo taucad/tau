@@ -16,7 +16,7 @@ describe('pending invitation', () => {
   });
 
   afterEach(() => {
-    clearPendingInvitation();
+    Cookies.remove('tau-invitation', { path: '/invitations' });
     globalThis.history.replaceState({}, '', '/');
   });
 
@@ -32,7 +32,7 @@ describe('pending invitation', () => {
     Cookies.set('tau-invitation', 'AbC-123_xyz', { path: '/invitations' });
     expect(readPendingInvitation()).toBe('AbC-123_xyz');
 
-    clearPendingInvitation();
+    clearPendingInvitation('AbC-123_xyz');
     expect(readPendingInvitation()).toBeUndefined();
   });
 
@@ -40,8 +40,18 @@ describe('pending invitation', () => {
     holdPendingInvitation('desktop-token');
     expect(readPendingInvitation()).toBe('desktop-token');
 
-    clearPendingInvitation();
+    clearPendingInvitation('desktop-token');
     expect(readPendingInvitation()).toBeUndefined();
+  });
+
+  it('keeps a newer token another tab held while this one was answered', () => {
+    Cookies.set('tau-invitation', 'newer', { path: '/invitations' });
+    holdPendingInvitation('newer');
+
+    clearPendingInvitation('older');
+    expect(readPendingInvitation()).toBe('newer');
+    globalThis.sessionStorage.clear();
+    expect(readPendingInvitation()).toBe('newer');
   });
 
   it('holds nothing by default', () => {

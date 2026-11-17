@@ -571,7 +571,8 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
   const account = tauTestAccount('replicad-preview');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
-  session = await launchDesktopApp({ token });
+  /* The package, as in the other tests here: the CSP under test is the one the packaged app serves. */
+  session = await launchDesktopApp({ token, packaged: true });
   const { page } = session;
   const rendererErrors: string[] = [];
   page.on('console', (message) => {

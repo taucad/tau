@@ -510,13 +510,15 @@ export const launchDesktopApp = async (options: {
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
   const runFlagState = process.env[flagStateVariable] ? resolveFlagState(process.env[flagStateVariable]) : undefined;
   const flagState = options.flagState ?? runFlagState;
-  /* A spec that names no flag state of its own, run with auto-open on, is not about onboarding: it starts as an install
-   * that has run before and a device whose setup was already offered. */
+  /* A spec that names no flag state of its own, run with onboarding on, is not about onboarding: it starts as an install
+   * that has run before and a device whose setup was already offered and whose tour was declined. Auto-open alone is
+   * not the test: with onboarding on, a newcomer's first project asks for the tour whether or not setup opens by itself
+   * (`first-project-tour.ts`), and its popover covers the composer. */
   const settledOnboarding =
     options.flagState === undefined &&
     options.profileRoot === undefined &&
     flagState !== undefined &&
-    flagStateFlags[flagState].onboardingAutoOpen;
+    flagStateFlags[flagState].onboarding;
   if (settledOnboarding) {
     /* Main counts a launch as the first run only while no window-state file exists, whatever the file holds
      * (`apps/desktop/src/main/first-run.ts`); an empty object restores no frame, so the window opens at its default

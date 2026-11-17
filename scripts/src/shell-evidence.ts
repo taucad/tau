@@ -3,8 +3,8 @@
  * verdict record a passing target leaves beside its receipt, and the stamp that says whether a row's receipt was
  * proven by this run or reused from an earlier one.
  *
- * A conformance receipt proves the code works on one machine: its OS, kernel, Bash, runner image, sandbox runtime and
- * (on Linux) bubblewrap and socat. None of that is in the Nx hash, so `fingerprint` puts it there as a `runtime`
+ * A conformance receipt proves the code works on one machine: its OS, kernel, shell (Bash, or PowerShell on Windows),
+ * runner image, sandbox runtime and (on Linux) bubblewrap and socat. None of that is in the Nx hash, so `fingerprint` puts it there as a `runtime`
  * input. It fails closed: unless the run asked for reuse (`TAU_SHELL_EVIDENCE=reuse`) on a GitHub-hosted conformance
  * row, and every probe answered, it prints a fresh random nonce, so the task hash matches nothing stored before and
  * nothing stored after. Nx hashes a runtime command's output whatever its exit status, so a probe that fails quietly
@@ -23,7 +23,7 @@
  *                                                                      not list is not expected (semantics tier)
  * Env: TAU_SHELL_EVIDENCE (`reuse` or `fresh`), TAU_SHELL_CONFORMANCE_ROW, TAU_SHELL_TIER (`semantics` or `full`),
  * GITHUB_ACTIONS, ImageOS, ImageVersion, TAU_SHELL_CONFORMANCE_BWRAP (Linux), TAU_SHELL_GUEST_IMAGE (Linux guest
- * rows), TAU_SHELL_CONFORMANCE_RECEIPT and NX_TASK_HASH (record), GITHUB_SHA, GITHUB_RUN_ID, GITHUB_REPOSITORY,
+ * rows), SystemRoot and ProgramFiles (Windows), TAU_SHELL_CONFORMANCE_RECEIPT and NX_TASK_HASH (record), GITHUB_SHA, GITHUB_RUN_ID, GITHUB_REPOSITORY,
  * GITHUB_SERVER_URL, GITHUB_STEP_SUMMARY and TAU_SHELL_PROJECTS (stamp).
  * Exit codes: 0 ok (record without a CI identity writes nothing and still exits 0); 1 refused, or record found no
  * receipt after its suite passed (a reused receipt where fresh evidence is required, or one whose record does not match
@@ -34,7 +34,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { arch, platform, release, version } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const fingerprintSchema = 'tau.shell-environment-fingerprint/1';
@@ -46,7 +46,7 @@ export const fingerprintCommand = 'node scripts/src/shell-evidence.ts fingerprin
 /** The command every cacheable conformance target runs after its suite passed. */
 export const recordCommand = 'node "$NX_WORKSPACE_ROOT/scripts/src/shell-evidence.ts" record';
 
-type Row = 'LNX-U' | 'LNX-U26' | 'LNX-D' | 'MAC-A' | 'MAC-X';
+type Row = 'LNX-U' | 'LNX-U26' | 'LNX-D' | 'MAC-A' | 'MAC-X' | 'WIN-X64';
 
 /** Each row's platform, architecture and (Linux) the one guest release it admits. */
 const rows: Readonly<Record<Row, { platform: NodeJS.Platform; arch: string; os?: string }>> = {
@@ -55,6 +55,7 @@ const rows: Readonly<Record<Row, { platform: NodeJS.Platform; arch: string; os?:
   'LNX-D': { platform: 'linux', arch: 'x64', os: 'debian 13' },
   'MAC-A': { platform: 'darwin', arch: 'arm64' },
   'MAC-X': { platform: 'darwin', arch: 'x64' },
+  'WIN-X64': { platform: 'win32', arch: 'x64' },
 };
 const tiers = new Set(['semantics', 'full']);
 
@@ -90,6 +91,48 @@ const canonical = (fields: Readonly<Record<string, string>>): string =>
 
 const osReleaseField = (text: string, name: string): string =>
   new RegExp(`^${name}="?([^"\\n]*)"?$`, 'mu').exec(text)?.[1] ?? '';
+
+/**
+ * A Windows row's own identities: the OS build with its update revision (`ver`, which `os.release()` leaves out) and
+ * the PowerShell the provider runs, chosen as `shell-identity.ts` chooses it (PowerShell 7 at its fixed path, else
+ * Windows PowerShell 5.1). Throws when a probe fails.
+ */
+const windowsFields = (
+  probe: Probe,
+): { readonly fields: Readonly<Record<string, string>> } | { readonly refused: string } => {
+  const { env } = probe;
+  const systemRoot = env['SystemRoot'] ?? env['SYSTEMROOT'] ?? '';
+  const programFiles = env['ProgramFiles'] ?? env['PROGRAMFILES'] ?? '';
+  if (systemRoot === '' || programFiles === '') {
+    return { refused: 'no Windows system paths (SystemRoot, ProgramFiles)' };
+  }
+  const shells = [
+    win32.join(programFiles, 'PowerShell', '7', 'pwsh.exe'),
+    win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+  ];
+  for (const shell of shells) {
+    let digest: string;
+    try {
+      digest = probe.digest(shell);
+    } catch {
+      continue;
+    }
+    const shellVersion = probe.run(shell, [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      '$PSVersionTable.PSVersion.ToString()',
+    ]);
+    return {
+      fields: {
+        os: probe.run(win32.join(systemRoot, 'System32', 'cmd.exe'), ['/d', '/c', 'ver']),
+        powershell: `${shell} ${shellVersion} sha256:${digest}`,
+      },
+    };
+  }
+  return { refused: 'no PowerShell at its fixed path (pwsh 7 or Windows PowerShell 5.1)' };
+};
 
 /**
  * Every identity a conformance verdict depends on beyond the source closure Nx already hashes, or the reason it
@@ -129,7 +172,6 @@ export const collectFingerprint = (probe: Probe): Fingerprint => {
       runnerImage: `${imageOs} ${imageVersion}`,
       kernel: probe.kernel(),
       node: probe.node(),
-      bash: `${probe.run('/bin/bash', ['--version'])} sha256:${probe.digest('/bin/bash')}`,
       ripgrep: probe.run('rg', ['--version']),
     };
     const runtime = probe.packageRoot('@anthropic-ai/sandbox-runtime');
@@ -137,9 +179,11 @@ export const collectFingerprint = (probe: Probe): Fingerprint => {
     fields['sandboxRuntime'] = `${runtimeVersion ?? ''} sha256:${probe.digestTree(runtime)}`;
     const pty = probe.packageRoot('node-pty');
     const ptyVersion = (JSON.parse(probe.readFile(join(pty, 'package.json'))) as { version?: string }).version;
+    // On Windows node-pty drives the terminal through ConPTY (`conpty.node`); elsewhere through `pty.node`.
+    const ptyNative = expected.platform === 'win32' ? 'conpty.node' : 'pty.node';
     const ptyBinary = [
-      join(pty, 'build', 'Release', 'pty.node'),
-      join(pty, 'prebuilds', `${probe.platform}-${probe.arch}`, 'pty.node'),
+      join(pty, 'build', 'Release', ptyNative),
+      join(pty, 'prebuilds', `${probe.platform}-${probe.arch}`, ptyNative),
     ].flatMap((path) => {
       try {
         return [`sha256:${probe.digest(path)}`];
@@ -151,6 +195,15 @@ export const collectFingerprint = (probe: Probe): Fingerprint => {
       return refuse('node-pty has no native binary');
     }
     fields['nodePty'] = `${ptyVersion ?? ''} ${ptyBinary[0]}`;
+    if (expected.platform === 'win32') {
+      const windows = windowsFields(probe);
+      if ('refused' in windows) {
+        return refuse(windows.refused);
+      }
+      Object.assign(fields, windows.fields);
+      return { ok: true, fields, digest: sha256(canonical(fields)) };
+    }
+    fields['bash'] = `${probe.run('/bin/bash', ['--version'])} sha256:${probe.digest('/bin/bash')}`;
     if (expected.platform === 'darwin') {
       fields['os'] =
         `macOS ${probe.run('/usr/bin/sw_vers', ['-productVersion'])} ${probe.run('/usr/bin/sw_vers', ['-buildVersion'])}`;

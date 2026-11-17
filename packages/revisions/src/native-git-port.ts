@@ -27,7 +27,7 @@ import type { RecordedProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
 import { CommandAbortedError, gitCommandActivity, runGitCommand } from '#git-command.js';
-import { largeObjectFiltersIn, writeLargeObjectFilters } from '#lfs-filters.js';
+import { largeObjectFilterPattern, missingLargeObjectFilters } from '#lfs-filters.js';
 import type { GitCommandResult } from '#git-command.js';
 import { parseTransportValue } from '#native-git-adapter.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
@@ -2398,21 +2398,30 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   };
 
   /*
-   * Git-lfs's filters in a store this port did not adopt, without a process when it can (W8 diagnostics): a store
-   * that holds them already is left alone, and one with none of them gets them written when the host knows git-lfs
-   * is installed. Anything else, a value somebody changed included, is git-lfs's own to answer.
+   * Git-lfs's filters in a store this port did not adopt, without starting git-lfs when it can (W8 diagnostics): one
+   * `git config` read, and a store that holds them all is left alone. A key it lacks is written by `git config`,
+   * one process per key, when the host's toolchain probe found git-lfs (so a machine without it never gets filters
+   * it cannot run). A value somebody changed, or a write Git refused, is git-lfs's own to answer, as before.
    */
   const configureLargeObjectFilters = async (): Promise<void> => {
-    const state = largeObjectFiltersIn(await readFile(join(storePath, 'config'), 'utf8').catch(() => ''));
-    if (state === 'configured') {
+    const listing = await run(['config', '--local', '--get-regexp', largeObjectFilterPattern]);
+    const missing = listing.exitCode > 1 ? undefined : missingLargeObjectFilters(textDecoder.decode(listing.stdout));
+    if (missing?.length === 0) {
       return;
     }
-    if (
-      state === 'absent' &&
-      (await options.gitLfsInstalled?.()) === true &&
-      (await writeLargeObjectFilters(storePath))
-    ) {
-      return;
+    if (missing !== undefined && (await options.gitLfsInstalled?.()) === true) {
+      let refused = false;
+      for (const [key, value] of missing) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- one writer of the store's config at a time, as Git locks it.
+        const written = await run(['config', '--local', key, value]);
+        refused = written.exitCode !== 0;
+        if (refused) {
+          break;
+        }
+      }
+      if (!refused) {
+        return;
+      }
     }
     await run(['lfs', 'install', '--local', '--skip-repo']);
   };
@@ -2482,8 +2491,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * config is the person's: the pointers its own attributes ask for are
      * resolved by whatever filters they configured (D16). Asked on every
      * open and idempotent, so a session after a crash between `git init` and
-     * here still configures them; read from the store's `config` first, so an
-     * open that finds them spawns nothing (`configureLargeObjectFilters`).
+     * here still configures them; asked of `git config` first, so an open
+     * that finds them starts no git-lfs (`configureLargeObjectFilters`).
      *
      * The filters only: `--skip-repo` installs no hooks. Tau's plumbing runs
      * none (`core.hooksPath` names the store's empty hooks file). Without it,

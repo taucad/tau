@@ -12,9 +12,6 @@ type AgentTurnDetail = Extract<ClientMetricEntry, { name: typeof IngestEntryName
 
 function createMockMetrics() {
   return {
-    kernelExecutionDuration: { record: vi.fn() },
-    kernelExecutions: { add: vi.fn() },
-    kernelExportDuration: { record: vi.fn() },
     agentSessions: { add: vi.fn() },
     agentTurns: { add: vi.fn() },
     agentTurnDuration: { record: vi.fn() },
@@ -71,84 +68,28 @@ describe('TelemetryController', () => {
     void controller.ingest(body, 'user-1', request, reply);
   };
 
-  it('should accept a signed-out batch without recording it', () => {
-    void controller.ingest(
-      { entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1500, detail: { status: 'ok' } }] },
-      undefined,
-      request,
-      reply,
-    );
+  const syncAttempt = {
+    name: IngestEntryName.SYNC_ATTEMPT,
+    duration: 120,
+    detail: { direction: 'push', outcome: 'ok', placement: 'browser' },
+  } as const;
 
-    expect(mockMetrics.kernelExecutionDuration.record).not.toHaveBeenCalled();
-    expect(mockMetrics.kernelExecutions.add).not.toHaveBeenCalled();
+  it('should accept a signed-out batch without recording it', () => {
+    void controller.ingest({ entries: [syncAttempt] }, undefined, request, reply);
+
+    expect(mockMetrics.syncClientAttempts.add).not.toHaveBeenCalled();
   });
 
   describe('POST /v1/telemetry/ingest', () => {
-    it('should record kernel execution duration and count for createGeometry entries', () => {
+    it('should drop a retired kernel entry unrecorded and record the rest of the batch', () => {
       ingestSignedIn({
-        entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1500, detail: { status: 'ok' } }],
+        entries: [{ name: 'observability.createGeometry' }, syncAttempt, { name: 'observability.exportGeometry' }],
       });
 
-      expect(mockMetrics.kernelExecutionDuration.record).toHaveBeenCalledWith(1.5, {
-        [AttributeKey.KERNEL_STATUS]: 'ok',
-      });
-      expect(mockMetrics.kernelExecutions.add).toHaveBeenCalledWith(1, { [AttributeKey.KERNEL_STATUS]: 'ok' });
-    });
-
-    it('should record export duration for exportGeometry entries', () => {
-      ingestSignedIn({
-        entries: [
-          {
-            name: IngestEntryName.KERNEL_EXPORT_GEOMETRY,
-            duration: 800,
-            detail: { status: 'ok', exportFormat: 'glb' },
-          },
-        ],
-      });
-
-      expect(mockMetrics.kernelExportDuration.record).toHaveBeenCalledWith(0.8, {
-        [AttributeKey.KERNEL_STATUS]: 'ok',
-        [AttributeKey.EXPORT_FORMAT]: 'glb',
-      });
-    });
-
-    it('should default status to "unknown" when detail is missing', () => {
-      ingestSignedIn({
-        entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 500 }],
-      });
-
-      expect(mockMetrics.kernelExecutionDuration.record).toHaveBeenCalledWith(0.5, {
-        [AttributeKey.KERNEL_STATUS]: 'unknown',
-      });
-    });
-
-    it('should default export format to "unknown" when not provided', () => {
-      ingestSignedIn({
-        entries: [{ name: IngestEntryName.KERNEL_EXPORT_GEOMETRY, duration: 300, detail: { status: 'ok' } }],
-      });
-
-      expect(mockMetrics.kernelExportDuration.record).toHaveBeenCalledWith(0.3, {
-        [AttributeKey.KERNEL_STATUS]: 'ok',
-        [AttributeKey.EXPORT_FORMAT]: 'unknown',
-      });
-    });
-
-    it('should process multiple entries in a single batch', () => {
-      ingestSignedIn({
-        entries: [
-          { name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1000, detail: { status: 'ok' } },
-          {
-            name: IngestEntryName.KERNEL_EXPORT_GEOMETRY,
-            duration: 2000,
-            detail: { status: 'ok', exportFormat: 'step' },
-          },
-          { name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 500, detail: { status: 'error' } },
-        ],
-      });
-
-      expect(mockMetrics.kernelExecutionDuration.record).toHaveBeenCalledTimes(2);
-      expect(mockMetrics.kernelExecutions.add).toHaveBeenCalledTimes(2);
-      expect(mockMetrics.kernelExportDuration.record).toHaveBeenCalledTimes(1);
+      const touched = Object.entries(mockMetrics)
+        .filter(([, instrument]) => ('add' in instrument ? instrument.add : instrument.record).mock.calls.length > 0)
+        .map(([key]) => key);
+      expect(touched).toEqual(['syncClientAttempts', 'syncClientAttemptDuration']);
     });
 
     it('should record a client sync attempt, its duration, its lag and its queue depth by placement, clamped', () => {
@@ -746,6 +687,22 @@ describe('TelemetryController', () => {
 
   describe('IngestPayloadDto validation (via ZodValidationPipe)', () => {
     const pipe = new ZodValidationPipe();
+
+    it('should admit a retired kernel entry by name only, so an old client batch is not refused', () => {
+      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- pipe.transform return type is any from NestJS ValidationPipe
+      const parsed = pipe.transform(
+        {
+          entries: [
+            { name: 'observability.createGeometry', duration: 5, detail: { status: 'error', error: 'Kernel crash' } },
+            { name: 'observability.exportGeometry', duration: 5, detail: { status: 'ok', exportFormat: 'stl' } },
+          ],
+        },
+        { type: 'body', metatype: IngestPayloadDto },
+      );
+      expect(parsed).toEqual({
+        entries: [{ name: 'observability.createGeometry' }, { name: 'observability.exportGeometry' }],
+      });
+    });
 
     it('should reject entries with unknown names', () => {
       expect(() =>

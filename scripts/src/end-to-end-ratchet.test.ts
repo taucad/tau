@@ -147,12 +147,14 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     expect(ratcheted).toEqual(expect.arrayContaining(firstBatch));
   });
 
-  it('should read a ratcheted suite consumer parity oracle from its merge-queue row, never the nightly', () => {
+  it('should read a ratcheted suite consumer parity oracle from its merge-queue row on a main commit, never the nightly', () => {
     const oracles = consumers.flatMap(({ oracles: list }) => list).filter((oracle) => oracle.kind === 'job');
     for (const suite of firstBatch) {
       const name = `Browser end-to-end (${suite.replace(':', ' ')})`;
       for (const oracle of oracles.filter(({ job }) => job === name)) {
-        expect(oracle, name).toMatchObject({ workflow: 'ci.yml', match: 'exact', scope: 'any', event: 'merge_group' });
+        // `main` scope follows a reused push to the merge-queue run on the same commit (#2296).
+        expect(oracle, name).toMatchObject({ workflow: 'ci.yml', match: 'exact', scope: 'main' });
+        expect(oracle, name).not.toHaveProperty('event');
       }
     }
     expect(oracles.map(({ job }) => job)).toContain('Browser end-to-end (agent-plugin test:e2e)');

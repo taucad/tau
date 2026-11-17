@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
+import { MemoryRouter } from 'react-router';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { store } from '#hooks/use-cookie.js';
@@ -73,7 +74,7 @@ describe('onboarding baseline through the web analytics boundary', () => {
   it('captures nothing while consent is declined', async () => {
     store.remove(firstSeenStorageName);
     markFirstSeen();
-    const view = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>);
+    const view = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>, { wrapper: MemoryRouter });
     await settle();
     reportFirstModelBuilt({ kernel: 'openscad' });
     expect(baselineCalls()).toStrictEqual([]);
@@ -82,7 +83,7 @@ describe('onboarding baseline through the web analytics boundary', () => {
 
   it('captures first_seen once after consent is accepted, then the first model once', async () => {
     state.consent = 'accepted';
-    const view = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>);
+    const view = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>, { wrapper: MemoryRouter });
     await vi.waitFor(() => {
       expect(baselineCalls().map(([event]) => event)).toStrictEqual(['first_seen']);
     }, sdkResponse);
@@ -96,7 +97,7 @@ describe('onboarding baseline through the web analytics boundary', () => {
     view.unmount();
 
     // Another load on the same device sends no second first_seen.
-    const again = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>);
+    const again = render(<WebAnalyticsProvider>{undefined}</WebAnalyticsProvider>, { wrapper: MemoryRouter });
     await settle();
     expect(baselineCalls().map(([event]) => event)).toStrictEqual(['first_seen', 'first_model_built']);
     again.unmount();

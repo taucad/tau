@@ -12,7 +12,7 @@ import { applyFatLineSegments } from '#graphics/three/materials/gltf-edges.js';
 import { MeasureTool, describeMeasurementTarget } from '#graphics/three/react/measure-tool.jsx';
 import * as measurementFeatures from '#graphics/three/utils/measurement-features.js';
 import { getMeshMeasurementFeatures } from '#graphics/three/utils/measurement-features.js';
-import type { EdgeFeature, MeasurementTarget } from '#graphics/three/utils/measurement-features.js';
+import type { BodyFeature, EdgeFeature, MeasurementTarget } from '#graphics/three/utils/measurement-features.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
 import type { MeasurementFeatureWorkerClient } from '#graphics/three/utils/measurement-features-worker-client.js';
 
@@ -513,6 +513,25 @@ describe('MeasureTool', () => {
     });
     expect(lists.mock.calls.map(([, options]) => options.filter)).toEqual(lists.mock.calls.map(() => 'edge'));
     mocks.graphicsSnapshot.context.measureFilter = 'auto';
+  });
+
+  it('should list a body whose only visible points a stride across its vertices skips', async () => {
+    const graph = getMeshMeasurementFeatures(mesh);
+    const seed = measurementFeatures.listMeasurementTargets(graph, { mesh, camera, canvas })[0]!;
+    // 100 points on the far face, hidden behind the near one, then one on the near face the camera sees.
+    const points = [
+      ...Array.from({ length: 100 }, (_, index) => new THREE.Vector3(-0.9 + (index % 10) * 0.2, -0.9, -1)),
+      new THREE.Vector3(0.5, 0.5, 1),
+    ];
+    const body: BodyFeature = { id: 'body:0', kind: 'body', evidence: 'mesh', points, bounds: new THREE.Box3() };
+    vi.spyOn(measurementFeatures, 'listMeasurementTargets').mockReturnValue([
+      { ...seed, id: 'body:0', kind: 'body', feature: body, featureId: body.id, position: new THREE.Vector3() },
+    ]);
+    requestCatalog();
+    await vi.waitFor(() => {
+      const published = mocks.send.mock.calls.findLast(([sent]) => sent.type === 'setMeasureCandidates')?.[0];
+      expect(published?.candidates?.map(({ id }) => id)).toEqual([`${mesh.uuid}:body:0`]);
+    });
   });
 
   it('continues at the first feature of a smaller next mesh after the worker resolves', async () => {

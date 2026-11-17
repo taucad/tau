@@ -1,6 +1,6 @@
 import type { GlbMaterial } from '@taucad/geometry-core';
 import type { AnyShape } from 'replicad';
-import type { OpenCascadeInstance } from 'replicad-opencascadejs';
+import type { OpenCascadeInstance, TopoDS_Shape } from 'replicad-opencascadejs';
 import type { SetRequired } from 'type-fest';
 import type { GeometryReplicad } from '#replicad.types.js';
 
@@ -18,9 +18,10 @@ export type Tessellation = {
 export type Meshable = SetRequired<AnyShape, 'mesh' | 'meshEdges'>;
 
 /**
+ * Where one occurrence of a shape sits: the key shared by its OCCT partners (same `TShape`), its orientation and its
+ * placement. Reading it never serializes or hashes BRep content.
  */
-export type ReplicadShapeIdentityInfo = {
-  prototypeHash: string;
+export type ReplicadShapeOccurrenceInfo = {
   partnerKey: string;
   orientation: string;
   locationMatrix: readonly [
@@ -46,6 +47,19 @@ export type ReplicadShapeIdentityInfo = {
 };
 
 /**
+ * Occurrence identity plus a content hash of the location-stripped BRep. The hash serializes the whole shape, so only
+ * product reuse on export reads it; tessellation instancing groups by partner key alone.
+ */
+export type ReplicadShapeIdentityInfo = ReplicadShapeOccurrenceInfo & {
+  prototypeHash: string;
+};
+
+/**
+ * Reads the occurrence identity of one shape. Partner keys are comparable only between shapes read by the same reader.
+ */
+export type ReplicadOccurrenceReader = (shape: Meshable) => ReplicadShapeOccurrenceInfo;
+
+/**
  */
 export type ReplicadTessellationInstance = {
   name: string;
@@ -68,6 +82,10 @@ type ReplicadInstancingOc = OpenCascadeInstance & {
 type ReplicadInstancingBindings = {
   ReplicadShapeIdentity?: {
     Inspect(shape: unknown): NativeShapeIdentity;
+    IsPartner(left: unknown, right: unknown): boolean;
+  };
+  ReplicadShapeHasher?: {
+    HashCode(shape: unknown, upperBound: number): number;
   };
   ReplicadPrototypeMeshExtractor?: {
     ExtractFaces(shape: unknown, tolerance: number, angularTolerance: number, skipNormals: boolean): NativeFaceMesh;
@@ -113,6 +131,15 @@ type NativeIdArray = {
   getIdsPtr(): number;
   getIdsSize(): number;
   delete(): void;
+};
+
+type ReplicadInstancingOrientations = {
+  TopAbs_Orientation: {
+    TopAbs_FORWARD: unknown;
+    TopAbs_REVERSED: unknown;
+    TopAbs_INTERNAL: unknown;
+    TopAbs_EXTERNAL: unknown;
+  };
 };
 
 type InspectReplicadShapeIdentityOptions = {
@@ -245,6 +272,131 @@ export function inspectReplicadShapeIdentity({
   } finally {
     raw.delete();
   }
+}
+
+/** `ReplicadShapeHasher`'s bound: the largest int32, as Replicad's own topology labels use. */
+const partnerHashUpperBound = 2_147_483_647;
+
+function emptyOccurrence(): ReplicadShapeOccurrenceInfo {
+  return {
+    partnerKey: '',
+    orientation: 'unknown',
+    locationMatrix: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+    determinant: 0,
+    canPrototypeMesh: false,
+  };
+}
+
+function orientationName(openCascade: OpenCascadeInstance, orientation: unknown): string {
+  const { TopAbs_Orientation: orientations } = openCascade as unknown as ReplicadInstancingOrientations;
+  switch (orientation) {
+    case orientations.TopAbs_FORWARD: {
+      return 'forward';
+    }
+    case orientations.TopAbs_REVERSED: {
+      return 'reversed';
+    }
+    case orientations.TopAbs_INTERNAL: {
+      return 'internal';
+    }
+    case orientations.TopAbs_EXTERNAL: {
+      return 'external';
+    }
+    default: {
+      return 'unknown';
+    }
+  }
+}
+
+function readLocationMatrix(handle: TopoDS_Shape): ReplicadShapeOccurrenceInfo['locationMatrix'] {
+  const location = handle.Location();
+  try {
+    const transformation = location.Transformation();
+    try {
+      const matrix: number[] = [];
+      for (let row = 1; row <= 3; row++) {
+        for (let column = 1; column <= 4; column++) {
+          matrix.push(transformation.Value(row, column));
+        }
+      }
+      matrix.push(0, 0, 0, 1);
+      return matrix as unknown as ReplicadShapeOccurrenceInfo['locationMatrix'];
+    } finally {
+      transformation.delete();
+    }
+  } finally {
+    location.delete();
+  }
+}
+
+/* The expansion and operand order of OCCT's gp_Mat::Determinant over the vectorial part, so the value is bit-equal. */
+function vectorialDeterminant(matrix: ReplicadShapeOccurrenceInfo['locationMatrix']): number {
+  const [m00, m01, m02, , m10, m11, m12, , m20, m21, m22] = matrix;
+  return m00 * (m11 * m22 - m21 * m12) - m01 * (m10 * m22 - m20 * m12) + m02 * (m10 * m21 - m20 * m11);
+}
+
+/**
+ * Creates a reader of occurrence identity for one render. Partners are found by hashing each shape at the identity
+ * location (`TShape` only; the hasher ignores orientation) and confirming with `IsPartner` against the first shape seen
+ * with that hash, so a hash collision gets its own key. No BRep is serialized. The reader holds the shapes it has seen
+ * as partner representatives, so drop it before those shapes are deleted.
+ *
+ * @param openCascade - The OpenCascade instance whose Replicad identity bindings to use.
+ * @returns A reader whose partner keys are equal exactly when two shapes share a `TShape`.
+ * @throws When the Replicad identity bindings are missing.
+ */
+export function createReplicadOccurrenceReader(openCascade: OpenCascadeInstance): ReplicadOccurrenceReader {
+  const { ReplicadShapeHasher: hasher, ReplicadShapeIdentity: identity } = asInstancingBindings(openCascade);
+  if (!hasher) {
+    throw new Error('Replicad tessellation instancing bindings are unavailable: ReplicadShapeHasher is missing');
+  }
+  if (!identity) {
+    throw new Error('Replicad tessellation instancing bindings are unavailable: ReplicadShapeIdentity is missing');
+  }
+
+  const representatives = new Map<number, TopoDS_Shape[]>();
+
+  const partnerKey = (handle: TopoDS_Shape): string => {
+    const identityLocation = new openCascade.TopLoc_Location();
+    let hash: number;
+    try {
+      const located = handle.Located(identityLocation, false);
+      try {
+        hash = hasher.HashCode(located, partnerHashUpperBound);
+      } finally {
+        located.delete();
+      }
+    } finally {
+      identityLocation.delete();
+    }
+
+    let bucket = representatives.get(hash);
+    if (!bucket) {
+      bucket = [];
+      representatives.set(hash, bucket);
+    }
+    let slot = bucket.findIndex((representative) => identity.IsPartner(representative, handle));
+    if (slot === -1) {
+      slot = bucket.push(handle) - 1;
+    }
+    return `${hash.toString(16)}.${String(slot)}`;
+  };
+
+  return (shape) => {
+    const handle = shapeHandle(shape) as TopoDS_Shape;
+    if (handle.IsNull()) {
+      return emptyOccurrence();
+    }
+
+    const locationMatrix = readLocationMatrix(handle);
+    return {
+      partnerKey: partnerKey(handle),
+      orientation: orientationName(openCascade, handle.Orientation()),
+      locationMatrix,
+      determinant: vectorialDeterminant(locationMatrix),
+      canPrototypeMesh: true,
+    };
+  };
 }
 
 /**

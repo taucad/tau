@@ -325,6 +325,14 @@
       "owner": "desktop updater"
     },
     {
+      "id": "B20",
+      "bound": "Desktop first-window reveal (15 s): a window whose first page has not painted is shown as it is, so a load that never finishes still leaves a visible window and its menu (B17)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout(reveal, windowRevealMilliseconds)",
+      "class": "Presentation",
+      "owner": "desktop boot"
+    },
+    {
       "id": "C1",
       "bound": "Leader heartbeat (M2 leading)",
       "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
@@ -733,6 +741,14 @@
       "token": "input.deadlineMilliseconds",
       "class": "External edge",
       "owner": "W8"
+    },
+    {
+      "id": "W30-LEASE",
+      "bound": "Chat-log lease wait for each chat's leadership lock, 5 s by default (chatLogLeaseWaitMilliseconds): a session that just closed releases its locks in that time; on expiry the lease is refused with the chat another process leads, so the delete it guards does not run",
+      "site": "packages/agent-host/src/browser.ts",
+      "token": "AbortSignal.timeout(waitMilliseconds)",
+      "class": "Liveness",
+      "owner": "W30 project lifecycle"
     },
     {
       "id": "D13",

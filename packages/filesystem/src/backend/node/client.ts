@@ -27,6 +27,7 @@ import type {
 } from '#types.js';
 import type { NodeFsPort } from '#backend/node/port.js';
 import type {
+  NodeFsHostDescription,
   NodeFsImportCopyReceipt,
   NodeFsImportSourceRow,
   NodeFsRequest,
@@ -41,6 +42,14 @@ import {
   nodeFsResultSchemas,
   parseNodeFsFrame,
 } from '#backend/node/protocol.js';
+
+/**
+ * This process's own platform, when it has one; a browser worker has none and keeps the POSIX answer.
+ *
+ * @returns `false` on Windows.
+ */
+const localDiskKeepsFileModes = (): boolean =>
+  (globalThis as { process?: { platform?: string } }).process?.platform !== 'win32';
 
 type Pending = {
   readonly op: NodeFsRequest['op'];
@@ -109,6 +118,7 @@ export class NodeFsChannel {
   private readonly _close = new Topic<void>({ name: 'NodeFsChannel.close' });
   private _nextId = 1;
   private _closed = false;
+  private _description: Promise<NodeFsHostDescription> | undefined;
 
   /**
    * Bind a channel to an already-connected port.
@@ -130,6 +140,26 @@ export class NodeFsChannel {
       });
     }
     port.start?.();
+  }
+
+  /**
+   * Ask the host about its disk, once per channel. A client in another process
+   * than the host (a renderer worker, a relayed UI) cannot answer this from its
+   * own platform: a Windows host keeps no file mode wherever its caller runs.
+   *
+   * @returns The host's description; a failed ask is retried on the next call.
+   */
+  public async describeHost(): Promise<NodeFsHostDescription> {
+    this._description ??= this.request({ op: 'describe' });
+    const description = this._description;
+    try {
+      return await description;
+    } catch (error) {
+      if (this._description === description) {
+        this._description = undefined;
+      }
+      throw error;
+    }
   }
 
   /** Whether the channel has been closed (host death or disposal). @returns `true` once closed. */
@@ -303,6 +333,10 @@ export class NodeFsChannel {
  */
 export class NodeFsProviderClient extends AbstractFileSystemProvider {
   public readonly capabilities: ProviderCapabilities;
+  /** Present only when the host's disk keeps an executable bit (`fileModes`). */
+  public readonly getFileMode?: (path: string) => Promise<FileMode>;
+  /** Present only when the host's disk keeps an executable bit (`fileModes`). */
+  public readonly setFileMode?: (path: string, mode: FileMode) => Promise<void>;
 
   private readonly _channel: NodeFsChannel;
   private readonly _root: string;
@@ -313,8 +347,16 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
    * @param options - `largeObjectSources`: the host was given a large-object
    *   store for this root, so a batch write may name an object by its id (EQ13).
    *   Only whoever admitted the root knows; the client never names the store.
+   *   `fileModes`: the host's disk keeps an executable bit, so this provider
+   *   exposes `getFileMode` and `setFileMode`. A caller in another process than
+   *   the host passes {@link NodeFsChannel.describeHost}'s answer; omitted, it is
+   *   this process's own platform, which is the host's only when it serves here.
    */
-  public constructor(channel: NodeFsChannel, root: string, options?: Readonly<{ largeObjectSources?: boolean }>) {
+  public constructor(
+    channel: NodeFsChannel,
+    root: string,
+    options?: Readonly<{ largeObjectSources?: boolean; fileModes?: boolean }>,
+  ) {
     super();
     this._channel = channel;
     this._root = root;
@@ -328,6 +370,16 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
       movesInPlace: true,
       ...(options?.largeObjectSources === true ? { largeObjectSources: true } : {}),
     };
+    if (options?.fileModes ?? localDiskKeepsFileModes()) {
+      this.getFileMode = async (path) => {
+        this._assertRootedPath(path);
+        return this._channel.request({ root: this._root, op: 'getFileMode', path });
+      };
+      this.setFileMode = async (path, mode) => {
+        this._assertRootedPath(path);
+        await this._channel.request({ root: this._root, op: 'setFileMode', path, mode });
+      };
+    }
   }
 
   /**
@@ -525,16 +577,6 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
   public async stat(path: string): Promise<FileStat> {
     this._assertRootedPath(path);
     return this._channel.request({ root: this._root, op: 'stat', path });
-  }
-
-  public async getFileMode(path: string): Promise<FileMode> {
-    this._assertRootedPath(path);
-    return this._channel.request({ root: this._root, op: 'getFileMode', path });
-  }
-
-  public async setFileMode(path: string, mode: FileMode): Promise<void> {
-    this._assertRootedPath(path);
-    await this._channel.request({ root: this._root, op: 'setFileMode', path, mode });
   }
 
   public async unlink(path: string): Promise<void> {

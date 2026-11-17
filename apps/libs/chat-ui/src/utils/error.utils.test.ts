@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { errorCategory } from '@taucad/types/constants';
 import {
+  chatFailureSentence,
   chatTurnNotStartedCode,
   parseAdmissionFailureForPersistence,
   parseErrorForPersistence,
@@ -136,5 +137,29 @@ describe('parseAdmissionFailureForPersistence', () => {
     );
 
     expect(parsed.code).toBe('INSUFFICIENT_CREDIT');
+  });
+});
+
+describe('chatFailureSentence', () => {
+  const coded = (fields: Record<string, unknown>): string =>
+    JSON.stringify({ category: errorCategory.generic, title: 'Error', message: 'The gateway said so.', ...fields });
+
+  it('should name a paused route in the card’s own words, never the gateway’s sentence (IS3)', () => {
+    expect(chatFailureSentence(coded({ code: 'MODEL_ROUTE_PAUSED' }))).toBe('This model is paused');
+  });
+
+  it('should name a coded refusal by its category’s title when that says more than "Error"', () => {
+    expect(chatFailureSentence(coded({ category: errorCategory.rateLimit, title: 'Rate Limit Exceeded' }))).toBe(
+      'Rate Limit Exceeded',
+    );
+  });
+
+  it('should say nothing of its own for a generic coded refusal', () => {
+    expect(chatFailureSentence(coded({ code: 'UPSTREAM_REJECTED' }))).toBeUndefined();
+  });
+
+  it('should keep an uncoded failure’s plain text', () => {
+    expect(chatFailureSentence('kernel crashed while meshing')).toBe('kernel crashed while meshing');
+    expect(chatFailureSentence(undefined)).toBeUndefined();
   });
 });

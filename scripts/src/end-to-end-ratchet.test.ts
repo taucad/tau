@@ -8,8 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { consumers } from '#consumer-parity-summary.js';
 
 /*
- * The end-to-end ratchet (operator ruling 2026-11-15): an end-to-end suite that passed two consecutive e2e-nightly
- * runs is listed in its project's `test:e2e:queue` `dependsOn`, runs in ci.yml's `e2e-queue` lane (one row per suite,
+ * The end-to-end ratchet (operator ruling 2026-11-15): an end-to-end suite that passed five consecutive e2e-nightly
+ * runs (two before 2026-11-17, merge-queue defect MQ-3) is listed in its project's `test:e2e:queue` `dependsOn`, runs in ci.yml's `e2e-queue` lane (one row per suite,
  * in the merge queue, when its project is affected) and leaves the nightly matrix for good. The plan's own rows and
  * failures are pinned with the other lanes in `ci-affected-lanes.test.ts`.
  */

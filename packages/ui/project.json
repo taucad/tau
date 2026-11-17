@@ -16,6 +16,7 @@
         "{workspaceRoot}/apps/libs/files-ui/src/**/*.tsx",
         "{workspaceRoot}/apps/libs/editor-ui/src/**/*.tsx",
         "{workspaceRoot}/apps/libs/settings-ui/src/**/*.tsx",
+        "{workspaceRoot}/apps/libs/publish-ui/src/**/*.tsx",
         "{workspaceRoot}/apps/libs/ui-core/src/**/*.tsx",
         "reactEventLayer"
       ]

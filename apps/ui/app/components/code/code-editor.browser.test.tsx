@@ -24,8 +24,12 @@ import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
 import type { EditorDiagnostic } from '@taucad/editor-ui/lib/editor-diagnostics';
 import { storeDiagnostics } from '@taucad/editor-ui/components/code/editor-lint';
-import { EditorDocumentSession, maxBackgroundDocuments } from '#lib/editor-document-session.js';
-import { clearEditorNavigation, registerEditorView, requestEditorNavigation } from '#lib/editor-navigation-service.js';
+import { EditorDocumentSession, maxBackgroundDocuments } from '@taucad/editor-ui/lib/editor-document-session';
+import {
+  clearEditorNavigation,
+  registerEditorView,
+  requestEditorNavigation,
+} from '@taucad/editor-ui/lib/editor-navigation-service';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { EditorNavigationTarget } from '#lib/editor-language-environment.js';
 import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';

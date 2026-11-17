@@ -693,6 +693,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (!isAbsolute(root)) {
       return false;
     }
+    /* Until its background `realpath` settles, the exact spelling main
+     * published is admitted as is: its physical spelling can differ (Windows
+     * short names such as `C:\\Users\\RUNNER~1`, macOS `/var` → `/private/var`).
+     * Once settled, the physical target is checked against the settled
+     * canonical spelling, so a retargeted link is refused. */
+    const published = trustedRoots.get(resolve(root));
+    if (published !== undefined && !published.isSettled) {
+      return true;
+    }
     const candidate = canonicalPath(root);
     const spelled = resolve(root);
     /* Descendants are admitted because projects live inside Home

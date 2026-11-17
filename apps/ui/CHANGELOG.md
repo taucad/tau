@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.13.0 (2026-11-17)
+
+### Features
+
+- feat(ui): Take dropped files on the whole chat pane and Home hero, and hold converting images with a skeleton (#2410) (53273d3a7)
+- feat(brep): Expose OCCT meshing as the @taucad/brep/occt subpath (#2407) (94ad1905d)
+- feat(ui): Scroll every page at the shell unless it is contained (#2396) (a7a63d66f)
+- feat(ui): Serve Home at / from a prerendered static shell (PL4) (#2380) (d34d322dc)
+- feat(filesystem): Settle each project root on its own with a status (WP1) (#2384) (cdc8f73c2)
+- feat(types): Catalogue the native CAD formats cadmpeg reads (#2376) (42d170e28)
+- feat(viewer): Adopt three-viewport-gizmo 3.0 beta with Turntable and Tumble orbit styles (#2372) (9fdbc9385)
+- feat(ui): Hand a native input's text to the rich composer from first paint (PL6) (#2340) (f7a09cfb0)
+- feat(heif): Add @taucad/heif so HEIC photos convert to JPEG in the composer, desktop and CLI (#2337) (b388a4315)
+- feat(api-llm-gateway): Add Gemini 4 Hydrogen and retire Gemini 3 (#2329) (297731779)
+- feat(ui): Commit a project click at once and draw its frame before the route (A15b2) (#2353) (0b396bc73)
+- feat(ui): Draw the phone workspace frame from first paint (A15c) (#2348) (281087809)
+- feat(ui): Name Sentry routes and tau.load route classes through public React Router APIs (RR7) (#2345) (1de0894e8)
+- feat(ui): Convert composer images in a runtime worker and refuse by format (#2336) (66bd84d6e)
+- feat(ui): Open each project into a persistent workspace frame drawn from the frame hint (A15b) (#2321) (22228f216)
+- feat(ui): Serve every response through root middleware with a typed router context (RR3) (#2333) (a8b7cce6b)
+- feat(ui): Serve project routes from a prerendered static shell (PL3) (#2338) (fa67df6f8)
+- feat(host): Convert ACP agent images the chat cannot store as sent (#2335) (0b98b03c9)
+- feat(ui): Replay editor text a reload left unsaved, and keep a refused close cut owed (A7e) (#2317) (35858af88)
+- feat(agent-host): Decide what every host stores with one attachment storage policy (#2319) (52b874e3d)
+- feat(ui): Move to React Router 7.18.5 and read router state through public hooks (RR1) (#2328) (8a66f784e)
+- feat(ui): Read the page URL from loader arguments under raw requests (RR2) (#2331) (73ce2521a)
+- feat(image)!: Add raster transcoder and rename transcoder ids to render, svg, raster (#2316) (ac237eec9)
+- feat(ui): Keep the viewer stage mounted through the file check (A15e) (#2322) (219af4794)
+- feat(ui): Apply per-visitor facts before paint from one client record (PL2) (#2314) (05036e264)
+
+### Fixes
+
+- fix(telemetry): Put desktop sync and the remaining producers under the one consent rule (#2430) (caff272e7)
+- fix(agent-host): Write chat logs and attachments on Windows without a directory fsync (#2420) (4e83b1db7)
+- fix(host): Initialize project identity on Windows without a directory fsync (#2415) (9d22a6585)
+- fix(ui): Keep a generated project name within the manifest's limit (#2373) (50e502efc)
+- fix(ui): Expire tau_skew on every static shell response (#2385) (5e9b567be)
+- fix(ui): Read composer files typed application/octet-stream and offer image/heif (#2375) (a6e0c8566)
+- fix(agent-tools): Report a refused main entry in model results (#2368) (8a9228f32)
+- fix(ui): List a refused external agent again when the window is looked at (#2369) (8c653c8cc)
+- fix(revisions): Flush a large-object fill by its own paths (SP4-fill) (#2357) (92041b491)
+- fix(viewer): Report a browser without a WebGL 2 context instead of a null-context crash (#2356) (e80bb8435)
+- fix(replicad): Use replicad-opencascadejs 0.23.0-beta.1 so delete() frees memory (#2360) (78ac66df9)
+- fix(ui): Show arriving files in a tree listed before its apply (SP4-tree) (#2355) (2cc515c6d)
+- fix(ui): Render the model once its own files are here, not every large object (#2263) (d08c7460e)
+- fix(host): Present Claude's Tau MCP calls under their Tau tool names (#2341) (9532cf317)
+- fix(revisions): Retry LFS downloads on the held action and verify a fill flush by its written paths (#2326) (44a6024cb)
+- fix(ui): Keep an approval's opening in its stream and let a paused run be stopped (#2327) (6ef27a031)
+- fix(ui): Keep worker bundles, WASM and client assets out of the server output (RR0) (#2323) (35368e79c)
+
+### Performance
+
+- perf(ui): Warm the workspace layout as a project open begins (SP5-warm) (#2388) (e13bd25b1)
+- perf(revisions): Pipeline a cold open's blobs and read whole trees in parallel (SP5) (#2386) (c771da099)
+- perf(ui): Cut the interactive tier to what the first action needs (PL5) (#2370) (816180a71)
+- perf(ui): Open a file pane on its own landing during a cloud open (SP4-panes) (#2365) (6ddf74179)
+- perf(ui): Open chats, Agents and a new chat before the whole download (SP2h) (#2354) (d1c44b336)
+- perf(filesystem): Net the change-event flood of a replacement and scope overflow resets (SP2g) (#2352) (23d2ecd9d)
+- perf(ui): Open the file tree and editor before the whole download (SP2f) (#2343) (9edf272da)
+- perf(ui): Cut the AI SDK and Home's three.js from the runtime entry (PL1) (#2332) (1f2bce237)
+
+### Other changes
+
+- refactor(api): Remove the old kernel instruments and the runtime dual-write (#2427) (687c7ea0b)
+- refactor(ui): Cut the settings-ui library from the app (UI wave D) (#2394) (904f506ec)
+- test(api): Grade L2 entries from compact results and add a library-first task (#2371) (b0a671b44)
+- refactor(ui): Move use-file-content and use-file-tree into files-ui behind a file-services context (UI wave D) (#2390) (efbf6eb59)
+- refactor(ui): Cut the editor-ui library from the app (UI wave D) (#2378) (d76ca1862)
+- refactor(ui): Resolve the build target by package condition and move the filesystem spine into files-ui (UI wave D) (#2318) (f3178bc7a)
+- refactor(ui): Retire the layout-flags path now that no surface reads a layout flag (#2367) (e93a899d4)
+- ci(ui): Run composer image Firefox and WebKit parity in the merge queue (#2349) (0529efd80)
+- ci(ui): Run composer image host parity in Firefox and WebKit nightly (#2346) (ff02d7b8f)
+- refactor(ui): Inject analytics into files-ui workspace telemetry (UI wave D) (#2313) (4f94f7cb5)
+
 ## 0.12.0 (2026-11-16)
 
 ### Features

@@ -18,7 +18,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve as resolvePath } from 'node:path';
+import { basename, dirname, join, normalize, resolve as resolvePath } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileMode } from '@taucad/filesystem';
@@ -228,6 +228,16 @@ const gitDirectoryName = '.git';
 const ignorePathspecBatch = 512;
 const liveCheckoutId = 'live';
 /**
+ * A hooks path that is not a directory, so neither Git nor git-lfs can put a
+ * hook there. git-lfs installs its hooks under `core.hooksPath` whenever its
+ * filter runs (a `worktree add` over tracked large files), and joins a path
+ * that is not absolute to the checkout: `/dev/null` has no drive on Windows,
+ * so there it planted `dev/null/post-checkout` and three more inside the
+ * checkout. The Win32 device namespace's `NUL` is absolute on Windows.
+ */
+const disabledHooksPath = process.platform === 'win32' ? String.raw`\\.\NUL` : '/dev/null';
+
+/**
  * Configuration this port pins on every command, ahead of the subcommand.
  *
  * The environment scrub takes care of `GIT_*`; these three reach git from the
@@ -250,7 +260,7 @@ const pinnedConfiguration: readonly string[] = Object.freeze([
   '-c',
   'core.autocrlf=false',
   '-c',
-  'core.hooksPath=/dev/null',
+  `core.hooksPath=${disabledHooksPath}`,
   '-c',
   'core.fsmonitor=false',
   '-c',
@@ -1814,10 +1824,13 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     const collected: Checkout[] = [];
     for (const block of blocks) {
       const lines = block.split('\n').filter((line) => line !== '');
-      const root = lines.find((line) => line.startsWith('worktree '))?.slice('worktree '.length);
-      if (root === undefined) {
+      const listed = lines.find((line) => line.startsWith('worktree '))?.slice('worktree '.length);
+      if (listed === undefined) {
         continue;
       }
+      /* Git for Windows lists `C:/Users/…`: a checkout's root is a path of this
+       * platform, the one its host opens and compares, so `C:\Users\…` there. */
+      const root = normalize(listed);
       const head = lines.find((line) => line.startsWith('HEAD '))?.slice('HEAD '.length);
       const branch = lines.find((line) => line.startsWith('branch '))?.slice('branch '.length);
       const linked = collected.length > 0;
@@ -2379,9 +2392,16 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * config is the person's: the pointers its own attributes ask for are
      * resolved by whatever filters they configured (D16). Asked on every
      * open and idempotent, so a session after a crash between `git init` and
-     * here still configures them. */
+     * here still configures them.
+     *
+     * The filters only: `--skip-repo` installs no hooks. Tau's plumbing runs
+     * none (`core.hooksPath` is pinned off), and git-lfs writes its hooks
+     * under that pinned path: on Linux `/dev/null` refused them (exit 2, after
+     * the filters were set), and on Windows git-lfs read `/dev/null` against the
+     * checkout and planted `dev/null/pre-push` and three more inside the
+     * project, an untracked folder every cut then saw as unsaved work. */
     if (!(await isAdopted())) {
-      await run(['lfs', 'install', '--local']);
+      await run(['lfs', 'install', '--local', '--skip-repo']);
     }
     /* Every project an older build recorded has no index at all, so this open
      * heals it. An existing index is left alone: in a repository Tau adopted

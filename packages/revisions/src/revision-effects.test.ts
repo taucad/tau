@@ -34,7 +34,7 @@ import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { RevisionPortError } from '#revision-port.js';
 import { remoteTrackingRef } from '#remotes.js';
 import type { Checkout, ConflictRecord, RemoteRef, RevisionPort, RevisionPushInput } from '#revision-port.js';
-import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
+import { gitToolchainOnPath, nativeHarness, removalRetries } from '#test/native-git-harness.js';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
@@ -91,7 +91,7 @@ const settles: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   await Promise.all(settles.splice(0).map(async (settle) => settle()));
-  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true, ...removalRetries })));
 });
 
 const createRevisionActors: typeof createRevisionActorsUntracked = (options) => {
@@ -7403,7 +7403,8 @@ describe("a cut honours the checkout's own Git ignore rules on both legs", () =>
           ['models/local.step', 'solid local\n'],
           ['models/deep/local.step', 'solid deep\n'],
           ['Upper.LOG', 'ignored only where case folds\n'],
-          ['Build/case.stl', 'solid\n'],
+          /* Beside no `build/` of its own: on a case-insensitive disk (Windows, macOS) `Build/` would be `build/`. */
+          ['models/Build/case.stl', 'solid\n'],
         ] as const) {
           // oxlint-disable-next-line no-await-in-loop -- parents first, one file at a time.
           await filesystem.writeFile(path, content);
@@ -7422,11 +7423,11 @@ describe("a cut honours the checkout's own Git ignore rules on both legs", () =>
       expect(legs[0]![1]).toStrictEqual([
         '.gitattributes',
         '.gitignore',
-        ...(ignoreCase ? [] : ['Build/case.stl']),
         ...(ignoreCase ? [] : ['Upper.LOG']),
         'keep.secret',
         'main.scad',
         'models/.gitignore',
+        ...(ignoreCase ? [] : ['models/Build/case.stl']),
         'models/deep/local.step',
         'notes.log',
       ]);

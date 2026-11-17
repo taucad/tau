@@ -200,6 +200,25 @@ describe('gitCommandActivity phases and slow processes', () => {
     expect(JSON.stringify(heard)).not.toContain('secret');
   });
 
+  it('should never label a process with a path given to an option that takes the next argument', async () => {
+    await meteredGitCommand(['--git-dir', '/home/ada/secret/.git', 'status'], lasting(1000));
+    await meteredGitCommand(['--work-tree', '/home/ada/secret', '--namespace', 'ada', 'log'], lasting(1000));
+    await meteredGitCommand(['--config-env', 'core.sshCommand=SECRET_SSH', 'fetch'], lasting(1000));
+    await meteredGitCommand(['--exec-path=/home/ada/secret/libexec'], lasting(1000));
+    await meteredGitCommand(['--unknown-valued', '/home/ada/secret', 'status'], lasting(1000));
+    await meteredGitCommand(['lfs', '/home/ada/secret'], lasting(1000));
+
+    expect(heard.map((event) => (event.type === 'command' ? event.command : event.type))).toStrictEqual([
+      'status',
+      'log',
+      'fetch',
+      '--exec-path',
+      '--unknown-valued',
+      'lfs',
+    ]);
+    expect(JSON.stringify(heard)).not.toMatch(/secret/iu);
+  });
+
   it('should report the bound that stopped a process, and a phase that threw as failed', async () => {
     const stopped = gitCommandActivity.during('admission', async () =>
       meteredGitCommand(['lfs', 'install'], lasting(30_000, new CommandAbortedError('deadline', 'stopped'))),

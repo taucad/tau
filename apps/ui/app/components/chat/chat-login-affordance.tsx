@@ -63,7 +63,7 @@ export function ChatLoginAffordance({
             Sign in in Tau&apos;s Terminal
           </Button>
           <span className='text-xs text-muted-foreground'>
-            Opens a tab with the command filled in; press Enter to run it. Tau continues once it succeeds.
+            Opens a tab with the command filled in; press Enter to run it. This chat continues once it succeeds.
           </span>
         </div>
       ) : undefined}

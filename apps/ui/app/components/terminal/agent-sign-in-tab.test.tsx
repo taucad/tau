@@ -149,7 +149,9 @@ describe('AgentSignInTab', () => {
 
     emit({ type: 'exited', exitCode: 0, signal: null });
 
-    expect(screen.getByRole('status')).toHaveTextContent('Signed in. Tau continues where acme stopped.');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Signed in. The chat that asked continues where acme stopped, as soon as it is open.',
+    );
     expect(takeAgentSignInSuccess('acme')).toBe(true);
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledOnce();

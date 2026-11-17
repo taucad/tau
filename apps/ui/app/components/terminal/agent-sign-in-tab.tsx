@@ -220,7 +220,7 @@ export function AgentSignInTab({
           <span className='min-w-0 flex-1'>
             {state.phase === 'ended'
               ? state.exitCode === 0
-                ? `Signed in. Tau continues where ${name} stopped.`
+                ? `Signed in. The chat that asked continues where ${name} stopped, as soon as it is open.`
                 : `The sign-in ended${state.exitCode === null ? ' before it finished' : ` with exit code ${String(state.exitCode)}`}.`
               : state.message}
           </span>

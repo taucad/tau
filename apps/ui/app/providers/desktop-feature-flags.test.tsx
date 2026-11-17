@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
+import { MemoryRouter } from 'react-router';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { store } from '#hooks/use-cookie.js';
@@ -67,6 +68,7 @@ describe('PostHog-backed flags through the desktop analytics boundary', () => {
       <DesktopAnalyticsProvider>
         <Workspace />
       </DesktopAnalyticsProvider>,
+      { wrapper: MemoryRouter },
     );
     expect(screen.getByRole('button')).toHaveTextContent('viewerControls=false');
     await vi.waitFor(() => {

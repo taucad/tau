@@ -454,15 +454,7 @@ type ViewerBridgeState = {
 
 const viewerBridgeStates = async (page: Page): Promise<ViewerBridgeState[]> =>
   page.evaluate(() => {
-    const bridges =
-      (
-        globalThis as typeof globalThis & {
-          __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{
-            getCamera(): { actorError?: string; actorStatus: string };
-            isGeometryFramed(): boolean;
-          }>;
-        }
-      ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+    const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
     return bridges.map((bridge) => ({
       actorError: bridge.getCamera().actorError,
       actorStatus: bridge.getCamera().actorStatus,

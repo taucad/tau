@@ -5,7 +5,7 @@ import { hardwareRenderTier, renderTierFeatures, resolveRenderTier } from '#grap
 
 const { environmentResolution } = viewerRenderProfile.lighting;
 
-const webGpuRenderer = (adapterInfo: Record<string, unknown> | undefined): object => ({
+const webGpuRenderer = (adapterInfo: Record<string, unknown> | undefined): WeakKey => ({
   coordinateSystem: WebGPUCoordinateSystem,
   backend: { device: { adapterInfo } },
 });

@@ -65,6 +65,11 @@ env:
   # No remote cache server and no local cache reads: every task runs.
   NX_SKIP_NX_CACHE: 'true'
   NX_NO_CLOUD: 'true'
+  # The UI build and tests read the same local service addresses as ci.yml; without them the prerender and the
+  # flag constants refuse the environment (first gate run 44109171015: `ui:build`, `ui:build:serve`, `ui:test`).
+  TAU_API_URL: http://localhost:4000
+  TAU_WEBSOCKET_URL: ws://localhost:4001
+  TAU_FRONTEND_URL: http://localhost:3000
 
 jobs:
   reuse:

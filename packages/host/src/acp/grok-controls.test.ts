@@ -35,10 +35,12 @@ describe('Grok controls', () => {
     expect(grokAutoAvailability(true, { auto_permission_mode_enabled: 'yes' })).toBe(true);
     expect(grokAutoAvailability(true, { auto_permission_mode_enabled: null })).toBeUndefined();
     expect(grokAutoAvailability(true, { auto_permission_mode_enabled: false })).toBe(false);
-    const options = grokControlOptions({ permission: 'ask', planning: 'plan', autoAvailable: undefined });
+    const options = grokControlOptions({ permission: 'ask', autoAvailable: undefined });
     expect(options[0]).toMatchObject({ category: 'mode', currentValue: 'ask' });
+    /* PR5: Grok's Build/Plan control is not offered; sessions stay in Build. */
+    expect(options.map((option) => option.category)).toEqual(['mode']);
     const choices = (available: boolean | undefined) =>
-      grokControlOptions({ permission: 'ask', planning: 'default', autoAvailable: available }).flatMap((option) =>
+      grokControlOptions({ permission: 'ask', autoAvailable: available }).flatMap((option) =>
         option.type === 'select' && option.category === 'mode'
           ? option.options.flatMap((entry) =>
               'options' in entry ? entry.options.map((choice) => choice.value) : [entry.value],
@@ -50,7 +52,7 @@ describe('Grok controls', () => {
   });
 
   it('should retain a previously selected Auto policy when its gate is withdrawn', () => {
-    expect(grokControlOptions({ permission: 'auto', planning: 'default', autoAvailable: false })[0]).toMatchObject({
+    expect(grokControlOptions({ permission: 'auto', autoAvailable: false })[0]).toMatchObject({
       currentValue: 'auto',
     });
     expect(grokPlanningRequest('chat-A', 'plan')).toEqual({

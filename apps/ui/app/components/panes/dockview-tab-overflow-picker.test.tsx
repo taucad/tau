@@ -257,6 +257,25 @@ describe('DockviewTabOverflowPicker', () => {
     expect(second.api.setActive).toHaveBeenCalledOnce();
   });
 
+  it('lists a tab Dockview splices into the same panels array (#2291)', () => {
+    const first = createPanel({ id: 'first', title: 'First' });
+    const opened = createPanel({ id: 'opened', title: 'package.json' });
+    const panels = [first];
+    const { properties } = createProperties({ panels, clientWidth: 100, scrollWidth: 300 });
+    const view = renderPicker(properties);
+    flushMeasurement();
+
+    // Dockview's group model opens a tab by splicing the array it already handed the header actions.
+    panels.push(opened);
+    view.rerender(
+      <TooltipProvider>
+        <DockviewTabOverflowPicker {...properties} panels={panels} />
+      </TooltipProvider>,
+    );
+
+    expect(getComboBoxProperties().groupedItems).toEqual([{ name: 'Open tabs', items: [first, opened] }]);
+  });
+
   it('remeasures when the group panel count changes', () => {
     const first = createPanel({ id: 'first', title: 'First' });
     const second = createPanel({ id: 'second', title: 'Second' });

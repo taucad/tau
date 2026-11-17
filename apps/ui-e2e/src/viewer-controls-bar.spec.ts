@@ -23,7 +23,7 @@ type ViewerBridge = {
   getSectionCapCompleteness():
     | { status: 'complete'; admittedSourceCount: number; exactSourceCount: number; perLoopSourceCount: number }
     | undefined;
-  getMeasureState(): { isMeasureActive: boolean; currentStart: Point | undefined };
+  getMeasureState(): { isMeasureActive: boolean; currentStart: Point | undefined; mode: 'auto' | 'point' };
   getViewSettings(): { enableGrid: boolean } | undefined;
   getCamera(): { requestedFov: number; projection: 'orthographic' | 'perspective' };
   setCamera(camera: { position: Point; target?: Point; fov?: number }): void;
@@ -225,7 +225,21 @@ describe('Viewer controls bar', () => {
     const { isActive } = await callBridge('getSectionState');
     expect(isActive, 'Section should keep running beside Measure').toBe(true);
 
-    // A half-placed measurement. The open cut's handles would sit in the way of the click, so none is open.
+    /* A half-placed measurement is a point-to-point one: in Auto a click picks a whole feature and measures it at once
+     * (`measure-tool.spec.ts`, "measures a whole edge from one Auto selection"), so the person chooses Points first.
+     * The open cut's handles would sit in the way of the click, so none is open. */
+    await target.click(selectors.getByRole('button', { name: /^Targets:/u }));
+    const measurementMode = selectors.getByRole('combobox', { name: 'Measurement mode', exact: true });
+    await target.focus(measurementMode);
+    await target.type(measurementMode, 'Points');
+    await target.keyboardPress('Tab');
+    await target.click(selectors.getByRole('button', { name: /^Targets:/u }));
+    await expect
+      .poll(async () => {
+        const { mode } = await callBridge('getMeasureState');
+        return mode;
+      })
+      .toBe('point');
     await callBridge('selectSectionCut', undefined);
     await clickWorldPoint(leftCubeTopPoint);
     await expect.poll(readMeasurementStart).toBeDefined();

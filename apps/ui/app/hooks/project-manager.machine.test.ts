@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag and context keys are snake_case (blueprint "Sentry events"). */
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import type { Remote } from 'comlink';
@@ -15,6 +16,15 @@ vi.mock('comlink', () => ({
 }));
 
 const faults = vi.hoisted(() => ({ reported: [] as unknown[] }));
+const uiReports = vi.hoisted(() => ({ calls: [] as Array<{ error: unknown; details: unknown }> }));
+
+vi.mock('#lib/error-reporting.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  reportUiError: async (error: unknown, details?: unknown) => {
+    uiReports.calls.push({ error, details });
+    return undefined;
+  },
+}));
 
 vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -213,6 +223,38 @@ describe('projectManagerMachine', () => {
       expect(ready.status).toBe('active');
       expect(ready.context.fault).toBe('first fault');
       expect(faults.reported).toEqual([first]);
+      actor.stop();
+    });
+  });
+
+  // T-R9.2 (D5): the library worker's failure is reported, not only logged.
+  describe('reporting', () => {
+    beforeEach(() => {
+      uiReports.calls.length = 0;
+    });
+
+    it('should report one project_library.worker_failed event with the error name when the worker throws', async () => {
+      class WorkerConstructionError extends Error {
+        public override readonly name = 'WorkerConstructionError';
+      }
+      const actor = createTestActor({
+        initResult: async () => {
+          throw new WorkerConstructionError('Failed to construct the worker at /Users/someone/app');
+        },
+      });
+      actor.start();
+      actor.send({ type: 'initialize' });
+      await waitFor(actor, (s) => s.value === 'error');
+
+      await vi.waitFor(() => {
+        expect(uiReports.calls).toHaveLength(1);
+      });
+      const [{ error, details }] = uiReports.calls as [{ error: Error; details: Record<string, unknown> }];
+      expect(details).toMatchObject({
+        tags: { tau_event: 'project_library.worker_failed', error_name: 'WorkerConstructionError' },
+        level: 'error',
+      });
+      expect(error.message).not.toContain('/');
       actor.stop();
     });
   });

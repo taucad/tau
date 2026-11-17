@@ -1561,11 +1561,7 @@
     },
     {
       // Current publish/import inversions. -- W9
-      "files": [
-        "apps/ui/app/lib/github-api.ts",
-        "apps/ui/app/machines/import-disk.machine.test.ts",
-        "apps/ui/app/machines/import-disk.machine.ts"
-      ],
+      "files": ["apps/ui/app/lib/github-api.ts"],
       "rules": { "no-restricted-imports": "off" }
     },
     {

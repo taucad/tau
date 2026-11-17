@@ -68,6 +68,7 @@ import { createRevisionCompute } from '#machines/revision-compute.js';
 import { linkedImportPort, stageLinkedImport } from '@taucad/ui-core/machines/import-linked';
 import { importConnectMessageType, serveImportChannel } from '@taucad/ui-core/machines/import-staging';
 import { systemSkillsOverlay } from '@taucad/ui-core/workers/system-skills-overlay';
+import { createNodeFsPortBroker, servicesUnavailableCode } from '#machines/file-manager.worker.node-port.js';
 
 /**
  * Handshake for the node filesystem backend (desktop only).
@@ -78,9 +79,11 @@ import { systemSkillsOverlay } from '@taucad/ui-core/workers/system-skills-overl
  * this worker. The listener is installed here — before the `/` root mount's
  * top-level await — because a node-backed Home cannot mount without it.
  */
-let nodeFsDelivery = Promise.withResolvers<MessagePort>();
-/** Nobody may await a port the previous channel already consumed and killed. */
-let nodeFsPortClaimed = false;
+const nodeFsPorts = createNodeFsPortBroker({
+  request: () => {
+    self.postMessage({ type: 'nodeFsPortRequest' });
+  },
+});
 const nodeFsHomeRoot = Promise.withResolvers<string>();
 self.addEventListener(
   'message',
@@ -88,29 +91,27 @@ self.addEventListener(
     const { data } = event;
     if (data.type === 'nodeFsPort' && data.port instanceof MessagePort && typeof data.homeRoot === 'string') {
       nodeFsHomeRoot.resolve(data.homeRoot);
-      nodeFsDelivery.resolve(data.port);
+      nodeFsPorts.deliver(data.port);
     } else if (data.type === 'nodeFsPortError' && typeof data.message === 'string') {
-      nodeFsPortClaimed = true;
-      nodeFsDelivery.reject(new Error(data.message));
+      nodeFsPorts.fail(data.message);
     }
   },
 );
 
 const providerRegistry = new ProviderRegistry({
   databasePrefix: metaConfig.databasePrefix,
+  // The previous channel died (the registry evicts on close and calls back here), or none arrived yet. The shell
+  // forks a fresh services utility on the next `connect()`; the broker backs off between requests and gives up with
+  // `SERVICES_UNAVAILABLE`, which it tells the file manager so the start can say so (B7).
   createNodeFsPort: async () => {
-    if (nodeFsPortClaimed) {
-      // The previous channel died (the registry evicts on close and calls back
-      // here). The shell forks a fresh services utility on the next `connect()`,
-      // so ask for another port instead of re-handing the dead one — awaiting
-      // the one-shot delivery would wedge the filesystem for the session.
-      nodeFsDelivery = Promise.withResolvers<MessagePort>();
-      nodeFsPortClaimed = false;
-      self.postMessage({ type: 'nodeFsPortRequest' });
+    try {
+      return await nodeFsPorts.createNodeFsPort();
+    } catch (error) {
+      if ((error as { code?: unknown }).code === servicesUnavailableCode) {
+        self.postMessage({ type: 'nodeFsUnavailable', code: servicesUnavailableCode });
+      }
+      throw error;
     }
-    const port = await nodeFsDelivery.promise;
-    nodeFsPortClaimed = true;
-    return port;
   },
 });
 /* Each mutation's wait for its claims and its time holding them, for the open's worker timings. */

@@ -24,7 +24,7 @@ import type { Checkout, RevisionPort } from '#revision-port.js';
 import { createProjectRevisionsActor } from '#revision-effects.js';
 import type { ProjectRevisions, RevisionFileSystem } from '#revision-effects.js';
 import { createTurnPlacementPort } from '#turn-placement.js';
-import type { TurnPlacementAdapter } from '#turn-placement.js';
+import type { TurnAdmissionTiming, TurnPlacementAdapter } from '#turn-placement.js';
 import type { TurnAttemptKey } from '#turn.types.js';
 import { recordedBy, testIdentity } from '#test/identity.js';
 
@@ -493,6 +493,118 @@ describe('createTurnPlacementPort (TS-S3)', () => {
    * XD4: an id no checkout and no branch on this device answers to waits only while a remote may bring the branch;
    * a project with no remote can never receive it, so it is refused for good.
    */
+  /* W8 diagnostics: one report per answered admission, ids and milliseconds only, with the activity it waited on. */
+  it('should report one admission timing when it answers, with its phases and the activity it waited on', async () => {
+    const project = await createProject();
+    const { revisions } = project.open();
+    /* A stand-in meter: what the settle phase records, and a record before the admission that no window sees. */
+    const windows = new Set<{ count: number; totalMilliseconds: number; longestMilliseconds: number }>();
+    const git = {
+      record: (milliseconds: number): void => {
+        for (const totals of windows) {
+          totals.count += 1;
+          totals.totalMilliseconds += milliseconds;
+          totals.longestMilliseconds = Math.max(totals.longestMilliseconds, milliseconds);
+        }
+      },
+      open: () => {
+        const totals = { count: 0, totalMilliseconds: 0, longestMilliseconds: 0 };
+        windows.add(totals);
+        return {
+          close: () => {
+            windows.delete(totals);
+            return { ...totals };
+          },
+        };
+      },
+    };
+    const timings: TurnAdmissionTiming[] = [];
+    const placement = createTurnPlacementPort({
+      revisions,
+      openTools: ({ filesystem: view }) => view,
+      settle: async () => {
+        git.record(7);
+        git.record(30);
+      },
+      admissionTiming: { activity: { git }, report: (timing) => timings.push(timing) },
+    });
+    git.record(500);
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+    await placement.admit({ requestId: 'admit:run-1:1:again', key });
+    await placement.fence();
+
+    expect(answer.status).toBe('applied');
+    const checkoutId = answer.status === 'refused' ? undefined : answer.placement.checkoutId;
+    expect(timings).toHaveLength(2);
+    const [first] = timings;
+    expect(first).toMatchObject({
+      requestId: 'admit:run-1:1',
+      chatId: key.chatId,
+      turnId: key.turnId,
+      runId: key.runId,
+      attempt: key.attempt,
+      status: 'applied',
+      checkoutId,
+      activity: { git: { count: 2, totalMilliseconds: 37, longestMilliseconds: 30 } },
+      longest: { source: 'git', milliseconds: 30 },
+    });
+    expect(Object.keys(first!).toSorted()).toStrictEqual(
+      [
+        'activity',
+        'attempt',
+        'chatId',
+        'checkoutId',
+        'longest',
+        'phases',
+        'requestId',
+        'runId',
+        'status',
+        'totalMilliseconds',
+        'turnId',
+      ].toSorted(),
+    );
+    expect(Object.keys(first!.phases).toSorted()).toStrictEqual(
+      ['admitTurn', 'grant', 'heldElsewhere', 'placeIntent', 'recordedCheckout', 'settle'].toSorted(),
+    );
+    expect(Object.values(first!.phases).every((milliseconds) => typeof milliseconds === 'number')).toBe(true);
+    const phases = Object.values(timings[0]!.phases);
+    expect(phases.reduce((total, phase) => total + phase, 0)).toBeLessThanOrEqual(timings[0]!.totalMilliseconds);
+    /* A replay does no placement work, and nothing ran while it was answered. */
+    expect(timings[1]).toMatchObject({
+      requestId: 'admit:run-1:1:again',
+      status: 'replayed',
+      activity: { git: { count: 0, totalMilliseconds: 0, longestMilliseconds: 0 } },
+    });
+    expect(timings[1]).not.toHaveProperty('longest');
+    expect(Object.keys(timings[1]!.phases).toSorted()).toStrictEqual(['admitTurn', 'grant']);
+  });
+
+  it('should report a refused admission with its code, and keep the answer when the report throws', async () => {
+    const project = await createProject();
+    await writeChatRecord(project.filesystem, 'missing-checkout');
+    const { revisions } = project.open();
+    const timings: TurnAdmissionTiming[] = [];
+    const placement = createTurnPlacementPort({
+      revisions,
+      openTools: ({ filesystem: view }) => view,
+      admissionTiming: {
+        report: (timing) => {
+          timings.push(timing);
+          throw new Error('The diagnostics sink is gone.');
+        },
+      },
+    });
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(answer).toMatchObject({ status: 'refused', code: 'CHECKOUT_UNKNOWN' });
+    expect(timings).toStrictEqual([
+      expect.objectContaining({ status: 'refused', code: 'CHECKOUT_UNKNOWN', activity: {} }),
+    ]);
+    expect(timings[0]).not.toHaveProperty('checkoutId');
+  });
+
   it("should place an attempt on the chat record's checkout when the person named none", async () => {
     const project = await createProject();
     await writeChatRecord(project.filesystem, 'missing-checkout');

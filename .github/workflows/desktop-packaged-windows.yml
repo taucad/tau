@@ -180,6 +180,9 @@ jobs:
             icacls 'C:\' 2>&1
             icacls 'D:\' 2>&1
             icacls $env:TEMP 2>&1
+            icacls $env:RUNNER_TEMP 2>&1
+            '--- window station and desktop ---'
+            whoami /groups /fo list 2>&1 | Select-String -Pattern 'Logon|Mandatory' -Context 0,2
             '--- application crashes (Event 1000, 1001) ---'
             Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001; StartTime = (Get-Date).AddHours(-2) } -ErrorAction SilentlyContinue |
               Select-Object -First 40 | Format-List TimeCreated, Id, ProviderName, Message

@@ -418,6 +418,31 @@ describe('desktop boot and troubleshooting bridge (T-R12.9)', () => {
     ]);
   });
 
+  /* WP9 (R7, D3): Reset local database records the local-database reset, then restarts so main applies it. */
+  it('should reset the local database as a fixed reset request followed by a normal restart', async () => {
+    vi.mocked(ipcRenderer.invoke).mockClear();
+    const { troubleshooting } = state.exposed.get('tau') as {
+      readonly troubleshooting: Readonly<{ resetLocalDatabase(): Promise<void> }>;
+    };
+    await troubleshooting.resetLocalDatabase();
+    expect(vi.mocked(ipcRenderer.invoke).mock.calls).toEqual([
+      [recoveryChannels.action, { type: 'reset', store: 'local-database' }],
+      [recoveryChannels.action, { type: 'restart', mode: 'normal' }],
+    ]);
+  });
+
+  /* WP9 (R7, T-B5.8): the marker of a granted folder, read by main, so a reset database adopts the folder's id. */
+  it("should read a granted folder's marker through main and answer undefined for anything but text", async () => {
+    const { directories } = state.exposed.get('tau') as {
+      readonly directories: Readonly<{ readMarker(path: string): Promise<string | undefined> }>;
+    };
+    vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce('{"workspaceId":"wsp_x"}');
+    await expect(directories.readMarker('/picked/Project')).resolves.toBe('{"workspaceId":"wsp_x"}');
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith(directoryGrantChannels.marker, '/picked/Project');
+    vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce(42);
+    await expect(directories.readMarker('/picked/Project')).resolves.toBeUndefined();
+  });
+
   it('should carry safe mode from the bootstrap argument and leave it absent in a normal launch', async () => {
     expect(tau().safeMode).toBeUndefined();
     const { argv } = process;

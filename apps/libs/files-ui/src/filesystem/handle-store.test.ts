@@ -1629,3 +1629,178 @@ describe('readProjectRootConfigs', () => {
     expect(read.configuration).toEqual(await getProjectRootConfigs());
   });
 });
+
+// ===========================================================================
+// Desktop resilient startup (WP9): Home's engine mirror and the folder list from the grants
+// ===========================================================================
+
+const homeBackendMirrorKey = 'tau:home-backend';
+
+/*
+ * T-B5.4 (B5, R7): Home's pin is mirrored to `localStorage` at pin time and on every read of it, and the mirror is
+ * read only when the database cannot be opened. On the desktop with no mirror Home is node, its engine by build; on
+ * the web with no mirror nothing is guessed (row S37).
+ */
+describe('Home engine mirror', () => {
+  afterEach(() => {
+    globalThis.localStorage.clear();
+  });
+
+  it('should write the mirror when Home is pinned', async () => {
+    const { pinHomeStorageBackend } = await loadStore();
+
+    await pinHomeStorageBackend('opfs');
+
+    expect(globalThis.localStorage.getItem(homeBackendMirrorKey)).toBe('opfs');
+  });
+
+  it('should refresh the mirror on a read of the pin', async () => {
+    const { getHomeStorageBackend, pinHomeStorageBackend } = await loadStore();
+    await pinHomeStorageBackend('opfs');
+    globalThis.localStorage.removeItem(homeBackendMirrorKey);
+
+    await expect(getHomeStorageBackend()).resolves.toBe('opfs');
+
+    expect(globalThis.localStorage.getItem(homeBackendMirrorKey)).toBe('opfs');
+  });
+
+  it('should take Home from the mirror when the database cannot be opened', async () => {
+    globalThis.localStorage.setItem(homeBackendMirrorKey, 'opfs');
+    vi.resetModules();
+    const { getHomeStorageBackend } = await import('#filesystem/handle-store.js');
+    stubFailingIndexedDb('VersionError');
+
+    await expect(getHomeStorageBackend()).resolves.toBe('opfs');
+  });
+
+  it('should start desktop Home on node when the database cannot be opened and no mirror exists', async () => {
+    installDesktop(async () => []);
+    vi.resetModules();
+    const { getHomeStorageBackend } = await import('#filesystem/handle-store.js');
+    stubFailingIndexedDb('UnknownError');
+
+    await expect(getHomeStorageBackend()).resolves.toBe('node');
+  });
+
+  it('should guess no engine on the web when the database cannot be opened and no mirror exists', async () => {
+    vi.resetModules();
+    const { getHomeStorageBackend } = await import('#filesystem/handle-store.js');
+    stubFailingIndexedDb('VersionError');
+
+    await expect(getHomeStorageBackend()).rejects.toMatchObject({ name: 'VersionError' });
+  });
+
+  it('should ignore a mirror that names no engine', async () => {
+    globalThis.localStorage.setItem(homeBackendMirrorKey, 'floppy');
+    vi.resetModules();
+    const { getHomeStorageBackend } = await import('#filesystem/handle-store.js');
+    stubFailingIndexedDb('VersionError');
+
+    await expect(getHomeStorageBackend()).rejects.toMatchObject({ name: 'VersionError' });
+  });
+});
+
+/*
+ * T-B5.8 (R7): after a desktop reset the handle database starts empty, and each folder the grant file still holds gets
+ * its workspace row back, with the id its `.tau/workspace.json` names when no other row holds it. A database that was
+ * not just created adopts nothing: a grant without a row there is not this function's to restore.
+ */
+describe('folder list from the grants after a database reset', () => {
+  const grantedPath = '/Users/tester/Projects/Workshop';
+  const markedWorkspaceId = 'wsp_K3d9Qm2Lx7Vb4Np8Rt1Zs';
+
+  const installGrants = (
+    paths: string[],
+    readMarker: (path: string) => Promise<string | undefined> = async () => undefined,
+  ): ReturnType<typeof vi.fn> => {
+    const read = vi.fn(readMarker);
+    buildTarget.desktop = true;
+    vi.stubGlobal('tau', {
+      nodeFs: { homeRoot: desktopHomeRoot, connect: async () => new MessageChannel().port1 },
+      dialog: { selectDirectory: vi.fn() },
+      directories: { list: async () => paths, onChange: () => () => undefined, readMarker: read },
+    });
+    return read;
+  };
+
+  it('should adopt a granted folder under the id its marker names', async () => {
+    const readMarker = installGrants([grantedPath], async (path) =>
+      path === grantedPath ? markerJson(markedWorkspaceId, 'workshop') : undefined,
+    );
+    const { getProjectRootConfigs, listWorkspaces } = await loadStore();
+
+    const configuration = await getProjectRootConfigs();
+
+    const workspaces = await listWorkspaces();
+    expect(workspaces).toHaveLength(1);
+    expect(workspaces[0]).toMatchObject({ workspaceId: markedWorkspaceId, path: grantedPath, name: 'Workshop' });
+    expect(readMarker).toHaveBeenCalledWith(grantedPath);
+    expect(configuration.roots).toContainEqual({ backend: 'node', path: grantedPath });
+  });
+
+  it('should adopt a granted folder with no marker under a new id', async () => {
+    installGrants([grantedPath]);
+    const { getProjectRootConfigs, listWorkspaces } = await loadStore();
+
+    await getProjectRootConfigs();
+
+    const workspaces = await listWorkspaces();
+    expect(workspaces).toHaveLength(1);
+    expect(workspaces[0]?.path).toBe(grantedPath);
+    expect(workspaces[0]?.workspaceId).toMatch(/^wsp_/u);
+    expect(workspaces[0]?.workspaceId).not.toBe(markedWorkspaceId);
+  });
+
+  it('should give a second folder that names the same marker a new id', async () => {
+    const copy = '/Users/tester/Projects/Workshop copy';
+    installGrants([grantedPath, copy], async () => markerJson(markedWorkspaceId, 'workshop'));
+    const { getProjectRootConfigs, listWorkspaces } = await loadStore();
+
+    await getProjectRootConfigs();
+
+    const workspaces = await listWorkspaces();
+    expect(workspaces).toHaveLength(2);
+    expect(workspaces.filter((workspace) => workspace.workspaceId === markedWorkspaceId)).toHaveLength(1);
+  });
+
+  it('should adopt nothing into a database that was not just created', async () => {
+    const grants: string[] = [];
+    installGrants(grants);
+    const { getProjectRootConfigs } = await loadStore();
+    await getProjectRootConfigs();
+    /* A later launch over the same database: a grant with no row appears. */
+    grants.push(grantedPath);
+    vi.resetModules();
+    const reloaded = await import('#filesystem/handle-store.js');
+
+    await reloaded.getProjectRootConfigs();
+
+    await expect(reloaded.listWorkspaces()).resolves.toEqual([]);
+  });
+
+  it('should adopt the folder list on a later read when the first one could not read the grants', async () => {
+    let failing = true;
+    buildTarget.desktop = true;
+    vi.stubGlobal('tau', {
+      nodeFs: { homeRoot: desktopHomeRoot, connect: async () => new MessageChannel().port1 },
+      dialog: { selectDirectory: vi.fn() },
+      directories: {
+        list: async () => {
+          if (failing) {
+            throw new Error('The services utility is not answering');
+          }
+          return [grantedPath];
+        },
+        onChange: () => () => undefined,
+        readMarker: async () => undefined,
+      },
+    });
+    const { getProjectRootConfigs, listWorkspaces } = await loadStore();
+    await expect(getProjectRootConfigs()).rejects.toThrow();
+    failing = false;
+
+    await getProjectRootConfigs();
+
+    await expect(listWorkspaces()).resolves.toHaveLength(1);
+  });
+});

@@ -163,3 +163,31 @@ describe('recovery resets (T-R12.7)', () => {
     expect(() => applyPendingResets(run)).not.toThrow();
   });
 });
+
+/*
+ * WP9 (R7, T-B5.6's unit half): Reset local database quarantines the app origin's database and its blobs, even when a
+ * damaged profile left a file where Chromium expects the database directory (T-B5.5's setup). The grant file stays, so
+ * the renderer rebuilds the folder list from it, and Local Storage stays, so Home's engine mirror survives the reset.
+ */
+describe('local database reset', () => {
+  it("should move the app origin's database and blobs, and keep the grant file and Local Storage", async () => {
+    const root = await profile();
+    await writeFile(join(root, 'granted-roots.json'), '["/projects/a"]');
+    await mkdir(join(root, 'IndexedDB'), { recursive: true });
+    await writeFile(join(root, 'IndexedDB', 'app_tau_0.indexeddb.leveldb'), 'not a directory');
+    await mkdir(join(root, 'IndexedDB', 'app_tau_0.indexeddb.blob', '1'), { recursive: true });
+    await mkdir(join(root, 'Local Storage', 'leveldb'), { recursive: true });
+    await writeFile(join(root, 'Local Storage', 'leveldb', 'CURRENT'), 'MANIFEST-2');
+    requestReset(root, 'local-database');
+    const run = options(root);
+
+    expect(applyPendingResets(run)).toEqual([{ store: 'local-database', outcome: 'moved' }]);
+
+    const quarantine = join(root, 'recovery', run.stamp, 'IndexedDB');
+    expect((await readdir(quarantine)).toSorted()).toEqual(['app_tau_0.indexeddb.blob', 'app_tau_0.indexeddb.leveldb']);
+    expect(await readFile(join(quarantine, 'app_tau_0.indexeddb.leveldb'), 'utf8')).toBe('not a directory');
+    expect(await readdir(join(root, 'IndexedDB'))).toEqual([]);
+    expect(await readFile(join(root, 'granted-roots.json'), 'utf8')).toBe('["/projects/a"]');
+    expect(await readFile(join(root, 'Local Storage', 'leveldb', 'CURRENT'), 'utf8')).toBe('MANIFEST-2');
+  });
+});

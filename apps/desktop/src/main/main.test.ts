@@ -853,6 +853,32 @@ describe('desktop main compute owner', () => {
     bootMilliseconds,
   );
 
+  /* WP9 (R7, T-B5.8): a reset database adopts each granted folder under the id its marker names. */
+  it(
+    'should read the marker of a granted folder only, and answer nothing for a folder without one',
+    async () => {
+      await bootstrap();
+      const granted = join(state.userData, 'Granted');
+      const bare = join(state.userData, 'Bare');
+      await mkdir(join(granted, '.tau'), { recursive: true });
+      await mkdir(bare, { recursive: true });
+      await writeFile(join(granted, '.tau', 'workspace.json'), '{"workspaceId":"wsp_marked"}');
+      for (const directory of [granted, bare]) {
+        dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [directory] });
+        // oxlint-disable-next-line no-await-in-loop -- grants are admitted one pick at a time.
+        await state.handlers.get('tau:select-directory')!({ senderFrame: {} });
+      }
+      const marker = state.handlers.get(directoryGrantChannels.marker)!;
+      await expect(marker({ senderFrame: {} }, granted)).resolves.toBe('{"workspaceId":"wsp_marked"}');
+      await expect(marker({ senderFrame: {} }, bare)).resolves.toBeUndefined();
+      /* Not granted, relative, or not a string: refused before any read. */
+      await expect(marker({ senderFrame: {} }, join(state.userData, 'Elsewhere'))).resolves.toBeUndefined();
+      await expect(async () => marker({ senderFrame: {} }, 'Granted')).rejects.toThrow('invalid directory');
+      await expect(async () => marker({ senderFrame: {} }, 42)).rejects.toThrow('invalid directory');
+    },
+    bootMilliseconds,
+  );
+
   it('should open only granted directories and propagate file manager failures', async () => {
     const directory = await bootstrap();
     await mkdir(directory, { recursive: true });

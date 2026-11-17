@@ -509,22 +509,25 @@ describe.runIf(!sandboxShips)('native sandbox without a backend', () => {
     });
     try {
       const refusals = [
-        session.request({
-          method: 'probe',
-          params: {},
-          parseResult: (value) => value,
-          signal: new AbortController().signal,
-        }),
-        runInNativeSandbox({
-          executablePath: process.execPath,
-          arguments: [workerPath],
-          readablePaths: [dirname(process.execPath)],
-          writablePath: artifactPath,
-          workingDirectory: workspacePath,
-          commandId: 'refusal#1',
-        }),
+        async () =>
+          session.request({
+            method: 'probe',
+            params: {},
+            parseResult: (value) => value,
+            signal: new AbortController().signal,
+          }),
+        async () =>
+          runInNativeSandbox({
+            executablePath: process.execPath,
+            arguments: [workerPath],
+            readablePaths: [dirname(process.execPath)],
+            writablePath: artifactPath,
+            workingDirectory: workspacePath,
+            commandId: 'refusal#1',
+          }),
       ];
-      for (const refusal of refusals) {
+      for (const launch of refusals) {
+        const refusal = launch();
         // oxlint-disable-next-line no-await-in-loop -- each refusal is asserted in turn.
         await expect(refusal).rejects.toBeInstanceOf(NativeRuntimeUnavailableError);
         // oxlint-disable-next-line no-await-in-loop -- each refusal is asserted in turn.

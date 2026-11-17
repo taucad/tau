@@ -234,12 +234,19 @@ const renameRetryBudgetMilliseconds = 1000;
  * `EPERM`, `EACCES` or `EBUSY` though nothing is wrong. As graceful-fs does,
  * the rename is retried with a growing delay (10 ms doubling, at most 250 ms
  * apart) for about a second; the last error is the answer. Elsewhere these
- * codes are real and answered at once.
+ * codes are real and answered at once. What the first attempt was admitted on
+ * can change during a backoff, so `beforeRetry` runs again after each one and
+ * its refusal is the answer.
  *
  * @param from - The path to rename.
  * @param to - Its new path.
+ * @param beforeRetry - The checks the first attempt passed, run again before each retry.
  */
-const renameRetryingTransientLocks = async (from: string, to: string): Promise<void> => {
+const renameRetryingTransientLocks = async (
+  from: string,
+  to: string,
+  beforeRetry: () => Promise<void>,
+): Promise<void> => {
   const startedAt = Date.now();
   for (let attempt = 0; ; attempt += 1) {
     try {
@@ -260,6 +267,8 @@ const renameRetryingTransientLocks = async (from: string, to: string): Promise<v
       await new Promise<void>((resolve) => {
         setTimeout(resolve, backoffMilliseconds);
       });
+      // oxlint-disable-next-line no-await-in-loop -- the next attempt is admitted only on these checks.
+      await beforeRetry();
     }
   }
 };
@@ -1997,26 +2006,35 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
   /**
    * Rename the synced temp sibling over its target, refusing a swapped parent or a symlink target.
+   * The same checks, `beforeReplace` included, admit every retry of a rename Windows briefly refused.
    *
    * @param staged - A filled write.
-   * @param beforeReplace - Runs after the checks, immediately before the rename.
+   * @param beforeReplace - Runs after the checks, immediately before each rename attempt.
    */
   private async _publishTemporary(staged: StagedWrite, beforeReplace?: () => Promise<void>): Promise<void> {
     const { rootedPath, targetPath, realBase, admittedDirectory, admittedTarget, temporaryPath } = staged;
-    const currentDirectory = await fs.realpath(path.dirname(targetPath));
-    if (currentDirectory !== admittedDirectory || !isContained(realBase, currentDirectory)) {
-      throw this._errno('ELOOP', 'refusing to replace a file through a changed parent', rootedPath);
-    }
-    const currentTarget = await this._lstatOrUndefined(admittedTarget);
-    if (currentTarget?.isSymbolicLink() === true) {
-      throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
-    }
-    await beforeReplace?.();
+    const admit = async (): Promise<void> => {
+      const currentDirectory = await fs.realpath(path.dirname(targetPath));
+      if (currentDirectory !== admittedDirectory || !isContained(realBase, currentDirectory)) {
+        throw this._errno('ELOOP', 'refusing to replace a file through a changed parent', rootedPath);
+      }
+      const currentTarget = await this._lstatOrUndefined(admittedTarget);
+      if (currentTarget?.isSymbolicLink() === true) {
+        throw this._errno('ELOOP', 'refusing to replace symbolic link', rootedPath);
+      }
+      await beforeReplace?.();
+    };
+    await admit();
     /* Rename keeps the inode, so this identifies the entry the rename is about
      * to publish — and tells a later writer's entry apart from ours below. */
     staged.written = await fs.lstat(temporaryPath, { bigint: true });
     staged.renaming = true;
-    await renameRetryingTransientLocks(temporaryPath, admittedTarget);
+    /* A refused rename published nothing: a retry the checks refuse leaves the write known not applied. */
+    await renameRetryingTransientLocks(temporaryPath, admittedTarget, async () => {
+      staged.renaming = false;
+      await admit();
+      staged.renaming = true;
+    });
     staged.replaced = true;
   }
 

@@ -17,7 +17,12 @@ import { pbkdf2 } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { join, sep } from 'node:path';
-import { NodeFsProvider, drainNodeFsProviderWatchClosures } from '#backend/node/provider.js';
+import {
+  NodeFsProvider,
+  drainNodeFsProviderWatchClosures,
+  writeNodeFileCheckedWithAuthority,
+} from '#backend/node/provider.js';
+import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { BatchEntry } from '#changeset.js';
 import parcelWatcher from '@parcel/watcher';
@@ -213,6 +218,42 @@ describe('NodeFsProvider atomic writes over a briefly held file on Windows', () 
       expect(elapsed).toBeLessThan(3000);
       expect(calls()).toBeGreaterThan(3);
       expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should refuse a retry once the writer lost its claim during the backoff, publishing nothing', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst('EPERM', Number.POSITIVE_INFINITY);
+    let asked = 0;
+    const writer: NodeAuthorityWriter = {
+      lockPath: join(root, '.lock'),
+      /* Current for the write's own checks and its first rename; lost while that rename's backoff runs. */
+      assertCurrent: async () => {
+        asked += 1;
+        if (calls() > 0) {
+          throw Object.assign(new Error('Another window owns this project.'), { code: 'AUTHORITY_LOCK_UNAVAILABLE' });
+        }
+      },
+      release: async () => undefined,
+    };
+    try {
+      await expect(
+        whileOnPlatform('win32', async () =>
+          writeNodeFileCheckedWithAuthority(
+            provider,
+            { path: 'target.txt', data: 'new', preconditions: [{ path: 'target.txt', expected: 'old' }] },
+            writer,
+          ),
+        ),
+      ).rejects.toMatchObject({ code: 'AUTHORITY_LOCK_UNAVAILABLE', applicationState: 'known-not-applied' });
+
+      expect(calls()).toBe(1);
+      expect(asked).toBe(3);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+      expect(temporaryFiles(root)).toEqual([]);
     } finally {
       provider.dispose();
     }

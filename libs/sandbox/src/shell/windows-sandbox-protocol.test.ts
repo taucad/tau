@@ -11,6 +11,7 @@ import {
   isShellRequirement,
   windowsFramePayloadLimit,
   windowsExclusiveLaunchRequirement,
+  windowsHelperEnd,
   windowsLaunchSpec,
 } from '#shell/windows-sandbox-protocol.js';
 
@@ -275,5 +276,18 @@ describe('windowsLaunchSpec', () => {
       columns: 100,
       rows: 30,
     });
+  });
+});
+
+describe('windowsHelperEnd', () => {
+  it('should name an NTSTATUS a helper dies with before it can report, and leave other exits as they are', () => {
+    expect(windowsHelperEnd(3_221_225_794, undefined)).toMatch(
+      /^exit 3221225794, 0xC0000142 STATUS_DLL_INIT_FAILED: Windows could not start it/u,
+    );
+    expect(windowsHelperEnd(-1_073_741_502, undefined)).toMatch(
+      /^exit -1073741502, 0xC0000142 STATUS_DLL_INIT_FAILED/u,
+    );
+    expect(windowsHelperEnd(9, undefined)).toBe('exit 9');
+    expect(windowsHelperEnd(undefined, 'SIGKILL')).toBe('signal SIGKILL');
   });
 });

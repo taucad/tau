@@ -836,12 +836,15 @@ describe('readWindowsSandboxStatus', () => {
         env: { ...process.env, TAU_FIXTURE_SCENARIO: scenario },
       });
 
-  it('should read an install record as installed', async () => {
-    await expect(
-      readWindowsSandboxStatus('helper.exe', {
-        spawnHelper: statusSpawn('installed'),
-      }),
-    ).resolves.toStrictEqual({ installed: true });
+  it('should read an install record as installed, asking only the quick question', async () => {
+    const asked: string[][] = [];
+    const spawnHelper: WindowsSandboxHelperSpawn = (arguments_) => {
+      asked.push([...arguments_]);
+      return statusSpawn('installed')(arguments_);
+    };
+
+    await expect(readWindowsSandboxStatus('helper.exe', { spawnHelper })).resolves.toStrictEqual({ installed: true });
+    expect(asked).toStrictEqual([['status', '--quick']]);
   });
 
   it('should read an absent install record as not installed', async () => {
@@ -854,11 +857,30 @@ describe('readWindowsSandboxStatus', () => {
     });
   });
 
-  it('should read a helper that cannot run as not installed', async () => {
+  it('should read a helper that cannot run as not installed, and say why', async () => {
+    const status = await readWindowsSandboxStatus(join(tmpdir(), 'tau-no-such-helper.exe'), {
+      environment: {},
+    });
+
+    expect(status.installed).toBe(false);
+    expect(status.diagnostic).toMatch(/^the helper could not be started: .*ENOENT/u);
+  });
+
+  it('should carry the helper stderr when it cannot read its install record', async () => {
     await expect(
-      readWindowsSandboxStatus(join(tmpdir(), 'tau-no-such-helper.exe'), {
-        environment: {},
-      }),
-    ).resolves.toStrictEqual({ installed: false });
+      readWindowsSandboxStatus('helper.exe', { spawnHelper: statusSpawn('status-unreadable') }),
+    ).resolves.toStrictEqual({
+      installed: false,
+      diagnostic: 'stderr: tau-windows-sandbox status: Access is denied. (os error 5)',
+    });
+  });
+
+  it('should carry the exit code, the output and stderr of a helper that failed', async () => {
+    await expect(
+      readWindowsSandboxStatus('helper.exe', { spawnHelper: statusSpawn('status-crash') }),
+    ).resolves.toStrictEqual({
+      installed: false,
+      diagnostic: 'exit 3; its output is not JSON: "{\\"accountSid\\":"; stderr: thread main panicked',
+    });
   });
 });

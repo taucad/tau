@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TypeScriptWorkerClient } from '@taucad/lsp/typescript-worker/client';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import type { EditorLanguageRequest } from '#lib/editor-language-runtime.js';
-import { EditorDocument } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import { acquireTypeScriptLanguage } from '#lib/typescript-language/typescript-codemirror.js';
 
 const createTypeScriptService = vi.hoisted(() => vi.fn());

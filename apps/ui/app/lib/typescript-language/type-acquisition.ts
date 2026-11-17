@@ -4,7 +4,7 @@ import { declarationPath, loadDeclarationGraph } from '#lib/typescript-language/
 import { Topic } from '@taucad/events';
 import { extractPackageInfoFromCdnUrl, isBareSpecifier } from '@taucad/utils/import';
 import type { TypeScriptWorkerClient } from '@taucad/lsp/typescript-worker/client';
-import type { EditorDocument } from '#lib/editor-document.js';
+import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import { readStaticTypePackage } from '#lib/typescript-language/static-types.js';
 import type { DependencyReader, StaticTypeDefinition } from '#lib/typescript-language/static-types.js';
 

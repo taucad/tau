@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 /**
- * `/invitations/:token` — the invitee's half of D27.
+ * `/invitations` — the invitee's half of D27. The link lands on
+ * `/invitations/<token>`, which holds the token and redirects here (#2290).
  *
  * There is no invitation email, so this link is the whole of what an invitee
  * receives. Every branch it can land in is a sentence a stranger has to act on
@@ -36,7 +37,8 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' } }));
 
-const { default: AcceptInvitation } = await import('#routes/invitations.$token/route.js');
+const { default: AcceptInvitation } = await import('#routes/invitations._index/route.js');
+const { holdPendingInvitation, readPendingInvitation } = await import('#lib/pending-invitation.lib.js');
 
 /** Where the route left the router. */
 function Where(): React.JSX.Element {
@@ -51,9 +53,9 @@ const mountRoute = (): void => {
   queryClient = client;
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={['/invitations/tok_abcdef']}>
+      <MemoryRouter initialEntries={['/invitations']}>
         <Routes>
-          <Route path='/invitations/:token' element={<AcceptInvitation />} />
+          <Route path='/invitations' element={<AcceptInvitation />} />
           <Route path='*' element={<span>elsewhere</span>} />
         </Routes>
         <Where />
@@ -85,6 +87,9 @@ const answerWith = (accept: { status: number; body: unknown }): void => {
 describe('AcceptInvitation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    globalThis.sessionStorage.clear();
+    // The desktop host's hold; the web cookie is read by the same function (`pending-invitation.lib.test.ts`).
+    holdPendingInvitation('tok_abcdef');
     mockSession.mockReturnValue({
       data: { user: { id: 'user_1', email: 'invitee@example.test' } },
       isPending: false,
@@ -180,11 +185,12 @@ describe('AcceptInvitation', () => {
     expect(screen.getByRole('status', { name: 'Checking your account' })).toBeDefined();
   });
 
-  /* The hold is the app's own `redirectTo`: the link survives the round trip
-     through sign-in and the route runs again on the way back. On the desktop
-     build the same mechanism is what "signed out when the link arrived" means
-     — main loads this route, and it holds the token across the browser
-     sign-in (R4). */
+  /* The token waits where `/invitations/<token>` held it, not in the address:
+     the sign-in round trip returns to `/invitations` and the route runs again
+     on the way back. On the desktop build the same hold is what "signed out
+     when the link arrived" means — main loads the link, and the token waits in
+     session storage across the browser sign-in (R4). #2290: no `redirectTo`
+     carries the token any more. */
   it('asks a signed-out visitor to sign in and come back here', async () => {
     mockSession.mockReturnValue({ data: undefined, isPending: false });
     mountRoute();
@@ -192,9 +198,43 @@ describe('AcceptInvitation', () => {
     expect(await screen.findByText('Sign in to accept this invitation')).toBeDefined();
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
-      '/auth/sign-in?redirectTo=%2Finvitations%2Ftok_abcdef',
+      '/auth/sign-in?redirectTo=%2Finvitations',
     );
     expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(document.body.innerHTML).not.toContain('tok_abcdef');
+    expect(readPendingInvitation()).toBe('tok_abcdef');
+  });
+
+  it('says there is nothing to open when no token is held', async () => {
+    globalThis.sessionStorage.clear();
+    mountRoute();
+
+    expect(await screen.findByText('There is no invitation to open.')).toBeDefined();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('forgets the token once the invitation is accepted', async () => {
+    mountRoute();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pathname').textContent).toBe('/w/home/shared-housing');
+    });
+    expect(readPendingInvitation()).toBeUndefined();
+  });
+
+  it('forgets a spent token', async () => {
+    answerWith({ status: 404, body: { code: 'INVITATION_NOT_FOUND' } });
+    mountRoute();
+    expect(await screen.findByText('This invitation link is no longer valid.')).toBeDefined();
+    expect(readPendingInvitation()).toBeUndefined();
+  });
+
+  it('keeps the token when the signed-in account is the wrong one', async () => {
+    answerWith({ status: 403, body: { code: 'INVITATION_EMAIL_MISMATCH' } });
+    mountRoute();
+
+    expect(await screen.findByText('This invitation was sent to a different email address.')).toBeDefined();
+    expect(readPendingInvitation()).toBe('tok_abcdef');
   });
 
   /* The page does its own job first and offers the app second (R4): the offer

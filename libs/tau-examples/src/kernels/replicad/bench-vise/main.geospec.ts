@@ -58,9 +58,11 @@ describe('BV-125 SysML geometry verification', () => {
     });
     expectGeo(await model()).toHaveTopologyCounts({ solids: 21 });
     expectGeo(await model()).toHaveStepUnits({ unit: 'mm' });
-    // One assembled spatial cluster; this does not claim that the 21 parts fuse.
+    // Connected components count qualified material connectivity, not overlapping bounds.
+    // Running clearances leave three: the fixed frame with its bushes, nut and screws;
+    // the moving jaw carriage on its guides and spindle; and the tommy bar in its hub.
     expectGeo(await model()).toHaveConnectedComponents({
-      count: 1,
+      count: 3,
       toleranceMm: 0.01,
     });
   });

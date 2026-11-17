@@ -2,7 +2,7 @@ import type { TypeScriptWorkerCommand } from '@taucad/lsp/typescript-worker/prot
 import { TypeScriptProjectService } from '@taucad/lsp/typescript-worker/typescript-service';
 import ts from 'typescript';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EditorDocument } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import type { DeclarationImport } from '#lib/typescript-language/declaration-graph.js';
 import { TypeAcquisitionController } from '#lib/typescript-language/type-acquisition.js';
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { Extension } from '@codemirror/state';
-import { EditorDocument } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { acquireEditorLanguage } from '#lib/editor-language-runtime.js';
 

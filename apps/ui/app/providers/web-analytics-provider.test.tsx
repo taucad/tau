@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
+import { MemoryRouter } from 'react-router';
 import * as Cookies from 'es-cookie';
 import { gunzipSync } from 'node:zlib';
 import { StrictMode, useState } from 'react';
@@ -193,7 +194,7 @@ describe('WebAnalyticsProvider', () => {
     const capture = vi.spyOn(posthog, 'capture');
     state.consent = 'declined';
 
-    const view = render(tree());
+    const view = render(tree(), { wrapper: MemoryRouter });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await settle();
 
@@ -215,7 +216,7 @@ describe('WebAnalyticsProvider', () => {
     state.isPending = true;
     state.user = undefined;
 
-    const view = render(tree());
+    const view = render(tree(), { wrapper: MemoryRouter });
     fireEvent.change(screen.getByRole('textbox', { name: 'Draft' }), { target: { value: 'unsaved design' } });
     const input = screen.getByRole('textbox', { name: 'Draft' });
     localStorage.setItem('tau-sidebar', 'true');

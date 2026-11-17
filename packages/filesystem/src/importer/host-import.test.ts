@@ -195,8 +195,9 @@ const stage = async (fixture: Fixture, plan: Awaited<ReturnType<typeof planImpor
   });
 
 describe('a host-side import', () => {
-  it('speaks protocol 12', () => {
-    expect(nodeFsProtocolVersion).toBe(12);
+  it('speaks protocol 12 or later', () => {
+    /* Introduced at 12; 13 adds the host's `describe` and keeps it. */
+    expect(nodeFsProtocolVersion).toBeGreaterThanOrEqual(12);
   });
 
   it('lists, copies and records the facts of a chosen folder, end to end', async () => {

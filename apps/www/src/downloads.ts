@@ -35,7 +35,8 @@ export const archiveDownloads = {
     label: 'Linux',
     icon: platformIcons.linux,
     file: 'Tau-linux-x64.tar.gz',
-    beta: false,
+    /** Listed as beta until the Linux build is qualified on a real device (deferred and untested, 2026-11-17). */
+    beta: true,
     detail: 'Linux x64 · tar.gz download',
     install: 'Extract the archive to a folder you own, then run Tau and sign in.',
     updates:
@@ -52,6 +53,18 @@ export const desktopDownloads = { ...macDownloads, ...archiveDownloads };
  */
 export const isArchivePlatform = (platform: keyof typeof desktopDownloads): platform is keyof typeof archiveDownloads =>
   Object.hasOwn(archiveDownloads, platform);
+
+/**
+ * Whether a platform's download entries are marked beta: an archive platform by its own `beta` flag, the installer
+ * catalog's portable Linux route as Linux. Clearing a flag removes its badge everywhere.
+ *
+ * @param platform - A desktop platform or installer catalog route platform.
+ * @returns Whether its download entries are marked beta.
+ */
+export const isBetaPlatform = (platform: keyof typeof desktopDownloads | 'linuxPortable'): boolean => {
+  const archive = platform === 'linuxPortable' ? 'linux' : platform;
+  return isArchivePlatform(archive) && archiveDownloads[archive].beta;
+};
 
 /**
  * Select an OS from low-entropy browser hints, without persisting or transmitting them.

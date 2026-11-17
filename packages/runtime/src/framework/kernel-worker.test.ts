@@ -2135,6 +2135,65 @@ public static class Params
       }
     });
 
+    /*
+     * STO-25: a read a tree write held and then refused (PENDING: the write failed or stalled) names a file the render
+     * reads but no dependency set yet names. It is watched, so the render runs again when that file lands, never
+     * staying on the refusal once the project is ready.
+     */
+    it('should run a failed watched render again when a file it was refused lands', async () => {
+      const contents: Record<string, Uint8Array<ArrayBuffer>> = { 'main.ts': new Uint8Array([1, 2]) };
+      const filesystem = createMockFileSystem({
+        existsResult: (path) => path in contents,
+        readFileResult: (path) => {
+          const content = contents[path];
+          if (content === undefined) {
+            throw Object.assign(new Error(`${path} was not written yet`), { code: 'PENDING' });
+          }
+          return content;
+        },
+      });
+      filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
+        Object.fromEntries(paths.map((path) => [path, contents[path]])),
+      );
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+      // @ts-expect-error - the kernel's filesystem is made over the proxy, as production initialization makes it
+      worker._filesystem = worker.createFileSystem();
+      const describeParameters = vi.fn(
+        async (_input: GetParametersInput, runtime: KernelRuntime): Promise<GetParameterDeclarationsResult> => {
+          await runtime.filesystem.readFile('part.ts');
+          return createParameterDeclaration();
+        },
+      );
+      // @ts-expect-error - inject the producer description at the existing protected fixture seam
+      worker.onGetParameters = describeParameters;
+
+      try {
+        const failed = await openDocument(worker, {}, createGeometryFile('main.ts'), { watch: true });
+        expect(failed.success).toBe(false);
+        expect(worker.getWatchedPaths()).toContain('part.ts');
+        const evaluated = vi.fn<NonNullable<MockKernelWorker['onEvaluated']>>();
+        worker.onEvaluated = evaluated;
+
+        contents['part.ts'] = new Uint8Array([3]);
+        watchHandler!({ type: 'change', path: 'part.ts' });
+        await vi.waitFor(() => {
+          expect(evaluated).toHaveBeenCalledOnce();
+        });
+        expect(evaluated.mock.calls[0]?.[0]).toMatchObject({ documentId: 'test-document', success: true });
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
     it('clears the internal progress relay when document evaluation throws', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({

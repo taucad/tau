@@ -98,11 +98,18 @@ describe('reportAutoKernelTurn', () => {
 describe('reportKernelOverride', () => {
   it('reports the kernel Auto had bound against the manual pick', () => {
     const { report, entries } = capture();
-    reportKernelOverride({ resolved: 'openscad', manual: 'replicad', turnsSince: 2 }, report);
-    reportKernelOverride({ resolved: undefined, manual: 'build123d', turnsSince: 0 }, report);
+    reportKernelOverride({ resolved: 'openscad', manual: 'replicad', turnsSince: 2, consent: 'granted' }, report);
+    reportKernelOverride({ resolved: undefined, manual: 'build123d', turnsSince: 0, consent: 'granted' }, report);
     expect(entries().map((entry) => entry.detail)).toEqual([
       { hostProfile: 'web', resolved: 'openscad', manual: 'replicad', turnsSince: 2, rubricVersion: 1 },
       { hostProfile: 'web', manual: 'build123d', turnsSince: 0, rubricVersion: 1 },
     ]);
+  });
+
+  /* PR-7 follow-up (AR-W6-02): `denied` is what the page resolves for telemetry off and Global Privacy Control. */
+  it.each(['denied', 'unknown'] as const)('reports nothing while the page consent is %s', (consent) => {
+    const { report, entries } = capture();
+    reportKernelOverride({ resolved: 'openscad', manual: 'replicad', turnsSince: 2, consent }, report);
+    expect(entries()).toEqual([]);
   });
 });

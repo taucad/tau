@@ -30,12 +30,12 @@ import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { useFeatureFlags } from '#flags/use-feature.js';
 import { DesktopTitlebarControls, TitlebarNavigation } from '#components/layout/desktop-titlebar-controls.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { reportBootStage } from '#lib/boot-signals.js';
 import { useDesktopFullscreen } from '#hooks/use-desktop-fullscreen.js';
 import { sidebarPreferredWidth } from '@taucad/ui-core/constants/sidebar.constants';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { WorkspaceFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { useWorkspaceFrameState } from '#components/layout/use-workspace-frame-state.js';
-import { reportBootStage } from '#lib/boot-signals.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 export const desktopHeaderHeight = 'calc(var(--spacing) * 9)';

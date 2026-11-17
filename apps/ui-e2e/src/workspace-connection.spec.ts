@@ -203,7 +203,11 @@ describe('large workspace connection', () => {
     await target.navigate('/files?settings=filesystem');
     await target.expectVisible(selectors.getByRole('button', { name: 'Reconnect', exact: true }));
     await target.click(selectors.getByRole('button', { name: 'Reconnect', exact: true }));
-    await target.expectVisible(selectors.getByText(`Updated workspace folder to "${workspaceName}"`));
+    /* Reconnect relinks this workspace (D2, U2): its marker names it, so it relinks with no question and the row is
+     * connected again, offering Change folder in place of Reconnect. */
+    await target.expectVisible(selectors.getByText(`Relinked "${workspaceName}"`, { exact: false }), 10_000);
+    await target.expectVisible(selectors.getByRole('button', { name: 'Change folder', exact: true }));
+    await target.expectCount(selectors.getByRole('button', { name: 'Reconnect', exact: true }), 0);
 
     expect(await readProjectStorageState()).toEqual(before);
     expect(await readOpfsWorkspaceMarker(workspaceName)).toEqual(markerBefore);
@@ -268,7 +272,7 @@ describe('large workspace connection', () => {
   test('relinks the same workspace with its projects when Change folder picks a copy at another place (T-R4.7)', async () => {
     const originalName = 'workspace-connection-before-move';
     const movedName = 'workspace-connection-after-move';
-    await installWorkspacePicker([originalName, movedName]);
+    await installWorkspacePicker(originalName);
     await target.navigate('/');
     await seedWorkspace(originalName, 2);
     await target.navigate('/files');
@@ -278,7 +282,11 @@ describe('large workspace connection', () => {
     const originalMarker = await readOpfsWorkspaceMarker(originalName);
     await copyOpfsDirectory(originalName, movedName);
 
-    await target.click(selectors.getByRole('button', { name: 'Change folder' }));
+    /* Change folder is a workspace row's command, in the folder settings (D2). The settings open in a new page, so the
+     * picker installed for it answers the copy. */
+    await installWorkspacePicker(movedName);
+    await target.navigate('/files?settings=filesystem');
+    await target.click(selectors.getByRole('button', { name: 'Change folder', exact: true }));
     await target.expectVisible(selectors.getByText(/Relinked/u), 10_000);
     const after = await readProjectStorageState();
 

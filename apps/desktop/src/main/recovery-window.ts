@@ -187,6 +187,7 @@ export type RecoveryWindowLike = {
   loadFile(path: string): Promise<void>;
   focus(): void;
   show(): void;
+  destroy(): void;
   isDestroyed(): boolean;
   once(event: 'closed', listener: () => void): unknown;
 };
@@ -316,6 +317,10 @@ export const createRecoveryWindowController = (host: {
     host.log('error', 'main.recovery-window-failed', { reason, detail });
     if (window === opened) {
       window = undefined;
+    }
+    /* A window whose page failed would otherwise linger, blank, behind the dialog that replaces it. */
+    if (!opened.isDestroyed()) {
+      opened.destroy();
     }
     void showFallback(trigger);
   };

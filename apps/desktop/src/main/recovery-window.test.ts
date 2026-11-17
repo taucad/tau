@@ -34,6 +34,7 @@ type FakeWindow = RecoveryWindowLike & {
   readonly events: EventEmitter;
   readonly loadFile: ReturnType<typeof vi.fn>;
   readonly focus: ReturnType<typeof vi.fn>;
+  readonly destroy: ReturnType<typeof vi.fn>;
 };
 
 const fakeWindow = (): FakeWindow => {
@@ -49,6 +50,7 @@ const fakeWindow = (): FakeWindow => {
     loadFile: vi.fn(async () => undefined),
     focus: vi.fn(),
     show: vi.fn(),
+    destroy: vi.fn(),
     isDestroyed: () => false,
     once: (event: string, listener: (...args: unknown[]) => void) => {
       events.once(event, listener);
@@ -152,6 +154,17 @@ describe('recovery window (T-R12.6)', () => {
     expect(fallback.showLogs).toHaveBeenCalledOnce();
     expect(fallback.downloadTau).toHaveBeenCalledOnce();
     expect(showMessageBox).toHaveBeenCalledTimes(3);
+  });
+
+  it('should destroy the failed recovery window before showing the native dialog', async () => {
+    const { controller, window, showMessageBox } = controllerFor();
+    controller.open('load-failed');
+    window.contents.emit('did-fail-load', {}, -6, 'ERR_FILE_NOT_FOUND', 'file:///missing', true);
+    expect(window.destroy).toHaveBeenCalledOnce();
+    expect(controller.isOpen()).toBe(false);
+    await vi.waitFor(() => {
+      expect(showMessageBox).toHaveBeenCalledOnce();
+    });
   });
 
   it('should fall back to the native dialog when loadFile rejects', async () => {

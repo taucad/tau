@@ -16,7 +16,7 @@ import { useProjects } from '#hooks/use-projects.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
 import { projectUrl, projectUrlOr } from '#utils/project-url.utils.js';
-import { legacyWorkspaceSlugTombstones } from '#filesystem/handle-store.js';
+import { legacyWorkspaceSlugTombstones } from '@taucad/files-ui/filesystem/handle-store';
 
 const equalsFolded = (a: string, b: string): boolean => a.toLocaleLowerCase() === b.toLocaleLowerCase();
 const isWorkspaceId = (value: string): boolean => value.startsWith(`${idPrefix.workspace}_`);

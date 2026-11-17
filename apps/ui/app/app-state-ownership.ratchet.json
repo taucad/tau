@@ -30,7 +30,6 @@
   },
   "modules": {
     "files": [
-      "apps/ui/app/flags/layout-flags.ts",
       "apps/ui/app/lib/frame-hint-draft.ts",
       "apps/ui/app/lib/frame-hint.ts",
       "apps/ui/app/machines/focus.machine.ts",

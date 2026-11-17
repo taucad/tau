@@ -13,6 +13,9 @@
  * - The RPC handler stack (LB4d) runs only when a tool call runs: `hooks/rpc-handlers` and the handlers
  *   behind `@taucad/chat/rpc`, whose `install_packages` handler brings `@taucad/bundler-core`'s package
  *   resolver and `semver`. The Packages panel's Install action and the debug probes import it on demand.
+ * - The viewer tier (PL5) loads when its pane mounts: the viewport's `chat-viewer` (three.js, the viewer package
+ *   and the runtime client), the code viewer (CodeMirror), the printer viewer (react-three), the canonical part
+ *   visuals of the part thumbnails (three.js) and the print preparation (the agent-tool registry and its RPC stack).
  * - The heavy list (`scripts/critical-path.mts`: the AI SDK, three.js, the runtime's root entry, kernels, the
  *   editor, telemetry) belongs to the deferred tier. Each class reaches some of it today; {@link knownHeavyReach}
  *   names each family with the work package that removes it. A family reached and not listed fails, and so does a
@@ -44,6 +47,11 @@ const onDemandModules = [
   'npm:@taucad/skills/resources',
   'hooks/rpc-handlers',
   'npm:@taucad/chat/rpc',
+  'routes/w.$workspace.$project/chat-viewer',
+  'routes/w.$workspace.$project/chat-editor-code-viewer',
+  'components/printer/printer-viewer',
+  'services/part-thumbnail-visual',
+  'routes/w.$workspace.$project/chat-print-prepare',
 ] as const;
 
 /**
@@ -52,16 +60,8 @@ const onDemandModules = [
  * shrinks: remove a row when its family is no longer reached.
  */
 const knownHeavyReach: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  project: {
-    editor: 'PL5: the code viewer of the workbench dock (chat-editor-code-viewer)',
-    'react-three': 'PL5: the printer viewer of the workbench dock',
-    runtime: "PL5: the viewer's runtime client (chat-viewer)",
-    sentry: 'PL5: error reporting (lib/sentry-event.lib)',
-    three: 'PL5: part thumbnails and the printer viewer',
-  },
-  home: {
-    sentry: 'PL5: error reporting (lib/sentry-event.lib)',
-  },
+  project: {},
+  home: {},
 };
 
 /**
@@ -69,9 +69,7 @@ const knownHeavyReach: Readonly<Record<string, Readonly<Record<string, string>>>
  * Same rule as {@link knownHeavyReach}: the list only shrinks.
  */
 const knownOnDemandReach: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  project: {
-    'npm:@taucad/chat/rpc': 'PL5: chat-print-prepare -> @taucad/agent-tools/registry -> the RPC handler stack',
-  },
+  project: {},
   home: {},
 };
 
@@ -454,8 +452,8 @@ describe('critical module graph', () => {
   });
 
   it('should find a heavy module reached only through a workspace package', () => {
-    expect(heavyReach(staticGraph(['workbench-records/view-record-session.ts'])).get('three')).toBe(
-      'workbench-records/view-record-session.ts -> npm:@taucad/workbench-panes/records/view-record -> packages/workbench-panes/src/records/view-record.ts -> npm:three',
+    expect(heavyReach(staticGraph(['services/headless-capture.ts'])).get('three')).toBe(
+      'services/headless-capture.ts -> npm:@taucad/ui-core/services/headless-capture-presentation -> apps/libs/ui-core/src/services/headless-capture-presentation.ts -> npm:three',
     );
   });
 

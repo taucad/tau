@@ -13,7 +13,7 @@ const { send, useFileTreeEntry, useFileReturn } = vi.hoisted(() => ({
 
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({ useFileReturn }));
 
-vi.mock('#hooks/use-file-tree.js', () => ({ useFileTreeEntry }));
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({ useFileTreeEntry }));
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef: { send } }),

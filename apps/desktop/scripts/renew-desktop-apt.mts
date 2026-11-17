@@ -46,7 +46,6 @@ export const renewDesktopApt = async (options: {
   ) {
     throw new Error('Invalid or non-increasing APT renewal issue time');
   }
-  const validUntil = new Date(issued + 7 * 86_400_000).toISOString();
   const { outputDirectory, gnupgHome, signingFingerprint } = options;
   if (
     !isAbsolute(outputDirectory) ||
@@ -74,7 +73,9 @@ export const renewDesktopApt = async (options: {
     ['Suite', suite],
     ['Codename', suite],
     ['Date', new Date(previous.inventory.issuedAt).toUTCString()],
-    ['Valid-Until', new Date(previous.inventory.validUntil).toUTCString()],
+    ...(previous.inventory.validUntil === undefined
+      ? []
+      : [['Valid-Until', new Date(previous.inventory.validUntil).toUTCString()] as const]),
   ] as const) {
     const values = fields(key);
     if (values.length !== 1 || values[0] !== value) {
@@ -83,7 +84,8 @@ export const renewDesktopApt = async (options: {
   }
   const renewed = release
     .replace(/^Date: .*$/mu, `Date: ${new Date(issued).toUTCString()}`)
-    .replace(/^Valid-Until: .*$/mu, `Valid-Until: ${new Date(validUntil).toUTCString()}`);
+    // APT metadata no longer expires: a renewal drops any Valid-Until an older Release carried.
+    .replace(/^Valid-Until: .*\n/mu, '');
   const releasePath = `dists/${suite}/Release`;
   const pointerPath = `dists/${suite}/InRelease`;
   await mkdir(dirname(join(outputDirectory, releasePath)), { recursive: true });
@@ -114,7 +116,8 @@ export const renewDesktopApt = async (options: {
   ]);
   const inRelease = await bytes(join(outputDirectory, pointerPath));
   const prefix = desktopAptSnapshotPrefix(inRelease);
-  const inventory: LinuxAptRepositoryInventory = { ...previous.inventory, issuedAt: options.issuedAt, validUntil };
+  const { validUntil: _retired, ...retained } = previous.inventory;
+  const inventory: LinuxAptRepositoryInventory = { ...retained, issuedAt: options.issuedAt };
   await mkdir(join(outputDirectory, prefix), { recursive: true });
   await writeFile(join(outputDirectory, prefix, 'InRelease'), inRelease, { flag: 'wx' });
   const inventoryPath = `${prefix}/inventory.json`;

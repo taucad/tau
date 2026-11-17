@@ -11,8 +11,15 @@ import { base64Loader } from '@taucad/vite/base64-loader';
  * file to resolve to at config-load time, and a `.ts` specifier needs
  * `allowImportingTsExtensions`.
  */
-// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- see above.
-import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiResolveAlias, uiSsrOptions } from '../vite.config';
+/* oxlint-disable eslint/no-restricted-imports, import/extensions -- see above. */
+import {
+  createUiReactCompilerPlugin,
+  createUiSourceAliasPlugin,
+  uiBuildTarget,
+  uiResolveAlias,
+  uiSsrOptions,
+} from '../vite.config';
+/* oxlint-enable eslint/no-restricted-imports, import/extensions */
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
 import { resolveTauCloudBuildEnabled } from '../build-environment';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
@@ -68,8 +75,7 @@ export default defineConfig({
     tauCsharpLanguageAssets: JSON.stringify(csharpAssets.assets ?? null),
     /* Not `desktop`: `isDesktopTarget()` must fold to `false` here, or the
      * bundle takes the Electron preload's ENV and IPC paths in a plain tab. */
-    // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
-    'import.meta.env.TAU_TARGET': '"web"',
+    ...uiBuildTarget('web').define,
   },
   plugins: [
     mtAssets.plugin,

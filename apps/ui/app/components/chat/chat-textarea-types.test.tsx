@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { useEffect } from 'react';
@@ -14,7 +16,7 @@ import type { CadAgentExecution } from '@taucad/chat';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
-import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
+import type { DraftAttachment, DraftAttachmentSource, PendingDraftImage } from '#hooks/draft.machine.js';
 import type { ChatTextareaSubmitPayload } from '#components/chat/chat-textarea-types.js';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 
@@ -79,6 +81,8 @@ const defaultDraftState = {
   editDraftAttachments: [] as DraftAttachment[],
   attachingMain: false,
   attachingEdit: false,
+  pendingMain: [] as PendingDraftImage[],
+  pendingEdit: [] as PendingDraftImage[],
 };
 
 let draftState = defaultDraftState;
@@ -142,7 +146,7 @@ vi.mock('@taucad/ui/components/sonner', () => ({
 }));
 
 /** The conversion runtime's derived sources, without loading its definition in jsdom. */
-const rasterSources: readonly string[] = ['jpeg', 'png', 'webp', 'gif', 'avif', 'bmp', 'tiff'];
+const rasterSources: readonly string[] = ['jpeg', 'png', 'webp', 'gif', 'avif', 'bmp', 'tiff', 'heic', 'heif'];
 vi.mock('#services/attachment-transcode-sources-store.js', () => ({
   loadAttachmentTranscodeSources: async () => rasterSources,
   subscribeAttachmentTranscodeSources: () => () => undefined,
@@ -429,6 +433,18 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("should hand the rail its own draft's images still converting, the main one's or the edit's", () => {
+    const converting = [{ isConverting: true }];
+    const adding = [{ isConverting: false }];
+    draftState = { ...defaultDraftState, attachingMain: true, pendingMain: converting, pendingEdit: adding };
+
+    const main = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn() }));
+    const edit = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(), mode: 'edit' }));
+
+    expect(main.result.current.pendingImages).toBe(converting);
+    expect(edit.result.current.pendingImages).toBe(adding);
+  });
+
   it('should send the stored PDF reference when the model reads PDFs', async () => {
     mockActiveModel = makeResolvedModel('pdf-model', ['text', 'image', 'pdf']);
     draftState = { ...defaultDraftState, draftAttachments: [storedPdf] };
@@ -437,7 +453,7 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
 
     expect(result.current.sendBlockReason).toBeUndefined();
     expect(result.current.attachmentAccept).toBe(
-      'image/jpeg,image/png,image/webp,image/gif,application/pdf,image/avif,.avif,image/bmp,.bmp,.dib,image/tiff,.tif,.tiff',
+      'image/jpeg,image/png,image/webp,image/gif,application/pdf,image/avif,.avif,image/bmp,.bmp,.dib,image/tiff,.tif,.tiff,image/heic,.heic,.heif,image/heif',
     );
     await act(async () => result.current.handleSubmit());
     expect(onSubmit).toHaveBeenCalledWith({ content: 'hello world', attachments: [storedPdf] });
@@ -863,7 +879,7 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     const input = { files: [makeFile('doc.pdf', 'application/pdf')], value: 'C:\\fakepath\\doc.pdf' };
 
     expect(result.current.attachmentAccept).toBe(
-      'image/jpeg,image/png,image/webp,image/gif,image/avif,.avif,image/bmp,.bmp,.dib,image/tiff,.tif,.tiff',
+      'image/jpeg,image/png,image/webp,image/gif,image/avif,.avif,image/bmp,.bmp,.dib,image/tiff,.tif,.tiff,image/heic,.heic,.heif,image/heif',
     );
     act(() => {
       result.current.handleFileChange({ target: input } as unknown as React.ChangeEvent<HTMLInputElement>);
@@ -1015,6 +1031,90 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     expect(toastErrorMock).toHaveBeenCalledWith("Couldn't attach this image", {
       description: "Photoshop (PSD) images can't be attached. Save it as JPEG or PNG and attach it again.",
     });
+  });
+
+  describe('a file typed application/octet-stream, by pick, drop and paste', () => {
+    const octet = 'application/octet-stream';
+    // A real HEIC photo, and a 32×48, 8-bit Photoshop header: both read from their bytes, not their declared type.
+    const heicBytes = new Uint8Array(
+      readFileSync(path.join(import.meta.dirname, '../../../../../libs/utils/src/image-probe.fixtures/small.heic')),
+    );
+    const psdBytes = (() => {
+      const bytes = new Uint8Array(26);
+      const view = new DataView(bytes.buffer);
+      bytes.set(new TextEncoder().encode('8BPS'));
+      view.setUint16(4, 1);
+      view.setUint16(12, 3);
+      view.setUint32(14, 32);
+      view.setUint32(18, 48);
+      view.setUint16(22, 8);
+      return bytes;
+    })();
+    const zipBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]);
+
+    type Route = 'pick' | 'drop' | 'paste';
+    const routes: readonly Route[] = ['pick', 'drop', 'paste'];
+
+    const attach = async (route: Route, file: File): Promise<void> => {
+      const { result } = renderHook(() =>
+        useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+      );
+      if (route === 'pick') {
+        act(() => {
+          result.current.handleFileChange({
+            target: { files: [file], value: '' },
+          } as unknown as React.ChangeEvent<HTMLInputElement>);
+        });
+      } else if (route === 'drop') {
+        await act(async () => {
+          await result.current.handleDrop(buildDragEvent([file]));
+        });
+      } else {
+        act(() => {
+          expect(result.current.handlePaste(buildClipboardEvent([file]))).toBe(true);
+        });
+      }
+    };
+
+    it.each(routes)('should convert a HEIC typed application/octet-stream (%s)', async (route) => {
+      await attach(route, makeFile('IMG_0001.HEIC', octet, heicBytes));
+
+      await waitFor(() => {
+        expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledOnce();
+      });
+      expect(chatActionsMock.addDraftAttachment.mock.calls[0]?.[0]).toBe('data:image/heic;base64,RAW_IMG_0001.HEIC');
+      expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+
+    it.each(routes)('should refuse a PSD typed application/octet-stream by its format (%s)', async (route) => {
+      await attach(route, makeFile('layout.psd', octet, psdBytes));
+
+      await waitFor(() => {
+        expect(toastErrorMock).toHaveBeenCalledWith("Couldn't attach this image", {
+          description: "Photoshop (PSD) images can't be attached. Save it as JPEG or PNG and attach it again.",
+        });
+      });
+      expect(chatActionsMock.addDraftAttachment).not.toHaveBeenCalled();
+    });
+
+    it.each(
+      routes.flatMap((route) => [
+        [route, 'models.zip', zipBytes],
+        [route, 'notes.txt', new TextEncoder().encode('just some notes')],
+      ]) as ReadonlyArray<readonly [Route, string, Uint8Array<ArrayBuffer>]>,
+    )(
+      'should refuse non-image bytes typed application/octet-stream as any file (%s %s)',
+      async (route, name, bytes) => {
+        await attach(route, makeFile(name, octet, bytes));
+
+        await waitFor(() => {
+          expect(toastErrorMock).toHaveBeenCalledWith("Couldn't attach this file", {
+            description: 'Only images and PDFs can be attached.',
+          });
+        });
+        expect(chatActionsMock.addDraftAttachment).not.toHaveBeenCalled();
+      },
+    );
   });
 
   it('should admit a dropped image an edge converts, under the type its bytes hold', async () => {

@@ -35,7 +35,7 @@ import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { CollapsibleFileOperation } from '#components/chat/chat-tool-file-operation.js';
-import { CodeBlockContent, Pre } from '#components/code/code-block.js';
+import { CodeBlockContent, Pre } from '@taucad/editor-ui/components/code/code-block';
 import { FileLink } from '#components/files/file-link.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
 import type { ChatMedia } from '#routes/w.$workspace.$project/chat-message-media.js';

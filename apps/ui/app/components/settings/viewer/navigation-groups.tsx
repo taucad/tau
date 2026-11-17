@@ -14,16 +14,25 @@ import {
   effectivePreset,
   gizmoStyleIds,
   mousePresetIds,
+  orbitStyleIds,
   resetLeaf,
   suggestedGizmo,
   suggestedPreset,
 } from '@taucad/preferences';
-import type { GizmoStyleId, LeafPatch, MousePresetId, PersonProfile, ViewerPreferences } from '@taucad/preferences';
+import type {
+  GizmoStyleId,
+  LeafPatch,
+  MousePresetId,
+  OrbitStyleId,
+  PersonProfile,
+  ViewerPreferences,
+} from '@taucad/preferences';
 import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
 import {
   gizmoStyleCopy,
   linuxAltNote,
   mousePresetCopy,
+  orbitStyleCopy,
   resetToSuggestion,
   resetToTauDefault,
   suggestedLabel,
@@ -87,6 +96,9 @@ export function NavigationGroup({ profile, viewer, writeViewer, onWrite }: Viewe
     onWrite(writeViewer({ controls: { preset: resetLeaf } }));
     setViewerPersonProperties(analytics, { mousePreset: suggestion });
   };
+  const chooseOrbitStyle = (next: OrbitStyleId): void => {
+    onWrite(writeViewer({ controls: { orbitStyle: next } }));
+  };
   const toggle = (leaf: 'zoomToCursor' | 'orbitAboutCursor' | 'invertZoom') => (checked: boolean) => {
     onWrite(writeViewer({ controls: { [leaf]: checked } }));
   };
@@ -135,6 +147,44 @@ export function NavigationGroup({ profile, viewer, writeViewer, onWrite }: Viewe
           </p>
         ) : undefined}
       </SettingsRow>
+      <SettingsRow
+        settingId='viewer-orbit-style'
+        title={viewerControlCopy.orbitStyle.title}
+        description={viewerControlCopy.orbitStyle.description}
+        control={
+          <>
+            {controls.orbitStyle === undefined ? undefined : (
+              <ModifiedIndicator
+                tooltip={resetToTauDefault}
+                onReset={() => {
+                  onWrite(writeViewer({ controls: { orbitStyle: resetLeaf } }));
+                }}
+              />
+            )}
+            <Select
+              size='md'
+              value={controls.orbitStyle ?? 'turntable'}
+              onValueChange={(next) => {
+                const id = orbitStyleIds.find((each) => each === next);
+                if (id !== undefined) {
+                  chooseOrbitStyle(id);
+                }
+              }}
+            >
+              <SelectTrigger className={suggestedTriggerClassName} aria-label={viewerControlCopy.orbitStyle.title}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {orbitStyleIds.map((id) => (
+                  <SelectItem key={id} value={id} textValue={orbitStyleCopy[id].name}>
+                    {orbitStyleCopy[id].name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        }
+      />
       <SettingsRow
         settingId='viewer-zoom-to-cursor'
         title={viewerControlCopy.zoomToCursor.title}

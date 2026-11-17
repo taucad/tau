@@ -12,7 +12,9 @@ const webgl = vi.hoisted(() => ({ isAvailable: true }));
 vi.mock('#components/onboarding/webgl-support.js', () => ({ canCreateWebGl: () => webgl.isAvailable }));
 // The live preview is its own chunk with the real viewer; `setup-viewer-preview.test.tsx` covers its loading.
 vi.mock('#components/onboarding/setup-live-preview.js', () => ({
-  default: () => <div data-testid='setup-live-preview' />,
+  default: ({ cameraInput }: { readonly cameraInput?: { orbitStyle?: string } }) => (
+    <div data-testid='setup-live-preview' data-orbit-style={cameraInput?.orbitStyle ?? 'turntable'} />
+  ),
 }));
 /* "Take it again" reads the project listing; these suites have no project. */
 vi.mock('#hooks/use-projects.js', () => ({ useProjects: () => ({ projects: [] }) }));
@@ -72,6 +74,18 @@ describe('setup step 3', () => {
     expect(screen.getByTestId('setup-binding-legend')).toHaveTextContent('the gizmo snaps to standard views');
     expect(personRecordStores.viewer.read().viewDefaults).not.toHaveProperty('display.gizmo');
     expect(personRecordStores.viewer.read().gizmo.style).toBe('axes');
+  });
+
+  it('asks how the view turns, Turntable first, and the preview turns as the choice does', async () => {
+    const user = userEvent.setup();
+    renderViewerStep();
+    const orbit = screen.getByRole('radiogroup', { name: 'How the view turns' });
+    expect(within(orbit).getByRole('radio', { name: 'Turntable' })).toBeChecked();
+    expect(await screen.findByTestId('setup-live-preview')).toHaveAttribute('data-orbit-style', 'turntable');
+    await user.click(within(orbit).getByRole('radio', { name: 'Tumble' }));
+    expect(personRecordStores.viewer.read().controls.orbitStyle).toBe('tumble');
+    expect(screen.getByTestId('setup-orbit-hint')).toHaveTextContent('turns freely over the top');
+    expect(screen.getByTestId('setup-live-preview')).toHaveAttribute('data-orbit-style', 'tumble');
   });
 
   it('offers no trackpad switch: the mouse preset is the only mapping', () => {

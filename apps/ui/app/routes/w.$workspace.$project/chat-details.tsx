@@ -3,7 +3,7 @@ import { FolderOpen, House, MemoryStick, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import type { FileSystemBackend } from '@taucad/types';
-import { projectLocationDescriptor } from '#utils/project-creation-location.utils.js';
+import { projectLocationDescriptor } from '@taucad/files-ui/utils/project-creation-location.utils';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import {
   FloatingPanel,

@@ -15,8 +15,8 @@ import { probeImage } from '@taucad/utils/image-probe';
 import { handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
 import type { StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
-import { draftMachine } from '#hooks/draft.machine.js';
-import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
+import { draftMachine, pendingDraftImages } from '#hooks/draft.machine.js';
+import type { DraftAttachmentModel, PendingDraftImage } from '#hooks/draft.machine.js';
 import { createResizeImageActor } from '#hooks/attachment-image.actor.js';
 import { attachmentImageBackend } from '#services/attachment-image-backend.js';
 import type { AttachmentImageClient } from '#services/attachment-image.service.js';
@@ -202,6 +202,8 @@ type Stored = { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: str
 const composerDraft = (service: AttachmentImageService) => {
   const stored: Stored[] = [];
   const failures: Error[] = [];
+  /** The thumbnail slots the composer held as each pick entered the draft. */
+  const pendingAtPick: Array<readonly PendingDraftImage[]> = [];
   const actor = createActor(
     draftMachine.provide({
       actors: {
@@ -237,6 +239,11 @@ const composerDraft = (service: AttachmentImageService) => {
   return {
     stored,
     failures,
+    pendingAtPick,
+    /** The thumbnail slots the composer holds now. */
+    get pending(): readonly PendingDraftImage[] {
+      return pendingDraftImages(actor.getSnapshot().context, 'main');
+    },
     /** Pick a file as the composer does: intake, then the draft. */
     async pick(file: File): Promise<void> {
       const intake = await readAttachmentFile(file, { transcodeSources: await loadAttachmentTranscodeSources() });
@@ -249,6 +256,7 @@ const composerDraft = (service: AttachmentImageService) => {
           ? { type: 'addDraftAttachment', dataUrl: source, declaredType: file.type, model: visionModel }
           : { type: 'addDraftAttachment', ...source, declaredType: file.type, model: visionModel },
       );
+      pendingAtPick.push(pendingDraftImages(actor.getSnapshot().context, 'main'));
       await settle();
     },
     /** Paste a file as the composer does. */
@@ -345,6 +353,82 @@ describe('composer image conversion through the attachment worker', () => {
     } finally {
       draft.stop();
     }
+  });
+
+  it('should convert a HEIC typed application/octet-stream to JPEG, by pick and by paste', async () => {
+    service = new AttachmentImageService();
+    const draft = composerDraft(service);
+    const heic = await heifFixture('small.heic');
+    try {
+      await draft.pick(new File([heic], 'IMG_0001.HEIC', { type: 'application/octet-stream' }));
+      await draft.paste(new File([heic], 'IMG_0001.HEIC', { type: 'application/octet-stream' }));
+
+      expect(draft.failures).toEqual([]);
+      expect(draft.stored.map(({ mediaType }) => mediaType)).toEqual(['image/jpeg', 'image/jpeg']);
+    } finally {
+      draft.stop();
+    }
+  });
+
+  it('should hold a converting slot for a HEIC until its JPEG is stored, and an adding slot for a PNG', async () => {
+    service = new AttachmentImageService();
+    const draft = composerDraft(service);
+    try {
+      await draft.pick(new File([await heifFixture('heic-rot6.heic')], 'IMG_0002.HEIC', { type: 'image/heic' }));
+      await draft.pick(new File([await fixture('small.png')], 'small.png', { type: 'image/png' }));
+
+      expect(draft.pendingAtPick).toEqual([[{ isConverting: true }], [{ isConverting: false }]]);
+      expect(draft.pending).toEqual([]);
+      expect(draft.failures).toEqual([]);
+      expect(draft.stored.map(({ mediaType }) => mediaType)).toEqual(['image/jpeg', 'image/png']);
+    } finally {
+      draft.stop();
+    }
+  });
+
+  it('should release the slot of a refused image, with the refusal unchanged', async () => {
+    service = new AttachmentImageService();
+    const draft = composerDraft(service);
+    try {
+      await draft.pick(new File([await heifFixture('bomb-16384.heic')], 'IMG_0003.HEIC', { type: 'image/heic' }));
+
+      expect(draft.pendingAtPick).toEqual([[{ isConverting: true }]]);
+      expect(draft.pending).toEqual([]);
+      expect(draft.failures).toHaveLength(1);
+      expect(draft.stored).toEqual([]);
+    } finally {
+      draft.stop();
+    }
+  });
+
+  it('should refuse a PSD typed application/octet-stream by its format, and a ZIP as any other file', async () => {
+    // A 32×48, 8-bit Photoshop header: recognised from its bytes, never stored or converted.
+    const psd = new Uint8Array(26);
+    const view = new DataView(psd.buffer);
+    psd.set(new TextEncoder().encode('8BPS'));
+    view.setUint16(4, 1);
+    view.setUint16(12, 3);
+    view.setUint32(14, 32);
+    view.setUint32(18, 48);
+    view.setUint16(22, 8);
+    const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+    const transcodeSources = await loadAttachmentTranscodeSources();
+    const copyOf = async (bytes: Uint8Array<ArrayBuffer>, name: string) => {
+      const intake = await readAttachmentFile(new File([bytes], name, { type: 'application/octet-stream' }), {
+        transcodeSources,
+      });
+      return intake.outcome === 'refused' ? attachmentRefusalCopy(intake) : intake;
+    };
+
+    await expect(copyOf(psd, 'layout.psd')).resolves.toEqual({
+      title: "Couldn't attach this image",
+      description: "Photoshop (PSD) images can't be attached. Save it as JPEG or PNG and attach it again.",
+    });
+    await expect(copyOf(zip, 'models.zip')).resolves.toEqual({
+      title: "Couldn't attach this file",
+      description: 'Only images and PDFs can be attached.',
+    });
+    service = new AttachmentImageService();
   });
 
   it('should store a 12 MP JPEG as a JPEG at 1568 px', async () => {

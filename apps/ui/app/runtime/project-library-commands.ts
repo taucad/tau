@@ -38,11 +38,12 @@ import {
   isNodeWorkspace,
   isNodeWorkspaceConnected,
   setProjectCreationLocation,
-} from '#filesystem/handle-store.js';
-import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
-import { directoryPicker } from '#constants/browser.constants.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import { isOrphanedProjectRoute } from '@taucad/files-ui/filesystem/orphaned-project-route';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
 import { createEntrylessProject, createInitialProject } from '#constants/project.constants.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
+import { fitProjectName, maxProjectNameLength, projectNameFromReply } from '#utils/project-name.utils.js';
 import {
   getEmptyCode,
   getKernelDependencies,
@@ -71,6 +72,9 @@ import {
   writeProjectLibraryFile,
 } from '#runtime/project-library-storage.js';
 import type { PersistentStorageRoot, ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
+
+/** What a duplicate's name ends with. */
+const copySuffix = ' (Copy)';
 
 /** A draft attachment an initial message carries, already stored in its source directory. @public */
 export type InitialMessageAttachment = Omit<StoredAttachmentRef, 'byteLength'>;
@@ -551,7 +555,8 @@ export class ProjectCommands {
     const targetId = generatePrefixedId(idPrefix.project);
     const targetManifest = projectToManifest({
       ...sourceProject,
-      name: `${sourceProject.name} (Copy)`,
+      /* A name near the manifest's limit would pass it with the suffix, failing the copy's commit. */
+      name: `${fitProjectName(sourceProject.name, maxProjectNameLength - copySuffix.length)}${copySuffix}`,
     });
     const providerBasePath = await allocateProjectBasePath(fileManager.client, sourceConfig, targetManifest.name);
     if (sourceConfig.backend === 'webaccess') {
@@ -892,7 +897,8 @@ export class ProjectCommands {
                  * project is still created, under the same default an empty
                  * suggestion gets. */
                 .catch((): string => '');
-        projectName = generated.trim() || defaultProjectName;
+        /* The reply is a model's text, not a name: only its first line, fitted to the manifest, is kept. */
+        projectName = projectNameFromReply(generated) || defaultProjectName;
       }
       if (options.kernel === 'auto') {
         projectData = createEntrylessProject(projectName ?? defaultProjectName);

@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { Workspace, WorkspaceEntry } from '#filesystem/handle-store.js';
+import type { Workspace, WorkspaceEntry } from '@taucad/files-ui/filesystem/handle-store';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import FilesRoute from '#routes/files/route.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -12,6 +12,7 @@ type ToastSuccessOptions = {
 };
 
 const {
+  catalogState,
   connectionState,
   mockAssertWorkspaceMutationAllowed,
   mockDisconnectWorkspace,
@@ -24,6 +25,7 @@ const {
 } = vi.hoisted(() => {
   const workspaceConnectionState: { current: WorkspaceConnectionState } = { current: { phase: 'idle' } };
   return {
+    catalogState: { extraWorkspaces: [] as Workspace[] },
     connectionState: { connected: true },
     mockAssertWorkspaceMutationAllowed: vi.fn(),
     mockDisconnectWorkspace: vi.fn<(workspaceId: string) => Promise<WorkspaceEntry | undefined>>(),
@@ -76,10 +78,10 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   }),
 }));
 
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   checkHandlePermission: vi.fn(async () => 'granted'),
   getWorkspace: mockGetWorkspace,
-  listWorkspaces: vi.fn(async () => [workspace]),
+  listWorkspaces: vi.fn(async () => [workspace, ...catalogState.extraWorkspaces]),
 }));
 
 vi.mock('#utils/workspace-telemetry.utils.js', () => ({
@@ -94,7 +96,7 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { error: vi.fn(), info: vi.fn(), success: mockToastSuccess },
 }));
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: true,
   directoryPicker: () => ({
     available: true,
@@ -116,6 +118,7 @@ vi.mock('#constants/browser.constants.js', () => ({
 describe('FilesRoute workspace disconnect', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    catalogState.extraWorkspaces = [];
     connectionState.connected = true;
     workspaceConnectionState.current = { phase: 'idle' };
     mockGetWorkspace.mockImplementation(async () => (connectionState.connected ? entry : undefined));
@@ -184,5 +187,50 @@ describe('FilesRoute workspace disconnect', () => {
     expect(await screen.findByText('0 projects ready')).toBeInTheDocument();
     expect(screen.getByText('47 projects need attention')).toBeInTheDocument();
     expect(screen.queryByText('2 projects ready')).not.toBeInTheDocument();
+  });
+});
+
+/* T-A3.1 (D4.4): Files is a document page. The columns flow and the shell scrolls; each column's tree keeps a bounded
+ * height of its own, so a long workspace list always has a scroll owner. */
+describe('FilesRoute layout', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    connectionState.connected = true;
+    workspaceConnectionState.current = { phase: 'idle' };
+    catalogState.extraWorkspaces = Array.from({ length: 29 }, (_unused, index) => ({
+      workspaceId: `wsp_extra_${index}`,
+      name: `Extra ${index}`,
+      lastConnectedAt: 1,
+      slug: `extra-${index}`,
+    }));
+    const entries = new Map<string, WorkspaceEntry>(
+      [workspace, ...catalogState.extraWorkspaces].map((item) => [
+        item.workspaceId,
+        { workspace: item, handle: mock<FileSystemDirectoryHandle>({ name: item.name }) },
+      ]),
+    );
+    mockGetWorkspace.mockImplementation(async (workspaceId) => entries.get(workspaceId));
+  });
+
+  it('should lay 30 workspaces out as a document with a bounded tree per column', async () => {
+    const { container } = render(
+      <TooltipProvider>
+        <FilesRoute />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByText('Extra 28')).toBeInTheDocument();
+    const pageRoot = container.firstElementChild;
+    expect(pageRoot).not.toHaveClass('h-full');
+    expect(container.querySelector('.auto-rows-fr')).toBeNull();
+    expect(container.querySelector('.h-full')).toBeNull();
+
+    const trees = container.querySelectorAll('[data-slot=files-column-tree]');
+    // Home plus 30 workspaces.
+    expect(trees).toHaveLength(31);
+    for (const tree of trees) {
+      expect(tree.className).toMatch(/(?:^|\s)max-h-\S+/);
+      expect(tree).toHaveClass('overflow-auto');
+    }
   });
 });

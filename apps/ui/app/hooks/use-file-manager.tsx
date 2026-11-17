@@ -1,4 +1,6 @@
-import { observeHomeProjectSaves } from '#filesystem/observe-home-project-saves.js';
+import { observeHomeProjectSaves } from '@taucad/files-ui/filesystem/observe-home-project-saves';
+import { FileServicesProvider } from '@taucad/files-ui/hooks/use-file-services';
+import type { FileServices } from '@taucad/files-ui/hooks/use-file-services';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { machineSettingsPath } from '@taucad/runtime/machine/settings';
@@ -49,8 +51,8 @@ import type { RootFileFacade } from '#runtime/file-manager-facade.js';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError, WatchEvent } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
-import { getProjectRootConfigs, setProjectFileSystemConfig } from '#filesystem/handle-store.js';
-import type { HomeStorageBackend, WorkspaceEntry } from '#filesystem/handle-store.js';
+import { getProjectRootConfigs, setProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
+import type { HomeStorageBackend, WorkspaceEntry } from '@taucad/files-ui/filesystem/handle-store';
 import {
   selectRuntimeFileManagerHost,
   selectRuntimeFiles,
@@ -1387,7 +1389,14 @@ function FileManagerScope({
     ],
   );
 
-  return <FileManagerContext.Provider value={value}>{children}</FileManagerContext.Provider>;
+  /* The files feature's hooks (`@taucad/files-ui/hooks/*`) read the two services from their own context. */
+  const fileServices = useMemo<FileServices>(() => ({ contentService, treeService }), [contentService, treeService]);
+
+  return (
+    <FileManagerContext.Provider value={value}>
+      <FileServicesProvider value={fileServices}>{children}</FileServicesProvider>
+    </FileManagerContext.Provider>
+  );
 }
 
 export function useFileManager(): FileManagerContextType {

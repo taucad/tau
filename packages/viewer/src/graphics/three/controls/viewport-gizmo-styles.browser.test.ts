@@ -1,14 +1,11 @@
 import '#test/browser.css';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Color, PerspectiveCamera, Vector3, WebGLRenderer } from 'three';
-import type { Camera, Object3D } from 'three';
 import { ViewportGizmo } from 'three-viewport-gizmo';
-import { applyViewportGizmoSurface } from '#graphics/three/controls/viewport-gizmo-cube-surface.js';
+import type { GizmoTarget } from 'three-viewport-gizmo';
 import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
-import {
-  hideViewportGizmoTargets,
-  resolveViewportGizmoStyleConfig,
-} from '#graphics/three/controls/viewport-gizmo-styles.js';
+import { resolveViewportGizmoStyleConfig } from '#graphics/three/controls/viewport-gizmo-styles.js';
+import { viewportGizmoClassName } from '#graphics/three/controls/viewport-gizmo-adapter.js';
 import type { GizmoStyleId } from '#graphics/three/controls/viewport-gizmo-styles.js';
 
 /*
@@ -23,6 +20,7 @@ afterEach(() => {
     cleanup();
   }
   document.documentElement.classList.remove('dark');
+  delete document.documentElement.dataset['pointerCursors'];
 });
 
 const mountGizmo = (gizmoStyle: GizmoStyleId): Readonly<{ gizmo: ViewportGizmo; camera: PerspectiveCamera }> => {
@@ -42,22 +40,16 @@ const mountGizmo = (gizmoStyle: GizmoStyleId): Readonly<{ gizmo: ViewportGizmo; 
   });
   const config = resolveViewportGizmoStyleConfig({ gizmoStyle, colors: style, radius: viewportGizmoMetrics.radius });
   const gizmo = new ViewportGizmo(camera, renderer, {
-    up: 'z',
+    up: { x: 0, y: 0, z: 1 },
     size: 300,
     container: document.body,
     placement: 'top-left',
     offset: { top: 0, left: 0 },
-    background: { enabled: false },
     animated: false,
+    className: viewportGizmoClassName,
     ...config.options,
   });
-  if (config.surface === 'tau') {
-    applyViewportGizmoSurface(gizmo, style, 'webgl');
-  }
-  if (!config.clickable) {
-    hideViewportGizmoTargets(gizmo);
-  }
-  gizmo.scale.multiplyScalar(config.scale);
+  gizmo.enabled = config.clickable;
   gizmo.update();
   cleanups.push(() => {
     gizmo.dispose();
@@ -67,44 +59,15 @@ const mountGizmo = (gizmoStyle: GizmoStyleId): Readonly<{ gizmo: ViewportGizmo; 
   return { gizmo, camera };
 };
 
-/** The client position of a target's centre on the gizmo's surface. */
-const screenPositionOf = (gizmo: ViewportGizmo, target: Object3D): Readonly<{ x: number; y: number }> => {
-  const gizmoCamera = Reflect.get(gizmo, '_camera') as Camera;
-  const surface = Reflect.get(gizmo, '_domElement') as HTMLElement;
-  gizmo.updateMatrixWorld(true);
-  gizmoCamera.updateMatrixWorld(true);
-  const point = target.getWorldPosition(new Vector3()).project(gizmoCamera);
-  const rect = surface.getBoundingClientRect();
-  return { x: rect.left + ((point.x + 1) / 2) * rect.width, y: rect.top + ((1 - point.y) / 2) * rect.height };
-};
+/** The targets the style draws: hidden ones stay in `gizmo.targets` with their option `enabled: false`. */
+const targetsOf = (gizmo: ViewportGizmo): readonly GizmoTarget[] =>
+  gizmo.targets.filter((target) => gizmo.options.type !== 'sphere' || target.kind === 'face');
 
-/** The targets a click can pick: the cube's faces, edges and corners, or the six balls. */
-const targetsOf = (gizmo: ViewportGizmo): readonly Object3D[] =>
-  (Reflect.get(gizmo, '_intersections') as Object3D[]).filter((target) => target.visible);
-
-/** Whether a target faces the camera that views the gizmo, so a click at its centre lands on it. */
-const facesViewer = (gizmo: ViewportGizmo, target: Object3D, threshold: number): boolean => {
-  const gizmoCamera = Reflect.get(gizmo, '_camera') as Camera;
-  const toCamera = gizmoCamera.position.clone().sub(target.getWorldPosition(new Vector3()));
-  return target.getWorldPosition(new Vector3()).normalize().dot(toCamera.normalize()) > threshold;
-};
-
-const click = (gizmo: ViewportGizmo, target: Object3D): Readonly<{ changed: boolean; animating: boolean }> => {
-  const surface = Reflect.get(gizmo, '_domElement') as HTMLElement;
-  const { x, y } = screenPositionOf(gizmo, target);
-  let changed = false;
-  const onChange = (): void => {
-    changed = true;
-  };
-  gizmo.addEventListener('change', onChange);
-  gizmo.domUpdate();
-  const init = { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse' };
-  surface.dispatchEvent(new PointerEvent('pointerdown', init));
-  document.dispatchEvent(new PointerEvent('pointerup', init));
-  gizmo.removeEventListener('change', onChange);
-  const { animating } = gizmo;
-  gizmo.animating = false;
-  return { changed, animating };
+// ponytail: the 2.x test clicked each target through private fields; 3.0 has no public target-to-screen projection,
+// so this turns through `lookFrom` by name. A real pointer click per target belongs to the library's own browser tests.
+const turnTo = async (gizmo: ViewportGizmo, target: GizmoTarget): Promise<string> => {
+  const end = await gizmo.lookFrom(target.name);
+  return end.outcome.status;
 };
 
 describe('gizmo styles in the browser', () => {
@@ -112,20 +75,16 @@ describe('gizmo styles in the browser', () => {
     { gizmoStyle: 'cube', kinds: ['face', 'edge', 'corner'] },
     { gizmoStyle: 'classic-cube', kinds: ['face', 'edge', 'corner'] },
     { gizmoStyle: 'axis-balls', kinds: [] },
-  ] as const)('$gizmoStyle: a click on each target in view snaps to that view (G1 to G3)', ({ gizmoStyle, kinds }) => {
+  ] as const)('$gizmoStyle: each target turns to its view (G1 to G3)', async ({ gizmoStyle, kinds }) => {
     const { gizmo } = mountGizmo(gizmoStyle);
-    // A ball is round, so every ball on the near side is in view; a cube target must face the viewer.
-    const threshold = gizmoStyle === 'axis-balls' ? 0 : 0.35;
-    const targets = targetsOf(gizmo).filter((target) => facesViewer(gizmo, target, threshold));
-    expect(targets.length).toBeGreaterThan(gizmoStyle === 'axis-balls' ? 2 : 6);
+    const targets = targetsOf(gizmo);
+    expect(targets.length).toBe(gizmoStyle === 'axis-balls' ? 6 : 26);
     if (kinds.length > 0) {
-      expect(new Set(targets.map((target) => target.userData['kind'] as string))).toEqual(new Set(kinds));
+      expect(new Set(targets.map((target) => target.kind))).toEqual(new Set(kinds));
     }
     for (const target of targets) {
-      expect(
-        click(gizmo, target),
-        `${target.userData['kind'] as string} at ${target.position.toArray().join(',')}`,
-      ).toEqual({ changed: true, animating: true });
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each turn starts where the last one ended.
+      expect(await turnTo(gizmo, target), target.name).toBe('reached');
     }
   });
 
@@ -171,14 +130,49 @@ describe('gizmo styles in the browser', () => {
   it('axes: shows no target and takes no click, so a press reaches the canvas below (G4)', () => {
     const { gizmo, camera } = mountGizmo('axes');
     const before = camera.quaternion.clone();
-    const surface = Reflect.get(gizmo, '_domElement') as HTMLElement;
-    const all = Reflect.get(gizmo, '_intersections') as Object3D[];
-    expect(targetsOf(gizmo)).toHaveLength(0);
-    for (const target of all) {
-      const { x, y } = screenPositionOf(gizmo, target);
-      expect(document.elementFromPoint(x, y)).not.toBe(surface);
-    }
+    // Display-only: the cube's `[data-disabled]` rule lets a press through to the canvas.
+    expect(gizmo.enabled).toBe(false);
+    expect(Object.hasOwn(gizmo.domElement.dataset, 'disabled')).toBe(true);
+    expect(getComputedStyle(gizmo.domElement).pointerEvents).toBe('none');
+    expect(gizmo.options.corners.enabled).toBe(false);
+    expect(gizmo.options.edges.enabled).toBe(false);
     expect(camera.quaternion.equals(before)).toBe(true);
     expect(gizmo.animating).toBe(false);
+  });
+
+  it('takes the action cursor over a target, the grabbing cursor while dragging, and no input when disabled (TA2)', () => {
+    // Pointer cursors on, so the action cursor token resolves to `pointer` rather than the default arrow.
+    document.documentElement.dataset['pointerCursors'] = 'true';
+    const { gizmo } = mountGizmo('cube');
+    const element = gizmo.domElement;
+    const cursor = (): string => getComputedStyle(element).cursor;
+    const { left, top, width, height } = element.getBoundingClientRect();
+    const centre = { clientX: left + width / 2, clientY: top + height / 2 };
+    const pointer = { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+
+    expect(cursor()).toBe('auto');
+
+    element.dispatchEvent(new PointerEvent('pointermove', { ...pointer, ...centre }));
+    expect(gizmo.hovered).not.toBeNull();
+    expect(cursor()).toBe('pointer');
+
+    element.dispatchEvent(new PointerEvent('pointerdown', { ...pointer, ...centre, button: 0, buttons: 1 }));
+    element.dispatchEvent(
+      new PointerEvent('pointermove', {
+        ...pointer,
+        clientX: centre.clientX + 40,
+        clientY: centre.clientY,
+        buttons: 1,
+      }),
+    );
+    expect(gizmo.dragging).toBe(true);
+    expect(cursor()).toBe('grabbing');
+    element.dispatchEvent(
+      new PointerEvent('pointerup', { ...pointer, clientX: centre.clientX + 40, clientY: centre.clientY, button: 0 }),
+    );
+    expect(gizmo.dragging).toBe(false);
+
+    gizmo.enabled = false;
+    expect(getComputedStyle(element).pointerEvents).toBe('none');
   });
 });

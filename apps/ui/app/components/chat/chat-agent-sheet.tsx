@@ -1469,11 +1469,14 @@ export function ChatAgentSheet({
   agentConfig,
   placements,
   focusEditor,
+  onOpen,
   enableShortcut = true,
 }: {
   readonly agentConfig: AgentConfig;
   readonly placements: readonly AgentHostPlacementTarget[];
   readonly focusEditor: () => void;
+  /** Called each time the sheet opens, so a refused agent the person has since fixed can be listed again. */
+  readonly onOpen?: () => void;
   /** Only the composer being typed in owns ⌘/ (F6). */
   readonly enableShortcut?: boolean | (() => boolean);
 }): React.JSX.Element {
@@ -1486,9 +1489,18 @@ export function ChatAgentSheet({
   const closedOutside = useRef(false);
   const backRef = useRef<(() => void) | undefined>(undefined);
 
+  const changeOpen = useCallback(
+    (next: boolean) => {
+      setIsOpen(next);
+      if (next) {
+        onOpen?.();
+      }
+    },
+    [onOpen],
+  );
   const open = useCallback(() => {
-    setIsOpen(true);
-  }, []);
+    changeOpen(true);
+  }, [changeOpen]);
   useKeybinding(openModelSelectorKeyCombination, open, { enabled: enableShortcut });
 
   const trigger = (
@@ -1548,7 +1560,7 @@ export function ChatAgentSheet({
 
   if (isMobile) {
     return (
-      <Drawer open={isOpen} onOpenChange={setIsOpen}>
+      <Drawer open={isOpen} onOpenChange={changeOpen}>
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
         <DrawerContent
           data-chat-textarea-focustrap
@@ -1569,7 +1581,7 @@ export function ChatAgentSheet({
 
   return (
     <Tooltip>
-      <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <Popover open={isOpen} onOpenChange={changeOpen}>
         <PopoverTrigger asChild>
           <TooltipTrigger asChild>{trigger}</TooltipTrigger>
         </PopoverTrigger>

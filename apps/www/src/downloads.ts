@@ -24,6 +24,8 @@ export const archiveDownloads = {
     label: 'Windows',
     icon: platformIcons.windows,
     file: 'Tau-win32-x64.zip',
+    /** Listed as beta until native x64 consumer evidence qualifies the Windows build. */
+    beta: true,
     detail: 'Windows x64 · ZIP download',
     install: 'Extract the ZIP to a folder you own, then run Tau.exe and sign in.',
     updates:
@@ -33,6 +35,7 @@ export const archiveDownloads = {
     label: 'Linux',
     icon: platformIcons.linux,
     file: 'Tau-linux-x64.tar.gz',
+    beta: false,
     detail: 'Linux x64 · tar.gz download',
     install: 'Extract the archive to a folder you own, then run Tau and sign in.',
     updates:
@@ -99,6 +102,28 @@ export const desktopDownloadLabel = (platform: keyof typeof desktopDownloads): s
 
 /** Mac file links name the chip, because one Mac label cannot say which architecture a direct file serves. */
 const macFileLabels = { mac: 'Apple silicon', macIntel: 'Intel Mac' } as const;
+
+/**
+ * Builds offered before they pass installer qualification: the page lists each as a direct channel archive marked beta,
+ * never recommends it to a detected host, and drops it once the installer catalog admits that platform's DMG.
+ */
+export const betaDownloads = {
+  macIntel: { file: 'Tau-macos-x64.zip', detail: 'Intel Mac · ZIP download' },
+};
+
+/**
+ * @param platform - A platform offered as a beta archive.
+ * @returns The production archive URL.
+ */
+export const betaDownloadHref = (platform: keyof typeof betaDownloads): string =>
+  `${downloadsOrigin}/latest/${betaDownloads[platform].file}`;
+
+/**
+ * @param platform - A platform offered as a beta archive.
+ * @returns Label markup from checked-in icon and product constants only.
+ */
+export const betaDownloadLabel = (platform: keyof typeof betaDownloads): string =>
+  `${desktopDownloads[platform].icon}<span>Download ZIP for ${macFileLabels[platform]}</span>`;
 
 /**
  * Label a link that downloads a file directly. A Mac link only ever serves its qualified DMG, so it says DMG and names
@@ -309,6 +334,7 @@ const admitDesktopCatalog = (
 /** Routes each platform lane of a composed catalog must carry exactly (D-H5 per-platform promotion). */
 const laneRoutes = {
   macos: ['macos-zip:darwin-arm64'],
+  windows: ['windows-nsis:win32-x64'],
   linux: ['linux-apt:linux-x64', 'linux-appimage:linux-x64'],
 } as const;
 
@@ -344,13 +370,16 @@ export const createDesktopDownloadCatalog = (options: {
     for (const input of composed['platforms']) {
       const platform = catalogRecord(input, ['lane', 'catalog']);
       const { lane } = platform;
-      if ((lane !== 'macos' && lane !== 'linux') || lanes.has(lane)) {
+      if (typeof lane !== 'string' || !Object.hasOwn(laneRoutes, lane) || lanes.has(lane)) {
         throw new TypeError('Unsupported or duplicate installer platform');
       }
       lanes.add(lane);
       const admitted = admitDesktopCatalog(platform['catalog'], options.channel, immutableArtifacts);
       // Each platform is complete on its own: exactly its routes, never a partial or another platform's.
-      if (JSON.stringify([...admitted.seen].sort()) !== JSON.stringify([...laneRoutes[lane]].sort())) {
+      if (
+        JSON.stringify([...admitted.seen].sort()) !==
+        JSON.stringify([...laneRoutes[lane as keyof typeof laneRoutes]].sort())
+      ) {
         throw new TypeError('Installer platform catalog is incomplete or carries another platform');
       }
       result.push(...admitted.result);

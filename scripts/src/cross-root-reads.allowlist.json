@@ -130,6 +130,21 @@
     "reason": "test fixture read from another project: the heif package owns the HEIC fixtures its parity tests share"
   },
   {
+    "file": "apps/libs/chat-ui/src/components/chat-paste-handler.test.ts",
+    "target": "libs/utils/src/image-probe.fixtures/small.heic",
+    "reason": "test fixture read from another project: @taucad/utils owns the image-probe fixtures, and this test feeds the real HEIC bytes to intake"
+  },
+  {
+    "file": "apps/libs/chat-ui/src/utils/attachment-intake.test.ts",
+    "target": "libs/utils/src/image-probe.fixtures/small.heic",
+    "reason": "test fixture read from another project: @taucad/utils owns the image-probe fixtures, and this test feeds the real HEIC bytes to intake"
+  },
+  {
+    "file": "apps/ui/app/components/chat/chat-textarea-types.test.tsx",
+    "target": "libs/utils/src/image-probe.fixtures/small.heic",
+    "reason": "test fixture read from another project: @taucad/utils owns the image-probe fixtures, and this test feeds the real HEIC bytes to intake"
+  },
+  {
     "file": "apps/desktop-e2e/src/desktop-picogk-kinematics.spec.ts",
     "target": "libs/tau-examples/**",
     "reason": "reads a Tau example from tau-examples as a fixture or source"
@@ -1063,5 +1078,15 @@
     "file": "tools/workspace-plugin/src/generators/plugin/generator.test.ts",
     "target": "packages/plugins/image",
     "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
+    "target": "apps/desktop/scripts/fetch-desktop-installer-candidate.mts",
+    "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
+  },
+  {
+    "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
+    "target": "apps/desktop/scripts/desktop-receipt-provenance.mts",
+    "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
   }
 ]

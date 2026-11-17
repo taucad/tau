@@ -235,6 +235,33 @@ describe('the compute worker seam', () => {
     expect(((refusal as Error).cause as Error | undefined)?.message).toMatch(/packfile version/u);
   });
 
+  it('sends a view over part of a wider read as its own bytes, and leaves the caller its view', async () => {
+    const sent: Array<Readonly<{ args: readonly unknown[]; transfer: readonly unknown[] }>> = [];
+    const connection = openComputeConnection({
+      postMessage: (message, transfer) => {
+        sent.push({ args: (message as { args: readonly unknown[] }).args, transfer });
+      },
+      addEventListener: () => undefined,
+    });
+    /* One entry out of a wide Range read: a clone would carry the whole read behind it. */
+    const read = new Uint8Array(1024 * 1024).fill(7);
+    const entry = read.subarray(4096, 4096 + 64);
+    void connection.compute.inflate(entry);
+    void connection.compute.sha1(read);
+
+    const [partial, whole] = sent;
+    const carried = partial!.args[0] as Uint8Array<ArrayBuffer>;
+    expect(carried.buffer.byteLength).toBe(64);
+    expect(carried).toStrictEqual(entry);
+    expect(partial!.transfer).toStrictEqual([carried.buffer]);
+    /* The caller's read and view are whole and untouched. */
+    expect(read.byteLength).toBe(1024 * 1024);
+    expect(entry.byteLength).toBe(64);
+    /* A view over its whole buffer is cloned as before, never handed over. */
+    expect(whole!.args[0]).toBe(read);
+    expect(whole!.transfer).toStrictEqual([]);
+  });
+
   it('waits for nothing when a call cannot be posted', async () => {
     const connection = openComputeConnection({
       postMessage: () => {

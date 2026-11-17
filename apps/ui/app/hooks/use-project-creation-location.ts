@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { directoryPicker, webAccessDirectoryPicker } from '#constants/browser.constants.js';
+import { directoryPicker, webAccessDirectoryPicker } from '@taucad/files-ui/constants/browser.constants';
 import {
   checkHandlePermission,
   getProjectCreationLocation,
@@ -9,8 +9,8 @@ import {
   listWorkspaces,
   requestHandlePermission,
   subscribeProjectRootConfigurationChanges,
-} from '#filesystem/handle-store.js';
-import type { Workspace } from '#filesystem/handle-store.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import type {
@@ -18,7 +18,10 @@ import type {
   ProjectCreationLocation,
   WorkspaceProjectCreationLocation,
 } from '@taucad/ui-core/types/project-creation-location.types';
-import { projectCreationLocationsEqual, projectLocationDescriptor } from '#utils/project-creation-location.utils.js';
+import {
+  projectCreationLocationsEqual,
+  projectLocationDescriptor,
+} from '@taucad/files-ui/utils/project-creation-location.utils';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { toast } from '@taucad/ui/components/sonner';
 import {

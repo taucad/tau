@@ -1,8 +1,8 @@
-import { desktopBridge, isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { desktopBridge, isDesktopTarget } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { registrationProbeChatId } from '@taucad/ui-core/lib/chat-observation-guard';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
 import { probeBrowserAgentHostCapability } from '#services/agent-host-client.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { StorageDurabilityClass } from '@taucad/agent-host';
 import type { FileSystemBackend } from '@taucad/types';
 import { generatePrefixedId } from '@taucad/utils/id';

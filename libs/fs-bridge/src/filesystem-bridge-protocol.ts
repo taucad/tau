@@ -15,9 +15,11 @@ import type {
   ProjectDiscoveryEntry,
   ProjectLocator,
   ProjectRootConfig,
+  ProjectRootConfigurationResult,
   ProjectRootDiscoveryStatus,
   RootedFileSystem,
   RootedPorcelain,
+  RootStatus,
   MountConfig,
   StorageRootConfig,
   WatchEvent,
@@ -421,6 +423,8 @@ type WorkspaceBridgeMethodName =
   | 'mount'
   | 'unmount'
   | 'configureProjectRoots'
+  | 'getRootStatuses'
+  | 'recheckRoots'
   | 'listProjectManifests'
   | 'verifyProjectRoute'
   | 'commitPendingProjectDirectory'
@@ -839,35 +843,38 @@ const storageRootConfigSchema: z.ZodType<StorageRootConfig> = z.discriminatedUni
   z.looseObject({ backend: z.literal('opfs') }),
   z.looseObject({ backend: z.literal('node'), path: z.string() }),
 ]);
+/* A configuration entry's id and directory are validated by the authority,
+ * which skips and reports an invalid entry instead of failing the whole
+ * configuration (blueprint B3); the wire checks only the shape. */
 const projectRootConfigSchema: z.ZodType<ProjectRootConfig> = z.discriminatedUnion('backend', [
   z.looseObject({
-    projectId: projectIdSchema,
+    projectId: z.string(),
     backend: z.literal('webaccess'),
     workspaceId: z.string(),
-    providerBasePath: projectDirectoryPathSchema,
+    providerBasePath: z.string(),
     directoryHandle: z.undefined().optional(),
   }),
   z.looseObject({
-    projectId: projectIdSchema,
+    projectId: z.string(),
     backend: z.literal('indexeddb'),
-    providerBasePath: projectDirectoryPathSchema,
+    providerBasePath: z.string(),
   }),
   z.looseObject({
-    projectId: projectIdSchema,
+    projectId: z.string(),
     backend: z.literal('opfs'),
-    providerBasePath: projectDirectoryPathSchema,
+    providerBasePath: z.string(),
   }),
   z.looseObject({
-    projectId: projectIdSchema,
+    projectId: z.string(),
     backend: z.literal('memory'),
     storageRootKey: z.string(),
-    providerBasePath: projectDirectoryPathSchema,
+    providerBasePath: z.string(),
   }),
   z.looseObject({
-    projectId: projectIdSchema,
+    projectId: z.string(),
     backend: z.literal('node'),
     path: z.string(),
-    providerBasePath: projectDirectoryPathSchema,
+    providerBasePath: z.string(),
   }),
 ]);
 const projectLocatorSchema: z.ZodType<ProjectLocator> = z.discriminatedUnion('backend', [
@@ -1244,6 +1251,33 @@ const projectRootConfigurationSchema = z.looseObject({
   projects: z.array(projectRootConfigSchema),
   roots: z.array(storageRootConfigSchema),
 });
+const rootStatusSchema: z.ZodType<RootStatus> = z.looseObject({
+  storageRootKey: z.string(),
+  backend: z.enum(['webaccess', 'indexeddb', 'opfs', 'node']),
+  state: z.enum(['available', 'notFound', 'permission', 'unreachable', 'conflict', 'error']),
+  code: z.string().optional(),
+});
+const rootStatusesSchema = z.array(rootStatusSchema);
+const projectRootConfigurationResultSchema: z.ZodType<ProjectRootConfigurationResult> = z.looseObject({
+  roots: rootStatusesSchema,
+  skipped: z.array(
+    z.looseObject({
+      kind: z.enum(['root', 'project', 'checkout']),
+      reason: z.enum([
+        'duplicate-root',
+        'invalid-project-id',
+        'duplicate-route',
+        'non-canonical-path',
+        'checkout-rule',
+        'duplicate-physical-route',
+        'root-unavailable',
+        'provider-unavailable',
+      ]),
+      projectId: z.string().optional(),
+      storageRootKey: z.string().optional(),
+    }),
+  ),
+});
 const projectDiscoveryResultSchema = z.looseObject({
   entries: z.array(projectDiscoveryEntrySchema),
   roots: z.array(projectRootDiscoveryStatusSchema),
@@ -1541,7 +1575,12 @@ const callSchemas = {
   exists: { args: oneStringArgument, result: booleanResult },
   mount: { args: z.tuple([z.string(), mountConfigSchema]), result: voidResult },
   unmount: { args: oneStringArgument, result: voidResult },
-  configureProjectRoots: { args: z.tuple([projectRootConfigurationSchema]), result: voidResult },
+  configureProjectRoots: {
+    args: z.tuple([projectRootConfigurationSchema]),
+    result: projectRootConfigurationResultSchema,
+  },
+  getRootStatuses: { args: noArgs, result: rootStatusesSchema },
+  recheckRoots: { args: z.tuple([z.array(z.string()).optional()]), result: rootStatusesSchema },
   listProjectManifests: { args: noArgs, result: projectDiscoveryResultSchema },
   verifyProjectRoute: {
     args: z.tuple([z.object({ projectId: projectIdSchema })]),
@@ -1639,7 +1678,11 @@ const callSchemas = {
   pendingPaths: { args: z.tuple([z.array(rootedPathSchema)]), result: z.array(z.string()) },
 } satisfies FileSystemBridgeCallSchemas;
 
-const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });
+/* Every named event the authority broadcasts: a frame this rejects ends the shared broadcast subscription. */
+const broadcastValidator = z.union([
+  z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema }),
+  z.looseObject({ event: z.literal('rootStatus'), data: rootStatusesSchema }),
+]);
 
 /** Exact runtime-validator inventory for the filesystem bridge domain. @public */
 export const fileSystemBridgeSchemas = {

@@ -233,4 +233,79 @@ describe('ChatTextareaAttachmentRail', () => {
       "Vision can't read PDFs. Remove the PDF or pick another model.",
     );
   });
+  describe('pending images', () => {
+    it("should hold a converting image's slot after the stored images and say so", async () => {
+      render(
+        <ChatTextareaAttachmentRail
+          attachments={[images[0]!]}
+          pendingImages={[{ isConverting: true }]}
+          directory={directory}
+          size='desktop'
+          onRemove={vi.fn()}
+        />,
+      );
+
+      const placeholder = screen.getByRole('status');
+      expect(placeholder).toHaveAttribute('aria-busy', 'true');
+      expect(placeholder).toHaveTextContent('Converting image…');
+      await waitFor(() => {
+        expect(screen.getAllByRole('img')).toHaveLength(1);
+      });
+      const thumbnail = screen.getByRole('button', { name: 'Open uploaded image 1' });
+      expect(thumbnail.compareDocumentPosition(placeholder)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(placeholder).toHaveClass('size-20', 'rounded-md', 'border');
+      expect(thumbnail).toHaveClass('size-20', 'rounded-md', 'border');
+    });
+
+    it("should draw the skeleton as the thumbnail's own shape, hidden from assistive technology", () => {
+      render(
+        <ChatTextareaAttachmentRail
+          attachments={[]}
+          pendingImages={[{ isConverting: true }]}
+          directory={directory}
+          size='mobile'
+          onRemove={vi.fn()}
+        />,
+      );
+
+      const placeholder = screen.getByRole('status');
+      expect(placeholder).toHaveClass('size-14');
+      const skeleton = placeholder.querySelector('[data-slot=skeleton]');
+      expect(skeleton).toHaveAttribute('aria-hidden', 'true');
+      expect(skeleton).toHaveClass('size-full', 'motion-reduce:animate-none');
+      expect(screen.getByLabelText('Attachments')).toBeInTheDocument();
+    });
+
+    it('should say adding for an image that needs no converting', () => {
+      render(
+        <ChatTextareaAttachmentRail
+          attachments={[]}
+          pendingImages={[{ isConverting: false }, { isConverting: true }]}
+          directory={directory}
+          size='desktop'
+          onRemove={vi.fn()}
+        />,
+      );
+
+      expect(screen.getAllByRole('status').map((status) => status.textContent)).toEqual([
+        'Adding image…',
+        'Converting image…',
+      ]);
+      expect(screen.queryByRole('button', { name: /^Remove/u })).toBeNull();
+    });
+
+    it('should render nothing with no attachments and nothing pending', () => {
+      const { container } = render(
+        <ChatTextareaAttachmentRail
+          attachments={[]}
+          pendingImages={[]}
+          directory={directory}
+          size='desktop'
+          onRemove={vi.fn()}
+        />,
+      );
+
+      expect(container).toBeEmptyDOMElement();
+    });
+  });
 });

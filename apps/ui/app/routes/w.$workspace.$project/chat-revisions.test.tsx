@@ -65,7 +65,7 @@ vi.mock('#components/code/code-editor.client.js', () => ({
     <pre data-testid='conflict-buffer'>{document.text}</pre>
   ),
 }));
-vi.mock('#components/code/diff-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
   DiffViewer: ({
     originalContent,
     modifiedContent,

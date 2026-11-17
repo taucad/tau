@@ -34,7 +34,7 @@ import { mergeFormDefaults } from '@taucad/viewer/parameters/rjsf-utils';
 import { projectFiles } from '#components/print/testing/project-files.js';
 import { formatDisplayLabel } from '@taucad/ui/utils/label';
 import type { PendingAgentHostApproval } from '#components/chat/chat-approval-banner.js';
-import type { DesktopBambuStudio } from '#filesystem/desktop-bridge.js';
+import type { DesktopBambuStudio } from '@taucad/files-ui/filesystem/desktop-bridge';
 import type { PendingMachineAction } from '#components/print/machine-action-approval.js';
 import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { fffProcessOf } from '@taucad/runtime/machine';
@@ -1138,7 +1138,7 @@ export const createBambuStudio = (available = true): BambuStudioFake => ({
 /** The Bambu Studio the fake desktop bridge hands the pane; `undefined` is the web build. */
 export const desktopHost: { bambuStudio: BambuStudioFake | undefined } = { bambuStudio: undefined };
 
-/** What the pane reads from `#filesystem/desktop-bridge.js`. */
+/** What the pane reads from `@taucad/files-ui/filesystem/desktop-bridge`. */
 export const desktopBridgeMock = {
   desktopBridge: (): { slicers: { bambuStudio: BambuStudioFake } } | undefined =>
     desktopHost.bambuStudio === undefined ? undefined : { slicers: { bambuStudio: desktopHost.bambuStudio } },

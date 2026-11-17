@@ -1,14 +1,21 @@
-import { completionTypeFromLsp } from '#components/code/editor-completion-icon.js';
-import { definitionProvider } from '#components/code/editor-definition.js';
-import { definitionLinkMarkdown, renderEditorDocumentation } from '#components/code/editor-documentation.js';
-import { languageFeatures, promptRename, triggerParameterHints } from '#components/code/editor-language-features.js';
+import { completionTypeFromLsp } from '@taucad/editor-ui/components/code/editor-completion-icon';
+import { definitionProvider } from '@taucad/editor-ui/components/code/editor-definition';
+import {
+  definitionLinkMarkdown,
+  renderEditorDocumentation,
+} from '@taucad/editor-ui/components/code/editor-documentation';
+import {
+  languageFeatures,
+  promptRename,
+  triggerParameterHints,
+} from '@taucad/editor-ui/components/code/editor-language-features';
 import type {
   CallHierarchyDirection,
   EditorLocationItem,
   EditorOccurrence,
   EditorSignature,
   EditorSymbol,
-} from '#components/code/editor-language-features.js';
+} from '@taucad/editor-ui/components/code/editor-language-features';
 import { StateEffect, StateField } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import { autocompletion } from '@codemirror/autocomplete';

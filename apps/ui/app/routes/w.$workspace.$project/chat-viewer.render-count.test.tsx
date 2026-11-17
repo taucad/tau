@@ -154,11 +154,13 @@ vi.mock('#workbench-records/view-actions.js', () => ({
   }),
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeSelector: <T,>(select: (tree: Map<string, unknown>) => T): T =>
     select(new Map([[entryPath, { type: 'file', name: entryPath }]])),
 }));
-vi.mock('#hooks/use-file-content.js', () => ({ useFileContent: () => ({ kind: 'text', text: 'cube();' }) }));
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
+  useFileContent: () => ({ kind: 'text', text: 'cube();' }),
+}));
 vi.mock('@taucad/viewer/hooks/use-graphics', async () => {
   const { useSelector } = await import('@xstate/react');
   return {

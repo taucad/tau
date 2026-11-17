@@ -4,7 +4,7 @@ import { RouterContextProvider } from 'react-router';
 
 const getEnvironment = vi.fn();
 vi.mock('#environment.config.js', () => ({ ENV: { TAU_API_URL: 'https://api.test' }, getEnvironment }));
-vi.mock('#filesystem/handle-store.js', () => ({ createWorkspace: vi.fn() }));
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({ createWorkspace: vi.fn() }));
 vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: vi.fn() }));
 
 const { loader } = await import('#routes/[__e2e].project-creation-location/route.js');

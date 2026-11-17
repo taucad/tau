@@ -17,7 +17,7 @@
  * The source also says whether its values are settled ({@link readRemoteFlagStatus}): `pending` while a client is
  * connected but has not answered, `evaluated` once PostHog's values (or a seeded state) are in, and `absent` when no
  * answer will come (analytics not admitted or withdrawn, the SDK failed to load, or the flag load failed), so the
- * defaults are final. The layout-flag mirror (`#flags/layout-flags`) writes only settled values.
+ * defaults are final.
  */
 
 import { Topic } from '@taucad/events';

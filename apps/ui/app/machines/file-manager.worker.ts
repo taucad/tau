@@ -49,7 +49,7 @@ import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
 import type { BundledTypesMountEntry, BundledTypesRoot } from '#machines/bundled-types-mount.js';
 import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
 import { createLazyBundledTypesReads } from '#machines/bundled-types-lazy.js';
-import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
+import { homeBackendFromWorkerName } from '@taucad/files-ui/machines/file-manager-worker-name';
 import { listWorkspaceDirectories } from '@taucad/files-ui/machines/file-manager-sync-fs-adapter';
 import {
   createCheckoutRoutes,
@@ -439,6 +439,7 @@ exposeFileSystem(withPendingGauge(workspaceBridgeService(fileService)), {
    * about a path it may not read (CI1). */
   policy: tauPathPolicy,
   changeEventBus: eventBus,
+  rootStatusEvents: { subscribe: (handler) => fileService.onRootStatusChange(handler) },
   createCoalescer: (deliver, coalescingWindow, onOverflow) =>
     new EventCoalescer(deliver, { coalescingWindow, onOverflow }),
   computeEvents: computeEvents.source,

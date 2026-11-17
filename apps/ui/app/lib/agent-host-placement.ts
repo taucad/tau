@@ -8,9 +8,14 @@ import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 import type { AgentChannelClient } from '@taucad/agent-host';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { createRemoteHostSession, listRemoteHosts, RemoteHostApiError } from '#lib/remote-host-client.js';
-import { desktopBridge, isDesktopTarget, nodeHomeRoot, onDesktopHostHandOff } from '#filesystem/desktop-bridge.js';
-import type { DesktopBridge, DesktopHostHandOff } from '#filesystem/desktop-bridge.js';
-import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import {
+  desktopBridge,
+  isDesktopTarget,
+  nodeHomeRoot,
+  onDesktopHostHandOff,
+} from '@taucad/files-ui/filesystem/desktop-bridge';
+import type { DesktopBridge, DesktopHostHandOff } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { getComputeReuseMode } from '@taucad/ui-core/lib/compute-reuse-preference';
 import { loopbackHostIdPrefix } from '@taucad/chat-ui/utils/chat-execution';
 

@@ -11,6 +11,7 @@ import {
   chatComposerShellClassName,
 } from '@taucad/chat-ui/components/chat-input-styles';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { queuedSendStatus } from '#components/hand-off/hand-off.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { Editor, JSONContent } from '@tiptap/core';
@@ -44,7 +45,9 @@ import { ChatTextareaBorderBeam } from '@taucad/chat-ui/components/chat-textarea
 import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
-import type { DraftAttachment } from '#hooks/draft.machine.js';
+import { ChatDropOverlay, useChatDropZone } from '#components/chat/chat-drop-zone.js';
+import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
+import type { DraftAttachment, PendingDraftImage } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
 import { ChatEditor } from '@taucad/chat-ui/components/tiptap/chat-editor';
@@ -65,12 +68,8 @@ import type { ChatContextReference } from '@taucad/chat-ui/components/chat-conte
 
 /** One identity for "no skills", so an unavailable catalog does not re-derive the slash items each render. */
 const noSkills: SkillsCatalogState['commands'] = [];
-
-const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
-  image: 'Add files',
-  viewer: 'Add screenshot',
-  reference: 'Add reference',
-};
+/** One identity for "nothing converting", so the memoised rail is not re-rendered for a new empty list. */
+const noPendingImages: readonly PendingDraftImage[] = [];
 
 /**
  * What becomes of an Enter queued on a painted draft nobody edited, decided by the draft's owner from the chat's record
@@ -112,6 +111,8 @@ type ChatTextareaDesktopProperties = {
   readonly isSubmitting: boolean;
   readonly canResume?: boolean;
   readonly isAttaching: boolean;
+  /** Images still converting or storing; the rail holds their thumbnail slots. */
+  readonly pendingImages?: readonly PendingDraftImage[];
   readonly inputText: string;
   readonly attachments: readonly DraftAttachment[];
   readonly attachmentDirectory: AttachmentDirectories;
@@ -145,9 +146,9 @@ type ChatTextareaDesktopProperties = {
   // Handlers (all must be stable references to prevent tooltip re-render loops)
   readonly handleSubmit: (finalizedText?: string, references?: readonly CadReference[]) => Promise<void>;
   readonly handleCancelClick: () => void;
-  readonly handleDragOver: (event: React.DragEvent) => void;
+  readonly handleDragOver: (event: ChatDragEvent) => void;
   readonly handleDragLeave: () => void;
-  readonly handleDrop: (event: React.DragEvent) => Promise<void>;
+  readonly handleDrop: (event: ChatDragEvent) => Promise<void>;
   readonly handlePaste: (event: ClipboardPasteEvent) => boolean;
   readonly handleFileSelect: () => void;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -176,6 +177,26 @@ export const acpCommandToSlashCommand = (
   };
 };
 
+/** Drag feedback: over the whole area when the composer takes its drops there, else over its own box. */
+function ChatDropFeedback({
+  dragKind,
+  dropZone,
+  className,
+}: {
+  readonly dragKind: ChatTextareaDragKind | undefined;
+  readonly dropZone: HTMLElement | undefined;
+  readonly className: string;
+}): React.ReactNode {
+  if (dragKind === undefined) {
+    return null;
+  }
+  return dropZone === undefined ? (
+    <ChatDropOverlay kind={dragKind} className={className} />
+  ) : (
+    createPortal(<ChatDropOverlay kind={dragKind} />, dropZone)
+  );
+}
+
 /**
  * At rest a collapsible composer is one row; anything in flight — focus, a
  * draft, dictation, a send, a drag — unfolds it. The container variants
@@ -191,6 +212,7 @@ const isComposerAtRest = (input: {
   readonly dragKind: ChatTextareaDragKind | undefined;
   readonly inputText: string;
   readonly attachments: readonly DraftAttachment[];
+  readonly pendingImages: readonly PendingDraftImage[];
 }): boolean =>
   input.enableMobileCollapse === true &&
   input.isFocused !== true &&
@@ -198,7 +220,8 @@ const isComposerAtRest = (input: {
   !input.isSubmitting &&
   input.dragKind === undefined &&
   input.inputText.trim().length === 0 &&
-  input.attachments.length === 0;
+  input.attachments.length === 0 &&
+  input.pendingImages.length === 0;
 
 /**
  * Why Send refuses, in the words its tooltip and description use (F14).
@@ -290,6 +313,7 @@ export const ChatTextareaDesktop = memo(function ({
   isSubmitting,
   canResume = false,
   isAttaching,
+  pendingImages = noPendingImages,
   inputText,
   attachments,
   attachmentDirectory,
@@ -822,9 +846,25 @@ export const ChatTextareaDesktop = memo(function ({
     dragKind,
     inputText,
     attachments,
+    pendingImages,
   });
   /* F19: the beam follows the box's corners. */
   const radius = mode === 'edit' ? 'rounded-lg' : 'rounded-2xl';
+  const dropZone = useChatDropZone({
+    isEnabled: mode === 'main',
+    containerReference,
+    onDragOver: handleDragOver,
+    onDragLeave: handleDragLeave,
+    onDrop: handleDrop,
+  });
+  /* With an area to take its drops, the area's listeners are the only ones, so a drop lands once. */
+  const boxDropHandlers = useMemo(
+    () =>
+      dropZone === undefined
+        ? { onDragOver: handleDragOver, onDragLeave: handleDragLeave, onDrop: handleDrop }
+        : undefined,
+    [dropZone, handleDragOver, handleDragLeave, handleDrop],
+  );
 
   return (
     // Outer wrapper is purely a positioning context for the beam overlay
@@ -850,15 +890,14 @@ export const ChatTextareaDesktop = memo(function ({
         onKeyDownCapture={cancelQueuedSubmitOnEscape}
         onFocus={handleTextareaFocus}
         onBlur={handleTextareaBlur}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        {...boxDropHandlers}
       >
         {/* Only a session's chat can hold a kernel this runtime cannot run. */}
         <ChatKernelFallbackNotice />
         {/* Attachments */}
         <ChatTextareaAttachmentRail
           attachments={attachments}
+          pendingImages={pendingImages}
           directory={attachmentDirectory}
           blockReason={sendBlockReason}
           blockReasonId={blockReasonId}
@@ -886,14 +925,7 @@ export const ChatTextareaDesktop = memo(function ({
           />
         </div>
 
-        {/* Drag and drop feedback */}
-        {dragKind ? (
-          <div className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-primary/10 backdrop-blur-xs'>
-            <p className='rounded-md border bg-background/50 px-2 font-medium text-primary'>
-              {dragOverlayCopy[dragKind]}
-            </p>
-          </div>
-        ) : null}
+        <ChatDropFeedback dragKind={dragKind} dropZone={dropZone} className={radius} />
 
         <DictationFeedback transcript={dictation.transcript} />
         {/* Present from mount for an input that queued a send, so the status is read when it changes. */}
@@ -1107,7 +1139,7 @@ export const ChatTextareaBar = memo(function ({
 }): React.JSX.Element {
   const barRef = useRef<HTMLDivElement>(null);
   useBarCollapse(barRef);
-  const { targets: placements } = useAgentHostPlacements();
+  const { targets: placements, refresh: refreshPlacements } = useAgentHostPlacements();
   const { execution } = useChatComposer().execution;
   const discoveredAgent =
     execution.kind === 'acp'
@@ -1172,6 +1204,7 @@ export const ChatTextareaBar = memo(function ({
             agentConfig={agentConfig}
             placements={placements}
             focusEditor={focusEditor}
+            onOpen={refreshPlacements}
             enableShortcut={ownsShortcuts}
           />
         </div>

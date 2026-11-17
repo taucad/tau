@@ -12,7 +12,7 @@ This app owns the browser shell, editor, file manager, chat presentation, and br
 - Keep the streaming skeleton in the run's single `TurnGroup`. Use `Chat.startupRequest` for durable first turns; `ChatSessionStore` restores refused or stopped sends with attachments.
 - Device composer records: chat-ui `db/composer-record-store`, `#machines/composer-record.machine`, `#hooks/composer-record`. Attachments: chat-ui `db/attachment-store`, `utils/attachment.utils`; `#hooks/use-attachment-source`. Build user messages only with `buildUserMessage` (`#utils/chat.utils`).
 - Load editor code only for mounted source panes; keep grammars lazy. Follow [Language Contribution Policy](../../docs/policy/language-contribution-policy.md) and [Filesystem Policy](../../docs/policy/filesystem-policy.md).
-- Follow [Chat Request Config Policy](../../docs/policy/chat-request-config-policy.md) and [SSR Bundle Policy](../../docs/policy/ssr-bundle-policy.md).
+- Follow the [chat request config](../../docs/policy/chat-request-config-policy.md), [SSR bundle](../../docs/policy/ssr-bundle-policy.md) and [progressive loading](../../docs/policy/progressive-loading-policy.md) policies.
 
 ## Checks
 
@@ -28,6 +28,5 @@ Quote focused test paths containing `$` so the shell preserves route parameters.
 - Keep `app/routes.ts` minimal and route modules under `app/routes`. Build-time Netlify values and SSR runtime values have different lifetimes; `app/environment.config.ts` owns runtime resolution. Keep the server's `tslib` runtime dependency and defer expensive analytics initialization and grammar loading.
 - For serving/deployment, read [infrastructure instructions](../../infra/AGENTS.md). `server.ts` and `app/lib/server-args.ts` own explicit host/HTTPS options and cross-origin headers. Preserve the LAN CA-trust explanation and CA/page QR targets when host and HTTPS are enabled; never install trust certificates implicitly.
 - Derive selector trigger labels from the same selected-state authority as their menus. Theme labels use the durable preference that also drives SSR and rendering; do not create a second display-only source.
-- Keep the `/` server render session-neutral. Resolve home-route authentication client-side from the shared session rather than a separate first-paint hint.
 - Keep Better Auth multi-session disabled; do not wire its plugins, endpoints, or UI.
 - Global React Query side effects consume the root shared `QueryClient`; do not create a second client.

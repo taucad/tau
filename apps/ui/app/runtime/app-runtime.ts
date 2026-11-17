@@ -18,7 +18,7 @@ import type {
 import { hashKey } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
-import type { HomeStorageBackend } from '#filesystem/handle-store.js';
+import type { HomeStorageBackend } from '@taucad/files-ui/filesystem/handle-store';
 import type { Analytics } from '#hooks/use-analytics.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { sessionsMachine } from '#machines/sessions.machine.js';
@@ -30,7 +30,7 @@ import type { EnvironmentDesktopQuit, EnvironmentHost, UnloadSequencer } from '#
 import { createFocusComposition } from '#runtime/app-runtime-focus.js';
 import type { FocusHandle } from '#runtime/app-runtime-focus.js';
 import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
-import { onDesktopQuitRequested, reportDesktopQuiesced } from '#filesystem/desktop-bridge.js';
+import { onDesktopQuitRequested, reportDesktopQuiesced } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { createFileManagerHost } from '#runtime/file-manager-host.js';
 import type {
   FileManagerActor,

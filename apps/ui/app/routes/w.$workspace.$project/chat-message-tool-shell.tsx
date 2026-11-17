@@ -13,7 +13,7 @@ import {
 import { ChatToolDescription } from '@taucad/chat-ui/components/chat-tool-text';
 import { ChatToolLabel } from '@taucad/chat-ui/components/chat-tool-label';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
-import { CodeBlockContent, Pre } from '#components/code/code-block.js';
+import { CodeBlockContent, Pre } from '@taucad/editor-ui/components/code/code-block';
 import { FileLink } from '#components/files/file-link.js';
 
 type ShellInvocation = ToolInvocation<typeof toolName.shell>;

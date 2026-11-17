@@ -1,0 +1,469 @@
+//! `launch`: the host-facing side of the framed protocol (README "Launch protocol").
+//!
+//! Order matters and is the point of this module: validate, journal and fsync, grant, start the runner
+//! suspended inside a kill-on-close job, connect, `ready`, wait for `start`, relay, and at the end confirm
+//! the job is empty and every descriptor is restored before `exit`. Anything unconfirmed is
+//! `cleanup-failed`, and the journal stays for `restore`.
+
+use std::collections::BTreeMap;
+use std::io::ErrorKind;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use windows_sys::Win32::Foundation::GetLastError;
+use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+use windows_sys::Win32::System::Diagnostics::Debug::{SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SetErrorMode};
+use windows_sys::Win32::System::Threading::{
+    CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessWithLogonW, GetCurrentProcessId,
+    PROCESS_INFORMATION, ResumeThread, STARTF_FORCEOFFFEEDBACK, STARTUPINFOW, WaitForSingleObject,
+};
+
+use super::acl::{self, Principals};
+use super::desktop::{PrivateDesktop, WindowStation, current_station_name};
+use super::job::Job;
+use super::pipe::{self, HandleIo};
+use super::restore::restore_journal;
+use super::setup::{load_password, load_record};
+use super::sid::{Sid, current_user};
+use super::util::{Error, Owned, Result, program_files, random_u32s, system_root, wide, wipe, wipe_wide};
+use crate::cmdline::{capability_sid, quote_arg};
+use crate::frame::{self, Frame, read_frame, write_frame};
+use crate::install::InstallRecord;
+use crate::journal::{FileEntry, JOURNAL_VERSION, Journal};
+use crate::protocol::{CleanupFailed, Exit, Ready, Refused, RunnerError, RunnerSpec};
+use crate::spec::{self, ExecutableRoots, ValidSpec};
+
+const RUNNER_EXIT_TIMEOUT: Duration = Duration::from_secs(10);
+const JOB_EMPTY_TIMEOUT: Duration = Duration::from_secs(10);
+
+type Sink = Arc<Mutex<HandleIo>>;
+
+fn send(sink: &Sink, frame: &Frame) {
+    if let Ok(mut out) = sink.lock() {
+        let _ = write_frame(&mut *out, frame);
+    }
+}
+
+fn refuse(sink: &Sink, refused: &Refused) -> i32 {
+    send(sink, &Frame::json(frame::REFUSED, refused));
+    0
+}
+
+pub fn run() -> i32 {
+    let stdin = HandleIo(unsafe { GetStdHandle(STD_INPUT_HANDLE) });
+    let sink: Sink = Arc::new(Mutex::new(HandleIo(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) })));
+    let mut stdin = stdin;
+    let first = match read_frame(&mut stdin) {
+        Ok(Some(frame)) if frame.kind == frame::SPEC => frame,
+        Ok(None) => return 0,
+        Ok(Some(_)) => {
+            return refuse(
+                &sink,
+                &Refused::unsupported(spec::requirement::SPEC, "the first frame must be the launch spec"),
+            );
+        }
+        Err(err) => {
+            eprintln!("tau-windows-sandbox launch: {err}");
+            return 2;
+        }
+    };
+    let roots =
+        match program_files().and_then(|pf| Ok(ExecutableRoots { program_files: pf, system_root: system_root()? })) {
+            Ok(roots) => roots,
+            Err(err) => {
+                return refuse(
+                    &sink,
+                    &Refused::unavailable("the system folders could not be resolved", Some(err.to_string())),
+                );
+            }
+        };
+    let valid = match spec::parse(&first.payload).and_then(|parsed| spec::validate(parsed, &roots)) {
+        Ok(valid) => valid,
+        Err(refused) => return refuse(&sink, &refused),
+    };
+    let record = match load_record() {
+        Ok(Some(record)) => record,
+        Ok(None) => return refuse(&sink, &Refused::unavailable("the Windows shell sandbox is not set up", None)),
+        Err(err) => {
+            return refuse(
+                &sink,
+                &Refused::unavailable("the sandbox install record is unreadable", Some(err.to_string())),
+            );
+        }
+    };
+    if let Err(refused) = check_runner(&record) {
+        return refuse(&sink, &refused);
+    }
+    let session = match Session::prepare(valid, &record) {
+        Ok(session) => session,
+        Err(refused) => return refuse(&sink, &refused),
+    };
+    session.run(stdin, sink)
+}
+
+/// The runner `TauSandbox` executes is the copy `setup` installed; it must be this very binary, or the
+/// install is stale and needs `setup` again.
+fn check_runner(record: &InstallRecord) -> std::result::Result<(), Refused> {
+    let stale = |diagnostic: String| {
+        Refused::unavailable("the sandbox runner needs repair (run setup again)", Some(diagnostic))
+    };
+    let installed = std::fs::read(&record.runner).map_err(|err| stale(format!("{}: {err}", record.runner)))?;
+    let current = std::env::current_exe().and_then(std::fs::read).map_err(|err| stale(err.to_string()))?;
+    if installed != current {
+        return Err(stale("the installed runner differs from this helper".to_owned()));
+    }
+    Ok(())
+}
+
+struct Session {
+    valid: ValidSpec,
+    record: InstallRecord,
+    principals: Principals,
+    person: Sid,
+    journal_path: String,
+    journal: Journal,
+    /// Opened for `WRITE_DAC` when the person may change it. The session ACEs are best-effort: adding
+    /// them only widens access, and Codex's shape runs without them.
+    station: Option<WindowStation>,
+    station_name: String,
+}
+
+impl Session {
+    fn prepare(valid: ValidSpec, record: &InstallRecord) -> std::result::Result<Self, Refused> {
+        let unavailable = |what: &str| {
+            let what = what.to_owned();
+            move |err: Error| Refused::unavailable(what.clone(), Some(err.to_string()))
+        };
+        let account = Sid::parse(&record.account_sid).map_err(unavailable("the sandbox account SID is invalid"))?;
+        let group = Sid::parse(&record.group_sid).map_err(unavailable("the sandbox group SID is invalid"))?;
+        if Sid::lookup(&record.account).map_err(unavailable("the sandbox account cannot be resolved"))?.as_ref()
+            != Some(&account)
+        {
+            return Err(Refused::unavailable("the sandbox account is missing (run setup again)", None));
+        }
+        let capability_text =
+            capability_sid(random_u32s::<4>().map_err(unavailable("no randomness for the capability SID"))?);
+        let capability = Sid::parse(&capability_text).map_err(unavailable("the capability SID is invalid"))?;
+        let person = current_user().map_err(unavailable("the current user cannot be resolved"))?;
+        let station_name = current_station_name().map_err(unavailable("the window station cannot be named"))?;
+        let station = match WindowStation::open_current() {
+            Ok(station) => Some(station),
+            Err(err) => {
+                eprintln!("tau-windows-sandbox launch: window station not adjustable, no session ACE: {err}");
+                None
+            }
+        };
+        let station_entry = match station.as_ref().map(WindowStation::journal_entry) {
+            Some(Ok(entry)) => Some(entry),
+            Some(Err(err)) => {
+                return Err(Refused::unavailable("the window station cannot be read", Some(err.to_string())));
+            }
+            None => None,
+        };
+
+        // Snapshot everything first; nothing has been changed yet.
+        let mut entries: Vec<FileEntry> = Vec::new();
+        for (path, _) in &valid.grants {
+            if entries.iter().any(|e| e.path.eq_ignore_ascii_case(path)) {
+                continue;
+            }
+            match acl::snapshot(path) {
+                Ok(Some(entry)) => entries.push(entry),
+                Ok(None) => eprintln!("tau-windows-sandbox launch: {path} does not exist; no ACL change"),
+                Err(err) => return Err(Refused::unavailable("a path's ACL could not be read", Some(err.to_string()))),
+            }
+        }
+        let journal = Journal {
+            version: JOURNAL_VERSION,
+            capability_sid: capability_text,
+            launcher_pid: unsafe { GetCurrentProcessId() },
+            entries,
+            window_station: station_entry,
+        };
+        let journal_path = valid.journal.clone();
+        if let Err(err) = journal.create(Path::new(&journal_path)) {
+            let message = if err.kind() == ErrorKind::AlreadyExists {
+                "a previous launch's ACL journal is still present; run restore first"
+            } else {
+                "the ACL journal could not be written"
+            };
+            return Err(Refused::unavailable(message, Some(err.to_string())));
+        }
+        Ok(Self {
+            valid,
+            record: record.clone(),
+            principals: Principals { account, group, capability },
+            person,
+            journal_path,
+            journal,
+            station,
+            station_name,
+        })
+    }
+
+    fn principal_sids(&self) -> Vec<String> {
+        vec![self.journal.capability_sid.clone(), self.record.account_sid.clone(), self.record.group_sid.clone()]
+    }
+
+    /// Undo everything this launch changed. `Ok` only when the job (if any) is empty and every descriptor
+    /// is confirmed restored; the journal is deleted only then.
+    fn teardown(&self, job: Option<&Job>) -> std::result::Result<(), String> {
+        let mut failures = Vec::new();
+        if let Some(job) = job {
+            match job.kill_and_wait(JOB_EMPTY_TIMEOUT) {
+                Ok(true) => {}
+                Ok(false) => failures.push("the sandbox job still has live processes".to_owned()),
+                Err(err) => failures.push(format!("the sandbox job could not be checked: {err}")),
+            }
+        }
+        failures.extend(restore_journal(&self.journal, &self.principal_sids()));
+        if failures.is_empty()
+            && let Err(err) = std::fs::remove_file(&self.journal_path)
+            && err.kind() != ErrorKind::NotFound
+        {
+            failures.push(format!("the journal could not be deleted: {err}"));
+        }
+        if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
+    }
+
+    fn apply_grants(&self) -> Result<()> {
+        for (path, access) in &self.valid.grants {
+            let Some(entry) = self.journal.entries.iter().find(|e| e.path.eq_ignore_ascii_case(path)) else { continue };
+            acl::apply(entry, &acl::aces_for(*access, &self.principals))?;
+        }
+        if let Some(station) = &self.station
+            && let Err(err) = station.grant(&[&self.principals.account, &self.principals.capability])
+        {
+            eprintln!("tau-windows-sandbox launch: no window-station session ACE: {err}");
+        }
+        Ok(())
+    }
+
+    fn run(self, stdin: HandleIo, sink: Sink) -> i32 {
+        let started = self.start_runner();
+        let (desktop, job, runner, to_runner, from_runner) = match started {
+            Ok(parts) => parts,
+            Err((job, err)) => {
+                let cleanup = self.teardown(job.as_ref());
+                return self.finish_refused(
+                    &sink,
+                    Refused::unavailable("the sandbox could not be started", Some(err.to_string())),
+                    cleanup,
+                );
+            }
+        };
+        let job = Arc::new(job);
+        let to_runner = Arc::new(Mutex::new(HandleIo(to_runner.raw())));
+        let mut from_runner_io = HandleIo(from_runner.raw());
+
+        // The runner's first frame: ready, or why not.
+        match read_frame(&mut from_runner_io) {
+            Ok(Some(frame)) if frame.kind == frame::READY => {}
+            other => {
+                let diagnostic = match other {
+                    Ok(Some(frame)) if frame.kind == frame::RUNNER_ERROR => runner_error_text(&frame.payload),
+                    Ok(_) => "the runner ended before it was ready".to_owned(),
+                    Err(err) => err.to_string(),
+                };
+                drop(desktop);
+                let cleanup = self.teardown(Some(&job));
+                return self.finish_refused(
+                    &sink,
+                    Refused::unavailable("the sandbox runner failed", Some(diagnostic)),
+                    cleanup,
+                );
+            }
+        }
+        let ready = Ready {
+            launcher_pid: unsafe { GetCurrentProcessId() },
+            runner_pid: runner.pid,
+            capability_sid: self.journal.capability_sid.clone(),
+            journal: self.journal_path.clone(),
+        };
+        send(&sink, &Frame::json(frame::READY, &ready));
+
+        let killed = Arc::new(AtomicBool::new(false));
+        host_reader(stdin, to_runner.clone(), job.clone(), killed.clone(), self.valid.stdio.clone());
+
+        // Relay until the runner's pipe closes.
+        let mut exit: Option<Exit> = None;
+        let mut runner_error: Option<String> = None;
+        let mut shell_started = false;
+        while let Ok(Some(frame)) = read_frame(&mut from_runner_io) {
+            match frame.kind {
+                frame::STDOUT | frame::STDERR | frame::OUTPUT => send(&sink, &frame),
+                frame::STARTED => {
+                    shell_started = true;
+                    send(&sink, &frame);
+                }
+                frame::EXIT => exit = serde_json::from_slice(&frame.payload).ok(),
+                frame::RUNNER_ERROR => runner_error = Some(runner_error_text(&frame.payload)),
+                _ => {}
+            }
+        }
+        unsafe { WaitForSingleObject(runner.process.raw(), RUNNER_EXIT_TIMEOUT.as_millis() as u32) };
+        drop(desktop);
+        let cleanup = self.teardown(Some(&job));
+        if !shell_started && !killed.load(Ordering::SeqCst) {
+            let diagnostic = runner_error.unwrap_or_else(|| "the runner ended before the shell started".to_owned());
+            return self.finish_refused(
+                &sink,
+                Refused::unavailable("the shell could not be started", Some(diagnostic)),
+                cleanup,
+            );
+        }
+        match cleanup {
+            Ok(()) => {
+                // A job kill (terminate, closed stdin) takes the runner down before it can report a code.
+                let exit = exit.unwrap_or_else(Exit::killed);
+                send(&sink, &Frame::json(frame::EXIT, &exit));
+            }
+            Err(message) => send(&sink, &Frame::json(frame::CLEANUP_FAILED, &CleanupFailed { message })),
+        }
+        0
+    }
+
+    fn finish_refused(&self, sink: &Sink, refused: Refused, cleanup: std::result::Result<(), String>) -> i32 {
+        match cleanup {
+            Ok(()) => refuse(sink, &refused),
+            Err(message) => {
+                send(sink, &Frame::json(frame::CLEANUP_FAILED, &CleanupFailed { message }));
+                0
+            }
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn start_runner(&self) -> std::result::Result<(PrivateDesktop, Job, Runner, Owned, Owned), (Option<Job>, Error)> {
+        self.apply_grants().map_err(|err| (None, err))?;
+        let desktop = PrivateDesktop::create(
+            &self.station_name,
+            &self.person,
+            &[&self.principals.account, &self.principals.capability],
+        )
+        .map_err(|err| (None, err))?;
+        let names = pipe::pipe_names().map_err(|err| (None, err))?;
+        let to_runner = pipe::create_server(&names.to_runner, true, &self.person, &self.principals.account)
+            .map_err(|err| (None, err))?;
+        let from_runner = pipe::create_server(&names.from_runner, false, &self.person, &self.principals.account)
+            .map_err(|err| (None, err))?;
+        let job = Job::kill_on_close().map_err(|err| (None, err))?;
+        let runner = match spawn_runner(&self.record, &names) {
+            Ok(runner) => runner,
+            Err(err) => return Err((Some(job), err)),
+        };
+        if let Err(err) = job.assign(runner.process.raw()) {
+            unsafe { windows_sys::Win32::System::Threading::TerminateProcess(runner.process.raw(), 1) };
+            return Err((Some(job), err));
+        }
+        if unsafe { ResumeThread(runner.thread.raw()) } == u32::MAX {
+            return Err((Some(job), Error::last("ResumeThread")));
+        }
+        if let Err(err) = pipe::accept(&to_runner, &names.to_runner, runner.pid)
+            .and_then(|()| pipe::accept(&from_runner, &names.from_runner, runner.pid))
+        {
+            return Err((Some(job), err));
+        }
+        let runner_spec = RunnerSpec {
+            capability_sid: self.journal.capability_sid.clone(),
+            desktop: desktop.startup_name.clone(),
+            executable: self.valid.executable.clone(),
+            arguments: self.valid.arguments.clone(),
+            working_directory: self.valid.working_directory.clone(),
+            environment: with_system_root(&self.valid.environment),
+            stdio: self.valid.stdio.clone(),
+        };
+        if let Err(err) = write_frame(&mut HandleIo(to_runner.raw()), &Frame::json(frame::SPEC, &runner_spec)) {
+            return Err((Some(job), err.into()));
+        }
+        Ok((desktop, job, runner, to_runner, from_runner))
+    }
+}
+
+/// PowerShell and most Win32 code need `SystemRoot`; supply it only when the host left it out.
+fn with_system_root(environment: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut environment = environment.clone();
+    if !environment.keys().any(|k| k.eq_ignore_ascii_case("SystemRoot"))
+        && let Ok(root) = system_root()
+    {
+        environment.insert("SystemRoot".to_owned(), root);
+    }
+    environment
+}
+
+fn runner_error_text(payload: &[u8]) -> String {
+    serde_json::from_slice::<RunnerError>(payload)
+        .map(|e| format!("{}: {}", e.stage, e.message))
+        .unwrap_or_else(|_| "the runner reported an unreadable error".to_owned())
+}
+
+struct Runner {
+    process: Owned,
+    thread: Owned,
+    pid: u32,
+}
+
+/// Start the installed runner as the sandbox account, suspended, without a profile.
+fn spawn_runner(record: &InstallRecord, names: &pipe::PipeNames) -> Result<Runner> {
+    let application = wide(&record.runner);
+    let mut command = wide(&format!(
+        "{} runner --pipe-in {} --pipe-out {} --launcher-pid {}",
+        quote_arg(&record.runner),
+        quote_arg(&names.to_runner),
+        quote_arg(&names.from_runner),
+        unsafe { GetCurrentProcessId() }
+    ));
+    let user = wide(&record.account);
+    let domain = wide(".");
+    let cwd = wide(&system_root()?);
+    let mut secret = load_password()?;
+    let mut password: Vec<u16> = String::from_utf8_lossy(&secret).encode_utf16().chain(std::iter::once(0)).collect();
+    wipe(&mut secret);
+
+    let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    startup.cb = size_of::<STARTUPINFOW>() as u32;
+    startup.dwFlags = STARTF_FORCEOFFFEEDBACK;
+    let mut info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+    let previous = unsafe { SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX) };
+    let ok = unsafe {
+        CreateProcessWithLogonW(
+            user.as_ptr(),
+            domain.as_ptr(),
+            password.as_ptr(),
+            0,
+            application.as_ptr(),
+            command.as_mut_ptr(),
+            CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
+            std::ptr::null(),
+            cwd.as_ptr(),
+            &startup,
+            &mut info,
+        )
+    };
+    let code = if ok == 0 { Some(unsafe { GetLastError() }) } else { None };
+    unsafe { SetErrorMode(previous) };
+    wipe_wide(&mut password);
+    if let Some(code) = code {
+        return Err(Error::code("CreateProcessWithLogonW", code));
+    }
+    Ok(Runner { process: Owned(info.hProcess), thread: Owned(info.hThread), pid: info.dwProcessId })
+}
+
+/// Forward host frames to the runner. `terminate` or a closed stdin kills the whole job.
+fn host_reader(mut stdin: HandleIo, to_runner: Sink, job: Arc<Job>, killed: Arc<AtomicBool>, stdio: spec::Stdio) {
+    std::thread::spawn(move || {
+        let terminal = matches!(stdio, spec::Stdio::Terminal { .. });
+        while let Ok(Some(frame)) = read_frame(&mut stdin) {
+            match frame.kind {
+                frame::START => send(&to_runner, &frame),
+                frame::INPUT | frame::RESIZE if terminal => send(&to_runner, &frame),
+                frame::TERMINATE => break,
+                _ => {}
+            }
+        }
+        killed.store(true, Ordering::SeqCst);
+        let _ = job.terminate();
+    });
+}

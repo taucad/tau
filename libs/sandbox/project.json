@@ -36,6 +36,36 @@
         "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts --test"
       }
     },
+    "build:windows-sandbox": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/windows-sandbox/src/**/*",
+        "{projectRoot}/windows-sandbox/Cargo.toml",
+        "{projectRoot}/windows-sandbox/Cargo.lock",
+        "{projectRoot}/windows-sandbox/rust-toolchain.toml"
+      ],
+      "outputs": ["{projectRoot}/windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe"],
+      "metadata": {
+        "description": "Build the Windows shell sandbox helper (windows-sandbox/, Rust) as tau-windows-sandbox.exe for x86_64-pc-windows-msvc. Windows only: it links against the MSVC toolchain. Elsewhere use `cargo check --target x86_64-pc-windows-msvc` in the crate."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/libs/sandbox/windows-sandbox",
+        "command": "cargo build --release --locked --target x86_64-pc-windows-msvc"
+      }
+    },
+    "test:windows-sandbox": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/windows-sandbox/**/*", "!{projectRoot}/windows-sandbox/target/**/*"],
+      "metadata": {
+        "description": "The Windows sandbox helper's portable unit tests (frame codec, spec validation, journal format, path checks, CLI). They run on any host; the Win32 code behind cfg(windows) is exercised by the Windows conformance row."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/libs/sandbox/windows-sandbox",
+        "command": "cargo test --locked"
+      }
+    },
     "size": {
       "dependsOn": ["build", "build:store-guard"],
       "inputs": [

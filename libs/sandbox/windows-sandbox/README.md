@@ -20,20 +20,32 @@ the WIN-X64 conformance row is green on a merged head (Q15 acceptance).
 WRITE_RESTRICTED`) whose restricting SIDs are a fresh random per-launch capability SID (`S-1-5-21-…`), the runner's
   logon SID and Everyone. A write succeeds only where an ACE grants that launch's capability SID.
 - **Reads.** `TauSandbox` cannot open another account's profile (the default profile DACL). The helper grants it read
-  on the launch's readable and writable roots and adds deny ACEs for the denied set inside them.
+  on the launch's readable and writable roots and adds deny ACEs for the denied set inside them. Per path set:
+  `readable` grants the account read and execute; `writable` grants the account and the capability SID read, write and
+  delete; `readOnly` grants the account read and denies the capability SID every write right, so a read-only path
+  inside a writable root stays read-only; `denied` denies `TauSandboxUsers` all access. Directory ACEs are inheritable.
 - **Sessions.** One sandbox account means read isolation is per account, not per session, so the provider serializes
   launches and answers a second concurrent one `session-limit` (A23 fallback clause).
 - **Descendants.** The runner places the shell in a Job Object with `KILL_ON_JOB_CLOSE`, no `BREAKAWAY_OK` and no
   `SILENT_BREAKAWAY_OK`; the launcher places the runner in its own kill-on-close job. Closing either kills the tree.
   `exit` is reported only once the job reports zero active processes.
-- **Network.** `setup` installs Windows Firewall rules scoped to the `TauSandbox` account: block all outbound, and block
-  loopback TCP/UDP except the fixed proxy port block recorded in the install record. A launch with nonempty
+- **Network.** `setup` installs Windows Firewall rules scoped to the `TauSandbox` account: block all outbound (and
+  inbound) traffic to non-loopback addresses, block loopback UDP, and block loopback TCP except the fixed proxy port
+  block recorded in the install record. A launch with nonempty
   `network.domains` is `unsupported: network-isolation` until the per-launch proxy lands (Q4 §7 risk 2).
 - **ACL lifecycle.** Before it changes any ACL the launcher writes a journal (path → original SDDL, `SE_DACL_PROTECTED`
   state) and fsyncs it. At exit, and in `restore` after a crash, it writes back exactly those descriptors. It never
-  removes an ACE it did not add (I11, E19; Q4 §7 risk 4).
-- **Desktop.** The runner gives the shell a private desktop on `WinSta0` and grants the session SIDs only on it; the
-  window-station DACL is restored byte-for-byte at teardown.
+  removes an ACE it did not add (I11, E19; Q4 §7 risk 4). The journal must not already exist (a leftover belongs to a
+  crashed launch: `restore` it first) and must not lie inside a granted or denied path.
+- **Desktop.** The launcher (not the runner, which as `TauSandbox` may not change `WinSta0`; this is where both the
+  spike and Codex create it) gives the shell a private desktop on its window station whose protected DACL admits the
+  person and, as participants, `TauSandbox` and the launch's capability SID. It adds one session ACE per SID to the
+  window station when the person may change its DACL (best-effort: the ACE only widens access), journals the original
+  descriptor, and restores it byte-for-byte at teardown.
+- **Runner binary.** `TauSandbox` cannot read the person's profile, where the desktop app installs, so `setup` copies the
+  helper to `%ProgramData%\Tau\Sandbox\bin\` (readable by `TauSandboxUsers`, writable only by SYSTEM and
+  Administrators) and `launch` starts that copy. `launch` refuses `sandbox-unavailable` when the installed copy differs
+  from itself, so an app update asks for `setup` again.
 - **Terminal.** The runner, not node-pty, owns the ConPTY (node-pty cannot create its pipes inside the token, spike run
   40041468455). It calls `SetConsoleCtrlHandler(NULL, FALSE)` before spawning and spawns with `0x80400`
   (`CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT`), never `CREATE_NEW_PROCESS_GROUP`, so Ctrl-C reaches the
@@ -45,14 +57,17 @@ WRITE_RESTRICTED`) whose restricting SIDs are a fresh random per-launch capabili
 
 | Command                    | Runs as             | Purpose                                                                                                                                                                            |
 | -------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `status`                   | the person          | Print the install record as JSON, `{"installed":false}` when absent. Never elevates.                                                                                               |
+| `status`                   | the person          | Print the install record as JSON with `"installed":true`, `{"installed":false}` when absent or unreadable. Never elevates.                                                         |
 | `setup`                    | Administrator (UAC) | Create or repair the account, group, password file and firewall rules; write the install record. Idempotent. `--for-user <SID>` names the person whose host may read the password. |
 | `revoke`                   | Administrator (UAC) | Remove the firewall rules, the account, the group, the password file and the install record. Idempotent.                                                                           |
 | `launch`                   | the person          | Speak the framed protocol below on stdin/stdout: apply and journal ACLs, start the runner as `TauSandbox`, relay I/O, restore ACLs.                                                |
-| `runner`                   | `TauSandbox`        | Internal. Started by `launch` with `CreateProcessWithLogonW` (no profile). Builds the token, job, desktop and stdio, then starts the shell.                                        |
+| `runner`                   | `TauSandbox`        | Internal. Started by `launch` with `CreateProcessWithLogonW` (no profile). Builds the token, job and stdio, then starts the shell on the launcher's private desktop.               |
 | `restore --journal <path>` | the person          | Restore the descriptors a crashed `launch` journaled, then delete the journal. Idempotent.                                                                                         |
 
-Install record: `%ProgramData%\Tau\Sandbox\install.json`, with `password.bin` beside it.
+Install record: `%ProgramData%\Tau\Sandbox\install.json`, with `password.bin` beside it and the runner copy in `bin\`.
+The directory's DACL is protected: SYSTEM and Administrators full control, the `--for-user` person read. `setup` also
+takes `--proxy-ports <list or a-b block>` (default `47311,47312`) and prints the record. The account is a member of
+`TauSandboxUsers` only (never Administrators: `setup` checks and refuses) and is hidden from the sign-in screen.
 
 ```json
 {
@@ -63,7 +78,8 @@ Install record: `%ProgramData%\Tau\Sandbox\install.json`, with `password.bin` be
   "groupSid": "S-1-5-21-…",
   "proxyPorts": [47311, 47312],
   "firewallRules": ["…"],
-  "forUser": "S-1-5-21-…"
+  "forUser": "S-1-5-21-…",
+  "runner": "C:\\ProgramData\\Tau\\Sandbox\\bin\\tau-windows-sandbox.exe"
 }
 ```
 
@@ -113,12 +129,53 @@ Launch spec (`0x01`):
 }
 ```
 
-`stdio` is `{ "kind": "terminal", "columns": n, "rows": n }` for the Terminal. `writable` includes the private HOME and
-temporary roots. Every path is absolute and already resolved by the host.
+`stdio` is `{ "kind": "terminal", "columns": n, "rows": n }` for the Terminal; with `pipes` the shell's stdin is `NUL`
+and `input`/`resize` are ignored. `writable` includes the private HOME and temporary roots. Every path is absolute
+(`X:\…`, no `.`/`..`, UNC, device or stream spelling) and already resolved by the host; a path that does not exist gets
+no ACL change. An optional `"network": { "domains": [] }` is accepted; nonempty `domains` is refused. `SystemRoot` is
+added to the environment when the host leaves it out.
+
+The helper fails closed: an unknown field anywhere in the spec is refused. `unsupported` refusals carry one of these
+`requirement` values: `spec` (unreadable spec, unknown field, misplaced journal), `spec-version`, `executable` (not an
+`.exe` under `%ProgramFiles%` or `%SystemRoot%`, or a `.cmd`/`.bat`), `absolute-paths`, `environment` (a name with
+`=` or NUL, or a name given twice in different case), `stdio` (a zero terminal size), `network-isolation`.
+
+Ordering. `refused` normally comes instead of `ready`. If the runner reported `ready` but the shell then could not be
+started (for example `CreateProcessAsUserW` failed), the helper restores the ACLs and sends `refused`
+(`sandbox-unavailable`, with the runner's `diagnostic`) after `ready`, never `started`; if that cleanup cannot be
+confirmed it sends `cleanup-failed` instead. `exit` carries the shell's own exit code when it ended by itself and
+`{ "signal": "SIGKILL" }` when the job was killed (`terminate`, closed stdin, or a runner that died).
+
+## Internal runner channel
+
+`launch` starts `runner --pipe-in <name> --pipe-out <name> --launcher-pid <pid>` suspended, assigns it to its job,
+resumes it and talks to it over two one-way named pipes (`\\.\pipe\tau-sandbox-<random>-in`/`-out`) created with
+`FILE_FLAG_FIRST_PIPE_INSTANCE`, `PIPE_REJECT_REMOTE_CLIENTS` and a protected DACL naming only the person and
+`TauSandbox`. Each side checks the other's PID. The frames are the same codec: `launch` sends `spec` (an internal spec
+with the capability SID and desktop name), then forwards `start`, `input`, `resize` and `terminate`; the runner answers
+`ready` (empty), `started`, `stdout`/`stderr`/`output` and `exit`, or `0xC1` `runner-error` (`{ "stage", "message" }`),
+which `launch` never forwards to the host.
+
+## ACL journal
+
+```json
+{
+  "version": 1,
+  "capabilitySid": "S-1-5-21-…",
+  "launcherPid": 1234,
+  "entries": [{ "path": "C:\\…", "sddl": "D:…", "protected": false }],
+  "windowStation": { "sessionId": 1, "name": "WinSta0", "descriptor": "<hex self-relative SD>" }
+}
+```
+
+`restore --journal <path>` restores every entry (children first), confirms each, restores the window station when it
+runs in the journaled session, deletes the journal and prints `{"restored":true}`. A missing journal is success. On any
+unconfirmed entry it prints the failures, keeps the journal and exits 1.
 
 ## Build
 
 ```bash
 pnpm nx run sandbox:build:windows-sandbox      # on Windows; cargo build --release --target x86_64-pc-windows-msvc
 cargo check --target x86_64-pc-windows-msvc    # anywhere the target is installed
+pnpm nx run sandbox:test:windows-sandbox       # cargo test: the portable unit tests, on any host
 ```

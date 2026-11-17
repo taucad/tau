@@ -1,4 +1,5 @@
 import { initializeHostDownload, initializeInstallerCatalog } from '#www/download-catalog.client.js';
+import { scheduleAppWarm } from '#www/app-warm.client.js';
 import type * as Live from '#www/live.js';
 import { readStoryProgress } from '#www/story-progress.js';
 import { randomUuid } from '@taucad/utils/id';
@@ -17,6 +18,8 @@ export function initializePage(signal: AbortSignal): () => void {
 
   // async-iife: bootstrap -- The page signal owns the bounded optional catalog enhancement.
   void initializeInstallerCatalog(signal);
+  // PL8: prefetch the app Home's modules once this page is idle, so opening the app needs no module download.
+  scheduleAppWarm(signal);
 
   const mobileMenu = document.querySelector('.mobile-menu');
   document.addEventListener(

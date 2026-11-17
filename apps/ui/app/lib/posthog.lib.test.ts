@@ -138,6 +138,8 @@ it('records replay text, masks inputs and the chat composer, and still blocks in
   expect(recording?.maskTextSelector).toBe('.ProseMirror');
   expect(recording?.maskAllInputs).toBe(true);
   expect(recording?.blockSelector).toContain('a[href*="/invitations/"]');
+  /* #2290: the recorder resolves a render-blocking hint's fragment href against the address bar. */
+  expect(recording?.blockSelector).toContain('link[rel="expect"]');
 });
 
 it('leaves exception capture to Sentry on every host, overriding the project remote setting', () => {

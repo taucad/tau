@@ -1,4 +1,4 @@
-import type { EditorDocument, DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
+import type { EditorDocument, DocumentChange, DocumentTransaction } from '@taucad/editor-ui/lib/editor-document';
 
 export type ChatEditorViewerProps = {
   /** Stable pane identity; split panes own distinct selections and scroll. */

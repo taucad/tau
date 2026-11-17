@@ -364,6 +364,11 @@ export const parseMachineBindingRecord = (value: unknown): MachineBindingRecord 
 };
 
 const syncDirectory = async (path: string): Promise<void> => {
+  /* Windows refuses `fsync` on a directory handle (EPERM). Each file is synced before its rename, and NTFS journals
+   * the rename, so there a new name is only as durable as that journal makes it. */
+  if (process.platform === 'win32') {
+    return;
+  }
   // oxlint-disable-next-line eslint/no-bitwise -- POSIX open flags are bit masks.
   const directory = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {

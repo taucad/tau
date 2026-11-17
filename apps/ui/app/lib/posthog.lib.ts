@@ -92,7 +92,11 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
       // (ProseMirror) contenteditable, so unsent text typed there is masked here; sent messages
       // render in the transcript, which replays in full.
       maskTextSelector: '.ProseMirror',
-      blockSelector: 'a[href*="/invitations/"], a[href*="%2Finvitations%2F" i]',
+      /* Invitation links carry a bearer token in their href. `link[rel="expect"]` (render-blocking hints, as Home's
+         composer and the workspace frame use) carries a fragment href the recorder resolves against the address bar,
+         so it would copy whatever that address holds (#2290). Replay also never runs at a credential address
+         (`posthog-analytics-provider.tsx`); blocking these keeps the hint out even if one is reached by other means. */
+      blockSelector: 'a[href*="/invitations/"], a[href*="%2Finvitations%2F" i], link[rel="expect"]',
       // The SDK calls this for rrweb Meta href before snapshot compression too.
       maskCapturedNetworkRequestFn: (request) => ({
         ...request,

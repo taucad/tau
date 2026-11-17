@@ -161,3 +161,88 @@ describe('Later staging signal acceptance — pending implementation', () => {
   it.todo('P3: physical-device kills carry samples and feedback (A3/A4/A11/A14)');
   it.todo('P5: consented events link PostHog replay; retired capture emits no PostHog exception (A8)');
 });
+
+/*
+ * T-R9.3 (desktop resilient startup blueprint, R9 and D5). The staging desktop job forces one file-service configure
+ * failure and one unhealthy boot in a staging build of the release under test before this target runs, and names that
+ * release in `TAU_DESKTOP_SENTRY_RELEASE` (`tau-desktop@<version>`). The probe then proves the pipe end to end: each
+ * event arrives in `tau-desktop` exactly once for that release, carries no path, and the issue alert filtering on its
+ * `tau_event` tag fired for it (tau-cloud I1). Neither event exists yet, and whether `tau-desktop` ingests anything
+ * from 0.4.0 builds is unverified, so the row lands as `it.fails`; the package that emits the last event removes the
+ * mark. Only ids, tag names and counts are asserted or logged.
+ */
+const desktopBootSignals = ['file_service.start_failed', 'desktop-boot-unhealthy'] as const;
+
+/** A person's home, a macOS temporary folder or a rehearsal folder: what a report must never carry (Rules, 3). */
+const personalPathPattern = /\/(?:Users|home)\/[^/\s"]+|[A-Za-z]:\\{1,2}Users|\/var\/folders\/|tau-desktop-e2e-pick-/u;
+
+const sentryRead = async (path: string, token: string): Promise<unknown> => {
+  const response = await fetch(new URL(path, 'https://us.sentry.io/api/0/'), {
+    headers: { authorization: `Bearer ${token}` },
+    redirect: 'error',
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => {
+    throw new Error('Sentry query failed without exposing response details');
+  });
+  if (!response.ok) {
+    throw new Error(`Sentry query refused (HTTP ${String(response.status)})`);
+  }
+  return response.json().catch(() => {
+    throw new TypeError('Sentry query returned invalid JSON');
+  });
+};
+
+describe('R9 desktop boot signals on staging (T-R9.3)', () => {
+  // Expected-failure: @rifont until 2026-12-15
+  it.fails('should receive one file_service.start_failed and one desktop-boot-unhealthy for the release with no path and fire both alerts', async () => {
+    const token = process.env['SENTRY_E2E_READ_TOKEN'] ?? '';
+    expect(Boolean(token), 'Configure staging SENTRY_E2E_READ_TOKEN').toBe(true);
+    const release = process.env['TAU_DESKTOP_SENTRY_RELEASE'] ?? '';
+    expect(release, 'Name the forced staging release in TAU_DESKTOP_SENTRY_RELEASE').toMatch(/^tau-desktop@\S+$/u);
+    const rules = await sentryRead('projects/taucad/tau-desktop/rules/?expand=lastTriggered', token);
+    expect(Array.isArray(rules), 'tau-desktop issue alert rules').toBe(true);
+    for (const signal of desktopBootSignals) {
+      const query = new URLSearchParams({
+        project: '-1',
+        query: `project:tau-desktop tau_event:${signal} release:"${release}"`,
+        field: 'id',
+        statsPeriod: '24h',
+      });
+      for (const environment of harnessSentryEnvironments) {
+        query.append('environment', environment);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Two queries, read in order so a refusal names its signal.
+      const listing = await sentryRead(`organizations/taucad/events/?${query.toString()}`, token);
+      const ids =
+        typeof listing === 'object' && listing !== null && 'data' in listing && Array.isArray(listing.data)
+          ? listing.data.flatMap((row: unknown) =>
+              typeof row === 'object' && row !== null && 'id' in row && typeof row.id === 'string' ? [row.id] : [],
+            )
+          : [];
+      expect(ids, `exactly one ${signal} for the release`).toHaveLength(1);
+      const id = ids[0] ?? '';
+      expect(id).toMatch(/^[\da-f]{32}$/u);
+      // oxlint-disable-next-line no-await-in-loop -- One detail read for each signal.
+      const detail = await sentryRead(`projects/taucad/tau-desktop/events/${id}/`, token);
+      // Assert only a boolean so a leaked path never reaches the test output.
+      expect(personalPathPattern.test(JSON.stringify(detail)), `${signal} carries no path`).toBe(false);
+      const created =
+        typeof detail === 'object' &&
+        detail !== null &&
+        'dateCreated' in detail &&
+        typeof detail.dateCreated === 'string'
+          ? Date.parse(detail.dateCreated)
+          : Number.NaN;
+      const fired = (Array.isArray(rules) ? rules : []).some((rule: unknown) => {
+        const text = JSON.stringify(rule);
+        const lastTriggered =
+          typeof rule === 'object' && rule !== null && 'lastTriggered' in rule && typeof rule.lastTriggered === 'string'
+            ? Date.parse(rule.lastTriggered)
+            : Number.NaN;
+        return text.includes('tau_event') && text.includes(signal) && lastTriggered >= created;
+      });
+      expect(fired, `the ${signal} alert fired for the event`).toBe(true);
+      console.info('Desktop boot signal observed', { signal, eventId: id });
+    }
+  }, 120_000);
+});

@@ -180,7 +180,6 @@ export const downloadTauPage = (channel: DesktopChannel): string =>
 
 /** What each button of {@link bootstrapFailureDialog} does, in button order. */
 export const bootstrapFailureActions = ['restart-safe-mode', 'show-logs', 'download-tau', 'quit'] as const;
-export type BootstrapFailureAction = (typeof bootstrapFailureActions)[number];
 
 /* The causes a person can act on, named in plain words (D8's preflight). */
 const unwritable = new Set(['EACCES', 'EPERM', 'EROFS']);

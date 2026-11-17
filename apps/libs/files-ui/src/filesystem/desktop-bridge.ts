@@ -328,6 +328,11 @@ export type DesktopBridge = {
     list(): Promise<readonly string[]>;
     /** Forget a folder without deleting files; refuses active projects. */
     disconnect(path: string): Promise<void>;
+    /**
+     * The text of a granted folder's `.tau/workspace.json`, or `undefined` when it has none or is not granted. Absent
+     * on a shell that predates it (desktop resilient startup blueprint R7).
+     */
+    readMarker?(path: string): Promise<string | undefined>;
     onChange(listener: () => void): () => void;
     open(path: string): Promise<void>;
     /** Select a file or folder inside a granted root in the file manager. */

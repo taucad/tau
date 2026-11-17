@@ -7,6 +7,7 @@
  * (WP6) may not be present: an action whose member is missing is not offered. On the web there are no logs or
  * recovery window; Restart in Safe Mode is the `/?safe=1` page load, and an update is a reload.
  */
+import { readHomeBackendMirror, resetHomeRecords } from '@taucad/files-ui/filesystem/handle-store';
 import { safeModeHref } from '#lib/boot-signals.js';
 
 /** The shell's troubleshooting members (WP6's preload), each optional. */
@@ -14,6 +15,8 @@ type TroubleshootingBridge = Readonly<{
   showLogs?: () => Promise<void>;
   open?: () => Promise<void>;
   restartInSafeMode?: () => Promise<void>;
+  /** Quarantine the local database at the next start, then restart (WP9, R7). */
+  resetLocalDatabase?: () => Promise<void>;
 }>;
 
 /** What the panel reads of `window.tau`, each member optional. */
@@ -23,7 +26,14 @@ type RecoveryShell = Readonly<{
 }>;
 
 /** The recovery actions, by the label the panel shows. @public */
-export type RecoveryActionId = 'updateTau' | 'checkForUpdates' | 'showLogs' | 'troubleshooting' | 'restartInSafeMode';
+export type RecoveryActionId =
+  | 'updateTau'
+  | 'checkForUpdates'
+  | 'showLogs'
+  | 'troubleshooting'
+  | 'restartInSafeMode'
+  | 'resetLocalDatabase'
+  | 'resetFolderList';
 
 /** One action the panel can offer: a button that runs, or a link to follow. @public */
 export type RecoveryAction = Readonly<{ id: RecoveryActionId; label: string }> &
@@ -35,6 +45,8 @@ const labels: Readonly<Record<RecoveryActionId, string>> = {
   showLogs: 'Show logs',
   troubleshooting: 'Troubleshooting',
   restartInSafeMode: 'Restart in Safe Mode',
+  resetLocalDatabase: 'Reset local database',
+  resetFolderList: 'Reset folder list',
 };
 
 const shell = (): RecoveryShell | undefined => (globalThis as { tau?: RecoveryShell }).tau;
@@ -67,6 +79,20 @@ const action = (id: RecoveryActionId): RecoveryAction | undefined => {
           },
         };
       }
+      case 'resetFolderList': {
+        /* Only with Home's engine mirror: the reset pins Home again from it, and without it nothing is guessed (S37). */
+        return readHomeBackendMirror() === undefined
+          ? undefined
+          : {
+              id,
+              label,
+              kind: 'run',
+              run: runner(async () => {
+                await resetHomeRecords();
+                globalThis.location.reload();
+              }),
+            };
+      }
       default: {
         return undefined;
       }
@@ -81,6 +107,12 @@ const action = (id: RecoveryActionId): RecoveryAction | undefined => {
       tau.troubleshooting?.restartInSafeMode === undefined
         ? undefined
         : async () => tau.troubleshooting?.restartInSafeMode?.(),
+    resetLocalDatabase:
+      tau.troubleshooting?.resetLocalDatabase === undefined
+        ? undefined
+        : async () => tau.troubleshooting?.resetLocalDatabase?.(),
+    /* The desktop's reset is the shell's quarantine; the web's database reset is not offered there. */
+    resetFolderList: undefined,
   };
   const call = calls[id];
   return call === undefined ? undefined : { id, label, kind: 'run', run: runner(call) };

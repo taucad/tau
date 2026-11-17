@@ -70,6 +70,15 @@ const projectRootConfigurationChannelName = `${appMetaConfig.databasePrefix}proj
 const homeBackendMetaKey = 'home-storage-backend';
 const projectCreationLocationMetaKey = 'project-creation-location';
 const persistentStorageRequestMetaKey = 'persistent-storage-request';
+/** Set in the upgrade that creates the database, cleared once the grant file's folders were adopted (R7). */
+const grantsAdoptionMetaKey = 'grants-adoption-pending';
+/**
+ * `localStorage` mirror of Home's pin, read only when the database cannot be opened (desktop resilient startup
+ * blueprint D1, R7). @public
+ */
+export const homeBackendMirrorKey = 'tau:home-backend';
+/** How long the shell may take to read one granted folder's marker before the folder is adopted under a new id. */
+const markerReadDeadlineMilliseconds = 2000;
 
 /**
  * Physical engine backing the system-owned Home workspace. `node` is the
@@ -282,6 +291,16 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(metaStoreName)) {
         db.createObjectStore(metaStoreName, { keyPath: 'key' });
+      }
+      if (event.oldVersion === 0) {
+        /* A database created now is a first run or a reset (D0): the folders the grant file still holds get their
+         * workspace rows back at the next topology read (R7). A write refused here (a full disk) costs only that
+         * adoption, never the open. */
+        try {
+          request.transaction?.objectStore(metaStoreName).put({ key: grantsAdoptionMetaKey });
+        } catch (error) {
+          console.warn('Could not mark the new database for granted-folder adoption', error);
+        }
       }
       if (event.oldVersion < 4) {
         const { transaction } = request;
@@ -618,10 +637,53 @@ const readHomeBackendPin = async (db: IDBDatabase): Promise<HomeStorageBackend |
     });
   });
 
-/** The durable Home engine, or the current profile's unpinned preference. */
+/**
+ * Home's pin as mirrored in `localStorage`, or `undefined` when there is none or it cannot be read.
+ *
+ * @returns The mirrored engine.
+ * @public
+ */
+export function readHomeBackendMirror(): HomeStorageBackend | undefined {
+  try {
+    const value = globalThis.localStorage.getItem(homeBackendMirrorKey);
+    return isHomeStorageBackend(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Mirror the pin; a storage that refuses the write only loses the fallback, never the pin. */
+function writeHomeBackendMirror(backend: HomeStorageBackend): void {
+  try {
+    globalThis.localStorage.setItem(homeBackendMirrorKey, backend);
+  } catch {
+    // The mirror is a fallback for an unopenable database; the pin itself is unaffected.
+  }
+}
+
+/**
+ * The durable Home engine, or the current profile's unpinned preference.
+ *
+ * When the database cannot be opened, Home's engine is its mirror; on the desktop with no mirror it is `node`, the
+ * build's data path; on the web with no mirror the failure is rethrown, because a guess could show an empty Home (row
+ * S37; desktop resilient startup blueprint D1, R7).
+ */
 export async function getHomeStorageBackend(): Promise<HomeStorageBackend> {
-  const pinned = await withDb(readHomeBackendPin);
+  let pinned: HomeStorageBackend | undefined;
+  try {
+    pinned = await withDb(readHomeBackendPin);
+  } catch (error) {
+    const mirrored = readHomeBackendMirror();
+    if (mirrored !== undefined) {
+      return mirrored;
+    }
+    if (isDesktopTarget) {
+      return 'node';
+    }
+    throw error;
+  }
   if (pinned) {
+    writeHomeBackendMirror(pinned);
     return pinned;
   }
   unpinnedHomeBackend ??= detectHomeStorageBackend();
@@ -656,6 +718,7 @@ export async function pinHomeStorageBackend(backend: HomeStorageBackend): Promis
             store.put({ key: homeBackendMetaKey, backend } satisfies HomeBackendMeta);
           });
           tx.addEventListener('complete', () => {
+            writeHomeBackendMirror(resolved);
             resolve(resolved);
           });
           tx.addEventListener('abort', () => {
@@ -944,6 +1007,134 @@ export async function createNodeWorkspace(hostPath: string, options?: { name?: s
       }),
     ),
   );
+}
+
+/** The marker id a granted folder names, or `undefined` when the shell cannot read one in time. */
+async function readGrantedFolderMarker(path: string): Promise<WorkspaceMarker | undefined> {
+  const readMarker = desktopBridge()?.directories?.readMarker;
+  if (readMarker === undefined) {
+    return undefined;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  /* A folder on a hung mount must not hold the start: past the deadline it is adopted under a new id. */
+  const deadline = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(undefined);
+    }, markerReadDeadlineMilliseconds);
+  });
+  try {
+    const text = await Promise.race([readMarker(path), deadline]);
+    return text === undefined ? undefined : parseWorkspaceMarker(text);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Rebuild the folder list from the grant file after the database was created (desktop resilient startup blueprint R7,
+ * T-B5.8). Each granted folder with no workspace row gets one, under the id its `.tau/workspace.json` names when no
+ * other row holds it, otherwise under a new id. A grant is a folder the person picked in the native dialog, so
+ * adopting it adds nothing they did not choose. Runs once per created database: the pending row is cleared in the
+ * same transaction that writes the rows.
+ *
+ * @param grants - The grant file's folders, Home excluded.
+ * @returns The rows it wrote.
+ */
+async function adoptGrantedFolders(grants: readonly string[]): Promise<Workspace[]> {
+  return withWorkspaceMintLock(async () =>
+    withDb(async (db) => {
+      const pending = await new Promise<unknown>((resolve, reject) => {
+        const request = db.transaction(metaStoreName, 'readonly').objectStore(metaStoreName).get(grantsAdoptionMetaKey);
+        request.addEventListener('success', () => {
+          resolve(request.result);
+        });
+        request.addEventListener('error', () => {
+          reject(request.error ?? new Error('Failed to read the grant adoption marker'));
+        });
+      });
+      if (pending === undefined) {
+        return [];
+      }
+      const existing = await readAllWorkspaces(db);
+      const home = nodeHomeRoot();
+      const paths = [...new Set(grants.map((grant) => normalizeHostPath(grant)))].filter(
+        (path) => path !== home && !existing.some((workspace) => workspace.path === path),
+      );
+      const markers = await Promise.all(paths.map(async (path) => readGrantedFolderMarker(path)));
+      const taken = new Set(existing.map((workspace) => workspace.workspaceId));
+      const adopted: Workspace[] = [];
+      for (const [index, path] of paths.entries()) {
+        const markedId = markers[index]?.workspaceId;
+        const workspaceId =
+          markedId !== undefined && !taken.has(markedId) ? markedId : generatePrefixedId(idPrefix.workspace);
+        taken.add(workspaceId);
+        const name = hostPathName(path);
+        adopted.push({
+          workspaceId,
+          name,
+          slug: allocateWorkspaceSlug(name, [...existing, ...adopted]),
+          lastConnectedAt: Date.now(),
+          path,
+        });
+      }
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction([workspacesStoreName, metaStoreName], 'readwrite');
+        for (const workspace of adopted) {
+          tx.objectStore(workspacesStoreName).put(workspace);
+        }
+        tx.objectStore(metaStoreName).delete(grantsAdoptionMetaKey);
+        tx.addEventListener('complete', () => {
+          resolve();
+        });
+        tx.addEventListener('error', () => {
+          reject(tx.error ?? new Error('Failed to adopt the granted folders'));
+        });
+        tx.addEventListener('abort', () => {
+          reject(tx.error ?? new Error('Granted folder adoption aborted'));
+        });
+      });
+      if (adopted.length > 0) {
+        publishProjectRootConfigurationChange();
+      }
+      return adopted;
+    }),
+  );
+}
+
+/**
+ * Reset the web's handle database when it cannot be opened (desktop resilient startup blueprint D3, T-B5.7): delete
+ * it and pin Home again from the mirror, so Home opens on the same engine. Offered only when the mirror exists, so it
+ * refuses without one rather than guess (row S37). Folder connections are lost and are added again; Home's files are
+ * in their own engine and are not touched.
+ *
+ * @public
+ */
+export async function resetHomeRecords(): Promise<void> {
+  const mirrored = readHomeBackendMirror();
+  if (mirrored === undefined) {
+    throw new Error("Home's storage selection is unknown, so the local database is not reset.");
+  }
+  cachedDb?.close();
+  cachedDb = undefined;
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(dbName);
+    request.addEventListener('success', () => {
+      resolve();
+    });
+    request.addEventListener('error', () => {
+      reject(request.error ?? new Error(`Failed to delete ${dbName}`));
+    });
+    request.addEventListener('blocked', () => {
+      reject(
+        Object.assign(new Error(`Resetting ${dbName} is blocked by another Tau tab; close it and try again.`), {
+          name: 'StorageUpgradeBlockedError',
+        }),
+      );
+    });
+  });
+  await pinHomeStorageBackend(mirrored);
 }
 
 async function readHandle(db: IDBDatabase, workspaceId: string): Promise<FileSystemDirectoryHandle | undefined> {
@@ -1691,9 +1882,10 @@ export async function getProjectRootConfigs(
   } catch (error) {
     throw new GrantListUnreadableError('The granted folder list could not be read', { cause: error });
   }
+  const adopted = grantList === undefined ? [] : await adoptGrantedFolders(grantList);
   const grantedPaths = new Set(grantList);
   const nodeRoots = new Map(
-    workspaces
+    [...workspaces, ...adopted]
       .filter((workspace) => isNodeWorkspace(workspace))
       .filter((workspace) => grantedPaths.has(workspace.path))
       .map((workspace) => [workspace.path, workspace] as const),

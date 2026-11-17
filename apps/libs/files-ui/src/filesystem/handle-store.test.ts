@@ -368,6 +368,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  /* Home's engine mirror (WP9) lives in `localStorage`, which outlives each case's fresh database. */
+  globalThis.localStorage.clear();
   buildTarget.desktop = false;
   vi.useRealTimers();
   vi.unstubAllGlobals();

@@ -534,12 +534,9 @@ describe('useProjectManager discovery (I7, I9)', () => {
       const { queryClient } = createHarness();
 
       await act(async () => {
-        await expect(
-          libraryFor(queryClient).beginMutation('proj_bbbbbbbbbbbbbbbbbbbbb', { gated: false }),
-        ).rejects.toMatchObject({
-          name: 'LocalDatabaseUnavailableError',
-          message: expect.stringMatching(/local database is unavailable/iu),
-        });
+        const mutation = libraryFor(queryClient).beginMutation('proj_bbbbbbbbbbbbbbbbbbbbb', { gated: false });
+        await expect(mutation).rejects.toThrow(/local database is unavailable/iu);
+        await expect(mutation).rejects.toHaveProperty('name', 'LocalDatabaseUnavailableError');
       });
     });
 

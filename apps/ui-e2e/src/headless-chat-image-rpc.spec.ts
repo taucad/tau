@@ -122,14 +122,18 @@ test('agent RPC returns one SVG drawing for single and multi-angle capture', asy
     throw new Error(single.message);
   }
   expect(single.images.map(({ view }) => view)).toEqual(['drawing']);
+  expect(single.message).toBeUndefined();
   expectAnnotated(await readDataUrlEvidence(single.images[0]!.dataUrl), 'image/png');
 
-  // A 2D view produces one image in either mode (capture_images tool description): multi_angle names 3D camera angles.
+  // A 2D view produces one image in either mode (capture_images tool description), and the note says why.
   const multiAngle = await captureImages({ mode: 'multi_angle', targetFile: 'src/main.ts' });
   if (!multiAngle.success) {
     throw new Error(multiAngle.message);
   }
   expect(multiAngle.images.map(({ view }) => view)).toEqual(['drawing']);
+  expect(multiAngle.message).toBe(
+    'View drawing is a 2D drawing with one canonical view, so multi_angle returned one image; its six camera angles apply to 3D views only.',
+  );
   expectAnnotated(await readDataUrlEvidence(multiAngle.images[0]!.dataUrl), 'image/png');
 });
 

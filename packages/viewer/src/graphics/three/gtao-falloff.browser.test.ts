@@ -2,22 +2,16 @@ import { expect, it } from 'vitest';
 import { PerspectiveCamera, UnsignedByteType, Vector3, WebGPUCoordinateSystem } from 'three';
 import { NodeMaterial, QuadMesh, RenderTarget, WebGLBackend, WebGPUBackend } from 'three/webgpu';
 import { sample, screenUV, select, uniform, vec3, vec4 } from 'three/tsl';
-import { ao } from 'three/addons/tsl/display/GTAONode.js';
-import type { Node, UniformNode } from 'three/webgpu';
+import type { Node } from 'three/webgpu';
 import { createRenderer } from '#graphics/three/renderer.js';
-
-// The node as Tau's three@0.184.0 patch builds it (see `GtaoNode` in post-processing-webgpu.tsx).
-type GtaoNode = ReturnType<typeof ao> & {
-  falloffEnd: UniformNode<'float', number>;
-  falloffRange: UniformNode<'float', number>;
-};
+import { gtao } from '#graphics/three/gtao-node.js';
 
 // A floor facing the camera 30 radii away, cut at the screen's centre column by a step whose top sits `h` radii
 // closer. A floor pixel just left of the step sees samples on the step's top, 3D distance about h from it.
 const size = 256;
 const radius = 1;
 const floorDistance = 30 * radius;
-// The pre-patch hard slab: the viewer's `thicknessRatio` 1 / 0.09 radii of view depth.
+// Three r184's hard slab: the viewer's `thicknessRatio` 1 / 0.09 radii of view depth.
 const oldSlabRatio = 1 / 0.09;
 
 it.each(['webgpu', 'webgl'] as const)(
@@ -36,11 +30,11 @@ it.each(['webgpu', 'webgl'] as const)(
     };
     const floorDepth = uniform(depthAt(floorDistance));
     const stepDepth = uniform(depthAt(floorDistance));
-    const aoNode = ao(
+    const aoNode = gtao(
       sample((uv: Node) => select<'float'>((uv as Node<'vec2'>).x.lessThan(0.5), floorDepth, stepDepth)),
       sample(() => vec4(0, 0, 1, 1)),
       camera,
-    ) as GtaoNode;
+    );
     aoNode.resolutionScale = 1;
     aoNode.useTemporalFiltering = false;
     aoNode.samples.value = 16;

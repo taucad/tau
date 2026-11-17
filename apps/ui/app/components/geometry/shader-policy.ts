@@ -118,7 +118,11 @@ export const shaderSites = [
   },
   {
     id: 'webgpu-post',
-    modules: ['packages/viewer/src/graphics/three/post-processing-webgpu.tsx'],
+    // The gtao-node.ts module is a temporary copy of three r184's GTAONode with the smooth falloff (delete at the next upgrade).
+    modules: [
+      'packages/viewer/src/graphics/three/post-processing-webgpu.tsx',
+      'packages/viewer/src/graphics/three/gtao-node.ts',
+    ],
     // Internal graph and lifecycle helpers share this site's contract.
     helpers: [
       'packages/viewer/src/graphics/three/ao-normal.ts',
@@ -132,7 +136,7 @@ export const shaderSites = [
       'packages/viewer/src/graphics/three/ao-denoise.ts',
       'packages/viewer/src/graphics/three/fxaa.ts',
     ],
-    authoring: ['tsl', 'render-pipeline'],
+    authoring: ['tsl', 'render-pipeline', 'upstream-fork'],
     backends: ['webgpu'],
     risks: ['camera', 'depth', 'lifecycle', 'hot-path', 'private-api', 'upstream-drift'],
   },
@@ -476,6 +480,7 @@ export const shaderEvidence = {
       'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should guard the upstream implementations whose owned resources require explicit disposal',
     ),
     'generated-source': [
+      'packages/viewer/src/graphics/three/gtao-node.test.ts::should stay pinned to the three release it copies',
       'packages/viewer/src/graphics/three/webgpu-depth-sampling.test.ts::should require requalification when Three sampled-view caching or texture lifetime changes',
       'packages/viewer/src/graphics/three/webgl-clear-state.test.ts::should require requalification when Three color-clear or mask caching changes',
       'packages/viewer/src/graphics/three/ao-denoise.test.ts::should preserve the deterministic depth and normal %s graph',
@@ -525,6 +530,7 @@ export const shaderEvidence = {
       'packages/viewer/src/graphics/three/post-processing.test.tsx::should resolve viewport AO radius from the CSS diagonal independently of DPR above the physical minimum',
     ],
     lifecycle: [
+      'packages/viewer/src/graphics/three/gtao-node.test.ts::should release its target, material and noise texture once, and keep caller-owned inputs alive',
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should isolate two 5K node views through sibling resize and remount on %s',
       'packages/viewer/src/graphics/three/surface-reuse.test.ts::should retire every attachment user before initialization and retry a failed preparation',
       'packages/viewer/src/graphics/three/surface-reuse.test.ts::should restore the target after %s fails',

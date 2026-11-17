@@ -19,9 +19,9 @@ import type { sample } from 'three/tsl';
 import type { Node } from 'three/webgpu';
 import { Vector2 } from 'three';
 import type { Camera } from 'three';
-import type { ao } from 'three/addons/tsl/display/GTAONode.js';
+import type { GtaoNode } from '#graphics/three/gtao-node.js';
 
-type AoTexture = ReturnType<ReturnType<typeof ao>['getTextureNode']>;
+type AoTexture = ReturnType<GtaoNode['getTextureNode']>;
 
 /**
  * Deterministic joint bilateral AO reconstruction. Only visibility is filtered;

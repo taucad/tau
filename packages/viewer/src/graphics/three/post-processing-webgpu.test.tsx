@@ -35,7 +35,6 @@ type MockAoNode = {
   scale: { value: number; greaterThan: (value: number) => unknown };
   getTextureNode: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
-  _noiseNode: { value: { dispose: ReturnType<typeof vi.fn> } };
 };
 
 const mocks = vi.hoisted(() => {
@@ -166,7 +165,6 @@ const mocks = vi.hoisted(() => {
   const postDispose = vi.fn();
   const antialiasDispose = vi.fn();
   const aoDispose = vi.fn();
-  const noiseDispose = vi.fn();
   const retireTransmissionCopy = vi.fn();
 
   const depthNode = { kind: 'depth', sample: vi.fn(() => ({ kind: 'sampled-depth' })) };
@@ -246,7 +244,6 @@ const mocks = vi.hoisted(() => {
       scale: { value: 0, greaterThan: (value: number) => ({ intensityAbove: value }) },
       getTextureNode: vi.fn(() => aoTexture),
       dispose: aoDispose,
-      _noiseNode: { value: { dispose: noiseDispose } },
     };
     aoNodes.push(node);
     return node;
@@ -261,7 +258,6 @@ const mocks = vi.hoisted(() => {
     })),
     ao,
     aoDispose,
-    noiseDispose,
     aoNodes,
     aoTexture,
     clearDepth,
@@ -368,7 +364,7 @@ vi.mock('#graphics/three/scene-overlay.jsx', () => ({
 vi.mock('#graphics/three/transmission-retirement.js', () => ({ retireTransmissionCopy: mocks.retireTransmissionCopy }));
 vi.mock('#graphics/three/materials/line2.material.js', () => ({ Line2NodeMaterial: vi.fn() }));
 vi.mock('#graphics/three/fxaa.js', () => ({ createViewportFxaa: mocks.fxaa }));
-vi.mock('three/addons/tsl/display/GTAONode.js', () => ({ ao: mocks.ao }));
+vi.mock('#graphics/three/gtao-node.js', () => ({ gtao: mocks.ao }));
 vi.mock('#graphics/three/ao-normal.js', () => ({
   encodeAoNormal: (normal: unknown) => normal,
   loadAoNormal: (encoded: unknown) => encoded,
@@ -527,7 +523,6 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     mocks.mix.mockClear();
     mocks.denoiseSize.mockClear();
     mocks.aoDispose.mockClear();
-    mocks.noiseDispose.mockClear();
     mocks.retireTransmissionCopy.mockClear();
     mocks.aoNodes.length = 0;
     mocks.aoTexture.sample.mockClear();
@@ -834,7 +829,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     });
     expect(mocks.denoise.mock.results[0]!.value.step.value.set).toHaveBeenCalledWith(1 / 1500, 1 / 1000);
     mounted.unmount();
-    expect(mocks.noiseDispose).toHaveBeenCalledOnce();
+    expect(mocks.aoDispose).toHaveBeenCalledOnce();
   });
 
   it('should prepare only the active beauty endpoint when AO is disabled', async () => {
@@ -891,7 +886,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(disposeFrame).toHaveBeenCalledOnce();
     expect(firstPass.dispose).toHaveBeenCalledOnce();
     expect(mocks.antialiasTargetDispose).toHaveBeenCalledOnce();
-    expect(mocks.noiseDispose).toHaveBeenCalledOnce();
+    expect(mocks.aoDispose).toHaveBeenCalledOnce();
   });
 
   it('restores the selected scene-pass depth with one direct fullscreen draw', async () => {
@@ -995,7 +990,6 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(mocks.aoDispose).toHaveBeenCalledOnce();
     expect(mocks.antialiasTargetDispose).toHaveBeenCalledTimes(1);
     expect(mocks.antialiasMaterialDispose).toHaveBeenCalledTimes(1);
-    expect(mocks.noiseDispose).toHaveBeenCalledOnce();
     expect(mocks.aoNodes).toHaveLength(1);
     expect(mocks.scenePasses[2]!.setMRT).toHaveBeenCalledWith({
       output: { kind: 'output' },
@@ -1142,10 +1136,6 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(createHash('sha256').update(source).digest('hex')).toBe(
       'f87704938524dc419b91d9dd29c89d53272c78819d17537780a1c3b7e42c921b',
     );
-    const aoSource = readFileSync(require.resolve('three/addons/tsl/display/GTAONode.js'), 'utf8');
-    expect(createHash('sha256').update(aoSource).digest('hex')).toBe(
-      'a7ddcfd4c5d81585202219a45154c1e316deefbbd79ce7e3a20d1e1273a576b2',
-    );
   });
 
   it('should dispose the retargeted graph once on unmount', async () => {
@@ -1160,7 +1150,6 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(mocks.antialiasDispose).toHaveBeenCalledOnce();
     expect(mocks.antialiasTargetDispose).toHaveBeenCalledOnce();
     expect(mocks.antialiasMaterialDispose).toHaveBeenCalledOnce();
-    expect(mocks.noiseDispose).toHaveBeenCalledOnce();
     expect(mocks.postDispose).toHaveBeenCalledTimes(2);
   });
 
@@ -1185,7 +1174,6 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     const mounted = await mount();
     expect(mocks.antialiasTargetDispose).toHaveBeenCalledTimes(1);
     expect(mocks.antialiasMaterialDispose).toHaveBeenCalledTimes(1);
-    expect(mocks.noiseDispose).toHaveBeenCalledOnce();
     expect(mocks.aoDispose).toHaveBeenCalledOnce();
     expect(mocks.scenePasses[0]!.dispose).toHaveBeenCalledOnce();
     mounted.unmount();

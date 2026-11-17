@@ -1,7 +1,16 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 // @vitest-environment node
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -865,6 +874,27 @@ describe('readWindowsSandboxStatus', () => {
     expect(status.installed).toBe(false);
     expect(status.diagnostic).toMatch(/^the helper could not be started: .*ENOENT/u);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    "should give the helper the Windows directory's drive as SystemDrive when the host passes none",
+    async () => {
+      /* A stand-in helper that reads as installed only when it was given the drive and nothing else of the host's. */
+      const directory = realpathSync(mkdtempSync(join(tmpdir(), 'tau-status-')));
+      const helper = join(directory, 'helper');
+      writeFileSync(
+        helper,
+        `#!/bin/sh\nif [ "$SystemDrive" = "D:" ] && [ -z "$ProgramData" ]; then printf '%s' '{"accountSid":"S-1-5-21-1"}'; else printf '%s' "{\\"installed\\":false}"; fi\n`,
+      );
+      chmodSync(helper, 0o755);
+      try {
+        await expect(
+          readWindowsSandboxStatus(helper, { environment: { SystemRoot: String.raw`d:\Windows`, HOME: '/nowhere' } }),
+        ).resolves.toStrictEqual({ installed: true });
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('should carry the helper stderr when it cannot read its install record', async () => {
     await expect(

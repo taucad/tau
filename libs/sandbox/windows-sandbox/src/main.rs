@@ -31,6 +31,10 @@ fn main() {
             std::process::exit(2);
         }
     };
+    #[cfg(windows)]
+    if let Err(err) = win::util::ensure_system_environment() {
+        eprintln!("tau-windows-sandbox: the system environment cannot be completed: {err}");
+    }
     std::process::exit(dispatch(command));
 }
 

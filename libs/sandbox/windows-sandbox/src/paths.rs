@@ -121,8 +121,28 @@ pub fn same_final_path(final_path: &str, path: &str) -> bool {
     }
 }
 
+/// The drive (`C:`) of a drive-rooted path such as the Windows directory, as `SystemDrive` spells it. `None` for a
+/// path that does not start with a drive letter and a colon.
+pub fn drive_of(path: &str) -> Option<String> {
+    let mut chars = path.chars();
+    match (chars.next(), chars.next()) {
+        (Some(letter), Some(':')) if letter.is_ascii_alphabetic() => Some(format!("{}:", letter.to_ascii_uppercase())),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn names_the_drive_of_the_windows_directory() {
+        assert_eq!(drive_of(r"C:\Windows").as_deref(), Some("C:"));
+        assert_eq!(drive_of(r"d:\WINDOWS").as_deref(), Some("D:"));
+        assert_eq!(drive_of(r"\\server\share"), None);
+        assert_eq!(drive_of(""), None);
+        assert_eq!(drive_of("1:"), None);
+    }
+
     use super::*;
 
     #[test]

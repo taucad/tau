@@ -12,7 +12,7 @@
     "self-host": {
       "project": {
         "brotliBytes": 1928788,
-        "requests": 305,
+        "requests": 306,
         "largestChunkBrotliBytes": 167393,
         "knownHeavy": {}
       },
@@ -26,7 +26,7 @@
     "cloud": {
       "project": {
         "brotliBytes": 1956998,
-        "requests": 314,
+        "requests": 315,
         "largestChunkBrotliBytes": 167319,
         "knownHeavy": {}
       },

@@ -14,6 +14,7 @@
 
 import { execFile } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +43,9 @@ const originalDirectory = process.cwd();
 
 beforeAll(async () => {
   /* The cli package resolves this package's source, so its bin needs only its own build. */
-  await execFileAsync('pnpm', ['nx', 'build', 'cli', '--excludeTaskDependencies'], { cwd: repoRoot });
+  /* Nx's own entry under this Node.js: Windows starts `pnpm` only as `pnpm.cmd`, which needs a shell. */
+  const nx = join(dirname(createRequire(join(repoRoot, 'package.json')).resolve('nx/package.json')), 'dist/bin/nx.js');
+  await execFileAsync(process.execPath, [nx, 'build', 'cli', '--excludeTaskDependencies'], { cwd: repoRoot });
   workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-built-child-'));
   await writeFile(join(workspaceRoot, 'main.ts'), replicadBox, 'utf8');
   /* The child reads only the daemon's working directory and its own, and in this workspace its dependencies are the

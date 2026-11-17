@@ -704,7 +704,7 @@ export const createEventLogAppender = async (
     const overdue = Promise.withResolvers<undefined>();
     const timer = setTimeout(() => {
       overdue.resolve(undefined);
-    }, segmentBound);
+    }, segmentBound); // Bound: segmentRefreshMilliseconds.
     (timer as { unref?: () => void }).unref?.();
     readIds += 1;
     const landing = trackedRead(readIds, timer, read);
@@ -780,7 +780,7 @@ export const createEventLogAppender = async (
     const expired = Promise.withResolvers<'expired'>();
     const timer = setTimeout(() => {
       expired.resolve('expired');
-    }, segmentBound);
+    }, segmentBound); // Bound: segmentRefreshMilliseconds.
     (timer as { unref?: () => void }).unref?.();
     const first = await Promise.race([result, expired.promise]);
     clearTimeout(timer);

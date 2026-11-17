@@ -176,6 +176,14 @@
       "owner": "XD4"
     },
     {
+      "id": "REVISIONS-REMOTE-READ-RETRY",
+      "bound": "A failed remotes read is asked again after 1 second, doubling to at most 60 seconds, until it settles on no remote or a connected one; the failure and its reason show meanwhile (tau #1098)",
+      "site": "packages/revisions/src/remote.machine.ts",
+      "token": "remoteReadRetry",
+      "class": "Backoff",
+      "owner": "W41"
+    },
+    {
       "id": "A11",
       "bound": "Sync backoff",
       "site": "packages/revisions/src/sync.machine.ts",

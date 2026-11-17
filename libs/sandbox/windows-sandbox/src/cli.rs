@@ -4,15 +4,27 @@ use crate::install::{PROXY_PORTS, parse_ports};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    Status,
-    Setup { for_user: String, proxy_ports: Vec<u16> },
+    /// `quick`: the install record and the account's profile only, without the network fence or the volume roots.
+    Status {
+        quick: bool,
+    },
+    Setup {
+        for_user: String,
+        proxy_ports: Vec<u16>,
+    },
     Revoke,
     Launch,
-    Runner { pipe_in: String, pipe_out: String, launcher_pid: u32 },
-    Restore { journal: String },
+    Runner {
+        pipe_in: String,
+        pipe_out: String,
+        launcher_pid: u32,
+    },
+    Restore {
+        journal: String,
+    },
 }
 
-pub const USAGE: &str = "usage: tau-windows-sandbox <status | setup --for-user <SID> [--proxy-ports <ports>] | revoke | launch | restore --journal <path>>";
+pub const USAGE: &str = "usage: tau-windows-sandbox <status [--quick] | setup --for-user <SID> [--proxy-ports <ports>] | revoke | launch | restore --journal <path>>";
 
 fn options(args: &[String], allowed: &[&str]) -> Result<Vec<(String, String)>, String> {
     let mut out: Vec<(String, String)> = Vec::new();
@@ -43,8 +55,9 @@ fn is_sid(text: &str) -> bool {
 pub fn parse(args: &[String]) -> Result<Command, String> {
     let (command, rest) = args.split_first().ok_or_else(|| USAGE.to_owned())?;
     match command.as_str() {
+        "status" if rest.len() == 1 && rest[0] == "--quick" => Ok(Command::Status { quick: true }),
         "status" | "revoke" | "launch" if !rest.is_empty() => Err(format!("{command} takes no options")),
-        "status" => Ok(Command::Status),
+        "status" => Ok(Command::Status { quick: false }),
         "revoke" => Ok(Command::Revoke),
         "launch" => Ok(Command::Launch),
         "setup" => {
@@ -91,7 +104,8 @@ mod tests {
 
     #[test]
     fn parses_every_subcommand() {
-        assert_eq!(parse(&args(&["status"])).unwrap(), Command::Status);
+        assert_eq!(parse(&args(&["status"])).unwrap(), Command::Status { quick: false });
+        assert_eq!(parse(&args(&["status", "--quick"])).unwrap(), Command::Status { quick: true });
         assert_eq!(parse(&args(&["revoke"])).unwrap(), Command::Revoke);
         assert_eq!(parse(&args(&["launch"])).unwrap(), Command::Launch);
         assert_eq!(
@@ -131,6 +145,8 @@ mod tests {
             &[][..],
             &["frobnicate"],
             &["status", "--x", "1"],
+            &["status", "--quick", "--quick"],
+            &["status", "--quick", "1"],
             &["setup"],
             &["setup", "--for-user", "alice"],
             &["setup", "--for-user", "S-1-5-21-1", "--for-user", "S-1-5-21-2"],

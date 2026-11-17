@@ -836,12 +836,15 @@ describe('readWindowsSandboxStatus', () => {
         env: { ...process.env, TAU_FIXTURE_SCENARIO: scenario },
       });
 
-  it('should read an install record as installed', async () => {
-    await expect(
-      readWindowsSandboxStatus('helper.exe', {
-        spawnHelper: statusSpawn('installed'),
-      }),
-    ).resolves.toStrictEqual({ installed: true });
+  it('should read an install record as installed, asking only the quick question', async () => {
+    const asked: string[][] = [];
+    const spawnHelper: WindowsSandboxHelperSpawn = (arguments_) => {
+      asked.push([...arguments_]);
+      return statusSpawn('installed')(arguments_);
+    };
+
+    await expect(readWindowsSandboxStatus('helper.exe', { spawnHelper })).resolves.toStrictEqual({ installed: true });
+    expect(asked).toStrictEqual([['status', '--quick']]);
   });
 
   it('should read an absent install record as not installed', async () => {

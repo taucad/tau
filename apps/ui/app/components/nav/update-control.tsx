@@ -16,7 +16,7 @@ export type UpdateControlAction = {
 /**
  * Sidebar row and popover shared by every "a newer Tau is available" surface.
  * Desktop and browser differ only in copy and the action they wire in, so both
- * read as the same control in the same place.
+ * read as the same control in the same place, the last entry of `SidebarNotices`.
  */
 export function UpdateControl({
   title,
@@ -46,7 +46,7 @@ export function UpdateControl({
   readonly shouldFocusOnOpen?: boolean;
 }): React.JSX.Element {
   return (
-    <SidebarMenu className='p-1'>
+    <SidebarMenu>
       <SidebarMenuItem>
         <Popover open={isOpen} onOpenChange={onOpenChange}>
           <PopoverTrigger asChild>

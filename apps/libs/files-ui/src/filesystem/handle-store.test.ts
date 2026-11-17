@@ -6,6 +6,14 @@ import { workspaceMarkerPath, workspaceMarkerSchemaUrl } from '@taucad/types';
 import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 import type * as HandleStore from '#filesystem/handle-store.js';
 
+/** The build target the store resolves at module scope; a case sets it before {@link loadStore}. */
+const buildTarget = vi.hoisted(() => ({ desktop: false }));
+vi.mock('@taucad/ui-core/lib/build-target', () => ({
+  get isDesktopTarget() {
+    return buildTarget.desktop;
+  },
+}));
+
 // ===========================================================================
 // In-memory File System Access handles
 // ===========================================================================
@@ -360,6 +368,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  buildTarget.desktop = false;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   Reflect.deleteProperty(globalThis.navigator, 'locks');
@@ -1522,5 +1532,100 @@ describe('project-root configuration broadcasts', () => {
 
     expect(listener).toHaveBeenCalledTimes(3);
     channel.close();
+  });
+});
+
+// ===========================================================================
+// Desktop resilient startup (WP2): open deadline and a degraded Home-only configuration
+// ===========================================================================
+
+/** An `indexedDB` whose open requests never fire an event, as a wedged profile can leave them (B31). */
+const stubSilentIndexedDb = (): ReturnType<typeof vi.fn> => {
+  const open = vi.fn(() => new EventTarget());
+  vi.stubGlobal('indexedDB', { open });
+  return open;
+};
+
+/** An `indexedDB` whose open fails with a named DOM error, as an older build opening a newer profile does (B5). */
+const stubFailingIndexedDb = (name: string): void => {
+  vi.stubGlobal('indexedDB', {
+    open: () => {
+      const request = new EventTarget() as EventTarget & { error: DOMException };
+      request.error = new DOMException('The requested version is less than the existing version.', name);
+      queueMicrotask(() => {
+        request.dispatchEvent(new Event('error'));
+      });
+      return request;
+    },
+  });
+};
+
+const desktopHomeRoot = '/Users/tester/Library/Application Support/Tau/home';
+
+const installDesktop = (list: () => Promise<string[]>): void => {
+  buildTarget.desktop = true;
+  vi.stubGlobal('tau', {
+    nodeFs: { homeRoot: desktopHomeRoot, connect: async () => new MessageChannel().port1 },
+    dialog: { selectDirectory: vi.fn() },
+    directories: { list, onChange: () => () => undefined },
+  });
+};
+
+describe('database open deadline', () => {
+  it('should reject a handle database open that fires no event at 5 000 ms, and open again on the next read', async () => {
+    vi.resetModules();
+    const store = await import('#filesystem/handle-store.js');
+    vi.useFakeTimers();
+    const open = stubSilentIndexedDb();
+
+    const first = store.getAllProjectFileSystemConfigs();
+    const settled = expect(first).rejects.toMatchObject({ name: 'DatabaseOpenTimeoutError' });
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(open).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await settled;
+
+    const second = store.getAllProjectFileSystemConfigs();
+    const secondSettled = expect(second).rejects.toMatchObject({ name: 'DatabaseOpenTimeoutError' });
+    expect(open).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(5000);
+    await secondSettled;
+  });
+});
+
+describe('readProjectRootConfigs', () => {
+  it('should start Home alone, marked degraded, when the records cannot be read on the desktop', async () => {
+    installDesktop(async () => ['/Users/tester/Projects/Workshop']);
+    vi.resetModules();
+    const { readProjectRootConfigs } = await import('#filesystem/handle-store.js');
+    stubFailingIndexedDb('VersionError');
+
+    const read = await readProjectRootConfigs();
+
+    expect(read.configuration).toEqual({ projects: [], roots: [{ backend: 'node', path: desktopHomeRoot }] });
+    expect(read.degraded).toEqual({ input: 'records', errorName: 'VersionError' });
+  });
+
+  it('should start Home alone, marked degraded, when the grant list cannot be read', async () => {
+    installDesktop(async () => {
+      throw new Error('The services utility is not answering');
+    });
+    vi.resetModules();
+    const { readProjectRootConfigs } = await import('#filesystem/handle-store.js');
+
+    const read = await readProjectRootConfigs();
+
+    expect(read.configuration.roots).toEqual([{ backend: 'node', path: desktopHomeRoot }]);
+    expect(read.degraded).toEqual({ input: 'grants', errorName: 'Error' });
+  });
+
+  it('should return the full configuration, not degraded, when every input reads', async () => {
+    stubStorage({});
+    const { readProjectRootConfigs, getProjectRootConfigs } = await loadStore();
+
+    const read = await readProjectRootConfigs();
+
+    expect(read.degraded).toBeUndefined();
+    expect(read.configuration).toEqual(await getProjectRootConfigs());
   });
 });

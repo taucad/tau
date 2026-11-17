@@ -12,7 +12,12 @@ import {
   AlertDialogTitle,
 } from '@taucad/ui/components/alert-dialog';
 import { cn } from '@taucad/ui/utils/cn';
-import { SettingsGroup, SettingsItem, SettingsRow, SettingsRowsLoading } from '#components/settings/settings-item.js';
+import {
+  SettingsGroup,
+  SettingsItem,
+  SettingsRow,
+  SettingsRowsLoading,
+} from '@taucad/settings-ui/components/settings/settings-item';
 import { GithubRepositoryWriteSettings } from '#components/github/github-repository-write-settings.js';
 import {
   configureGithubAccess,

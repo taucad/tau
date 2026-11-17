@@ -387,6 +387,7 @@ export type UiBrowserCommands = {
   uiSampleCameraDuringClick(selector: string, frameCount: number): Promise<unknown[]>;
   uiScrollTarget(selector: string, surface?: TargetSurface): Promise<void>;
   uiSetTargetOffline(offline: boolean): Promise<void>;
+  uiFailEntryChunk(fail: boolean): Promise<void>;
   uiSetViewport(viewport: TargetViewport, surface?: TargetSurface): Promise<void>;
   uiStartHostFixture(): Promise<string>;
   uiStartLinkedGithubFixture(): Promise<TargetLinkedGithub>;

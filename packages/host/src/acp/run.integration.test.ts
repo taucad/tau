@@ -27,7 +27,7 @@ import type { Agent, Client, SessionConfigOption, SessionUpdate, StopReason } fr
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { AgentChannelAdmissionConfig } from '@taucad/agent-host/wire';
 import type { AgentLogEvent, ExternalAgentTurn, JsonValue, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
-import { reduceEventLog } from '@taucad/agent-host';
+import { parseLogEvent, reduceEventLog } from '@taucad/agent-host';
 import { parseQuestionsFile, serializeAnswersFile } from '@taucad/chat';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
@@ -2082,16 +2082,17 @@ describe('one ACP session per chat', () => {
       onFrame: (frame) => frames.push(frame),
     });
 
+    /* The one call on the first turn is the default mode (PR5), not the model. */
     await session.prompt('first noask', stubTurn(), fakeAgentModel);
-    expect(sent(frames, 'session/set_config_option')).toBe(0);
+    expect(sent(frames, 'session/set_config_option')).toBe(1);
 
     await session.prompt('second noask', stubTurn(), 'gpt-5.3-codex');
-    expect(sent(frames, 'session/set_config_option')).toBe(1);
+    expect(sent(frames, 'session/set_config_option')).toBe(2);
     expect(modelOption(session.configOptions)).toMatchObject({ currentValue: 'gpt-5.3-codex' });
 
-    /* Still one, because the session now holds what the third turn asks for. */
+    /* Still two, because the session now holds what the third turn asks for. */
     await session.prompt('third noask', stubTurn(), 'gpt-5.3-codex');
-    expect(sent(frames, 'session/set_config_option')).toBe(1);
+    expect(sent(frames, 'session/set_config_option')).toBe(2);
     await session.close();
   }, 30_000);
 
@@ -2112,7 +2113,8 @@ describe('one ACP session per chat', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP configuration retains its wire id.
       web_search: true,
     });
-    expect(sent(frames, 'session/set_config_option')).toBe(2);
+    /* Thinking, web search and the default mode (PR5). */
+    expect(sent(frames, 'session/set_config_option')).toBe(3);
     expect(
       frames.some(
         ({ direction, frame }) =>
@@ -2137,7 +2139,43 @@ describe('one ACP session per chat', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- ACP configuration retains its wire id.
       web_search: true,
     });
-    expect(sent(frames, 'session/set_config_option')).toBe(2);
+    expect(sent(frames, 'session/set_config_option')).toBe(3);
+    await session.close();
+  }, 30_000);
+
+  it('starts a new session in auto, falls back on a model without it, and keeps a pick (PR5)', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-mode-'));
+    roots.push(cwd);
+    const frames: AcpWireFrame[] = [];
+    const session = await openAcpSession({
+      adapter: { ...fakeAgent, defaultModePreference: ['auto', 'acceptEdits'] },
+      cwd,
+      createId: () => randomUUID(),
+      onFrame: (frame) => frames.push(frame),
+    });
+    const mode = (): unknown => session.configOptions?.find((option) => option.id === 'mode')?.currentValue;
+    const modeSets = (): string[] =>
+      frames
+        .filter(
+          ({ direction, frame }) =>
+            direction === 'client->agent' &&
+            frame.includes('"method":"session/set_config_option"') &&
+            frame.includes('"configId":"mode"'),
+        )
+        .map(({ frame }) => /"value":"([^"]+)"/u.exec(frame)?.[1] ?? '');
+
+    await session.prompt('first noask', stubTurn(), fakeAgentModel);
+    expect(mode()).toBe('auto');
+    /* The composer echoes `auto`; the fixture clamps it to `default` on a model without auto. */
+    await session.prompt('second noask', stubTurn(), 'gpt-5.3-codex', { mode: 'auto' });
+    expect(mode()).toBe('acceptEdits');
+    await session.prompt('third noask', stubTurn(), fakeAgentModel, { mode: 'acceptEdits' });
+    expect(mode()).toBe('auto');
+    /* The person picks Manual: kept through a model switch. */
+    await session.prompt('fourth noask', stubTurn(), fakeAgentModel, { mode: 'default' });
+    await session.prompt('fifth noask', stubTurn(), 'gpt-5.3-codex', { mode: 'default' });
+    expect(mode()).toBe('default');
+    expect(modeSets()).toEqual(['auto', 'acceptEdits', 'auto', 'default']);
     await session.close();
   }, 30_000);
 
@@ -2601,6 +2639,11 @@ describe('restoring a session a cold start lost', () => {
         textOfMessage(event.message).includes('could not restore'),
     );
     expect(notes).toHaveLength(1);
+    /* The note is a durable row like any other: the log refuses one its schema does not admit. */
+    const envelope = { version: 1, leaderEpoch: 'epoch', recordedAt: 'now', runId: 'run-lost' };
+    for (const [sequence, event] of appended.entries()) {
+      expect(() => parseLogEvent({ ...event, ...envelope, sequence })).not.toThrow();
+    }
   }, 30_000);
 });
 

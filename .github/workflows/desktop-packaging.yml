@@ -150,7 +150,7 @@ jobs:
           docker run --rm -e TAU_APT_DISPOSABLE_CONTAINER=1 -e TAU_APT_ENROLLMENT_SCRIPT=/configure-linux-apt.sh --mount type=bind,source="$PWD/apps/desktop/scripts/configure-linux-apt.test.mts",target=/test.mts,readonly --mount type=bind,source="$PWD/apps/desktop/scripts/configure-linux-apt.sh",target=/configure-linux-apt.sh,readonly node:24.20.0-bookworm-slim bash -c 'apt-get update -qq && apt-get install -y -qq gnupg && node /test.mts'
       - name: Route contracts, protected publication and first-download verification
         if: runner.os == 'Linux'
-        run: pnpm nx run-many -p desktop -t test-route-publication test-route-transport test-publication-authority test-receipt-provenance test-first-download test-installer-candidate test-linux-receipts-replay
+        run: pnpm nx run-many -p desktop -t test-route-publication test-route-transport test-publication-authority test-receipt-provenance test-first-download test-installer-candidate test-intel-beta-dmg test-linux-receipts-replay
       - name: Signed APT publication, interruption and metadata renewal
         if: runner.os == 'Linux'
         shell: bash
@@ -160,7 +160,7 @@ jobs:
           pnpm exec esbuild apps/desktop/scripts/renew-desktop-apt.test.mts --bundle --platform=node --format=esm --outfile=out/research/desktop-packaging-ci/renew-desktop-apt.mjs
           docker run --rm -e TAU_APT_DISPOSABLE_CONTAINER=1 --mount type=bind,source="$PWD/out/research/desktop-packaging-ci",target=/fixtures,readonly node:24.20.0-bookworm-slim bash -c 'apt-get update -qq && apt-get install -y -qq gnupg && node /fixtures/linux-apt-repository.mjs && node /fixtures/desktop-apt-publication.mjs && node /fixtures/renew-desktop-apt.mjs'
       - name: Qualification evidence refuses incomplete and synthetic acceptance
-        run: pnpm nx run-many -p desktop -t test-qualification-evidence test-qualification-metadata test-qualification-profile-access
+        run: pnpm nx run-many -p desktop -t test-qualification-evidence test-qualification-metadata test-qualification-profile-access test-qualification-recovery
       - name: Real probe processes and isolated HTTPS transport
         run: pnpm nx run-many -p desktop -t test-qualification-probe-process test-qualification-mirror test-qualification-tls test-collect-qualification-rows
       - name: Native quit refuses foreign processes and stale sessions

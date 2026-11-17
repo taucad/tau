@@ -1,5 +1,5 @@
 import { Heading } from '@taucad/ui/components/heading';
-import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
+import { SettingsItem, SettingsSectionCard } from '@taucad/settings-ui/components/settings/settings-item';
 import { useRef, useState } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, LoaderCircle, Plus } from 'lucide-react';

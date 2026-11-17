@@ -72,6 +72,7 @@ const { projectManager, query, registry, useQuery, worker, chats } = vi.hoisted(
       observed: [] as string[],
       projection: undefined as { ledger: { position: { cursor: number } }; endCursor: number } | undefined,
       plan: { liveChatIds: [] as string[] },
+      logs: new Map<string, string>(),
     },
   };
 });
@@ -87,7 +88,32 @@ vi.mock('@tanstack/react-query', () => ({
 const listingQuery = vi.hoisted(() => ({ queryKey: ['projects'], queryFn: async () => undefined }));
 
 const commands = vi.hoisted(() => ({
-  current: undefined as Pick<ProjectCommands, 'verifyProjectQuiescent' | 'closeProjectSession'> | undefined,
+  current: undefined as
+    | Pick<ProjectCommands, 'verifyProjectQuiescent' | 'leaseQuiescentProject' | 'closeProjectSession'>
+    | undefined,
+}));
+
+/* The headless half (W30): a log reading `running` holds a run that has not ended; the lease records its release. */
+const leases = vi.hoisted(() => ({
+  taken: [] as Array<Readonly<{ projectId: string; chatIds: readonly string[] }>>,
+  releasedAfter: undefined as readonly string[] | undefined,
+}));
+vi.mock('@taucad/agent-host', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  unsettledLogRun: (bytes: Uint8Array<ArrayBuffer>) =>
+    new TextDecoder().decode(bytes) === 'running' ? { runId: 'run_1', state: 'running' } : undefined,
+}));
+vi.mock('@taucad/agent-host/browser', () => ({
+  leaseChatLogs: async (input: { projectId: string; chatIds: readonly string[] }) => {
+    leases.taken.push(input);
+    return {
+      status: 'held',
+      lost: () => false,
+      release: () => {
+        leases.releasedAfter = [...registry.operations];
+      },
+    };
+  },
 }));
 
 vi.mock('#hooks/use-project-manager.js', async () => {
@@ -103,8 +129,9 @@ vi.mock('#hooks/use-project-manager.js', async () => {
   const chatSource = mock<ChatStorage>({
     getChatsForResource: async () => {
       const stored = await projectManager.getChatsForResource();
-      return stored.map(({ id }) => mock<Chat>({ id }));
+      return stored.map(({ id }) => mock<Chat>({ id, name: id }));
     },
+    readChatLog: async (chatId) => new TextEncoder().encode(chats.logs.get(chatId) ?? ''),
   });
   const built = new commandsModule.ProjectCommands({
     facade: notCalled,
@@ -126,6 +153,7 @@ vi.mock('#hooks/use-project-manager.js', async () => {
   });
   commands.current = {
     verifyProjectQuiescent: built.verifyProjectQuiescent,
+    leaseQuiescentProject: built.leaseQuiescentProject,
     closeProjectSession: built.closeProjectSession,
   };
   return {
@@ -207,14 +235,35 @@ describe('useProjects deletion', () => {
     chats.observed = [];
     chats.projection = undefined;
     chats.plan = { liveChatIds: [] };
+    chats.logs.clear();
+    leases.taken.length = 0;
+    leases.releasedAfter = undefined;
     projectManager.getChatsForResource.mockResolvedValue([]);
     vi.clearAllMocks();
   });
 
-  it('refuses permanent deletion without a caught-up projection for every stored chat', async () => {
-    projectManager.getChatsForResource.mockResolvedValue([{ id: 'unseen-chat' }]);
+  /* #2303: a closed project's chats are read from their logs under a lease; it is never asked to be opened. */
+  it('permanently deletes a closed project whose chat logs hold no unended run, under their lease', async () => {
+    projectManager.getChatsForResource.mockResolvedValue([{ id: 'settled-chat' }]);
     const { result } = renderHook(() => useProjects());
-    await expect(result.current.permanentlyDeleteProject('proj_closed')).rejects.toThrow(/Restore.*open/u);
+    await act(async () => result.current.permanentlyDeleteProject('proj_closed'));
+    /* Verified once, then held through the delete. */
+    expect(leases.taken).toEqual([
+      { projectId: 'proj_closed', chatIds: ['settled-chat'] },
+      { projectId: 'proj_closed', chatIds: ['settled-chat'] },
+    ]);
+    expect(registry.operations).toEqual(['remove-composers:proj_closed', 'delete:proj_closed']);
+    /* Released only once the delete is done. */
+    expect(leases.releasedAfter).toEqual(['remove-composers:proj_closed', 'delete:proj_closed']);
+  });
+
+  it('refuses permanent deletion of a closed project whose chat log holds a run that has not ended', async () => {
+    projectManager.getChatsForResource.mockResolvedValue([{ id: 'running-chat' }]);
+    chats.logs.set('running-chat', 'running');
+    const { result } = renderHook(() => useProjects());
+    await expect(result.current.permanentlyDeleteProject('proj_closed')).rejects.toThrow(
+      /running-chat" has a run that has not ended/u,
+    );
     expect(projectManager.permanentlyDeleteProject).not.toHaveBeenCalled();
   });
 
@@ -280,16 +329,16 @@ describe('useProjects listing query', () => {
   });
 
   /* Two keys meant two whole-workspace discovery passes per navigation (W21 / D19). */
-  it('reads one key whichever deleted filter the caller asks for', () => {
+  it('reads one key whichever scope the caller asks for', () => {
     useQuery.mockClear();
     renderHook(() => useProjects());
-    renderHook(() => useProjects({ includeDeleted: true }));
+    renderHook(() => useProjects({ scope: 'all' }));
 
     const keys = useQuery.mock.calls.map((call) => JSON.stringify(call[0]['queryKey']));
     expect(new Set(keys).size).toBe(1);
   });
 
-  it('filters the deleted rows out of the shared listing', () => {
+  it('filters the shared listing to the scope it is asked for', () => {
     const entry = (id: string, deletedAt?: number) => ({
       projectId: id,
       manifest: { name: id },
@@ -304,9 +353,12 @@ describe('useProjects listing query', () => {
     };
 
     const visible = renderHook(() => useProjects());
-    const all = renderHook(() => useProjects({ includeDeleted: true }));
+    const trash = renderHook(() => useProjects({ scope: 'trash' }));
+    const all = renderHook(() => useProjects({ scope: 'all' }));
 
     expect(visible.result.current.projects.map(({ id }) => id)).toEqual(['proj_live']);
+    /* #2305: the Trash is the trashed projects alone, never the live ones beside them. */
+    expect(trash.result.current.projects.map(({ id }) => id)).toEqual(['proj_trashed']);
     expect(all.result.current.projects.map(({ id }) => id)).toEqual(['proj_live', 'proj_trashed']);
     query.data = undefined;
   });

@@ -107,7 +107,7 @@ export const content = (): React.JSX.Element => (
                 <p className='fine' data-download-detail={platform} />
               </div>
             ))}
-            {/* The Intel Mac beta archive leaves the list once the catalog admits a qualified Intel DMG. */}
+            {/* The Intel Mac beta DMG leaves the list once the catalog admits a qualified Intel DMG. */}
             <div data-beta-route='macIntel'>
               <div className='download-title'>
                 <SiteLink

@@ -261,11 +261,11 @@ try {
     // oxlint-disable-next-line eslint/no-await-in-loop -- Inspect both SSR archive links in this one browser document.
     assert.equal(await nojsPage.locator(`#downloads a[href="https://downloads.tau.new/latest/${file}"]`).count(), 1);
   }
-  // A Mac has no qualified archive fallback: without the catalog the only Mac file is the Intel beta ZIP.
+  // A Mac has no qualified archive fallback: without the catalog the only Mac file is the Intel beta DMG.
   assert.equal(await nojsPage.locator('a[href*="Tau-macos"]').count(), 1);
   assert.equal(
     await nojsPage
-      .locator('[data-beta-route="macIntel"] a[href="https://downloads.tau.new/latest/Tau-macos-x64.zip"]')
+      .locator('[data-beta-route="macIntel"] a[href="https://downloads.tau.new/latest/Tau-macos-x64.dmg"]')
       .count(),
     1,
   );

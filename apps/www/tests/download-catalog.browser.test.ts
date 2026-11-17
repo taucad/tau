@@ -59,6 +59,7 @@ type Visit = {
 type Surface = {
   /** `beta` marks a link inside an unqualified beta entry, which stands apart from the qualified Mac routes. */
   readonly links: ReadonlyArray<{ text: string; href: string; visible: boolean; beta: boolean }>;
+  /** Page text outside beta entries, so qualified-route claims are not satisfied by the Intel beta DMG. */
   readonly text: string;
 };
 
@@ -71,7 +72,13 @@ const surface = async (page: Page): Promise<Surface> => ({
       beta: anchor.closest('[data-beta-route]') !== null,
     })),
   ),
-  text: (await page.locator('body').textContent()) ?? '',
+  text: await page.locator('body').evaluate((body) => {
+    const copy = body.cloneNode(true) as HTMLElement;
+    for (const beta of copy.querySelectorAll('[data-beta-route]')) {
+      beta.remove();
+    }
+    return copy.textContent;
+  }),
 });
 
 describe('shipping installer catalog browser behavior', () => {
@@ -181,15 +188,15 @@ describe('shipping installer catalog browser behavior', () => {
   };
 
   /**
-   * The Intel beta ZIP is the one Mac file listed without a qualified catalog route.
+   * The Intel beta DMG is the one Mac file listed without a qualified catalog route.
    * @param links - The rendered page's links.
    * @param shown - Whether the entry is expected visible: hidden once the catalog admits an Intel DMG.
    */
   const expectIntelBeta = (links: Surface['links'], shown: boolean): void => {
     const beta = links.filter((link) => link.beta);
     expect(beta).toHaveLength(1);
-    expect(beta[0]).toMatchObject({ text: 'Download ZIP for Intel Mac', visible: shown });
-    expect(new URL(beta[0]!.href).pathname).toBe('/latest/Tau-macos-x64.zip');
+    expect(beta[0]).toMatchObject({ text: 'Download DMG for Intel Mac', visible: shown });
+    expect(new URL(beta[0]!.href).pathname).toBe('/latest/Tau-macos-x64.dmg');
   };
 
   /**
@@ -324,7 +331,7 @@ describe('shipping installer catalog browser behavior', () => {
     ]);
     const upgraded = await surface(page);
     expectTruthfulMacLabels(upgraded.links);
-    // A qualified Intel DMG replaces the beta ZIP entry.
+    // A qualified Intel DMG replaces the beta DMG entry.
     expectIntelBeta(upgraded.links, false);
     const instructions = await page.locator('[data-install-instructions]').textContent();
     expect(instructions).toMatch(
@@ -368,9 +375,9 @@ describe('shipping installer catalog browser behavior', () => {
     expect(visible.filter((link) => !link.beta && /Intel Mac|macos-x64/u.test(`${link.text} ${link.href}`))).toEqual(
       [],
     );
-    // Without a qualified Intel DMG the Intel beta ZIP stays listed, served from the staging origin.
+    // Without a qualified Intel DMG the Intel beta DMG stays listed, served from the staging origin.
     expectIntelBeta(after.links, true);
-    expect(visible.find((link) => link.beta)?.href).toBe('https://downloads.taucad.dev/latest/Tau-macos-x64.zip');
+    expect(visible.find((link) => link.beta)?.href).toBe('https://downloads.taucad.dev/latest/Tau-macos-x64.dmg');
     const apple = visible.filter((link) => link.text === 'Download DMG for Apple silicon');
     expect(apple.length).toBeGreaterThanOrEqual(2);
     for (const link of apple) {

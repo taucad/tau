@@ -81,7 +81,7 @@ describe('GitHub credential renewal (A10)', () => {
     expect(guard.take()).toEqual([]);
   });
 
-  it('should run a negative or non-finite wait out at once and clamp a far one, as setTimeout did', () => {
+  it('should run a negative or non-finite wait out at once, as setTimeout did, and clamp a far one to the longest wait it holds', () => {
     const { actor, clock, due } = harness();
     actor.send({ type: 'schedule', delayMilliseconds: -5 });
     clock.advance(0);

@@ -386,15 +386,17 @@ function useViewerSelectableFiles(): ViewerSelectableFile[] | undefined {
       return undefined;
     }
     const superseded = new AbortController();
+    // A search answers the tree revision it started on; a later revision runs its own.
+    const isCurrent = (): boolean => !superseded.signal.aborted && tree.completeTreeVersion === revision;
     // async-iife: bootstrap -- An effect cannot await the project search.
     void (async () => {
       try {
         const files = await listViewerSourceFiles(tree, capabilities);
-        if (!superseded.signal.aborted) {
+        if (isCurrent()) {
           setListed(files);
         }
       } catch {
-        if (!superseded.signal.aborted) {
+        if (isCurrent()) {
           setListed([]);
         }
       }

@@ -194,6 +194,53 @@ describe('the object store', () => {
     expect(await store.read('0'.repeat(40))).toBeUndefined();
   });
 
+  it('keeps an imported whole entry with the deflated body it inflated from, deflating only the others', async () => {
+    const { provider } = rangedProvider();
+    const inline = createInlineCompute();
+    let deflates = 0;
+    const compute = {
+      ...inline,
+      deflate: async (raw: Uint8Array<ArrayBuffer>) => {
+        deflates += 1;
+        return inline.deflate(raw);
+      },
+    };
+    const store = createObjectStore({
+      files: gitFilesOf(provider, '.git'),
+      gitdir: '.git',
+      compute,
+      fenceName: 'import',
+    });
+    const objectOf = (text: string) => {
+      const data = encoder.encode(text);
+      return {
+        oid: digestHex('sha1', encoder.encode(`blob ${String(data.byteLength)}\0${text}`)),
+        type: 'blob',
+        data,
+      } as const;
+    };
+    const copied = objectOf('cube(1);\n'.repeat(40));
+    const deflated = objectOf('sphere(2);\n'.repeat(40));
+    /* A body as a remote pack's entry holds it: a view over a wider read. */
+    const wide = new Uint8Array(4096);
+    const body = await inline.deflate(copied.data);
+    wide.set(body, 100);
+
+    const packs = await store.importObjects([
+      { ...copied, compressed: wide.subarray(100, 100 + body.byteLength) },
+      deflated,
+      deflated,
+    ]);
+
+    expect(packs).toHaveLength(1);
+    expect(deflates).toBe(1);
+    const [readCopied, readDeflated] = await Promise.all([store.read(copied.oid), store.read(deflated.oid)]);
+    expect(readCopied?.data).toStrictEqual(copied.data);
+    expect(readDeflated?.data).toStrictEqual(deflated.data);
+    /* Held objects are skipped: a second import writes nothing. */
+    expect(await store.importObjects([copied, deflated])).toStrictEqual([]);
+  });
+
   it('costs one table lookup and one range read for a packed object, and never reads the pack whole', async () => {
     const { provider, packReads } = rangedProvider();
     const writer = storeOver(provider);

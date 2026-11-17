@@ -11,7 +11,7 @@ vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: () => [false, vi.fn(), vi.fn()],
 }));
 vi.mock('@taucad/ui-kit/icons/file-extension-icon', () => ({ FileExtensionIcon: () => undefined }));
-vi.mock('#components/code/diff-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
   DiffViewer: ({ originalContent }: { readonly originalContent: string }) => <pre>{originalContent}</pre>,
   getFirstChangedLine: () => 1,
 }));

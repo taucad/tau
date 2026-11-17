@@ -94,7 +94,7 @@ import { getFileExtension, encodeTextFile } from '@taucad/ui-core/utils/filesyst
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useFileTreeSelector } from '#hooks/use-file-tree.js';
+import { useFileTreeSelector } from '@taucad/files-ui/hooks/use-file-tree';
 import { useDirectoryListing } from '@taucad/fs-client/react/use-directory-listing';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
@@ -102,12 +102,12 @@ import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import { parentDirectory } from '@taucad/utils/path';
 import { useRowWindow } from '@taucad/project-workspace/hooks/use-row-window';
 
-import type { TreeItemData } from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
+import type { TreeItemData } from '@taucad/files-ui/utils/file-tree.utils';
 import {
   buildFileTreeIndex,
   indexedItemData,
   isEditorSystemArtifactPath,
-} from '#routes/w.$workspace.$project/chat-editor-file-tree.utils.js';
+} from '@taucad/files-ui/utils/file-tree.utils';
 import { fileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import type { FileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@taucad/ui-core/filesystem/workspace-errors';
@@ -138,7 +138,7 @@ import {
   createFileTreeDownloadError,
   getFileTreeDownloadErrorMessage,
   getFileTreeDownloadPolicy,
-} from '#routes/w.$workspace.$project/file-tree-download-policy.js';
+} from '@taucad/files-ui/utils/file-tree-download-policy';
 import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { previewProjectFileInQuickLook } from '#filesystem/desktop-quick-look.js';
 import { NativeFileManagerIcon, useRevealInFileManager } from '#hooks/use-native-file-manager.js';

@@ -407,6 +407,7 @@ export const ChatTextarea = memo(function ({
         isSubmitting={logic.isSubmitting}
         canResume={logic.canResume}
         isAttaching={logic.isAttaching}
+        pendingImages={logic.pendingImages}
         inputText={logic.inputText}
         attachments={logic.attachments}
         attachmentDirectory={logic.attachmentDirectory}

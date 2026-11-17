@@ -51,6 +51,7 @@ import {
 } from '@taucad/files-ui/filesystem/handle-store';
 import type {
   ProjectFileSystemConfig,
+  Workspace,
   WorkspaceBindingRepair,
   WorkspaceEntry,
 } from '@taucad/files-ui/filesystem/handle-store';
@@ -959,6 +960,73 @@ export const deriveWorkspaceBindingRepairs = async (
     projectCount: group.length,
     repairs: group.map(({ repair }) => repair),
   }));
+};
+
+/**
+ * The listing from discovery alone, for a start whose local databases cannot be opened (desktop resilient startup
+ * blueprint R7, B5). Home's files are on disk, so its projects list and open without a library row: each project's
+ * state is read from its own files (`.tau/library.json` and the manifest's time), as a missing row is recovered, and
+ * nothing is written. Slugs use whatever workspace rows can still be read; Home's need none.
+ *
+ * @param recordFiles - The record client that reads each project's own files.
+ * @param discovery - The pass's listing.
+ * @returns The listing, with no recoveries and no binding repairs.
+ * @public
+ */
+export const buildDiscoveryOnlyListing = async (
+  recordFiles: ProjectLibraryFileClient,
+  discovery: ProjectDiscoveryResult,
+): Promise<ProjectListing> => {
+  const validEntries = discovery.entries.filter(
+    (entry): entry is Extract<ProjectDiscoveryEntry, { status: 'valid' }> => entry.status === 'valid',
+  );
+  const [workspaces, states] = await Promise.all([
+    listWorkspaces().catch((): Workspace[] => []),
+    Promise.all(validEntries.map(async ({ projectId }) => readProjectLibraryStateFromDisk(recordFiles, projectId))),
+  ]);
+  const projects: ProjectLibraryEntry[] = validEntries.map((entry, index) => {
+    const slugs = projectSlugsOf(entry.locator, workspaces);
+    return {
+      projectId: entry.projectId,
+      manifest: entry.manifest,
+      library: states[index]!,
+      locator: entry.locator,
+      ...(slugs === undefined ? {} : { slugs }),
+      ...(entry.issue === undefined ? {} : { issue: entry.issue }),
+    };
+  });
+  return {
+    projects,
+    conflicts: discovery.entries.filter(
+      (entry): entry is Exclude<ProjectDiscoveryEntry, { status: 'valid' }> => entry.status !== 'valid',
+    ),
+    recoveries: [],
+    workspaceBindingRepairs: [],
+  };
+};
+
+/**
+ * A project's library state read from its own files, with nothing written: what a start without its library database
+ * shows (R7).
+ *
+ * @param recordFiles - The record client.
+ * @param projectId - The project.
+ * @returns The state.
+ * @public
+ */
+export const readProjectLibraryStateFromDisk = async (
+  recordFiles: ProjectLibraryFileClient,
+  projectId: string,
+): Promise<ProjectLibraryState> => {
+  const [tombstone, lastActivityAt] = await Promise.all([
+    readProjectLibraryFile(recordFiles, projectId),
+    readManifestActivityAt(recordFiles, projectId),
+  ]);
+  return {
+    projectId,
+    lastActivityAt,
+    ...(tombstone.deletedAt === undefined ? {} : { deletedAt: tombstone.deletedAt }),
+  };
 };
 
 /** Enrich a pass's listing into what the library shows: library rows, slugs, conflicts, recoveries and repairs. */

@@ -256,12 +256,21 @@ const handleStoreTestState = vi.hoisted(() => ({
   updateWorkspaceHandle: vi.fn(async () => undefined),
   disconnectWorkspace: vi.fn<(workspaceId: string) => Promise<WorkspaceEntry | undefined>>(async () => undefined),
   restoreWorkspaceHandle: vi.fn(async () => false),
+  /* WP9: the input a start went on without, and Home's engine mirror; neither is set outside the database rows. */
+  degraded: undefined as { input: 'records' | 'grants'; errorName: string } | undefined,
+  mirror: undefined as 'indexeddb' | 'opfs' | 'node' | undefined,
+  resetHomeRecords: vi.fn(async () => undefined),
 }));
 
 vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
-  readProjectRootConfigs: async () => ({ configuration: await mockGetProjectRootConfigs(), degraded: undefined }),
+  readProjectRootConfigs: async () => ({
+    configuration: await mockGetProjectRootConfigs(),
+    degraded: handleStoreTestState.degraded,
+  }),
+  readHomeBackendMirror: () => handleStoreTestState.mirror,
+  resetHomeRecords: handleStoreTestState.resetHomeRecords,
   getWorkspace: vi.fn(async () => undefined),
   getWorkspaceMetadata: vi.fn(async () => undefined),
   getProjectFileSystemConfig: async () => mockGetProjectFileSystemConfig(),
@@ -1020,6 +1029,119 @@ describe('SharedWorkerGate', () => {
 
     expect(screen.getByText('subtree')).toBeInTheDocument();
     expect(workerTestState.instances).toHaveLength(0);
+  });
+});
+
+/*
+ * T-B5.5, T-B5.7 (B5, R7; the component half): a start that went on with Home alone because its records could not be
+ * read says so beside Home and offers the action for the cause. On the desktop the reset is the shell's quarantine of
+ * the local database; on the web it is offered only when Home's engine mirror exists, so Home opens on the same engine.
+ */
+describe('database panel', () => {
+  const troubleshooting = {
+    showLogs: vi.fn(async () => undefined),
+    open: vi.fn(async () => undefined),
+    restartInSafeMode: vi.fn(async () => undefined),
+    resetLocalDatabase: vi.fn(async () => undefined),
+  };
+  const updates = { check: vi.fn(async () => undefined) };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    workerTestState.instances.length = 0;
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    mockWaitForWorkerReady.mockResolvedValue(undefined);
+    readsHome = true;
+  });
+
+  afterEach(() => {
+    handleStoreTestState.degraded = undefined;
+    handleStoreTestState.mirror = undefined;
+    vi.unstubAllGlobals();
+  });
+
+  const renderHome = async (): Promise<HTMLElement> => {
+    render(
+      <RootFileManagerProvider>
+        <HomeFileManagerNotice />
+        <SharedWorkerGate>
+          <span>files ready</span>
+        </SharedWorkerGate>
+      </RootFileManagerProvider>,
+    );
+    expect(await screen.findByText('files ready')).toBeInTheDocument();
+    return screen.findByRole('alert', { name: "Tau's local database is unavailable" });
+  };
+
+  it('should keep Home open and offer Reset local database on the desktop', async () => {
+    vi.stubGlobal('tau', { troubleshooting, updates });
+    handleStoreTestState.degraded = { input: 'records', errorName: 'UnknownError' };
+
+    const panel = await renderHome();
+
+    expect(within(panel).getByText(/Home is open/u)).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Reset local database' }));
+    expect(troubleshooting.resetLocalDatabase).toHaveBeenCalledTimes(1);
+  });
+
+  it('should offer Update Tau beside the reset for a database a newer Tau opened', async () => {
+    vi.stubGlobal('tau', { troubleshooting, updates });
+    handleStoreTestState.degraded = { input: 'records', errorName: 'VersionError' };
+
+    const panel = await renderHome();
+
+    expect(within(panel).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Reset local database' })).toBeInTheDocument();
+  });
+
+  it('should ask to close the other Tau window when the database is blocked, and offer Try again', async () => {
+    vi.stubGlobal('tau', { troubleshooting, updates });
+    handleStoreTestState.degraded = { input: 'records', errorName: 'StorageUpgradeBlockedError' };
+
+    const panel = await renderHome();
+
+    expect(within(panel).getByText(/close the other Tau window/iu)).toBeInTheDocument();
+    /* Try again reloads the page, which opens the database afresh once the other window is gone. */
+    expect(within(panel).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Reset local database' })).not.toBeInTheDocument();
+  });
+
+  it('should offer no reset on the web without Home\u2019s engine mirror', async () => {
+    handleStoreTestState.degraded = { input: 'records', errorName: 'UnknownError' };
+
+    const panel = await renderHome();
+
+    expect(within(panel).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
+  });
+
+  it('should offer Reset folder list on the web when Home\u2019s engine mirror exists', async () => {
+    handleStoreTestState.degraded = { input: 'records', errorName: 'UnknownError' };
+    handleStoreTestState.mirror = 'opfs';
+
+    const panel = await renderHome();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Reset folder list' }));
+    await waitFor(() => {
+      expect(handleStoreTestState.resetHomeRecords).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('should show no database panel when the grant list, not the database, could not be read', async () => {
+    vi.stubGlobal('tau', { troubleshooting, updates });
+    handleStoreTestState.degraded = { input: 'grants', errorName: 'Error' };
+    render(
+      <RootFileManagerProvider>
+        <HomeFileManagerNotice />
+        <SharedWorkerGate>
+          <span>files ready</span>
+        </SharedWorkerGate>
+      </RootFileManagerProvider>,
+    );
+
+    expect(await screen.findByText('files ready')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset local database' })).not.toBeInTheDocument();
   });
 });
 

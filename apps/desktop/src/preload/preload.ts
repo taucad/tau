@@ -245,6 +245,10 @@ contextBridge.exposeInMainWorld('tau', {
         throw new Error(refusal);
       }
     },
+    readMarker: async (path: string): Promise<string | undefined> => {
+      const text: unknown = await ipcRenderer.invoke(directoryGrantChannels.marker, path);
+      return typeof text === 'string' ? text : undefined;
+    },
     onChange: (listener: () => void): (() => void) => {
       ipcRenderer.on(directoryGrantChannels.changed, listener);
       return () => {
@@ -298,6 +302,11 @@ contextBridge.exposeInMainWorld('tau', {
     },
     copyDiagnostics: async (): Promise<void> => {
       await ipcRenderer.invoke(recoveryChannels.action, { type: 'copy-diagnostics' });
+    },
+    /* R7, D3: the database panel's reset. Main records it and applies it at the next start, so the app restarts. */
+    resetLocalDatabase: async (): Promise<void> => {
+      await ipcRenderer.invoke(recoveryChannels.action, { type: 'reset', store: 'local-database' });
+      await ipcRenderer.invoke(recoveryChannels.action, { type: 'restart', mode: 'normal' });
     },
   },
   runtimeKernelIds: bootstrap.runtimeKernelIds,

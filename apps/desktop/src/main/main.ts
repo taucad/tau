@@ -18,7 +18,7 @@ import { installBrowserHost } from '#main/browser-host.js';
  */
 
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { homedir, totalmem } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -700,6 +700,9 @@ const askRendererToQuiesce = async (
     }
   });
 };
+
+/** The largest `.tau/workspace.json` main reads for the renderer; a marker is a few hundred bytes. */
+const workspaceMarkerByteLimit = 64 * 1024;
 
 /* Set by bootstrap once it can make the main window: a second launch then reopens one when none exists (B19). */
 let ensureMainWindow: (() => void) | undefined;
@@ -2138,6 +2141,27 @@ const bootstrapElectronApp = async (): Promise<void> => {
       window.webContents.send(directoryGrantChannels.changed);
     }
     return undefined;
+  });
+
+  /* R7, T-B5.8: a reset database adopts each granted folder under the id its marker names. Only a granted folder is
+   * read, only its marker, and an oversized or unreadable one answers nothing. */
+  ipcMain.handle(directoryGrantChannels.marker, async (event, path: unknown) => {
+    if (!trusted(event.senderFrame) || typeof path !== 'string' || !isAbsolute(path)) {
+      throw new Error('Desktop shell refused an invalid directory marker read.');
+    }
+    if (!roots.roots().includes(resolve(path))) {
+      return undefined;
+    }
+    const marker = join(resolve(path), '.tau', 'workspace.json');
+    try {
+      const { size } = await stat(marker);
+      if (size > workspaceMarkerByteLimit) {
+        return undefined;
+      }
+      return await readFile(marker, 'utf8');
+    } catch {
+      return undefined;
+    }
   });
 
   ipcMain.handle('tau:select-directory', async (event, options: unknown) => {

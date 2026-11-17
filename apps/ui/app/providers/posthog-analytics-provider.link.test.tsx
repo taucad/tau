@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { MemoryRouter } from 'react-router';
 import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -50,7 +51,7 @@ describe('PostHog grant and Sentry link (SB7)', () => {
     sdk.get_session_replay_url.mockReturnValue('https://us.posthog.com/replay/s1?t=10');
     state.sdk = sdk;
 
-    const view = render(tree(false));
+    const view = render(tree(false), { wrapper: MemoryRouter });
     expect(applyAnalyticsLink({ tags: {} })).toEqual({ tags: {} });
 
     view.rerender(tree(true));
@@ -93,6 +94,7 @@ describe('PostHog grant and Sentry link (SB7)', () => {
       <Fresh isActive options={options} isReplayEnabled={false}>
         <span />
       </Fresh>,
+      { wrapper: MemoryRouter },
     );
     await waitFor(() => {
       expect(sdk.init).toHaveBeenCalledOnce();

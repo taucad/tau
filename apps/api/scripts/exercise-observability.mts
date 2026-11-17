@@ -258,16 +258,6 @@ await run('telemetry', async () => {
     const response = await call('POST', '/v1/telemetry/ingest', {
       body: {
         entries: [
-          {
-            name: 'observability.createGeometry',
-            duration: random(80, 2500),
-            detail: { status: failed ? 'error' : 'success' },
-          },
-          {
-            name: 'observability.exportGeometry',
-            duration: random(200, 4000),
-            detail: { status: 'success', exportFormat: ['stl', 'step', 'glb'][round % 3] },
-          },
           // Synthetic fixtures in the shape the UI and daemon send: they validate ingest to metrics, not agents.
           {
             name: 'agent.session',

@@ -47,9 +47,9 @@ describe('observability harness build boundary', () => {
     vi.stubGlobal('__reactRouterAppDirectory', path.resolve(appDirectory, '..', target, 'app'));
     vi.stubEnv('TAU_DEBUG', 'true');
     vi.stubEnv('SENTRY_ENVIRONMENT', 'staging');
-    const { default: routes } =
+    // Both manifests resolve their route tree at module load and export the array.
+    const { default: entries } =
       target === 'desktop' ? await import('../../desktop/app/routes.js') : await import('../../serve/app/routes.js');
-    const entries = await routes;
     expect(entries.some((entry) => entry.path === '__debug/observability')).toBe(false);
   });
 });

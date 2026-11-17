@@ -1452,6 +1452,7 @@ knownDefect(
   'F6 (A15d): with the agent host 3 s late, the chat lane shows no empty state or skeleton, its header indicator shows from 1,000 ms for at least 500 ms, and the composer keeps its box',
   {
     artifact: 'f6-wide',
+    // Expected-failure: @rifont until 2026-12-15
     expectedFailure: true,
     budget: turnBudget,
     measure: async () => measureHeldTranscript('f6-wide'),
@@ -2047,6 +2048,7 @@ knownDefect(
   'F13 (A15d): under reduced motion, with the agent host 3 s late, the chat lane indicator has words and runs no animation',
   {
     artifact: 'f13-wide',
+    // Expected-failure: @rifont until 2026-12-15
     expectedFailure: true,
     budget: turnBudget,
     measure: async () => {

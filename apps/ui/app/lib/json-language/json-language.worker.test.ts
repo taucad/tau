@@ -3,8 +3,8 @@ import { mock } from 'vitest-mock-extended';
 import { EditorState } from '@codemirror/state';
 import { acceptCompletion, currentCompletions, setSelectedCompletion, startCompletion } from '@codemirror/autocomplete';
 import { EditorView } from '@codemirror/view';
-import { EditorDocument } from '#lib/editor-document.js';
-import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { acquireJsonLanguage } from '#lib/json-language/json-codemirror.js';
 

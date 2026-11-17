@@ -7,7 +7,7 @@
 //! `{"op":"connect","address":"ip:port"}` (TCP, three seconds); `{"op":"environment"}` (every variable the
 //! worker sees, as an object); and `{"op":"session"}` (the DACLs of the process's window station and thread desktop
 //! as SDDL, whether it can create a window there, what a Chromium-style restricted, Low-integrity child on an
-//! alternate desktop makes of the session (`restrictedChild`), and the DACL of every fixed volume's root folder: the conformance
+//! alternate desktop makes of the session (`restrictedChild`), the DACL and label of its temporary folder, and the DACL of every fixed volume's root folder: the conformance
 //! suite runs it as the person after every row, so a launch that leaves the person's session unusable for GUI
 //! processes, or a volume root changed, fails). Every answer carries `ok`, and
 //! `error` when it is false.
@@ -160,6 +160,37 @@ fn session() -> Result<Value, String> {
         }
         volumes.insert(root.clone(), Value::String(sddl_of(&mut buffer, &root)?));
     }
+    // The person's temporary folder (DACL and label), which Chromium and the GPU driver write beneath.
+    let temp_path = std::env::temp_dir().to_string_lossy().into_owned();
+    let temp_wide: Vec<u16> = temp_path.encode_utf16().chain(std::iter::once(0)).collect();
+    const LABEL_SECURITY_INFORMATION: u32 = 0x10;
+    let temp_info = DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION;
+    let mut needed = 0u32;
+    unsafe { GetFileSecurityW(temp_wide.as_ptr(), temp_info, std::ptr::null_mut(), 0, &mut needed) };
+    let mut temp_buffer = vec![0u64; (needed as usize).div_ceil(8).max(1)];
+    if unsafe { GetFileSecurityW(temp_wide.as_ptr(), temp_info, temp_buffer.as_mut_ptr().cast(), needed, &mut needed) }
+        == 0
+    {
+        return Err(format!("GetFileSecurityW({temp_path}): {}", last()));
+    }
+    let mut text: *mut u16 = std::ptr::null_mut();
+    let mut length = 0u32;
+    if unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            temp_buffer.as_mut_ptr().cast(),
+            1,
+            temp_info,
+            &mut text,
+            &mut length,
+        )
+    } == 0
+    {
+        return Err(format!("ConvertSecurityDescriptorToStringSecurityDescriptorW({temp_path}): {}", last()));
+    }
+    let temporary_sddl = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(text, length as usize) })
+        .trim_end_matches('\0')
+        .to_owned();
+    unsafe { LocalFree(text.cast()) };
     let station = dacl(unsafe { GetProcessWindowStation() }, "window station")?;
     let desktop = dacl(unsafe { GetThreadDesktop(GetCurrentThreadId()) }, "desktop")?;
     // A hidden window of the predefined STATIC class on the thread's desktop.
@@ -190,6 +221,7 @@ fn session() -> Result<Value, String> {
         "window": window_error.is_none(),
         "windowError": window_error,
         "restrictedChild": restricted_child()?,
+        "temporaryFolder": { "path": temp_path, "sddl": temporary_sddl },
         "volumes": volumes,
     }))
 }

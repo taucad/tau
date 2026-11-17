@@ -388,6 +388,8 @@ export type PersonSession = Readonly<{
    * `stage` names the step that failed otherwise.
    */
   restrictedChild: Readonly<{ stage: string; exitCode?: string; error?: string }>;
+  /** The person's temporary folder and its DACL and mandatory label, as SDDL. */
+  temporaryFolder: Readonly<{ path: string; sddl: string }>;
   /** Each fixed volume's root folder and its DACL, as SDDL: `setup` grants the volume capability there; no launch may. */
   volumes: Readonly<Record<string, string>>;
 }>;

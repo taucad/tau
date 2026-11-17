@@ -2379,6 +2379,23 @@ export const uiOpenBeforeHydration: BrowserCommand<
   return { found, hydratedBeforeAct, box, before, after };
 };
 
+/** The client entry's module, as the build names it (`/assets/entry.client-<hash>.js`). */
+const entryChunkRequest = /\/assets\/entry\.client-[^/?]+\.js(?:\?.*)?$/u;
+
+/** Answer the entry's own fetch with 500 (B28), so the bundle never runs; `false` serves it again. */
+const failEntryChunk = async (route: Parameters<Parameters<ProviderContext['route']>[1]>[0]): Promise<void> => {
+  await route.fulfill({ status: 500, contentType: 'text/plain', body: 'entry chunk refused by the test' });
+};
+
+/**
+ * Answer every request for the client entry chunk with 500 (T-B28.3), so the page has its server-rendered document and
+ * no bundle; `false` lets the entry load again.
+ */
+export const uiFailEntryChunk: BrowserCommand<[fail: boolean]> = async (commandContext, fail) => {
+  const { context } = sessionFor(commandContext);
+  await (fail ? context.route(entryChunkRequest, failEntryChunk) : context.unroute(entryChunkRequest, failEntryChunk));
+};
+
 /** Cuts the context off from the network, so a cached shell is all a navigation can be served from. */
 export const uiSetTargetOffline: BrowserCommand<[offline: boolean]> = async (commandContext, offline) => {
   const session = sessionFor(commandContext);
@@ -3980,6 +3997,7 @@ export const uiBrowserCommands = {
   uiSampleCameraDuringClick,
   uiScrollTarget,
   uiSetTargetOffline,
+  uiFailEntryChunk,
   uiOpenWithStalledDocument,
   uiSetViewport,
   uiStartHostFixture,

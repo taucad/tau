@@ -261,6 +261,7 @@ const handleStoreTestState = vi.hoisted(() => ({
 vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
+  readProjectRootConfigs: async () => ({ configuration: await mockGetProjectRootConfigs(), degraded: undefined }),
   getWorkspace: vi.fn(async () => undefined),
   getWorkspaceMetadata: vi.fn(async () => undefined),
   getProjectFileSystemConfig: async () => mockGetProjectFileSystemConfig(),
@@ -911,6 +912,100 @@ describe('SharedWorkerGate', () => {
 
     expect(await screen.findByText('opening')).toBeInTheDocument();
     expect(screen.queryByText('subtree')).not.toBeInTheDocument();
+  });
+
+  /*
+   * T-B5.3 (B5, B7, R5): a deterministic failure gets a panel whose actions change the input. The desktop actions are
+   * the shell's optional `tau.troubleshooting` and `tau.updates` members, shown only when the shell provides them.
+   */
+  describe('classified start failure', () => {
+    const troubleshooting = {
+      showLogs: vi.fn(async () => undefined),
+      open: vi.fn(async () => undefined),
+      restartInSafeMode: vi.fn(async () => undefined),
+    };
+    const updates = { check: vi.fn(async () => undefined) };
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const renderFailure = async (error: Error) => {
+      mockWaitForWorkerReady.mockRejectedValue(error);
+      render(
+        <RootFileManagerProvider>
+          <SharedWorkerGate>
+            <div>subtree</div>
+          </SharedWorkerGate>
+        </RootFileManagerProvider>,
+      );
+      /* The one automatic retry of a first, transient failure, once the failure is in. */
+      await screen.findByRole('alert');
+      testClock.advance(1000);
+      /* The panel is rendered again after the retry: read it afresh each time. */
+      return () => screen.getByRole('alert');
+    };
+    const named = (name: string, message: string): Error => Object.assign(new Error(message), { name });
+
+    it('offers Update Tau, Show logs and Troubleshooting for a database a newer Tau opened', async () => {
+      vi.stubGlobal('tau', { troubleshooting, updates });
+      const panel = await renderFailure(named('VersionError', 'The requested version is less than the existing one'));
+
+      await vi.waitFor(() => {
+        expect(within(panel()).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
+      });
+      expect(within(panel()).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+      expect(within(panel()).getByRole('button', { name: 'Troubleshooting' })).toBeInTheDocument();
+      expect(within(panel()).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+      fireEvent.click(within(panel()).getByRole('button', { name: 'Update Tau' }));
+      expect(updates.check).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks to close the other Tau window when the database is blocked', async () => {
+      vi.stubGlobal('tau', { troubleshooting, updates });
+      const panel = await renderFailure(named('StorageUpgradeBlockedError', 'Opening the database is blocked'));
+
+      await vi.waitFor(() => {
+        expect(within(panel()).getByText(/close the other Tau window/iu)).toBeInTheDocument();
+      });
+      expect(within(panel()).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+    });
+
+    it('offers Restart in Safe Mode, Check for Updates and Show logs when the services utility will not start', async () => {
+      vi.stubGlobal('tau', { troubleshooting, updates });
+      const panel = await renderFailure(
+        Object.assign(new Error('The services utility did not start'), { code: 'SERVICES_UNAVAILABLE' }),
+      );
+
+      await vi.waitFor(() => {
+        expect(within(panel()).getByRole('button', { name: 'Restart in Safe Mode' })).toBeInTheDocument();
+      });
+      expect(within(panel()).getByRole('button', { name: 'Check for Updates' })).toBeInTheDocument();
+      expect(within(panel()).getByRole('button', { name: 'Show logs' })).toBeInTheDocument();
+      fireEvent.click(within(panel()).getByRole('button', { name: 'Restart in Safe Mode' }));
+      expect(troubleshooting.restartInSafeMode).toHaveBeenCalledTimes(1);
+    });
+
+    it('hides a desktop action the shell does not provide', async () => {
+      vi.stubGlobal('tau', { updates });
+      const panel = await renderFailure(named('VersionError', 'The requested version is less than the existing one'));
+
+      await vi.waitFor(() => {
+        expect(within(panel()).getByRole('button', { name: 'Update Tau' })).toBeInTheDocument();
+      });
+      expect(within(panel()).queryByRole('button', { name: 'Show logs' })).not.toBeInTheDocument();
+      expect(within(panel()).queryByRole('button', { name: 'Troubleshooting' })).not.toBeInTheDocument();
+    });
+
+    it('opens safe mode as a page load on the web and offers no logs', async () => {
+      const panel = await renderFailure(
+        Object.assign(new Error('The services utility did not start'), { code: 'SERVICES_UNAVAILABLE' }),
+      );
+
+      await vi.waitFor(() => {
+        expect(within(panel()).getByRole('link', { name: 'Restart in Safe Mode' })).toHaveAttribute('href', '/?safe=1');
+      });
+      expect(within(panel()).queryByRole('button', { name: 'Show logs' })).not.toBeInTheDocument();
+    });
   });
 
   /* A pending storage selection must not hide the page or admit a worker. */

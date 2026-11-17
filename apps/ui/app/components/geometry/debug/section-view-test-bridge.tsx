@@ -46,8 +46,10 @@ import {
   sectionCapOutlineDebugUserDataKey,
   sectionCapStencilDebugUserDataKey,
 } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
-import type { SectionCapOutlineDebugControl } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
-import type { SectionCapStencilDiagnostics } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
+import type {
+  SectionCapOutlineDebugControl,
+  SectionCapStencilDiagnostics,
+} from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
 import { selectGraphicsViewportGizmoLocked } from '@taucad/viewer/machines/graphics.machine';
 import { getSceneRenderRoots } from '@taucad/viewer/graphics/three/scene-overlay';
 import {

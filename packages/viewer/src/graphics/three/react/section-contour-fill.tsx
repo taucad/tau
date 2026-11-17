@@ -19,8 +19,10 @@ import {
   sectionCapOutlineDebugUserDataKey,
   sectionCapStencilDebugUserDataKey,
 } from '#graphics/three/utils/section-cap-stencil-debug.js';
-import type { SectionCapOutlineDebugControl } from '#graphics/three/utils/section-cap-stencil-debug.js';
-import type { SectionCapStencilDiagnostics } from '#graphics/three/utils/section-cap-stencil-debug.js';
+import type {
+  SectionCapOutlineDebugControl,
+  SectionCapStencilDiagnostics,
+} from '#graphics/three/utils/section-cap-stencil-debug.js';
 import { createSectionLoopCaps } from '#graphics/three/utils/section-loop-caps.js';
 import type { SectionLoopCapFace, SectionLoopCapSource } from '#graphics/three/utils/section-loop-caps.js';
 import { createSectionOpenBackFaces } from '#graphics/three/utils/section-open-back-faces.js';

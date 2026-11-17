@@ -284,7 +284,7 @@ describe('headless capture adapter', () => {
         lineWidth: Math.hypot(2400, 1350) / 960,
         lineColor: '#000000',
         toneMapping: 'neutral',
-        ao: { intensity: 0.75, distanceFalloff: 0.5, samples: 16, resolutionScale: 0.5 },
+        ao: { intensity: 0.75, distanceFalloff: 1, samples: 16, resolutionScale: 0.5 },
         lighting: {
           headlamp: { intensity: 1.5, rightOffset: 2, upOffset: 2 },
           lights: [],

@@ -15,7 +15,7 @@ describe('buildViewerCaptureImageOptions', () => {
       ao: {
         radiusPixels: 960 * 0.01,
         intensity: 0.75,
-        distanceFalloff: 0.5,
+        distanceFalloff: 1,
         thicknessRatio: 1 / 0.09,
         denoiseDepthTolerance: 0.1,
         samples: 16,

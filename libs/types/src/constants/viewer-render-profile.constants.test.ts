@@ -10,6 +10,7 @@ describe('viewerRenderProfile', () => {
       radiusViewportFraction: 0.01,
       radiusMinimumDevicePixels: 4,
       thicknessRatio: 1 / 0.09,
+      slabDistanceFalloff: 1,
       falloffEndRatio: 22,
       falloffRange: 0.8,
       denoiseDepthTolerance: 0.1,

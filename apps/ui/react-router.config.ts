@@ -41,9 +41,21 @@ export default {
    * `v8_passThroughRequests` is React Router 8's behaviour (blueprint B4): loaders and actions get the request as
    * sent, so a client navigation's `request.url` is `<path>.data?_routes=…`. Anything that means the page's own URL
    * reads the `url` argument.
+   *
+   * `v8_viteEnvironmentApi` is React Router 8's build (blueprint B6, RR5): one Vite config builds the client and server
+   * environments, so server-only options live under `environments.ssr` in `vite.config.ts`, and the Netlify adapter
+   * (4.x) writes a function that imports `build/server/index.js` and the adapter's `serverless` handler.
    */
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
-  future: { unstable_optimizeDeps: true, v8_passThroughRequests: true, v8_middleware: true },
+  future: {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
+    unstable_optimizeDeps: true,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
+    v8_passThroughRequests: true,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
+    v8_middleware: true,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
+    v8_viteEnvironmentApi: true,
+  },
   /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.
    *

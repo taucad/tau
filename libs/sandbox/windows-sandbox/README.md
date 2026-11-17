@@ -193,8 +193,11 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   `SetKernelObjectSecurity`, which does not propagate, and reads each back: the full SDDL must equal the journal's. It
   never removes an ACE it did not add and never writes an owner or group (I11, E19; Q4 §7 risk 4). A granted or denied
   path that is itself a link or junction is refused (`absolute-paths`). The journal must not already exist (a leftover
-  belongs to a crashed launch: `restore` it first) and must not lie inside a granted or denied path. Journaling costs
-  one handle open per object under the granted paths, the same order of work as the propagation itself.
+  belongs to a crashed launch: `restore` it first) and must not lie inside a readable, writable or read-only path, where
+  the shell could read or rewrite it. It may lie inside a denied path, and Tau's desktop keeps it there: its custody
+  directory is in Electron's `userData`, under the person's profile, which every launch denies whole. The journal is
+  then left out of the descriptors it records (it is being written, and teardown deletes it). Journaling costs one
+  handle open per object under the granted paths, the same order of work as the propagation itself.
 - **Desktop.** The launcher creates the shell's private desktop on its window station. The runner cannot: as
   `TauSandbox` it may not change `WinSta0`, and both the spike and Codex create the desktop here too. The desktop's
   protected DACL admits the person and, as participants, `TauSandbox`, the launch's capability SID and its package SID.

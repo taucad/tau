@@ -114,20 +114,29 @@ pub fn volume_roots_granted(record: &InstallRecord) -> bool {
         && record.volume_roots.iter().all(|root| volume::granted(root, &sid))
 }
 
-pub fn status() -> i32 {
+/// `status`: the install record with `installed`, `profilePresent`, `volumeRootsGranted` and the network fence.
+/// `quick` stops after the record and the profile: a host asking only whether setup has run (the services probe, at
+/// app start) must not wait on the firewall's COM API and the WFP engine, which a launch checks for itself anyway.
+pub fn status(quick: bool) -> i32 {
     let value = match load_record() {
         Ok(Some(record)) => {
             let mut value = serde_json::to_value(&record).unwrap_or_default();
             value["installed"] = true.into();
             value["profilePresent"] =
                 Sid::parse(&record.account_sid).map(|sid| profile::present(&sid)).unwrap_or(false).into();
-            value["volumeRootsGranted"] = volume_roots_granted(&record).into();
-            with_fence(value, Some(&record))
+            if quick {
+                value
+            } else {
+                value["volumeRootsGranted"] = volume_roots_granted(&record).into();
+                with_fence(value, Some(&record))
+            }
         }
+        Ok(None) if quick => serde_json::json!({ "installed": false }),
         Ok(None) => with_fence(serde_json::json!({ "installed": false }), None),
         Err(err) => {
             eprintln!("tau-windows-sandbox status: {err}");
-            with_fence(serde_json::json!({ "installed": false }), None)
+            let value = serde_json::json!({ "installed": false });
+            if quick { value } else { with_fence(value, None) }
         }
     };
     println!("{value}");

@@ -622,7 +622,9 @@ export const readWindowsSandboxStatus = async (
     };
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = run(['status']);
+      /* The quick answer reads the install record and the account's profile only: it must not wait on the network
+         fence, which can be slow while the app starts and which every launch checks for itself. */
+      child = run(['status', '--quick']);
     } catch (error) {
       notInstalled(`the helper could not be started: ${String(error)}`);
       return;

@@ -8,8 +8,10 @@
  * 2. Each pack's `.idx` is read whole and checked against its trailer; the
  *    pack itself is read only by Range ({@link openRemotePack}).
  * 3. Each head's commit, its trees level by level, and the blobs its listing
- *    names are read in coalesced waves and kept in local packs of at most the
- *    repack ceiling, indexed from what was written: no `indexPack`.
+ *    names are read in coalesced waves — the listed blobs while the trees are
+ *    walked, each batch while the one before it is kept — and kept in local
+ *    packs of at most the repack ceiling, indexed from what was written (no
+ *    `indexPack`), each whole entry with the deflated bytes it was read as.
  * 4. Older history stays on the server: the heads' commits are the store's
  *    shallow boundary, the store reads history through by Range while the
  *    catalogue's links last, and a later fetch brings what is new.
@@ -26,7 +28,7 @@ import type { ObjectSource, ObjectStore } from '#object-store/object-store.js';
 import { openRemotePack } from '#object-store/remote-pack.js';
 import type { RemotePack, RemotePackCounters } from '#object-store/remote-pack.js';
 import { readTreeEntries } from '#object-store/tree-codec.js';
-import type { StoredObject } from '#pack-reader/pack-reader.js';
+import type { CopiedObject, StoredObject } from '#pack-reader/pack-reader.js';
 
 /** The ref families a catalogue answers; ops are never among them. */
 export type CatalogueFamily = 'heads' | 'tags' | 'chats';
@@ -164,10 +166,12 @@ const isCatalogue = (value: unknown): value is Catalogue => {
 };
 
 /* Every remote pack read as one source: each object from the first pack that holds it. */
-const sourceOver = (packs: readonly RemotePack[]): ObjectSource =>
+const sourceOver = (
+  packs: readonly RemotePack[],
+): ObjectSource & Readonly<{ readMany: (oids: Iterable<string>) => Promise<Map<string, CopiedObject>> }> =>
   Object.freeze({
-    readMany: async (oids: Iterable<string>): Promise<Map<string, StoredObject>> => {
-      const found = new Map<string, StoredObject>();
+    readMany: async (oids: Iterable<string>): Promise<Map<string, CopiedObject>> => {
+      const found = new Map<string, CopiedObject>();
       let missing = [...new Set(oids)];
       for (const pack of packs) {
         if (missing.length === 0) {
@@ -253,13 +257,31 @@ type Stage = Readonly<{
 /* How an import reads, keeps and bounds what it reads. */
 type Importer = Readonly<{
   store: ObjectStore;
-  /* Reads every one of `oids`, or throws. */
-  readAll: (oids: readonly string[]) => Promise<Map<string, StoredObject>>;
-  keep: (objects: ReadonlyMap<string, StoredObject>) => Promise<void>;
+  /* Reads every one of `oids`, each checked against its id, or throws. */
+  readAll: (oids: readonly string[]) => Promise<Map<string, CopiedObject>>;
+  /* A whole entry's deflated body is kept as it is: it inflated to the checked object. */
+  keep: (objects: ReadonlyMap<string, CopiedObject>) => Promise<void>;
   sizeOf: (oid: string) => number;
   limits: Readonly<{ batchBytes: number; batchObjects: number }>;
   stage: Stage;
+  /* Set once either side of an import running side by side fails: the other reads and keeps nothing more. */
+  halt: { stopped: boolean };
 }>;
+
+/* The side of an import that stopped because the other side failed; the other side's failure is what is told. */
+class ImportStopped extends Error {
+  public constructor() {
+    super('The import stopped: a step beside it failed.');
+    this.name = 'ImportStopped';
+  }
+}
+
+/* Throw when the import has stopped, before a batch or a level is read or kept. */
+const checkGoing = (importer: Importer): void => {
+  if (importer.halt.stopped) {
+    throw new ImportStopped();
+  }
+};
 
 /* Stage one object, with its bytes while they fit the bound and by its id past it. */
 const stageObject = (
@@ -268,10 +290,12 @@ const stageObject = (
   staged: Readonly<{ object: StoredObject; names: readonly string[] }>,
 ): void => {
   const { stage, limits } = importer;
-  const { object, names } = staged;
+  const { names } = staged;
   if (stage.entries.has(oid)) {
     return;
   }
+  /* Held by its body alone: a deflated body is a view into the Range read it came from, which staging would pin. */
+  const object: StoredObject = { type: staged.object.type, data: staged.object.data };
   const bytes = object.data.byteLength;
   const fits = stage.held.objects < limits.batchObjects && stage.held.bytes + bytes <= limits.batchBytes;
   stage.entries.set(oid, { object: fits ? object : undefined, names });
@@ -287,9 +311,10 @@ const stageObject = (
 const readBatches = async (
   oids: readonly string[],
   importer: Importer,
-  each: (objects: ReadonlyMap<string, StoredObject>) => Promise<void>,
+  each: (objects: ReadonlyMap<string, CopiedObject>) => Promise<void>,
 ): Promise<void> => {
   for (const batch of batchesOf(oids, importer.sizeOf, importer.limits)) {
+    checkGoing(importer);
     // oxlint-disable-next-line no-await-in-loop -- one batch held at a time.
     const objects = await importer.readAll(batch);
     // oxlint-disable-next-line no-await-in-loop -- handed on before the next batch is read.
@@ -297,9 +322,71 @@ const readBatches = async (
   }
 };
 
-/* Read `oids` a bounded batch at a time, and keep each batch before the next is read. */
+/*
+ * Read `oids` a bounded batch at a time and keep each batch, the next batch
+ * read while the last one is kept: at most two batches are held, one landing
+ * and one being kept, and batches are kept in order, one at a time.
+ */
 const keepBatches = async (oids: readonly string[], importer: Importer): Promise<void> => {
-  await readBatches(oids, importer, async (objects) => importer.keep(objects));
+  /* The keep in flight never rejects: its failure is held here, handled from the moment it starts, and thrown at the
+   * next await of it, so a keep that fails while the next batch is read is never an unhandled rejection. */
+  let keeping: Promise<void> | undefined;
+  let keepFailed: Readonly<{ error: unknown }> | undefined;
+  const keepHeld = async (objects: ReadonlyMap<string, CopiedObject>): Promise<void> => {
+    try {
+      await importer.keep(objects);
+    } catch (error) {
+      keepFailed ??= { error };
+    }
+  };
+  const kept = async (): Promise<void> => {
+    await keeping;
+    if (keepFailed !== undefined) {
+      throw keepFailed.error;
+    }
+  };
+  try {
+    for (const batch of batchesOf(oids, importer.sizeOf, importer.limits)) {
+      checkGoing(importer);
+      // oxlint-disable-next-line no-await-in-loop -- one batch read while the batch before it is kept.
+      const objects = await importer.readAll(batch);
+      // oxlint-disable-next-line no-await-in-loop -- a batch is kept only once the one before it is.
+      await kept();
+      checkGoing(importer);
+      keeping = keepHeld(objects);
+    }
+    await kept();
+  } catch (error) {
+    /* A read that failed while a batch was being kept waits for that keep: nothing runs on after the import. */
+    await keeping;
+    throw error;
+  }
+};
+
+/*
+ * Both run side by side; the first to fail stops the other before its next
+ * batch or level, both settle, and that first failure is thrown.
+ */
+const bothSettled = async (
+  importer: Importer,
+  left: () => Promise<void>,
+  right: () => Promise<void>,
+): Promise<void> => {
+  let failed: Readonly<{ error: unknown }> | undefined;
+  const side = async (run: () => Promise<void>): Promise<void> => {
+    try {
+      await run();
+    } catch (error) {
+      if (!(error instanceof ImportStopped)) {
+        failed ??= { error };
+      }
+      importer.halt.stopped = true;
+    }
+  };
+  await Promise.all([side(left), side(right)]);
+  if (failed !== undefined) {
+    throw failed.error;
+  }
 };
 
 /*
@@ -367,6 +454,12 @@ const unheld = async (store: ObjectStore, oids: Iterable<string>): Promise<strin
  * batches and staged, then the blobs, kept. A tree the store already holds is
  * not walked: trees are kept only through {@link keepStaged}, after every blob
  * and subtree they name, so a held tree's subtree is held.
+ *
+ * Where the listings name every blob (each walked commit has one), the
+ * blobs name nothing and wait on no tree, so they are read and kept while the
+ * trees are walked: the walk's waves are the latency of one level after
+ * another, and the blobs' batches would otherwise wait for all of them.
+ * Otherwise the blobs follow the walk, listed and found together.
  */
 const importTrees = async (
   roots: Iterable<string>,
@@ -375,34 +468,45 @@ const importTrees = async (
 ): Promise<void> => {
   const seen = new Set<string>();
   const walkedBlobs = new Set<string>();
-  let level = await unheld(importer.store, roots);
-  while (level.length > 0) {
-    const next: string[] = [];
-    for (const oid of level) {
-      seen.add(oid);
-    }
-    // oxlint-disable-next-line no-await-in-loop -- a level's subtrees are known only once the level is read.
-    await readBatches(level, importer, async (trees) => {
-      await Promise.all(
-        [...trees].map(async ([oid, tree]) => {
-          const entries = await entriesOf(oid, tree);
-          const subtrees = entries.filter((entry) => entry.type === 'tree').map((entry) => entry.oid);
-          stageObject(importer, oid, { object: tree, names: subtrees });
-          for (const entry of entries) {
-            if (entry.type === 'tree' && !seen.has(entry.oid)) {
-              seen.add(entry.oid);
-              next.push(entry.oid);
-            } else if (entry.type === 'blob' && walk.walked) {
-              walkedBlobs.add(entry.oid);
+  const walkTrees = async (): Promise<void> => {
+    let level = await unheld(importer.store, roots);
+    while (level.length > 0) {
+      const next: string[] = [];
+      for (const oid of level) {
+        seen.add(oid);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a level's subtrees are known only once the level is read.
+      await readBatches(level, importer, async (trees) => {
+        await Promise.all(
+          [...trees].map(async ([oid, tree]) => {
+            const entries = await entriesOf(oid, tree);
+            const subtrees = entries.filter((entry) => entry.type === 'tree').map((entry) => entry.oid);
+            stageObject(importer, oid, { object: tree, names: subtrees });
+            for (const entry of entries) {
+              if (entry.type === 'tree' && !seen.has(entry.oid)) {
+                seen.add(entry.oid);
+                next.push(entry.oid);
+              } else if (entry.type === 'blob' && walk.walked) {
+                walkedBlobs.add(entry.oid);
+              }
             }
-          }
-        }),
-      );
-    });
-    // oxlint-disable-next-line no-await-in-loop -- the next level is what this one named and the store lacks.
-    level = await unheld(importer.store, next);
+          }),
+        );
+      });
+      // oxlint-disable-next-line no-await-in-loop -- the next level is what this one named and the store lacks.
+      level = await unheld(importer.store, next);
+    }
+  };
+  if (walk.walked) {
+    /* Blobs the walk finds share delta chains with the listed ones: read together, they share their bases' reads. */
+    await walkTrees();
+    await keepBatches(await unheld(importer.store, [...walk.listed, ...walkedBlobs]), importer);
+    return;
   }
-  await keepBatches(await unheld(importer.store, [...walk.listed, ...walkedBlobs]), importer);
+  const keepListed = async (): Promise<void> => {
+    await keepBatches(await unheld(importer.store, walk.listed), importer);
+  };
+  await bothSettled(importer, walkTrees, keepListed);
 };
 
 /*
@@ -568,6 +672,7 @@ const importerOver = (
     sizeOf: (oid) => listedSizes.get(oid) ?? Math.max(0, ...packs.map((pack) => pack.entryBytes(oid) ?? 0)),
     limits: { batchBytes: options.batchBytes ?? 16 * 1024 * 1024, batchObjects: options.batchObjects ?? 2048 },
     stage: { entries: new Map(), held: { objects: 0, bytes: 0 }, peak: { objects: 0, bytes: 0 } },
+    halt: { stopped: false },
   };
   const report = (): ColdOpenReport => {
     const ranges: RemotePackCounters = { rangeRequests: 0, bytesFetched: 0, waves: 0 };
@@ -624,7 +729,9 @@ export const coldOpenFromCatalogue = async (options: ColdOpenOptions): Promise<C
         return new Map();
       }
       try {
-        return await source.readMany(oids);
+        const read = await source.readMany(oids);
+        /* Bodies alone: what is read through is held in a cache that counts bodies, never deflated bytes. */
+        return new Map([...read].map(([oid, object]) => [oid, { type: object.type, data: object.data }]));
       } catch {
         /* A lapsed or refused link reads as absent: the caller reports the object missing. */
         return new Map();

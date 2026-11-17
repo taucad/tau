@@ -662,7 +662,8 @@ export const ChatTextareaDesktop = memo(function ({
   /* The queued send (above): an edit in the native input after its Enter had already cancelled it (`submitQueued` is
    * false then). It waits, still queued, while sending is not permitted, and carries the editor's text, since the
    * draft this composer was rendered with can still be the previous one; it also waits for a model and dictation. */
-  /* Home decides at adoption and says so on its early input; the project route's owner decides from the record. */
+  /* The draft's owner decides from its record (the chat's, or Home's); Home also cancels at adoption, on its early
+   * input, when the draft already holds another text. */
   const paintedSendVerdict: PaintedSendVerdict | undefined =
     earlyInput?.paintedSendCancelled === undefined
       ? ownerPaintedSendVerdict

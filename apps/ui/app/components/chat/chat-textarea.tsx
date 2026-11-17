@@ -57,7 +57,7 @@ const recordedDraftText = (record: ComposerRecord | undefined): string =>
 
 /**
  * What becomes of an Enter pressed on a painted draft nobody edited (ruling 2026-11-17T03:28Z): it waits while the
- * chat's record is unread, is sent when the record holds the painted text for this chat and nothing more, and is
+ * composer's record (the chat's, or Home's own) is unread, is sent when the record holds the painted text for this chat and nothing more, and is
  * cancelled otherwise (another chat's draft, another text, an attachment the box never showed, or no record to confirm
  * it).
  *
@@ -186,7 +186,7 @@ export const ChatTextarea = memo(function ({
   const isRecordLoading = useSelector(composerRecordRef, (state) =>
     state ? state.matches({ lifecycle: 'loading' }) : false,
   );
-  /* The text of the draft the chat's record held when it was read, or undefined while it is unread (or there is no
+  /* The text of the draft the composer's record held when it was read, or undefined while it is unread (or there is no
    * record to read). */
   const recordDraftText = useSelector(composerRecordRef, (state) =>
     state === undefined || state.matches({ lifecycle: 'loading' })

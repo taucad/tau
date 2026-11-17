@@ -1001,8 +1001,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   /* Windows: native workers and main's own seal step run in the sandbox helper's AppContainer, and only main may run
    * its one-time elevated setup; the frame names the helper to every kernel utility. Off, a native kernel refuses. */
   const windowsNativeSandbox = resolveDesktopWindowsNativeSandbox({
-    environment: process.env,
-    resourcesPath: process.resourcesPath,
+    sandboxEnvironment: windowsSandboxEnvironment,
     userDataPath: app.getPath('userData'),
   });
   if (windowsNativeSandbox !== undefined) {

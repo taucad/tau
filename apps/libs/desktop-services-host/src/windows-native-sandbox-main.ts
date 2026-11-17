@@ -9,33 +9,32 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { DesktopWindowsNativeSandbox } from '#native-kernels-frame.js';
-import { bundledWindowsSandboxHelper, setUpWindowsShellSandbox } from '#services-host-shell.js';
+import { setUpWindowsShellSandbox } from '#services-host-shell.js';
 
 /**
  * The Windows native sandbox main composes, or `undefined` when it is off: only on Windows, with
- * `TAU_WINDOWS_SHELL_SANDBOX=1` (the same gate as the Terminal's shell, Q15) and a bundled helper that exists. Off,
- * a native kernel on Windows refuses to launch rather than run uncontained.
+ * `TAU_WINDOWS_SHELL_SANDBOX=1` (the same gate as the Terminal's shell, Q15) and the helper this build ships. Off, a
+ * native kernel on Windows refuses to launch rather than run uncontained.
  *
- * @param input - The platform, main's environment, Electron's resources folder and main's user-data folder.
+ * @param input - The platform; the Windows sandbox environment main composed for the services utility
+ *   (`windowsShellSandboxEnvironment`), never main's inherited one, so nothing that launches Tau chooses the helper it
+ *   runs elevated; and main's user-data folder.
  * @returns The helper and the journal directory.
  */
 export const resolveDesktopWindowsNativeSandbox = (
   input: Readonly<{
     platform?: NodeJS.Platform | undefined;
-    environment: Readonly<Record<string, string | undefined>>;
-    resourcesPath: string | undefined;
+    sandboxEnvironment: Readonly<Record<string, string | undefined>>;
     userDataPath: string;
   }>,
 ): DesktopWindowsNativeSandbox | undefined => {
-  if ((input.platform ?? process.platform) !== 'win32' || input.environment['TAU_WINDOWS_SHELL_SANDBOX'] !== '1') {
-    return undefined;
-  }
-  const helperPath = bundledWindowsSandboxHelper({
-    environment: input.environment,
-    resourcesPath: input.resourcesPath,
-    source: false,
-  });
-  if (helperPath === undefined || !existsSync(helperPath)) {
+  const helperPath = input.sandboxEnvironment['TAU_WINDOWS_SANDBOX_HELPER'];
+  if (
+    (input.platform ?? process.platform) !== 'win32' ||
+    input.sandboxEnvironment['TAU_WINDOWS_SHELL_SANDBOX'] !== '1' ||
+    helperPath === undefined ||
+    !existsSync(helperPath)
+  ) {
     return undefined;
   }
   return { helperPath, journalDirectory: join(input.userDataPath, 'native-sandbox-journals') };

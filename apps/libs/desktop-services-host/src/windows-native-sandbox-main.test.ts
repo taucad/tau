@@ -26,8 +26,7 @@ describe('resolveDesktopWindowsNativeSandbox', () => {
   ): ReturnType<typeof resolveDesktopWindowsNativeSandbox> =>
     resolveDesktopWindowsNativeSandbox({
       platform,
-      environment,
-      resourcesPath: undefined,
+      sandboxEnvironment: environment,
       userDataPath: join(root, 'userData'),
     });
 

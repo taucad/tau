@@ -101,7 +101,7 @@ import { requestEditorNavigation } from '#lib/editor-navigation-service.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitStart } from '#hooks/use-wait-start.js';
-import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
+import { EditorPanePlaceholder } from '@taucad/editor-ui/components/code/editor-pane-placeholder';
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { useKernelDiagnostics } from '#hooks/use-kernel-diagnostics.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -110,7 +110,7 @@ import { isWorkspaceMutationErrorLike, workspaceMutationErrorCopy } from '@tauca
 import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.js';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 import { EditorSymbolPathProvider } from '#routes/w.$workspace.$project/editor-symbol-path.js';
-import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
+import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
 import { useReportHistoryPaneShown } from '#routes/w.$workspace.$project/revision-pane-requests.js';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
 import { isDesktopTarget } from '#lib/build-target.js';

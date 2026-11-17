@@ -15,8 +15,8 @@ import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
 import { virtualDeclarationRoot } from '#lib/virtual-declarations.js';
-import { symbolGlyph } from '#components/code/editor-completion-icon.js';
-import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
+import { symbolGlyph } from '@taucad/editor-ui/components/code/editor-completion-icon';
+import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
 import { cn } from '@taucad/ui/utils/cn';
 
 /** Every crumb, file or symbol, shares one height, text size and icon size, like VS Code's breadcrumbs. */

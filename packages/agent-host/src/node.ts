@@ -321,6 +321,11 @@ const readIfPresent = async (filePath: string): Promise<Uint8Array<ArrayBuffer>>
 
 /** Sync a directory so a file created in it survives power loss (L4 D-107). */
 const syncDirectory = async (directory: string): Promise<void> => {
+  /* Windows refuses `fsync` on a directory handle (EPERM), which failed every chat write there. The file's own
+   * handle is synced before this, and NTFS journals the rename or create that this sync would make durable. */
+  if (process.platform === 'win32') {
+    return;
+  }
   const handle = await open(directory, 'r');
   try {
     await handle.sync();

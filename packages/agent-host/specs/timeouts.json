@@ -18,6 +18,7 @@
     "apps/ui/app/hooks/use-revision-status.ts",
     "apps/ui/app/machines/file-manager.worker.revisions.ts",
     "apps/ui/app/machines/file-manager.machine.ts",
+    "apps/ui/app/machines/github-credential-renewal.machine.ts",
     "apps/ui/app/workers/agent-host-projects.ts",
     "apps/libs/lsp-fs/src/sync/sync-fs-server.ts"
   ],
@@ -225,9 +226,9 @@
     },
     {
       "id": "B11",
-      "bound": "GitHub credential renewal",
-      "site": "apps/ui/app/hooks/use-revision-status.ts",
-      "token": "lease.timer = undefined",
+      "bound": "GitHub credential renewal: an `after` on the renewal actor's clock, clamped to the longest `setTimeout` wait (A10)",
+      "site": "apps/ui/app/machines/github-credential-renewal.machine.ts",
+      "token": "renewal: (_, enq) =>",
       "class": "External edge",
       "owner": "W8"
     },

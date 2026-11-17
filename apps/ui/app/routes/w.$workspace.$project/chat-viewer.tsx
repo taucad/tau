@@ -7,6 +7,7 @@ import {
 } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import type { ModelFilesWait } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { interactiveViewContent } from '#lib/interactive-view-content.js';
+import { defaultOperationTimeout } from '@taucad/ui-core/constants/editor.constants';
 import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
 import { useSelector } from '@xstate/react';
 import { memo, useEffect, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -126,7 +127,14 @@ function usePaneRuntimeView({
   const subscriptionKey = `${document?.id ?? ''}:${requestedId ?? ''}:${optionsKey}:${instance ?? ''}:${includeEdges}`;
   // The offered view, its MIME type and the kernel are unknown until the document first evaluates, so a view opened
   // earlier would be closed and reopened under its real key as soon as the evaluation lands.
-  const evaluated = evaluation !== undefined;
+  // The unit keeps its last evaluation across a park, so a reopened document starts with its predecessor's: the view
+  // waits for the document's own evaluation (the one that arrives after it opened) instead of opening on a stale one.
+  const [evaluationOwner, setEvaluationOwner] = useState({ evaluation, documentId: document?.id });
+  if (evaluationOwner.evaluation !== evaluation) {
+    setEvaluationOwner({ evaluation, documentId: document?.id });
+  }
+  const evaluationDocumentId = evaluationOwner.evaluation === evaluation ? evaluationOwner.documentId : document?.id;
+  const evaluated = evaluation !== undefined && evaluationDocumentId === document?.id;
 
   useEffect(() => {
     if (!document || !evaluated || Boolean(unavailable) || isEmpty) {
@@ -225,11 +233,52 @@ function usePaneRuntimeView({
     subscriptionKey,
   ]);
 
+  /* What a capture reads when it starts or wakes: the pane's current key, and whether it can have a view at all. A
+   * pane whose unit is reopening its document (a resume after a park, as when the phone layout takes the viewer over)
+   * has neither a document nor an active view yet, and a capture waits for them rather than failing. */
+  const captureState = useRef({ key: '', blocked: true, opening: false });
+  const captureWaiters = useRef(new Set<() => void>());
+  // After the view effect above, so a capture woken here finds the view this commit opened.
+  useEffect(() => {
+    captureState.current = {
+      key: subscriptionKey,
+      blocked: Boolean(unavailable) || isEmpty || viewError?.key === subscriptionKey,
+      opening: !document || !evaluated || activeView.current?.key !== subscriptionKey,
+    };
+    for (const wake of captureWaiters.current) {
+      wake();
+    }
+  });
+
   const captureRendering = useCallback(async (): Promise<Rendering> => {
-    const active = activeView.current;
-    if (!active || active.key !== subscriptionKey || Boolean(unavailable) || isEmpty) {
+    const deadline = AbortSignal.timeout(defaultOperationTimeout);
+    let { current } = activeView;
+    while (!current || current.key !== captureState.current.key) {
+      if (deadline.aborted) {
+        throw new Error('The selected view did not open in time for capture.');
+      }
+      if (captureState.current.blocked || !captureState.current.opening) {
+        throw new Error('The selected view is unavailable for capture.');
+      }
+      const { promise, resolve, reject } = Promise.withResolvers<void>();
+      const fail = (): void => {
+        reject(new Error('The selected view did not open in time for capture.'));
+      };
+      captureWaiters.current.add(resolve);
+      deadline.addEventListener('abort', fail, { once: true });
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- Each wake re-reads the pane, which a render has just changed.
+        await promise;
+      } finally {
+        captureWaiters.current.delete(resolve);
+        deadline.removeEventListener('abort', fail);
+      }
+      current = activeView.current;
+    }
+    if (captureState.current.blocked) {
       throw new Error('The selected view is unavailable for capture.');
     }
+    const active = current;
     const assertActive = (): void => {
       if (active.closed || activeView.current !== active) {
         throw new Error('The selected view changed during capture.');
@@ -248,7 +297,7 @@ function usePaneRuntimeView({
       }
       return outcome.rendering;
     }
-  }, [subscriptionKey, unavailable, isEmpty]);
+  }, []);
 
   return {
     captureRendering,

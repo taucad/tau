@@ -770,3 +770,46 @@ describe('HeadlessImageService', () => {
     },
   );
 });
+
+describe('HeadlessImageService debug telemetry', () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock('#services/headless-image-debug.js');
+  });
+
+  it('keeps worker spans flushed after the transcode reply in that transcode record', async () => {
+    const records: Array<{ name: string; detail: Readonly<Record<string, unknown>> }> = [];
+    vi.resetModules();
+    vi.doMock('#services/headless-image-debug.js', () => ({
+      recordHeadlessImageTiming: (name: string, _startTime: number, detail: Readonly<Record<string, unknown>> = {}) => {
+        records.push({ name, detail });
+      },
+    }));
+    const isolated = await import('#services/headless-image.service.js');
+    const imageClient = createMockRuntimeClient<typeof imageRuntime>();
+    let emitTelemetry: ((batch: { entries: unknown[] }) => void) | undefined;
+    vi.mocked(imageClient.on).mockImplementation(((event: string, handler: (batch: { entries: unknown[] }) => void) => {
+      if (event === 'telemetry') {
+        emitTelemetry = handler;
+      }
+      return () => undefined;
+    }) as unknown as typeof imageClient.on);
+    vi.mocked(imageClient.transcode).mockResolvedValue({ success: true, data: files(), issues: [] });
+    const service = new isolated.HeadlessImageService({
+      debug: true,
+      createImageClient: vi.fn().mockResolvedValue(imageClient),
+      isGpuAvailable: () => true,
+      isAutomaticGpuAvailable: () => true,
+    });
+    try {
+      await service.export(captureJob('capture'));
+      // The worker flushes an operation's spans after its terminal reply.
+      emitTelemetry?.({ entries: [{ name: 'kernel.transcode' }] });
+
+      const transcode = records.find(({ name }) => name === 'runtime.transcode');
+      expect(transcode?.detail['telemetry']).toEqual([{ name: 'kernel.transcode' }]);
+    } finally {
+      service.dispose();
+    }
+  });
+});

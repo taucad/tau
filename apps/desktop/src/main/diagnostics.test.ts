@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are snake_case. */
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -137,6 +137,31 @@ describe('createDiagnosticsLog', () => {
     expect(readFileSync(log!.filePath, 'utf8')).toContain('main.bootstrap-failed');
   });
 
+  it('should fall back when the log file cannot be opened for append in a directory that exists', () => {
+    const directory = logDirectory();
+    /* A directory where the log file should be: the open fails whatever the account's privileges. */
+    mkdirSync(join(directory, 'desktop.log'));
+    const log = createDiagnosticsLog({ directory, echo: false });
+    expect(log.filePath.startsWith(tmpdir())).toBe(true);
+    expect(dirname(log.filePath)).not.toBe(directory);
+    log.log('error', 'main.bootstrap-failed');
+    expect(readFileSync(log.filePath, 'utf8')).toContain('main.bootstrap-failed');
+  });
+
+  it('should keep the fallback log in a fresh private folder no other account can name in advance', () => {
+    const parent = logDirectory();
+    const blocked = join(parent, 'not-a-directory');
+    writeFileSync(blocked, 'occupied');
+    const first = createDiagnosticsLog({ directory: join(blocked, 'logs'), echo: false });
+    const second = createDiagnosticsLog({ directory: join(blocked, 'logs'), echo: false });
+    first.log('error', 'main.bootstrap-failed');
+    const folder = dirname(first.filePath);
+    expect(folder).not.toBe(dirname(second.filePath));
+    expect(lstatSync(folder).isSymbolicLink()).toBe(false);
+    expect(lstatSync(folder).mode & 0o777).toBe(0o700);
+    expect(statSync(first.filePath).mode & 0o777).toBe(0o600);
+  });
+
   it('never throws when the log cannot be written', () => {
     const log = createDiagnosticsLog({ directory: logDirectory(), echo: false });
     expect(() => {
@@ -162,7 +187,8 @@ describe('createDiagnosticsLog main-thread cost', () => {
       log.log('warn', 'kernel.stderr', { chunk: `line ${String(index)}` });
     }
 
-    expect(existsSync(log.filePath)).toBe(false);
+    /* Opening the log creates the file empty; no record lands until the flush. */
+    expect(readFileSync(log.filePath, 'utf8')).toBe('');
     await log.flush();
     const lines = readFileSync(log.filePath, 'utf8').trim().split('\n');
     expect(lines).toHaveLength(100);

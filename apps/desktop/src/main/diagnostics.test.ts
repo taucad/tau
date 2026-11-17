@@ -296,9 +296,7 @@ describe('forwarders', () => {
       const report = vi.fn();
       const reload = vi.fn();
       const restartInSafeMode = vi.fn();
-      const showMessageBox = vi.fn(
-        typeof response === 'function' ? response : async () => Promise.resolve({ response }),
-      );
+      const showMessageBox = vi.fn(typeof response === 'function' ? response : async () => ({ response }));
       let now = 0;
       const timers = new Set<Timer>();
       watchRendererHangs(
@@ -328,7 +326,7 @@ describe('forwarders', () => {
       );
       const advance = async (milliseconds: number): Promise<void> => {
         now += milliseconds;
-        for (const timer of [...timers]) {
+        for (const timer of timers) {
           if (timer.at <= now) {
             timers.delete(timer);
             timer.callback();

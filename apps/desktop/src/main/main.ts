@@ -129,9 +129,11 @@ import {
   safeModeSignal,
   optionalStepFailedSignal,
   probeLeftoverIgnoredSignal,
+  rendererReloadPolicySignal,
   storeQuarantinedSignal,
   updaterFailureSignal,
 } from '#main/desktop-signals.js';
+import { closedPageName, createRendererReloadPolicy } from '#main/renderer-reload-policy.js';
 import type { BootstrapStep, DesktopSignal, OptionalBootstrapStep } from '#main/desktop-signals.js';
 import {
   addTroubleshootingMenu,
@@ -2263,16 +2265,88 @@ const bootstrapElectronApp = async (): Promise<void> => {
       quickLookControllers.get(window.id)?.dispose();
       quickLookControllers.delete(window.id);
     });
+    /* B11: reload once, send a second death within 60 s Home with a notice, and hand a third within 5 minutes to the
+     * recovery window (D0). A reload the hang rule asked for is not a death. */
+    const reloadPolicy = createRendererReloadPolicy({ now: () => performance.now() });
+    let pageTitle: string | undefined;
+    window.webContents.on('page-title-updated', (_event, title) => {
+      pageTitle = title;
+    });
+    let reloadingHungPage = false;
+    const openHomeAfterDeaths = async (closed: string): Promise<void> => {
+      try {
+        await window.loadURL(rendererUrl('/'));
+      } catch (error) {
+        log.log('error', 'main.renderer-home-failed', error);
+      }
+      if (window.isDestroyed()) {
+        return;
+      }
+      try {
+        await dialog.showMessageBox(window, {
+          type: 'warning',
+          title: 'Tau',
+          message: `${closed} was closed`,
+          detail: 'The page stopped working twice within a minute, so Tau opened Home instead.',
+          buttons: ['OK'],
+          noLink: true,
+        });
+      } catch (error) {
+        log.log('error', 'main.renderer-home-notice-failed', error);
+      }
+    };
     forwardRendererDiagnostics(window.webContents, log, {
-      recover: () => {
+      recover: (reason) => {
         noteRendererGone();
-        if (!quitting && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-          window.webContents.reload();
+        if (reloadingHungPage) {
+          reloadingHungPage = false;
+          return;
         }
+        if (quitting || window.isDestroyed() || window.webContents.isDestroyed()) {
+          return;
+        }
+        const decision = reloadPolicy.gone(reason);
+        if (decision === undefined) {
+          return;
+        }
+        const { step, count } = decision;
+        log.log('warn', 'main.renderer-reload', { step, reason, count });
+        reportDesktopSignal(rendererReloadPolicySignal(step, reason, count));
+        if (step === 'reload') {
+          window.webContents.reload();
+          return;
+        }
+        if (step === 'stop') {
+          recoveryHooks?.openRecovery('renderer-deaths');
+          return;
+        }
+        void openHomeAfterDeaths(closedPageName(window.webContents.getURL(), pageTitle));
       },
       report: reportDesktopSignal,
     });
-    watchRendererHangs(window, log, { report: reportDesktopSignal });
+    watchRendererHangs(window, log, {
+      report: reportDesktopSignal,
+      /* B24: at 30 s, report the hang and offer Wait, Reload or Restart in Safe Mode (D0). */
+      hangRule: {
+        setTimeout: (offerHangChoice, milliseconds) => setTimeout(offerHangChoice, milliseconds),
+        clearTimeout: (handle) => {
+          clearTimeout(handle as ReturnType<typeof setTimeout>);
+        },
+        showMessageBox: async (options) => dialog.showMessageBox(window, options),
+        reload: () => {
+          if (quitting || window.isDestroyed() || window.webContents.isDestroyed()) {
+            return;
+          }
+          /* A hung renderer cannot run a reload itself: end it, then load the page again in a new one. */
+          reloadingHungPage = true;
+          window.webContents.forcefullyCrashRenderer();
+          window.webContents.reload();
+        },
+        restartInSafeMode: () => {
+          void recoveryHooks?.restartInSafeMode();
+        },
+      },
+    });
 
     /* Deny every new window and every in-window navigation away from the app,
      * sending real links to the user's browser instead. `will-redirect` is

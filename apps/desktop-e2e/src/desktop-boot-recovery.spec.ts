@@ -269,6 +269,16 @@ const messageBoxes = async (application: ElectronApplication): Promise<Array<{ m
     () => (globalThis as typeof globalThis & { __boxes?: Array<{ message: string; buttons: string[] }> }).__boxes ?? [],
   );
 
+const boxMessages = async (application: ElectronApplication): Promise<string[]> => {
+  const boxes = await messageBoxes(application);
+  return boxes.map((box) => box.message);
+};
+
+const boxButtons = async (application: ElectronApplication): Promise<string[][]> => {
+  const boxes = await messageBoxes(application);
+  return boxes.map((box) => box.buttons);
+};
+
 const crashRenderer = async (application: ElectronApplication): Promise<void> => {
   await application.evaluate(({ webContents }) => {
     webContents
@@ -298,9 +308,7 @@ describe('desktop renderer reload policy and hang rule (T-B11.2, T-B24.2)', () =
     /* Second within 60 s: Home, with a notice naming what was closed. */
     await crashRenderer(application);
     await page.waitForURL((url) => url.pathname === '/', { waitUntil: 'load', timeout: 120_000 });
-    await expect
-      .poll(async () => (await messageBoxes(application)).map((box) => box.message))
-      .toEqual([expect.stringMatching(/closed/iu)]);
+    await expect.poll(async () => boxMessages(application)).toEqual([expect.stringMatching(/closed/iu)]);
 
     /* Third within 5 minutes: no more reloads, the recovery window instead. */
     await crashRenderer(application);
@@ -317,22 +325,22 @@ describe('desktop renderer reload policy and hang rule (T-B11.2, T-B24.2)', () =
     await expect.poll(async () => lastStage(userData), { timeout: 120_000 }).toBe('home-ready');
     /* Reload. */
     await stubMessageBoxes(application, 1);
-    void page
-      .evaluate(() => {
-        const until = Date.now() + 40_000;
-        while (Date.now() < until) {
-          // Block the page's main thread.
-        }
-      })
-      .catch(() => undefined);
+    /* Settles (or rejects, once the hung renderer is replaced) after the assertions below. */
+    const blocking = page.evaluate(() => {
+      const until = Date.now() + 40_000;
+      while (Date.now() < until) {
+        // Block the page's main thread.
+      }
+    });
 
     await expect
-      .poll(async () => (await messageBoxes(application)).map((box) => box.buttons), { timeout: 90_000 })
+      .poll(async () => boxButtons(application), { timeout: 90_000 })
       .toEqual([['Wait', 'Reload', 'Restart in Safe Mode']]);
     const restored = await application.firstWindow();
     await restored.waitForURL((url) => url.protocol === 'app:', { waitUntil: 'load', timeout: 120_000 });
     expect(await restored.evaluate(() => document.readyState)).toBe('complete');
     const log = await readFile(join(userData, 'logs', 'desktop.log'), 'utf8');
     expect(log).toContain('renderer.hang-offered');
+    await Promise.allSettled([blocking]);
   }, 600_000);
 });

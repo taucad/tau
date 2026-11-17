@@ -325,6 +325,14 @@
       "owner": "desktop boot"
     },
     {
+      "id": "B22",
+      "bound": "Desktop renderer hang rule (B24, 30 s): a window unresponsive this long is reported while it lasts and the person is offered Wait, Reload or Restart in Safe Mode; Wait asks again after another 30 s, and a page that answers first closes the choice (diagnostics.ts rendererHangOfferMilliseconds)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout: (offerHangChoice, milliseconds) => setTimeout(offerHangChoice, milliseconds),",
+      "class": "Liveness",
+      "owner": "desktop boot"
+    },
+    {
       "id": "C1",
       "bound": "Leader heartbeat (M2 leading)",
       "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",

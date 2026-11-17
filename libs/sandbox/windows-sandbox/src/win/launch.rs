@@ -5,8 +5,9 @@
 //! the job is empty and every descriptor is restored before `exit`. Anything unconfirmed is
 //! `cleanup-failed`, and the journal stays for `restore`.
 
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,11 +22,12 @@ use windows_sys::Win32::System::Threading::{
     LOGON_WITH_PROFILE, PROCESS_INFORMATION, ResumeThread, STARTF_FORCEOFFFEEDBACK, STARTUPINFOW, WaitForSingleObject,
 };
 
-use super::acl::{self, Principals};
+use super::acl;
 use super::desktop::{PrivateDesktop, WindowStation, current_station_name};
-use super::exclusive::{self, Exclusive};
+use super::exclusive;
 use super::executable::pin;
 use super::job::Job;
+use super::ledger;
 use super::lowbox::derive_package_sid;
 use super::pipe::{self, HandleIo};
 use super::profile;
@@ -39,9 +41,10 @@ use crate::appcontainer::package_name;
 use crate::cmdline::{capability_sid, quote_arg};
 use crate::frame::{self, Frame, read_frame, write_frame};
 use crate::install::{InstallRecord, firewall_off_message};
-use crate::journal::{Entry, Header, JOURNAL_VERSION, JournalWriter};
+use crate::journal::{self, Entry, Header, JOURNAL_VERSION, JournalWriter};
+use crate::overlap::{key, overlaps};
 use crate::paths::is_within;
-use crate::protocol::{CleanupFailed, Exit, Ready, Refused, RunnerError, RunnerSpec};
+use crate::protocol::{CleanupFailed, Exit, Ready, Refused, RunnerError, RunnerReady, RunnerSpec};
 use crate::spec::{self, ExecutableRoots, ValidSpec, format_digest};
 use crate::tree::{self, Sample};
 
@@ -119,31 +122,10 @@ pub fn run() -> i32 {
         },
         None => None,
     };
-    // One launch at a time: held from before the journal until teardown has restored it (`exclusive.rs`).
-    let exclusive = match exclusive::try_acquire() {
-        Ok(Some(exclusive)) => exclusive,
-        Ok(None) => {
-            return refuse(&sink, &Refused::busy(spec::requirement::EXCLUSIVE_LAUNCH, exclusive::BUSY));
-        }
-        Err(err) => {
-            return refuse(
-                &sink,
-                &Refused::unavailable(
-                    "the sandbox cannot tell whether another launch is running",
-                    Some(err.to_string()),
-                ),
-            );
-        }
-    };
-    let mut session = match Session::prepare(valid, &record) {
+    let session = match Session::prepare(valid, &record) {
         Ok(session) => session,
-        Err(refused) => {
-            drop(exclusive);
-            return refuse(&sink, &refused);
-        }
+        Err(refused) => return refuse(&sink, &refused),
     };
-    // Released by the teardown, before the last frame: a host that starts the next launch on `exit` finds it free.
-    session.exclusive = RefCell::new(Some(exclusive));
     let code = session.run(stdin, sink);
     drop(pinned);
     code
@@ -183,20 +165,25 @@ fn check_fence(record: &InstallRecord) -> std::result::Result<(), Refused> {
 struct Session {
     valid: ValidSpec,
     record: InstallRecord,
-    principals: Principals,
+    account: Sid,
+    capability: Sid,
+    package: Sid,
     person: Sid,
     journal_path: String,
     capability_sid: String,
     package_sid: String,
     package_name: String,
-    /// The journaled roots, in application order. Their descendants are only in the journal file.
-    roots: Vec<Entry>,
+    /// The granted and denied paths that exist, in application order, and the directories among them.
+    roots: Vec<String>,
+    directories: Vec<String>,
     /// Opened for `WRITE_DAC` when the person may change it. The session ACEs are best-effort: adding
     /// them only widens access, and Codex's shape runs without them.
     station: Option<WindowStation>,
     station_name: String,
-    /// One launch at a time (`exclusive.rs`), held until [`Session::teardown`] has restored everything.
-    exclusive: RefCell<Option<Exclusive>>,
+    /// Whether this launch wrote its journal: only then does its teardown restore one.
+    journaled: Cell<bool>,
+    /// Marks the launch live for `restore` (`exclusive.rs`) until the launcher exits.
+    _live: exclusive::Live,
 }
 
 impl Session {
@@ -206,7 +193,6 @@ impl Session {
             move |err: Error| Refused::unavailable(what.clone(), Some(err.to_string()))
         };
         let account = Sid::parse(&record.account_sid).map_err(unavailable("the sandbox account SID is invalid"))?;
-        let group = Sid::parse(&record.group_sid).map_err(unavailable("the sandbox group SID is invalid"))?;
         if Sid::lookup(&record.account).map_err(unavailable("the sandbox account cannot be resolved"))?.as_ref()
             != Some(&account)
         {
@@ -241,19 +227,11 @@ impl Session {
                 None
             }
         };
-        let station_entry = match station.as_ref().map(WindowStation::journal_entry) {
-            Some(Ok(entry)) => Some(entry),
-            Some(Err(err)) => {
-                return Err(Refused::unavailable("the window station cannot be read", Some(err.to_string())));
-            }
-            None => None,
-        };
-
-        // Snapshot every root first; nothing has been changed yet.
-        let mut roots: Vec<Entry> = Vec::new();
+        // Classify every root; nothing has been changed yet. Snapshots come once the runner's logon SID is known.
+        let mut roots: Vec<String> = Vec::new();
         let mut directories: Vec<String> = Vec::new();
         for (path, _) in &valid.grants {
-            if roots.iter().any(|e| e.path.eq_ignore_ascii_case(path)) {
+            if roots.iter().any(|root| root.eq_ignore_ascii_case(path)) {
                 continue;
             }
             match root_kind(path) {
@@ -271,36 +249,128 @@ impl Session {
                 Ok(RootKind::File) => {}
                 Err(err) => return Err(Refused::unavailable("a path could not be read", Some(err.to_string()))),
             }
-            match acl::snapshot(path) {
-                Ok(Some(entry)) => roots.push(entry),
-                Ok(None) => eprintln!("tau-windows-sandbox launch: {path} does not exist; no ACL change"),
-                Err(err) => return Err(Refused::unavailable("a path's ACL could not be read", Some(err.to_string()))),
-            }
+            roots.push(path.clone());
         }
-        let header = Header {
-            version: JOURNAL_VERSION,
-            capability_sid: capability_text.clone(),
-            package_sid: package_text.clone(),
-            package_name: package_label.clone(),
-            launcher_pid: unsafe { GetCurrentProcessId() },
-            window_station: station_entry,
-        };
+        let live = exclusive::live(&package_label).map_err(unavailable("the launch cannot be marked live"))?;
         let journal_path = valid.journal.clone();
-        write_journal(Path::new(&journal_path), &header, &roots, &directories)?;
         Ok(Self {
             valid,
             record: record.clone(),
-            principals: Principals { account, group, capability, package },
+            account,
+            capability,
+            package,
             person,
             journal_path,
             capability_sid: capability_text,
             package_sid: package_text,
             package_name: package_label,
             roots,
+            directories,
             station,
             station_name,
-            exclusive: RefCell::new(None),
+            journaled: Cell::new(false),
+            _live: live,
         })
+    }
+
+    /// Journal and grant, under the person's descriptor lock: read the other unrestored journals, refuse a launch
+    /// that would expose one of them (or the ledger) to its shell or put its own journal in reach of another's,
+    /// journal every object with its original descriptor (another journal's entry where one covers it), register
+    /// the journal, then add this launch's ACEs and its window-station ACEs.
+    fn grant(&self, logon: &Sid) -> std::result::Result<(), Refused> {
+        let unavailable = |what: &str, err: String| Refused::unavailable(what.to_owned(), Some(err));
+        // Another launch editing descriptors past the wait: the same machine-readable answer as before concurrency.
+        let _lock = exclusive::descriptors()
+            .map_err(|err| Refused::busy(spec::requirement::EXCLUSIVE_LAUNCH, err.to_string()))?;
+        let ledger_dir = ledger::directory()
+            .map_err(|err| unavailable("the ledger of launches cannot be found", err.to_string()))?;
+        let granted: Vec<String> = self.valid.grants.iter().map(|(path, _)| path.clone()).collect();
+        let exposed = |target: &str| granted.iter().find(|path| is_within(target, path)).cloned();
+        if let Some(path) = exposed(&ledger_dir) {
+            return Err(Refused::unavailable(
+                format!("{path:?} holds the sandbox's ledger of launches, which no launch may be granted"),
+                None,
+            ));
+        }
+        let others = ledger::others(&self.package_name)
+            .map_err(|err| unavailable("the ledger of launches cannot be read", err.to_string()))?;
+        let mut originals: HashMap<String, Entry> = HashMap::new();
+        for other in &others {
+            if let Some(path) = exposed(&other.journal) {
+                return Err(Refused::unavailable(
+                    format!(
+                        "{path:?} holds another running or unrestored launch's journal, which this launch may not be granted"
+                    ),
+                    None,
+                ));
+            }
+            let journal = Path::new(&other.journal);
+            let summary = journal::read_summary(journal).map_err(|err| {
+                unavailable("another launch's journal cannot be read", format!("{}: {err}", other.journal))
+            })?;
+            if !summary.complete {
+                continue;
+            }
+            let theirs: Vec<String> = summary.roots.iter().map(|root| root.path.clone()).collect();
+            if theirs.iter().any(|root| is_within(&self.journal_path, root)) {
+                return Err(Refused::unavailable(
+                    "this launch's journal lies inside another running or unrestored launch's paths".to_owned(),
+                    None,
+                ));
+            }
+            if !overlaps(&theirs, &self.roots) {
+                continue;
+            }
+            let mut keep = |entry: Entry| {
+                if self.roots.iter().any(|root| is_within(&entry.path, root)) {
+                    originals.entry(key(&entry.path)).or_insert(entry);
+                }
+            };
+            for root in summary.roots {
+                keep(root);
+            }
+            journal::for_each_child(journal, keep).map_err(|err| {
+                unavailable("another launch's journal cannot be read", format!("{}: {err}", other.journal))
+            })?;
+        }
+        let labeled = |path: &str| {
+            self.valid
+                .grants
+                .iter()
+                .any(|(granted, access)| granted.eq_ignore_ascii_case(path) && acl::needs_low_label(*access))
+        };
+        // The original of an object another journal covers is that journal's entry, when it is the same object.
+        let original = |mut entry: Entry| {
+            if let Some(theirs) = originals.get(&key(&entry.path))
+                && theirs.file_id == entry.file_id
+            {
+                entry.sddl = theirs.sddl.clone();
+            }
+            entry
+        };
+        let mut roots = Vec::new();
+        for path in &self.roots {
+            match acl::snapshot(path) {
+                Ok(Some(entry)) => roots.push(Entry { labeled: labeled(path), ..original(entry) }),
+                Ok(None) => eprintln!("tau-windows-sandbox launch: {path} does not exist; no ACL change"),
+                Err(err) => return Err(unavailable("a path's ACL could not be read", err.to_string())),
+            }
+        }
+        let header = Header {
+            version: JOURNAL_VERSION,
+            capability_sid: self.capability_sid.clone(),
+            logon_sid: logon.to_sddl(),
+            package_sid: self.package_sid.clone(),
+            package_name: self.package_name.clone(),
+            launcher_pid: unsafe { GetCurrentProcessId() },
+            window_station: self.station.as_ref().map(WindowStation::journal_entry),
+        };
+        write_journal(Path::new(&self.journal_path), &header, &roots, &self.directories, &original)?;
+        self.journaled.set(true);
+        ledger::register(&self.package_name, &self.journal_path)
+            .map_err(|err| unavailable("the ledger of launches cannot be written", err.to_string()))?;
+        self.apply_grants(logon)
+            .map_err(|err| unavailable("the folder permissions could not be granted", err.to_string()))
     }
 
     /// Undo everything this launch changed. `Ok` only when the job (if any) is empty and every descriptor
@@ -314,40 +384,48 @@ impl Session {
                 Err(err) => failures.push(format!("the sandbox job could not be checked: {err}")),
             }
         }
-        failures.extend(restore_journal(
-            Path::new(&self.journal_path),
-            &[self.record.account_sid.clone(), self.record.group_sid.clone()],
-        ));
-        if failures.is_empty()
-            && let Err(err) = std::fs::remove_file(&self.journal_path)
-            && err.kind() != ErrorKind::NotFound
-        {
-            failures.push(format!("the journal could not be deleted: {err}"));
+        if self.journaled.get() {
+            match exclusive::descriptors() {
+                Ok(_lock) => {
+                    let restored = restore_journal(Path::new(&self.journal_path));
+                    if restored.is_empty() {
+                        if let Err(err) = std::fs::remove_file(&self.journal_path)
+                            && err.kind() != ErrorKind::NotFound
+                        {
+                            failures.push(format!("the journal could not be deleted: {err}"));
+                        } else if let Err(err) = ledger::unregister(&self.package_name) {
+                            failures.push(format!("the ledger could not be updated: {err}"));
+                        }
+                    }
+                    failures.extend(restored);
+                }
+                Err(err) => failures.push(err.to_string()),
+            }
         }
-        // Restored, or kept for `restore`: either way this launch changes nothing more.
-        drop(self.exclusive.borrow_mut().take());
         if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
     }
 
-    fn apply_grants(&self) -> Result<()> {
+    fn apply_grants(&self, logon: &Sid) -> Result<()> {
+        let grantees =
+            acl::Grantees { logon: logon.clone(), capability: self.capability.clone(), package: self.package.clone() };
         for (path, access) in &self.valid.grants {
-            if !self.roots.iter().any(|e| e.path.eq_ignore_ascii_case(path)) {
+            if !self.roots.iter().any(|root| root.eq_ignore_ascii_case(path)) {
                 continue;
             }
-            acl::apply(path, &acl::aces_for(*access, &self.principals), acl::needs_low_label(*access))?;
+            acl::apply(path, &acl::aces_for(*access, &grantees), acl::needs_low_label(*access))?;
         }
         if let Some(station) = &self.station
-            && let Err(err) = station.grant(&self.participants())
+            && let Err(err) = station.grant(&[logon, &self.capability, &self.package])
         {
             eprintln!("tau-windows-sandbox launch: no window-station session ACE: {err}");
         }
         Ok(())
     }
 
-    /// Who joins the private desktop and the window station besides the person: the sandbox account, the
-    /// launch's capability SID (the restricted pass) and its package SID (the AppContainer pass).
+    /// Who joins the launch's own private desktop besides the person: the sandbox account, the launch's
+    /// capability SID (the restricted pass) and its package SID (the AppContainer pass).
     fn participants(&self) -> [&Sid; 3] {
-        [&self.principals.account, &self.principals.capability, &self.principals.package]
+        [&self.account, &self.capability, &self.package]
     }
 
     fn run(self, stdin: HandleIo, sink: Sink) -> i32 {
@@ -376,8 +454,16 @@ impl Session {
                 other => break other,
             }
         };
-        match first {
-            Ok(Some(frame)) if frame.kind == frame::READY => {}
+        let logon = match first {
+            Ok(Some(frame)) if frame.kind == frame::READY => {
+                serde_json::from_slice::<RunnerReady>(&frame.payload).map_err(|err| err.to_string()).and_then(|ready| {
+                    if ready.logon_sid.starts_with("S-1-5-5-") {
+                        Sid::parse(&ready.logon_sid).map_err(|err| err.to_string())
+                    } else {
+                        Err(format!("the runner's logon SID {} is not one", ready.logon_sid))
+                    }
+                })
+            }
             other => {
                 let diagnostic = match other {
                     Ok(Some(frame)) if frame.kind == frame::RUNNER_ERROR => runner_error_text(&frame.payload),
@@ -392,6 +478,16 @@ impl Session {
                     cleanup,
                 );
             }
+        };
+        // Journal and grant to the runner's logon SID, which the shell's token carries and no other launch's does.
+        let granted = match logon {
+            Ok(logon) => self.grant(&logon),
+            Err(diagnostic) => Err(Refused::unavailable("the sandbox runner failed", Some(diagnostic))),
+        };
+        if let Err(refused) = granted {
+            drop(desktop);
+            let cleanup = self.teardown(Some(&job));
+            return self.finish_refused(&sink, refused, cleanup);
         }
         let ready = Ready {
             launcher_pid: unsafe { GetCurrentProcessId() },
@@ -457,14 +553,13 @@ impl Session {
 
     #[allow(clippy::type_complexity)]
     fn start_runner(&self) -> std::result::Result<(PrivateDesktop, Job, Runner, Owned, Owned), (Option<Job>, Error)> {
-        self.apply_grants().map_err(|err| (None, err))?;
         let desktop = PrivateDesktop::create(&self.station_name, &self.person, &self.participants())
             .map_err(|err| (None, err))?;
         let names = pipe::pipe_names().map_err(|err| (None, err))?;
-        let to_runner = pipe::create_server(&names.to_runner, true, &self.person, &self.principals.account)
-            .map_err(|err| (None, err))?;
-        let from_runner = pipe::create_server(&names.from_runner, false, &self.person, &self.principals.account)
-            .map_err(|err| (None, err))?;
+        let to_runner =
+            pipe::create_server(&names.to_runner, true, &self.person, &self.account).map_err(|err| (None, err))?;
+        let from_runner =
+            pipe::create_server(&names.from_runner, false, &self.person, &self.account).map_err(|err| (None, err))?;
         let job = Job::kill_on_close().map_err(|err| (None, err))?;
         let runner = match spawn_runner(&self.record, &names) {
             Ok(runner) => runner,
@@ -536,6 +631,7 @@ fn write_journal(
     header: &Header,
     roots: &[Entry],
     directories: &[String],
+    original: &dyn Fn(Entry) -> Entry,
 ) -> std::result::Result<(), Refused> {
     let mut writer = match JournalWriter::create(path, header) {
         Ok(writer) => writer,
@@ -567,7 +663,7 @@ fn write_journal(
                 |child| {
                     let child = child.to_string_lossy();
                     match acl::snapshot(&child) {
-                        Ok(Some(entry)) => writer.child(entry),
+                        Ok(Some(entry)) => writer.child(original(entry)),
                         Ok(None) => Ok(()),
                         // An object the person cannot read is one ACL propagation cannot change either.
                         Err(err) => {

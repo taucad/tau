@@ -647,27 +647,22 @@ describe('createWindowsShellProvider', () => {
     });
   });
 
-  describe('session serialization', () => {
-    it('should refuse a second launch while one is live and admit it once the first is recovered', async () => {
+  describe('concurrency', () => {
+    it('should run a second launch while one is live', async () => {
       const h = harness('hang');
       const first = await prepare(h);
       const second = await prepare(h);
       const child = pipesOf(await h.provider.launch(launchOf(first.executionId)));
-
-      const refused = await h.provider.launch(launchOf(second.executionId));
-
-      expect(refused).toStrictEqual({
-        status: 'sandbox-unavailable',
-        message: 'Windows runs one sandboxed shell at a time and another one is running; close it, then try again.',
-      });
-      await child.terminate();
-      await finish(h, first);
       h.setScenario('echo');
+
       const again = pipesOf(await h.provider.launch(launchOf(second.executionId)));
+
       await expect(again.exited).resolves.toStrictEqual({ exitCode: 0 });
+      await child.terminate();
+      expect(await finish(h, first)).toMatchObject({ status: 'stopped' });
     });
 
-    it('should refuse a launch while an earlier launch journal is unrestored', async () => {
+    it('should launch beside an earlier launch journal that is unrestored, which recovery still restores', async () => {
       const h = harness('cleanup-failed');
       const first = await prepare(h);
       const child = pipesOf(await h.provider.launch(launchOf(first.executionId)));
@@ -675,15 +670,22 @@ describe('createWindowsShellProvider', () => {
       const second = await prepare(h);
       h.setScenario('echo');
 
-      const refused = await h.provider.launch(launchOf(second.executionId));
+      const again = pipesOf(await h.provider.launch(launchOf(second.executionId)));
+
+      await expect(again.exited).resolves.toStrictEqual({ exitCode: 0 });
+      expect(await finish(h, first)).toMatchObject({ status: 'stopped' });
+    });
+
+    it('should answer the helper exclusive-launch refusal sandbox-unavailable with nothing started', async () => {
+      const h = harness('busy');
+      const first = await prepare(h);
+
+      const refused = await h.provider.launch(launchOf(first.executionId));
 
       expect(refused).toMatchObject({
         status: 'sandbox-unavailable',
-        message: expect.stringContaining('has not finished restoring its folder permissions') as unknown,
+        message: expect.stringContaining('locked for over 120 seconds') as unknown,
       });
-      expect(await finish(h, first)).toMatchObject({ status: 'stopped' });
-      const again = pipesOf(await h.provider.launch(launchOf(second.executionId)));
-      await expect(again.exited).resolves.toStrictEqual({ exitCode: 0 });
     });
   });
 

@@ -8,8 +8,7 @@
  * Every row starts with a positive control that must succeed inside the same sandbox, then the negatives, and every
  * deny verdict is decided outside the sandbox: file digests, canaries and ACLs the test process placed and reads back,
  * listeners and a named-pipe server that count their own clients, and the process table. What the sandboxed command
- * prints is recorded as context only. Launches run one at a time because the provider admits one session at a time
- * (A23 fallback clause); only the A23 row overlaps two on purpose.
+ * prints is recorded as context only. Launches run one at a time unless a row overlaps them on purpose (A23, NW02-NW04).
  *
  * Off unless `TAU_SHELL_CONFORMANCE=1`, which only `sandbox:test:shell-conformance:windows` sets. On any platform but
  * win32 the suite fails rather than skips. `TAU_SHELL_CONFORMANCE_ROW` names the row (WIN-X64),
@@ -54,7 +53,7 @@ import {
 } from '#shell/shell-identity.js';
 import type { ShellExecutable } from '#shell/shell-identity.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellProcess, ShellProvider } from '#shell/shell-provider.js';
-import { launchExclusionConformance, nativeWorkerConformance } from '#shell/windows-native-worker.fixture.js';
+import { nativeWorkerRows } from '#shell/windows-native-worker.fixture.js';
 import type { NativeWorkerContext } from '#shell/windows-native-worker.fixture.js';
 import { createWindowsShellProvider } from '#shell/windows-shell-provider.js';
 
@@ -1341,46 +1340,41 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     expect(escapePids(aborted.pids, output).filter((pid) => alive(pid))).toStrictEqual([]);
   });
 
-  conformance('A23', 'a second concurrent launch is refused while the first runs to completion', async () => {
-    const sync = join(work, 'a23');
-    mkdirSync(sync, { recursive: true });
-    const first = run(
-      [
-        `Set-Content -LiteralPath ${quote(join(sync, 'ready'))} -Value ready -NoNewline`,
-        `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
-        `Set-Content -LiteralPath ${quote(join(sync, 'first-done'))} -Value done -NoNewline`,
-      ].join('\n'),
-      { commandId: 'conformance#a23-first' },
-    );
-    try {
-      expect(await waitUntil(() => existsSync(join(sync, 'ready')), 30_000)).toBe(true);
-      const second = await prepared(
-        launchOf(`Set-Content -LiteralPath ${quote(join(sync, 'second-ran'))} -Value ran`, {
-          commandId: 'conformance#a23-second',
-        }),
+  conformance(
+    'A23',
+    'a second launch runs to completion beside a live first one, over the same workspace',
+    async () => {
+      const sync = join(work, 'a23');
+      mkdirSync(sync, { recursive: true });
+      const first = run(
+        [
+          `Set-Content -LiteralPath ${quote(join(sync, 'ready'))} -Value ready -NoNewline`,
+          `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
+          `Set-Content -LiteralPath ${quote(join(sync, 'first-done'))} -Value done -NoNewline`,
+        ].join('\n'),
+        { commandId: 'conformance#a23-first' },
       );
+      try {
+        expect(await waitUntil(() => existsSync(join(sync, 'ready')), 30_000)).toBe(true);
+        /* Concurrent launches (README "Sessions"): the second grants the same workspace and ends first. */
+        const second = await run(`Set-Content -LiteralPath ${quote(join(sync, 'second-ran'))} -Value ran -NoNewline`, {
+          commandId: 'conformance#a23-second',
+        });
 
-      /*
-       * The provider answers an overlapping launch `sandbox-unavailable` with nothing started; the desktop's shell
-       * service turns the same overlap into `session-limit` before it reaches the provider (`maxExecutions: 1`).
-       */
-      expect(second).toMatchObject({ status: 'sandbox-unavailable' });
-      expect(JSON.stringify(second)).toMatch(/one sandboxed shell at a time/u);
-      expect(existsSync(join(sync, 'second-ran'))).toBe(false);
-    } finally {
-      writeFileSync(join(sync, 'release'), '');
-      await first.catch(() => undefined);
-    }
-    const ended = await first;
+        expect(second.exitCode, second.stderr).toBe(0);
+        expect(readFileSync(join(sync, 'second-ran'), 'utf8')).toBe('ran');
+        /* The second's restore left the first's grants: it still writes where it was granted. */
+        expect(existsSync(join(sync, 'first-done'))).toBe(false);
+      } finally {
+        writeFileSync(join(sync, 'release'), '');
+        await first.catch(() => undefined);
+      }
+      const ended = await first;
 
-    expect(ended.exitCode, ended.stderr).toBe(0);
-    expect(readFileSync(join(sync, 'first-done'), 'utf8')).toBe('done');
-    /* The limit is about overlap only: once the first settled, the next launch runs. */
-    const after = await run(`Set-Content -LiteralPath ${quote(join(sync, 'after'))} -Value after -NoNewline`);
-
-    expect(after.exitCode, after.stderr).toBe(0);
-    expect(readFileSync(join(sync, 'after'), 'utf8')).toBe('after');
-  });
+      expect(ended.exitCode, ended.stderr).toBe(0);
+      expect(readFileSync(join(sync, 'first-done'), 'utf8')).toBe('done');
+    },
+  );
 
   conformance(
     'A26',
@@ -1629,17 +1623,9 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     pause: delay,
   });
 
-  conformanceWithin(180_000)(
-    'NW01',
-    'a native worker outside Program Files runs pinned to its digest, loads from its unwritable runtime root, writes only its artifacts, has no network and reads stdin to close-input',
-    async () => nativeWorkerConformance(nativeWorkerContext()),
-  );
-
-  conformanceWithin(180_000)(
-    'NW02',
-    'the helper runs one launch at a time: a second launch and a restore are refused while a worker is live, and the next launch runs as soon as it exits',
-    async () => launchExclusionConformance(nativeWorkerContext()),
-  );
+  for (const [id, title, body] of nativeWorkerRows(nativeWorkerContext)) {
+    conformanceWithin(180_000)(id, title, body);
+  }
 
   conformance('W07', 'after every launch, each path the suite touched has exactly its original ACL', async () => {
     expect(sddlOf(aclPaths)).toStrictEqual(aclBaseline);

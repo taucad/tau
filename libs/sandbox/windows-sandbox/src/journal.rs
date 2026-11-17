@@ -7,19 +7,22 @@
 //! the whole journal, `end` included, before it changes any ACL. A journal without a valid `end` therefore
 //! belongs to a launch that changed nothing, and restoring it only deletes it.
 //!
-//! Each entry keeps the full descriptor (owner, group, DACL and its control flags, and the mandatory label)
-//! as SDDL and the object's file id. Restoring writes back the recorded DACL with its control flags and the
-//! recorded label; it never removes an ACE that was not added by the launch, because it never edits ACEs
-//! at all.
+//! Each entry keeps the object's original descriptor (owner, group, DACL and its control flags, and the mandatory
+//! label) as SDDL and its file id. "Original" means before any launch covering the object changed it: an object
+//! another unrestored journal already holds is recorded with that journal's entry (`overlap.rs`). Restoring removes
+//! the ACEs naming the launch's own SIDs from each root and, where no other unrestored journal covers an object,
+//! writes back its recorded control flags and label. It never writes back an ACE list, so it never touches an ACE
+//! another launch or the person added.
 
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
-/// Version 3 added the package name and SID and the mandatory label. Older journals are refused: version 2 shipped
-/// only on unmerged branches, behind `TAU_WINDOWS_SHELL_SANDBOX`.
-pub const JOURNAL_VERSION: u32 = 3;
+/// Version 4 grants to the runner's logon SID instead of the shared sandbox account, records which roots are
+/// writable and restores by SID (concurrent launches, README "Sessions"). Older journals are refused: versions 2 and 3
+/// shipped only on unmerged branches, behind `TAU_WINDOWS_SHELL_SANDBOX`.
+pub const JOURNAL_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -27,8 +30,6 @@ pub struct WindowStationEntry {
     /// The Terminal Services session whose window station this is; a restore from another session skips it.
     pub session_id: u32,
     pub name: String,
-    /// The self-relative security descriptor (DACL only), hex, restored byte for byte.
-    pub descriptor: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -36,6 +37,9 @@ pub struct WindowStationEntry {
 pub struct Header {
     pub version: u32,
     pub capability_sid: String,
+    /// The launch's runner's logon SID (`S-1-5-5-…`), which every first-pass grant and every denial names: unique to
+    /// the launch, unlike the sandbox account.
+    pub logon_sid: String,
     /// The launch's AppContainer package SID (`S-1-15-2-…`): a restored root must not name it either.
     pub package_sid: String,
     /// The launch's AppContainer name (`tau.sandbox.<32 hex digits>`), which the runner registers in the
@@ -58,6 +62,16 @@ pub struct Entry {
     /// `None` when the object's attributes could not be read.
     #[serde(default)]
     pub file_id: Option<String>,
+    /// A writable root, whose tree's mandatory label the launch lowered.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub labeled: bool,
+}
+
+impl Header {
+    /// Every SID the launch's ACEs name: restore removes exactly these.
+    pub fn own_sids(&self) -> Vec<String> {
+        vec![self.logon_sid.clone(), self.capability_sid.clone(), self.package_sid.clone()]
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -191,31 +205,6 @@ pub fn for_each_child(path: &Path, mut visit: impl FnMut(Entry)) -> io::Result<(
     .map(|_| ())
 }
 
-pub fn to_hex(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(DIGITS[(byte >> 4) as usize] as char);
-        out.push(DIGITS[(byte & 0x0f) as usize] as char);
-    }
-    out
-}
-
-pub fn from_hex(text: &str) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
-        return None;
-    }
-    let digit = |c: u8| -> Option<u8> {
-        match c {
-            b'0'..=b'9' => Some(c - b'0'),
-            b'a'..=b'f' => Some(c - b'a' + 10),
-            b'A'..=b'F' => Some(c - b'A' + 10),
-            _ => None,
-        }
-    };
-    text.as_bytes().chunks(2).map(|pair| Some(digit(pair[0])? << 4 | digit(pair[1])?)).collect()
-}
-
 /// `<volume serial>:<file index>` in hex, as journaled in [`Entry::file_id`].
 pub fn file_id(volume_serial: u32, index: u64) -> String {
     format!("{volume_serial:08x}:{index:016x}")
@@ -230,19 +219,16 @@ mod tests {
         Header {
             version: JOURNAL_VERSION,
             capability_sid: "S-1-5-21-1-2-3-4".into(),
+            logon_sid: "S-1-5-5-0-4242".into(),
             package_sid: "S-1-15-2-1-2-3-4-5-6-7".into(),
             package_name: "tau.sandbox.000000010000000200000003ffffffff".into(),
             launcher_pid: 77,
-            window_station: Some(WindowStationEntry {
-                session_id: 1,
-                name: "WinSta0".into(),
-                descriptor: to_hex(&[1, 0, 4, 0x80, 0xff]),
-            }),
+            window_station: Some(WindowStationEntry { session_id: 1, name: "WinSta0".into() }),
         }
     }
 
     fn entry(path: &str, sddl: &str) -> Entry {
-        Entry { path: path.into(), sddl: sddl.into(), file_id: Some(file_id(0xabcd, 42)) }
+        Entry { path: path.into(), sddl: sddl.into(), file_id: Some(file_id(0xabcd, 42)), labeled: false }
     }
 
     fn temp(name: &str) -> PathBuf {
@@ -354,11 +340,19 @@ mod tests {
     }
 
     #[test]
-    fn hex_round_trips() {
-        let bytes: Vec<u8> = (0..=255).collect();
-        assert_eq!(from_hex(&to_hex(&bytes)).unwrap(), bytes);
-        assert_eq!(from_hex("0"), None);
-        assert_eq!(from_hex("zz"), None);
-        assert_eq!(from_hex("AB").unwrap(), vec![0xab]);
+    fn keeps_writable_roots_and_names_the_launch_own_sids() {
+        let path = temp("labeled").join("journal.json");
+        let mut writer = JournalWriter::create(&path, &header()).unwrap();
+        writer.root(Entry { labeled: true, ..entry(r"C:\w", "O:BAG:BAD:(A;;FA;;;SY)") }).unwrap();
+        writer.root(entry(r"C:\r", "O:BAG:BAD:(A;;FA;;;SY)")).unwrap();
+        writer.finish().unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        // Only a writable root spells the flag out.
+        assert_eq!(text.matches("\"labeled\":true").count(), 1);
+        assert!(!text.contains("\"labeled\":false"));
+        let summary = read_summary(&path).unwrap();
+        assert_eq!(summary.roots.iter().map(|root| root.labeled).collect::<Vec<_>>(), [true, false]);
+        assert_eq!(summary.header.own_sids(), ["S-1-5-5-0-4242", "S-1-5-21-1-2-3-4", "S-1-15-2-1-2-3-4-5-6-7"]);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
 }

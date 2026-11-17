@@ -2,9 +2,10 @@
 //!
 //! `launch` creates a private desktop on its own window station whose protected DACL admits the person
 //! (all access) and, as participants, the sandbox account, this launch's capability SID and its
-//! AppContainer package SID, with a Low mandatory label so the Low-integrity shell may use it. It adds one
-//! ACE per session SID to the window station and restores the window station's original descriptor byte
-//! for byte at teardown.
+//! AppContainer package SID, with a Low mandatory label so the Low-integrity shell may use it. The window station
+//! is shared by every launch in the session: each adds one ACE per SID of its own (its runner's logon SID, its
+//! capability SID, its package SID) and removes exactly the ACEs naming those SIDs at teardown, so concurrent
+//! launches never undo each other's (README "Sessions").
 
 use std::ffi::c_void;
 
@@ -23,9 +24,11 @@ use windows_sys::Win32::System::StationsAndDesktops::{
 };
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
+use super::acl::{from_sddl, to_sddl};
 use super::sid::Sid;
 use super::util::{Error, Local, Result, check, check_status, random_u32s, wide};
-use crate::journal::{WindowStationEntry, from_hex, to_hex};
+use crate::journal::WindowStationEntry;
+use crate::overlap::{dacl_part, dacl_without_all, names_any};
 
 const DESKTOP_ALL_ACCESS: u32 = 0x000F_01FF;
 /// All access but `DELETE`, `WRITE_DAC` and `WRITE_OWNER` (Codex `DESKTOP_PARTICIPANT_ACCESS`).
@@ -110,12 +113,17 @@ impl WindowStation {
         Ok(bytes.to_vec())
     }
 
-    pub fn journal_entry(&self) -> Result<WindowStationEntry> {
-        Ok(WindowStationEntry {
-            session_id: self.session_id,
-            name: self.name.clone(),
-            descriptor: to_hex(&self.descriptor()?),
-        })
+    pub fn journal_entry(&self) -> WindowStationEntry {
+        WindowStationEntry { session_id: self.session_id, name: self.name.clone() }
+    }
+
+    fn dacl_sddl(&self) -> Result<String> {
+        let mut descriptor = self.descriptor()?;
+        let mut aligned = vec![0u64; descriptor.len().div_ceil(8)];
+        unsafe {
+            std::ptr::copy_nonoverlapping(descriptor.as_mut_ptr(), aligned.as_mut_ptr() as *mut u8, descriptor.len())
+        };
+        to_sddl(aligned.as_mut_ptr() as PSECURITY_DESCRIPTOR, DACL_SECURITY_INFORMATION)
     }
 
     /// Add one session ACE per SID to the current DACL.
@@ -181,19 +189,22 @@ impl WindowStation {
         )
     }
 
-    /// Write the journaled descriptor back and confirm the bytes match.
-    pub fn restore(&self, entry: &WindowStationEntry) -> Result<()> {
-        let original =
-            from_hex(&entry.descriptor).ok_or_else(|| Error::msg("journaled window-station descriptor is not hex"))?;
-        let mut aligned = vec![0u64; original.len().div_ceil(8)];
-        unsafe { std::ptr::copy_nonoverlapping(original.as_ptr(), aligned.as_mut_ptr() as *mut u8, original.len()) };
+    /// Remove every ACE naming one of `own` and nothing else, and confirm none is left.
+    pub fn revoke(&self, own: &[String]) -> Result<()> {
+        let sddl = self.dacl_sddl()?;
+        let dacl =
+            dacl_part(&sddl).ok_or_else(|| Error::msg(format!("the window station's DACL {sddl} does not parse")))?;
+        if !names_any(dacl, own) {
+            return Ok(());
+        }
+        let kept = dacl_without_all(dacl, own)
+            .ok_or_else(|| Error::msg(format!("the window station's DACL {sddl} does not parse")))?;
+        let sd = from_sddl(&kept)?;
         let info = DACL_SECURITY_INFORMATION;
-        check(
-            unsafe { SetUserObjectSecurity(self.handle, &info, aligned.as_mut_ptr() as PSECURITY_DESCRIPTOR) },
-            "SetUserObjectSecurity(window station)",
-        )?;
-        if self.descriptor()? != original {
-            return Err(Error::msg("the window-station descriptor did not read back byte for byte"));
+        check(unsafe { SetUserObjectSecurity(self.handle, &info, sd.0) }, "SetUserObjectSecurity(window station)")?;
+        let now = self.dacl_sddl()?;
+        if dacl_part(&now).is_none_or(|dacl| names_any(dacl, own)) {
+            return Err(Error::msg(format!("the window station still names the launch ({now})")));
         }
         Ok(())
     }

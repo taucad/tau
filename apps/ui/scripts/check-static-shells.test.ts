@@ -115,6 +115,8 @@ describe('findStrayPrerenderOutputs', () => {
       '_root.data',
     ]);
     expect(findStrayPrerenderOutputs(homeClass, (file) => file === '__shell/home/index.html')).toStrictEqual([]);
+    // The name the prerender writes under trailing-slash-aware data requests (RR4).
+    expect(findStrayPrerenderOutputs(homeClass, (file) => file === '_.data')).toStrictEqual(['_.data']);
   });
 
   it('should leave a rewrite shell, which is served from its prerendered file, alone', () => {

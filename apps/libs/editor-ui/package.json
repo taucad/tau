@@ -44,7 +44,9 @@
     "./components/code/use-highlighted-lines": "./src/components/code/use-highlighted-lines.ts",
     "./lib/editor-diagnostics": "./src/lib/editor-diagnostics.ts",
     "./lib/editor-document": "./src/lib/editor-document.ts",
+    "./lib/editor-document-session": "./src/lib/editor-document-session.ts",
     "./lib/editor-languages": "./src/lib/editor-languages.ts",
+    "./lib/editor-navigation-service": "./src/lib/editor-navigation-service.ts",
     "./lib/editor-syntax": "./src/lib/editor-syntax.ts",
     "./lib/editor-syntax.fixtures": "./src/lib/editor-syntax.fixtures.ts",
     "./lib/kcl-language/kcl-bindings": "./src/lib/kcl-language/kcl-bindings.ts",
@@ -58,11 +60,13 @@
   "devDependencies": {
     "@lezer/highlight": "catalog:",
     "@taucad/kcl-wasm-lib": "catalog:",
+    "@taucad/types": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "^14.6.1",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "vitest-mock-extended": "catalog:"
   },
   "dependencies": {
     "@codemirror/autocomplete": "catalog:",
@@ -74,7 +78,10 @@
     "@codemirror/view": "catalog:",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/events": "workspace:*",
+    "@taucad/fs-client": "workspace:*",
     "@taucad/grammars": "workspace:*",
+    "@taucad/parameters": "workspace:*",
+    "@taucad/revisions": "workspace:*",
     "@taucad/ui": "workspace:*",
     "@taucad/ui-core": "workspace:*",
     "@taucad/utils": "workspace:*",
@@ -86,6 +93,7 @@
     "rehype-stringify": "catalog:",
     "remark-parse": "catalog:",
     "remark-rehype": "catalog:",
+    "uint8array-extras": "catalog:",
     "unified": "catalog:",
     "vscode-uri": "catalog:"
   },

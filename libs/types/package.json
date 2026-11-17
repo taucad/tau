@@ -20,7 +20,8 @@
     "./desktop": "./src/desktop.ts",
     "./desktop-native-kernels": "./src/desktop-native-kernels.ts",
     "./desktop-terminal": "./src/desktop-terminal.ts",
-    "./desktop-updates": "./src/desktop-updates.ts"
+    "./desktop-updates": "./src/desktop-updates.ts",
+    "./deployment": "./src/deployment.ts"
   },
   "imports": {
     "#*.js": "./src/*.ts",

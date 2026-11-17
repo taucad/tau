@@ -62,8 +62,8 @@ import {
   setEditorTextScope,
   subscribeEditorConflictRecords,
   subscribeOwedEditorText,
-} from '#lib/editor-document-session.js';
-import type { EditorTextScope } from '#lib/editor-document-session.js';
+} from '@taucad/editor-ui/lib/editor-document-session';
+import type { EditorTextScope } from '@taucad/editor-ui/lib/editor-document-session';
 import { getProjectRootConfigs, setCheckoutRootConfigs } from '@taucad/files-ui/filesystem/handle-store';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
 import { chatsOpen, isFileCheckSettled } from '#hooks/use-project-availability.js';

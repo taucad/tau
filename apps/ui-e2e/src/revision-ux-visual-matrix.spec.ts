@@ -372,8 +372,10 @@ test('S24: places the chat in focus on a branch from its chip, then offers Switc
   /* The chat in focus works in main, the live checkout, as the canvas row has it. */
   await switchToBranch('main');
   /* D3 (bee2a79e41): the branch's chip ⋮ offers Run this chat here while it would move the chat in focus. */
-  await pickBranchVerb(branchName, 'Run this chat here', async () => {
-    await target.screenshot(undefined, 'revisions-S24-use-in-chat-1440-light.png');
+  await pickBranchVerb(branchName, 'Run this chat here', {
+    before: async () => {
+      await target.screenshot(undefined, 'revisions-S24-use-in-chat-1440-light.png');
+    },
   });
   await target.expectVisible(selectors.getByRole('button', { name: `Switch to ${branchName}`, exact: true }), 60_000);
   await target.screenshot(undefined, 'revisions-S24-follow-chat-1440-light.png');

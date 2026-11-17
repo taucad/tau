@@ -20,7 +20,7 @@ import {
   triggerParameterHints,
 } from '@taucad/editor-ui/components/code/editor-language-features';
 import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
-import { EditorDocumentSession } from '#lib/editor-document-session.js';
+import { EditorDocumentSession } from '@taucad/editor-ui/lib/editor-document-session';
 import type { TextChange } from '@taucad/editor-ui/lib/editor-document';
 import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';

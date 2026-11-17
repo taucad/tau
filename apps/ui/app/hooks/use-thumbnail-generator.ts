@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { awaitGeometryPresentation } from '@taucad/viewer/graphics/three/utils/geometry-presentation-admission';
 import { useActorRef } from '@xstate/react';
-import { asKnownArtifact } from '@taucad/runtime';
+import { asKnownArtifact } from '@taucad/runtime/types';
 import { buildViewerCaptureImageOptions } from '@taucad/agent-tools/capture';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';

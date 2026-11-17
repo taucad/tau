@@ -29,6 +29,21 @@ export const mimeTypes = {
   igs: 'application/iges',
   brep: 'application/octet-stream',
 
+  // Native CAD (read by `@taucad/cadmpeg`; none has a registered media type)
+  sldprt: 'application/octet-stream',
+  catpart: 'application/octet-stream',
+  ipt: 'application/octet-stream',
+  iam: 'application/octet-stream',
+  f3d: 'application/octet-stream',
+  f3z: 'application/octet-stream',
+  fcstd: 'application/octet-stream',
+  '3dm': 'application/octet-stream',
+  sat: 'application/octet-stream',
+  sab: 'application/octet-stream',
+  smt: 'application/octet-stream',
+  smb: 'application/octet-stream',
+  pvz: 'application/octet-stream',
+
   // Sparse volumetric geometry
   vdb: 'application/vnd.openvdb',
 

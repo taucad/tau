@@ -104,7 +104,7 @@ fn ensure(rules: &INetFwRules, spec: &BlockRule<'_>, users: &str) -> Result<()> 
     let rule: INetFwRule3 = unsafe { CoCreateInstance(&NetFwRule, None, CLSCTX_INPROC_SERVER) }
         .map_err(com("CoCreateInstance(NetFwRule)"))?;
     unsafe { rule.SetName(&name) }.map_err(com("SetName"))?;
-    configure(&rule, spec, users)?;
+    configure(&rule, spec, users).map_err(|error| Error::msg(format!("firewall rule {}: {error}", spec.name)))?;
     unsafe {
         rules.Add(&rule.cast::<windows::Win32::NetworkManagement::WindowsFirewall::INetFwRule>().map_err(com("cast"))?)
     }

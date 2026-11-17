@@ -26,7 +26,8 @@ pub const RULE_BLOCK_LOOPBACK_UDP: &str = "tau_sandbox_block_loopback_udp";
 pub const FIREWALL_RULES: [&str; 4] =
     [RULE_BLOCK_OUTBOUND, RULE_BLOCK_INBOUND, RULE_BLOCK_LOOPBACK_TCP, RULE_BLOCK_LOOPBACK_UDP];
 
-pub const LOOPBACK_ADDRESSES: &str = "127.0.0.0/8,::1";
+/// `::/127` covers `::` and `::1`. The firewall COM API refused the earlier `127.0.0.0/8,::1` on windows-2025 (E_INVALIDARG).
+pub const LOOPBACK_ADDRESSES: &str = "127.0.0.0/8,::/127";
 pub const NON_LOOPBACK_ADDRESSES: &str =
     "0.0.0.0-126.255.255.255,128.0.0.0-255.255.255.255,::,::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff";
 

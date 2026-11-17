@@ -97,6 +97,27 @@ export const verifyDesktopDescriptor = (input: unknown, keys: Readonly<Record<st
   return parsed;
 };
 
+/**
+ * An update refused only because the computer's clock puts the descriptor outside its validity window: issued more than
+ * five minutes in the local future, or already expired by the local clock (B25). Main says "Check your computer's date
+ * and time" for it instead of the generic refusal.
+ */
+export class UpdateClockError extends Error {
+  public constructor() {
+    super('Update descriptor is outside its validity period by this computer’s clock');
+    this.name = 'UpdateClockError';
+  }
+}
+
+/**
+ * Whether an error is {@link UpdateClockError}, also across a library that re-throws it.
+ *
+ * @param error - The error.
+ * @returns Whether the clock refused the update.
+ */
+export const isUpdateClockError = (error: unknown): boolean =>
+  error instanceof UpdateClockError || (error instanceof Error && error.name === 'UpdateClockError');
+
 /** Admit only a fresh candidate for the installed route and exact immutable relative path. */
 export const parseDesktopUpdateDescriptor = (
   input: unknown,
@@ -119,8 +140,6 @@ export const parseDesktopUpdateDescriptor = (
     identity.channel !== descriptor.channel ||
     identity.version !== descriptor.version ||
     descriptor.path !== `releases/${encodeURIComponent(descriptor.tag)}/${artifact}` ||
-    issued > now + 300_000 ||
-    descriptorExpires <= now ||
     descriptorExpires <= issued ||
     descriptorExpires - issued > 7 * 24 * 60 * 60 * 1000
   ) {
@@ -128,6 +147,10 @@ export const parseDesktopUpdateDescriptor = (
   }
   if (descriptor.version !== installation.version && !isNewerVersion(descriptor.version, installation.version)) {
     throw new Error('Update descriptor would downgrade the installed app');
+  }
+  /* Only these two checks read the local clock: when they are the only ones that fail, the clock is the cause. */
+  if (issued > now + 300_000 || descriptorExpires <= now) {
+    throw new UpdateClockError();
   }
   return descriptor;
 };

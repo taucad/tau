@@ -377,16 +377,17 @@ describe('AppImage update from a launch that is not healthy (T-B22.1)', () => {
             : marker,
         ),
       );
-    mocks.fetch.mockImplementation(async (url: string) =>
-      Promise.resolve(
+    mocks.fetch.mockImplementation(
+      async (url: string) =>
         new Response(
           JSON.stringify(url.endsWith('/latest/desktop-update-linux-appimage-x64.json') ? signedNewer() : baseline),
         ),
-      ),
     );
     mocks.checkForUpdates.mockImplementation(async () => {
-      /* electron-updater asks its provider for the latest version; the provider reads and admits the feed. */
-      await new mocks.provider!.updateProvider(undefined, undefined, {}).getLatestVersion();
+      /* The downloader asks its provider for the latest version; the provider reads and admits the feed. */
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- A constructor, so new-cap wants PascalCase.
+      const { updateProvider: InstalledProvider } = mocks.provider!;
+      await new InstalledProvider(undefined, undefined, {}).getLatestVersion();
     });
     return startPlatformUpdater({
       platform: 'linux',

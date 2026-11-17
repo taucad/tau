@@ -436,10 +436,13 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
     // lookup leaves existing health untouched and is retried by the next check without restarting.
     const baselineUrl = `${origin}/releases/${encodeURIComponent(installation.tag)}/desktop-update-linux-appimage-x64.json`;
     const document = await fetchUpdateDescriptor(baselineUrl);
-    if (!(await options.confirmHealthy?.())) {
-      throw new Error('AppImage workspace has not acknowledged a healthy startup');
+    /* A launch that is not healthy may still update forward (D8, B22): it authenticates the running image and leaves
+     * the health record where it is, so the retained recovery image stays the last one that was healthy. */
+    if (await options.confirmHealthy?.()) {
+      image.markHealthy(document);
+    } else {
+      image.authenticate(document);
     }
-    image.markHealthy(document);
   };
   const backend: PlatformUpdateBackend = {
     systemManaged: false,

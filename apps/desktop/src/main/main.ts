@@ -1,5 +1,6 @@
 import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernels';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
+import type { DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 import { isMachinesFeatureEnabled, machinesDisabledMessage } from '@taucad/types/constants';
 import { randomUUID } from 'node:crypto';
 import { createCallbackLogic } from 'xstate';
@@ -130,6 +131,7 @@ import {
   optionalStepFailedSignal,
   probeLeftoverIgnoredSignal,
   storeQuarantinedSignal,
+  updateBlockedSignal,
   updaterFailureSignal,
 } from '#main/desktop-signals.js';
 import type { BootstrapStep, DesktopSignal, OptionalBootstrapStep } from '#main/desktop-signals.js';
@@ -166,6 +168,9 @@ import { parseDesktopInstallation } from '#main/update-identity.js';
 import { z } from 'zod';
 import type { DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import { createAutoInstall } from '#main/update-auto-install.js';
+import type { AutoInstall } from '#main/update-auto-install.js';
+import { desktopDownloadPage } from '#shared/desktop-release.js';
 import { startUpdateTriggers } from '#main/update-triggers.js';
 import type { MoveToApplicationsHost } from '#main/app-location.js';
 import {
@@ -1747,6 +1752,48 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return false;
   };
 
+  const updaterReady = Promise.withResolvers<DesktopUpdater>();
+  /* The updater's last snapshot, for the recovery window (D0, D8). */
+  let latestUpdate: ReturnType<DesktopUpdater['snapshot']> | undefined;
+  let publishRecoveryState = (): void => undefined;
+  /* What this launch's renderer has reported (D0). Check for Updates… before the shell mounts opens the recovery
+   * window instead of a renderer window, and the updater's health is `home-ready` in a normal launch (D8). */
+  let shellMountedThisLaunch = false;
+  let homeReadyThisLaunch = false;
+  /* A CI probe observes its renderer and starts the updater itself; it records no ledger and installs nothing alone. */
+  const probing = otaProbe !== undefined || routeQualification !== undefined;
+  /* Open the recovery window, and whether it is open, once bootstrap has made it. */
+  let openRecoveryFor = (_trigger: RecoveryTrigger): void => undefined;
+  let isRecoveryOpen = (): boolean => false;
+  /*
+   * Decision N1: a launch that never reached `home-ready`, in automatic safe mode or with the recovery window showing,
+   * installs a downloaded, verified update by itself after a 10 s countdown with Cancel, once for each target version.
+   */
+  const autoInstall: AutoInstall | undefined =
+    bootHealth === undefined
+      ? undefined
+      : createAutoInstall({
+          mode: launchMode,
+          blockedTarget: bootHealth.blockedAutoInstallTarget,
+          recoveryShowing: () => isRecoveryOpen(),
+          showCountdown: () => {
+            openRecoveryFor('auto-install');
+          },
+          noteAutoInstall: (targetVersion) => {
+            bootHealth.noteAutoInstall(targetVersion);
+          },
+          install: async () => {
+            const updater = await updaterReady.promise;
+            await updater.install();
+          },
+          publish: () => {
+            publishRecoveryState();
+          },
+          report: reportDesktopSignal,
+          log: (level, event, detail) => {
+            log.log(level, event, detail);
+          },
+        });
   /* D0: the renderer's two boot stages, from the app's own top-level document only. */
   ipcMain.on(bootChannels.stage, (event, stage: unknown) => {
     if (
@@ -1762,6 +1809,19 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     bootHealth?.advance(reached);
     bootWatchdog?.stage(reached);
+    shellMountedThisLaunch = true;
+    if (reached === 'home-ready' && !homeReadyThisLaunch) {
+      homeReadyThisLaunch = true;
+      autoInstall?.homeReady();
+      /* The launch is healthy now: one check acknowledges it without waiting for the next periodic check (D8). */
+      if (!probing) {
+        // async-iife: bootstrap -- a failed check is published by the updater as its own state.
+        void (async (): Promise<void> => {
+          const updater = await updaterReady.promise;
+          await updater.check();
+        })();
+      }
+    }
   });
   /* D0: sleep is not a hang. Every pending deadline stops on suspend and starts again from zero on resume. */
   powerMonitor.on('suspend', () => {
@@ -1786,10 +1846,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
   });
 
-  const updaterReady = Promise.withResolvers<DesktopUpdater>();
-  /* The updater's last snapshot, for the recovery window (D0, D8). */
-  let latestUpdate: ReturnType<DesktopUpdater['snapshot']> | undefined;
-  let publishRecoveryState = (): void => undefined;
   ipcMain.handle(desktopUpdateChannels.snapshot, async (event) => {
     if (!trusted(event.senderFrame)) {
       throw new Error('Untrusted update request');
@@ -2700,6 +2756,16 @@ const bootstrapElectronApp = async (): Promise<void> => {
       installFailed = false;
     }
   };
+  /** Report a blocked update path once for each reason in a launch (B25, B27). */
+  const reportedBlocks = new Set<string>();
+  const noteUpdateBlocked = (reason: DesktopUpdateSnapshot['blockedReason']): void => {
+    if (reason === undefined || reportedBlocks.has(reason)) {
+      return;
+    }
+    reportedBlocks.add(reason);
+    log.log('warn', 'updater.blocked', { reason });
+    reportDesktopSignal(updateBlockedSignal(reason, process.platform));
+  };
   /* Started before the first window, so an update can repair a launch whose page never renders (B17, D8). A CI
    * probe is the exception: it decides whether to install only after observing its renderer, so it starts after. */
   const startUpdater = async (installForProbe: boolean): Promise<void> => {
@@ -2733,7 +2799,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
         }
         /* The recovery window shows the updater's live status (D0, D8). */
         latestUpdate = snapshot;
+        noteUpdateBlocked(snapshot.blockedReason);
         publishRecoveryState();
+        autoInstall?.updateChanged(snapshot);
       },
       openExternal: async (url) => shell.openExternal(url),
       log: (level, event, detail) => {
@@ -2758,36 +2826,23 @@ const bootstrapElectronApp = async (): Promise<void> => {
         platformUpdater = await startPlatformUpdater({
           ...updaterOptions,
           prepareToInstall,
-          confirmHealthy: async () => {
-            const deadline = Date.now() + 30_000;
-            while (Date.now() < deadline) {
-              const window = appWindows().find((candidate) => !candidate.isDestroyed());
-              if (!window) {
-                /* The updater now starts before the first window: wait for it within the same bound. */
-                // oxlint-disable-next-line no-await-in-loop -- Poll for the first window only until the bounded startup deadline.
-                await sleep(250);
-                continue;
-              }
-              // oxlint-disable-next-line no-await-in-loop -- Startup acknowledgement waits for the real renderer save registration.
-              const ready: unknown = await window.webContents.executeJavaScript(
-                'location.protocol === "app:" && location.host === "tau" && document.querySelector("main") !== null && globalThis.tau?.quit?.isReady() === true',
-              );
-              if (ready === true) {
-                return true;
-              }
-              // oxlint-disable-next-line no-await-in-loop -- Poll the renderer only until the bounded startup deadline.
-              await sleep(250);
-            }
-            return false;
-          },
+          /*
+           * One health signal (D0, D8): a launch is healthy for the updater when it is a normal launch that reached
+           * `home-ready`. It answers at once; `home-ready` runs one check of its own. A CI probe starts the updater only
+           * after it has observed its renderer's save handler, which was this answer before `home-ready` existed.
+           */
+          confirmHealthy: async () => probing || (launchMode === 'normal' && homeReadyThisLaunch),
         });
       } catch (error) {
+        /* A damaged installation marker (B27): this copy cannot update itself, so the updater says so, with Download
+         * Tau, instead of failing every check with the same error. */
         log.log('error', 'updater.installed-route-invalid', { message: String(error) });
         const { startPlatformUpdateController } = await import('#main/update-controller.js');
         platformUpdater = startPlatformUpdateController(
           { ...updaterOptions, prepareToInstall },
           {
             systemManaged: false,
+            blockedReason: 'installation-marker',
             check: async () => {
               throw error;
             },
@@ -2821,10 +2876,16 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
   };
   const checkForUpdates = async (): Promise<void> => {
-    if (appWindows().length === 0) {
-      await createMainWindow();
+    /* No window has mounted this launch: the recovery window shows the check and its result, and needs nothing the
+     * renderer needs (D8, B22). */
+    if (shellMountedThisLaunch) {
+      if (appWindows().length === 0) {
+        await createMainWindow();
+      }
+      focusMainWindow();
+    } else {
+      openRecoveryFor('check-for-updates');
     }
-    focusMainWindow();
     const updater = await updaterReady.promise;
     await updater.check(true);
   };
@@ -2842,7 +2903,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     showMessageBox: async (options) => dialog.showMessageBox(options),
     fallback: {
       restartInSafeMode: async () => hooks.restartInSafeMode(),
-      downloadTau: async () => shell.openExternal(downloadTauPage(desktopChannel)),
+      downloadTau: async () => shell.openExternal(desktopDownloadPage(desktopChannel, latestUpdate)),
       showLogs: () => {
         shell.showItemInFolder(log.filePath);
       },
@@ -2863,6 +2924,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       open: (trigger) => {
         recoveryTrigger = trigger;
         recoveryController.open(trigger);
+        /* With the recovery window showing, a ready update may install by itself (N1). */
+        autoInstall?.reevaluate();
       },
     },
     prepareToQuit: async (purpose, reason) => {
@@ -2882,6 +2945,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
   });
   recoveryHooks = hooks;
+  openRecoveryFor = (trigger) => {
+    hooks.openRecovery(trigger);
+  };
+  isRecoveryOpen = () => recoveryController.isOpen();
   /** What the recovery window shows: why it opened, the ledger, the updater and the resets waiting for a start. */
   const recoveryState = () => ({
     mode: launchMode,
@@ -2890,6 +2957,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     stage: bootHealth?.stage(),
     ...(bootHealth?.previousOutcome === undefined ? {} : { previousOutcome: bootHealth.previousOutcome }),
     ...(latestUpdate === undefined ? {} : { update: latestUpdate }),
+    ...(autoInstall?.state() === undefined ? {} : { autoInstall: autoInstall.state() }),
+    downloadPage: desktopDownloadPage(desktopChannel, latestUpdate),
     pendingResets: readPendingResets(app.getPath('userData')),
   });
   publishRecoveryState = () => {
@@ -2927,9 +2996,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
         const updater = await updaterReady.promise;
         await updater.install();
       },
-      /* The automatic install and its Cancel are WP7's; until then there is nothing to cancel. */
-      cancelAutoInstall: () => undefined,
-      downloadTau: async () => shell.openExternal(downloadTauPage(desktopChannel)),
+      cancelAutoInstall: () => {
+        autoInstall?.cancel();
+      },
+      downloadTau: async () => shell.openExternal(desktopDownloadPage(desktopChannel, latestUpdate)),
       resetsChanged: () => {
         publishRecoveryState();
       },
@@ -3011,7 +3081,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     // Native menus must be reinstalled after adding items.
     Menu.setApplicationMenu(applicationMenu);
   }
-  const probing = otaProbe !== undefined || routeQualification !== undefined;
   if (!probing) {
     bootstrapStep = 'updater';
     await startUpdater(false);

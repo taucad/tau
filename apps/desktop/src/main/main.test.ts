@@ -3021,7 +3021,8 @@ describe('desktop main update path without a renderer (WP7)', () => {
       await vi.waitFor(async () => {
         expect(await windowsCreated()).toHaveLength(2);
       });
-      expect((await windowsCreated())[1]?.webPreferences?.partition).not.toBe('tau-recovery');
+      const created = await windowsCreated();
+      expect(created[1]?.webPreferences?.partition).not.toBe('tau-recovery');
     },
     bootMilliseconds,
   );

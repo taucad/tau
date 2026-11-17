@@ -48,6 +48,7 @@ import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesContent, generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { recordedBy } from '#test/identity.js';
+import { shellPath, writeShellExecutable } from '#test/script-executable.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -1293,27 +1294,20 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
          * the first argument that is neither an option nor an option's value,
          * because the port pins configuration ahead of every subcommand. */
         const log = join(root, 'commands.log');
-        const wrapper = join(root, 'git-counting');
-        await writeFile(
-          wrapper,
-          [
-            '#!/bin/sh',
-            'verb=',
-            'skip=0',
-            'for argument in "$@"; do',
-            '  if [ "$skip" = 1 ]; then skip=0; continue; fi',
-            '  case "$argument" in',
-            '    -C|-c) skip=1 ;;',
-            '    -*) ;;',
-            '    *) verb="$argument"; break ;;',
-            '  esac',
-            'done',
-            `echo "$verb	$*" >> ${log}`,
-            'exec git "$@"',
-            '',
-          ].join('\n'),
-          { mode: 0o755 },
-        );
+        const wrapper = await writeShellExecutable(join(root, 'git-counting'), [
+          'verb=',
+          'skip=0',
+          'for argument in "$@"; do',
+          '  if [ "$skip" = 1 ]; then skip=0; continue; fi',
+          '  case "$argument" in',
+          '    -C|-c) skip=1 ;;',
+          '    -*) ;;',
+          '    *) verb="$argument"; break ;;',
+          '  esac',
+          'done',
+          `echo "$verb	$*" >> ${shellPath(log)}`,
+          'exec git "$@"',
+        ]);
         const counted = createNativeGitRevisionPort({ repositoryPath, gitExecutable: wrapper });
 
         const limited = await counted.log({ heads: [chain.at(-1)!], limit: chainLimit });
@@ -2037,21 +2031,14 @@ describe.runIf(gitToolchainOnPath)('native remote credential transport', () => {
       const repositoryPath = join(root, 'project');
       const argumentsLog = join(root, 'arguments.log');
       const environmentLog = join(root, 'environment.log');
-      const wrapper = join(root, 'git-credential-check');
       const authorization = 'Bearer github-secret-value';
       try {
         await mkdir(repositoryPath, { recursive: true });
-        await writeFile(
-          wrapper,
-          [
-            '#!/bin/sh',
-            `printf '%s\\n' "$@" > ${argumentsLog}`,
-            `printf '%s\n%s\n%s\n%s' "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" "$GIT_CONFIG_KEY_1" "$GIT_CONFIG_VALUE_1" > ${environmentLog}`,
-            'exec git "$@"',
-            '',
-          ].join('\n'),
-          { mode: 0o755 },
-        );
+        const wrapper = await writeShellExecutable(join(root, 'git-credential-check'), [
+          `printf '%s\\n' "$@" > ${shellPath(argumentsLog)}`,
+          `printf '%s\n%s\n%s\n%s' "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" "$GIT_CONFIG_KEY_1" "$GIT_CONFIG_VALUE_1" > ${shellPath(environmentLog)}`,
+          'exec git "$@"',
+        ]);
         const port = createNativeGitRevisionPort({
           repositoryPath,
           gitExecutable: wrapper,

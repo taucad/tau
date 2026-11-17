@@ -138,7 +138,11 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
       const current: unknown = JSON.parse(await readFile(join(second, 'tau.json'), 'utf8'));
       expect(current).toMatchObject({ $schema: 'https://tau.new/schemas/tau-v1.json' });
       expect(current).not.toHaveProperty('id');
-      expect(git(bare, ['rev-parse', 'refs/heads/main'])).toBe(head);
+      /* On failure, name what moved the remote's head. */
+      expect(
+        git(bare, ['rev-parse', 'refs/heads/main']),
+        git(bare, ['log', '--format=%H %s%n%b', '--stat', '-2', 'refs/heads/main']),
+      ).toBe(head);
       expect(git(bare, ['show', `${head}:tau.json`])).toBe(original);
       expect(git(second, ['show', `${head}:tau.json`])).toBe(original);
     } finally {

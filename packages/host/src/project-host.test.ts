@@ -223,6 +223,17 @@ const unresolvedRuntime = (): ProjectHostRuntimeClient => ({
   }),
 });
 
+/**
+ * Remove a test's sandbox, retrying while Windows still holds it.
+ *
+ * A close that cannot record keeps the project for a retried close and does not wait for the work it started, so
+ * that work can still hold the workspace when the test removes it. Windows refuses to remove a directory in use
+ * (EBUSY) where POSIX removes it regardless; run 44016853439 found the refused directory removable a second later. `rm`'s
+ * own retries wait out that tail (backoff of 100 ms per attempt, ten attempts: 5.5 s at most).
+ */
+const removeSandbox = async (sandbox: string): Promise<void> =>
+  rm(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+
 /** A project host's options, composed as the desktop utility composes them. */
 const desktopProjectHostOptions = async (
   extra: Pick<ProjectHostOptions, 'turnPlacement'> = {},
@@ -230,7 +241,7 @@ const desktopProjectHostOptions = async (
 ): Promise<ProjectHostOptions> => {
   const sandbox = existing ?? (await mkdtemp(join(tmpdir(), 'tau-project-host-')));
   if (existing === undefined) {
-    cleanups.push(async () => rm(sandbox, { recursive: true, force: true }));
+    cleanups.push(async () => removeSandbox(sandbox));
   }
   const workspaceRoot = join(sandbox, 'home', 'bracket');
   await mkdir(workspaceRoot, { recursive: true });
@@ -966,7 +977,7 @@ describe('createProjectHost', () => {
   /* A renamed machine (a `.local` suffix, a DHCP name) is still the same device, and keeps its own sessions. */
   it('should stamp the same device after the machine is renamed', async () => {
     const sandbox = await mkdtemp(join(tmpdir(), 'tau-project-host-'));
-    cleanups.push(async () => rm(sandbox, { recursive: true, force: true }));
+    cleanups.push(async () => removeSandbox(sandbox));
     const before = createProjectHost(await desktopProjectHostOptions({}, sandbox));
     const beforeDevice = await stampedDevice();
     await before.close();
@@ -1000,7 +1011,10 @@ describe('createProjectHost', () => {
 
     expect(afterDevice).toBe(beforeDevice);
     expect(await segmentDevices(options.workspaceRoot)).toEqual([afterDevice]);
-  });
+    /* Two hosts and a fresh import of the whole host module graph. On the hosted windows-2025 runner this row took
+     * 3,284, 3,759, 4,019, 4,291, 2,849 and 9,198 ms in six runs of this lane (the last 44027233976), against 1.3 s
+     * on Linux, so the 5 s default failed it, and its late cleanup then broke the next row. */
+  }, 20_000);
 
   /* RH-A22: the desktop built its registry without parameter actors, so it offered no parameter tools. */
   it('should give the desktop project host parameter tools', async () => {

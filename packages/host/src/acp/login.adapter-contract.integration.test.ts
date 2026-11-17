@@ -30,11 +30,12 @@ import { spawnAcpAdapter } from '#acp/spawn.js';
 const resolveFrom = new URL('../../../cli/src/commands/serve.ts', import.meta.url).href;
 
 const roots: string[] = [];
-const closers: Array<() => void> = [];
+const closers: Array<() => Promise<void> | void> = [];
 
 afterEach(async () => {
   for (const close of closers.splice(0)) {
-    close();
+    // oxlint-disable-next-line no-await-in-loop -- each adapter is ended before its home is removed.
+    await close();
   }
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
@@ -50,8 +51,20 @@ const advertisedAuthMethods = async (adapter: AcpAdapter): Promise<readonly Auth
   roots.push(home);
   // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their names.
   const spawned = spawnAcpAdapter({ adapter, cwd: home, environment: { HOME: home, PATH: '' } });
-  closers.push(() => {
+  /* Ended, then waited for: Windows keeps a running process's working directory in use, so its home cannot be
+   * removed until the adapter has exited. */
+  const exited = new Promise<void>((resolve) => {
+    if (spawned.child.exitCode !== null || spawned.child.signalCode !== null) {
+      resolve();
+      return;
+    }
+    spawned.child.once('exit', () => {
+      resolve();
+    });
+  });
+  closers.push(async () => {
     spawned.signal('SIGKILL');
+    await exited;
   });
   const connection = client({ name: 'tau-host' }).connect(spawned.stream);
   closers.push(() => {

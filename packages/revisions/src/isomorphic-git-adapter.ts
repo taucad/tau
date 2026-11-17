@@ -1855,6 +1855,34 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     return checkouts;
   };
 
+  /** Create or open the store; {@link RevisionPort.init} queues it, one run per store at a time. */
+  const initStore = async (input: InitRevisionStoreInput): Promise<void> => {
+    const brandNew = !(await gitFiles.exists(`${gitdir}/config`));
+    if (brandNew && input.createSetupFiles !== false && !(await filesystem.exists(generatedIgnorePath))) {
+      await filesystem.writeFile(generatedIgnorePath, generatedIgnoreContent(undefined, input.additionalIgnores ?? []));
+    }
+    // Only now: the repository is created after the file that decides what a
+    // snapshot may ever contain already exists.
+    await init({ fs, dir: '', gitdir, defaultBranch });
+    /* Tau's derived-content ignores, where stock Git reads them and no
+     * revision records them: the store's own file, never versioned. */
+    const excludePath = `${gitdir}/info/exclude`;
+    const existingExclude = (await gitFiles.exists(excludePath))
+      ? await gitFiles.readFile(excludePath, 'utf8')
+      : undefined;
+    const exclude = generatedIgnoreContent(existingExclude, input.additionalIgnores ?? []);
+    if (exclude !== existingExclude) {
+      await gitFiles.mkdir(`${gitdir}/info`, { recursive: true });
+      await gitFiles.writeFile(excludePath, exclude);
+    }
+    /* Every project an older build recorded has no index at all, so this open
+     * heals it. An existing index is left alone: in a repository Tau adopted
+     * it may hold the person's own staged work. */
+    if (!(await gitFiles.exists(`${gitdir}/index`))) {
+      await syncLiveIndex();
+    }
+  };
+
   const port: RevisionPort = Object.freeze({
     describe: async (): Promise<RevisionEngineDescriptor> => {
       await Promise.resolve();
@@ -1882,36 +1910,15 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * exactly as the disk leg does (`native-git-port.ts`). The attributes file
      * is never written here: the cut supplies it in the recorded tree and
      * writes its live copy in the same mint (`revision-effects`, A4).
+     *
+     * One `init` at a time per store, as on the disk leg: the effects'
+     * `ensureStore` and a caller's own `init` can both reach a brand-new store,
+     * and two runs at once each wrote the ignore file and `info/exclude`. On
+     * Windows the second rename over a file the first writer still held open
+     * failed with EPERM. Queued, the second run finds the store the first made.
      */
-    init: async (input: InitRevisionStoreInput): Promise<void> => {
-      const brandNew = !(await gitFiles.exists(`${gitdir}/config`));
-      if (brandNew && input.createSetupFiles !== false && !(await filesystem.exists(generatedIgnorePath))) {
-        await filesystem.writeFile(
-          generatedIgnorePath,
-          generatedIgnoreContent(undefined, input.additionalIgnores ?? []),
-        );
-      }
-      // Only now: the repository is created after the file that decides what a
-      // snapshot may ever contain already exists.
-      await init({ fs, dir: '', gitdir, defaultBranch });
-      /* Tau's derived-content ignores, where stock Git reads them and no
-       * revision records them: the store's own file, never versioned. */
-      const excludePath = `${gitdir}/info/exclude`;
-      const existingExclude = (await gitFiles.exists(excludePath))
-        ? await gitFiles.readFile(excludePath, 'utf8')
-        : undefined;
-      const exclude = generatedIgnoreContent(existingExclude, input.additionalIgnores ?? []);
-      if (exclude !== existingExclude) {
-        await gitFiles.mkdir(`${gitdir}/info`, { recursive: true });
-        await gitFiles.writeFile(excludePath, exclude);
-      }
-      /* Every project an older build recorded has no index at all, so this open
-       * heals it. An existing index is left alone: in a repository Tau adopted
-       * it may hold the person's own staged work. */
-      if (!(await gitFiles.exists(`${gitdir}/index`))) {
-        await syncLiveIndex();
-      }
-    },
+    init: async (input: InitRevisionStoreInput): Promise<void> =>
+      withRefLock(`${filesystem.id}:${gitdir}:init`, async () => initStore(input)),
 
     readRevision: async (id: RevisionId): Promise<RevisionRecord | undefined> => {
       const commit = await commitOf(id);

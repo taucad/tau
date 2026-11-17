@@ -10,9 +10,9 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile, unlink } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -374,6 +374,70 @@ const ports = [
   },
 ];
 
+/*
+ * A packaged app's own `git`: it runs the system git with only `git-lfs`'s directory on `PATH`. Windows runs no
+ * shell script, so there it is a small executable compiled with the C# compiler every Windows .NET Framework
+ * installation ships; it waits for git, so no grandchild outlives it holding its pipes.
+ */
+const bundledGitCs = (git: string, path: string): string => `
+using System;
+using System.Diagnostics;
+using System.Text;
+static class BundledGit {
+  static string Quote(string value) {
+    if (value.Length > 0 && value.IndexOfAny(new[] { ' ', '\\t', '"' }) < 0) { return value; }
+    var text = new StringBuilder("\\"");
+    var slashes = 0;
+    foreach (var c in value) {
+      if (c == '\\\\') { slashes++; continue; }
+      if (c == '"') { text.Append('\\\\', slashes * 2 + 1); text.Append('"'); slashes = 0; continue; }
+      text.Append('\\\\', slashes);
+      slashes = 0;
+      text.Append(c);
+    }
+    text.Append('\\\\', slashes * 2);
+    return text.Append('"').ToString();
+  }
+  static int Main(string[] args) {
+    var quoted = new string[args.Length];
+    for (var i = 0; i < args.Length; i++) { quoted[i] = Quote(args[i]); }
+    var start = new ProcessStartInfo(${JSON.stringify(git)}, string.Join(" ", quoted));
+    start.UseShellExecute = false;
+    start.EnvironmentVariables["PATH"] = ${JSON.stringify(path)};
+    using (var child = Process.Start(start)) {
+      child.WaitForExit();
+      return child.ExitCode;
+    }
+  }
+}
+`;
+
+/**
+ * Write the bundled `git` stand-in: a shell script on macOS and Linux, a compiled `.exe` on Windows.
+ * @param path - Where it goes, without an extension.
+ * @param git - The system git it runs.
+ * @param lfsDirectory - The only directory on its `PATH`.
+ * @returns The executable's path.
+ */
+const writeBundledGit = async (path: string, git: string, lfsDirectory: string): Promise<string> => {
+  if (process.platform === 'win32') {
+    const executable = `${path}.exe`;
+    await writeFile(`${path}.cs`, bundledGitCs(git, lfsDirectory));
+    const compiler = join(
+      process.env['SystemRoot'] ?? String.raw`C:\Windows`,
+      'Microsoft.NET',
+      'Framework64',
+      'v4.0.30319',
+      'csc.exe',
+    );
+    execFileSync(compiler, ['/nologo', `/out:${executable}`, `${path}.cs`], { stdio: 'ignore' });
+    return executable;
+  }
+  await writeFile(path, `#!/bin/sh\nPATH="${lfsDirectory}"\nexport PATH\nexec "${git}" "$@"\n`);
+  await chmod(path, 0o755);
+  return path;
+};
+
 /**
  * Review a1 R1: the early named refusal, on every disk host.
  *
@@ -381,6 +445,23 @@ const ports = [
  * invisible — the app opened, files edited, and no revision ever appeared. The
  * host now says so once, by name, when the project opens.
  */
+/**
+ * Whether this host's temporary disk keeps a file's executable bit. NTFS has none: Windows' `chmod` sets only
+ * the read-only flag, so a checkout file there cannot gain one.
+ */
+const diskKeepsExecutableBit = await (async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'tau-host-mode-'));
+  try {
+    const file = join(directory, 'probe');
+    await writeFile(file, '');
+    await chmod(file, 0o755);
+    const { mode } = await stat(file);
+    return Math.floor(mode / 0o100) % 2 === 1;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+})();
+
 describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
   it('reports the missing binaries once, and records with the executables it is given', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-toolchain-'));
@@ -418,15 +499,15 @@ describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
      * resolves through it and no second binary is ever named — which is what
      * the stand-in below reproduces, since a system git's exec path has none.
      */
-    const git = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
-    const gitLfs = execFileSync('which', ['git-lfs'], {
-      encoding: 'utf8',
-    }).trim();
+    const locate = (name: string): string =>
+      execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', [name], { encoding: 'utf8' })
+        .split(/\r?\n/u)[0]!
+        .trim();
+    const git = locate('git');
+    const gitLfs = locate('git-lfs');
     const bundledRoot = await mkdtemp(join(tmpdir(), 'tau-host-toolchain-'));
     roots.push(bundledRoot);
-    const bundledGit = join(bundledRoot, 'bundled-git');
-    await writeFile(bundledGit, `#!/bin/sh\nPATH="${dirname(gitLfs)}"\nexport PATH\nexec "${git}" "$@"\n`);
-    await chmod(bundledGit, 0o755);
+    const bundledGit = await writeBundledGit(join(bundledRoot, 'bundled-git'), git, dirname(gitLfs));
     const bundledEvents: HostRevisionEvent[] = [];
     process.env['PATH'] = '';
     const bundled = createProjectRevisions({
@@ -623,7 +704,19 @@ for (const row of ports) {
       await writeFile(join(held.workspaceRoot, 'main.ts'), original);
       await chmod(join(held.workspaceRoot, 'main.ts'), 0o755);
       const compared4 = await held.revisions.channel.request(request);
-      expect(compared4.result).toMatchObject({ notices: ['executable-added'] });
+      if (diskKeepsExecutableBit) {
+        expect(compared4.result).toMatchObject({ notices: ['executable-added'] });
+      } else {
+        // NTFS keeps no executable bit: chmod sets only the read-only flag, so the
+        // checkout file still matches the revision, bytes and mode.
+        expect(compared4.result).toEqual({
+          original: 'export const size = 2;\n',
+          modified: 'export const size = 2;\n',
+          kind: 'text',
+          change: 'unchanged',
+          notices: [],
+        });
+      }
       await writeFile(join(held.workspaceRoot, 'main.ts'), new Uint8Array([0x80]));
       const compared5 = await held.revisions.channel.request(request);
       expect(compared5.result).toMatchObject({ kind: 'unsupported' });
@@ -1450,7 +1543,10 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
 
       /* The store is this project's own `.git`, and git itself says so. */
       expect(
-        execFileSync('git', ['-C', workspaceRoot, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(),
+        /* Git names it with `/` on Windows; `resolve` spells it as this platform does. */
+        resolve(
+          execFileSync('git', ['-C', workspaceRoot, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(),
+        ),
       ).toBe(await realpath(workspaceRoot));
       /* With the two generated, versioned files beside it (S16, S35, D24). */
       expect(await readFile(join(workspaceRoot, '.gitignore'), 'utf8')).toContain('/.tau/runs/');

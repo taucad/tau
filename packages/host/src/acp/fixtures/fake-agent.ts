@@ -76,7 +76,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 import { connectMcpOverFetch } from '#acp/fixtures/mcp-fetch-client.js';
 
@@ -534,11 +534,17 @@ const emitPresentationUpdates = async (sessionId: string): Promise<void> => {
   await update(sessionId, { sessionUpdate: 'session_info_update', title: 'Fixture session' });
 };
 
+/** A skill directory's files, named by their `/`-separated relative paths as an agent spells skill references. */
+const skillPaths = async (skillRoot: string): Promise<string[]> => {
+  const paths = await readdir(skillRoot, { recursive: true });
+  return paths.map((path) => path.split(sep).join('/'));
+};
+
 const reportNativeSkills = async (sessionId: string, session: SessionState, namesOnly: boolean): Promise<void> => {
   if (namesOnly) {
     const namesByRoot = await Promise.all(
       session.additionalDirectories.map(async (root) => {
-        const paths = await readdir(join(root, '.agents', 'skills'), { recursive: true });
+        const paths = await skillPaths(join(root, '.agents', 'skills'));
         return paths.filter((path) => path.endsWith('/SKILL.md')).map((path) => path.slice(0, -'/SKILL.md'.length));
       }),
     );
@@ -553,7 +559,7 @@ const reportNativeSkills = async (sessionId: string, session: SessionState, name
   const skills = await Promise.all(
     session.additionalDirectories.map(async (root) => {
       const skillRoot = join(root, '.agents', 'skills');
-      const paths = await readdir(skillRoot, { recursive: true });
+      const paths = await skillPaths(skillRoot);
       const files = await Promise.all(
         paths.toSorted().map(async (path) => {
           try {

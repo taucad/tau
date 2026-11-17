@@ -22,6 +22,7 @@ import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { recordedBy, testIdentity } from '#test/identity.js';
+import { diskKeepsExecutableBit } from '#test/native-git-harness.js';
 import { generatedGitattributesContent, generatedGitattributesPath } from '#workspace-config.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
@@ -317,7 +318,8 @@ describe('a warm reopen of a checkout an earlier session compared (Tau #2013)', 
     expect(treeId).toBe(await compare(second.walking));
   });
 
-  it('should read a file whose mode alone changed between the sessions', async () => {
+  /* A change of mode alone needs a disk with an executable bit: NTFS has none (`revision-effects.index-capture.test.ts` holds Windows' row). */
+  it.runIf(diskKeepsExecutableBit)('should read a file whose mode alone changed between the sessions', async () => {
     const { root, session } = await fixture(files(20));
     const first = await session();
     await mint(first);

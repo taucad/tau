@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/agent-plugin",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"],
+  "tags": ["scope:shared", "type:package", "ci:windows-unit"],
   "release": {
     "version": {
       "versionActions": "packages/agent-plugin/scripts/version-actions.ts"

@@ -99,6 +99,7 @@ import type { MachineArtifactReference, MachineBindingOutcome } from '@taucad/ru
 import type { HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { gitCommandActivity } from '@taucad/revisions/node';
+import type { GitActivityEvent } from '@taucad/revisions/node';
 import { packageVersion } from '@taucad/runtime/metadata';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
 import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/utility';
@@ -499,7 +500,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     });
   /* W8 diagnostics: each Git process of this realm that ran a second or longer, and each store open with the Git it
    * ran, as `services.git-command` and `services.git-phase` lines. Subcommands, phases and milliseconds only. */
-  const stopGitActivity = gitCommandActivity.observe((event) => {
+  const stopGitActivity = gitCommandActivity.observe((event: GitActivityEvent) => {
     log(`git-${event.type}`, event);
   });
   const {

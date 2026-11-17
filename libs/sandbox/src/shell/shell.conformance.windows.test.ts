@@ -40,7 +40,7 @@ import { arch, homedir, networkInterfaces, platform, release, tmpdir, version } 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import {
@@ -54,8 +54,12 @@ import {
 } from '#shell/shell-identity.js';
 import type { ShellExecutable } from '#shell/shell-identity.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellProcess, ShellProvider } from '#shell/shell-provider.js';
-import { launchExclusionConformance, nativeWorkerConformance } from '#shell/windows-native-worker.fixture.js';
-import type { NativeWorkerContext } from '#shell/windows-native-worker.fixture.js';
+import {
+  launchExclusionConformance,
+  nativeWorkerConformance,
+  personSession,
+} from '#shell/windows-native-worker.fixture.js';
+import type { NativeWorkerContext, PersonSession } from '#shell/windows-native-worker.fixture.js';
 import { createWindowsShellProvider } from '#shell/windows-shell-provider.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
@@ -555,6 +559,8 @@ const receipt = (): Record<string, unknown> => {
   };
 };
 
+let sessionBefore: PersonSession | undefined;
+
 describe.runIf(enabled)('Windows shell conformance', () => {
   beforeAll(async () => {
     if (process.platform !== 'win32') {
@@ -567,6 +573,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     if (helperStatus['installed'] === false) {
       throw new Error('the Windows sandbox is not set up on this machine; run the helper `setup --for-user` elevated.');
     }
+    sessionBefore = personSession(workerProbe);
+    observations['session'] = sessionBefore;
     proxyPorts = Array.isArray(helperStatus['proxyPorts']) ? (helperStatus['proxyPorts'] as number[]) : [];
     const resolved = await resolveShellExecutable({ platform: 'win32', environment: process.env });
     if ('status' in resolved) {
@@ -638,6 +646,12 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       onHelperDiagnostic: recordHelperDiagnostic,
     });
     ready = true;
+  });
+
+  /* Every row ends with the person's session as it began: the same window-station and desktop DACLs, and a new
+     process of theirs that starts and creates a window. */
+  afterEach(() => {
+    expect(personSession(workerProbe)).toStrictEqual(sessionBefore);
   });
 
   afterAll(() => {

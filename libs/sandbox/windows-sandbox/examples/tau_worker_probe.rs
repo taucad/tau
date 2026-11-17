@@ -4,9 +4,11 @@
 //!
 //! Requests: `{"op":"echo","value":…}`; `{"op":"read","path":…}`; `{"op":"write","path":…,"text":…}`;
 //! `{"op":"load","path":…}` (`LoadLibraryW`, answering the loaded module's own file name); and
-//! `{"op":"connect","address":"ip:port"}` (TCP, three seconds); and `{"op":"environment"}` (every variable the
-//! worker sees, as an object). Every answer carries `ok`, and `error` when
-//! it is false.
+//! `{"op":"connect","address":"ip:port"}` (TCP, three seconds); `{"op":"environment"}` (every variable the
+//! worker sees, as an object); and `{"op":"session"}` (the DACLs of the process's window station and thread desktop
+//! as SDDL, and whether it can create a window there: the conformance suite runs it as the person after every row,
+//! so a launch that leaves the person's session unusable for GUI processes fails). Every answer carries `ok`, and
+//! `error` when it is false.
 
 use std::io::{BufRead, Write};
 
@@ -39,6 +41,112 @@ fn load(_path: &str) -> Result<String, String> {
     Err("LoadLibraryW exists only on Windows".to_owned())
 }
 
+#[cfg(windows)]
+fn session() -> Result<Value, String> {
+    use std::ffi::c_void;
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetProcessWindowStation() -> *mut c_void;
+        fn GetThreadDesktop(thread: u32) -> *mut c_void;
+        fn GetUserObjectSecurity(
+            object: *mut c_void,
+            info: *const u32,
+            sd: *mut c_void,
+            length: u32,
+            needed: *mut u32,
+        ) -> i32;
+        fn CreateWindowExW(
+            ex_style: u32,
+            class: *const u16,
+            name: *const u16,
+            style: u32,
+            x: i32,
+            y: i32,
+            width: i32,
+            height: i32,
+            parent: *mut c_void,
+            menu: *mut c_void,
+            instance: *mut c_void,
+            param: *mut c_void,
+        ) -> *mut c_void;
+        fn DestroyWindow(window: *mut c_void) -> i32;
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentThreadId() -> u32;
+        fn LocalFree(memory: *mut c_void) -> *mut c_void;
+    }
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            sd: *mut c_void,
+            revision: u32,
+            info: u32,
+            text: *mut *mut u16,
+            length: *mut u32,
+        ) -> i32;
+    }
+    const DACL_SECURITY_INFORMATION: u32 = 4;
+    let last = || std::io::Error::last_os_error().to_string();
+    let dacl = |object: *mut c_void, what: &str| -> Result<String, String> {
+        let info = DACL_SECURITY_INFORMATION;
+        let mut needed = 0u32;
+        unsafe { GetUserObjectSecurity(object, &info, std::ptr::null_mut(), 0, &mut needed) };
+        let mut buffer = vec![0u64; (needed as usize).div_ceil(8).max(1)];
+        if unsafe { GetUserObjectSecurity(object, &info, buffer.as_mut_ptr().cast(), needed, &mut needed) } == 0 {
+            return Err(format!("GetUserObjectSecurity({what}): {}", last()));
+        }
+        let mut text: *mut u16 = std::ptr::null_mut();
+        let mut length = 0u32;
+        if unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                buffer.as_mut_ptr().cast(),
+                1,
+                info,
+                &mut text,
+                &mut length,
+            )
+        } == 0
+        {
+            return Err(format!("ConvertSecurityDescriptorToStringSecurityDescriptorW({what}): {}", last()));
+        }
+        let sddl = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(text, length as usize) });
+        unsafe { LocalFree(text.cast()) };
+        Ok(sddl.trim_end_matches('\0').to_owned())
+    };
+    let station = dacl(unsafe { GetProcessWindowStation() }, "window station")?;
+    let desktop = dacl(unsafe { GetThreadDesktop(GetCurrentThreadId()) }, "desktop")?;
+    // A hidden window of the predefined STATIC class on the thread's desktop.
+    let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+    let window = unsafe {
+        CreateWindowExW(
+            0,
+            class.as_ptr(),
+            class.as_ptr(),
+            0,
+            0,
+            0,
+            1,
+            1,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    let window_error = if window.is_null() { Some(last()) } else { None };
+    if !window.is_null() {
+        unsafe { DestroyWindow(window) };
+    }
+    Ok(json!({ "station": station, "desktop": desktop, "window": window_error.is_none(), "windowError": window_error }))
+}
+
+#[cfg(not(windows))]
+fn session() -> Result<Value, String> {
+    Err("window stations exist only on Windows".to_owned())
+}
+
 fn connect(address: &str) -> Result<(), String> {
     let address: std::net::SocketAddr = address.parse().map_err(|err| format!("{err}"))?;
     std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_secs(3))
@@ -67,6 +175,10 @@ fn answer(request: &Value) -> Value {
             Err(err) => Err(err),
         },
         "connect" => connect(&text(request, "address")),
+        "session" => match session() {
+            Ok(value) => return json!({ "op": op, "ok": true, "value": value }),
+            Err(err) => Err(err),
+        },
         _ => Err(format!("unknown op {op:?}")),
     };
     match outcome {

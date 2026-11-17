@@ -50,6 +50,19 @@ const die = (code: number): void => {
 const text = (bytes: Uint8Array<ArrayBuffer>): string => Buffer.from(bytes).toString('utf8');
 
 const status = (): void => {
+  if (scenario === 'status-unreadable') {
+    /* The helper's own answer when it cannot read its install record. */
+    process.stderr.write('tau-windows-sandbox status: Access is denied. (os error 5)\n');
+    process.stdout.write(JSON.stringify({ installed: false }));
+    leave(0);
+    return;
+  }
+  if (scenario === 'status-crash') {
+    process.stdout.write('{"accountSid":');
+    process.stderr.write('thread main panicked\n');
+    leave(3);
+    return;
+  }
   process.stdout.write(
     scenario === 'installed'
       ? JSON.stringify({

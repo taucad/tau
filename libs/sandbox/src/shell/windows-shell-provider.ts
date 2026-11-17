@@ -35,6 +35,7 @@ import {
   decodeWindowsHelperFrame,
   encodeWindowsHostFrame,
   isShellRequirement,
+  windowsHelperEnd,
   windowsLaunchSpec,
   windowsSandboxProtocolVersion,
 } from '#shell/windows-sandbox-protocol.js';
@@ -83,7 +84,14 @@ export type WindowsShellProviderOptions = Readonly<{
 }>;
 
 /** What the helper's `status` reports. @public */
-export type WindowsSandboxStatus = Readonly<{ installed: boolean }>;
+export type WindowsSandboxStatus = Readonly<{
+  installed: boolean;
+  /**
+   * Why a `status` run did not read as installed, when it was not a clean "no install record": the spawn error, a
+   * timeout, the exit code or signal, unparsable output and the helper's stderr (bounded). For a host's log.
+   */
+  diagnostic?: string | undefined;
+}>;
 
 /** How much of the helper's own diagnostic log a refusal or failure carries, in characters. */
 const diagnosticCharacters = 512;
@@ -487,7 +495,7 @@ const openChannel = (
   });
   child.once('close', (code, signal) => {
     onGone(
-      `The sandbox helper stopped before it reported the shell's exit (${code === null ? `signal ${String(signal)}` : `exit ${String(code)}`}).`,
+      `The sandbox helper stopped before it reported the shell's exit (${windowsHelperEnd(code ?? undefined, signal ?? undefined)}).`,
     );
   });
   return {
@@ -607,42 +615,58 @@ export const readWindowsSandboxStatus = async (
 ): Promise<WindowsSandboxStatus> => {
   const run = options.spawnHelper ?? defaultSpawn(helperPath, options.environment ?? process.env);
   return new Promise((resolve) => {
+    const notInstalled = (reason: string | undefined, stderr = ''): void => {
+      const parts = [reason, stderr.trim() === '' ? undefined : `stderr: ${stderr.trim()}`].filter(
+        (part) => part !== undefined,
+      );
+      resolve(parts.length === 0 ? { installed: false } : { installed: false, diagnostic: parts.join('; ') });
+    };
     let child: ChildProcessWithoutNullStreams;
     try {
       child = run(['status']);
-    } catch {
-      resolve({ installed: false });
+    } catch (error) {
+      notInstalled(`the helper could not be started: ${String(error)}`);
       return;
     }
     let output = '';
+    let errors = '';
+    let timedOut = false;
     child.stdin.end();
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       output = (output + chunk).slice(0, 64 * 1024);
     });
-    child.stderr.resume();
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+      errors = (errors + chunk).slice(-diagnosticCharacters);
+    });
     const timer = setTimeout(() => {
+      timedOut = true;
       child.kill();
     }, 10_000);
-    child.once('error', () => {
+    child.once('error', (error) => {
       clearTimeout(timer);
-      resolve({ installed: false });
+      notInstalled(`the helper could not be started: ${error.message}`, errors);
     });
-    child.once('close', (code) => {
+    child.once('close', (code, signal) => {
       clearTimeout(timer);
+      const ended = timedOut
+        ? 'the helper did not answer within 10 s'
+        : windowsHelperEnd(code ?? undefined, signal ?? undefined);
+      let record: unknown;
       try {
-        const record: unknown = JSON.parse(output);
-        /* The install record names the sandbox account; an absent one prints `{"installed":false}`. */
-        resolve({
-          installed:
-            code === 0 &&
-            typeof record === 'object' &&
-            record !== null &&
-            !('installed' in record && record.installed === false) &&
-            'accountSid' in record &&
-            typeof record.accountSid === 'string',
-        });
+        record = JSON.parse(output);
       } catch {
-        resolve({ installed: false });
+        notInstalled(`${ended}; its output is not JSON: ${JSON.stringify(output.slice(0, 200))}`, errors);
+        return;
+      }
+      const object = typeof record === 'object' && record !== null ? record : {};
+      /* The install record names the sandbox account; an absent one prints `{"installed":false}`. */
+      const absent = 'installed' in object && object.installed === false;
+      if (code === 0 && !absent && 'accountSid' in object && typeof object.accountSid === 'string') {
+        resolve({ installed: true });
+      } else if (code === 0 && absent) {
+        notInstalled(undefined, errors);
+      } else {
+        notInstalled(`${ended}; it answered ${JSON.stringify(output.slice(0, 200))}`, errors);
       }
     });
   });

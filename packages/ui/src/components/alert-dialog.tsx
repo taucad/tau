@@ -4,6 +4,9 @@ import { cn } from '#utils/cn.js';
 import { buttonVariants } from '#components/button.js';
 import { headingVariants } from '#components/heading.variants.js';
 
+/** Bounds the content to the dynamic viewport less its margin and scrolls its body on both axes (D4.7, D4.9). */
+const overlayScrollClass = 'max-h-[calc(100dvh-2rem)] overflow-x-auto overflow-y-auto';
+
 /**
  * Owns state and focus for a modal confirmation dialog.
  *
@@ -97,10 +100,16 @@ function AlertDialogOverlay({
 function AlertDialogContent({
   className,
   overlayClassName,
+  scroll = 'document',
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content> & {
   /** Classes for the overlay behind the dialog, such as a z-index that matches the content's. */
   readonly overlayClassName?: string;
+  /**
+   * Who scrolls the content. `document` (the default): the content is bound to the dynamic viewport and scrolls its
+   * body on both axes (D4.7). `contained`: the content manages its own inner scroller and keeps its own bounds.
+   */
+  readonly scroll?: 'document' | 'contained';
 }): React.JSX.Element {
   return (
     <AlertDialogPortal>
@@ -109,6 +118,7 @@ function AlertDialogContent({
         data-slot='alert-dialog-content'
         className={cn(
           'shadow-lg fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg',
+          scroll === 'document' && overlayScrollClass,
           className,
         )}
         {...props}

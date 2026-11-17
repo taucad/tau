@@ -6,6 +6,7 @@ import { clientFactsScript } from '#lib/client-facts.js';
 import {
   checkShell,
   findSentinelLeaks,
+  findStrayPrerenderOutputs,
   findUnlistedInlineScripts,
   inlineScripts,
   scriptHashSource,
@@ -16,7 +17,7 @@ import {
   visitors,
 } from '#scripts/check-static-shells.mts';
 
-const [projectClass] = staticShellClasses as readonly [StaticShellClass];
+const [projectClass, homeClass] = staticShellClasses as readonly [StaticShellClass, StaticShellClass];
 
 const shell = (body = '<main><div aria-busy="true">Loading workspace</div></main>'): string =>
   `<!DOCTYPE html><html><head><title>Tau</title></head><body>${body}<script>window.ENV = { ...{"TAU_BUILD_ID":"1700000000000"} }</script><script>window.__reactRouterContext = {"ssr":true,"url":"/w/__shell/__shell"};</script></body></html>`;
@@ -47,6 +48,7 @@ const holding = (): Parameters<typeof checkShell>[0] => ({
   functionHeaders: functionHeaders(),
   staticHeaders: [matchingStaticHeaders(), matchingStaticHeaders()],
   serverBuildId: '1700000000000',
+  strayFiles: [],
 });
 
 describe('checkShell', () => {
@@ -93,6 +95,30 @@ describe('checkShell', () => {
       functionDocument: leaky,
     });
     expect(problems).toStrictEqual([expect.stringContaining('renders its placeholder')]);
+  });
+
+  it("should fail an edge shell whose prerendered files are left at its URL's static path", () => {
+    expect(checkShell({ ...holding(), routeClass: homeClass, strayFiles: ['index.html', '_root.data'] })).toStrictEqual(
+      [
+        expect.stringContaining('index.html is still in the client output'),
+        expect.stringContaining('_root.data is still in the client output'),
+      ],
+    );
+  });
+});
+
+describe('findStrayPrerenderOutputs', () => {
+  it("should name an edge shell's prerendered document and data files that remain", () => {
+    const present = new Set(['index.html', '_root.data', '__shell/home/index.html']);
+    expect(findStrayPrerenderOutputs(homeClass, (file) => present.has(file))).toStrictEqual([
+      'index.html',
+      '_root.data',
+    ]);
+    expect(findStrayPrerenderOutputs(homeClass, (file) => file === '__shell/home/index.html')).toStrictEqual([]);
+  });
+
+  it('should leave a rewrite shell, which is served from its prerendered file, alone', () => {
+    expect(findStrayPrerenderOutputs(projectClass, () => true)).toStrictEqual([]);
   });
 });
 
@@ -193,6 +219,7 @@ describe('document helpers', () => {
 
   it('should render a real URL of the class for the function', () => {
     expect(sampleUrl(projectClass)).toBe('/w/home/bracket-v2');
+    expect(sampleUrl(homeClass)).toBe('/');
   });
 
   it('should send two visitors that differ in every fact a per-request render could read', () => {

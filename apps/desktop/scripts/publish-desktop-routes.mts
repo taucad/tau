@@ -25,6 +25,7 @@ import {
   desktopLaneKeys,
   desktopLaneManifestKey,
   desktopManifestDigest,
+  desktopPlatformLanes,
   desktopPublicationScopes,
   verifyDesktopRouteDescriptor,
 } from './desktop-route-publication.mjs';
@@ -564,7 +565,7 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
     // A platform lane composes its catalog with every other platform's completed catalog, each read back exactly as
     // that platform's own completion receipt recorded it; the all-platform lane keeps its single catalog.
     const others = await Promise.all(
-      (['macos', 'linux'] as const)
+      desktopPlatformLanes
         .filter((other) => other !== lane)
         .map(async (other) => [other, await readCompletedPlatformCatalog(store, other)] as const),
     );
@@ -743,9 +744,6 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
             artifactDirectory: root,
             ...(previous ? { previous } : {}),
           });
-    if (Date.parse(apt.inventory.validUntil) <= Date.now()) {
-      throw new Error('Expired APT snapshot cannot be published');
-    }
     await apt.publish({
       async put(object) {
         const remoteKey = `apt/${object.path}`;

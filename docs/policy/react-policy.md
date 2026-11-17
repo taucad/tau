@@ -282,7 +282,7 @@ This rule is checked by `apps/ui/app/dependency-signal.policy.node.test.ts` for 
 
 In the graphics scope, a React effect never sends an actor event, subscribes to an actor, store or emitter, or starts a timer (`setTimeout`, `setInterval`, `requestAnimationFrame`). A component never reads an actor snapshot during render or in an effect. The debts below are the exceptions found so far. React renders from selectors and reports what the person did from event handlers. Everything that runs over time is an actor's: its `after` delays, its callback logic and its children (graphics event-driven state charter, D4 and I10).
 
-The graphics scope is `packages/viewer`, `packages/camera` and `packages/three`, plus the `apps/ui` rows the charter inventory names: `workbench-records/`, `machines/project.machine.ts`, `view-settings-sync-host.tsx` and `workbench-layout-controller.ts`. The rest of the UI keeps the same rule as a ratchet (D17): each file's count may only go down until its own capability charter moves it.
+The graphics scope is `packages/viewer`, `packages/camera` and `packages/three`, plus the `apps/ui` rows the charter inventory names: `workbench-records/`, `machines/project.machine.ts` and `workbench-layout-controller.ts` (`view-settings-sync-host.tsx` was deleted when the project runtime took its flush). The app state scope keeps the same rule in `apps/ui/app` (app state orchestration charter D15, I16): the files that owned project and session orchestration, the project library and workbench layout, every module and machine that programme created or rewrote, and the whole of `runtime/`. Both scopes are held at zero, and the list is in the project's `react-event-layer.policy.node.test.ts`. The rest of the UI keeps the same rule as a ratchet (D17): each file's count may only go down until its own capability charter moves it.
 
 **Why**: An effect runs after a commit that React may discard, repeat or reorder. An effect that sends or subscribes makes React's render schedule part of the actor's protocol, and the orbit snap-back (taucad/tau#1602) was two such effects racing. An actor owns its own timing and its own subscriptions, so the protocol can be tested and model-checked without React.
 
@@ -307,7 +307,7 @@ Effects and handlers that read, subscribe or time through a helper the counter c
 - `packages/viewer/src/graphics/three/post-processing-webgpu.tsx` schedules camera preparation (`scheduleCameraPreparation`: DOM listeners and a re-armed timeout) from a layout effect.
 - `packages/viewer/src/graphics/three/react/use-model-gpu-pick.ts` creates a picker whose landing schedules an animation frame from an effect.
 - `packages/viewer/src/hooks/use-viewer-shortcuts.ts` opens a subscription from a key handler (`watchShortcutWrite`) and keeps it until graphics shows the written value.
-- In `apps/ui`, `view-settings-sync-host.tsx` registers a producer and `workbench-records/record-issues.ts` publishes into a module store from effects.
+- In `apps/ui`, `workbench-records/record-issues.ts` publishes into a module store from effects.
 
 A boundary where React context or a prop is the only source of a value may send that value as one event from one effect. In a project held at zero it is a named exception, never a ceiling line. Each one names its boundary in a comment and is listed with its reason in its project's `react-event-layer.policy.node.test.ts`. The reason names the boundary's one external source, such as a context, a prop or the router's commit. A value with a second source is not a boundary, and a new boundary needs a ruling. `packages/viewer` is held at zero with these exceptions, and its ceiling manifest is empty:
 
@@ -316,6 +316,13 @@ A boundary where React context or a prop is the only source of a value may send 
 | `packages/viewer/src/model-viewer.tsx`              | The standalone viewer's artifact prop sent as `updateArtifact` or `clearArtifact`                           | Inventory C10, 2026-11-12          |
 | `packages/viewer/src/hooks/use-graphics.tsx`        | The viewer environment's theme, accent and contrast, from React context, sent as `viewerEnvironmentChanged` | G8, 2026-11-12                     |
 | `packages/viewer/src/parameters/use-field-edits.ts` | A parameter field's authority prop sent as `observed`                                                       | Programme control, G12, 2026-11-12 |
+
+`apps/ui/app` holds the app state scope at zero with two named boundaries (app state orchestration charter D15). A third needs a ruling:
+
+- **The committed route.** `routes/w.$workspace.$project/project-route-intent.tsx` reports each route the router commits to the focus actor, from one effect, listed at its one site. The router's commit is its only source. Its other direction is not an effect: the `navigate` calls focus asks for (the canonical URL, the focused chat, the one-time marker) run in the sink it binds, and the router is their only sink.
+- **The start after hydration.** `runtime/app-runtime-provider.tsx` starts the app's one runtime from a layout effect once the page has hydrated, so the server HTML and the first client render read the same unstarted snapshots ([XState policy](xstate-policy.md), App state contract). A start is not a counted site, so it is not in the policy test. The app state ownership ratchet (`apps/ui/app/app-state-ownership.ratchet.node.test.ts`) holds it as its one line.
+
+The counter misses actor ownership and time: `useActorRef`, `createActor`, `.start()`, a store mount, `queueMicrotask`, a `waitFor` timeout and a `useFlushOnClose` registration. In the app state scope the ownership ratchet counts these per file, and its counts only go down.
 
 An instrument is the other kind of named exception: a debug probe, an e2e bridge or a profiling route that observes the app rather than runs it. It is held at zero and listed at its exact count with a reason that starts `instrument:`, so a new probe is a deliberate one-line edit. `apps/ui/app` lists three: `components/geometry/debug/section-view-test-bridge.tsx`, `routes/[__e2e].onshape-render-profile/route.tsx` and `chat-clients/debug-probes.tsx` (app state orchestration charter, D15).
 

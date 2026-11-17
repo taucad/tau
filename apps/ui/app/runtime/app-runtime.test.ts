@@ -106,7 +106,7 @@ describe('app runtime root', () => {
       'window:pagehide',
     ]);
     expect(selectSessionsRegistry(runtime.getSnapshot())).toBe(registry);
-    registry.send({ type: 'open', projectId: 'p1' });
+    registry.send({ type: 'open', projectId: 'p1', request: { workspace: '' } });
     expect(Object.keys(registry.getSnapshot().context.refs)).toEqual(['p1']);
 
     runtime.stop();
@@ -214,7 +214,7 @@ describe('app runtime root', () => {
 
     /* The session's start bound is an `after` on the runtime's clock. */
     expect(clock.nextDue()).toBeUndefined();
-    registry.send({ type: 'open', projectId: 'p1' });
+    registry.send({ type: 'open', projectId: 'p1', request: { workspace: '' } });
     expect(clock.nextDue()).toBeDefined();
     expect(inspected.some((event) => event.type === '@xstate.transition' && event.actorRef === registryRef)).toBe(true);
     runtime.stop();

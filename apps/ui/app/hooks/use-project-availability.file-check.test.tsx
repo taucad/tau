@@ -95,7 +95,7 @@ function SlowProbe(): ReactNode {
 describe('the "Preparing model" view reads slow from the session (A14)', () => {
   it('should be slow once the session reports its check slow, and not once the check settles', async () => {
     const { registry, clock, report } = compose();
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     await flushTasks();
     render(
       <SessionsProvider actor={registry}>

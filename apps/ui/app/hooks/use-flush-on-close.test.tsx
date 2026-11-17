@@ -442,7 +442,7 @@ describe('the quit guard — producers before the session close (A0.2 item 9, D2
     if (started === undefined) {
       throw new Error('the environment host spawns a registry');
     }
-    started.send({ type: 'open', projectId });
+    started.send({ type: 'open', projectId, request: { workspace: '' } });
     render(
       <UnloadProvider sequencer={environment.sequencer}>
         {registrations.map(({ site, stage, callback }) => (
@@ -490,7 +490,7 @@ describe('the quit guard — producers before the session close (A0.2 item 9, D2
     }
     const actor = actorProducer(sequence);
     const unregister = environment.sequencer.register('producer', actor.callback);
-    started.send({ type: 'open', projectId });
+    started.send({ type: 'open', projectId, request: { workspace: '' } });
     render(
       <UnloadProvider sequencer={environment.sequencer}>
         {registrations.map(({ site, stage, callback }) => (

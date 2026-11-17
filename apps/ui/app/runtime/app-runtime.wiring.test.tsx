@@ -193,7 +193,7 @@ describe('round 13: the runtime hands focus its route and flush ports', () => {
     const runtime = createAppRuntime({ environment: () => host, idleFileManagers: true }).start();
     const registry = selectSessionsRegistry(runtime.getSnapshot());
     const chatSessions = selectRuntimeChatSessions(runtime);
-    registry.send({ type: 'open', projectId: 'proj_a' });
+    registry.send({ type: 'open', projectId: 'proj_a', request: { workspace: '' } });
     expect(Object.keys(chatSessions.getLivenessSnapshot().projects)).toEqual(['proj_a']);
     registry.send({ type: 'close', projectId: 'proj_a', reason: 'user' });
     await vi.waitFor(() => {

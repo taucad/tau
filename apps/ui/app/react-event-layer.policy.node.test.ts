@@ -14,6 +14,13 @@
  * The three instruments, the section-view e2e bridge, the Onshape render profile route and the chat debug probes,
  * are held at zero with named exceptions at their exact counts (app state orchestration charter D15, inventory rows
  * X1 to X3). A new probe in one of them is a deliberate one-line edit here.
+ *
+ * The app state orchestration programme's zero scope (charter D15, I16; plan § 4 A10): its scoped files, the modules
+ * and machines it created or rewrote, the whole of `runtime/` and `workbench-records/`, and the files later lanes
+ * added to the ownership ratchet. One boundary keeps a site: `project-route-intent.tsx` reports each committed route
+ * to focus, and the router's commit is its only source (boundary 1). Boundary 2, the runtime's start after hydration
+ * in `runtime/app-runtime-provider.tsx`, is not a counted site; the ownership ratchet holds it. A new boundary needs a
+ * ruling, and a file added to the programme's paths joins this list.
  */
 
 // Test-only tooling import: kept out of the Nx graph so lint-rule churn in libs/oxlint does not invalidate this
@@ -31,12 +38,50 @@ describe('React event layer ceiling', () => {
         scope: [
           new URL('chat-clients/debug-probes.tsx', import.meta.url),
           new URL('components/geometry/debug/section-view-test-bridge.tsx', import.meta.url),
+          new URL('hooks/chat-session-store.fixture.tsx', import.meta.url),
+          new URL('hooks/use-file-manager.tsx', import.meta.url),
+          new URL('hooks/use-project-manager.tsx', import.meta.url),
+          new URL('hooks/use-project.tsx', import.meta.url),
+          new URL('hooks/use-projects.ts', import.meta.url),
+          new URL('hooks/use-revision-status.ts', import.meta.url),
+          new URL('hooks/use-sessions.tsx', import.meta.url),
+          new URL('hooks/use-wait-start.ts', import.meta.url),
+          new URL('lib/frame-hint.ts', import.meta.url),
+          new URL('machines/focus.machine.ts', import.meta.url),
+          new URL('machines/focus.route-state.ts', import.meta.url),
+          new URL('machines/github-credential-renewal.machine.ts', import.meta.url),
+          new URL('machines/library-access.machine.ts', import.meta.url),
+          new URL('machines/library-discovery.machine.ts', import.meta.url),
+          new URL('machines/library-recovery.machine.ts', import.meta.url),
+          new URL('machines/project-session.machine.ts', import.meta.url),
           new URL('machines/project.machine.ts', import.meta.url),
+          new URL('machines/session-file-check.machine.ts', import.meta.url),
+          new URL('machines/sessions.machine.ts', import.meta.url),
           new URL('routes/[__e2e].onshape-render-profile/route.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/chat-viewer-dockview.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/chat-workbench-dockview.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/focused-project-view.session.ts', import.meta.url),
+          new URL('routes/w.$workspace.$project/focused-project-view.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/project-live-sessions.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/project-route-intent.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/project-route.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/project-sync-placeholder.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/project-workspace-context.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/workbench-checkout-root.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/workbench-layout-controller.shim.ts', import.meta.url),
           new URL('routes/w.$workspace.$project/workbench-layout-controller.ts', import.meta.url),
+          new URL('routes/w.$workspace.$project/workbench-record-host.tsx', import.meta.url),
+          new URL('routes/w.$workspace.$project/workspace-frame.tsx', import.meta.url),
+          new URL('runtime/', import.meta.url),
+          new URL('services/sessions-store.ts', import.meta.url),
           new URL('workbench-records/', import.meta.url),
         ],
         exceptions: {
+          'apps/ui/app/routes/w.$workspace.$project/project-route-intent.tsx': {
+            sites: 1,
+            reason:
+              'boundary: the committed route reported to focus; the router commit is its one source (charter D15, boundary 1)',
+          },
           'apps/ui/app/chat-clients/debug-probes.tsx': {
             sites: 4,
             reason: 'instrument: debug-only probes (inventory X3)',

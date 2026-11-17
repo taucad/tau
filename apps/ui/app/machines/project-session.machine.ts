@@ -115,7 +115,10 @@ export type ProjectSessionAvailability = 'pending' | 'slow' | 'settled';
 /** Input accepted when creating a projectSessionMachine actor. @public */
 export type ProjectSessionMachineInput = Readonly<{
   projectId: string;
-  /** What this session was opened with. Optional until A10: the sidebar and the notice send bare opens until A5b. */
+  /**
+   * What this session was opened with. The registry always passes the open's request, which is required since A10;
+   * a session a test or a standalone host creates directly may have none.
+   */
   request?: ProjectSessionOpenRequest;
   /** The sessions registry; this session reports its liveness to it. */
   parentRef?: AnyActorRef;

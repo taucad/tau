@@ -590,7 +590,10 @@ public static class Params
         frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: physical } }, [port]),
       );
 
-      expect(log).toHaveBeenCalledWith('runtime-fs-served', { workspaceRoot: physical });
+      /* Served once the alias's background `realpath` settles: no root is canonicalised on the request's path. */
+      await vi.waitFor(() => {
+        expect(log).toHaveBeenCalledWith('runtime-fs-served', { workspaceRoot: physical });
+      });
       expect(port.close).not.toHaveBeenCalled();
     } finally {
       host.dispose();
@@ -2271,8 +2274,11 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       ),
     );
 
-    expect(log).toHaveBeenCalledWith('agent-host.untrusted-root', {
-      workspaceRoot: '/etc',
+    /* Refused once the admitted root's background `realpath` settles: a spelling no root matches yet may be its alias. */
+    await vi.waitFor(() => {
+      expect(log).toHaveBeenCalledWith('agent-host.untrusted-root', {
+        workspaceRoot: '/etc',
+      });
     });
     expect(port.close).toHaveBeenCalled();
   });

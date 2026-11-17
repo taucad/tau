@@ -292,10 +292,10 @@
       "fixedBy": "outside this charter: desktop import grant delivery (a grant carried with the port request would remove the wait)"
     },
     {
-      "id": "TRUSTED-ROOT-CANONICAL",
-      "bound": "Background canonicalisation of an admitted desktop root (2 s): a root whose realpath has not settled is canonicalised by the request that needs it, and a hung one is never waited on again",
+      "id": "TRUSTED-ROOT-SETTLE",
+      "bound": "A kernel or agent-host port request naming an admitted root by a spelling not matched yet waits for the background realpath of the admitted roots (2 s), then is refused; requests for other roots never wait on it",
       "site": "apps/libs/desktop-services-host/src/services-host.impl.ts",
-      "token": "trustedRootCanonicalDeadlineMilliseconds);",
+      "token": "setTimeout(resolve, trustedRootSettleMilliseconds)",
       "class": "External edge",
       "owner": "desktop resilient startup WP1"
     },

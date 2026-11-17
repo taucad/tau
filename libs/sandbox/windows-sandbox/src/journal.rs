@@ -20,10 +20,11 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
-/// Version 5 grants the first pass to the shared sandbox account and every denial to the launch's package, records
-/// which roots are writable and which name the account, and restores by SID (concurrent launches, README "Sessions").
-/// Older journals are refused: versions 2 to 4 shipped only on unmerged branches, behind `TAU_WINDOWS_SHELL_SANDBOX`.
-pub const JOURNAL_VERSION: u32 = 5;
+/// Version 6 grants the first pass to the shared sandbox account and denies the shared sandbox group and the launch's
+/// package, records which roots are writable and which name the account or the group, and restores by SID (concurrent
+/// launches, README "Sessions"). Older journals are refused: versions 2 to 5 shipped only on unmerged branches, behind
+/// `TAU_WINDOWS_SHELL_SANDBOX`.
+pub const JOURNAL_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -42,6 +43,9 @@ pub struct Header {
     /// is the person's own, `CreateProcessWithLogonW` hands the caller's to the new logon), so it is never one of
     /// [`Header::own_sids`]: a root loses its ACEs naming it only when no other unrestored journal grants that root.
     pub account_sid: String,
+    /// The sandbox group's SID, which every denial names (in every launch's first pass). Shared like the account and
+    /// removed from a root the same way.
+    pub group_sid: String,
     /// The launch's AppContainer package SID (`S-1-15-2-…`): a restored root must not name it either.
     pub package_sid: String,
     /// The launch's AppContainer name (`tau.sandbox.<32 hex digits>`), which the runner registers in the
@@ -70,6 +74,9 @@ pub struct Entry {
     /// A root whose grant names the sandbox account (every grant but a denial).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub account: bool,
+    /// A root whose denial names the sandbox group.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub group: bool,
 }
 
 impl Header {
@@ -225,6 +232,7 @@ mod tests {
             version: JOURNAL_VERSION,
             capability_sid: "S-1-5-21-1-2-3-4".into(),
             account_sid: "S-1-5-21-9-9-9-1005".into(),
+            group_sid: "S-1-5-21-9-9-9-1006".into(),
             package_sid: "S-1-15-2-1-2-3-4-5-6-7".into(),
             package_name: "tau.sandbox.000000010000000200000003ffffffff".into(),
             launcher_pid: 77,
@@ -239,6 +247,7 @@ mod tests {
             file_id: Some(file_id(0xabcd, 42)),
             labeled: false,
             account: false,
+            group: false,
         }
     }
 
@@ -335,10 +344,12 @@ mod tests {
             [lines[0], lines[0], lines[5]].join("\n"),
             // unknown field
             [lines[0].replace("\"launcherPid\"", "\"extra\":1,\"launcherPid\"").as_str(), lines[5]].join("\n"),
-            // an earlier version (4 named the runner's logon SID)
-            [lines[0].replace("\"version\":5", "\"version\":4").as_str(), lines[5]].join("\n"),
+            // an earlier version (5 had no group SID)
+            [lines[0].replace("\"version\":6", "\"version\":5").as_str(), lines[5]].join("\n"),
             // a later version
-            [lines[0].replace("\"version\":5", "\"version\":6").as_str(), lines[5]].join("\n"),
+            [lines[0].replace("\"version\":6", "\"version\":7").as_str(), lines[5]].join("\n"),
+            // a header without the group SID
+            [lines[0].replace("\"groupSid\":\"S-1-5-21-9-9-9-1006\",", "").as_str(), lines[5]].join("\n"),
             // a version 4 header, with the runner's logon SID in place of the account
             [lines[0].replace("\"accountSid\"", "\"logonSid\"").as_str(), lines[5]].join("\n"),
             // a header without its package SID
@@ -358,16 +369,18 @@ mod tests {
         let mut writer = JournalWriter::create(&path, &header()).unwrap();
         writer.root(Entry { labeled: true, account: true, ..entry(r"C:\w", "O:BAG:BAD:(A;;FA;;;SY)") }).unwrap();
         writer.root(Entry { account: true, ..entry(r"C:\r", "O:BAG:BAD:(A;;FA;;;SY)") }).unwrap();
-        writer.root(entry(r"C:\d", "O:BAG:BAD:(A;;FA;;;SY)")).unwrap();
+        writer.root(Entry { group: true, ..entry(r"C:\d", "O:BAG:BAD:(A;;FA;;;SY)") }).unwrap();
         writer.finish().unwrap();
         let text = fs::read_to_string(&path).unwrap();
         // Only a writable root spells `labeled` out, and only a root that grants the account `account`.
         assert_eq!(text.matches("\"labeled\":true").count(), 1);
         assert_eq!(text.matches("\"account\":true").count(), 2);
-        assert!(!text.contains("\"labeled\":false") && !text.contains("\"account\":false"));
+        assert_eq!(text.matches("\"group\":true").count(), 1);
+        assert!(!text.contains(":false"));
         let summary = read_summary(&path).unwrap();
         assert_eq!(summary.roots.iter().map(|root| root.labeled).collect::<Vec<_>>(), [true, false, false]);
         assert_eq!(summary.roots.iter().map(|root| root.account).collect::<Vec<_>>(), [true, true, false]);
+        assert_eq!(summary.roots.iter().map(|root| root.group).collect::<Vec<_>>(), [false, false, true]);
         // The shared account is never one of the launch's own SIDs.
         assert_eq!(summary.header.own_sids(), ["S-1-5-21-1-2-3-4", "S-1-15-2-1-2-3-4-5-6-7"]);
         fs::remove_dir_all(path.parent().unwrap()).unwrap();

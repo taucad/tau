@@ -71,17 +71,22 @@ pub struct Ace<'a> {
 /// service gives a `CreateProcessWithLogonW` logon the caller's logon SID), and Windows adds no group to a token
 /// without `SeTcbPrivilege`. So the first pass is granted to the shared `account`, and isolation rests on the other
 /// passes, which every access must also satisfy: the AppContainer pass (`package`, this launch's alone, on every
-/// access) and the restricted pass (`capability`, this launch's alone, on writes).
+/// access) and the restricted pass (`capability`, this launch's alone, on writes). A denial names the sandbox
+/// `group` (in every launch's first pass) as well as the package: the AppContainer pass does not reliably honour a
+/// deny ACE for the package SID on a read (W03 read a denied file through one), and the first pass does.
 pub struct Grantees {
     pub account: Sid,
+    pub group: Sid,
     pub capability: Sid,
     pub package: Sid,
 }
 
 /// The ACEs one planned access adds. A grant must satisfy each pass: the first (the account), the AppContainer pass
 /// (the package SID; `ALL APPLICATION PACKAGES` is never granted) and, for writes, the restricted pass (the
-/// capability SID). A denial needs one pass only: it denies the package, which every access of this launch's shell
-/// is checked against and no other launch's carries, so it is removed by SID like every other ACE of the launch's.
+/// capability SID). A denial needs one pass only and denies two: the first, through the sandbox group every launch's
+/// token carries, which holds for certain, and the AppContainer pass, through the launch's package SID. The group is
+/// shared like the account, and restored the same way (`overlap.rs`): a path one launch denies is denied to every
+/// launch's shell while that launch's journal stands, which fails closed.
 pub fn aces_for(access: Access, grantees: &Grantees) -> Vec<Ace<'_>> {
     match access {
         Access::Read => vec![
@@ -98,8 +103,16 @@ pub fn aces_for(access: Access, grantees: &Grantees) -> Vec<Ace<'_>> {
             Ace { sid: &grantees.package, mode: Mode::Grant, mask: READ_MASK },
             Ace { sid: &grantees.capability, mode: Mode::Deny, mask: DENY_WRITE_MASK },
         ],
-        Access::Denied => vec![Ace { sid: &grantees.package, mode: Mode::Deny, mask: DENY_ALL_MASK }],
+        Access::Denied => vec![
+            Ace { sid: &grantees.group, mode: Mode::Deny, mask: DENY_ALL_MASK },
+            Ace { sid: &grantees.package, mode: Mode::Deny, mask: DENY_ALL_MASK },
+        ],
     }
+}
+
+/// Whether an access's ACEs name the shared sandbox group (a denial only).
+pub fn names_group(access: Access) -> bool {
+    access == Access::Denied
 }
 
 /// Whether an access's ACEs name the shared sandbox account (every one but a denial).
@@ -273,6 +286,7 @@ pub fn snapshot(path: &str) -> Result<Option<Entry>> {
         file_id: handle_file_id(&handle),
         labeled: false,
         account: false,
+        group: false,
     }))
 }
 

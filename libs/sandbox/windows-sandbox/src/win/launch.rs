@@ -166,6 +166,8 @@ struct Session {
     valid: ValidSpec,
     record: InstallRecord,
     account: Sid,
+    /// The sandbox group, which every denial names (`acl::Grantees`).
+    group: Sid,
     capability: Sid,
     package: Sid,
     person: Sid,
@@ -193,6 +195,7 @@ impl Session {
             move |err: Error| Refused::unavailable(what.clone(), Some(err.to_string()))
         };
         let account = Sid::parse(&record.account_sid).map_err(unavailable("the sandbox account SID is invalid"))?;
+        let group = Sid::parse(&record.group_sid).map_err(unavailable("the sandbox group SID is invalid"))?;
         if Sid::lookup(&record.account).map_err(unavailable("the sandbox account cannot be resolved"))?.as_ref()
             != Some(&account)
         {
@@ -257,6 +260,7 @@ impl Session {
             valid,
             record: record.clone(),
             account,
+            group,
             capability,
             package,
             person,
@@ -346,6 +350,7 @@ impl Session {
             entry
         };
         let account = self.account.to_sddl();
+        let group = self.group.to_sddl();
         let mut roots = Vec::new();
         for path in &self.roots {
             match acl::snapshot(path) {
@@ -353,19 +358,23 @@ impl Session {
                     let entry = Entry {
                         labeled: granted_as(path, acl::needs_low_label),
                         account: granted_as(path, acl::names_account),
+                        group: granted_as(path, acl::names_group),
                         ..original(entry)
                     };
-                    // The last launch out removes every ACE naming the shared account from a root itself; one the
-                    // person (or a lost journal) set there before any launch would go with them. An inherited one
-                    // comes from above and is inherited again.
-                    if entry.account
-                        && dacl_part(&entry.sddl)
-                            .is_some_and(|dacl| names_explicitly(dacl, std::slice::from_ref(&account)))
+                    // The last launch out removes every ACE naming the shared account (or, for a denial, the
+                    // shared group) from a root itself; one the person (or a lost journal) set there before any
+                    // launch would go with them. An inherited one comes from above and is inherited again.
+                    let shared: Vec<String> = [(entry.account, &account), (entry.group, &group)]
+                        .into_iter()
+                        .filter(|(named, _)| *named)
+                        .map(|(_, sid)| sid.clone())
+                        .collect();
+                    if !shared.is_empty() && dacl_part(&entry.sddl).is_some_and(|dacl| names_explicitly(dacl, &shared))
                     {
                         return Err(Refused::unavailable(
                             format!(
-                                "{path:?} already names the sandbox account in its permissions; remove that entry (or \
-                                 restore the launch that left it) first"
+                                "{path:?} already names the sandbox account or group in its permissions; remove that \
+                                 entry (or restore the launch that left it) first"
                             ),
                             None,
                         ));
@@ -380,6 +389,7 @@ impl Session {
             version: JOURNAL_VERSION,
             capability_sid: self.capability_sid.clone(),
             account_sid: account,
+            group_sid: group,
             package_sid: self.package_sid.clone(),
             package_name: self.package_name.clone(),
             launcher_pid: unsafe { GetCurrentProcessId() },
@@ -427,6 +437,7 @@ impl Session {
     fn apply_grants(&self) -> Result<()> {
         let grantees = acl::Grantees {
             account: self.account.clone(),
+            group: self.group.clone(),
             capability: self.capability.clone(),
             package: self.package.clone(),
         };

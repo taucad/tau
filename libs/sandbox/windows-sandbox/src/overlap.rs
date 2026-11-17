@@ -4,6 +4,10 @@
 //!
 //! - **Its own ACEs.** Every ACE a launch adds names its capability SID or its package SID, or the shared sandbox
 //!   account (below). Restore removes the ACEs naming its own two SIDs and no other ([`dacl_without_all`]).
+//! - **Its group ACEs.** A denial also denies the sandbox group, which every launch's first pass carries (the
+//!   AppContainer pass alone does not hold a deny for certain). Restored like the account's: a root keeps them while
+//!   another unrestored journal denies the same root ([`Coverage::group_covered`]), and they deny every launch's shell
+//!   meanwhile, which fails closed.
 //! - **Its account ACEs.** The first pass can only be granted to the sandbox account, which every launch shares, and
 //!   `SetEntriesInAclW` merges two launches' grants to it on one root into one ACE. So a root keeps its account ACEs
 //!   while another unrestored journal grants the same root ([`Coverage::account_covered`]), and the last launch
@@ -103,6 +107,8 @@ pub struct Coverage {
     /// Objects another journal grants the account on as a root: their account ACEs are the last such journal's to
     /// remove.
     pub accounted: HashSet<String>,
+    /// Objects another journal denies the group on as a root: likewise for the group's deny ACEs.
+    pub grouped: HashSet<String>,
 }
 
 impl Coverage {
@@ -130,6 +136,19 @@ impl Coverage {
     /// Whether another unrestored journal grants the account on this object as a root of its own.
     pub fn account_covered(&self, path: &str) -> bool {
         self.accounted.contains(&key(path))
+    }
+
+    /// Note one of another journal's roots whose denial names the group.
+    pub fn note_group(&mut self, ours: &HashSet<String>, path: &str) {
+        let key = key(path);
+        if ours.contains(&key) {
+            self.grouped.insert(key);
+        }
+    }
+
+    /// Whether another unrestored journal denies the group on this object as a root of its own.
+    pub fn group_covered(&self, path: &str) -> bool {
+        self.grouped.contains(&key(path))
     }
 
     pub fn flags_covered(&self, path: &str) -> bool {
@@ -224,6 +243,10 @@ mod tests {
         coverage.note_account(&ours, r"C:\Other\out");
         assert!(coverage.account_covered(r"c:\runtime"));
         assert!(!coverage.account_covered(r"C:\Other\out") && !coverage.account_covered(r"C:\Work\out"));
+        // The group's deny ACEs, likewise, and independently of the account's.
+        coverage.note_group(&ours, r"C:\Work\out");
+        assert!(coverage.group_covered(r"c:\work\OUT") && !coverage.group_covered(r"C:\Runtime"));
+        assert!(!coverage.account_covered(r"C:\Work\out"));
     }
 
     #[test]

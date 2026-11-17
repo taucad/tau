@@ -111,8 +111,8 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   and execute. `writable` grants the account, the capability SID and the package read, write and delete, and lowers
   the root's mandatory label to Low (`S:(ML;OICI;NW;;;LW)` on a directory), so the Low-integrity shell may write what
   the DACL grants. `readOnly` grants the account and the package read and denies the capability SID every write
-  right, so a read-only path inside a writable root stays read-only. `denied` denies the package all access, which
-  the AppContainer pass alone enforces for every access of the shell.
+  right, so a read-only path inside a writable root stays read-only. `denied` denies all access to the sandbox
+  group, which every launch's token carries in its first pass, and to the package. The group's deny is the one that holds: with a package-only deny, W03 read a denied file inside a readable root, and the AppContainer pass is not relied on for a deny; a first-pass deny stops every access, as on #2478.
   Directory ACEs and the directory label are inheritable. PowerShell 7 and Windows PowerShell 5.1 need nothing else:
   their binaries, `System32` and the .NET runtimes live under `%ProgramFiles%` and `%SystemRoot%`, which already grant
   `ALL APPLICATION PACKAGES` read and execute. The host's environment points `TEMP`, `TMP`, `USERPROFILE`, `APPDATA` and
@@ -165,6 +165,10 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
     than the remaining launches asked for (a write after a writer ended, beside a reader still running); no shell can
     use it, since each access also needs its own package SID and, for a write, its own capability SID, but the
     sandbox account's own unconfined processes (the runner, which runs only the helper) could.
+  - **Group ACEs.** A denial's deny for the sandbox group is shared the same way: a root keeps it while another
+    unrestored journal denies the same root, and the last launch denying it removes it; a launch refuses a denied root
+    whose original DACL already names the group. Meanwhile it denies every launch's shell, so a path one launch denies
+    is closed to another launch that would read it until the first ends: it fails closed.
   - **Control flags and labels.** Propagation sets `SE_DACL_AUTO_INHERITED` on everything under a root, and a writable
     root's tree gets the Low label. These are shared by every launch covering the object, so the last to end restores
     them. A launch that journals an object another unrestored journal also holds records that journal's entry as the
@@ -408,7 +412,7 @@ its stderr, sent at any time, also before `ready`), which `launch` never forward
 JSON lines, streamed on write and on restore so memory stays bounded however large the granted trees are:
 
 ```text
-{"kind":"header","version":5,"capabilitySid":"S-1-5-21-…","accountSid":"S-1-5-21-…","packageSid":"S-1-15-2-…","packageName":"tau.sandbox.…","launcherPid":1234,"windowStation":{"sessionId":1,"name":"WinSta0"}}
+{"kind":"header","version":6,"capabilitySid":"S-1-5-21-…","accountSid":"S-1-5-21-…","groupSid":"S-1-5-21-…","packageSid":"S-1-15-2-…","packageName":"tau.sandbox.…","launcherPid":1234,"windowStation":{"sessionId":1,"name":"WinSta0"}}
 {"kind":"root","path":"C:\\…\\home","sddl":"O:S-1-5-21-…G:S-1-5-21-…D:(A;OICI;FA;;;SY)…S:(ML;…)","fileId":"<volume serial>:<file index>","labeled":true,"account":true}
 {"kind":"child","path":"C:\\…\\home\\a.txt","sddl":"O:…G:…D:AI(A;ID;FA;;;SY)…","fileId":"…"}
 {"kind":"end","roots":1,"children":1}
@@ -419,13 +423,13 @@ directory root (a root nested in another is journaled under its own walk only), 
 journal, `end` included, is fsynced before any ACL changes, so a journal without a valid `end` belongs to a launch
 that changed nothing. `fileId` (absent when the attributes were unreadable) tells the journaled object from one put in
 its place during the launch; such a replacement is not rewritten (the root's propagating restore already removed what
-it inherited) and only has to name none of the launch's SIDs. `labeled` marks a writable root, `account` a root whose grant names the account (every one but a denial). Each `sddl` carries owner, group, DACL and the mandatory label (`S:` part, absent when there is
-none), read with `READ_CONTROL`. Versions 1 to 4 (1 to 3 restored snapshots, 4 granted the first pass to the runner's
-logon SID, which is the person's) are refused; they only ever existed on unmerged branches behind
+it inherited) and only has to name none of the launch's SIDs. `labeled` marks a writable root, `account` a root whose grant names the account (every one but a denial), `group` a root whose denial names the group. Each `sddl` carries owner, group, DACL and the mandatory label (`S:` part, absent when there is
+none), read with `READ_CONTROL`. Versions 1 to 5 (1 to 3 restored snapshots, 4 granted the first pass to the runner's
+logon SID, which is the person's, 5 denied the package only) are refused; they only ever existed on unmerged branches behind
 `TAU_WINDOWS_SHELL_SANDBOX`.
 
 `restore --journal <path>` refuses a journal whose launcher is still running, takes the descriptor lock, removes the
-launch's ACEs (and the account's, where no other journal grants the root) from the roots with propagation (children first, and the label too on a writable root no other journal's
+launch's ACEs (and the account's and the group's, where no other journal grants or denies the same root) from the roots with propagation (children first, and the label too on a writable root no other journal's
 writable root covers), then settles every journaled object and root as "ACL lifecycle" says (the DACL flags with
 `WRITE_DAC`, the label with `WRITE_OWNER` only where it differs), removes the launch's window-station ACEs when it runs
 in the journaled session, deletes the journal, unregisters it from the ledger and prints `{"restored":true}`. A missing

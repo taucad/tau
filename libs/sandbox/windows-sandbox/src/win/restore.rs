@@ -44,6 +44,9 @@ fn coverage(header: &Header, ours: &HashSet<String>, failures: &mut Sample) -> C
             if root.account {
                 coverage.note_account(ours, &root.path);
             }
+            if root.group {
+                coverage.note_group(ours, &root.path);
+            }
         }
         if let Err(err) = journal::for_each_child(path, |child| coverage.note(ours, &child.path, &labeled)) {
             failures.note(format!("{}: {err}", other.journal));
@@ -95,6 +98,9 @@ pub fn restore_journal(path: &Path) -> Vec<String> {
         let mut removed = own.clone();
         if root.account && coverage_known && !coverage.account_covered(&root.path) {
             removed.push(summary.header.account_sid.clone());
+        }
+        if root.group && coverage_known && !coverage.group_covered(&root.path) {
+            removed.push(summary.header.group_sid.clone());
         }
         if let Err(err) = acl::remove_propagating(&root.path, &removed) {
             failures.note(format!("{}: {err}", root.path));

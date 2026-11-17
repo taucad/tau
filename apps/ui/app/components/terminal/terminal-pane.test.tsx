@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopTerminalBridge, DesktopTerminalSession, TerminalHostFrame } from '@taucad/types/desktop-terminal';
 import { TerminalPane } from '#components/terminal/terminal-pane.js';
-import type { TerminalRendererLoader } from '#components/terminal/terminal-pane.js';
+import type { TerminalRendererLoader } from '#components/terminal/terminal-view-options.js';
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
 import { highContrastQuery, highContrastRatio } from '#components/terminal/terminal-theme.js';
 import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';

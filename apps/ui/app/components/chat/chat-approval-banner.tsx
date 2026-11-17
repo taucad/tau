@@ -1,7 +1,8 @@
 import { getToolPartName, isAnyToolPart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
-import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
+import { daemonPlacementOf, externalAgentDisplayName } from '#lib/agent-host-placement.js';
+import { desktopAgentSignInBridge, requestAgentSignIn } from '#components/terminal/agent-sign-in-tabs.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
@@ -263,7 +264,25 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   if (login) {
     /* Not a decision: nothing here is approved or denied, so the banner hands
      * over to the affordance that says what the *user* has to do (V11). */
-    return <ChatLoginAffordance login={login} />;
+    /* Only where this desktop runs the agent can Tau start its CLI; elsewhere the card keeps the command to copy. */
+    const signsInHere =
+      workspace !== undefined &&
+      desktopAgentSignInBridge() !== undefined &&
+      activeExecution !== undefined &&
+      daemonPlacementOf(activeExecution) === 'desktop';
+    return (
+      <ChatLoginAffordance
+        login={login}
+        onSignInInTerminal={
+          signsInHere
+            ? () => {
+                requestAgentSignIn(login.agentId);
+                workspace.openPanel('terminal');
+              }
+            : undefined
+        }
+      />
+    );
   }
   if (!approval) {
     return undefined;

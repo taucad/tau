@@ -165,6 +165,13 @@ export type AcpAgentProfile = {
    * CLI found outside PATH by its absolute path instead.
    */
   readonly loginCommand?: string | undefined;
+  /**
+   * The arguments of {@link AcpAgentProfile.loginCommand} after `cli`, as the CLI receives them.
+   *
+   * Tau's own sign-in tab starts the resolved `cli` with exactly these, never a
+   * shell line, and only after the user presses Enter (ACP agent policy rule 10).
+   */
+  readonly loginArgs?: readonly string[] | undefined;
 } & (
   | {
       /** Npm package holding the ACP adapter. */
@@ -215,6 +222,7 @@ export type ReviewedAcpAgentProfile = AcpAgentProfile & {
   readonly installCommand: AcpShellCommand;
   readonly updateCommand: AcpShellCommand;
   readonly loginCommand: string;
+  readonly loginArgs: readonly string[];
 };
 
 /**
@@ -272,6 +280,7 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     updateCommand: { posix: 'claude update', windows: 'claude update' },
     /* From code.claude.com/docs/en/cli-reference, read 2026-11-15. */
     loginCommand: 'claude auth login',
+    loginArgs: ['auth', 'login'],
   },
   {
     id: 'codex',
@@ -317,6 +326,7 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     /* Listed by `codex --help` on the operator's Mac, 2026-11-15. */
     updateCommand: { posix: 'codex update', windows: 'codex update' },
     loginCommand: 'codex login',
+    loginArgs: ['login'],
   },
   {
     id: 'grok',
@@ -353,6 +363,7 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     },
     updateCommand: { posix: 'grok update', windows: 'grok update' },
     loginCommand: 'grok login',
+    loginArgs: ['login'],
   },
 ];
 

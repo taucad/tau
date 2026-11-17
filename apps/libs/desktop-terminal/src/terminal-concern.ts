@@ -48,7 +48,10 @@ export type TerminalPort = {
 export type TerminalConcernOptions = {
   /**
    * The desktop's shell, probed once by its composer and shared with the agent's `shell` tool. Absent, every session
-   * is refused `sandbox-unavailable`; nothing ever falls back to an uncontained shell.
+   * is refused `sandbox-unavailable`; nothing ever falls back to an uncontained shell. The one process Tau starts
+   * outside the sandbox is not a shell and not this concern's: an external agent's own sign-in CLI, which main starts
+   * in its own Terminal tab on the person's Enter (`apps/desktop/src/main/agent-sign-in.ts`, D19/D20 amendment of
+   * 2026-11-16).
    */
   readonly shell?: (() => Promise<ShellProbe>) | undefined;
   /** Whether main's latest root allowlist still admits a project root. */

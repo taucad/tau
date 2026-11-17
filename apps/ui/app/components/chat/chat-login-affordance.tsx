@@ -1,4 +1,5 @@
-import { KeyRound } from 'lucide-react';
+import { KeyRound, SquareTerminal } from 'lucide-react';
+import { Button } from '@taucad/ui/components/button';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import type { AgentHostLogin } from '@taucad/chat-ui/services/agent-host-event-projection';
@@ -7,17 +8,28 @@ import type { AgentHostLogin } from '@taucad/chat-ui/services/agent-host-event-p
  * What the *user* has to do to sign an external agent in (V11).
  *
  * Tau brokers nothing here, and that is the design, not a gap: the credential
- * planes stay separate (X6/VI4), so Tau never opens a vendor login, never runs
- * the command and never sees what either produces. It renders the facts the
- * agent handed back — a verification URL and its code, or a command line — and
- * the user completes the flow wherever they actually are, which is the only
- * answer that also works for a browser paired to a remote daemon.
+ * planes stay separate (X6/VI4), so Tau never opens a vendor login page itself
+ * and never sees what the flow produces. It renders the facts the agent handed
+ * back — a verification URL and its code, or a command line — and the user
+ * completes the flow wherever they actually are, which is the only answer that
+ * also works for a browser paired to a remote daemon.
  *
- * @param props - The login the agent is waiting on.
+ * Where the agent runs on this desktop, the card also offers the agent's own
+ * sign-in in a Terminal tab (ACP agent policy rule 10): the tab fills in the
+ * command and runs it only on the user's Enter, for any agent whose profile
+ * declares one.
+ *
+ * @param props - The login the agent is waiting on, and the action that opens its sign-in tab when this desktop runs the agent.
  * @returns The affordance, rendered inside the approval banner's slot.
  * @public
  */
-export function ChatLoginAffordance({ login }: { readonly login: AgentHostLogin }): React.JSX.Element {
+export function ChatLoginAffordance({
+  login,
+  onSignInInTerminal,
+}: {
+  readonly login: AgentHostLogin;
+  readonly onSignInInTerminal?: (() => void) | undefined;
+}): React.JSX.Element {
   const name = externalAgentDisplayName(login.agentId);
   const commands = login.methods.flatMap((method) => (method.terminalCommand ? [method] : []));
   return (
@@ -38,10 +50,23 @@ export function ChatLoginAffordance({ login }: { readonly login: AgentHostLogin 
           {login.code === undefined ? ' to continue.' : ` and enter the code ${login.code}.`}
         </p>
       )}
+      {commands.length > 0 && onSignInInTerminal !== undefined ? (
+        <div className='flex min-w-0 flex-wrap items-center gap-2'>
+          <Button size='xs' onClick={onSignInInTerminal}>
+            <SquareTerminal aria-hidden />
+            Sign in in Tau&apos;s Terminal
+          </Button>
+          <span className='text-xs text-muted-foreground'>
+            Opens a Terminal tab with the command filled in; press Enter to run it.
+          </span>
+        </div>
+      ) : undefined}
       {commands.length > 0 ? (
         <div className='flex min-w-0 flex-col gap-1'>
           <p className='text-xs text-muted-foreground'>
-            Run this in a terminal on the machine running the agent, then send your message again:
+            {onSignInInTerminal === undefined
+              ? 'Run this in a terminal on the machine running the agent, then send your message again:'
+              : 'Or run this in a terminal of your own, then send your message again:'}
           </p>
           {commands.map((method) => (
             <div key={method.id} className='flex min-w-0 items-center gap-2'>

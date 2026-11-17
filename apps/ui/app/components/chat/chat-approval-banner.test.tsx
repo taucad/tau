@@ -34,6 +34,13 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
 }));
 
+let signInBridge: unknown;
+const requestAgentSignIn = vi.fn();
+vi.mock('#components/terminal/agent-sign-in-tabs.js', () => ({
+  desktopAgentSignInBridge: () => signInBridge,
+  requestAgentSignIn,
+}));
+
 const { ChatApprovalBanner, pendingAgentHostApprovals, pendingApprovals } =
   await import('#components/chat/chat-approval-banner.js');
 
@@ -590,5 +597,71 @@ describe('a login an external agent is waiting on', () => {
      * in this test, so the id stands in for the product name. */
     expect(screen.getByRole('region', { name: 'Sign in to codex' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /approve|deny/iu })).toBeNull();
+  });
+
+  describe("offering the agent's own sign-in in Tau's Terminal", () => {
+    /** A profile-driven agent no vendor ships: the action is generic, keyed by nothing but the id. */
+    const loginFor = (agentId: string) =>
+      approvalMessage({
+        interruptId: 'login-5',
+        kind: 'approval',
+        prompt: `${agentId} is not logged in.`,
+        options: [],
+        login: {
+          agentId,
+          methods: [{ id: 'cli-login', name: 'Sign in', terminalCommand: `${agentId} account sign-in` }],
+        },
+      });
+
+    beforeEach(() => {
+      signInBridge = undefined;
+      requestAgentSignIn.mockClear();
+      openPanel.mockClear();
+    });
+
+    it('opens a Terminal tab for any agent this desktop runs, filled in and not run', async () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'acme', hostId: 'desktop' } as unknown as typeof activeExecution;
+      messages = [loginFor('acme')];
+      render(
+        <TooltipProvider>
+          <ChatApprovalBanner />
+        </TooltipProvider>,
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: "Sign in in Tau's Terminal" }));
+
+      expect(requestAgentSignIn).toHaveBeenCalledExactlyOnceWith('acme');
+      expect(openPanel).toHaveBeenCalledExactlyOnceWith('terminal');
+      /* The copyable command stays for a terminal of the person's own. */
+      expect(screen.getByText('acme account sign-in')).toBeInTheDocument();
+    });
+
+    it('keeps only the command to copy when the agent runs on another host', () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'acme', hostId: 'daemon-1' } as unknown as typeof activeExecution;
+      messages = [loginFor('acme')];
+      render(
+        <TooltipProvider>
+          <ChatApprovalBanner />
+        </TooltipProvider>,
+      );
+
+      expect(screen.queryByRole('button', { name: "Sign in in Tau's Terminal" })).toBeNull();
+      expect(screen.getByText('acme account sign-in')).toBeInTheDocument();
+    });
+
+    it('keeps only the command to copy where this page has no local Terminal', () => {
+      activeExecution = { kind: 'acp', agentId: 'acme', hostId: 'desktop' } as unknown as typeof activeExecution;
+      messages = [loginFor('acme')];
+      render(
+        <TooltipProvider>
+          <ChatApprovalBanner />
+        </TooltipProvider>,
+      );
+
+      expect(screen.queryByRole('button', { name: "Sign in in Tau's Terminal" })).toBeNull();
+      expect(screen.getByText('acme account sign-in')).toBeInTheDocument();
+    });
   });
 });

@@ -3,7 +3,7 @@ title: 'ACP Agent Policy'
 description: 'Rules every external ACP agent profile and host must meet for install locations, discovery, probes, refusals, fix commands, sign-in and version floors.'
 status: active
 created: '2026-11-15'
-updated: '2026-11-15'
+updated: '2026-11-16'
 related:
   - docs/research/acp-agent-install-paths-blueprint.md
   - docs/research/external-agent-acp-topology.md
@@ -40,6 +40,7 @@ Declare everything Tau knows about an agent's install locations, its install, up
 | `fallbackExecutables`                       | A key for `darwin`, `linux` and `win32`; an empty list carries a comment saying no location outside PATH is known |
 | `installCommand`, `updateCommand`           | A `posix` and a `windows` line, from the vendor's documentation                                                   |
 | `loginCommand`                              | Starts with `cli`                                                                                                 |
+| `loginArgs`                                 | The words of `loginCommand` after `cli`, none needing quotes; `[cli, ...loginArgs]` spells `loginCommand`         |
 
 ### 2. Declare Verified Install Locations
 
@@ -135,7 +136,7 @@ Resolve one `fixCommand` on the host for the host's own platform and send it on 
 
 ### 10. Show a Sign-In Command That Works
 
-List Tau's `cli-login` method first on every sign-in surface. Name the CLI by its bare name when it was found on PATH and by its quoted absolute path otherwise. Drop an advertised terminal command that runs the host's own runtime or names the adapter's module path. Quote every surfaced command for the host's shell. On POSIX, single-quote an argument that is empty or holds anything outside `[A-Za-z0-9_@%+=:,./-]`, writing each `'` inside it as `'\''`. On Windows, double-quote an argument that is empty or holds whitespace, `"`, `'`, `` ` `` or `$`, escape each `` ` ``, `"` and `$` inside it with a backtick, and write a quoted program as `& "..."` so PowerShell runs it. Never run a sign-in command.
+List Tau's `cli-login` method first on every sign-in surface. Name the CLI by its bare name when it was found on PATH and by its quoted absolute path otherwise. Drop an advertised terminal command that runs the host's own runtime or names the adapter's module path. Quote every surfaced command for the host's shell. On POSIX, single-quote an argument that is empty or holds anything outside `[A-Za-z0-9_@%+=:,./-]`, writing each `'` inside it as `'\''`. On Windows, double-quote an argument that is empty or holds whitespace, `"`, `'`, `` ` `` or `$`, escape each `` ` ``, `"` and `$` inside it with a backtick, and write a quoted program as `& "..."` so PowerShell runs it.
 
 **Why**: An adapter describes sign-in as its own process invocation, which is Tau's binary when Tau hosts the adapter.
 
@@ -151,6 +152,16 @@ INCORRECT:
 ```text
 /Applications/Tau.app/Contents/Frameworks/Tau Helper.app/Contents/MacOS/Tau Helper .../claude-agent-acp/dist/index.js --cli auth login --claudeai
 ```
+
+Run a sign-in only in the desktop's sign-in tab, and only the profile's own:
+
+- The page names an agent id and nothing else. Main finds the adapter in its own discovery and starts it with `acpLoginLaunch`: the located `executablePath` (located again, rule 4), the profile's `loginArgs` and the adapter's own environment (`acpAdapterEnvironment`, so `configEnv` such as `CLAUDE_CONFIG_DIR` applies). Never a shell, a renderer-supplied string or a command an adapter advertised.
+- Show the command filled in; start it only on the user's Enter or click.
+- Tau code never parses, logs, stores or forwards the tab's input or output beyond drawing it; the vendor's page opens in the default browser, never in a Tau window.
+- One running sign-in per agent; stop it when its tab, window or the app closes. The tab ends when the CLI exits, and the next turn clears the sign-in refusal; add no polling.
+- A surface with no local Terminal (a browser, a remote host) keeps the command to copy.
+
+**Why**: The user completes the vendor's own flow in a process Tau starts but never reads, which keeps sign-in inside the vendor's terms (`docs/research/claude-code-acp-terms-review.md`, Finding 2) and lands the login where the agent reads it.
 
 ### 11. Tie the Version Floor to the Adapter Pin
 
@@ -172,6 +183,7 @@ Every profile passes `registry.conformance.test.ts` and `login.conformance.test.
 - Showing an adapter's advertised terminal command without checking what it runs.
 - Testing sign-in only against a fake agent whose auth methods differ from the real adapter's.
 - Copying an install command from a blog post or from memory.
+- Running a sign-in through a shell, or keying its launch to an agent id outside the profile.
 
 ## Adding an Agent Checklist
 

@@ -12,7 +12,7 @@
 
 import { Heading } from '@taucad/ui/components/heading';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { SquareTerminal } from 'lucide-react';
+import { SquareTerminal, X } from 'lucide-react';
 import { terminalAccessSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type {
   DesktopTerminalBridge,
@@ -37,22 +37,26 @@ import { useCookie } from '#hooks/use-cookie.js';
 import { useProject } from '#hooks/use-project.js';
 import { useTerminalAvailability } from '#components/terminal/terminal-availability.js';
 import type { TerminalAvailability } from '#components/terminal/terminal-availability.js';
-import type { TerminalRendererOptions, TerminalRendererView } from '#components/terminal/terminal-renderer.js';
+import type { TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 import { outputSlices } from '#components/terminal/terminal-output-text.js';
+import { highContrastQuery, readTerminalTheme, terminalTextRendering } from '#components/terminal/terminal-theme.js';
 import {
-  highContrastQuery,
-  highContrastRatio,
-  readTerminalTheme,
-  terminalTextRendering,
-} from '#components/terminal/terminal-theme.js';
-
-/** Loads the renderer; the default imports it lazily so no other surface pays for it. @public */
-export type TerminalRendererLoader = (options: TerminalRendererOptions) => Promise<TerminalRendererView>;
-
-const loadTerminalRenderer: TerminalRendererLoader = async (options) => {
-  const { createTerminalRenderer } = await import('#components/terminal/terminal-renderer.js');
-  return createTerminalRenderer(options);
-};
+  loadTerminalRenderer,
+  openTerminalLink,
+  readMinimumContrastRatio,
+  terminalViewOptions,
+} from '#components/terminal/terminal-view-options.js';
+import type { TerminalRendererLoader } from '#components/terminal/terminal-view-options.js';
+import type { DesktopAgentSignInBridge } from '@taucad/types/desktop-agent-sign-in';
+import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
+import { AgentSignInTab } from '#components/terminal/agent-sign-in-tab.js';
+import {
+  desktopAgentSignInBridge,
+  dismissAgentSignIn,
+  selectTerminalTab,
+  terminalTabId,
+  useAgentSignInTabs,
+} from '#components/terminal/agent-sign-in-tabs.js';
 
 type AccessRequest = Readonly<{ requestId: string; access: TerminalAccess; expiresAt: string }>;
 
@@ -67,21 +71,6 @@ type PaneState =
     }>
   | Readonly<{ phase: 'refused'; refusal: TerminalRefusal }>;
 
-/* The code editor's font (`--font-mono`, 14px, line-height 1.5), so the Terminal and the editor set code the same way. */
-const fallbackFontFamily = "'Geist Mono', ui-monospace, monospace";
-const fontSize = 14;
-const lineHeight = fontSize * 1.5;
-/**
- * The editor's monospace family, read from the `--font-mono` token the code editor uses.
- *
- * @param element - An element inside the themed document.
- * @returns The font family list.
- */
-const readEditorFontFamily = (element: Element): string =>
-  getComputedStyle(element).getPropertyValue('--font-mono').trim() || fallbackFontFamily;
-const readMinimumContrastRatio = (): number =>
-  globalThis.matchMedia(highContrastQuery).matches ? highContrastRatio : 1;
-const scrollbackLines = 10_000;
 // Bound synchronous bridge startup separately from the host's ongoing backpressure window.
 const initialFrameLimit = 64;
 
@@ -377,24 +366,11 @@ export function TerminalPane({
     setFindTerm(undefined);
     setAccessRequest(undefined);
     setNotice(undefined);
-    const theme = readTerminalTheme(host);
     let view: TerminalRendererView;
     try {
       view = await loadRenderer({
-        host,
-        fontFamily: readEditorFontFamily(host),
-        fontSize,
-        lineHeight,
-        theme,
-        ...terminalTextRendering(theme),
-        scrollback: scrollbackLines,
-        screenReaderMode: screenReaderModeRef.current,
-        minimumContrastRatio: readMinimumContrastRatio(),
-        reducedMotion: globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches,
-        onLinkActivate(uri) {
-          /* The desktop navigation policy sends http(s) to the person's browser and opens nothing in the app. */
-          globalThis.open(uri, '_blank', 'noopener,noreferrer');
-        },
+        ...terminalViewOptions(host, screenReaderModeRef.current),
+        onLinkActivate: openTerminalLink,
         onLeave() {
           chromeRef.current?.focus();
         },
@@ -750,8 +726,99 @@ export function TerminalPane({
 }
 
 /**
+ * The Terminal pane with any external-agent sign-in tabs beside the person's own shell.
+ *
+ * The shell keeps its place in the tree whether or not a sign-in tab is open, so opening one never restarts the shell.
+ * A sign-in tab runs whether or not the shell is available: it is the agent's own CLI, not the contained shell.
+ *
+ * @param props - The shell's availability, the preload's sign-in bridge and, for tests, a renderer loader.
+ * @returns The pane.
+ * @public
+ */
+export function TerminalTabs({
+  availability,
+  signInBridge,
+  loadRenderer = loadTerminalRenderer,
+}: {
+  readonly availability: TerminalAvailability;
+  readonly signInBridge: DesktopAgentSignInBridge | undefined;
+  readonly loadRenderer?: TerminalRendererLoader;
+}): React.JSX.Element {
+  const tabs = useAgentSignInTabs();
+  const agentIds = signInBridge === undefined ? [] : tabs.agentIds;
+  const selected = agentIds.includes(tabs.selected) ? tabs.selected : terminalTabId;
+  return (
+    <div className='flex size-full flex-col'>
+      {agentIds.length > 0 ? (
+        <div role='tablist' aria-label='Terminal tabs' className='flex shrink-0 flex-wrap gap-1 border-b px-2 py-1'>
+          <Button
+            role='tab'
+            size='xs'
+            variant={selected === terminalTabId ? 'secondary' : 'ghost'}
+            aria-selected={selected === terminalTabId}
+            onClick={() => {
+              selectTerminalTab(terminalTabId);
+            }}
+          >
+            Terminal
+          </Button>
+          {agentIds.map((agentId) => {
+            const name = externalAgentDisplayName(agentId);
+            return (
+              <span key={agentId} className='flex items-center'>
+                <Button
+                  role='tab'
+                  size='xs'
+                  variant={selected === agentId ? 'secondary' : 'ghost'}
+                  aria-selected={selected === agentId}
+                  onClick={() => {
+                    selectTerminalTab(agentId);
+                  }}
+                >
+                  {`Sign in to ${name}`}
+                </Button>
+                <Button
+                  size='icon-xs'
+                  variant='ghost'
+                  aria-label={`Close sign-in to ${name}`}
+                  onClick={() => {
+                    dismissAgentSignIn(agentId);
+                  }}
+                >
+                  <X aria-hidden />
+                </Button>
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      <div className='relative min-h-0 flex-1'>
+        <div className='size-full' hidden={selected !== terminalTabId}>
+          <TerminalPane availability={availability} loadRenderer={loadRenderer} />
+        </div>
+        {signInBridge === undefined
+          ? null
+          : agentIds.map((agentId) => (
+              <div key={agentId} role='tabpanel' className='size-full' hidden={selected !== agentId}>
+                <AgentSignInTab
+                  agentId={agentId}
+                  bridge={signInBridge}
+                  loadRenderer={loadRenderer}
+                  onClose={() => {
+                    dismissAgentSignIn(agentId);
+                  }}
+                />
+              </div>
+            ))}
+      </div>
+    </div>
+  );
+}
+
+/**
  * The Terminal pane for the current project, gated by the shared predicate. The Workbench catalog and the narrow
- * layout both mount this. Closing the pane or leaving the project ends its session without asking.
+ * layout both mount this. Closing the pane or leaving the project ends its session without asking, and closing the
+ * pane closes its sign-in tabs' CLIs too.
  *
  * @param props - The workbench profile; a shared or public view omits the Terminal.
  * @returns The pane.
@@ -763,5 +830,10 @@ export function ProjectTerminalPane({
   readonly profile?: 'editor' | 'shared';
 }): React.JSX.Element {
   const { projectId } = useProject();
-  return <TerminalPane availability={useTerminalAvailability(projectId, profile)} />;
+  return (
+    <TerminalTabs
+      availability={useTerminalAvailability(projectId, profile)}
+      signInBridge={profile === 'editor' ? desktopAgentSignInBridge() : undefined}
+    />
+  );
 }

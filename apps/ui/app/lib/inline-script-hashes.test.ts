@@ -9,6 +9,7 @@ import { handOffScript } from '#components/hand-off/hand-off.js';
 import { handOffSurfaces } from '#components/hand-off/hand-off-store.js';
 import { earlyInputScript } from '#components/chat/chat-early-input.js';
 import { focusProjectNameScript } from '#routes/projects_.new/focus-project-name-script.js';
+import { buildBootWatchdogScript } from '#lib/boot-watchdog.js';
 
 /** The CSP hash source of a script's text: SHA-256 of its UTF-8 bytes, base64 (CSP3 § 6.7.3.3). */
 const hashSource = (source: string): string =>
@@ -21,6 +22,7 @@ const servedSources: Readonly<Record<TauInlineScript, string>> = {
   handOffProjectComposer: handOffScript('previous-sibling', handOffSurfaces['project-composer']),
   earlyChatInput: earlyInputScript,
   focusProjectName: focusProjectNameScript,
+  bootWatchdog: buildBootWatchdogScript() ?? '',
 };
 
 describe('tauInlineScriptHashes', () => {

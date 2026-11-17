@@ -691,10 +691,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (!isAbsolute(root)) {
       return false;
     }
-    /* The exact spelling main published is admitted as is. Its physical
-     * spelling can differ before the background `realpath` settles: Windows
-     * short names (`C:\\Users\\RUNNER~1`) and macOS `/var` → `/private/var`. */
-    if (trustedRoots.has(resolve(root))) {
+    /* Until its background `realpath` settles, the exact spelling main
+     * published is admitted as is: its physical spelling can differ (Windows
+     * short names such as `C:\\Users\\RUNNER~1`, macOS `/var` → `/private/var`).
+     * Once settled, the physical target is checked against the settled
+     * canonical spelling, so a retargeted link is refused. */
+    const published = trustedRoots.get(resolve(root));
+    if (published !== undefined && !published.isSettled) {
       return true;
     }
     const candidate = canonicalPath(root);
@@ -1250,6 +1253,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       syncTelemetryConsent: () => telemetryConsent,
       /* B1: every revision this host records names the desktop app as its leg. */
       via: 'desktop',
+      /* W8 diagnostics: each turn admission's phases and the Git it waited on, ids and milliseconds only. */
+      admissionTimed: (timing) => {
+        log('turn-admission-timed', timing);
+      },
       tauCredential: () => {
         const token = authToken;
         return token === undefined ? undefined : { apiBaseUrl: config.tauApiUrl, authorization: `Bearer ${token}` };

@@ -561,6 +561,7 @@ const createTabProperties = ({
     setActive: vi.fn(),
     updateParameters: vi.fn(),
     onDidTitleChange: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidGroupChange: vi.fn(() => ({ dispose: vi.fn() })),
   } as unknown as DockviewPanelApi;
   group.panels.push({ id, api } as unknown as IDockviewPanel);
 

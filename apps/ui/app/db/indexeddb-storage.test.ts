@@ -573,3 +573,33 @@ describe('IndexedDbStorageProvider', () => {
     });
   });
 });
+
+describe('IndexedDbStorageProvider open deadline (B31)', () => {
+  it('should reject an open that fires no event at 5 000 ms with DatabaseOpenTimeoutError, and open again on the next read', async () => {
+    const original = globalThis.indexedDB;
+    const open = vi.fn(() => new EventTarget());
+    vi.useFakeTimers();
+    try {
+      globalThis.indexedDB = { open } as unknown as IDBFactory;
+      const provider = new IndexedDbStorageProvider();
+
+      const first = expect(provider.getAppUiPreferences()).rejects.toMatchObject({
+        name: 'DatabaseOpenTimeoutError',
+      });
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(open).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await first;
+
+      const second = expect(provider.getAppUiPreferences()).rejects.toMatchObject({
+        name: 'DatabaseOpenTimeoutError',
+      });
+      expect(open).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(5000);
+      await second;
+    } finally {
+      vi.useRealTimers();
+      globalThis.indexedDB = original;
+    }
+  });
+});

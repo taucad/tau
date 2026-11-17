@@ -1,6 +1,6 @@
 /**
  * "We paused this model" (crash capture blueprint, the only crash UI). Shown instead of re-running a shared model
- * that stopped the page the last time it opened on this device (`#lib/kill-memory`). One component, two copy states:
+ * that stopped the page the last time it opened on this device (the app's kill memory). One component, two copy states:
  * `paused` after the first kill (primary "Try again"), `repeat` after a kill that followed "Try again" (primary
  * "Go home", secondary "Try anyway"). It sends nothing and says nothing about reporting, so it is the same in every
  * telemetry state. Laid out like the "Run this model" gate it sits beside, and no kernel or viewer runs while it shows.
@@ -10,7 +10,6 @@ import { Link } from 'react-router';
 import { Pause, Play } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Heading } from '@taucad/ui/components/heading';
-import type { PausedState } from '#lib/kill-memory.js';
 
 /** The gate's copy, by state. */
 export const pausedModelCopy = {
@@ -24,6 +23,9 @@ export const pausedModelCopy = {
   },
 } as const;
 
+/** The gate's copy state. The app's kill memory hands its paused state in, and the type checker holds the two together. */
+type PausedModelGateState = keyof typeof pausedModelCopy;
+
 export function PausedModelGate({
   state,
   name,
@@ -31,7 +33,7 @@ export function PausedModelGate({
   facts,
   onRun,
 }: {
-  readonly state: PausedState;
+  readonly state: PausedModelGateState;
   /** The model's name, the gate's label. */
   readonly name: string;
   /** The model's stored thumbnail; without one the gate shows its icon and the facts line instead. */

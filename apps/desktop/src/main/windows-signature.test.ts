@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { validateWindowsSignature } from '#main/windows-signature.js';
+import { createWindowsPowerShellEnvironment, validateWindowsSignature } from '#main/windows-signature.js';
 
 const path = String.raw`C:\Users\Person\Downloads\Tau setup.exe`;
 const publisher = 'CN=Tau Limited, O=Tau Limited, L=Auckland, C=NZ';
@@ -43,5 +43,14 @@ describe('Windows Authenticode verdict', () => {
     expect(() => {
       validateWindowsSignature(signature, { ...expected, publisher: '' });
     }).toThrow();
+  });
+
+  it('should drop an inherited PowerShell 7 module path in any casing', () => {
+    const parent: NodeJS.ProcessEnv = {};
+    parent['PSModulePath'] = String.raw`C:\Program Files\PowerShell\7\Modules`;
+    parent['psmodulepath'] = 'x';
+    parent['Path'] = String.raw`C:\Windows`;
+
+    expect(Object.entries(createWindowsPowerShellEnvironment(parent))).toEqual([['Path', String.raw`C:\Windows`]]);
   });
 });

@@ -8,10 +8,17 @@ import { cacheTag, cdnBackedSsrRouteHeaders } from '#lib/react-router.lib.js';
 import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { ErrorPage } from '#components/error-page.js';
-import { PublicationLockScreen, parsePublicationLockPayload } from '#components/share/publication-lock-screen.js';
-import type { PublicationLockReason, PublicationLockScreenVariant } from '#components/share/publication-lock-screen.js';
-import { parsePublicationRecord, publicationFileFetchInit } from '#components/share/parsed-publication.js';
-import type { ParsedPublication } from '#components/share/parsed-publication.js';
+import { PublicationLockScreen } from '#components/share/publication-lock-screen.js';
+import { parsePublicationLockPayload } from '@taucad/publish-ui/components/share/publication-lock-screen';
+import type {
+  PublicationLockReason,
+  PublicationLockScreenVariant,
+} from '@taucad/publish-ui/components/share/publication-lock-screen';
+import {
+  parsePublicationRecord,
+  publicationFileFetchInit,
+} from '@taucad/publish-ui/components/share/parsed-publication';
+import type { ParsedPublication } from '@taucad/publish-ui/components/share/parsed-publication';
 import { ClientOnly } from '@taucad/ui/components/client-only';
 
 const SharedProjectWorkbench = lazy(async () => {

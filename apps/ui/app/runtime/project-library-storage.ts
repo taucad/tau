@@ -43,6 +43,7 @@ import {
   getAllProjectFileSystemConfigs,
   getProjectFileSystemConfig,
   getWorkspace,
+  getWorkspaceMetadata,
   listWorkspaces,
   pinHomeStorageBackend,
   requestHomeStoragePersistence,
@@ -823,6 +824,16 @@ export const classifyMissingProject = async (
       (root) =>
         root.status === 'inaccessible' && persistentStorageRootKey(root.root) === persistentStorageRootKey(config),
     )
+  ) {
+    return 'unavailable';
+  }
+  /* A workspace whose folder access was withdrawn (Disconnect, or the handle gone) keeps its identity and bindings: the
+   * project is on storage this device cannot reach now, not missing (W30, storage `revoked`), so the route says to
+   * reconnect it rather than that the project does not exist. */
+  if (
+    config?.backend === 'webaccess' &&
+    (await getWorkspace(config.workspaceId)) === undefined &&
+    (await getWorkspaceMetadata(config.workspaceId)) !== undefined
   ) {
     return 'unavailable';
   }

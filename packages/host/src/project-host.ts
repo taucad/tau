@@ -108,6 +108,7 @@ export type ProjectHostOptions = Pick<
   | 'syncTelemetryPlacement'
   | 'syncTelemetryConsent'
   | 'via'
+  | 'admissionTimed'
 > &
   Pick<AgentLauncherOptions, 'systemPrompt' | 'model' | 'modelTransport' | 'credential'> &
   Pick<
@@ -477,6 +478,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
     ...(options.syncTelemetryPlacement === undefined ? {} : { syncTelemetryPlacement: options.syncTelemetryPlacement }),
     ...(options.syncTelemetryConsent === undefined ? {} : { syncTelemetryConsent: options.syncTelemetryConsent }),
+    ...(options.admissionTimed === undefined ? {} : { admissionTimed: options.admissionTimed }),
     events: options.onRevisionEvent,
   });
 

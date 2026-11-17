@@ -111,6 +111,12 @@ function Invoke-Setup {
   $digest = (Get-FileHash -LiteralPath $helper -Algorithm SHA256).Hash.ToLowerInvariant()
   Write-Host "Helper installed at $helper (sha256:$digest)."
 
+  # With Windows Firewall off the sandbox account's block rules have no effect; run 44004391207 reached both listeners.
+  # A consumer Windows 11 has it on, so the disposable runner is set to match, with the default outbound allow and
+  # inbound block for every other account. The profile state is printed for the receipt.
+  Set-NetFirewallProfile -All -Enabled True -DefaultOutboundAction Allow -DefaultInboundAction Block
+  Get-NetFirewallProfile | ForEach-Object { Write-Host "Firewall profile $($_.Name): enabled $($_.Enabled)." }
+
   Invoke-Helper $helper @('setup', '--for-user', $sid)
   Write-Host 'Install record:'
   Invoke-Helper $helper @('status')

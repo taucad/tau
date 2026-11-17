@@ -884,45 +884,46 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     expect(escapePids(aborted.pids, output).filter((pid) => alive(pid))).toStrictEqual([]);
   });
 
-  conformance(
-    'A23',
-    'a second concurrent launch is refused session-limit while the first runs to completion',
-    async () => {
-      const sync = join(work, 'a23');
-      mkdirSync(sync, { recursive: true });
-      const first = run(
-        [
-          `Set-Content -LiteralPath ${quote(join(sync, 'ready'))} -Value ready -NoNewline`,
-          `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
-          `Set-Content -LiteralPath ${quote(join(sync, 'first-done'))} -Value done -NoNewline`,
-        ].join('\n'),
-        { commandId: 'conformance#a23-first' },
+  conformance('A23', 'a second concurrent launch is refused while the first runs to completion', async () => {
+    const sync = join(work, 'a23');
+    mkdirSync(sync, { recursive: true });
+    const first = run(
+      [
+        `Set-Content -LiteralPath ${quote(join(sync, 'ready'))} -Value ready -NoNewline`,
+        `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
+        `Set-Content -LiteralPath ${quote(join(sync, 'first-done'))} -Value done -NoNewline`,
+      ].join('\n'),
+      { commandId: 'conformance#a23-first' },
+    );
+    try {
+      expect(await waitUntil(() => existsSync(join(sync, 'ready')), 30_000)).toBe(true);
+      const second = await prepared(
+        launchOf(`Set-Content -LiteralPath ${quote(join(sync, 'second-ran'))} -Value ran`, {
+          commandId: 'conformance#a23-second',
+        }),
       );
-      try {
-        expect(await waitUntil(() => existsSync(join(sync, 'ready')), 30_000)).toBe(true);
-        const second = await prepared(
-          launchOf(`Set-Content -LiteralPath ${quote(join(sync, 'second-ran'))} -Value ran`, {
-            commandId: 'conformance#a23-second',
-          }),
-        );
 
-        expect(second.status).not.toBe('started');
-        expect(JSON.stringify(second)).toMatch(/session-limit/u);
-        expect(existsSync(join(sync, 'second-ran'))).toBe(false);
-      } finally {
-        writeFileSync(join(sync, 'release'), '');
-      }
-      const ended = await first;
+      /*
+       * The provider answers an overlapping launch `sandbox-unavailable` with nothing started; the desktop's shell
+       * service turns the same overlap into `session-limit` before it reaches the provider (`maxExecutions: 1`).
+       */
+      expect(second).toMatchObject({ status: 'sandbox-unavailable' });
+      expect(JSON.stringify(second)).toMatch(/one sandboxed shell at a time/u);
+      expect(existsSync(join(sync, 'second-ran'))).toBe(false);
+    } finally {
+      writeFileSync(join(sync, 'release'), '');
+      await first.catch(() => undefined);
+    }
+    const ended = await first;
 
-      expect(ended.exitCode, ended.stderr).toBe(0);
-      expect(readFileSync(join(sync, 'first-done'), 'utf8')).toBe('done');
-      /* The limit is about overlap only: once the first settled, the next launch runs. */
-      const after = await run(`Set-Content -LiteralPath ${quote(join(sync, 'after'))} -Value after -NoNewline`);
+    expect(ended.exitCode, ended.stderr).toBe(0);
+    expect(readFileSync(join(sync, 'first-done'), 'utf8')).toBe('done');
+    /* The limit is about overlap only: once the first settled, the next launch runs. */
+    const after = await run(`Set-Content -LiteralPath ${quote(join(sync, 'after'))} -Value after -NoNewline`);
 
-      expect(after.exitCode, after.stderr).toBe(0);
-      expect(readFileSync(join(sync, 'after'), 'utf8')).toBe('after');
-    },
-  );
+    expect(after.exitCode, after.stderr).toBe(0);
+    expect(readFileSync(join(sync, 'after'), 'utf8')).toBe('after');
+  });
 
   conformance(
     'A26',

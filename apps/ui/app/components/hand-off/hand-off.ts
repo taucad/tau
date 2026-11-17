@@ -122,7 +122,7 @@ const scriptBody = (target: string, queueSubmit: boolean): string =>
 
 /**
  * The inline script served right after a native input. It has no interpolated input: its source is fixed per target
- * and option.
+ * and option, and each served spelling's CSP hash is listed in `#lib/inline-script-hashes`.
  *
  * @param target - Where the input is, relative to the script.
  * @param options - The surface's recorder choices.

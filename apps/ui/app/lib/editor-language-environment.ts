@@ -1,7 +1,7 @@
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { EditorDocumentSession } from '#lib/editor-document-session.js';
-import type { EditorDiagnostics } from '#lib/editor-diagnostics.js';
+import type { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
 import type { FileManagerApi, FileManagerRef } from '#machines/file-manager.machine.types.js';
 
 /** Project-owned ports passed to language services only after a code pane mounts. */

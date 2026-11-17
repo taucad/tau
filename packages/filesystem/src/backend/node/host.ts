@@ -38,6 +38,7 @@ import {
   nodeEntryKind,
   readNodeFileBounded,
   listNodeEntriesBounded,
+  nodeDiskKeepsFileModes,
 } from '#backend/node/provider.js';
 import type { ImportCopyReceipt } from '#backend/node/provider.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
@@ -1005,6 +1006,14 @@ const wireCopyReceipt = (receipt: ImportCopyReceipt): NodeFsImportCopyReceipt =>
   ...(receipt.facts === undefined ? {} : { facts: receipt.facts }),
 });
 
+/** A client that asks for a mode the host's disk does not keep gets ENOTSUP, never a made-up `100644`. */
+const refuseFileMode = async (path: string): Promise<never> => {
+  throw Object.assign(new Error(`ENOTSUP: this host's disk keeps no file mode, '${path}'`), {
+    code: 'ENOTSUP',
+    path,
+  });
+};
+
 const runOperation = async (
   provider: NodeFsProvider,
   request: NodeFsRequest,
@@ -1135,10 +1144,10 @@ const runOperation = async (
       return provider.stat(request.path);
     }
     case 'getFileMode': {
-      return provider.getFileMode(request.path);
+      return (provider.getFileMode ?? refuseFileMode)(request.path);
     }
     case 'setFileMode': {
-      return provider.setFileMode(request.path, request.mode);
+      return (provider.setFileMode ?? refuseFileMode)(request.path, request.mode);
     }
     case 'mkdir': {
       return mutate(request.root, [request.path], async () => provider.mkdir(request.path));
@@ -1238,6 +1247,16 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
       const unsubscribe = subscriptions.get(request.id);
       subscriptions.delete(request.id);
       unsubscribe?.();
+      return;
+    }
+
+    if (request.op === 'describe') {
+      send({
+        v: nodeFsProtocolVersion,
+        id: request.id,
+        type: 'result',
+        value: { fileModes: nodeDiskKeepsFileModes() },
+      });
       return;
     }
 

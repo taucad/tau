@@ -35,9 +35,9 @@ export type EarlyChatInput = HandOffSnapshot & { readonly paintedSendCancelled?:
  * half-parsed document when the parser reaches a script, and here that cut can only fall after the box and its bar,
  * never between them. Enter queues a send for the adopter (A15d, H-f): the box shows it queued and says so, and an
  * edit or Escape cancels it. The box also has the recorder paint Home's stored draft (the draft hint, H-e) into the
- * input before first paint.
+ * input before first paint. Its CSP hash is listed in `#lib/inline-script-hashes`.
  */
-const earlyInputScript = handOffScript('within-previous-sibling', { queueSubmit: true });
+export const earlyInputScript = handOffScript('within-previous-sibling', { queueSubmit: true });
 
 /** The box's marks for the recorder: a hand-off box that paints the draft hint. */
 const earlyInputBox = { [handOffBoxAttribute]: '', [draftHintAttribute]: '' };

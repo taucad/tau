@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { createMemoryProvider, MemoryProvider } from '@taucad/filesystem/backend';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { postService } from '#adapter-transport/adapter-transport.js';
@@ -1066,4 +1066,217 @@ describe.runIf(gitToolchainOnPath)('a shallow boundary whose history arrives', (
       await rm(own.directory, { recursive: true, force: true });
     }
   }, 120_000);
+});
+
+/* One commit with a tree twelve levels deep, a file at every level, and its listing: what a project's closure is. */
+const deepHost = async (): Promise<
+  Readonly<{
+    directory: string;
+    git: (...args: string[]) => string;
+    main: string;
+    pack: Uint8Array<ArrayBuffer>;
+    index: Uint8Array<ArrayBuffer>;
+    packName: string;
+    listing: Uint8Array<ArrayBuffer>;
+  }>
+> => {
+  const directory = await mkdtemp(join(tmpdir(), 'tau-sp5-deep-'));
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  for (const [name, value] of [
+    ['GIT_AUTHOR_NAME', 'Tau'],
+    ['GIT_AUTHOR_EMAIL', 'tau@example.com'],
+    ['GIT_COMMITTER_NAME', 'Tau'],
+    ['GIT_COMMITTER_EMAIL', 'tau@example.com'],
+    ['GIT_CONFIG_NOSYSTEM', '1'],
+    ['HOME', directory],
+  ] as const) {
+    environment[name] = value;
+  }
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, { cwd: directory, env: environment, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  for (let depth = 0; depth < 12; depth += 1) {
+    const folder = join(directory, ...Array.from({ length: depth }, (_value, level) => `level-${String(level)}`));
+    // oxlint-disable-next-line no-await-in-loop -- each level's folder before its files.
+    await mkdir(folder, { recursive: true });
+    for (let file = 0; file < 4; file += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- a few small files.
+      await writeFile(join(folder, `part-${String(file)}.scad`), `${randomBytes(256).toString('hex')}\n`);
+    }
+  }
+  git('add', '-A');
+  git('commit', '-q', '-m', 'Deep');
+  git('repack', '-adfq');
+  const packDirectory = join(directory, '.git', 'objects', 'pack');
+  const packFiles = await readdir(packDirectory);
+  const packFile = packFiles.find((name) => name.endsWith('.pack'))!;
+  const pack = new Uint8Array(await readFile(join(packDirectory, packFile)));
+  const main = git('rev-parse', 'refs/heads/main');
+  const listed = lines(git('ls-tree', '-r', '-l', main)).map((line) => {
+    const [meta = '', path = ''] = line.split('\t');
+    const [mode = '', , oid = '', size = ''] = meta.split(/\s+/u);
+    return `${mode}\t${oid}\t${size}\t\t\t${path}`;
+  });
+  return {
+    directory,
+    git,
+    main,
+    pack,
+    index: new Uint8Array(await readFile(join(packDirectory, packFile.replace(/\.pack$/u, '.idx')))),
+    packName: `pack-${Buffer.from(pack.subarray(-20)).toString('hex')}-${nonce}`,
+    listing: new Uint8Array(
+      gzipSync(`${[`tau-head-listing\t1\t${main}\t${git('rev-parse', `${main}^{tree}`)}`, ...listed].join('\n')}\n`),
+    ),
+  };
+};
+
+describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
+  let deep: Awaited<ReturnType<typeof deepHost>>;
+
+  beforeAll(async () => {
+    deep = await deepHost();
+  });
+
+  afterAll(async () => {
+    await rm(deep.directory, { recursive: true, force: true });
+  });
+
+  /* The catalogue and files host of `deep`, recording each Range read as it is asked; `corrupt` flips a byte of each. */
+  const serveDeep = (
+    corrupt: ReadonlyArray<readonly [number, number]> = [],
+  ): Readonly<{ fetch: typeof globalThis.fetch; asked: Array<readonly [number, number]> }> => {
+    const asked: Array<readonly [number, number]> = [];
+    const packHref = `${filesOrigin}/packs/${deep.packName}.pack`;
+    const indexHref = `${filesOrigin}/packs/${deep.packName}.idx`;
+    const listingHref = `${filesOrigin}/listings/${deep.main}.tsv.gz`;
+    const fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+      if (url.href.startsWith(catalogueUrl)) {
+        return Response.json({
+          format: 1,
+          generation: 1,
+          refs: [{ ref: 'refs/heads/main', oid: deep.main }],
+          listings: [{ commit: deep.main, href: listingHref, bytes: deep.listing.byteLength }],
+          packs: [
+            {
+              key: `packs/${deep.packName}.pack`,
+              bytes: deep.pack.byteLength,
+              index: { href: indexHref, bytes: deep.index.byteLength },
+              pack: { href: packHref, bytes: deep.pack.byteLength },
+            },
+          ],
+          complete: true,
+          expiresAt: Math.floor(Date.now() / 1000) + 900,
+        });
+      }
+      if (url.href === indexHref) {
+        return new Response(deep.index, { status: 200 });
+      }
+      if (url.href === listingHref) {
+        return new Response(deep.listing, { status: 200 });
+      }
+      const range = packRangeRefused(new Headers(init?.headers).get('range') ?? undefined, deep.pack.byteLength);
+      if (url.href !== packHref || range === undefined) {
+        return new Response('Not Found', { status: 404 });
+      }
+      asked.push(range);
+      /* A round trip, so that what is asked side by side is seen side by side. */
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+      const bytes = deep.pack.slice(...range);
+      for (const [start, end] of corrupt) {
+        if (range[0] < end && start < range[1]) {
+          const at = Math.max(start, range[0]) - range[0] + 4;
+          bytes[at] = 255 - bytes[at]!;
+        }
+      }
+      return new Response(bytes, { status: 206 });
+    };
+    return { fetch: fetch as typeof globalThis.fetch, asked };
+  };
+
+  const extentOf = (oid: string): readonly [number, number] => {
+    const index = readPackIndex(deep.index);
+    const offset = index.offsetOf(oid)!;
+    return [offset, index.endOf(offset, deep.pack.byteLength)];
+  };
+  const touches = (range: readonly [number, number], extent: readonly [number, number]): boolean =>
+    range[0] < extent[1] && extent[0] < range[1];
+
+  it('reads the listed blobs while it walks the levels, and keeps every object of the head byte for byte', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'deep');
+    const served = serveDeep();
+
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: served.fetch, store, compute });
+
+    expect(opened).toBeDefined();
+    const deepest = deep.git(
+      'rev-parse',
+      `${deep.main}:${Array.from({ length: 11 }, (_value, level) => `level-${String(level)}`).join('/')}`,
+    );
+    const blobs = lines(deep.git('ls-tree', '-r', deep.main)).map((line) => line.split(/\s+/u)[2]!);
+    const firstBlob = served.asked.findIndex((range) => blobs.some((oid) => touches(range, extentOf(oid))));
+    const deepestTree = served.asked.findIndex((range) => touches(range, extentOf(deepest)));
+    /* Twelve levels are twelve waves, one after another; the blobs do not wait for the last of them. */
+    expect(firstBlob).toBeGreaterThanOrEqual(0);
+    expect(firstBlob).toBeLessThan(deepestTree);
+    expect(opened!.report.ranges.waves).toBeGreaterThanOrEqual(13);
+    /* Equivalent to git's own closure of the head: every object, byte for byte. */
+    const closure = lines(deep.git('rev-list', '--objects', deep.main)).map((line) => line.split(' ')[0]!);
+    for (const oid of closure) {
+      // oxlint-disable-next-line no-await-in-loop -- one object compared at a time.
+      const read = await store.read(oid);
+      const type = deep.git('cat-file', '-t', oid);
+      expect(read?.type).toBe(type);
+      expect(read?.data).toStrictEqual(
+        new Uint8Array(execFileSync('git', ['cat-file', type, oid], { cwd: deep.directory })),
+      );
+    }
+    expect(opened!.report.imported).toBe(closure.length);
+  });
+
+  it('answers undefined for a blob whose bytes are not its id, and keeps no tree or commit that names it', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'deep-corrupt');
+    const blob = deep.git('rev-parse', `${deep.main}:level-0/level-1/part-2.scad`);
+
+    expect(
+      await coldOpenFromCatalogue({ catalogueUrl, fetch: serveDeep([extentOf(blob)]).fetch, store, compute }),
+    ).toBeUndefined();
+    const named = [
+      deep.main,
+      deep.git('rev-parse', `${deep.main}^{tree}`),
+      deep.git('rev-parse', `${deep.main}:level-0`),
+    ];
+    expect(await Promise.all(named.map(async (oid) => store.has(oid)))).toEqual([false, false, false]);
+    expect(await store.has(blob)).toBe(false);
+
+    /* A retry over whole bytes brings the head. */
+    expect(await coldOpenFromCatalogue({ catalogueUrl, fetch: serveDeep().fetch, store, compute })).toBeDefined();
+    expect(await store.has(deep.main)).toBe(true);
+  });
+
+  it('answers undefined for a listed blob the packs do not hold, with nothing left running', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'deep-missing');
+    const served = serveDeep();
+    const missing = 'e'.repeat(40);
+    const text = String(gunzipSync(deep.listing));
+    const withMissing = new Uint8Array(gzipSync(`${text}100644\t${missing}\t12\t\t\tghost.scad\n`));
+    const fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+      return url.href.includes('/listings/') ? new Response(withMissing, { status: 200 }) : served.fetch(input, init);
+    }) as typeof globalThis.fetch;
+
+    expect(await coldOpenFromCatalogue({ catalogueUrl, fetch, store, compute })).toBeUndefined();
+    const asked = served.asked.length;
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    /* The walk settled before the answer: no read starts after it. */
+    expect(served.asked).toHaveLength(asked);
+    expect(await store.has(deep.main)).toBe(false);
+  });
 });

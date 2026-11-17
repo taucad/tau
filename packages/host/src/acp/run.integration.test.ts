@@ -555,12 +555,13 @@ describe('the external agent run kind', () => {
     expect(Object.keys(consumed[0]!.files).toSorted()).toEqual(expectedPaths.toSorted());
     const digest = createHash('sha256')
       .update(
-        JSON.stringify(
-          geospecBundles.map((bundle) => ({
+        JSON.stringify({
+          layout: ['.agents/skills', '.claude/skills'],
+          bundles: geospecBundles.map((bundle) => ({
             slug: bundle.slug,
             files: bundle.files.map(({ path, sha256 }) => ({ path, sha256 })),
           })),
-        ),
+        }),
       )
       .digest('hex');
     expect(consumed[0]!.root.split('/').at(-1)).toBe(digest);
@@ -684,6 +685,13 @@ describe('the external agent run kind', () => {
       files[1][1],
     );
     await expect(readFile(join(publication, '.agents/skills/workbench/SKILL.md'), 'utf8')).resolves.toBe(
+      workbenchBundles[0]?.body,
+    );
+    /* Claude Code finds skills under an added directory's `.claude/skills` only. */
+    await expect(readFile(join(publication, '.claude/skills/fixture-skill/references/guide.md'), 'utf8')).resolves.toBe(
+      files[1][1],
+    );
+    await expect(readFile(join(publication, '.claude/skills/workbench/SKILL.md'), 'utf8')).resolves.toBe(
       workbenchBundles[0]?.body,
     );
     await runTurn(harness, { chatId: 'chat-skills', runId: 'run-skills-restored', text: 'inspect skills noask' });

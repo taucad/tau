@@ -563,8 +563,8 @@ describe('ProjectNavigation', () => {
     expect(descriptionOf(expandedLink)).toHaveTextContent(/^Live, busy$/u);
   });
 
-  /* D15: the name dissolves at the row's edge rather than clipping. */
-  it('keeps project actions in flow beside the name', () => {
+  /* D13, D15: the name dissolves at the row's edge rather than clipping, and the actions sit over its tail. */
+  it('lays project actions over the name instead of beside it', () => {
     render(<ProjectNavigation />);
     const link = screen.getByRole('link', { name: 'Two' });
     const row = link.closest<HTMLElement>('[data-slot=project-trigger]');
@@ -575,9 +575,17 @@ describe('ProjectNavigation', () => {
     const newChat = screen.getByRole('button', { name: 'New chat in Two' });
     expect(more.compareDocumentPosition(newChat)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     /* R13: the actions rest hidden on fine pointers and show on hover, focus and coarse pointers. */
-    const actions = more.closest('[data-slot=project-row-actions]');
-    expect(actions).toHaveClass('hidden', 'group-hover/row:flex', 'group-focus-within/row:flex', 'pointer-coarse:flex');
+    const actions = more.closest('[data-slot=row-actions]');
+    expect(actions).toHaveClass(
+      'fade-action',
+      'absolute',
+      'hidden',
+      'group-hover/row:flex',
+      'group-focus-within/row:flex',
+      'pointer-coarse:flex',
+    );
     expect(actions).toContainElement(newChat);
+    expect(link).not.toContainElement(actions as HTMLElement);
     expect(screen.queryByRole('button', { name: /^Project sync:/u })).not.toBeInTheDocument();
   });
 

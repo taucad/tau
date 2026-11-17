@@ -4,7 +4,7 @@
  * browser barrel (`backend/index.ts`), which the file-manager worker bundles.
  */
 
-export { drainNodeFsProviderWatchClosures, NodeFsProvider, nodeDiskKeepsFileModes } from '#backend/node/provider.js';
+export { drainNodeFsProviderWatchClosures, NodeFsProvider } from '#backend/node/provider.js';
 export type { ImportCopyFacts, ImportCopyReceipt, ImportFileCopy } from '#backend/node/provider.js';
 export { importSourceIdentity, listImportSource, readImportSource } from '#backend/node/import-source.js';
 export type { ImportSourceGrant, ImportSourceIdentity } from '#backend/node/import-source.js';
@@ -34,4 +34,4 @@ export { repositoryLargeObjectStore } from '#backend/node/large-object-store.js'
 export { toNodeFsPort } from '#backend/node/port.js';
 export type { EmitterPort, NodeFsPort } from '#backend/node/port.js';
 export { nodeFsProtocolVersion } from '#backend/node/protocol.js';
-export type { NodeFsHostDescription, NodeFsWatchEvent } from '#backend/node/protocol.js';
+export type { NodeFsWatchEvent } from '#backend/node/protocol.js';

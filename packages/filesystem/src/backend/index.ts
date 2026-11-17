@@ -6,4 +6,4 @@ export { MemoryProvider, createMemoryProvider } from '#backend/memory-provider.j
 export { NodeFsChannel, NodeFsImportSources, NodeFsProviderClient } from '#backend/node/client.js';
 export { toNodeFsPort } from '#backend/node/port.js';
 export type { EmitterPort, NodeFsPort } from '#backend/node/port.js';
-export type { NodeFsHostDescription, NodeFsWatchEvent } from '#backend/node/protocol.js';
+export type { NodeFsWatchEvent } from '#backend/node/protocol.js';

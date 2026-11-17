@@ -1,0 +1,1149 @@
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+// @vitest-environment node
+/*
+ * The Windows shell conformance suite (row WIN-X64, desktop Bash/Terminal blueprint Q15): the real Windows provider
+ * (`createWindowsShellProvider` over `tau-windows-sandbox.exe`) and the machine's own PowerShell, never a fixture or a
+ * mock. The Bash rows live in `shell.conformance.test.ts`; this file is the Windows half of the same contract.
+ *
+ * Every row starts with a positive control that must succeed inside the same sandbox, then the negatives, and every
+ * deny verdict is decided outside the sandbox: file digests, canaries and ACLs the test process placed and reads back,
+ * listeners and a named-pipe server that count their own clients, and the process table. What the sandboxed command
+ * prints is recorded as context only. Launches run one at a time because the provider admits one session at a time
+ * (A23 fallback clause); only the A23 row overlaps two on purpose.
+ *
+ * Off unless `TAU_SHELL_CONFORMANCE=1`, which only `sandbox:test:shell-conformance:windows` sets. On any platform but
+ * win32 the suite fails rather than skips. `TAU_SHELL_CONFORMANCE_ROW` names the row (WIN-X64),
+ * `TAU_SHELL_CONFORMANCE_RECEIPT` where the JSON receipt goes, and `TAU_SHELL_CONFORMANCE_WINDOWS_HELPER` the installed
+ * helper (default: the `sandbox:build:windows-sandbox` output). The helper's elevated `setup` must already have run for
+ * the user running this suite (`libs/sandbox/scripts/shell-conformance-windows.ps1`); its absence fails the row.
+ */
+import { createHash, randomUUID } from 'node:crypto';
+import { execFileSync, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+import { createSocket } from 'node:dgram';
+import type { Socket as DatagramSocket } from 'node:dgram';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { connect, createServer } from 'node:net';
+import type { AddressInfo, Server } from 'node:net';
+import { arch, homedir, networkInterfaces, platform, release, tmpdir, version } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { refusedShellEnvironment } from '#shell/shell-environment.js';
+import {
+  resolveShellExecutable,
+  shellCommandArguments,
+  shellInteractiveArguments,
+  shellVersionCommand,
+} from '#shell/shell-identity.js';
+import type { ShellExecutable } from '#shell/shell-identity.js';
+import type { ShellLaunch, ShellLaunchOutcome, ShellProcess, ShellProvider } from '#shell/shell-provider.js';
+import { createWindowsShellProvider } from '#shell/windows-shell-provider.js';
+
+const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
+const row = process.env['TAU_SHELL_CONFORMANCE_ROW'] ?? 'unnamed';
+const helperPath =
+  process.env['TAU_SHELL_CONFORMANCE_WINDOWS_HELPER'] ??
+  fileURLToPath(
+    new URL('../../windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe', import.meta.url),
+  );
+const systemRoot = process.env['SystemRoot'] ?? process.env['SYSTEMROOT'] ?? String.raw`C:\Windows`;
+/** Windows PowerShell 5.1 at its fixed path; T02 runs on it too when present beside PowerShell 7. */
+const windowsPowerShell = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+const windowsPowerShellPresent = process.platform === 'win32' && existsSync(windowsPowerShell);
+
+type RowResult = Readonly<{
+  id: string;
+  title: string;
+  status: 'pass' | 'fail' | 'operator-validation-pending' | 'residual-disclosed';
+  detail?: string;
+}>;
+
+const results: RowResult[] = [];
+/** Context the sandboxed commands printed, kept for the receipt only; no verdict reads it. */
+const observations: Record<string, unknown> = {};
+
+/** A conformance row: the outcome lands in the receipt whether it passes or fails. */
+const conformance = (id: string, title: string, body: () => Promise<void>): void => {
+  it(`${id}: ${title}`, { timeout: 60_000 }, async () => {
+    try {
+      await body();
+      results.push({ id, title, status: 'pass' });
+    } catch (error) {
+      results.push({ id, title, status: 'fail', detail: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  });
+};
+
+const digestOf = (path: string): string => `sha256:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+
+/** A file's digest, or `absent`: a write probe that created a file shows up as a change from `absent`. */
+const stateOf = (path: string): string => (existsSync(path) ? digestOf(path) : 'absent');
+
+const sizeOf = (path: string): number => (existsSync(path) ? statSync(path).size : 0);
+
+const commandOutput = (file: string, arguments_: readonly string[]): string => {
+  try {
+    return execFileSync(file, arguments_, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  } catch (error) {
+    return `unavailable: ${error instanceof Error ? error.message.split('\n')[0]! : String(error)}`;
+  }
+};
+
+const text = async (chunks: AsyncIterable<Uint8Array<ArrayBuffer>>): Promise<string> => {
+  const decoder = new TextDecoder();
+  let result = '';
+  for await (const chunk of chunks) {
+    result += decoder.decode(chunk, { stream: true });
+  }
+  return result + decoder.decode();
+};
+
+const delay = async (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
+/** A PowerShell single-quoted literal. */
+const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+
+/** `-EncodedCommand` text: UTF-16LE, base64, so a nested script survives every command line it passes through. */
+const encoded = (script: string): string => Buffer.from(script, 'utf16le').toString('base64');
+
+/** Whether a process exists, from the process table: EPERM is another account's live process (`uv_kill`, signal 0). */
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+let root = '';
+let work = '';
+let readonly = '';
+let secret = '';
+let outside = '';
+let home = '';
+let records = '';
+let profileCanaryDirectory = '';
+let custodyRoot = '';
+let shell: ShellExecutable;
+let windowsPowerShellIdentity: ShellExecutable | undefined;
+let provider: ShellProvider;
+let shellVersion = '';
+let helperStatus: Record<string, unknown> = {};
+let proxyPorts: readonly number[] = [];
+let aclPaths: readonly string[] = [];
+let aclBaseline: Record<string, string> = {};
+let ready = false;
+
+/** The explicit child environment: system folders, and a private profile and temp folder inside the writable root. */
+const baseEnvironment = (): Record<string, string> => {
+  const system32 = join(systemRoot, 'System32');
+  const profile = join(work, 'profile');
+  return {
+    SystemRoot: systemRoot,
+    windir: systemRoot,
+    ComSpec: join(system32, 'cmd.exe'),
+    PATHEXT: '.COM;.EXE;.BAT;.CMD',
+    PATH: [system32, systemRoot, join(system32, 'Wbem'), dirname(windowsPowerShell), dirname(shell.path)].join(';'),
+    ProgramFiles: process.env['ProgramFiles'] ?? String.raw`C:\Program Files`,
+    USERPROFILE: profile,
+    APPDATA: join(profile, 'AppData', 'Roaming'),
+    LOCALAPPDATA: join(profile, 'AppData', 'Local'),
+    TEMP: join(work, 'temp'),
+    TMP: join(work, 'temp'),
+  };
+};
+
+const defaultFilesystem = (): ShellLaunch['filesystem'] => ({
+  readable: [readonly, home],
+  writable: [work],
+  readOnly: [],
+  denied: [secret, join(home, '.ssh')],
+});
+
+const launchOf = (command: string, overrides: Partial<ShellLaunch> = {}): ShellLaunch => ({
+  /* Prepared in `start`; a launch refused at admission never reaches custody. */
+  executionId: '',
+  executablePath: shell.path,
+  arguments: shellCommandArguments('powershell', command),
+  workingDirectory: work,
+  commandId: `conformance#${String(results.length + 1)}`,
+  filesystem: defaultFilesystem(),
+  network: { domains: [] },
+  environment: baseEnvironment(),
+  stdio: { kind: 'pipes' },
+  signal: new AbortController().signal,
+  ...overrides,
+});
+
+const prepared = async (launch: ShellLaunch, through: ShellProvider = provider): Promise<ShellLaunchOutcome> => {
+  const privateRoot = mkdtempSync(join(custodyRoot, 'sessions', 'tau-shell-'));
+  const { executionId } = await through.prepare({ privateRoot, resource: undefined });
+  return through.launch({ ...launch, executionId });
+};
+
+const start = async (launch: ShellLaunch, through: ShellProvider = provider): Promise<ShellProcess> => {
+  const outcome = await prepared(launch, through);
+  if (outcome.status !== 'started') {
+    throw new Error(`the provider did not start the launch: ${JSON.stringify(outcome)}`);
+  }
+  return outcome.process;
+};
+
+/** Run one command to completion in the sandbox and collect what it printed. */
+const run = async (
+  command: string,
+  overrides: Partial<ShellLaunch> = {},
+): Promise<{ stdout: string; stderr: string; exitCode: number | undefined }> => {
+  const process_ = await start(launchOf(command, overrides));
+  if (process_.kind !== 'pipes') {
+    throw new Error('expected a pipes launch');
+  }
+  const [stdout, stderr, exit] = await Promise.all([text(process_.stdout), text(process_.stderr), process_.exited]);
+  return { stdout: stdout.replaceAll('\r\n', '\n'), stderr, exitCode: 'exitCode' in exit ? exit.exitCode : undefined };
+};
+
+/** Run PowerShell outside the sandbox, as the test user: the external observer's own tool. */
+const observe = (script: string, environment: Record<string, string> = {}): string =>
+  execFileSync(shell.path, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8',
+    env: { ...process.env, ...environment },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+
+/** The SDDL (owner, group and DACL) of each path, read outside the sandbox. */
+const sddlOf = (paths: readonly string[]): Record<string, string> =>
+  JSON.parse(
+    observe(
+      [
+        "$ErrorActionPreference = 'Stop'",
+        '$result = [ordered]@{}',
+        'foreach ($path in ($env:CONFORMANCE_SDDL_PATHS | ConvertFrom-Json)) { $result[$path] = (Get-Acl -LiteralPath $path).Sddl }',
+        '$result | ConvertTo-Json -Compress',
+      ].join('\n'),
+      { CONFORMANCE_SDDL_PATHS: JSON.stringify(paths) },
+    ),
+  ) as Record<string, string>;
+
+const interfaceAddress = (): string | undefined =>
+  Object.values(networkInterfaces())
+    .flat()
+    .find((entry) => entry?.family === 'IPv4' && !entry.internal)?.address;
+
+/** A TCP listener outside the sandbox on one address that counts every connection it ever sees. */
+const tcpCanary = async (address: string): Promise<{ server: Server; port: number; connections: () => number }> => {
+  let connections = 0;
+  const server = createServer((socket) => {
+    connections += 1;
+    socket.end('HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n');
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, address, resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+  return { server, port, connections: () => connections };
+};
+
+/** A UDP socket outside the sandbox on one address that counts every datagram it receives. */
+const udpCanary = async (
+  address: string,
+): Promise<{ socket: DatagramSocket; port: number; datagrams: () => number }> => {
+  let datagrams = 0;
+  const socket = createSocket('udp4');
+  socket.on('message', () => {
+    datagrams += 1;
+  });
+  await new Promise<void>((resolve) => {
+    socket.bind(0, address, resolve);
+  });
+  return { socket, port: socket.address().port, datagrams: () => datagrams };
+};
+
+const tcpControl = async (address: string, port: number): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const socket = connect({ host: address, port }, () => {
+      socket.end();
+      resolve();
+    });
+    socket.on('error', reject);
+  });
+
+const udpControl = async (address: string, port: number): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const socket = createSocket('udp4');
+    socket.send(Buffer.from('control'), port, address, (error) => {
+      socket.close();
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+  });
+
+const waitUntil = async (condition: () => boolean, milliseconds: number): Promise<boolean> => {
+  for (const deadline = Date.now() + milliseconds; !condition(); ) {
+    if (Date.now() > deadline) {
+      return false;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- polls an external observation until it holds or the bound passes.
+    await delay(50);
+  }
+  return true;
+};
+
+/**
+ * A named-pipe server outside the sandbox whose DACL grants Everyone full control (A22), so only the sandbox can keep
+ * a sandboxed client out. It keeps four instances listening and writes the number of clients it ever accepted.
+ */
+const pipeServer = async (): Promise<{ name: string; connections: () => number; stop: () => Promise<void> }> => {
+  const name = `tau-conformance-${randomUUID()}`;
+  const directory = mkdtempSync(join(custodyRoot, 'pipe-'));
+  const count = join(directory, 'count');
+  const listening = join(directory, 'listening');
+  const stop = join(directory, 'stop');
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    '$security = [System.IO.Pipes.PipeSecurity]::new()',
+    "$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')",
+    '$self = [System.Security.Principal.WindowsIdentity]::GetCurrent().User',
+    "$security.AddAccessRule([System.IO.Pipes.PipeAccessRule]::new($everyone, 'FullControl', 'Allow'))",
+    "$security.AddAccessRule([System.IO.Pipes.PipeAccessRule]::new($self, 'FullControl', 'Allow'))",
+    'function New-Instance {',
+    '  if ($PSVersionTable.PSVersion.Major -ge 6) {',
+    "    [System.IO.Pipes.NamedPipeServerStreamAcl]::Create($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous', 0, 0, $security)",
+    '  } else {',
+    "    [System.IO.Pipes.NamedPipeServerStream]::new($env:CONFORMANCE_PIPE, 'InOut', 4, 'Byte', 'Asynchronous', 0, 0, $security)",
+    '  }',
+    '}',
+    '$servers = @(1..4 | ForEach-Object { New-Instance })',
+    '$waits = @($servers | ForEach-Object { $_.WaitForConnectionAsync() })',
+    '$accepted = 0',
+    'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_COUNT -Value 0 -NoNewline',
+    'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_LISTENING -Value 1 -NoNewline',
+    'while (-not (Test-Path -LiteralPath $env:CONFORMANCE_PIPE_STOP)) {',
+    '  for ($i = 0; $i -lt $servers.Count; $i++) {',
+    '    if ($waits[$i].IsCompleted) {',
+    "      if ($waits[$i].Status -eq 'RanToCompletion') {",
+    '        $accepted++',
+    '        Set-Content -LiteralPath $env:CONFORMANCE_PIPE_COUNT -Value $accepted -NoNewline',
+    '      }',
+    '      $servers[$i].Dispose()',
+    '      $servers[$i] = New-Instance',
+    '      $waits[$i] = $servers[$i].WaitForConnectionAsync()',
+    '    }',
+    '  }',
+    '  Start-Sleep -Milliseconds 20',
+    '}',
+  ].join('\n');
+  const child: ChildProcess = spawn(shell.path, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+    env: {
+      ...process.env,
+      CONFORMANCE_PIPE: name,
+      CONFORMANCE_PIPE_COUNT: count,
+      CONFORMANCE_PIPE_LISTENING: listening,
+      CONFORMANCE_PIPE_STOP: stop,
+    },
+    stdio: 'ignore',
+  });
+  const exited = new Promise<void>((resolve) => {
+    child.once('exit', () => {
+      resolve();
+    });
+  });
+  if (!(await waitUntil(() => existsSync(listening), 30_000))) {
+    child.kill();
+    throw new Error('the named-pipe observer never listened');
+  }
+  return {
+    name,
+    connections: () => Number(readFileSync(count, 'utf8') || '0'),
+    stop: async () => {
+      writeFileSync(stop, '');
+      if (!(await Promise.race([exited.then(() => true), delay(10_000).then(() => false)]))) {
+        child.kill();
+      }
+    },
+  };
+};
+
+const pipeControl = async (name: string): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const socket = connect({ path: `\\\\.\\pipe\\${name}` }, () => {
+      socket.end();
+      resolve();
+    });
+    socket.on('error', reject);
+  });
+
+/** Strip VT control sequences ConPTY interleaves with text, so a marker is matched on what the screen shows. */
+const vtSequence =
+  // oxlint-disable-next-line no-control-regex -- the escape and bell characters are the point.
+  /\u001B\[[\d;?]*[ -/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)|\u001B[()][\dAB]|\u001B[=>]/gu;
+
+const operatingSystem = (): Record<string, string> => ({
+  version: version(),
+  build: release(),
+  caption: commandOutput(shell.path, [
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    '(Get-CimInstance Win32_OperatingSystem).Caption',
+  ]),
+});
+
+const receipt = (): Record<string, unknown> => {
+  const server = process.env['GITHUB_SERVER_URL'];
+  const repository = process.env['GITHUB_REPOSITORY'];
+  const runId = process.env['GITHUB_RUN_ID'];
+  return {
+    schema: 'tau.shell-conformance.receipt/1',
+    row,
+    recordedAt: new Date().toISOString(),
+    source: {
+      sha: process.env['GITHUB_SHA'] ?? commandOutput('git', ['rev-parse', 'HEAD']),
+      run: server && repository && runId ? `${server}/${repository}/actions/runs/${runId}` : 'local',
+    },
+    host: { platform: platform(), arch: arch(), kernel: release(), kernelVersion: version(), os: operatingSystem() },
+    node: { version: process.versions.node, abi: process.versions.modules, electron: process.versions['electron'] },
+    provider: {
+      name: provider.name,
+      helper: { path: helperPath, realPath: realpathSync(helperPath), digest: digestOf(helperPath) },
+      install: helperStatus,
+    },
+    shell: { ...shell, version: shellVersion },
+    windowsPowerShell: windowsPowerShellIdentity,
+    observations,
+    results,
+  };
+};
+
+describe.runIf(enabled)('Windows shell conformance', () => {
+  beforeAll(async () => {
+    if (process.platform !== 'win32') {
+      throw new Error(`${process.platform} is not a row of this suite; the Bash rows are shell.conformance.test.ts.`);
+    }
+    if (!existsSync(helperPath)) {
+      throw new Error(`no Windows sandbox helper at ${helperPath}; a conformance row never falls back to another one.`);
+    }
+    helperStatus = JSON.parse(execFileSync(helperPath, ['status'], { encoding: 'utf8' })) as Record<string, unknown>;
+    if (helperStatus['installed'] === false) {
+      throw new Error('the Windows sandbox is not set up on this machine; run the helper `setup --for-user` elevated.');
+    }
+    proxyPorts = Array.isArray(helperStatus['proxyPorts']) ? (helperStatus['proxyPorts'] as number[]) : [];
+    const resolved = await resolveShellExecutable({ platform: 'win32', environment: process.env });
+    if ('status' in resolved) {
+      throw new Error(resolved.message);
+    }
+    shell = resolved;
+    if (windowsPowerShellPresent && realpathSync(windowsPowerShell).toLowerCase() !== shell.realPath.toLowerCase()) {
+      windowsPowerShellIdentity = {
+        kind: 'powershell',
+        path: windowsPowerShell,
+        realPath: realpathSync(windowsPowerShell),
+        digest: digestOf(windowsPowerShell),
+      };
+    }
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-shell-conformance-')));
+    work = join(root, 'work');
+    readonly = join(root, 'readonly');
+    secret = join(root, 'secret');
+    outside = join(root, 'outside');
+    home = join(root, 'home');
+    records = join(work, 'records');
+    for (const directory of [
+      work,
+      readonly,
+      secret,
+      outside,
+      records,
+      join(home, '.ssh'),
+      join(work, 'temp'),
+      join(work, 'profile', 'AppData', 'Roaming'),
+      join(work, 'profile', 'AppData', 'Local'),
+    ]) {
+      mkdirSync(directory, { recursive: true });
+    }
+    writeFileSync(join(readonly, 'granted.txt'), 'GRANTED-READ');
+    writeFileSync(join(secret, 'canary.txt'), 'SECRET-CANARY');
+    writeFileSync(join(outside, 'canary.txt'), 'OUTSIDE-CANARY');
+    writeFileSync(join(home, 'notes.txt'), 'HOME-NOTES');
+    writeFileSync(join(home, '.ssh', 'id_canary'), 'SSH-CANARY');
+    writeFileSync(join(records, 'chat.json'), 'RECORD-ORIGINAL');
+    /* The test user's own profile, outside every grant: the sandbox account must not read or write it. */
+    profileCanaryDirectory = realpathSync(mkdtempSync(join(homedir(), 'tau-conformance-profile-')));
+    writeFileSync(join(profileCanaryDirectory, 'canary.txt'), 'PROFILE-CANARY');
+    custodyRoot = realpathSync(mkdtempSync(join(tmpdir(), 'tau-shell-custody-')));
+    mkdirSync(join(custodyRoot, 'records'));
+    mkdirSync(join(custodyRoot, 'sessions'));
+    aclPaths = [
+      root,
+      work,
+      readonly,
+      join(readonly, 'granted.txt'),
+      secret,
+      join(secret, 'canary.txt'),
+      outside,
+      join(outside, 'canary.txt'),
+      home,
+      join(home, 'notes.txt'),
+      join(home, '.ssh'),
+      join(home, '.ssh', 'id_canary'),
+      records,
+      join(records, 'chat.json'),
+      profileCanaryDirectory,
+      join(profileCanaryDirectory, 'canary.txt'),
+    ];
+    aclBaseline = sddlOf(aclPaths);
+    provider = createWindowsShellProvider({
+      helperPath,
+      custody: { directory: join(custodyRoot, 'records'), sessionDirectory: join(custodyRoot, 'sessions') },
+    });
+    ready = true;
+  });
+
+  afterAll(() => {
+    const path = process.env['TAU_SHELL_CONFORMANCE_RECEIPT'];
+    if (path !== undefined && ready) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, `${JSON.stringify(receipt(), undefined, 2)}\n`);
+    }
+    for (const directory of [root, profileCanaryDirectory, custodyRoot]) {
+      if (directory !== '') {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  });
+
+  conformance('W01', 'the fixed-path PowerShell runs in the sandbox and reports its version', async () => {
+    const result = await run(shellVersionCommand('powershell'));
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toMatch(/^\d+\.\d+/u);
+    shellVersion = result.stdout.trim();
+  });
+
+  conformance('W02', 'the receipt binds the shell kind, fixed path, real path and digest (I12)', async () => {
+    const programFiles = process.env['ProgramFiles'] ?? String.raw`C:\Program Files`;
+    const pwsh = join(programFiles, 'PowerShell', '7', 'pwsh.exe');
+    const expected = existsSync(pwsh) ? pwsh : windowsPowerShell;
+
+    expect(shell.kind).toBe('powershell');
+    expect(shell.path.toLowerCase()).toBe(expected.toLowerCase());
+    expect(shell.realPath.toLowerCase()).toBe(realpathSync(expected).toLowerCase());
+    /* The digest is recomputed here from the bytes on disk, not taken from the resolver. */
+    expect(shell.digest).toBe(digestOf(shell.realPath));
+    const bound = receipt();
+
+    expect(bound['shell']).toMatchObject({
+      kind: 'powershell',
+      path: shell.path,
+      realPath: shell.realPath,
+      digest: digestOf(shell.realPath),
+    });
+    expect((bound['provider'] as { helper: { digest: string } }).helper.digest).toBe(digestOf(helperPath));
+    expect(provider.name.length).toBeGreaterThan(0);
+  });
+
+  /** T02-pwsh: the language cases, decided by comparing stdout and the exit status outside the sandbox. */
+  const grammar = async (executablePath: string): Promise<void> => {
+    const of = async (command: string) => run(command, { executablePath });
+    const hereString = await of("@'\nline1\nline2\n'@");
+
+    expect(hereString.exitCode, hereString.stderr).toBe(0);
+    expect(hereString.stdout.trim()).toBe('line1\nline2');
+    const pipeline = await of("'a b c' -split ' ' | Measure-Object | ForEach-Object Count");
+
+    expect(pipeline.stdout.trim()).toBe('3');
+    const subexpression = await of('Write-Output "val=$(2 + 3)"');
+
+    expect(subexpression.stdout.trim()).toBe('val=5');
+    const exit = await of('exit 7');
+
+    expect(exit.exitCode).toBe(7);
+    /* UTF-8 on stdout: the bytes are set explicitly, and a non-ASCII argument reaches the shell intact. */
+    const utf8 = await of(
+      "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::Write([string][char]0xE9 + [char]0x2603 + '-' + 'café☃'.Length)",
+    );
+
+    expect(utf8.exitCode, utf8.stderr).toBe(0);
+    expect(utf8.stdout).toBe('é☃-5');
+  };
+
+  conformance('T02-pwsh', 'PowerShell grammar: here-string, pipeline, subexpression, exit status, UTF-8', async () => {
+    await grammar(shell.path);
+  });
+
+  if (windowsPowerShellPresent) {
+    conformance('T02-ps51', 'the same grammar on Windows PowerShell 5.1 at its fixed path', async () => {
+      if (windowsPowerShellIdentity === undefined) {
+        /* The resolved shell is 5.1 itself; T02-pwsh already ran on it. */
+        expect(shell.realPath.toLowerCase()).toBe(realpathSync(windowsPowerShell).toLowerCase());
+        return;
+      }
+      await grammar(windowsPowerShell);
+    });
+  }
+
+  conformance(
+    'W03',
+    'granted roots read and write; readable-only, denied, read-only and profile paths do not, ACLs unchanged',
+    async () => {
+      const filesystem = { ...defaultFilesystem(), readOnly: [records] };
+      /* Each read probe copies what it read into its own file in the writable root: the copy is what is judged. */
+      const readProbe = (name: string, path: string): string =>
+        `try { Get-Content -LiteralPath ${quote(path)} -Raw -ErrorAction Stop | Set-Content -LiteralPath ${quote(join(work, `read-${name}.txt`))} -NoNewline -ErrorAction Stop } catch { }`;
+      const writeProbe = (path: string): string =>
+        `try { Set-Content -LiteralPath ${quote(path)} -Value FORGED -NoNewline -ErrorAction Stop } catch { }`;
+      const positive = await run(
+        [
+          readProbe('granted', join(readonly, 'granted.txt')),
+          readProbe('notes', join(home, 'notes.txt')),
+          readProbe('record', join(records, 'chat.json')),
+          `Set-Content -LiteralPath ${quote(join(work, 'out.txt'))} -Value WROTE -NoNewline`,
+        ].join('\n'),
+        { filesystem },
+      );
+
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(readFileSync(join(work, 'read-granted.txt'), 'utf8')).toBe('GRANTED-READ');
+      expect(readFileSync(join(work, 'read-notes.txt'), 'utf8')).toBe('HOME-NOTES');
+      expect(readFileSync(join(work, 'read-record.txt'), 'utf8')).toBe('RECORD-ORIGINAL');
+      expect(readFileSync(join(work, 'out.txt'), 'utf8')).toBe('WROTE');
+
+      const denied = {
+        secret: join(secret, 'canary.txt'),
+        ssh: join(home, '.ssh', 'id_canary'),
+        outside: join(outside, 'canary.txt'),
+        profile: join(profileCanaryDirectory, 'canary.txt'),
+      };
+      const written = [
+        join(readonly, 'written.txt'),
+        join(readonly, 'granted.txt'),
+        join(outside, 'written.txt'),
+        join(secret, 'canary.txt'),
+        join(home, '.ssh', 'id_canary'),
+        join(records, 'chat.json'),
+        join(records, 'new.json'),
+        join(profileCanaryDirectory, 'canary.txt'),
+        join(profileCanaryDirectory, 'written.txt'),
+      ];
+      const before = Object.fromEntries(written.map((path) => [path, stateOf(path)]));
+      const negative = await run(
+        [
+          ...Object.entries(denied).map(([name, path]) => readProbe(name, path)),
+          ...written.map((path) => writeProbe(path)),
+          `try { Move-Item -LiteralPath ${quote(join(records, 'chat.json'))} -Destination ${quote(join(work, 'moved.json'))} -ErrorAction Stop } catch { }`,
+          `try { Remove-Item -LiteralPath ${quote(records)} -Recurse -Force -ErrorAction Stop } catch { }`,
+          `try { Remove-Item -LiteralPath ${quote(join(readonly, 'granted.txt'))} -Force -ErrorAction Stop } catch { }`,
+          `Set-Content -LiteralPath ${quote(join(work, 'negative-ran.txt'))} -Value ran -NoNewline`,
+        ].join('\n'),
+        { filesystem },
+      );
+
+      /* The probes ran (positive control inside the negative launch), and the bytes outside judge every one. */
+      expect(readFileSync(join(work, 'negative-ran.txt'), 'utf8'), negative.stderr).toBe('ran');
+      expect(Object.keys(denied).filter((name) => existsSync(join(work, `read-${name}.txt`)))).toStrictEqual([]);
+      expect(negative.stdout).not.toMatch(/CANARY/u);
+      expect(Object.fromEntries(written.map((path) => [path, stateOf(path)]))).toStrictEqual(before);
+      expect(existsSync(join(work, 'moved.json'))).toBe(false);
+      expect(readFileSync(join(records, 'chat.json'), 'utf8')).toBe('RECORD-ORIGINAL');
+      expect(readFileSync(join(readonly, 'granted.txt'), 'utf8')).toBe('GRANTED-READ');
+      /* Every path the two launches granted, denied or probed carries exactly the descriptor it had before. */
+      expect(sddlOf(aclPaths)).toStrictEqual(aclBaseline);
+    },
+  );
+
+  conformance(
+    'W04',
+    'baseline outbound is refused, judged by TCP and UDP listeners on an interface and on loopback',
+    async () => {
+      const address = interfaceAddress();
+      if (address === undefined) {
+        throw new Error('this host has no non-loopback IPv4 interface to place the outbound canary on.');
+      }
+      const [remoteTcp, loopbackTcp, remoteUdp, loopbackUdp] = await Promise.all([
+        tcpCanary(address),
+        tcpCanary('127.0.0.1'),
+        udpCanary(address),
+        udpCanary('127.0.0.1'),
+      ]);
+      try {
+        const ports = [remoteTcp.port, loopbackTcp.port, remoteUdp.port, loopbackUdp.port];
+
+        expect(ports.filter((port) => proxyPorts.includes(port))).toStrictEqual([]);
+        /* Controls: each listener counts a client from outside the sandbox. */
+        await tcpControl(address, remoteTcp.port);
+        await tcpControl('127.0.0.1', loopbackTcp.port);
+        await udpControl(address, remoteUdp.port);
+        await udpControl('127.0.0.1', loopbackUdp.port);
+        expect(await waitUntil(() => remoteUdp.datagrams() === 1 && loopbackUdp.datagrams() === 1, 5000)).toBe(true);
+
+        expect([remoteTcp.connections(), loopbackTcp.connections()]).toStrictEqual([1, 1]);
+        const tcp = (host: string, port: number): string =>
+          `try { $c = [System.Net.Sockets.TcpClient]::new(); [void]$c.ConnectAsync(${quote(host)}, ${String(port)}).Wait(5000); $c.Dispose() } catch { }`;
+        const udp = (host: string, port: number): string =>
+          `try { $u = [System.Net.Sockets.UdpClient]::new(); [void]$u.Send([byte[]](1,2,3), 3, ${quote(host)}, ${String(port)}); $u.Dispose() } catch { }`;
+        const http = (host: string, port: number): string =>
+          `try { [void](Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 -Uri 'http://${host}:${String(port)}/') } catch { }`;
+        const result = await run(
+          [
+            tcp(address, remoteTcp.port),
+            tcp('127.0.0.1', loopbackTcp.port),
+            http(address, remoteTcp.port),
+            http('127.0.0.1', loopbackTcp.port),
+            udp(address, remoteUdp.port),
+            udp('127.0.0.1', loopbackUdp.port),
+            `Set-Content -LiteralPath ${quote(join(work, 'network-ran.txt'))} -Value ran -NoNewline`,
+          ].join('\n'),
+        );
+        await delay(1000);
+
+        expect(readFileSync(join(work, 'network-ran.txt'), 'utf8'), result.stderr).toBe('ran');
+        /* The listeners are the judge: still only the controls. */
+        expect({
+          remoteTcp: remoteTcp.connections(),
+          loopbackTcp: loopbackTcp.connections(),
+          remoteUdp: remoteUdp.datagrams(),
+          loopbackUdp: loopbackUdp.datagrams(),
+        }).toStrictEqual({ remoteTcp: 1, loopbackTcp: 1, remoteUdp: 1, loopbackUdp: 1 });
+      } finally {
+        remoteTcp.server.close();
+        loopbackTcp.server.close();
+        remoteUdp.socket.close();
+        loopbackUdp.socket.close();
+      }
+
+      const marker = join(work, 'network-domains-ran.txt');
+      const outcome = await prepared(
+        launchOf(`Set-Content -LiteralPath ${quote(marker)} -Value ran`, {
+          network: { domains: ['granted.tau-qualification.test'] },
+        }),
+      );
+
+      expect(outcome).toMatchObject({ status: 'unsupported', requirement: 'network-isolation' });
+      expect(existsSync(marker)).toBe(false);
+    },
+  );
+
+  conformance('A22', 'a named pipe whose DACL grants Everyone is never reached from the sandbox', async () => {
+    const server = await pipeServer();
+    try {
+      await pipeControl(server.name);
+
+      expect(await waitUntil(() => server.connections() === 1, 5000)).toBe(true);
+      const client = (direction: string): string =>
+        `try { $p = [System.IO.Pipes.NamedPipeClientStream]::new('.', ${quote(server.name)}, '${direction}'); $p.Connect(3000); $p.Dispose() } catch { }`;
+      const result = await run(
+        [
+          client('InOut'),
+          client('In'),
+          client('Out'),
+          `try { $f = [System.IO.File]::Open(${quote(`\\\\.\\pipe\\${server.name}`)}, 'Open', 'Read'); $f.Dispose() } catch { }`,
+          `Set-Content -LiteralPath ${quote(join(work, 'pipe-ran.txt'))} -Value ran -NoNewline`,
+        ].join('\n'),
+      );
+      await delay(1000);
+
+      expect(readFileSync(join(work, 'pipe-ran.txt'), 'utf8'), result.stderr).toBe('ran');
+      /* The server is the judge: the control client and nothing else. */
+      expect(server.connections()).toBe(1);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  /**
+   * A24's escape set: a detached `Start-Process`, a `Start-Job`, a `CREATE_BREAKAWAY_FROM_JOB` child and a WMI
+   * `Win32_Process.Create` child, each a writer that appends to its own sentinel and records its own PID there.
+   */
+  const escapes = (
+    prefix: string,
+  ): { sentinels: Record<string, string>; pids: Record<string, string>; command: string } => {
+    const names = ['detached', 'job', 'breakaway', 'wmi'] as const;
+    const sentinels = Object.fromEntries(names.map((name) => [name, join(work, `${prefix}-${name}.beat`)]));
+    const pids = Object.fromEntries(names.map((name) => [name, join(work, `${prefix}-${name}.pid`)]));
+    const writer = (name: (typeof names)[number]): string =>
+      `Set-Content -LiteralPath ${quote(pids[name]!)} -Value $PID -NoNewline; while ($true) { Add-Content -LiteralPath ${quote(sentinels[name]!)} -Value b -NoNewline; Start-Sleep -Milliseconds 100 }`;
+    const argumentsOf = (name: (typeof names)[number]): string =>
+      `-NoLogo -NoProfile -NonInteractive -EncodedCommand ${encoded(writer(name))}`;
+    const breakaway = [
+      'using System; using System.Runtime.InteropServices; using System.Text;',
+      'public static class TauBreakaway {',
+      '  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct StartupInfo {',
+      '    public int cb; public string reserved; public string desktop; public string title;',
+      '    public int x, y, xSize, ySize, xChars, yChars, fill, flags; public short show, reserved2;',
+      '    public IntPtr reserved3, input, output, error; }',
+      '  [StructLayout(LayoutKind.Sequential)] struct ProcessInformation { public IntPtr process, thread; public int pid, tid; }',
+      '  [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]',
+      '  static extern bool CreateProcessW(string application, StringBuilder command, IntPtr processAttributes,',
+      '    IntPtr threadAttributes, bool inherit, uint flags, IntPtr environment, string directory,',
+      '    ref StartupInfo startup, out ProcessInformation information);',
+      '  public static string Start(string application, string command) {',
+      '    var startup = new StartupInfo(); startup.cb = Marshal.SizeOf(typeof(StartupInfo)); ProcessInformation information;',
+      '    // CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW',
+      '    bool started = CreateProcessW(application, new StringBuilder(command), IntPtr.Zero, IntPtr.Zero, false,',
+      '      0x01000000 | 0x08000000, IntPtr.Zero, null, ref startup, out information);',
+      '    return started ? "started " + information.pid : "refused " + Marshal.GetLastWin32Error(); } }',
+    ].join('\n');
+    const started = (name: string): string =>
+      `((Test-Path -LiteralPath ${quote(sentinels[name]!)}) -and (Get-Item -LiteralPath ${quote(sentinels[name]!)}).Length -gt 0)`;
+    const command = [
+      `$exe = ${quote(shell.path)}`,
+      `Start-Process -FilePath $exe -ArgumentList ${quote(argumentsOf('detached'))} -WindowStyle Hidden`,
+      `$job = Start-Job -ScriptBlock ([scriptblock]::Create(${quote(writer('job'))}))`,
+      `try { Add-Type -TypeDefinition ${quote(breakaway)}; Write-Output ('breakaway ' + [TauBreakaway]::Start($exe, ('"' + $exe + '" ' + ${quote(argumentsOf('breakaway'))}))) } catch { Write-Output ('breakaway error ' + $_.Exception.Message) }`,
+      `try { $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ('"' + $exe + '" ' + ${quote(argumentsOf('wmi'))}) } -ErrorAction Stop; Write-Output ('wmi ' + $r.ReturnValue + ' ' + $r.ProcessId) } catch { Write-Output ('wmi error ' + $_.Exception.Message) }`,
+      /* Wait, bounded, for the two writers that must start; the escapes get a few more seconds to show themselves. */
+      `$deadline = (Get-Date).AddSeconds(25); while ((Get-Date) -lt $deadline -and -not (${started('detached')} -and ${started('job')})) { Start-Sleep -Milliseconds 100 }`,
+      `$deadline = (Get-Date).AddSeconds(3); while ((Get-Date) -lt $deadline -and -not (${started('breakaway')} -and ${started('wmi')})) { Start-Sleep -Milliseconds 100 }`,
+    ].join('\n');
+    return { sentinels, pids, command };
+  };
+
+  /** The PIDs a writer recorded, and any the sandboxed command reported, for the external process-table check. */
+  const escapePids = (pids: Record<string, string>, stdout: string): number[] =>
+    [
+      ...Object.values(pids)
+        .filter((path) => existsSync(path))
+        .map((path) => Number(readFileSync(path, 'utf8').trim())),
+      ...[...stdout.matchAll(/^(?:breakaway started|wmi 0) (\d+)$/gmu)].map((match) => Number(match[1])),
+    ].filter((pid) => Number.isInteger(pid) && pid > 0);
+
+  const sizesOf = (sentinels: Record<string, string>): Record<string, number> =>
+    Object.fromEntries(Object.entries(sentinels).map(([name, path]) => [name, sizeOf(path)]));
+
+  conformance(
+    'A24',
+    'a detached process, a job, a breakaway child and a WMI child all die with a session that exits',
+    async () => {
+      const exited = escapes('a24-exit');
+      const result = await run([exited.command, 'exit 0'].join('\n'));
+      observations['A24-exit'] = result.stdout.trim();
+      const settled = sizesOf(exited.sentinels);
+
+      expect(result.exitCode, result.stderr).toBe(0);
+      /* Positive controls: the detached process and the job really ran inside the session. */
+      expect([settled['detached']! > 0, settled['job']! > 0], JSON.stringify(settled)).toStrictEqual([true, true]);
+      await delay(1500);
+
+      expect(sizesOf(exited.sentinels)).toStrictEqual(settled);
+      const exitedPids = escapePids(exited.pids, result.stdout);
+
+      expect(exitedPids.filter((pid) => alive(pid))).toStrictEqual([]);
+    },
+  );
+
+  conformance('A24-abort', 'the same escapes all die with a session that is aborted while it runs', async () => {
+    const aborted = escapes('a24-abort');
+    const controller = new AbortController();
+    const process_ = await start(
+      launchOf([aborted.command, 'Start-Sleep -Seconds 300'].join('\n'), { signal: controller.signal }),
+    );
+    if (process_.kind !== 'pipes') {
+      throw new Error('expected a pipes launch');
+    }
+    const stdout = text(process_.stdout);
+    try {
+      expect(
+        await waitUntil(
+          () => sizeOf(aborted.sentinels['detached']!) > 0 && sizeOf(aborted.sentinels['job']!) > 0,
+          30_000,
+        ),
+      ).toBe(true);
+      await delay(3500);
+    } finally {
+      // A failed positive control still stops the launch.
+      controller.abort();
+      await process_.exited;
+    }
+    const output = await stdout;
+    observations['A24-abort'] = output.trim();
+    const stopped = sizesOf(aborted.sentinels);
+    await delay(1500);
+
+    expect(sizesOf(aborted.sentinels)).toStrictEqual(stopped);
+    expect(escapePids(aborted.pids, output).filter((pid) => alive(pid))).toStrictEqual([]);
+  });
+
+  conformance(
+    'A23',
+    'a second concurrent launch is refused session-limit while the first runs to completion',
+    async () => {
+      const sync = join(work, 'a23');
+      mkdirSync(sync, { recursive: true });
+      const first = run(
+        [
+          `Set-Content -LiteralPath ${quote(join(sync, 'ready'))} -Value ready -NoNewline`,
+          `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
+          `Set-Content -LiteralPath ${quote(join(sync, 'first-done'))} -Value done -NoNewline`,
+        ].join('\n'),
+        { commandId: 'conformance#a23-first' },
+      );
+      try {
+        expect(await waitUntil(() => existsSync(join(sync, 'ready')), 30_000)).toBe(true);
+        const second = await prepared(
+          launchOf(`Set-Content -LiteralPath ${quote(join(sync, 'second-ran'))} -Value ran`, {
+            commandId: 'conformance#a23-second',
+          }),
+        );
+
+        expect(second.status).not.toBe('started');
+        expect(JSON.stringify(second)).toMatch(/session-limit/u);
+        expect(existsSync(join(sync, 'second-ran'))).toBe(false);
+      } finally {
+        writeFileSync(join(sync, 'release'), '');
+      }
+      const ended = await first;
+
+      expect(ended.exitCode, ended.stderr).toBe(0);
+      expect(readFileSync(join(sync, 'first-done'), 'utf8')).toBe('done');
+      /* The limit is about overlap only: once the first settled, the next launch runs. */
+      const after = await run(`Set-Content -LiteralPath ${quote(join(sync, 'after'))} -Value after -NoNewline`);
+
+      expect(after.exitCode, after.stderr).toBe(0);
+      expect(readFileSync(join(sync, 'after'), 'utf8')).toBe('after');
+    },
+  );
+
+  conformance(
+    'A26',
+    'a PowerShell copy under the profile or a .cmd shim is shell-missing or refused, and nothing starts',
+    async () => {
+      const fake = realpathSync(mkdtempSync(join(homedir(), 'tau-conformance-a26-')));
+      try {
+        const fakeProgramFiles = join(fake, 'Program Files');
+        const fakeSystemRoot = join(fake, 'Windows');
+        mkdirSync(join(fakeProgramFiles, 'PowerShell', '7'), { recursive: true });
+        mkdirSync(join(fakeSystemRoot, 'System32', 'WindowsPowerShell', 'v1.0'), { recursive: true });
+        const copiedPwsh = join(fakeProgramFiles, 'PowerShell', '7', 'pwsh.exe');
+        const copiedWindowsPowerShell = join(fakeSystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+        copyFileSync(shell.realPath, copiedPwsh);
+        if (windowsPowerShellPresent) {
+          copyFileSync(windowsPowerShell, copiedWindowsPowerShell);
+        }
+        const resolved = await resolveShellExecutable({
+          platform: 'win32',
+          environment: { ...process.env, ProgramFiles: fakeProgramFiles, SystemRoot: fakeSystemRoot },
+        });
+
+        expect(resolved).toMatchObject({ status: 'shell-missing' });
+        const shim = join(fake, 'pwsh.cmd');
+        const marker = join(work, 'a26-ran');
+        writeFileSync(shim, `@echo ran> "${marker}-shim"\r\n`);
+        /* The 5.1 copy runs from anywhere, so only a refusal keeps its marker absent. */
+        const candidates = [copiedPwsh, ...(windowsPowerShellPresent ? [copiedWindowsPowerShell] : []), shim];
+        const outcomes: Record<string, ShellLaunchOutcome['status']> = {};
+        for (const [index, executablePath] of candidates.entries()) {
+          // oxlint-disable-next-line no-await-in-loop -- one refused executable at a time, each judged by its marker.
+          const outcome = await prepared({
+            ...launchOf(`Set-Content -LiteralPath ${quote(`${marker}-${String(index)}`)} -Value ran`),
+            executablePath,
+          });
+          outcomes[executablePath] = outcome.status;
+          if (outcome.status === 'started') {
+            // oxlint-disable-next-line no-await-in-loop -- stop what should never have started before judging it.
+            await outcome.process.terminate();
+          }
+        }
+
+        expect(
+          Object.values(outcomes).filter((status) => status === 'started'),
+          JSON.stringify(outcomes),
+        ).toStrictEqual([]);
+        expect(candidates.map((_, index) => existsSync(`${marker}-${String(index)}`))).toStrictEqual(
+          candidates.map(() => false),
+        );
+        expect(existsSync(`${marker}-shim`)).toBe(false);
+      } finally {
+        rmSync(fake, { recursive: true, force: true });
+      }
+    },
+  );
+
+  conformance(
+    'E17',
+    'a missing or corrupt helper leaves the capability unavailable, never an unsandboxed substitute',
+    async () => {
+      const corrupt = join(custodyRoot, 'corrupt-helper.exe');
+      writeFileSync(corrupt, 'not an executable\n');
+      for (const [name, path] of [
+        ['missing', join(custodyRoot, 'missing-helper.exe')],
+        ['corrupt', corrupt],
+      ] as const) {
+        const marker = join(work, `e17-ran-${name}`);
+        const through = createWindowsShellProvider({
+          helperPath: path,
+          custody: { directory: join(custodyRoot, 'records'), sessionDirectory: join(custodyRoot, 'sessions') },
+        });
+        // oxlint-disable-next-line no-await-in-loop -- one broken install at a time, each judged by its own marker.
+        const outcome = await prepared(launchOf(`Set-Content -LiteralPath ${quote(marker)} -Value ran`), through);
+        if (outcome.status === 'started') {
+          // oxlint-disable-next-line no-await-in-loop -- as above.
+          const exit = await outcome.process.exited.catch((error: unknown) => ({ rejected: String(error) }));
+
+          expect(exit, name).not.toStrictEqual({ exitCode: 0 });
+        } else {
+          expect(outcome.message.length, name).toBeGreaterThan(0);
+        }
+        expect(existsSync(marker), name).toBe(false);
+      }
+    },
+  );
+
+  conformance(
+    'W05',
+    'refused variables are refused, and the shell sees only the environment it was given',
+    async () => {
+      const given = { ...baseEnvironment(), GIVEN_VALUE: 'GIVEN-VALUE' };
+      const positive = await run('[Console]::Write($env:GIVEN_VALUE)', { environment: given });
+
+      expect(positive.exitCode, positive.stderr).toBe(0);
+      expect(positive.stdout).toBe('GIVEN-VALUE');
+      /* The host's own variables are in this process; none may reach the child. */
+      const names = await run("[Console]::Write(((Get-ChildItem env:).Name | Sort-Object) -join ';')", {
+        environment: given,
+      });
+
+      expect(names.exitCode, names.stderr).toBe(0);
+      const allowed = new Set([...Object.keys(given), 'PSModulePath'].map((name) => name.toUpperCase()));
+      const seen = names.stdout.split(';').filter((name) => name !== '');
+      observations['W05-environment'] = seen;
+
+      expect(seen.filter((name) => !allowed.has(name.toUpperCase()))).toStrictEqual([]);
+      for (const [name, value] of [
+        ['PSExecutionPolicyPreference', 'Bypass'],
+        ['NODE_OPTIONS', String.raw`--require=C:\injected.js`],
+        ['GITHUB_TOKEN', 'not-a-real-token'],
+      ] as const) {
+        /* The provider's floor names it, so a refusal is the only correct outcome. */
+        expect(refusedShellEnvironment({ [name]: value })).toStrictEqual([name]);
+        const marker = join(work, `w05-ran-${name}`);
+        // oxlint-disable-next-line no-await-in-loop -- one refused variable at a time, each judged by its own marker.
+        const outcome = await prepared(
+          launchOf(`Set-Content -LiteralPath ${quote(marker)} -Value ran`, {
+            environment: { ...baseEnvironment(), [name]: value },
+          }),
+        );
+
+        expect(outcome, name).toMatchObject({ status: 'unsupported', requirement: 'environment' });
+        expect(existsSync(marker), name).toBe(false);
+      }
+    },
+  );
+
+  conformance(
+    'W06',
+    'the Terminal shell owns a ConPTY: tty, resize, Ctrl-C, UTF-8 and containment inside it',
+    async () => {
+      const process_ = await start(
+        launchOf('', {
+          arguments: shellInteractiveArguments('powershell'),
+          stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } },
+        }),
+      );
+      if (process_.kind !== 'terminal') {
+        throw new Error('expected a terminal launch');
+      }
+      let raw = '';
+      const reading = (async () => {
+        const decoder = new TextDecoder();
+        for await (const chunk of process_.output) {
+          raw += decoder.decode(chunk, { stream: true });
+        }
+      })();
+      const screen = (): string => raw.replace(vtSequence, '');
+      const waitFor = async (marker: string | RegExp, milliseconds = 15_000): Promise<void> => {
+        const seen = (): boolean => (typeof marker === 'string' ? screen().includes(marker) : marker.test(screen()));
+        if (!(await waitUntil(seen, milliseconds))) {
+          throw new Error(`no ${String(marker)} in ${JSON.stringify(screen().slice(-2000))}`);
+        }
+      };
+      const type = (line: string): void => {
+        process_.write(new TextEncoder().encode(line));
+      };
+      try {
+        /* Only the shell's own evaluation prints these markers; the echo of the typed line cannot. */
+        type('"TTY-$(40+2)-$([Console]::IsInputRedirected)-$([Console]::IsOutputRedirected)"\r');
+        await waitFor('TTY-42-False-False');
+
+        process_.resize({ columns: 100, rows: 40 });
+        let resized = false;
+        for (let attempt = 0; attempt < 5 && !resized; attempt++) {
+          type('"SIZE-$([Console]::WindowHeight)x$([Console]::WindowWidth)"\r');
+          // oxlint-disable-next-line no-await-in-loop -- the resize reaches the shell asynchronously; ask until it shows.
+          resized = await waitUntil(() => screen().includes('SIZE-40x100'), 1000);
+        }
+
+        expect(resized, JSON.stringify(screen().slice(-1000))).toBe(true);
+
+        type('"SLEEP-$(3+4)"; Start-Sleep -Seconds 30\r');
+        await waitFor('SLEEP-7');
+        await delay(300);
+        const interruptedAt = Date.now();
+        type('\u0003');
+        type('"AFTER-$(1+1)"\r');
+        await waitFor('AFTER-2', 10_000);
+
+        expect(Date.now() - interruptedAt).toBeLessThan(10_000);
+
+        /* UTF-8 both ways: typed non-ASCII reaches the shell as the right characters, and the shell's output arrives. */
+        type(`"UNI-$('café☃日本'.Length)-$([int][char]'é')-$([int][char]'☃')"\r`);
+        await waitFor('UNI-6-233-9731');
+        type('"OUT-$([char]0x2603)$([char]0xE9)"\r');
+        await waitFor('OUT-☃é');
+
+        /* Containment from inside the Terminal, judged by the files outside it. */
+        const exfil = join(work, 'terminal-read-secret.txt');
+        const forged = join(readonly, 'terminal-written.txt');
+        const ran = join(work, 'terminal-ran.txt');
+        const secretBefore = digestOf(join(secret, 'canary.txt'));
+        type(
+          [
+            `try { Get-Content -LiteralPath ${quote(join(secret, 'canary.txt'))} -Raw -ErrorAction Stop | Set-Content -LiteralPath ${quote(exfil)} -NoNewline } catch { }`,
+            `try { Set-Content -LiteralPath ${quote(forged)} -Value FORGED -ErrorAction Stop } catch { }`,
+            `try { Set-Content -LiteralPath ${quote(join(secret, 'canary.txt'))} -Value FORGED -ErrorAction Stop } catch { }`,
+            `Set-Content -LiteralPath ${quote(ran)} -Value ran -NoNewline`,
+            '"PROBED-$(5+5)"',
+          ].join('; ') + '\r',
+        );
+        await waitFor('PROBED-10');
+
+        expect(readFileSync(ran, 'utf8')).toBe('ran');
+        expect(existsSync(exfil)).toBe(false);
+        expect(existsSync(forged)).toBe(false);
+        expect(digestOf(join(secret, 'canary.txt'))).toBe(secretBefore);
+        expect(screen()).not.toContain('SECRET-CANARY');
+
+        type('exit 3\r');
+
+        expect(await process_.exited).toStrictEqual({ exitCode: 3 });
+      } finally {
+        await process_.terminate().catch(() => undefined);
+        await reading.catch(() => undefined);
+      }
+    },
+  );
+
+  conformance('W07', 'after every launch, each path the suite touched has exactly its original ACL', async () => {
+    expect(sddlOf(aclPaths)).toStrictEqual(aclBaseline);
+  });
+});

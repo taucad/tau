@@ -42,6 +42,11 @@ function Viewer({ navigation }: Readonly<{ navigation: boolean }>): React.JSX.El
   shortcutKeys = useViewerShortcuts(barRef, () => undefined, { navigation });
   return (
     <section data-viewer-frame aria-label='Viewer'>
+      <div role='application' tabIndex={0} aria-label='Viewer stage'>
+        <div className='viewport-gizmo-cube' role='application' tabIndex={0} aria-label='View cube'>
+          <button type='button'>Turn up</button>
+        </div>
+      </div>
       <div ref={barRef}>
         <button type='button'>Viewer control</button>
         <input aria-label='Viewer field' />
@@ -124,6 +129,23 @@ describe('viewer navigation keys (N1)', () => {
       screen.getByRole('slider', { name: 'Viewer slider' }).focus();
     });
     expect(await press(viewer, '{ArrowRight}')).toBe('none');
+  });
+
+  it('orbits from the focused stage, and leaves the arrows to the focused view cube and its buttons', async () => {
+    const viewer = startViewer('tau');
+    renderViewer(viewer);
+    act(() => {
+      screen.getByRole('application', { name: 'Viewer stage' }).focus();
+    });
+    expect(await press(viewer, '{ArrowLeft}')).toBe('orbit');
+    act(() => {
+      screen.getByRole('application', { name: 'View cube' }).focus();
+    });
+    expect(await press(viewer, '{ArrowLeft}')).toBe('none');
+    act(() => {
+      screen.getByRole('button', { name: 'Turn up' }).focus();
+    });
+    expect(await press(viewer, '{ArrowUp}')).toBe('none');
   });
 
   it('does nothing while the host leaves navigation off', async () => {

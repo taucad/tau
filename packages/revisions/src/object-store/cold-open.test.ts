@@ -1144,8 +1144,9 @@ describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
   /* The catalogue and files host of `deep`, recording each Range read as it is asked; `corrupt` flips a byte of each. */
   const serveDeep = (
     corrupt: ReadonlyArray<readonly [number, number]> = [],
-  ): Readonly<{ fetch: typeof globalThis.fetch; asked: Array<readonly [number, number]> }> => {
+  ): Readonly<{ fetch: typeof globalThis.fetch; asked: Array<readonly [number, number]>; inFlight: () => number }> => {
     const asked: Array<readonly [number, number]> = [];
+    let inFlight = 0;
     const packHref = `${filesOrigin}/packs/${deep.packName}.pack`;
     const indexHref = `${filesOrigin}/packs/${deep.packName}.idx`;
     const listingHref = `${filesOrigin}/listings/${deep.main}.tsv.gz`;
@@ -1180,10 +1181,12 @@ describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
         return new Response('Not Found', { status: 404 });
       }
       asked.push(range);
+      inFlight += 1;
       /* A round trip, so that what is asked side by side is seen side by side. */
       await new Promise((resolve) => {
         setTimeout(resolve, 5);
       });
+      inFlight -= 1;
       const bytes = deep.pack.slice(...range);
       for (const [start, end] of corrupt) {
         if (range[0] < end && start < range[1]) {
@@ -1193,7 +1196,7 @@ describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
       }
       return new Response(bytes, { status: 206 });
     };
-    return { fetch: fetch as typeof globalThis.fetch, asked };
+    return { fetch: fetch as typeof globalThis.fetch, asked, inFlight: () => inFlight };
   };
 
   const extentOf = (oid: string): readonly [number, number] => {
@@ -1271,6 +1274,8 @@ describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
     }) as typeof globalThis.fetch;
 
     expect(await coldOpenFromCatalogue({ catalogueUrl, fetch, store, compute })).toBeUndefined();
+    /* Every read the open started had landed when it answered. */
+    expect(served.inFlight()).toBe(0);
     const asked = served.asked.length;
     await new Promise((resolve) => {
       setTimeout(resolve, 50);
@@ -1278,5 +1283,110 @@ describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
     /* The walk settled before the answer: no read starts after it. */
     expect(served.asked).toHaveLength(asked);
     expect(await store.has(deep.main)).toBe(false);
+  });
+
+  const blobsOfDeep = (): string[] => lines(deep.git('ls-tree', '-r', deep.main)).map((line) => line.split(/\s+/u)[2]!);
+  const deepestOf = (): string =>
+    deep.git(
+      'rev-parse',
+      `${deep.main}:${Array.from({ length: 11 }, (_value, level) => `level-${String(level)}`).join('/')}`,
+    );
+
+  it('answers undefined when a keep fails while the next batch is read, with no unhandled rejection', async () => {
+    const compute = countingCompute();
+    const held = await emptyStore(compute, 'deep-keep-fails');
+    const unhandled: unknown[] = [];
+    const listen = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', listen);
+    try {
+      const store: ObjectStore = {
+        ...held,
+        importObjects: async (objects) => {
+          if ([...objects].some((object) => object.type === 'blob')) {
+            throw new Error('The disk is full.');
+          }
+          return held.importObjects(objects);
+        },
+      };
+      const served = serveDeep();
+
+      expect(
+        await coldOpenFromCatalogue({ catalogueUrl, fetch: served.fetch, store, compute, batchObjects: 4 }),
+      ).toBeUndefined();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(unhandled).toEqual([]);
+      expect(served.inFlight()).toBe(0);
+      expect(await held.has(deep.main)).toBe(false);
+    } finally {
+      process.off('unhandledRejection', listen);
+    }
+  });
+
+  it('holds at most two batches of blobs: one read while the one before it is kept', async () => {
+    const compute = countingCompute();
+    const held = await emptyStore(compute, 'deep-two-batches');
+    const blobs = new Set(blobsOfDeep());
+    let keptBatches = 0;
+    let most = 0;
+    const store: ObjectStore = {
+      ...held,
+      importObjects: async (objects) => {
+        const list = [...objects];
+        await new Promise((resolve) => {
+          setTimeout(resolve, 15);
+        });
+        const written = await held.importObjects(list);
+        if (list.some((object) => blobs.has(object.oid))) {
+          keptBatches += 1;
+        }
+        return written;
+      },
+    };
+    const served = serveDeep();
+    const extents = [...blobs].map((oid) => extentOf(oid));
+    const fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const range = /^bytes=(\d+)-(\d+)$/u.exec(new Headers(init?.headers).get('range') ?? '');
+      if (range !== null && extents.some((extent) => touches([Number(range[1]), Number(range[2]) + 1], extent))) {
+        const asked = served.asked.filter((seen) => extents.some((extent) => touches(seen, extent))).length + 1;
+        most = Math.max(most, asked - keptBatches);
+      }
+      return served.fetch(input, init);
+    }) as typeof globalThis.fetch;
+
+    expect(await coldOpenFromCatalogue({ catalogueUrl, fetch, store, compute, batchObjects: 1 })).toBeDefined();
+    /* One blob per batch, so each blob read is a batch: never more than two ahead of what is kept. */
+    expect(most).toBeGreaterThanOrEqual(2);
+    expect(most).toBeLessThanOrEqual(2);
+  });
+
+  it('stops walking the levels once a listed blob fails', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'deep-walk-stops');
+    const blob = deep.git('rev-parse', `${deep.main}:part-0.scad`);
+    const served = serveDeep([extentOf(blob)]);
+
+    expect(await coldOpenFromCatalogue({ catalogueUrl, fetch: served.fetch, store, compute })).toBeUndefined();
+    expect(served.inFlight()).toBe(0);
+    const deepest = extentOf(deepestOf());
+    expect(served.asked.some((range) => touches(range, deepest))).toBe(false);
+  });
+
+  it('stops keeping the listed blobs once the walk fails', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'deep-keep-stops');
+    const tree = deep.git('rev-parse', `${deep.main}:level-0`);
+    const served = serveDeep([extentOf(tree)]);
+
+    expect(
+      await coldOpenFromCatalogue({ catalogueUrl, fetch: served.fetch, store, compute, batchObjects: 2 }),
+    ).toBeUndefined();
+    expect(served.inFlight()).toBe(0);
+    const blobs = blobsOfDeep();
+    const kept = await Promise.all(blobs.map(async (oid) => store.has(oid)));
+    expect(kept.filter(Boolean).length).toBeLessThan(blobs.length);
   });
 });

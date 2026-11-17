@@ -1969,7 +1969,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       if (readOptions?.largeObjects === 'local') {
         /* No transfer: what is here already is read, each object once and a bounded number at a time,
          * and the rest stay pointers for the caller to track. */
-        const unique = [...new Map(pointers.map((pointer) => [pointer.oid, pointer])).values()];
+        /* The first pointer of each object, as one read after another took it. */
+        const firsts = new Map<string, LfsPointer>();
+        for (const pointer of pointers) {
+          if (!firsts.has(pointer.oid)) {
+            firsts.set(pointer.oid, pointer);
+          }
+        }
+        const unique = [...firsts.values()];
         const contents = await pooled(unique, treeReadStreams, async (pointer) => readLocalLfsObject(pointer));
         const local = new Map<string, Uint8Array<ArrayBuffer>>();
         for (const [at, pointer] of unique.entries()) {

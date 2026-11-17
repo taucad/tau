@@ -114,6 +114,16 @@ export const coalesceRanges = (ranges: Iterable<readonly [number, number]>): Arr
   return merged;
 };
 
+/*
+ * Every one of `work` settled, then their answers in order, or the first failure: a call that fails
+ * returns only once none of its reads, inflates or checks is still running.
+ */
+const allSettled = async <Result>(work: ReadonlyArray<Promise<Result>>): Promise<Result[]> => {
+  await Promise.allSettled(work);
+  /* Settled already: this answers at once, with the first failure in order. */
+  return Promise.all(work);
+};
+
 /**
  * Open a pack on the server through its stored index: the index is checked
  * against its own trailer and the pack's name, never rebuilt.
@@ -250,7 +260,7 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
         }
         try {
           // oxlint-disable-next-line no-await-in-loop -- a wave's bases are known only once the wave has landed.
-          const fetched = await Promise.all(coalesceRanges(ranges).map(async ([start, end]) => fetchSpan(start, end)));
+          const fetched = await allSettled(coalesceRanges(ranges).map(async ([start, end]) => fetchSpan(start, end)));
           spans.push(...fetched);
           spans.sort((left, right) => left.start - right.start);
           if (landing !== undefined) {
@@ -279,15 +289,21 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
         }
         wave = next;
       }
-      const read = await Promise.all(
+      const read = await allSettled(
         held.map(async (oid) => {
           /* A whole entry keeps its deflated body: the object it inflated to is checked below, so a store keeps
            * those bytes as they are rather than deflate the object again. */
-          const object = await reader.readForCopy(oid);
+          const copied = await reader.readForCopy(oid);
           /* Each object is checked against its id: the index and the trailer vouch for the pack, not the transfer. */
-          if (object !== undefined && (await compute.sha1(frameObject(object.type, object.data))) !== oid) {
+          if (copied !== undefined && (await compute.sha1(frameObject(copied.type, copied.data))) !== oid) {
             throw new TypeError(`A Range read of ${name} answered other bytes for ${oid}.`);
           }
+          /* A body cut out of a wider read is copied, so no object pins the whole Range read behind it. */
+          const compressed = copied?.compressed;
+          const object =
+            compressed === undefined || compressed.byteLength === compressed.buffer.byteLength
+              ? copied
+              : { ...copied!, compressed: new Uint8Array(compressed) };
           return [oid, object] as const;
         }),
       );

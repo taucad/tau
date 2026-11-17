@@ -148,6 +148,11 @@ describe('openRemotePack', () => {
       objects.map(async (object) => inline.inflate(new Uint8Array(read.get(object.oid)!.compressed!))),
     );
     expect(inflated).toStrictEqual(objects.map((object) => object.data));
+    /* Each body is its own bytes: none pins the Range read it was cut from. */
+    for (const object of objects) {
+      const { compressed } = read.get(object.oid)!;
+      expect(compressed!.buffer.byteLength).toBe(compressed!.byteLength);
+    }
   });
 
   it('starts no queued Range read once its call has failed', async () => {

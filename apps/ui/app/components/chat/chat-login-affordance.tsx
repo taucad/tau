@@ -1,16 +1,15 @@
+import { lazy, Suspense } from 'react';
 import { KeyRound, SquareTerminal } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
-import { CopyButton } from '@taucad/ui/components/copy-button';
 import type { AgentHostLogin } from '@taucad/chat-ui/services/agent-host-event-projection';
-import {
-  CodeBlock,
-  CodeBlockAction,
-  CodeBlockContent,
-  CodeBlockHeader,
-  Pre,
-} from '@taucad/editor-ui/components/code/code-block';
 import type { AgentSignInFailure } from '#components/terminal/agent-sign-ins.js';
+
+/* The code block carries the syntax highlighter, so it stays off the Home page's critical path until a card shows. */
+const ChatLoginCommand = lazy(async () => {
+  const module = await import('#components/chat/chat-login-command.js');
+  return { default: module.ChatLoginCommand };
+});
 
 /**
  * What the *user* has to do to sign an external agent in (V11).
@@ -88,16 +87,16 @@ export function ChatLoginAffordance({
               : 'Or run this in a terminal of your own, then send your message again:'}
           </p>
           {commands.map((method) => (
-            <CodeBlock key={method.id} variant='floating'>
-              <CodeBlockHeader variant='floating'>
-                <CodeBlockAction variant='floating' visibility='alwaysVisible'>
-                  <CopyButton size='icon-xs' tooltip='Copy command' getText={() => method.terminalCommand ?? ''} />
-                </CodeBlockAction>
-              </CodeBlockHeader>
-              <CodeBlockContent className='py-1.5 pr-9 pl-2.5'>
-                <Pre className='font-mono text-xs wrap-anywhere whitespace-pre-wrap'>{method.terminalCommand}</Pre>
-              </CodeBlockContent>
-            </CodeBlock>
+            <Suspense
+              key={method.id}
+              fallback={
+                <pre className='rounded-md border bg-muted py-1.5 pr-9 pl-2.5 font-mono text-xs wrap-anywhere whitespace-pre-wrap'>
+                  {method.terminalCommand}
+                </pre>
+              }
+            >
+              <ChatLoginCommand command={method.terminalCommand ?? ''} />
+            </Suspense>
           ))}
         </div>
       ) : undefined}

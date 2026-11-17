@@ -53,6 +53,21 @@ $v = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($env:TAU_SIGNATURE_FIL
 [ordered]@{productVersion=$v.ProductVersion;productName=$v.ProductName;path=$s.Path;status=$s.Status.ToString();subject=$s.SignerCertificate.Subject;timestamp=$t} | ConvertTo-Json -Compress
 `;
 
+/**
+ * Windows PowerShell 5.1 must rebuild its own module path. A PSModulePath inherited from a
+ * PowerShell 7 parent (the default GitHub Actions Windows shell) makes 5.1 autoload the Core
+ * Microsoft.PowerShell.Security module, which it cannot load, so Get-AuthenticodeSignature fails.
+ */
+export const createWindowsPowerShellEnvironment = (parent: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(parent)) {
+    if (name.toLowerCase() !== 'psmodulepath') {
+      environment[name] = value;
+    }
+  }
+  return environment;
+};
+
 /** Fail closed on tool errors, absent JSON/certificates, wrong publisher or untrusted files. */
 export const verifyWindowsSignature = async (options: {
   path: string;
@@ -68,7 +83,7 @@ export const verifyWindowsSignature = async (options: {
   if (!windowsRoot || !win32.isAbsolute(windowsRoot) || !win32.isAbsolute(options.path)) {
     throw new Error('Windows signature verification requires absolute system and candidate paths');
   }
-  const environment = { ...process.env };
+  const environment = createWindowsPowerShellEnvironment(process.env);
   environment['TAU_SIGNATURE_FILE'] = options.path;
   const { stdout, stderr } = await execute(
     win32.join(windowsRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),

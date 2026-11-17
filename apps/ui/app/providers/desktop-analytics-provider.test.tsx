@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
+import { MemoryRouter } from 'react-router';
 import { StrictMode } from 'react';
 import type { ReactNode } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -102,7 +103,7 @@ describe('DesktopAnalyticsProvider', () => {
     const init = vi.spyOn(posthog, 'init');
     const capture = vi.spyOn(posthog, 'capture');
 
-    render(tree());
+    render(tree(), { wrapper: MemoryRouter });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await settle();
 
@@ -122,7 +123,7 @@ describe('DesktopAnalyticsProvider', () => {
     const capture = vi.spyOn(posthog, 'capture');
 
     // Default on: no decision is needed before capture.
-    render(tree());
+    render(tree(), { wrapper: MemoryRouter });
     await settle();
     expect(init).toHaveBeenCalledOnce();
     expect(init).toHaveBeenCalledWith(

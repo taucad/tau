@@ -691,16 +691,36 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (!isAbsolute(root)) {
       return false;
     }
+    /* Until its background `realpath` settles, the exact spelling main
+     * published is admitted as is: its physical spelling can differ (Windows
+     * short names such as `C:\\Users\\RUNNER~1`, macOS `/var` → `/private/var`).
+     * Once settled, the physical target is checked against the settled
+     * canonical spelling, so a retargeted link is refused. */
+    const published = trustedRoots.get(resolve(root));
+    if (published !== undefined && !published.isSettled) {
+      return true;
+    }
     const candidate = canonicalPath(root);
+    const spelled = resolve(root);
     /* Descendants are admitted because projects live inside Home
      * (`userData/home/<project>`); the `sep` suffix keeps `…/home-evil` from
      * matching `…/home`. */
-    const within = (trusted: string): boolean => candidate === trusted || candidate.startsWith(trusted + sep);
+    const isWithin = (path: string, trusted: string): boolean => path === trusted || path.startsWith(trusted + sep);
     /* A root is matched by the spelling main published and, once its background
      * `realpath` settles, by its canonical spelling. No root is canonicalised on
-     * a request's path: a hung mount would hold this event loop (blueprint D8). */
+     * a request's path ahead of need: a hung mount would hold this event loop
+     * (blueprint D8). */
     for (const [stored, entry] of trustedRoots) {
-      if (within(stored) || (entry.canonical !== undefined && within(entry.canonical))) {
+      if (isWithin(candidate, stored) || (entry.canonical !== undefined && isWithin(candidate, entry.canonical))) {
+        return true;
+      }
+      /* A request that names the root by its published, non-canonical spelling
+       * before that root has settled (an 8.3 `RUNNER~1` profile on Windows,
+       * `/var` for `/private/var` on macOS). Its own `realpath` above has just
+       * answered on the same mount, so the root is canonicalised here, and the
+       * comparison stays physical: a symlink under the root that leaves it is
+       * still refused. */
+      if (entry.canonical === undefined && isWithin(spelled, stored) && isWithin(candidate, canonicalPath(stored))) {
         return true;
       }
     }

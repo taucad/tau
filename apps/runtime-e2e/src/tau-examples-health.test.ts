@@ -4,7 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { Engine } from 'geospec-engine/node';
 import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
-import { createExampleGeoSpecRuntimeClient, exampleKernelExtensions } from '@taucad/tau-examples/runtime';
+import {
+  createExampleGeoSpecRuntimeClient,
+  exampleKernelExtensions,
+  exampleUnpreparedKernelIds,
+} from '@taucad/tau-examples/runtime';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -16,11 +20,19 @@ const inventory = JSON.parse(readFileSync(resolve(examplesSource, 'manifest.json
   kernel: string;
   name: string;
 }>;
+/*
+ * A native kernel (PicoGK) evaluates only once `tau prepare <kernel>` has sealed its closure in this machine's
+ * dependency store; until then the product answers KERNEL_NOT_PREPARED, which is correct and not a model defect.
+ * The corpus is checked on the kernels this machine can run, as the GeoSpec suites' PicoGK row is, and the prepared
+ * turbofan is checked by `runtime-e2e:native-turbofan`, which prepares PicoGK first.
+ */
 const models = inventory.filter(({ kind }) => kind === 'model');
+const runnableModels = models.filter(({ kernel }) => !exampleUnpreparedKernelIds.has(kernel));
+const unpreparedModels = models.filter(({ kernel }) => exampleUnpreparedKernelIds.has(kernel));
 const examplePattern = process.env['TAU_EXAMPLE_PATTERN'];
 const selectedModels = examplePattern
-  ? models.filter(({ kernel, name }) => new RegExp(examplePattern).test(`${kernel}.${name}`))
-  : models;
+  ? runnableModels.filter(({ kernel, name }) => new RegExp(examplePattern).test(`${kernel}.${name}`))
+  : runnableModels;
 const escapeRegExp = (text: string): string => text.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
 
 describe('Tau example model health', () => {
@@ -45,6 +57,11 @@ describe('Tau example model health', () => {
       },
     });
     try {
+      if (unpreparedModels.length > 0) {
+        console.info(
+          `Not prepared on this machine, so not checked here: ${unpreparedModels.map(({ kernel, name }) => `${kernel}.${name}`).join(', ')}`,
+        );
+      }
       expect(selectedModels.length, `TAU_EXAMPLE_PATTERN ${examplePattern ?? ''} selects no model`).toBeGreaterThan(0);
       /* One run per model, so each model's admitted evidence is released before the next loads. A single run keeps
        * every model's retained input live until the module ends, and the corpus outgrows the host's retained input

@@ -1,6 +1,6 @@
 import { completionTypeFromLsp } from '@taucad/editor-ui/components/code/editor-completion-icon';
 import { definitionProvider } from '@taucad/editor-ui/components/code/editor-definition';
-import { storeDiagnostics } from '#components/code/editor-lint.js';
+import { storeDiagnostics } from '@taucad/editor-ui/components/code/editor-lint';
 import { languageFeatures, promptRename } from '@taucad/editor-ui/components/code/editor-language-features';
 import type {
   EditorLocationItem,
@@ -25,7 +25,7 @@ import type { Program } from '@taucad/kcl-wasm-lib/bindings/Program';
 import type { KclValueView } from '@taucad/kcl-wasm-lib/bindings/KclValueView';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { Topic } from '@taucad/events';
-import type { EditorDocument, DocumentChange, TextChange } from '#lib/editor-document.js';
+import type { EditorDocument, DocumentChange, TextChange } from '@taucad/editor-ui/lib/editor-document';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { workspacePathFromFileUri } from '#lib/editor-workspace-fs/editor-workspace-fs.js';
 import { applyEditorWorkspaceEdits } from '#lib/editor-workspace-edits.js';
@@ -50,9 +50,9 @@ import {
   openKclTarget,
 } from '#lib/kcl-language/kcl-navigation.js';
 import type { KclLocation, KclNavigationContext } from '#lib/kcl-language/kcl-navigation.js';
-import type { KclBindingKind, KclOutlineSymbol } from '#lib/kcl-language/kcl-bindings.js';
-import { loadKclStdlib } from '#lib/kcl-language/kcl-stdlib.js';
-import type { KclStdlib } from '#lib/kcl-language/kcl-stdlib.js';
+import type { KclBindingKind, KclOutlineSymbol } from '@taucad/editor-ui/lib/kcl-language/kcl-bindings';
+import { loadKclStdlib } from '@taucad/editor-ui/lib/kcl-language/kcl-stdlib';
+import type { KclStdlib } from '@taucad/editor-ui/lib/kcl-language/kcl-stdlib';
 
 type OpenDocument = { count: number; text: string; unsubscribe: () => void };
 type EditBasis = ReadonlyMap<string, Readonly<{ version: number; text: string }>>;

@@ -2,29 +2,11 @@ import { useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 import { z } from 'zod';
 import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
-import type { SettingId } from '#components/settings/settings-registry.js';
+import type { SettingId } from '@taucad/settings-ui/components/settings/settings-catalogue';
+import { settingsSectionSchema } from '@taucad/settings-ui/components/settings/settings-section';
+import type { SettingsSection } from '@taucad/settings-ui/components/settings/settings-section';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { enumParameter, stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
-
-/** Sections the dialog can show, and the single source of truth for `?settings=`. */
-export const settingsSectionSchema = z.enum([
-  'general',
-  'browser',
-  'filesystem',
-  'account',
-  'security',
-  'repositories',
-  'billing',
-  'data-controls',
-  'viewer',
-  'compute',
-  'machines',
-  'models',
-  'agents',
-  'experimental',
-]);
-
-export type SettingsSection = z.infer<typeof settingsSectionSchema>;
 
 const defaultSection: SettingsSection = 'general';
 

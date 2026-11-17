@@ -23,3 +23,15 @@ export const setCollaboratorRoleSchema = z.object({
   role: z.enum(['read', 'write']),
 });
 export class SetCollaboratorRoleDto extends createZodDto(setCollaboratorRoleSchema) {}
+
+/**
+ * `POST /v1/invitations/accept` — the token from the invitation link.
+ *
+ * The token is a bearer credential, so it travels in the body and never in the
+ * path: request lines reach access logs, proxies and traces, and bodies do not
+ * (#2290). It is 32 random bytes in base64url, so anything longer is not one.
+ */
+export const acceptInvitationSchema = z.object({
+  token: z.string().min(1).max(128),
+});
+export class AcceptInvitationDto extends createZodDto(acceptInvitationSchema) {}

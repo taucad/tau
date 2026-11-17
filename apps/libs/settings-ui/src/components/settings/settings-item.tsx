@@ -1,13 +1,35 @@
 import { Heading } from '@taucad/ui/components/heading';
-import { useId } from 'react';
+import { createContext, useContext, useId } from 'react';
 import type { ComponentProps, ReactNode } from 'react';
 import { Info } from 'lucide-react';
 import { Card } from '@taucad/ui/components/card';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
-import type { SettingId } from '#components/settings/settings-registry.js';
-import { settingsSections } from '#components/settings/settings-registry.js';
+import type { SettingId, SettingsSectionDefinition } from '#components/settings/settings-catalogue.js';
+import { createSettingsCatalogue } from '#components/settings/settings-catalogue.js';
+
+/*
+ * The sections this deployment offers. The host gates the catalogue (Tau Cloud, desktop, feature flags) and provides
+ * the result around its settings; without a provider every catalogue entry but the Experimental flags is offered.
+ */
+const SettingsSectionsContext = createContext<readonly SettingsSectionDefinition[]>(createSettingsCatalogue([]));
+
+/**
+ * Provides the sections this deployment offers to the {@link SettingsItem} destinations below it.
+ *
+ * @param props - The host's gated sections, and the settings they govern.
+ * @returns The provider.
+ */
+export function SettingsSectionsProvider({
+  sections,
+  children,
+}: {
+  readonly sections: readonly SettingsSectionDefinition[];
+  readonly children: ReactNode;
+}): React.JSX.Element {
+  return <SettingsSectionsContext value={sections}>{children}</SettingsSectionsContext>;
+}
 
 type SettingsItemProps = {
   readonly settingId: SettingId;
@@ -18,12 +40,13 @@ type SettingsItemProps = {
 /**
  * An explicit, focusable destination for a registered setting.
  *
- * The registry is the single source of truth for which settings exist in this
- * deployment, so a setting it filters out (Tau Cloud entries in a self-hosted
- * build) renders nothing instead of crashing the panel. Unknown ids are a
- * compile error via `SettingId`.
+ * The provided sections are the single source of truth for which settings exist
+ * in this deployment, so a setting the host filters out (Tau Cloud entries in a
+ * self-hosted build) renders nothing instead of crashing the panel. Unknown ids
+ * are a compile error via `SettingId`.
  */
 export function SettingsItem({ settingId, children, className }: SettingsItemProps): React.JSX.Element | undefined {
+  const settingsSections = useContext(SettingsSectionsContext);
   const definition = settingsSections.flatMap((section) => section.entries).find((entry) => entry.id === settingId);
   if (!definition) {
     return undefined;

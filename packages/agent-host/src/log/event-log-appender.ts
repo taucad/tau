@@ -664,40 +664,79 @@ export const createEventLogAppender = async (
    * holds one of the few threads every file read in this process shares, and a bound only stops the wait: a refresh
    * that began a read of its own each time took every thread after a few resends. A refresh while a read runs shares
    * the one read that begins when it ends, which still sees every write made before that refresh.
+   *
+   * Tau #1098, item 2: nor does the waiting read wait on one read for good. If the open's first read hung, the read
+   * queued behind it never began, and every start, Resume and approval on the chat was refused `SEGMENTS_UNREADABLE`
+   * until the chat was closed and reopened. The queued read now begins once the read it waits on ends, or once the
+   * segment bound has passed since that read began, whichever is first; with two reads outstanding it waits for either
+   * to end. So at most two reads are ever outstanding, and one hung read never holds the chat's history.
    */
-  let inFlight: Promise<Landing> | undefined;
-  let reading = false;
+  type Outstanding = Readonly<{ landing: Promise<Landing>; overdue: Promise<void> }>;
+  const segmentBound = options.segmentReadMilliseconds ?? segmentRefreshMilliseconds; // Bound: segmentRefreshMilliseconds.
+  const outstandingReadLimit = 2;
+  const outstanding = new Map<number, Outstanding>();
+  let readIds = 0;
+  let newest: Outstanding | undefined;
   let queued: Promise<Landing> | undefined;
   const readOnce = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
     readsBegun += 1;
     const order = readsBegun;
-    reading = true;
     try {
       return { order, read: { segments: await read() } };
     } catch (error) {
       return { order, read: { failure: unreadAnomaly(error instanceof Error ? error.message : String(error)) } };
+    }
+  };
+  /* A read, outstanding until it ends: then its bound stops and its slot frees. */
+  const trackedRead = async (
+    id: number,
+    timer: ReturnType<typeof setTimeout>,
+    read: () => Promise<readonly ChatLogSegment[]>,
+  ): Promise<Landing> => {
+    try {
+      return await readOnce(read);
     } finally {
-      reading = false;
+      clearTimeout(timer);
+      outstanding.delete(id);
     }
   };
   const startRead = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
-    inFlight = readOnce(read);
-    return inFlight;
+    const overdue = Promise.withResolvers<undefined>();
+    const timer = setTimeout(() => {
+      overdue.resolve(undefined);
+    }, segmentBound); // Bound: segmentRefreshMilliseconds.
+    (timer as { unref?: () => void }).unref?.();
+    readIds += 1;
+    const landing = trackedRead(readIds, timer, read);
+    const entry: Outstanding = { landing, overdue: overdue.promise };
+    outstanding.set(readIds, entry);
+    newest = entry;
+    return landing;
   };
-  const afterRead = async (
-    running: Promise<Landing>,
-    read: () => Promise<readonly ChatLogSegment[]>,
-  ): Promise<Landing> => {
-    await running;
+  /* The queued read's turn: a read that ends, or the newest read past the bound while a second read may still begin. */
+  const readSlot = async (): Promise<void> => {
+    const ends = Array.from(outstanding.values(), async (entry) => {
+      await entry.landing;
+    });
+    const overdue = outstanding.size < outstandingReadLimit && newest !== undefined ? [newest.overdue] : [];
+    await Promise.race([...ends, ...overdue]);
+  };
+  const afterRead = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
+    await readSlot();
+    /* A read that ended may have been one of two: wait again while both slots are still taken. */
+    while (outstanding.size >= outstandingReadLimit) {
+      // oxlint-disable-next-line no-await-in-loop -- waits for one of the two outstanding reads to end
+      await readSlot();
+    }
     queued = undefined;
     return startRead(read);
   };
   const sharedRead = async (read: () => Promise<readonly ChatLogSegment[]>): Promise<Landing> => {
     if (queued === undefined) {
-      if (!reading || inFlight === undefined) {
+      if (outstanding.size === 0) {
         return startRead(read);
       }
-      queued = afterRead(inFlight, read);
+      queued = afterRead(read);
     }
     return queued;
   };
@@ -741,7 +780,7 @@ export const createEventLogAppender = async (
     const expired = Promise.withResolvers<'expired'>();
     const timer = setTimeout(() => {
       expired.resolve('expired');
-    }, options.segmentReadMilliseconds ?? segmentRefreshMilliseconds); // Bound: segmentRefreshMilliseconds.
+    }, segmentBound); // Bound: segmentRefreshMilliseconds.
     (timer as { unref?: () => void }).unref?.();
     const first = await Promise.race([result, expired.promise]);
     clearTimeout(timer);

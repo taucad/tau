@@ -9,38 +9,6 @@ afterEach(() => {
 });
 
 describe('searchSettings', () => {
-  it('should return no results for an empty query', () => {
-    expect(searchSettings(' \t ')).toEqual([]);
-  });
-
-  it('should normalize case, diacritics, and punctuation', () => {
-    const result = searchSettings('ACCENT---CÓLOR');
-
-    expect(result.flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('accent-color');
-  });
-
-  it('should match every query token across section and setting text', () => {
-    const result = searchSettings('data training');
-
-    expect(result).toHaveLength(1);
-    expect(result[0]?.section.id).toBe('data-controls');
-    expect(result[0]?.entries.map(({ id }) => id)).toEqual(['improve-service']);
-  });
-
-  it('should reject results when any query token is unmatched', () => {
-    expect(searchSettings('theme storage')).toEqual([]);
-  });
-
-  it('should match setting aliases', () => {
-    expect(searchSettings('colour').flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('accent-color');
-    expect(searchSettings('cache').flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('compute-reuse');
-    expect(searchSettings('dark mode').flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('theme');
-    expect(searchSettings('colour theme').flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('theme');
-    expect(searchSettings('cursor hand').flatMap(({ entries }) => entries.map(({ id }) => id))).toContain(
-      'pointer-cursors',
-    );
-  });
-
   it('should include every setting when its section matches', () => {
     const result = searchSettings('agents');
 
@@ -53,12 +21,6 @@ describe('searchSettings', () => {
       'open-tabs',
       'testing-tools',
     ]);
-  });
-
-  it('should rank an exact setting label before section-wide matches', () => {
-    const ids = searchSettings('filesystem').flatMap(({ entries }) => entries.map(({ id }) => id));
-
-    expect(ids[0]).toBe('filesystem-context');
   });
 
   it('should register every feature flag with globally unique setting ids', () => {

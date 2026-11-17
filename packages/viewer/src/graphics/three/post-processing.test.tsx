@@ -27,6 +27,24 @@ vi.mock('@react-three/fiber', () => ({
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useGraphicsSelector: () => mocks.enabled,
 }));
+// The canvas's render tier, resolved from the mocked renderer on every render: the tests reuse one renderer object
+// across adapters, which the per-renderer tier cache would otherwise keep from the first.
+vi.mock('#graphics/three/use-render-tier.js', async () => {
+  const { renderTierFeatures } = await import('#graphics/three/render-tier.js');
+  const { rendererUsesSoftwareRasterizer } = await import('#graphics/three/utils/software-rasterizer.js');
+  return {
+    useRenderTier: () => {
+      const rasterizer = rendererUsesSoftwareRasterizer(mocks.gl) ? 'software' : 'hardware';
+      return {
+        backend: mocks.backend,
+        rasterizer,
+        features: renderTierFeatures(mocks.backend, rasterizer),
+        fallbackReason: undefined,
+        overridden: false,
+      };
+    },
+  };
+});
 vi.mock('#graphics/three/three-graphics-backend-context.jsx', () => ({
   useThreeGraphicsBackend: () => mocks.backend,
 }));

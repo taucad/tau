@@ -418,6 +418,67 @@ const serializedWatcher = (watcher: NativeWatcher): NativeWatcher => ({
     return { unsubscribe: async () => serializeNative(async () => subscription.unsubscribe()) };
   },
 });
+/** How often a Windows watch rewrites its probe while it waits for the native watcher to report it. */
+const watchProbeIntervalMilliseconds = 50;
+/** How long a Windows watch waits for its probe before it is admitted unconfirmed, as it was before probes. */
+const watchProbeBudgetMilliseconds = 5000;
+
+/**
+ * A probe file for the native watch on `directory`. Its name has the shape of
+ * an atomic write's temp file (`.<name>.<pid>.<uuid>.tmp`), so watch streams
+ * and listings never show it and a crash leaves one the temp sweep removes.
+ *
+ * @param directory - The directory the native watch observes.
+ * @returns The probe's path, and a promise the watch callback resolves on its event.
+ */
+const watchProbe = (directory: string): { path: string; seen: PromiseWithResolvers<void> } => ({
+  path: path.join(directory, `.tau-watch-probe.${process.pid}.${randomUUID()}.tmp`),
+  seen: Promise.withResolvers<void>(),
+});
+
+/**
+ * Wait until the native watch reports `probe`, rewriting it meanwhile.
+ *
+ * On Windows `@parcel/watcher`'s `subscribe` resolves once it has queued the
+ * watch to its backend thread, which issues `ReadDirectoryChangesW` later; a
+ * change in between is never reported. So a Windows watch is admitted only
+ * once its own probe came back through it, or after a bounded wait, or at once
+ * if the probe cannot be written (a read-only directory), as before probes.
+ *
+ * @param probe - The probe from {@link watchProbe}, whose `seen` the watch callback resolves.
+ */
+const awaitNativeWatchLive = async (probe: { path: string; seen: PromiseWithResolvers<void> }): Promise<void> => {
+  const seen = (async (): Promise<'live'> => {
+    await probe.seen.promise;
+    return 'live';
+  })();
+  const startedAt = Date.now();
+  try {
+    while (Date.now() - startedAt < watchProbeBudgetMilliseconds) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each rewrite waits for the one before it to be missed.
+        await fs.writeFile(probe.path, String(Date.now()));
+      } catch {
+        return;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- the pause between rewrites, cut short by the probe's event.
+      const outcome = await Promise.race([
+        seen,
+        new Promise<'waiting'>((resolve) => {
+          setTimeout(() => {
+            resolve('waiting');
+          }, watchProbeIntervalMilliseconds);
+        }),
+      ]);
+      if (outcome === 'live') {
+        return;
+      }
+    }
+  } finally {
+    await fs.rm(probe.path, { force: true }).catch(() => undefined);
+  }
+};
+
 type WatchClosures = { pending: Set<Promise<void>>; admissions: Set<Promise<void>>; failures: unknown[] };
 const watchClosures = new WeakMap<NodeFsProvider, WatchClosures>();
 
@@ -1032,9 +1093,23 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       /* Excluded subtrees of a watched directory are never watched natively, so a bulk change under one (a cache
        * rebuild, an install) neither spends inotify watches nor reaches this process at all. */
       const ignore = targetIsDirectory ? nativeIgnores(entry.rootedPath, directory, excludes) : [];
+      const probe = process.platform === 'win32' ? watchProbe(directory) : undefined;
       const subscription = await native.subscribe(
         directory,
-        (error, events) => {
+        (error, reported) => {
+          let events = reported;
+          if (probe !== undefined && error) {
+            /* A stream that failed is never going to report the probe; admission answers the failure. */
+            probe.seen.resolve();
+          }
+          if (probe !== undefined && reported.some((event) => event.path === probe.path)) {
+            probe.seen.resolve();
+            /* The probe is this watch's own, and it arrives before the entry records its directory. */
+            events = reported.filter((event) => event.path !== probe.path);
+            if (events.length === 0 && !error) {
+              return;
+            }
+          }
           if (unsubscribed) {
             return;
           }
@@ -1092,6 +1167,9 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         },
         ignore.length === 0 ? undefined : { ignore },
       );
+      if (probe !== undefined && !unsubscribed) {
+        await awaitNativeWatchLive(probe);
+      }
       if (unsubscribed) {
         close(subscription);
         return;

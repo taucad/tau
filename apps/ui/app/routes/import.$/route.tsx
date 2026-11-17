@@ -52,7 +52,7 @@ import { inspect } from '#machines/inspector.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { isExcludedImportPath } from '@taucad/ui-core/utils/file-reader.utils';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';

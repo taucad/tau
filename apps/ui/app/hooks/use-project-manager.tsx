@@ -10,8 +10,8 @@ import type { projectManagerMachine } from '#hooks/project-manager.machine.js';
 import type { WorkspaceBindingRepairResult } from '@taucad/files-ui/filesystem/handle-store';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
 import type { AppUiPreferences, ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
-import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
+import type { PendingProjectRecovery } from '@taucad/files-ui/types/pending-project-operation.types';
+import type { ProjectLibraryEntry, ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import {

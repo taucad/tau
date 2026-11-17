@@ -27,8 +27,11 @@ import { serializeStartRecord, startRecordPath } from '@taucad/revisions';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
-import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type {
+  PendingProjectOperation,
+  PendingProjectStorage,
+} from '@taucad/files-ui/types/pending-project-operation.types';
+import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
 import type { CreateProjectOptions, ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';

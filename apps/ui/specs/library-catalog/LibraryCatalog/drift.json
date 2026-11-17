@@ -117,16 +117,16 @@
     "writeStopEnded"
   ],
   "sources": {
-    "apps/ui/app/hooks/use-project-manager.tsx": "44bec3a7c238cd824661c721ad1d534f95057e3cf352a79f05ba76c9e679e098",
-    "apps/ui/app/machines/library-access.machine.ts": "1227083a7798d63266441263049a45181d356931c98e5bee0a409cbc869cb539",
-    "apps/ui/app/machines/library-discovery.machine.ts": "6a5cd1451c900aa184f254e719421363ef49b13834acf7f53f7bceea486b00fd",
-    "apps/ui/app/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
-    "apps/ui/app/runtime/project-library-commands.ts": "4a5355dbefa7767e7adeac88329c506a5b32cd7a0a3e1b2ae2401366a48cdd2f",
+    "apps/libs/files-ui/src/machines/library-access.machine.ts": "1227083a7798d63266441263049a45181d356931c98e5bee0a409cbc869cb539",
+    "apps/libs/files-ui/src/machines/library-discovery.machine.ts": "6a5cd1451c900aa184f254e719421363ef49b13834acf7f53f7bceea486b00fd",
+    "apps/libs/files-ui/src/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
+    "apps/ui/app/hooks/use-project-manager.tsx": "e9e92422276a09effe4cd5745a8ab9a1ef7102ef4a9f9f33123a318c6197dfde",
+    "apps/ui/app/runtime/project-library-commands.ts": "64e1c770e78a5ad1c4061890ebaa7c4a6bbb80981cd274bc4c420febcec0242b",
     "apps/ui/app/runtime/project-library-workspace.ts": "f240eba37a406cd97d56f5f5b1b022915b07f5ed124dc2438e26870968188c12",
-    "apps/ui/app/runtime/project-library.ts": "d29b7cfb50b3429f08d7b09cdd4e737293cbb8951eb9b262b90147cc7c509dfe"
+    "apps/ui/app/runtime/project-library.ts": "c64fa5b6106712b22b9839d5664ea84cf5442bb63e5eb794df836523637ba5b7"
   },
   "specs": {
-    "LibraryCatalog.tla": "46cd9b942e2d5cdb97097f8cacd56d5e8422bcd2b90d8471bc93a7ca3296d88a"
+    "LibraryCatalog.tla": "33770eb1fc28aa224633ccee589a692faac879648ecd11d733e21b3239c2ba33"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",

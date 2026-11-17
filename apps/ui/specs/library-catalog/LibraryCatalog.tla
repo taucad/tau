@@ -96,6 +96,9 @@
 \* to `@taucad/files-ui`; the four sources only re-point their imports. No action or correspondence changes.
 \* Project name fit (2026-11-16): `ProjectCommands` keeps a generated name's first line and fits it, and a duplicate's
 \* name, to the manifest's 200 code units before the create is journaled. No action or correspondence changes.
+\* DC-10 files-ui slice 5 (2026-11-17): the three library machines, `project-library.types`,
+\* `pending-project-operation.types`, `project-url.utils` and `project-name.utils` moved to `@taucad/files-ui`; the
+\* four library sources only re-point (and rewrap) their imports. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

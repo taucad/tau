@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectLocator } from '@taucad/filesystem';
-import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
+import type { Workspace } from '#filesystem/handle-store.js';
 import {
   projectChatIdFromSearch,
   projectChatUrl,

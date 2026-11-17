@@ -4,6 +4,7 @@
  */
 
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { tmpdir } from 'node:os';
 import type * as Os from 'node:os';
 import { join } from 'node:path';
@@ -223,6 +224,26 @@ const unresolvedRuntime = (): ProjectHostRuntimeClient => ({
   }),
 });
 
+/**
+ * Remove a test's sandbox, naming what this process still holds open when Windows refuses: a directory there cannot
+ * go while a handle or a process's working directory is in it.
+ */
+const removeSandbox = async (sandbox: string): Promise<void> => {
+  try {
+    await rm(sandbox, { recursive: true, force: true });
+  } catch (error) {
+    const handles = (process as unknown as { _getActiveHandles: () => Array<Record<string, unknown>> })
+      ._getActiveHandles()
+      .map((handle) => handle.constructor.name);
+    await delay(1000);
+    const later = await rm(sandbox, { recursive: true, force: true }).then(
+      () => 'removed a second later',
+      (laterError: unknown) => `still refused a second later: ${String(laterError)}`,
+    );
+    throw new Error(`${String(error)}; open handles: ${handles.join(', ')}; ${later}`, { cause: error });
+  }
+};
+
 /** A project host's options, composed as the desktop utility composes them. */
 const desktopProjectHostOptions = async (
   extra: Pick<ProjectHostOptions, 'turnPlacement'> = {},
@@ -230,7 +251,7 @@ const desktopProjectHostOptions = async (
 ): Promise<ProjectHostOptions> => {
   const sandbox = existing ?? (await mkdtemp(join(tmpdir(), 'tau-project-host-')));
   if (existing === undefined) {
-    cleanups.push(async () => rm(sandbox, { recursive: true, force: true }));
+    cleanups.push(async () => removeSandbox(sandbox));
   }
   const workspaceRoot = join(sandbox, 'home', 'bracket');
   await mkdir(workspaceRoot, { recursive: true });
@@ -966,7 +987,7 @@ describe('createProjectHost', () => {
   /* A renamed machine (a `.local` suffix, a DHCP name) is still the same device, and keeps its own sessions. */
   it('should stamp the same device after the machine is renamed', async () => {
     const sandbox = await mkdtemp(join(tmpdir(), 'tau-project-host-'));
-    cleanups.push(async () => rm(sandbox, { recursive: true, force: true }));
+    cleanups.push(async () => removeSandbox(sandbox));
     const before = createProjectHost(await desktopProjectHostOptions({}, sandbox));
     const beforeDevice = await stampedDevice();
     await before.close();

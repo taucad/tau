@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -565,7 +565,7 @@ describe('the external agent run kind', () => {
         ),
       )
       .digest('hex');
-    expect(consumed[0]!.root.split('/').at(-1)).toBe(digest);
+    expect(basename(consumed[0]!.root)).toBe(digest);
     const opened = harness.frames.find(
       (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/new"'),
     );
@@ -678,7 +678,7 @@ describe('the external agent run kind', () => {
       (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/new"'),
     );
     expect(opened?.frame).toContain('additionalDirectories');
-    expect(opened?.frame).not.toContain(sourceRoot);
+    expect(opened?.frame).not.toContain(JSON.stringify(sourceRoot).slice(1, -1));
     const publication = (JSON.parse(opened!.frame) as { params: { additionalDirectories: string[] } }).params
       .additionalDirectories[0]!;
     await until(async () => sent(harness.frames, 'session/close') === 1, 'skill session eviction');
@@ -692,7 +692,16 @@ describe('the external agent run kind', () => {
     const restored = harness.frames.find(
       (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/resume"'),
     );
-    expect(restored?.frame).toContain(publication);
+    const sentMethods = harness.frames
+      .filter((frame) => frame.direction === 'client->agent')
+      .map((frame) => (JSON.parse(frame.frame) as { method?: string }).method ?? 'reply');
+    /* Parsed, not matched: JSON escapes a Windows path's backslashes. */
+    expect(
+      restored === undefined
+        ? undefined
+        : (JSON.parse(restored.frame) as { params: { additionalDirectories?: string[] } }).params.additionalDirectories,
+      sentMethods.join(' '),
+    ).toEqual([publication]);
 
     const overridden = await startHarness({ systemSkillBundles: [bundle] });
     const overrideRoot = join(overridden.workspaceRoot, '.agents', 'skills', bundle.slug);

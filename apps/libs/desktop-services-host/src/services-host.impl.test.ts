@@ -634,8 +634,10 @@ public static class Params
 });
 
 describe('createServicesHost — filesystem authority lifetime', () => {
+  /* Sandboxes by their canonical spelling, as main publishes a root: a macOS `/var` or Windows 8.3 temp path is served
+   * only once the background `realpath` settles (D8), and these rows serve their concern synchronously. */
   const createHeldRuntimeWrite = async (outcome: 'success' | 'failure') => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-runtime-drain-'));
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-runtime-drain-')));
     const root = join(sandbox, 'project');
     const authorityDirectory = join(sandbox, 'authority');
     await Promise.all([mkdir(root), mkdir(authorityDirectory)]);
@@ -722,7 +724,7 @@ describe('createServicesHost — filesystem authority lifetime', () => {
   });
 
   it('shares one real checked-write owner across overlapping rooted views and drains it on quiesce', async () => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-'));
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-authority-')));
     const root = join(sandbox, 'home');
     const project = join(root, 'project');
     const authorityDirectory = join(sandbox, 'authority');
@@ -774,7 +776,7 @@ describe('createServicesHost — filesystem authority lifetime', () => {
   });
 
   it('rejects a broad authored root that encloses authority metadata before applying its checked write', async () => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-overlap-'));
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-authority-overlap-')));
     const authorityDirectory = join(sandbox, 'filesystem-authority');
     const contentDirectory = join(sandbox, 'project');
     await Promise.all([mkdir(authorityDirectory), mkdir(contentDirectory)]);
@@ -807,7 +809,7 @@ describe('createServicesHost — filesystem authority lifetime', () => {
   });
 
   it('refuses physical and symlinked broad roots before reading, listing, stating, or watching authority metadata', async () => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-private-'));
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-authority-private-')));
     const alias = `${sandbox}-alias`;
     const authorityDirectory = join(sandbox, 'filesystem-authority');
     await mkdir(authorityDirectory);
@@ -855,7 +857,7 @@ describe('createServicesHost — filesystem authority lifetime', () => {
   });
 
   it('returns OS writer ownership when an actual MessageChannel client disconnects', async () => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-detach-'));
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-authority-detach-')));
     const root = join(sandbox, 'project');
     const authorityDirectory = join(sandbox, 'authority');
     await Promise.all([mkdir(root), mkdir(authorityDirectory)]);

@@ -83,6 +83,28 @@ const quit = async (application: ElectronApplication): Promise<void> => {
   await closed;
 };
 
+/**
+ * Replace `app.relaunch` with a recorder that writes the arguments it was given to `target`, so they outlive the
+ * process the restart then quits.
+ */
+const recordRelaunch = async (application: ElectronApplication, target: string): Promise<void> => {
+  await application.evaluate(({ app }, path) => {
+    const { writeFileSync } = process.getBuiltinModule('node:fs');
+    app.relaunch = (options) => {
+      writeFileSync(path, JSON.stringify(options?.args ?? []));
+    };
+  }, target);
+};
+
+const readRelaunch = async (target: string): Promise<string[]> =>
+  JSON.parse(await readFile(target, 'utf8')) as string[];
+
+/* The switches a recorded relaunch adds to what `launch` and Playwright already pass. */
+const relaunchedSwitches = (recorded: readonly string[]): string[] =>
+  recorded.filter(
+    (value) => value.startsWith('--') && !/^--(?:user-data-dir|inspect|remote-debugging-port)(?:=|$)/u.test(value),
+  );
+
 /** The recovery window, once main opened it. */
 const recoveryPage = async (application: ElectronApplication): Promise<Page> => {
   let found: Page | undefined;
@@ -158,27 +180,28 @@ describe('desktop boot recovery (T-R12.12)', () => {
     const application = await launch(userData, { clientRoot: emptyClient });
     const recovery = await recoveryPage(application);
     await expect.poll(async () => recovery.locator('#update-status').textContent()).toMatch(/\S/u);
-    await application.evaluate(({ shell, app }) => {
+    await application.evaluate(({ shell }) => {
       const test = globalThis as typeof globalThis & { __recovery?: string[] };
       test.__recovery = [];
       shell.showItemInFolder = (path) => {
         test.__recovery!.push(`show-logs:${path.endsWith('desktop.log')}`);
       };
-      app.relaunch = (options) => {
-        test.__recovery!.push(`relaunch:${(options?.args ?? []).includes('--safe-mode')}`);
-      };
     });
+    const relaunchRecord = join(userData, 'relaunch.json');
+    await recordRelaunch(application, relaunchRecord);
     await recovery.getByRole('button', { name: 'Show Logs' }).click();
-    await recovery.getByRole('button', { name: 'Restart in Safe Mode' }).click();
     await expect
       .poll(async () =>
-        application
-          .evaluate(() => (globalThis as typeof globalThis & { __recovery?: string[] }).__recovery ?? [])
-          .catch(() => ['closed']),
+        application.evaluate(() => (globalThis as typeof globalThis & { __recovery?: string[] }).__recovery ?? []),
       )
-      .toEqual(expect.arrayContaining(['show-logs:true']));
+      .toEqual(['show-logs:true']);
     const log = await readFile(join(userData, 'logs', 'desktop.log'), 'utf8');
     expect(log).toContain('main.recovery-shown');
+    /* The restart relaunches with `--safe-mode` and quits this process. */
+    const closed = application.waitForEvent('close');
+    await recovery.getByRole('button', { name: 'Restart in Safe Mode' }).click();
+    await closed;
+    expect(await readRelaunch(relaunchRecord)).toContain('--safe-mode');
   }, 300_000);
 
   it('(c) falls back to the native dialog when the recovery page itself is missing', async () => {
@@ -221,25 +244,20 @@ describe('desktop boot recovery (T-R12.12)', () => {
     const userData = await profile();
     const application = await launch(userData);
     await appPage(application);
-    const relaunchArgs = await application.evaluate(async ({ app, Menu }) => {
-      const captured: string[][] = [];
-      app.relaunch = (options) => {
-        captured.push([...(options?.args ?? [])]);
-      };
+    const relaunchRecord = join(userData, 'relaunch.json');
+    await recordRelaunch(application, relaunchRecord);
+    const closed = application.waitForEvent('close');
+    await application.evaluate(({ Menu }) => {
       const help = Menu.getApplicationMenu()?.items.find((item) => item.role === 'help' || item.label === 'Help');
       const troubleshooting = help?.submenu?.items.find((item) => item.label === 'Troubleshooting');
       troubleshooting?.submenu?.items.find((item) => item.label === 'Restart in Safe Mode')?.click();
-      for (let waited = 0; waited < 600 && captured.length === 0; waited += 1) {
-        // oxlint-disable-next-line no-await-in-loop -- poll until the quit owner has armed the relaunch.
-        await new Promise((resolve) => {
-          setTimeout(resolve, 100);
-        });
-      }
-      return captured[0] ?? [];
     });
+    /* The restart quits this process once the relaunch is armed; the next launch starts only after it is gone. */
+    await closed;
+    const relaunchArgs = relaunchedSwitches(await readRelaunch(relaunchRecord));
     expect(relaunchArgs).toContain('--safe-mode');
 
-    const relaunched = await launch(userData, { args: ['--safe-mode'] });
+    const relaunched = await launch(userData, { args: relaunchArgs });
     const page = await appPage(relaunched);
     await expect
       .poll(async () => page.locator('[data-slot="safe-mode-bar"]').isVisible(), { timeout: 120_000 })

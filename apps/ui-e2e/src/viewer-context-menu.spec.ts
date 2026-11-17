@@ -3,30 +3,6 @@ import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
-type ViewerContextMenuBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST_BRIDGES__?: ViewerContextMenuBridge[];
-  __TAU_SECTION_VIEW_TEST__?: {
-    setCamera(camera: {
-      position: readonly [number, number, number];
-      target?: readonly [number, number, number];
-      fov?: number;
-      zoom?: number;
-    }): void;
-    projectWorldPoint(point: readonly [number, number, number]): { x: number; y: number; visible: boolean };
-    getModelHoverState(): { activeUnitId: string | undefined; hoveredComponentId: string | undefined };
-    getModelComponents(): Array<{ id: string; name: string }>;
-    projectModelComponent(componentId: string): Array<{ x: number; y: number; visible: boolean }>;
-  };
-};
-
-type ViewerContextMenuBridge = NonNullable<ViewerContextMenuBridgeWindow['__TAU_SECTION_VIEW_TEST__']> & {
-  getRenderedModelComponentState(componentId: string): {
-    meshCount: number;
-    visibleMeshCount: number;
-    materialOpacities: readonly number[];
-  };
-};
-
 const seedRoute = '/__e2e/viewer-context-menu';
 const canvasSelector = '[data-testid="cad-viewer-canvas-region"] canvas';
 /** Points on or between the fixture's two 16 × 18 × 8 mm boxes, in metres as the bridge takes them. */
@@ -81,10 +57,9 @@ async function readMenuRowGeometry(locator: Locator): Promise<MenuRowGeometry> {
 
 async function driveStableCamera(): Promise<void> {
   await target.evaluate(() => {
-    const bridgeWindow = globalThis as unknown as ViewerContextMenuBridgeWindow;
     const bridges =
-      bridgeWindow.__TAU_SECTION_VIEW_TEST_BRIDGES__ ??
-      (bridgeWindow.__TAU_SECTION_VIEW_TEST__ ? [bridgeWindow.__TAU_SECTION_VIEW_TEST__] : []);
+      globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ??
+      (globalThis.__TAU_SECTION_VIEW_TEST__ ? [globalThis.__TAU_SECTION_VIEW_TEST__] : []);
     if (bridges.length === 0) {
       throw new Error('Viewer context menu e2e bridge is not installed.');
     }
@@ -106,11 +81,10 @@ async function projectWorldPoint(
 ): Promise<{ x: number; y: number; visible: boolean }> {
   return target.evaluate(
     ({ nextPoint, nextBridgeIndex }) => {
-      const bridgeWindow = globalThis as unknown as ViewerContextMenuBridgeWindow;
       const bridge =
         nextBridgeIndex === undefined
-          ? bridgeWindow.__TAU_SECTION_VIEW_TEST__
-          : bridgeWindow.__TAU_SECTION_VIEW_TEST_BRIDGES__?.[nextBridgeIndex];
+          ? globalThis.__TAU_SECTION_VIEW_TEST__
+          : globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.[nextBridgeIndex];
       if (!bridge) {
         throw new Error('Viewer context menu e2e bridge is not installed.');
       }
@@ -124,11 +98,10 @@ async function projectWorldPoint(
 async function getHoveredComponentId(bridgeIndex?: number): Promise<string | undefined> {
   return target.evaluate(
     ({ nextBridgeIndex }: { nextBridgeIndex?: number }) => {
-      const bridgeWindow = globalThis as unknown as ViewerContextMenuBridgeWindow;
       const bridge =
         nextBridgeIndex === undefined
-          ? bridgeWindow.__TAU_SECTION_VIEW_TEST__
-          : bridgeWindow.__TAU_SECTION_VIEW_TEST_BRIDGES__?.[nextBridgeIndex];
+          ? globalThis.__TAU_SECTION_VIEW_TEST__
+          : globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.[nextBridgeIndex];
       if (!bridge) {
         throw new Error('Viewer context menu e2e bridge is not installed.');
       }
@@ -140,16 +113,12 @@ async function getHoveredComponentId(bridgeIndex?: number): Promise<string | und
 }
 
 async function waitForViewerBridge(): Promise<void> {
-  await target.waitFor(
-    () => ((globalThis as unknown as ViewerContextMenuBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__?.length ?? 0) > 0,
-  );
+  await target.waitFor(() => (globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.length ?? 0) > 0);
 }
 
 async function waitForViewerBridgeCount(count: number): Promise<void> {
   await target.waitFor(
-    (expectedCount) =>
-      (globalThis as unknown as ViewerContextMenuBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__?.length ===
-      expectedCount,
+    (expectedCount) => globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.length === expectedCount,
     count,
     { timeout: 60_000 },
   );
@@ -157,9 +126,7 @@ async function waitForViewerBridgeCount(count: number): Promise<void> {
 
 async function getBridgeSourcePath(bridgeIndex: number): Promise<string> {
   return target.evaluate((nextBridgeIndex) => {
-    const unitId = (globalThis as unknown as ViewerContextMenuBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__?.[
-      nextBridgeIndex
-    ]?.getModelHoverState().activeUnitId;
+    const unitId = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.[nextBridgeIndex]?.getModelHoverState().activeUnitId;
     if (!unitId?.startsWith('file:')) {
       throw new Error(`Viewer bridge ${nextBridgeIndex} is not bound to a source-file unit.`);
     }
@@ -169,7 +136,7 @@ async function getBridgeSourcePath(bridgeIndex: number): Promise<string> {
 
 async function readRenderedComponentStates(componentId: string) {
   return target.evaluate((nextComponentId) => {
-    const bridges = (globalThis as unknown as ViewerContextMenuBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+    const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
     return bridges.map((bridge) => bridge.getRenderedModelComponentState(nextComponentId));
   }, componentId);
 }
@@ -177,7 +144,7 @@ async function readRenderedComponentStates(componentId: string) {
 async function waitForSharedRenderedModel(): Promise<void> {
   await target.waitFor(
     () => {
-      const bridges = (globalThis as unknown as ViewerContextMenuBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+      const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
       const componentIds = bridges[0]?.getModelComponents().map(({ id }) => id) ?? [];
       return (
         bridges.length === 2 &&
@@ -212,9 +179,7 @@ async function hasHoverAtPoint(
 
 async function findComponentHitPoint(bridgeIndex = 0): Promise<{ x: number; y: number }> {
   const projectedComponentPoints = await target.evaluate((nextBridgeIndex) => {
-    const bridge = (globalThis as unknown as ViewerContextMenuBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__?.[
-      nextBridgeIndex
-    ];
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.[nextBridgeIndex];
     if (!bridge) {
       throw new Error(`Viewer bridge ${nextBridgeIndex} is not installed.`);
     }
@@ -266,7 +231,7 @@ async function openSeededProject(): Promise<void> {
   await waitForViewerBridge();
   await target.waitFor(
     () => {
-      const bridge = (globalThis as unknown as ViewerContextMenuBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__?.[0];
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.[0];
       return (
         bridge?.getModelComponents().some(({ id }) => bridge.getRenderedModelComponentState(id).visibleMeshCount > 0) ??
         false

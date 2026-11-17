@@ -23,6 +23,7 @@ import {
 import type { StoredProjectConfig } from '#support/project-storage-state.js';
 import { awaitSaved, historyRow, revisionChip, visibleRevisionsPanel } from '#support/revision-session.js';
 import { filesPane, treeItem } from '#support/file-tree.js';
+import type { SectionViewTestCutValues } from '@taucad/app/test-bridges/section-view';
 
 const projectNames = { a: 'Project Navigation A', b: 'Project Navigation B' } as const;
 const entryPaths = { a: 'alpha.ts', b: 'beta.ts' } as const;
@@ -451,17 +452,12 @@ test('A0.1 row 4 (S34): a rename in a second tab reaches the first tab’s libra
   await target.expectCount(selectors.getByText(/doesn't exist|may have been deleted|project not found/iu), 0);
 });
 
-type SectionCut = Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>;
-type SectionBridge = Readonly<{
-  setSectionCuts(cuts: readonly SectionCut[]): string[];
-  getSectionState(): Readonly<{ isActive: boolean; cuts: ReadonlyArray<SectionCut & Readonly<{ id: string }>> }>;
-}>;
+type SectionCut = SectionViewTestCutValues;
 
 /** The live section's values; cut ids are made anew at every seed, so they are left out. */
 const readSection = async (): Promise<Readonly<{ isActive: boolean; cuts: readonly SectionCut[] }> | undefined> =>
   target.evaluate(() => {
-    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionBridge })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       return undefined;
     }
@@ -535,9 +531,7 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
   await target.expectContainingText(source, 'makeBaseBox(18', 30_000);
   const chatToggle = selectors.getByRole('button', { name: 'Toggle Chat lane' }).first();
   await target.expectAttribute(chatToggle, 'aria-pressed', 'true');
-  await target.waitFor(() =>
-    Boolean((globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: unknown }).__TAU_SECTION_VIEW_TEST__),
-  );
+  await target.waitFor(() => Boolean(globalThis.__TAU_SECTION_VIEW_TEST__));
   const cut: SectionCut = { kind: 'plane', plane: 'xz', offset: 0.017, isFlipped: true };
 
   if (isAtOnce) {
@@ -558,9 +552,7 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
           const clock = (): number => performance.timeOrigin + performance.now();
           document.querySelector<HTMLButtonElement>('[data-a01-chat-toggle]')?.click();
           const toggledAt = clock();
-          (
-            globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionBridge }
-          ).__TAU_SECTION_VIEW_TEST__?.setSectionCuts([input.cut]);
+          globalThis.__TAU_SECTION_VIEW_TEST__?.setSectionCuts([input.cut]);
           const cutAt = clock();
           if (element instanceof HTMLElement) {
             element.focus();
@@ -633,8 +625,7 @@ const editViewArrangeAndReload = async (isAtOnce: boolean): Promise<EditedAndRel
   await target.expectAttribute(chatToggle, 'aria-pressed', 'false');
   /* The view setting: a section cut on A's view. */
   await target.evaluate((nextCut) => {
-    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionBridge })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     bridge?.setSectionCuts([nextCut]);
   }, cut);
   await expect.poll(readSection).toEqual({ isActive: true, cuts: [cut] });
@@ -705,7 +696,8 @@ test('A0.1 row 5a (S26, D26, A7c): an arrangement, a view setting and an edit ma
     viewKept:
       section?.isActive === true &&
       section.cuts.length === 1 &&
-      restored?.kind === cut.kind &&
+      restored?.kind === 'plane' &&
+      cut.kind === 'plane' &&
       restored.plane === cut.plane &&
       restored.offset === cut.offset &&
       restored.isFlipped === cut.isFlipped,

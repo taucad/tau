@@ -3,17 +3,6 @@ import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { waitForRenderedGeometry } from '#support/headless-capture.js';
 
-/**
- * The owned-project Preview at `/w/{workspace}/{project}/preview`.
- *
- * Builtin examples have no preview route of their own any more: 2ba77dbeaa ("Add provider-qualified project
- * sharing") removed `/examples/:id`, so the example is seeded as an owned project first. Preview itself is the
- * viewer and workbench Dockviews since #679, which retired the page's `3D model preview` image and its debug
- * bounding-box panel; the scene is read through the viewer's `TAU_DEBUG` bridge, which global-setup enables.
- */
-
-type Bounds = Readonly<{ min: readonly [number, number, number]; max: readonly [number, number, number] }>;
-
 type RenderedModel = Readonly<{
   components: number;
   meshes: number;
@@ -29,15 +18,7 @@ const seedExample = async (locator: string): Promise<string> => {
 
 const readRenderedModel = async (): Promise<RenderedModel> =>
   target.evaluate(() => {
-    const bridge = (
-      globalThis as {
-        __TAU_SECTION_VIEW_TEST__?: {
-          getModelComponents(): ReadonlyArray<Readonly<{ id: string }>>;
-          getRenderedModelComponentState(id: string): Readonly<{ meshCount: number }>;
-          getRenderedModelComponentSurfaceBounds(id: string): Bounds | undefined;
-        };
-      }
-    ).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     const components = bridge?.getModelComponents() ?? [];
     const min = [Infinity, Infinity, Infinity];
     const max = [-Infinity, -Infinity, -Infinity];

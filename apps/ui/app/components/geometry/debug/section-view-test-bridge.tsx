@@ -1,31 +1,35 @@
 import { downloadBlob } from '@taucad/utils/file';
-import type { WorkspaceRendererIdentity } from '#components/geometry/debug/workspace-renderer-diagnostics.js';
 import { getWorkspaceRendererIdentity } from '#components/geometry/debug/workspace-renderer-diagnostics.js';
+import type {
+  SectionViewTestBridgeApi,
+  SectionViewTestCameraState,
+  SectionViewTestCameraTransitionDiagnostics,
+  SectionViewTestCapCompleteness,
+  SectionViewTestCut,
+  SectionViewTestHelperMaterialState,
+  SectionViewTestHelperSummary,
+  SectionViewTestPresentedTier,
+  SectionViewTestProjectedPoint,
+  SectionViewTestRenderedModelComponentState,
+} from '#components/geometry/debug/section-view-test-bridge-api.js';
 import { webGpuFallbackReason } from '@taucad/viewer/graphics/graphics-backend';
+import { useViewerEnvironment } from '@taucad/viewer/environment/viewer-environment';
+import { resolveRenderTier } from '@taucad/viewer/graphics/three/render-tier';
+import { selectPresentedRenderTier } from '@taucad/viewer/machines/canvas.machine';
 import React, { useEffect } from 'react';
 import * as THREE from 'three';
 import { renderLoopObservers } from '@taucad/viewer/graphics/three/render-loop-observer';
-import type { RenderLoopCapture } from '@taucad/viewer/graphics/three/render-loop-observer';
 import { createRenderFrameTimer } from '@taucad/viewer/graphics/three/render-frame-timing';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { RendererInstance } from '@taucad/viewer/graphics/three/renderer';
 import { perspectiveVerticalSpan, resolveCameraUp } from '@taucad/camera';
-import type { CameraSource } from '@taucad/camera/machine';
 import type { RenderFrame } from '@taucad/spatial';
 import { fromThreeRenderBounds, fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { graphicsSettingsForView } from '@taucad/workbench-panes/records/view-record';
-import type { GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
 import type { GraphicsContext } from '@taucad/viewer/machines/graphics.machine';
 import { areSectionCutsEqual, resolveSectionPieces } from '@taucad/viewer/graphics/section-cuts';
-import type {
-  SectionAxis,
-  SectionCut,
-  SectionCutPatch,
-  SectionPiece,
-  SectionPlane,
-} from '@taucad/viewer/graphics/section-cuts';
 import type { SectionHandleTarget } from '@taucad/viewer/graphics/three/controls/section-handles';
 import {
   useCameraConnectorRef,
@@ -51,258 +55,9 @@ import {
 const selectGestureHeld = (cameraRef: GraphicsContext['cameraRef']): boolean =>
   cameraRef.getSnapshot().matches({ gesture: 'held' });
 
-/**
- * A cut to add: what is left out takes the Add menu's default with no view (a plane through the bounds centre,
- * unflipped; a 90° cutaway from angle zero). A cutaway passes through the bounds centre.
- */
-export type SectionViewTestCut =
-  | Readonly<{
-      kind: 'plane';
-      plane: SectionPlane;
-      offset?: number;
-      isFlipped?: boolean;
-    }>
-  | Readonly<{
-      kind: 'revolution';
-      axis: SectionAxis;
-      start?: number;
-      sweep?: number;
-    }>;
-
-export type SectionViewTestSectionState = Readonly<{
-  isActive: boolean;
-  cuts: readonly SectionCut[];
-  selectedCutId: string | undefined;
-  hoveredCutId: string | undefined;
-  /** The cuts the caps last committed, which picking and captures read, and the pieces they remove. */
-  committedCuts: readonly SectionCut[];
-  committedPieces: readonly SectionPiece[];
-  /** Whether the committed cuts hold the live cuts' values: the caps have caught up with the last edit. */
-  isCommitted: boolean;
-}>;
-
-export type SectionViewTestCamera = Readonly<{
-  position: readonly [number, number, number];
-  target?: readonly [number, number, number];
-  fov?: number;
-  zoom?: number;
-  rollRadians?: number;
-}>;
-
-export type SectionViewTestCameraState = Readonly<{
-  actorStatus: string;
-  actorError?: string;
-  projection: 'orthographic' | 'perspective';
-  requestedFov: number;
-  requestedPerspectiveZoom: number;
-  bounds: Readonly<{
-    min: readonly [number, number, number];
-    max: readonly [number, number, number];
-  }>;
-  handoffFov?: number;
-  verticalSpan: number;
-  /** The camera actor's view revision; it advances once for every view change the actor applies. */
-  revision: number;
-  /** The source of the change that produced `revision` (`input`, `framing`, `persisted` and so on). */
-  lastChangeSource: CameraSource;
-  position: readonly [number, number, number];
-  quaternion: readonly [number, number, number, number];
-  target: readonly [number, number, number];
-  fov?: number;
-  zoom?: number;
-  aspect: number;
-  controlsDistance: number;
-  controlsEnabled: boolean;
-  viewportGizmoLockActive: boolean;
-  clipping: Readonly<{ near: number; far: number }>;
-  nativeClipping: Readonly<{ near: number; far: number }>;
-}>;
-
-export type SectionViewTestCameraTransitionDiagnostics = Readonly<{
-  requests: number;
-  frames: number;
-  actorSyncFailures: number;
-  averageRequestToActorSyncMilliseconds: number;
-  maximumRequestToActorSyncMilliseconds: number;
-  maximumRequestToFrameMilliseconds: number;
-  staleFrames: number;
-}>;
-
-export type SectionViewTestHelperSummary = Readonly<{
-  sectionHelperMeshCount: number;
-  sectionHelperLineSegments2Count: number;
-  sectionHelperContourSegmentCount: number;
-  sectionHelperRenderOrders: Readonly<{
-    meshes: readonly number[];
-    lineSegments2: readonly number[];
-  }>;
-  sectionHelperMaterialStates: readonly SectionViewTestHelperMaterialState[];
-}>;
-
-export type SectionViewTestHelperMaterialState = Readonly<{
-  objectType: string;
-  materialType: string;
-  renderOrder: number;
-  transparent: boolean;
-  depthTest: boolean;
-  depthWrite: boolean;
-}>;
-
-export type SectionViewTestProjectedPoint = Readonly<{
-  x: number;
-  y: number;
-  visible: boolean;
-}>;
-
-export type SectionViewTestModelHoverState = Readonly<{
-  activeUnitId: string | undefined;
-  hoveredComponentId: string | undefined;
-}>;
-
-export type SectionViewTestModelComponent = Readonly<{
-  id: string;
-  name: string;
-}>;
-
-export type SectionViewTestModelVisibility = Readonly<{
-  hiddenComponentIds: readonly string[];
-  isolatedComponentIds: readonly string[];
-}>;
-
-export type SectionViewTestRenderedModelComponentState = Readonly<{
-  meshCount: number;
-  visibleMeshCount: number;
-  materialOpacities: readonly number[];
-  surfaceMaterialOpacities: readonly number[];
-  edgeMaterialOpacities: readonly number[];
-}>;
-
-/** How the caps graded the committed sources: every source is capped, exactly or per loop. */
-export type SectionViewTestCapCompleteness = Readonly<{
-  status: 'complete';
-  admittedSourceCount: number;
-  exactSourceCount: number;
-  perLoopSourceCount: number;
-  pendingSourceCount: number;
-  sources: ReadonlyArray<
-    Readonly<{ sourceKey: string; grade: 'exact' | 'per-loop' | 'pending'; reason: string | undefined }>
-  >;
-}>;
-
-export type SectionViewTestMeasureState = Readonly<{
-  isMeasureActive: boolean;
-  /** True while camera controls hold a gesture (`gesture.held`); a measure gesture started here is discarded. */
-  cameraInteracting: boolean;
-  /** Meshes the measure tool has drawn into the scene: snap indicators, lines and labels. */
-  measurementUiMeshCount: number;
-  rendererGeometryCount: number;
-  snapDistancePx: number;
-  candidates: GraphicsContext['measureCandidates'];
-  activeCandidateId: string | undefined;
-  lockedTargetId: string | undefined;
-  mode: GraphicsContext['measureMode'];
-  currentStart: readonly [number, number, number] | undefined;
-  measurements: ReadonlyArray<
-    Readonly<{
-      id: string;
-      distance: number;
-      startPoint: readonly [number, number, number];
-      endPoint: readonly [number, number, number];
-      operation?: string;
-      quality?: string;
-      status?: string;
-      unavailableReason?: string;
-    }>
-  >;
-}>;
-
 /** Renderers this page's bridges have seen, numbered in the order they were first asked about. */
 const rendererGenerations = new WeakMap<RendererInstance, number>();
 let lastRendererGeneration = 0;
-
-export type SectionViewTestBridgeApi = Readonly<{
-  getGraphicsBackend(): 'webgl' | 'webgpu';
-  /** Why this page draws on WebGL where WebGPU was asked for (`canvas-loss`), or `undefined` when it has not fallen back. */
-  getWebGpuFallbackReason(): 'canvas-loss' | undefined;
-  /** A number that changes whenever this viewport's renderer is replaced, as by a remount. */
-  getRendererGeneration(): number;
-  /** Identity from this viewport's renderer, never a separately created probe context. */
-  getRendererIdentity(): WorkspaceRendererIdentity;
-  /** Warmed full R3F frame submission and completion latency, in milliseconds; excludes RAF/vsync. */
-  measureRenderFrames(options?: Readonly<{ gpuTiming?: boolean; orbit?: boolean }>): Promise<
-    Readonly<{
-      submission: readonly number[];
-      completion: readonly number[];
-      gpu: ReadonlyArray<number | undefined>;
-      gpuMethod: string;
-      firstSubmission: number;
-      geometries: number;
-      textures: number;
-      drawCalls: number;
-      triangles: number;
-      revision: string;
-      width: number;
-      height: number;
-      pixelRatio: number;
-    }>
-  >;
-  startRenderLoopCapture(): void;
-  finishRenderLoopCapture(): RenderLoopCapture;
-  getViewportCanvas(): HTMLCanvasElement;
-  /** The durable record this view persists, for revisit-equals-reload assertions (Law 4). */
-  getViewSettings(): GraphicsViewSettings | undefined;
-  isGeometryFramed(): boolean;
-  /** Replaces the cuts, none selected, turning Section on (off for none); returns the ids of those added. */
-  setSectionCuts(cuts: readonly SectionViewTestCut[]): string[];
-  /** Adds a cut, selected, turning Section on; undefined when the list is full. */
-  addSectionCut(cut: SectionViewTestCut): string | undefined;
-  updateSectionCut(id: string, patch: SectionCutPatch): void;
-  /** Removing the last cut turns Section off. */
-  removeSectionCut(id: string): void;
-  selectSectionCut(id: string | undefined): void;
-  /** On with no cuts adds the default plane. */
-  setSectionViewActive(active: boolean): void;
-  getSectionState(): SectionViewTestSectionState;
-  /** Where a drawn handle is on screen; only the selected cut has drag handles. */
-  projectSectionHandle(kind: SectionHandleTarget['kind'], cutId: string): SectionViewTestProjectedPoint | undefined;
-  setPresentation(presentation: Readonly<{ surfaces: boolean; lines: boolean }>): void;
-  setGridPresentationClipPolicy(policy: Readonly<{ far: boolean; near: boolean }>): void;
-  getModelComponents(): SectionViewTestModelComponent[];
-  getModelVisibility(): SectionViewTestModelVisibility;
-  getRenderedModelComponentState(componentId: string): SectionViewTestRenderedModelComponentState;
-  /** Actual triangle bounds in anchor-frame metres, including the live mechanism pose. */
-  getRenderedModelComponentSurfaceBounds(componentId: string):
-    | Readonly<{
-        min: readonly [number, number, number];
-        max: readonly [number, number, number];
-      }>
-    | undefined;
-  /** Actual triangle vertices in anchor-frame metres, independent of joint metadata. */
-  getRenderedModelComponentSurfacePoints(componentId: string): Array<readonly [number, number, number]>;
-  projectModelComponent(componentId: string): SectionViewTestProjectedPoint[];
-  hideModelComponent(componentId: string): void;
-  isolateModelComponent(componentId: string): void;
-  resetModelVisibility(): void;
-  setCamera(camera: SectionViewTestCamera): void;
-  setFovAngle(angle: number): void;
-  getCamera(): SectionViewTestCameraState;
-  getCameraTransitionDiagnostics(): SectionViewTestCameraTransitionDiagnostics;
-  resetCameraTransitionDiagnostics(): void;
-  getRenderFrame(): RenderFrame;
-  setRenderFrame(renderFrame: RenderFrame): void;
-  projectWorldPoint(point: readonly [number, number, number]): SectionViewTestProjectedPoint;
-  getModelHoverState(): SectionViewTestModelHoverState;
-  setMeasureActive(active: boolean): void;
-  getMeasureState(): SectionViewTestMeasureState;
-  getSectionHelperSummary(): SectionViewTestHelperSummary;
-  getSectionCapCompleteness(): SectionViewTestCapCompleteness | undefined;
-  getSectionCapStencilDiagnostics(): SectionCapStencilDiagnostics | undefined;
-}>;
-
-type SectionViewTestGlobal = typeof globalThis & {
-  __TAU_SECTION_VIEW_TEST__?: SectionViewTestBridgeApi;
-  __TAU_SECTION_VIEW_TEST_BRIDGES__?: SectionViewTestBridgeApi[];
-};
 
 function isActuallyVisible(object: THREE.Object3D): boolean {
   let current: THREE.Object3D | undefined = object;
@@ -579,6 +334,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
   const setRenderFrame = useSetRenderFrame();
   const modelInteractionRef = useModelInteractionRef();
   const get = useThree((state) => state.get);
+  const { renderTierOverride } = useViewerEnvironment();
   const bridgeRef = React.useRef<SectionViewTestBridgeApi | undefined>(undefined);
   const pendingCaptureRef = React.useRef(false);
   const pendingCameraTransitionRef = React.useRef<
@@ -639,7 +395,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
     }
 
     const { scene } = get();
-    const bridgeGlobal = globalThis as SectionViewTestGlobal;
+    const bridgeGlobal = globalThis;
     const getActiveUnitId = (): string | undefined => graphicsActor.getSnapshot().context.modelInteractionUnitId;
     const setFovAngle = (angle: number): void => {
       const expectedCamera = angle === 0 ? cameraRig.orthographicCamera : cameraRig.perspectiveCamera;
@@ -683,7 +439,46 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       }
       return added?.id;
     };
+    // Aborted when this bridge unmounts: every `whenPresented` still waiting then settles.
+    const unmounted = new AbortController();
     const bridge: SectionViewTestBridgeApi = {
+      async whenPresented() {
+        // The tier is resolved once per renderer, so the canvas actor holds this very object only while it hosts this
+        // bridge's renderer.
+        const ownTier = resolveRenderTier(get().gl, renderTierOverride);
+        const canvasRef = graphicsActor.getSnapshot().context.canvas?.ref;
+        if (!canvasRef) {
+          return undefined;
+        }
+        return new Promise<SectionViewTestPresentedTier | undefined>((resolve) => {
+          const settle = (presented: SectionViewTestPresentedTier | undefined): void => {
+            subscription.unsubscribe();
+            unmounted.signal.removeEventListener('abort', abandon);
+            resolve(presented);
+          };
+          const abandon = (): void => {
+            settle(undefined);
+          };
+          const observe = (snapshot: ReturnType<typeof canvasRef.getSnapshot>): void => {
+            const hosted = snapshot.context.tier;
+            if (
+              snapshot.status !== 'active' ||
+              snapshot.matches('lost') ||
+              snapshot.matches('failed') ||
+              (hosted !== undefined && hosted !== ownTier)
+            ) {
+              settle(undefined);
+              return;
+            }
+            if (selectPresentedRenderTier(snapshot) === ownTier) {
+              settle({ rendererGeneration: bridge.getRendererGeneration(), tier: ownTier });
+            }
+          };
+          const subscription = canvasRef.subscribe({ next: observe, complete: abandon, error: abandon });
+          unmounted.signal.addEventListener('abort', abandon, { once: true });
+          observe(canvasRef.getSnapshot());
+        });
+      },
       getViewSettings() {
         if (!project) {
           return undefined;
@@ -1197,6 +992,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
     bridgeGlobal.__TAU_SECTION_VIEW_TEST__ = bridge;
 
     return () => {
+      unmounted.abort();
       if (bridgeRef.current === bridge) {
         bridgeRef.current = undefined;
       }
@@ -1221,6 +1017,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
     isTauDebugEnabled,
     modelInteractionRef,
     project,
+    renderTierOverride,
     setRenderFrame,
   ]);
 

@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
 import type { FeatureFlags } from '#flags/flag.constants.js';
+import { hardwareRenderTier } from '@taucad/viewer/graphics/three/render-tier';
 
 const mockState = vi.hoisted(() => ({
   flags: undefined as FeatureFlags | undefined,
@@ -102,6 +103,7 @@ describe('ExperimentalSettings', () => {
         actor.getSnapshot().context.canvas?.ref.send({
           type: 'hostCreated',
           backend,
+          tier: hardwareRenderTier(backend),
           surface: { width: 800, height: 600, pixelRatio: 1 },
           domElement: document.createElement('canvas'),
           host: createCallbackLogic<CanvasHostCommand, undefined>(() => undefined),

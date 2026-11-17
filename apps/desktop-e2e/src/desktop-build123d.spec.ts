@@ -528,38 +528,39 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     expect(size[1]).toBeCloseTo(12, 7);
     expect(size[2]).toBeCloseTo(10, 7);
 
+    /* A real quit on every platform, as the PicoGK row below: the fixture's own disposal is `app.exit`, which skips
+     * the shutdown that removes each worker's temporary root. The worker census reads `ps`, so Windows proves the
+     * clean exit only. */
+    const workers = nativeWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
     if (process.platform !== 'win32') {
-      const workers = nativeWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
       expect(workers.length).toBeGreaterThan(0);
-      /* A real quit, as the PicoGK row below: the fixture's own disposal is `app.exit`, which skips the shutdown
-       * that removes each worker's temporary root. */
-      const electronProcess = session.application.process();
-      await expect
-        .poll(
-          async () =>
-            page.evaluate(() => {
-              const shell = globalThis as typeof globalThis & { tau?: { quit?: { isReady(): boolean } } };
-              return shell.tau?.quit?.isReady() ?? false;
-            }),
-          { timeout: 120_000 },
-        )
-        .toBe(true);
-      await session.application.evaluate(({ app }) => {
-        app.quit();
-      });
-      await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).toBe(0);
-      expect(electronProcess.signalCode).toBeNull();
-      await session.close();
-      session = undefined;
-      await expect
-        .poll(() => workers.every(({ pid }) => !nativeWorkers().some((worker) => worker.pid === pid)), {
-          timeout: 10_000,
-        })
-        .toBe(true);
-      await expect
-        .poll(() => workers.every(({ temporaryRoot }) => !existsSync(temporaryRoot)), { timeout: 10_000 })
-        .toBe(true);
     }
+    const electronProcess = session.application.process();
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            const shell = globalThis as typeof globalThis & { tau?: { quit?: { isReady(): boolean } } };
+            return shell.tau?.quit?.isReady() ?? false;
+          }),
+        { timeout: 120_000 },
+      )
+      .toBe(true);
+    await session.application.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).toBe(0);
+    expect(electronProcess.signalCode).toBeNull();
+    await session.close();
+    session = undefined;
+    await expect
+      .poll(() => workers.every(({ pid }) => !nativeWorkers().some((worker) => worker.pid === pid)), {
+        timeout: 10_000,
+      })
+      .toBe(true);
+    await expect
+      .poll(() => workers.every(({ temporaryRoot }) => !existsSync(temporaryRoot)), { timeout: 10_000 })
+      .toBe(true);
   } catch (error) {
     await session?.capture('build123d-failure');
     throw error;

@@ -306,6 +306,25 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-desktop.mts --platform win32-x64 --archive"
       }
     },
+    "package-windows-e2e": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "The unpacked win32-x64 test package the Windows packaged end-to-end gate runs (desktop-packaged-windows.yml). No --archive, so it honours TAU_API_URL and the TAU_E2E_* switches; never a distribution."
+      },
+      "dependsOn": [
+        "build",
+        {
+          "projects": ["ui"],
+          "target": "check-desktop-payload"
+        },
+        "prepare-build123d-python-windows"
+      ],
+      "outputs": ["{projectRoot}/package-out"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-desktop.mts --platform win32-x64"
+      }
+    },
     "test-macos-package-mode": {
       "executor": "nx:run-commands",
       "options": {

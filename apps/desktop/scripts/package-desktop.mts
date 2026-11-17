@@ -18,6 +18,8 @@
  * Each omission is printed before packaging.
  * Usage: node --import @oxc-node/core/register apps/desktop/scripts/package-desktop.mts --platform linux-x64|win32-x64
  *   [--archive]
+ * Without --archive the unpacked app is a test package: it honours endpoint and E2E environment overrides, as an
+ * unsigned package-macos build does. Every --archive build is locked to its built-in endpoints.
  * Output: <output root>/Tau-<target>/ (the unpacked app); with --archive, after the vendored-licence gate,
  * <output root>/Tau-linux-x64.tar.gz or <output root>/Tau-win32-x64.zip.
  * Exit codes: 0 on an assembled app (and archive); non-zero on a wrong host, missing artifacts, a held licence, or a
@@ -138,8 +140,11 @@ await stageRuntimePackages({
   desktopRoot,
   stageRoot,
   packages: runtimePackages,
+  /* A distribution archive is a release and stays locked to its built-in endpoints; an unpacked app without one is a
+   * test package (the Windows packaged end-to-end suite, `desktop:package-windows-e2e`), which must honour
+   * `TAU_API_URL` and the `TAU_E2E_*` switches the way an unsigned `package-macos` build does. */
   manifestFields: desktopManifestFields({
-    environmentOverrides: false,
+    environmentOverrides: !writesArchive,
     channel: desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']),
   }),
 });

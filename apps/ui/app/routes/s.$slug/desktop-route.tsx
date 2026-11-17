@@ -40,8 +40,8 @@ import { parseShareSlug } from '@taucad/share/locator';
 import { Button } from '@taucad/ui/components/button';
 import { Loader } from '@taucad/ui/components/loader';
 import { PublicationLockScreen } from '#components/share/publication-lock-screen.js';
-import type { PublicationLockScreenVariant } from '#components/share/publication-lock-screen.js';
-import { parsePublicationRecord } from '#components/share/parsed-publication.js';
+import type { PublicationLockScreenVariant } from '@taucad/publish-ui/components/share/publication-lock-screen';
+import { parsePublicationRecord } from '@taucad/publish-ui/components/share/parsed-publication';
 import {
   ErrorBoundary as PublicationErrorBoundary,
   PublicationInteractiveSurface,

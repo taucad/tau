@@ -4,7 +4,6 @@ import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { listDataTransfer, listFileList } from '@taucad/ui-core/utils/file-reader.utils';
 import type { ImportListing, ImportSourceDescriptor } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
-import { findMainFile } from '#routes/import.$/import.utils.js';
 
 /**
  * Plans one source in the file-manager worker: paths and sizes come back,
@@ -12,6 +11,9 @@ import { findMainFile } from '#routes/import.$/import.utils.js';
  */
 /** Plans a source in the worker; `signal` aborts when the planning actor stops, so a cancelled plan never becomes the plan. */
 export type ImportPlanner = (source: ImportSourceDescriptor, signal?: AbortSignal) => Promise<ImportListing>;
+
+/** Picks the main file to preselect from a listing's paths. The route supplies it from its import rules. */
+type MainFilePicker = (filePaths: string[]) => string | undefined;
 
 const emptyListing: ImportListing = {
   name: 'Uploaded Files',
@@ -26,6 +28,7 @@ const emptyListing: ImportListing = {
 export type ImportDiskContext = {
   parentRef: AnyActorRef | undefined;
   plan: ImportPlanner;
+  pickMainFile: MainFilePicker;
   /** What the source holds once the policy and limits judged it: the review's paths and sizes. */
   listing: ImportListing;
   importName: string;
@@ -46,6 +49,7 @@ export type ImportOrigin = 'folder' | 'zip';
 type ImportDiskInput = {
   parentRef?: AnyActorRef;
   plan?: ImportPlanner;
+  pickMainFile: MainFilePicker;
 };
 
 /**
@@ -164,7 +168,10 @@ const fail = (error: unknown, enq: ImportDiskEnqueue) => {
 /* The handlers every reading state shares: the files land, and progress is reported as it moves. */
 const readingHandlers = {
   filesRead: (
-    { event }: Readonly<{ event: Extract<ImportDiskEvent, { type: 'filesRead' }> }>,
+    {
+      context,
+      event,
+    }: Readonly<{ context: ImportDiskContext; event: Extract<ImportDiskEvent, { type: 'filesRead' }> }>,
     enq: ImportDiskEnqueue,
   ) => {
     const { listing } = event;
@@ -174,7 +181,7 @@ const readingHandlers = {
         listing,
         importName: event.importName,
         origin: event.origin,
-        selectedMainFile: findMainFile(listing.files.map(({ path }) => path)),
+        selectedMainFile: context.pickMainFile(listing.files.map(({ path }) => path)),
       },
     };
   },
@@ -229,6 +236,7 @@ export const importDiskMachine = setup({
       (async () => {
         throw new Error('An import needs the file manager to plan its files.');
       }),
+    pickMainFile: input.pickMainFile,
     listing: emptyListing,
     importName: 'Uploaded Files',
     selectedMainFile: undefined,

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router';
 import { Switch } from '@taucad/ui/components/switch';
 import { useSession } from '@better-auth-ui/react';
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { CookiePreferencesDialog } from '#components/cookie-preferences.js';
 import { CloudAccountClosure } from '#cloud/settings-billing.js';
 import { desktopAnalyticsCopy, useDesktopAnalytics } from '#hooks/use-desktop-analytics.js';

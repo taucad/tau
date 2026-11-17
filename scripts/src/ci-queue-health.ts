@@ -20,6 +20,10 @@ export type WorkflowRun = {
   readonly id: number;
   /** The merge-group commit the run tested; the queue moves the base branch to it when the group lands. */
   readonly head_sha?: string;
+  /** `gh-readonly-queue/main/pr-<n>-<base sha>` for a merge group, the branch for a push (flake ledger). */
+  readonly head_branch?: string | undefined;
+  /** `merge_group`, `push`, ... (flake ledger). */
+  readonly event?: string | undefined;
   readonly status: string | undefined;
   readonly conclusion: string | undefined;
   readonly created_at: string;

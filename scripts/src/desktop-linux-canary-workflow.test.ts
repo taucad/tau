@@ -64,6 +64,8 @@ const linuxRows = [
   'debian-apt-x11',
   'debian-appimage-x11',
 ];
+/** T-B22.4 (desktop resilient startup blueprint, I2): route qualification's Linux recovery rows. */
+const linuxRecoveryRows = ['ubuntu-apt-recovery-x11', 'ubuntu-appimage-recovery-x11'];
 const ids = (rows: unknown): readonly string[] => (rows as ReadonlyArray<{ readonly id: string }>).map(({ id }) => id);
 
 describe('Linux clean-host acceptance canary', () => {
@@ -117,7 +119,11 @@ describe('Linux route qualification canary', () => {
     for (const graphics of ['stock', 'isolated-software']) {
       const outputs = select('linux', graphics);
       expect(ids(outputs['canary'])).toEqual(['ubuntu-apt-x11']);
-      expect(ids(outputs['matrix'])).toEqual(linuxRows.slice(1));
+      // Stock runs add the T-B22.4 recovery rows after the chain rows; software CI has no receipts to gate.
+      expect(ids(outputs['matrix'])).toEqual([
+        ...linuxRows.slice(1),
+        ...(graphics === 'stock' ? linuxRecoveryRows : []),
+      ]);
     }
   });
 
@@ -125,7 +131,7 @@ describe('Linux route qualification canary', () => {
     const mac = select('macos');
     expect(mac['canary']).toEqual([]);
     expect(ids(mac['matrix'])).toEqual(['macos-zip-arm64', 'macos-dmg-arm64']);
-    expect(ids(select('all')['matrix'])).toHaveLength(11);
+    expect(ids(select('all')['matrix'])).toHaveLength(14);
   });
 
   it('holds the rest of a Linux matrix until the canary passes', () => {
@@ -157,7 +163,7 @@ describe('Platform-scoped production evidence', () => {
 
   it('selects Linux and Mac rows for a production qualification', () => {
     for (const [scope, rows] of [
-      ['linux', linuxRows.slice(1)],
+      ['linux', [...linuxRows.slice(1), ...linuxRecoveryRows]],
       ['macos', ['macos-zip-arm64', 'macos-dmg-arm64']],
     ] as const) {
       const outputs = selectRows(qualification.jobs['admission'], {

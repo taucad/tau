@@ -7,7 +7,7 @@ import { findEntryGraphics } from '@taucad/workbench-panes/units/geometry-units'
 import { selectProjectRef } from '#runtime/project-runtime.js';
 import type { ProjectRuntimeViewSource } from '#runtime/project-runtime.session.js';
 import { useFocusedProjectSession } from '#routes/w.$workspace.$project/focused-project-view.session.js';
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { Switch } from '@taucad/ui/components/switch';
 import { flagRegistry, experimentalFeatureFlagNames } from '#flags/flag.constants.js';
 import type { FeatureFlagName } from '#flags/flag.constants.js';

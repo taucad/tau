@@ -225,6 +225,7 @@ export const createCanvasConfig = (
     resolve(repoRoot, 'apps/libs/editor-ui/src'),
     resolve(repoRoot, 'apps/libs/revisions-ui/src'),
     resolve(repoRoot, 'apps/libs/settings-ui/src'),
+    resolve(repoRoot, 'apps/libs/publish-ui/src'),
     resolve(repoRoot, 'apps/libs/ui-core/src'),
     ...Array.from(aliases.values(), dirname),
   ]);

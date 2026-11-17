@@ -228,7 +228,7 @@
       "executor": "nx:run-commands",
       "cache": true,
       "metadata": {
-        "description": "Static-shell gate (progressive loading PL3, shell invariants 1, 2, 5 and 6): for each static-shell class of app/lib/route-classes.ts, renders the shell through the web server build for two different visitors a day apart and requires the prerendered bytes, the function's own document for a real URL of the class, the build id /health/build answers, the function document's isolation, CSP, reporting and document policies on the static headers (netlify.toml and the _headers the build writes), and no rendered placeholder. Runs with the build's environment (TAU_API_URL, TAU_WEBSOCKET_URL, TAU_FRONTEND_URL, as ci.yml sets them workflow-wide). CI's build lane runs it whenever this app is affected."
+        "description": "Static-shell gate (progressive loading PL3, shell invariants 1, 2, 5 and 6): for each static-shell class of app/lib/route-classes.ts, renders the shell through the web server build for two different visitors a day apart and requires the prerendered bytes, the function's own document for a real URL of the class, the build id /health/build answers, the function document's isolation, CSP, reporting and document policies on the static headers (netlify.toml and the _headers the build writes), every inline script either listed with its CSP hash in app/lib/inline-script-hashes.ts or recognised as one whose source is not fixed (the client environment, the icon sprite loader, React Router's and React's own scripts), and no rendered placeholder. Runs with the build's environment (TAU_API_URL, TAU_WEBSOCKET_URL, TAU_FRONTEND_URL, as ci.yml sets them workflow-wide). CI's build lane runs it whenever this app is affected."
       },
       "dependsOn": ["build"],
       "inputs": [
@@ -236,6 +236,7 @@
         "{projectRoot}/scripts/write-content-security-policy-headers.mts",
         "{projectRoot}/app/lib/route-classes.ts",
         "{projectRoot}/app/lib/content-security-policy.server.ts",
+        "{projectRoot}/app/lib/inline-script-hashes.ts",
         "{projectRoot}/netlify.toml",
         {
           "env": "TAU_API_URL"

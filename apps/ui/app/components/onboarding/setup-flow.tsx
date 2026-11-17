@@ -8,7 +8,7 @@ import { Heading } from '@taucad/ui/components/heading';
 import { cn } from '@taucad/ui/utils/cn';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { useFeature } from '#flags/use-feature.js';
-import { settingsSectionSchema } from '#hooks/use-settings-dialog.js';
+import { settingsSectionSchema } from '@taucad/settings-ui/components/settings/settings-section';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
 import type { SectionWriteResult } from '#preferences/section-store.js';

@@ -41,9 +41,9 @@ describe('3:1 rotary gearbox', () => {
       uniqueNames: true,
     });
     expectGeo(model).toBeWatertight();
-    // Nested/intermeshing AABBs form one spatial group. Count the actual solids
-    // separately; this matcher does not identify 19 disconnected nested shells.
-    expectGeo(model).toHaveConnectedComponents({ count: 1, tolerance: 0.01 });
+    // Connected components count qualified material connectivity, not overlapping
+    // bounds: the 19 parts are separate solids with running clearance between them.
+    expectGeo(model).toHaveConnectedComponents({ count: 19, tolerance: 0.01 });
     expectGeo(
       await loadModel({ file: 'main.ts', format: 'step' }),
     ).toHaveTopologyCounts({ solids: 19 });
@@ -204,10 +204,11 @@ describe('3:1 rotary gearbox', () => {
         file: 'main.ts',
         parameters: { part: 'gears', inputAngle },
       });
-      expectGeo(model).toHaveConnectedComponents({ count: 1, tolerance: 0.01 });
+      // Meshing gears with backlash are two separate solids.
+      expectGeo(model).toHaveConnectedComponents({ count: 2, tolerance: 0.01 });
       expectGeo(model).toHaveNoComponentInterference({
         tolerance: 0.005,
-        pairs: [{ left: 'Input pinion', right: 'Output wheel' }],
+        pairs: [{ left: 'Input pinion#0', right: 'Output wheel#0' }],
       });
       expectGeo(model).toHaveAssemblyOccurrences({
         occurrences: [
@@ -359,7 +360,7 @@ describe('3:1 rotary gearbox', () => {
     expectGeo(model).toBeWatertight();
     expectGeo(model).toHaveNoComponentInterference({
       tolerance: 0.005,
-      pairs: [{ left: 'Input pinion', right: 'Output wheel' }],
+      pairs: [{ left: 'Input pinion#0', right: 'Output wheel#0' }],
     });
     expectGeo(await part('Output wheel', parameters)).toHavePlanarFace({
       normal: [0, 0, 1],
@@ -381,7 +382,7 @@ describe('3:1 rotary gearbox', () => {
       });
       expectGeo(model).toHaveNoComponentInterference({
         tolerance: 0.005,
-        pairs: [{ left: 'Input pinion', right: 'Output wheel' }],
+        pairs: [{ left: 'Input pinion#0', right: 'Output wheel#0' }],
       });
     });
   }

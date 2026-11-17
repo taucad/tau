@@ -240,7 +240,36 @@ describe('shipping installer catalog browser behavior', () => {
     expect(await page.locator('[data-qualified-downloads] a[href$=".deb"]').count()).toBe(2);
     expect(await page.locator('[data-qualified-downloads] a[href$=".AppImage"]').count()).toBe(1);
     expect(await page.locator('[data-qualified-downloads] a[href$=".zip"]').count()).toBe(3);
+    // Untested Windows and Linux routes carry the page's own Beta badge; Mac routes do not.
+    const staticBadge = await page
+      .locator('.download-title [data-slot="badge"]')
+      .first()
+      .evaluate((node) => node.outerHTML);
+    const summaries = await page
+      .locator('[data-qualified-downloads] summary')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => [node.firstChild?.textContent, node.querySelector('[data-slot="badge"]')?.outerHTML]),
+      );
+    expect(summaries).toEqual([
+      ['Mac — installation and archive downloads', undefined],
+      ['Intel — installation and archive downloads', undefined],
+      ['Windows — installation and archive downloads', staticBadge],
+      ['Linux — installation and archive downloads', staticBadge],
+      ['Linux portable — installation and archive downloads', staticBadge],
+    ]);
     await close();
+
+    // A Windows visitor's recommended download says beta, before and after the catalog upgrade.
+    const windows = await open({ platform: 'Win32', enabled: false });
+    expect(await windows.page.locator('[data-download-detail="host"]').textContent()).toBe(
+      'Windows x64 · ZIP download · beta',
+    );
+    await windows.close();
+    const windowsCatalog = await open({ platform: 'Win32' });
+    expect(await windowsCatalog.page.locator('[data-download-detail="host"]').textContent()).toBe(
+      'Windows x64 · per-user installer · beta',
+    );
+    await windowsCatalog.close();
 
     const unpromoted = await open({ catalog: { ...projection(), promoted: false } });
     expect(await unpromoted.page.locator('[data-download-platform="windows"]').getAttribute('href')).toContain('.zip');

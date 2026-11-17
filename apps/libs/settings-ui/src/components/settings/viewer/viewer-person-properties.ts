@@ -4,7 +4,11 @@
  * go through `useAnalytics().capture`, so web consent and the desktop opt-out apply. Setup (WP6) sets the same names.
  */
 import type { GizmoStyleId, MousePresetId } from '@taucad/preferences';
-import type { Analytics } from '#hooks/use-analytics.js';
+
+/** The analytics the host passes in; the app's `useAnalytics()` value satisfies it. */
+export type ViewerAnalytics = {
+  readonly capture: (event: string, properties?: Readonly<Record<string, unknown>>) => void;
+};
 
 /** The viewer's person properties. */
 export type ViewerPersonProperties = Partial<
@@ -26,7 +30,7 @@ export const viewerPersonPropertyNames = {
  * @param analytics - The host's analytics.
  * @param properties - The properties that changed, with their values now in effect.
  */
-export const setViewerPersonProperties = (analytics: Analytics, properties: ViewerPersonProperties): void => {
+export const setViewerPersonProperties = (analytics: ViewerAnalytics, properties: ViewerPersonProperties): void => {
   const named = Object.fromEntries(
     Object.entries(properties).map(([key, value]) => [
       viewerPersonPropertyNames[key as keyof ViewerPersonProperties],

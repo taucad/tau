@@ -5,7 +5,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { assertRootedPath, resolveRootedPath } from '@taucad/utils/path';
 import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
-import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
+import { isVirtualDeclarationPath } from '@taucad/editor-ui/lib/virtual-declarations';
 import type { PartialDeep } from 'type-fest';
 import type {
   EditorState,

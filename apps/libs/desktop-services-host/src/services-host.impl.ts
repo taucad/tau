@@ -79,6 +79,7 @@ import type {
   ProjectHostActor,
   ProjectHostOptions,
 } from '@taucad/host';
+import type { ReportingConsent } from '@taucad/host/telemetry';
 import { createChannelServer, wrapMessagePortMain } from '@taucad/rpc';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
@@ -617,6 +618,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let sessionPrincipal: string | undefined;
   /** The signed-in account's display name, sent with its id; the Terminal's git commits under both. */
   let sessionPrincipalName: string | undefined;
+  /**
+   * The renderer's resolved telemetry consent as desktop main relays it (`telemetryConsent` frame, AR-W6-02). Read per
+   * settled sync attempt, so a change applies to every open project; until main says it, `unknown` sends nothing.
+   */
+  let telemetryConsent: ReportingConsent = 'unknown';
   let agentHostConfig: AgentHostConfig | undefined;
   /* One machine host per utility lifetime: opened on the first machines
    * concern or ceremony, surviving every renderer reload, closed on quiesce.
@@ -685,16 +691,33 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (!isAbsolute(root)) {
       return false;
     }
+    /* The exact spelling main published is admitted as is. Its physical
+     * spelling can differ before the background `realpath` settles: Windows
+     * short names (`C:\\Users\\RUNNER~1`) and macOS `/var` → `/private/var`. */
+    if (trustedRoots.has(resolve(root))) {
+      return true;
+    }
     const candidate = canonicalPath(root);
+    const spelled = resolve(root);
     /* Descendants are admitted because projects live inside Home
      * (`userData/home/<project>`); the `sep` suffix keeps `…/home-evil` from
      * matching `…/home`. */
-    const within = (trusted: string): boolean => candidate === trusted || candidate.startsWith(trusted + sep);
+    const isWithin = (path: string, trusted: string): boolean => path === trusted || path.startsWith(trusted + sep);
     /* A root is matched by the spelling main published and, once its background
      * `realpath` settles, by its canonical spelling. No root is canonicalised on
-     * a request's path: a hung mount would hold this event loop (blueprint D8). */
+     * a request's path ahead of need: a hung mount would hold this event loop
+     * (blueprint D8). */
     for (const [stored, entry] of trustedRoots) {
-      if (within(stored) || (entry.canonical !== undefined && within(entry.canonical))) {
+      if (isWithin(candidate, stored) || (entry.canonical !== undefined && isWithin(candidate, entry.canonical))) {
+        return true;
+      }
+      /* A request that names the root by its published, non-canonical spelling
+       * before that root has settled (an 8.3 `RUNNER~1` profile on Windows,
+       * `/var` for `/private/var` on macOS). Its own `realpath` above has just
+       * answered on the same mount, so the root is canonicalised here, and the
+       * comparison stays physical: a symlink under the root that leaves it is
+       * still refused. */
+      if (entry.canonical === undefined && isWithin(spelled, stored) && isWithin(candidate, canonicalPath(stored))) {
         return true;
       }
     }
@@ -1223,6 +1246,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         : { prepareKernel: nativeKernels.prepare, preparableKernels: nativeKernels.preparable }),
       apiBaseUrl: config.tauApiUrl,
       syncTelemetryPlacement: 'desktop',
+      /* PR-7 follow-up (AR-W6-02): sync attempts under the renderer's one consent rule, read per attempt. */
+      syncTelemetryConsent: () => telemetryConsent,
       /* B1: every revision this host records names the desktop app as its leg. */
       via: 'desktop',
       tauCredential: () => {
@@ -1509,6 +1534,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             ? frame['principalName']
             : undefined;
         log('credential-updated', { present: authToken !== undefined });
+        return;
+      }
+      case 'telemetryConsent': {
+        /* Main relays the renderer's resolved consent (AR-W4-03c); anything unrecognised reads as `unknown`. */
+        const { consent } = frame;
+        telemetryConsent = consent === 'granted' || consent === 'denied' ? consent : 'unknown';
+        log('telemetry-consent-updated', { consent: telemetryConsent });
         return;
       }
       case 'quiesce': {

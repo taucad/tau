@@ -9,7 +9,8 @@
  *   rewrite, redirect and header rules of `netlify.toml`, which {@link renderNetlifyShellRouting} generates and
  *   `route-classes.test.ts` holds equal to the checked-in file, and the Home shell's file, which the marketing edge
  *   function names and the build moves into place (`scripts/place-static-shells.ts`);
- * - the interactive roots the critical-path guards measure (`scripts/critical-path.mts`);
+ * - the interactive roots the critical-path guards measure (`scripts/critical-path.mts`), and the warm manifest the
+ *   build writes from them (`scripts/write-warm-manifest.ts`, read by `warm-next-step.ts` and the marketing site);
  * - the shell invariants checked on the build output (`scripts/check-static-shells.mts`).
  *
  * The file imports nothing, so build configuration and native Node scripts can read it before app aliases exist.
@@ -42,6 +43,11 @@ type RouteClassBase = Readonly<{
    * so it belongs to the interactive tier). Present on the classes the critical-path guards measure.
    */
   interactive?: readonly string[];
+  /**
+   * The class whose interactive tier this class's documents prefetch once idle (progressive loading PL8,
+   * `warm-next-step.ts`): the step a visitor most likely takes next. It names a class with {@link interactive} roots.
+   */
+  warms?: string;
 }>;
 
 /** A class served by one prerendered document for all of its URLs. */
@@ -133,6 +139,8 @@ const homeClass: StaticShellClass = {
   routes: ['_index'],
   // Home's open graph adds the rich composer, which `useNewProjectComposer` requests at mount.
   interactive: [...shellRoots, 'routes/_index/route.tsx', 'components/chat/new-project-chat-composer.tsx'],
+  // LB9: a project row and the composer's first send both open the project route.
+  warms: 'project',
 };
 
 /** The registry. Order is report order. */
@@ -172,7 +180,7 @@ export const routeClasses: readonly RouteClass[] = [
       'files',
       'github.complete',
       'import.$',
-      'invitations.$token',
+      'invitations._index',
       'loader',
       'loader_.glass',
       'machines.$hostId.$machineId',
@@ -202,6 +210,7 @@ export const routeClasses: readonly RouteClass[] = [
       'health.ready.ts',
       'health.startup.ts',
       'i.$',
+      'invitations.$token',
       'settings_',
       'settings_.$',
     ],

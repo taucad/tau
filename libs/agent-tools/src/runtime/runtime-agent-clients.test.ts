@@ -460,7 +460,12 @@ describe('createRuntimeAgentClients', () => {
     });
     await expect(
       clients.images.captureImages({ targetFile: 'drawing.ts', mode: 'multi_angle', view: 'drawing' }),
-    ).resolves.toEqual({ success: true, images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }] });
+    ).resolves.toEqual({
+      success: true,
+      images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }],
+      message:
+        'View drawing is a 2D drawing with one canonical view, so multi_angle returned one image; its six camera angles apply to 3D views only.',
+    });
     expect(clients.exporter).toHaveBeenCalledTimes(2);
     const unitless = clientsFor(
       runtimeFixture({
@@ -473,6 +478,8 @@ describe('createRuntimeAgentClients', () => {
     await expect(unitless.images.captureImages({ targetFile: 'drawing.ts', mode: 'multi_angle' })).resolves.toEqual({
       success: true,
       images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }],
+      message:
+        'View drawing is a 2D drawing with one canonical view, so multi_angle returned one image; its six camera angles apply to 3D views only.',
     });
     expect(unitless.exporter.mock.calls[2]?.[0]).toMatchObject({
       exportOptions: { axes: false, scaleBar: false },

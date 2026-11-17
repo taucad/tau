@@ -18,7 +18,12 @@ import type { MeasurementFeatureWorkerClient } from '#graphics/three/utils/measu
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn<
-    (event: { type: string; candidates?: Array<{ id: string; label: string }>; hasMore?: boolean }) => void
+    (event: {
+      type: string;
+      candidates?: Array<{ id: string; label: string }>;
+      hasMore?: boolean;
+      activeId?: string;
+    }) => void
   >(),
   workerClientFactory: undefined as (() => MeasurementFeatureWorkerClient) | undefined,
   kinematics: undefined as Actor<typeof kinematicsMachine> | undefined,
@@ -388,6 +393,40 @@ describe('MeasureTool', () => {
       line.material.dispose();
       (fatLine as THREE.Mesh).geometry.dispose();
       ((fatLine as THREE.Mesh).material as THREE.Material).dispose();
+    }
+  });
+
+  it('should not let a fat edge line occlude the surface targets it outlines', async () => {
+    getMeshMeasurementFeatures(mesh);
+    // The model's edges as the viewer draws them: a fat line with no feature graph of its own. Its position attribute
+    // is a quad template at the line's local z = 0, which sits here in front of the box's near face.
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(2, 2, 2)).translate(0, 0, -2),
+      new THREE.LineBasicMaterial(),
+    );
+    const outline = new THREE.Group();
+    outline.position.z = 2;
+    outline.add(edges);
+    applyFatLineSegments({ scene: outline }, { backend: 'webgl', resolution: new THREE.Vector2(800, 600) });
+    const [fatLine] = outline.children as [THREE.Mesh];
+    expect(fatLine.type).toBe('LineSegments2');
+    mesh.add(outline);
+    try {
+      await act(async () => {
+        mocks.graphicsSnapshot.context.pickableMeshesVersion++;
+        renderTool();
+      });
+      act(() => {
+        canvas.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 400, clientY: 300 }));
+      });
+      await vi.waitFor(() => {
+        const published = mocks.send.mock.calls.findLast(([sent]) => sent.type === 'setMeasureCandidates')?.[0];
+        expect(published?.activeId).toContain(mesh.uuid);
+      });
+    } finally {
+      mesh.remove(outline);
+      fatLine.geometry.dispose();
+      (fatLine.material as THREE.Material).dispose();
     }
   });
 

@@ -1011,20 +1011,18 @@ const mcpResult = (
       : undefined;
   }
   if (tool.claude === true) {
-    /* Claude Code replaces a result's content with its `structuredContent` as
-     * JSON, and a failure keeps its `CODE: message` text. */
+    /* Claude Code replaces a result's text with its `structuredContent` as
+     * JSON, in the final block after any non-text block it rendered (a
+     * screenshot's `[Resource link: …]` lines), and a failure keeps its
+     * `CODE: message` text. */
     const blocks: readonly unknown[] | undefined =
       typeof rawOutput === 'string'
         ? [{ type: 'text', text: rawOutput }]
         : Array.isArray(rawOutput)
           ? rawOutput
           : undefined;
-    const text = (blocks ?? [])
-      .flatMap((block) => {
-        const value = asRecord(block)?.['text'];
-        return typeof value === 'string' ? [value] : [];
-      })
-      .join('\n');
+    const value = asRecord(blocks?.at(-1))?.['text'];
+    const text = typeof value === 'string' ? value : '';
     let structuredContent: unknown;
     if (!failed && text !== '') {
       try {

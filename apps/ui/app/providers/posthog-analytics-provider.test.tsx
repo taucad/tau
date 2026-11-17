@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { MemoryRouter } from 'react-router';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -33,7 +34,7 @@ const tree = (isActive: boolean): React.JSX.Element => (
 describe('deferred analytics', () => {
   it('keeps a draft usable without loading the SDK, and ignores a load after consent withdrawal', async () => {
     const sdk = mock<PostHog>({ __loaded: false });
-    const view = render(tree(false));
+    const view = render(tree(false), { wrapper: MemoryRouter });
     const input = screen.getByRole('textbox', { name: 'Draft' });
     await userEvent.type(input, 'keep this design');
     expect(pending.load).not.toHaveBeenCalled();

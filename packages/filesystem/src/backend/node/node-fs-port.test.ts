@@ -26,7 +26,7 @@ import { NodeFsChannel, NodeFsChannelClosedError, NodeFsProviderClient } from '#
 import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';
 import { tauPathPolicy } from '#path-registry.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
-import { NodeFsProvider, nodeDiskKeepsFileModes } from '#backend/node/provider.js';
+import { NodeFsProvider } from '#backend/node/provider.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { streamChunkSize } from '#backend/stream-utils.js';
 import type { NodeFsPort } from '#backend/node/port.js';
@@ -1020,19 +1020,15 @@ describe('node filesystem client/host round trip', () => {
     });
   });
 
-  // NTFS keeps no executable bit: the Windows side is node-fs-host-description.test.ts, which fakes it on any disk.
-  it.runIf(nodeDiskKeepsFileModes())(
-    'round-trips only supported regular-file modes through the protected seam',
-    async () => {
-      const { provider } = connect();
-      await provider.writeFile('run.sh', '#!/bin/sh\n');
+  it('round-trips only supported regular-file modes through the protected seam', async () => {
+    const { provider } = connect();
+    await provider.writeFile('run.sh', '#!/bin/sh\n');
 
-      await provider.setFileMode?.('run.sh', '100755');
-      await expect(provider.getFileMode?.('run.sh')).resolves.toBe('100755');
-      await provider.setFileMode?.('run.sh', '100644');
-      await expect(provider.getFileMode?.('run.sh')).resolves.toBe('100644');
-    },
-  );
+    await provider.setFileMode('run.sh', '100755');
+    await expect(provider.getFileMode('run.sh')).resolves.toBe('100755');
+    await provider.setFileMode('run.sh', '100644');
+    await expect(provider.getFileMode('run.sh')).resolves.toBe('100644');
+  });
 
   it('hides an in-flight atomic-write temp file from directory listings', async () => {
     const { root, provider } = connect();

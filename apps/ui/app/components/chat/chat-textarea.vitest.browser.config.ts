@@ -53,6 +53,10 @@ export default defineConfig({
           }
           await session.send('Emulation.setTouchEmulationEnabled', { enabled: coarse, maxTouchPoints: 1 });
         },
+        /** `prefers-reduced-motion: reduce`, so motion-reduce styles apply. */
+        async composerReducedMotion({ page }, reduce: boolean) {
+          await page.emulateMedia({ reducedMotion: reduce ? 'reduce' : 'no-preference' });
+        },
       },
       instances: [{ browser: 'chromium' }],
     },

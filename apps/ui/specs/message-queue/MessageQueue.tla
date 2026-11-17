@@ -141,6 +141,9 @@
 \* WP5 (composer image formats): the store and the composer draft provide the image step from the app's
 \* attachment image actor, and a queued image carries its declared type for the intake counter only; admission,
 \* delivery, persistence and the queue barrier are unchanged.
+\* Composer drop zone and converting slot: the chat pane and Home hero forward dropped files to the composer's
+\* existing drop handler, and the draft lists images still being converted as placeholder slots. Draft, admission,
+\* delivery, persistence and the queue barrier are unchanged. No action or verdict changes.
 \* SP2g (change-event netting): the store's watch of a chat's foreign segment directory also refolds on a
 \* summary of that directory or any ancestor (the project root included), as the coalescer now delivers scoped
 \* `directoryChanged` resets; a refold only re-reads segments, so admission, delivery, persistence and the queue

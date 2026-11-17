@@ -63,7 +63,9 @@ import type {
   DraftAttachmentModel,
   DraftAttachmentSource,
   draftMachine,
+  PendingDraftImage,
 } from '#hooks/draft.machine.js';
+import { pendingDraftImages } from '#hooks/draft.machine.js';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
@@ -338,6 +340,10 @@ export type DraftState = {
   attachingMain: boolean;
   /** The same for the open edit. */
   attachingEdit: boolean;
+  /** The main draft's images still converting or storing, whose thumbnail slots the composer holds. */
+  pendingMain: readonly PendingDraftImage[];
+  /** The same for the open edit. */
+  pendingEdit: readonly PendingDraftImage[];
 };
 
 /**
@@ -347,6 +353,15 @@ export type DraftState = {
 export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
   const { draftActorRef } = useChatComposer();
   const draftContext = useSelector(draftActorRef, (state) => state.context);
+  /* Derived only when the queue or the open edit changes, so a keystroke keeps the lists' identity. */
+  const { attachmentQueue, activeEditMessageId } = draftContext;
+  const pending = useMemo(
+    () => ({
+      main: pendingDraftImages({ attachmentQueue, activeEditMessageId }, 'main'),
+      edit: pendingDraftImages({ attachmentQueue, activeEditMessageId }, 'edit'),
+    }),
+    [attachmentQueue, activeEditMessageId],
+  );
 
   const draftState = useMemo<DraftState>(
     () => ({
@@ -361,8 +376,10 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
       editDraftAttachments: draftContext.editDraftAttachments,
       attachingMain: draftContext.attachmentQueue.some((entry) => entry.target === 'main'),
       attachingEdit: draftContext.attachmentQueue.some((entry) => entry.target === 'edit'),
+      pendingMain: pending.main,
+      pendingEdit: pending.edit,
     }),
-    [draftContext],
+    [draftContext, pending],
   );
 
   return selector(draftState);

@@ -30,12 +30,12 @@
   },
   "modules": {
     "files": [
+      "apps/libs/files-ui/src/machines/library-access.machine.ts",
+      "apps/libs/files-ui/src/machines/library-discovery.machine.ts",
+      "apps/libs/files-ui/src/machines/library-recovery.machine.ts",
       "apps/ui/app/lib/frame-hint.ts",
       "apps/ui/app/machines/focus.machine.ts",
       "apps/ui/app/machines/focus.route-state.ts",
-      "apps/ui/app/machines/library-access.machine.ts",
-      "apps/ui/app/machines/library-discovery.machine.ts",
-      "apps/ui/app/machines/library-recovery.machine.ts",
       "apps/ui/app/machines/session-file-check.machine.ts",
       "apps/ui/app/routes/w.$workspace.$project/focused-project-view.session.ts",
       "apps/ui/app/routes/w.$workspace.$project/workbench-layout-controller.shim.ts",

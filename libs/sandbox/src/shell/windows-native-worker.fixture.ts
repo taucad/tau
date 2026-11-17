@@ -24,6 +24,7 @@ import type { Server } from 'node:net';
 import { join } from 'node:path';
 
 import { openWindowsHelperSession } from '#shell/windows-helper-session.fixture.js';
+import { windowsExclusiveLaunchRequirement } from '#shell/windows-sandbox-protocol.js';
 import type { WindowsHelperFrame, WindowsLaunchSpec } from '#shell/windows-sandbox-protocol.js';
 
 /** What the row borrows from the conformance suite. */
@@ -324,8 +325,9 @@ export const launchExclusionConformance = async (context: NativeWorkerContext): 
   await refused.closed;
 
   assert.equal(refusal.type, 'refused', JSON.stringify(refusal));
+  /* Machine-readable: a host matches the requirement, never the message. */
   assert.equal(refusal.refusal.status, 'sandbox-unavailable');
-  assert.match(refusal.refusal.message, /one at a time/u);
+  assert.equal(refusal.refusal.requirement, windowsExclusiveLaunchRequirement);
   /* Refused before anything changed. */
   assert.equal(existsSync(secondJournal), false);
   assert.deepEqual(sddlOf([secondArtifacts]), secondSddl);
@@ -339,7 +341,7 @@ export const launchExclusionConformance = async (context: NativeWorkerContext): 
   }
 
   assert.equal(restore.status, 1, restore.stdout);
-  assert.match(restore.stdout, /one at a time/u);
+  assert.equal((JSON.parse(restore.stdout) as { requirement?: string }).requirement, windowsExclusiveLaunchRequirement);
   assert.equal(existsSync(stray), true);
   rmSync(stray);
 

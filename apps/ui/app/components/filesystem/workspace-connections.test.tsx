@@ -438,6 +438,42 @@ describe('WorkspaceConnections', () => {
     expect(state.removeWorkspace).not.toHaveBeenCalled();
   });
 
+  it('should act on the folder each command was invoked on when two folders share a name (T-R3.2)', async () => {
+    const name = 'tau-desktop-workspace';
+    const kept = { ...workspace, workspaceId: 'wsp_kept', name, path: `/tmp/a/${name}`, lastConnectedAt: 1 };
+    const missing = { ...workspace, workspaceId: 'wsp_missing', name, path: `/tmp/b/${name}`, lastConnectedAt: 2 };
+    state.paths = [kept.path, missing.path];
+    state.listWorkspaces.mockResolvedValue([missing, kept]);
+    /* The page has just loaded: the rows are read, but the file service has not published a root status yet. */
+    state.rootStatuses = [];
+    const { rerender } = render(<WorkspaceConnections shouldGroupNotFound />);
+    await waitFor(() => {
+      expect(screen.getAllByText('tau-desktop-workspace')).toHaveLength(2);
+    });
+
+    /* A granted folder is not called Connected before its status is known, so no command can reach the wrong row. */
+    expect(screen.queryByRole('button', { name: 'Disconnect workspace' })).not.toBeInTheDocument();
+    state.rootStatuses = [
+      { storageRootKey: `node:${kept.path}`, backend: 'node', state: 'available' },
+      { storageRootKey: `node:${missing.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    rerender(<WorkspaceConnections shouldGroupNotFound />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Disconnect workspace' }));
+    await waitFor(() => {
+      expect(state.disconnect).toHaveBeenCalledWith(kept.path);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Remove from Tau' })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from Tau' }));
+
+    await waitFor(() => {
+      expect(state.removeWorkspace).toHaveBeenCalledWith(kept.workspaceId);
+    });
+    expect(state.disconnect).not.toHaveBeenCalledWith(missing.path);
+    expect(state.removeWorkspace).not.toHaveBeenCalledWith(missing.workspaceId);
+  });
+
   it('should name the unfinished operation and link to its recovery when Remove is refused', async () => {
     state.rootStatuses = [
       { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },

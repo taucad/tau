@@ -222,6 +222,49 @@ const removeCreatedParents = async ({ first, last }: Readonly<{ first: string; l
 };
 
 /* Whether a process with this pid exists: `EPERM` means it does, under another user. */
+/** Errors Windows answers a rename with while another program briefly holds one of its files. */
+const transientRenameCodes = new Set(['EPERM', 'EACCES', 'EBUSY']);
+/** How long a Windows rename keeps retrying a transient lock, in total. */
+const renameRetryBudgetMilliseconds = 1000;
+
+/**
+ * Rename, retrying on Windows while the error is one a transient lock gives.
+ *
+ * Windows Defender, the search indexer and backup agents open a freshly
+ * written file for a moment, and a rename over or of it then fails with
+ * `EPERM`, `EACCES` or `EBUSY` though nothing is wrong. As graceful-fs does,
+ * the rename is retried with a growing delay (10 ms doubling, at most 250 ms
+ * apart) for about a second; the last error is the answer. Elsewhere these
+ * codes are real and answered at once.
+ *
+ * @param from - The path to rename.
+ * @param to - Its new path.
+ */
+const renameRetryingTransientLocks = async (from: string, to: string): Promise<void> => {
+  const startedAt = Date.now();
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- each attempt waits on the one before it.
+      await fs.rename(from, to);
+      return;
+    } catch (error) {
+      const { code } = error as NodeJS.ErrnoException;
+      const elapsed = Date.now() - startedAt;
+      if (process.platform !== 'win32' || code === undefined || !transientRenameCodes.has(code)) {
+        throw error;
+      }
+      if (elapsed >= renameRetryBudgetMilliseconds) {
+        throw error;
+      }
+      const backoffMilliseconds = Math.min(10 * 2 ** attempt, 250, renameRetryBudgetMilliseconds - elapsed);
+      // oxlint-disable-next-line no-await-in-loop -- the backoff between attempts.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, backoffMilliseconds);
+      });
+    }
+  }
+};
+
 const isProcessAlive = (pid: number): boolean => {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     return false;
@@ -1973,7 +2016,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
      * to publish — and tells a later writer's entry apart from ours below. */
     staged.written = await fs.lstat(temporaryPath, { bigint: true });
     staged.renaming = true;
-    await fs.rename(temporaryPath, admittedTarget);
+    await renameRetryingTransientLocks(temporaryPath, admittedTarget);
     staged.replaced = true;
   }
 

@@ -34,6 +34,9 @@ import { writeExecutableStub } from '../scripts/executable-stub.mjs';
 const appRoot = join(import.meta.dirname, '..');
 const require = createRequire(join(appRoot, 'package.json'));
 const execFileAsync = promisify(execFile);
+/* A Windows user's PATH always holds System32, and the Codex adapter starts its CLI through `cmd.exe` there. */
+const windowsSystemPath =
+  process.platform === 'win32' ? [join(process.env['SystemRoot'] ?? String.raw`C:\Windows`, 'System32')] : [];
 const adapters = acpAgentProfiles.flatMap((profile) => (profile.package === undefined ? [] : [profile.package]));
 
 /**
@@ -167,7 +170,9 @@ describe('ACP adapter staging', () => {
         `process.stdout.write('2.1.301 (stub)\\n');`,
       ].join('\n'),
     );
-    path = [stubDirectory, await installedCodexDirectory(), dirname(process.execPath)].join(delimiter);
+    path = [stubDirectory, await installedCodexDirectory(), dirname(process.execPath), ...windowsSystemPath].join(
+      delimiter,
+    );
     for (const name of adapters) {
       // oxlint-disable-next-line no-await-in-loop -- The closure nests packages; staging is serial by construction.
       await copyRuntimeClosure({ name, source: dirname(require.resolve(`${name}/package.json`)), modulesRoot });

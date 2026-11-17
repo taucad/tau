@@ -546,7 +546,8 @@ describe('desktop main compute owner', () => {
 
   const bootstrap = async (): Promise<string> => {
     vi.stubGlobal('tauCloudBuildEnabled', false);
-    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-owner-'));
+    /* Main canonicalizes project roots natively, which spells out a Windows 8.3 temp directory (`RUNNER~1`). */
+    state.userData = await realpath(await mkdtemp(join(tmpdir(), 'tau-main-owner-')));
     await import('#main/main.js');
     await vi.waitFor(() => {
       expect(state.resolveFork).toBeDefined();
@@ -2184,8 +2185,10 @@ describe('desktop main machine store', () => {
       const store = join(state.userData, 'config', 'machines');
       expect(additions['TAU_DESKTOP_MACHINES_DIR']).toBe(store);
       const { mode } = await stat(store);
+      /* Owner-only on macOS and Linux. Windows has no POSIX mode: Node reports 0o666 for any writable directory
+       * (measured on windows-2025, run 43999226627), and the store is fenced by the profile directory's ACL. */
       // oxlint-disable-next-line eslint/no-bitwise -- the POSIX mode is a bit field
-      expect(mode & 0o777).toBe(0o700);
+      expect(mode & 0o777).toBe(process.platform === 'win32' ? 0o666 : 0o700);
       expect(additions['TAU_DESKTOP_LEGACY_MACHINES_DIR']).toBe(join(state.userData, 'machines'));
 
       const postMessage = vi.fn();

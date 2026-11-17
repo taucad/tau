@@ -98,9 +98,9 @@ describe('platform update transport and launch', () => {
         .spyOn(files, 'readFile')
         .mockImplementation(async (path) =>
           JSON.stringify(
-            path === '/app/package.json'
+            path === join('/app', 'package.json')
               ? { version: marker.version, tauDesktop: { sourceCommit: marker.sourceCommit } }
-              : typeof path === 'string' && path.startsWith('/opt/')
+              : typeof path === 'string' && path.startsWith(join('/opt', '/'))
                 ? { ...marker, tag: 'desktop@0.2.0', version: '0.2.0' }
                 : marker,
           ),
@@ -167,7 +167,7 @@ describe('platform update transport and launch', () => {
       .spyOn(files, 'readFile')
       .mockImplementation(async (path) =>
         JSON.stringify(
-          path === '/app/package.json'
+          path === join('/app', 'package.json')
             ? { version: marker.version, tauDesktop: { sourceCommit: marker.sourceCommit } }
             : marker,
         ),
@@ -298,32 +298,38 @@ describe('AppImage relaunch', () => {
     });
     /* eslint-enable @typescript-eslint/naming-convention -- End environment names. */
   });
-  it('starts a detached host bash waiter instead of Electron relaunch and waits until it exists', async () => {
-    // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
-    const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
-    mocks.spawn.mockReturnValue(child);
-    vi.stubEnv('APPDIR', mount);
-    let relaunched: Promise<void>;
-    try {
-      relaunched = relaunchAppImage('/usr/bin/tau-staging-appimage', ['--ozone-platform=x11']);
-    } finally {
-      vi.unstubAllEnvs();
-    }
-    child.emit('spawn');
-    await expect(relaunched).resolves.toBeUndefined();
-    expect(mocks.spawn).toHaveBeenCalledWith(
-      '/bin/bash',
-      ['-c', appImageRelaunchScript, 'tau-relaunch', '/usr/bin/tau-staging-appimage', '--ozone-platform=x11'],
-      expect.objectContaining({ shell: false, detached: true, stdio: ['pipe', 'ignore', 'ignore'] }),
-    );
-    const options = (mocks.spawn.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }])[2];
-    expect(options.env['APPDIR']).toBeUndefined();
-    expect(child.unref).toHaveBeenCalled();
-    await expect(relaunchAppImage('tau-staging-appimage', [])).rejects.toThrow(/absolute/u);
-    const failure = relaunchAppImage('/usr/bin/tau-staging-appimage', []);
-    child.emit('error', new Error('spawn EAGAIN'));
-    await expect(failure).rejects.toThrow('spawn EAGAIN');
-  });
+  /* Off Windows by design: an AppImage is a Linux package, and `relaunchAppImage` checks the host's real
+   * `/bin/bash` before it quits (ENOENT on windows-2025, run 43999226627). Windows restarts through the NSIS
+   * installer instead, covered by 'waits for spawn and propagates asynchronous launch failure…' above. */
+  it.skipIf(process.platform === 'win32')(
+    'starts a detached host bash waiter instead of Electron relaunch and waits until it exists',
+    async () => {
+      // oxlint-disable-next-line unicorn/prefer-event-target -- Node child_process delivers spawn/error through EventEmitter.
+      const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
+      mocks.spawn.mockReturnValue(child);
+      vi.stubEnv('APPDIR', mount);
+      let relaunched: Promise<void>;
+      try {
+        relaunched = relaunchAppImage('/usr/bin/tau-staging-appimage', ['--ozone-platform=x11']);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+      child.emit('spawn');
+      await expect(relaunched).resolves.toBeUndefined();
+      expect(mocks.spawn).toHaveBeenCalledWith(
+        '/bin/bash',
+        ['-c', appImageRelaunchScript, 'tau-relaunch', '/usr/bin/tau-staging-appimage', '--ozone-platform=x11'],
+        expect.objectContaining({ shell: false, detached: true, stdio: ['pipe', 'ignore', 'ignore'] }),
+      );
+      const options = (mocks.spawn.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }])[2];
+      expect(options.env['APPDIR']).toBeUndefined();
+      expect(child.unref).toHaveBeenCalled();
+      await expect(relaunchAppImage('tau-staging-appimage', [])).rejects.toThrow(/absolute/u);
+      const failure = relaunchAppImage('/usr/bin/tau-staging-appimage', []);
+      child.emit('error', new Error('spawn EAGAIN'));
+      await expect(failure).rejects.toThrow('spawn EAGAIN');
+    },
+  );
   it.runIf(process.platform === 'linux')(
     'closes inherited descriptors and starts the target only after the parent end closes',
     async () => {

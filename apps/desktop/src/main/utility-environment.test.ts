@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE */
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
@@ -73,13 +73,13 @@ describe('compileCacheEnvironment', () => {
 
   it('should put the compile cache under the app data root', () => {
     expect(compileCacheEnvironment(userData)).toEqual({
-      TAU_COMPILE_CACHE_DIR: '/Users/someone/Library/Application Support/Tau/compile-cache',
+      TAU_COMPILE_CACHE_DIR: join(userData, 'compile-cache'),
     });
   });
 
   it('should keep the compile cache out of the signed bundle', () => {
     const { TAU_COMPILE_CACHE_DIR: directory } = compileCacheEnvironment(userData);
-    expect(directory.startsWith(`${userData}/`)).toBe(true);
+    expect(directory.startsWith(`${userData}${sep}`)).toBe(true);
     expect(directory.startsWith(bundle)).toBe(false);
     expect(directory).not.toContain('app.asar');
   });
@@ -95,7 +95,7 @@ describe('compileCacheEnvironment', () => {
   it('should reach every utility fork through the allowlisted addition', () => {
     expect(utilityEnvironment({ PATH: '/usr/bin' }, compileCacheEnvironment(userData))).toEqual({
       PATH: '/usr/bin',
-      TAU_COMPILE_CACHE_DIR: '/Users/someone/Library/Application Support/Tau/compile-cache',
+      TAU_COMPILE_CACHE_DIR: join(userData, 'compile-cache'),
     });
   });
 });
@@ -108,8 +108,11 @@ describe('packagedEsbuildEnvironment', () => {
         platform: 'darwin',
       }),
     ).toEqual({
-      ESBUILD_BINARY_PATH:
-        '/Applications/Tau.app/Contents/Resources/app.asar.unpacked/node_modules/@esbuild/darwin-arm64/bin/esbuild',
+      ESBUILD_BINARY_PATH: join(
+        '/Applications/Tau.app/Contents/Resources',
+        'app.asar.unpacked/node_modules',
+        '@esbuild/darwin-arm64/bin/esbuild',
+      ),
     });
   });
 
@@ -119,7 +122,11 @@ describe('packagedEsbuildEnvironment', () => {
 
   it('should point packaged Linux and Windows utilities at their staged executables', () => {
     expect(packagedEsbuildEnvironment(true, '/opt/Tau/resources', { architecture: 'x64', platform: 'linux' })).toEqual({
-      ESBUILD_BINARY_PATH: '/opt/Tau/resources/app.asar.unpacked/node_modules/@esbuild/linux-x64/bin/esbuild',
+      ESBUILD_BINARY_PATH: join(
+        '/opt/Tau/resources',
+        'app.asar.unpacked/node_modules',
+        '@esbuild/linux-x64/bin/esbuild',
+      ),
     });
     expect(packagedEsbuildEnvironment(true, 'C:/Tau/resources', { architecture: 'x64', platform: 'win32' })).toEqual({
       ESBUILD_BINARY_PATH: join('C:/Tau/resources', 'app.asar.unpacked/node_modules', '@esbuild/win32-x64/esbuild.exe'),

@@ -49,6 +49,16 @@
         "command": "node scripts/src/validate-cross-root-reads.ts"
       }
     },
+    "validate-expected-failures": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Rejects an expected-failure marker (it.fails, test.fails, a known-defect row's expectedFailure: true) without a `// Expected-failure: @<owner> until YYYY-MM-DD` label at most 28 days ahead, and a malformed scripts/src/flake-ledger.json (taucad/tau#1281). The weekly CI health report raises a marker or ledger entry once its day has passed. Uncached: it scans every tracked test file."
+      },
+      "options": {
+        "command": "node scripts/src/validate-expected-failures.ts"
+      }
+    },
     "validate-project-names": {
       "executor": "nx:run-commands",
       "options": {

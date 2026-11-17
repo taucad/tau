@@ -1395,16 +1395,14 @@ describe('project discovery over unavailable roots (T-B13.3)', () => {
     const nativeWatch = NodeFsProvider.prototype.watch;
     /* Released at teardown, so the host can close; never during the row. */
     const release = Promise.withResolvers<() => void>();
-    vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(async function (
-      this: NodeFsProvider,
-      request,
-      handler,
-    ) {
-      if ((this as unknown as { _base: string })._base === hung) {
-        return release.promise;
-      }
-      return nativeWatch.call(this, request, handler);
-    });
+    vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(
+      async function (this: NodeFsProvider, request, handler) {
+        if ((this as unknown as { _base: string })._base === hung) {
+          return release.promise;
+        }
+        return nativeWatch.call(this, request, handler);
+      },
+    );
     const { port1, port2 } = new MessageChannel();
     const stopHost = serveNodeFsProvider(port2, {
       policy: tauPathPolicy,

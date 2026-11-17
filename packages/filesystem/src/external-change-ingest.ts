@@ -474,7 +474,10 @@ export class ExternalChangeIngest {
   private async _admitRoot({ root, scope, storageRootKey }: StagedDiscoveryRoot): Promise<void> {
     const provider = await this._registry.getProvider(scope);
     const directoryHandle = snapshotSource(root);
-    if ((provider.observe === undefined && directoryHandle === undefined) || this._observedExternalRoots.has(storageRootKey)) {
+    if (
+      (provider.observe === undefined && directoryHandle === undefined) ||
+      this._observedExternalRoots.has(storageRootKey)
+    ) {
       return;
     }
     const state: ObservedExternalRoot = {

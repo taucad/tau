@@ -248,7 +248,13 @@ describe('WorkspaceFileService root isolation', () => {
         nodeProject(home, validProjectId, 'valid'),
       ],
       checkouts: [
-        { backend: 'node', path: home, projectId: homeProjectId, checkoutId: 'chk_one', providerBasePath: 'outside-checkouts' },
+        {
+          backend: 'node',
+          path: home,
+          projectId: homeProjectId,
+          checkoutId: 'chk_one',
+          providerBasePath: 'outside-checkouts',
+        },
       ],
       roots: [{ backend: 'node', path: home }],
     });
@@ -366,21 +372,19 @@ describe('WorkspaceFileService root isolation', () => {
     const nativeWatch = NodeFsProvider.prototype.watch;
     let dropWatcher: (() => void) | undefined;
     let gone = false;
-    vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(async function (
-      this: NodeFsProvider,
-      request,
-      handler,
-    ) {
-      if (baseOf(this) === other) {
-        if (gone) {
-          throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(
+      async function (this: NodeFsProvider, request, handler) {
+        if (baseOf(this) === other) {
+          if (gone) {
+            throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+          }
+          dropWatcher = () => {
+            handler({ type: 'reset' });
+          };
         }
-        dropWatcher = () => {
-          handler({ type: 'reset' });
-        };
-      }
-      return nativeWatch.call(this, request, handler);
-    });
+        return nativeWatch.call(this, request, handler);
+      },
+    );
     const { service } = createNodeService([home, other]);
     const configuration: ProjectRootConfiguration = {
       projects: [],

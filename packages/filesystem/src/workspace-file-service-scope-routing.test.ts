@@ -415,27 +415,24 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     await expect(replacement.exists('still-current.txt')).resolves.toBe(false);
   });
 
-  it.each(invalidTopologyCases)(
-    'skips $name without disturbing the active topology',
-    async ({ projects, skipped }) => {
-      const { service, mountTable } = await createService();
-      await configureProjects(service, [{ projectId: activeProjectId, storageRootKey: 'memory:active' }]);
-      const rooted = service.createRootedFileSystem(`/projects/${activeProjectId}`);
-      await rooted.writeFile('preserved.txt', 'preserved');
-      const active: ProjectRootConfig = {
-        projectId: activeProjectId,
-        backend: 'memory',
-        storageRootKey: 'memory:active',
-        providerBasePath: activeProjectId,
-      };
+  it.each(invalidTopologyCases)('skips $name without disturbing the active topology', async ({ projects, skipped }) => {
+    const { service, mountTable } = await createService();
+    await configureProjects(service, [{ projectId: activeProjectId, storageRootKey: 'memory:active' }]);
+    const rooted = service.createRootedFileSystem(`/projects/${activeProjectId}`);
+    await rooted.writeFile('preserved.txt', 'preserved');
+    const active: ProjectRootConfig = {
+      projectId: activeProjectId,
+      backend: 'memory',
+      storageRootKey: 'memory:active',
+      providerBasePath: activeProjectId,
+    };
 
-      const result = await service.configureProjectRoots({ projects: [active, ...projects], roots: [] });
+    const result = await service.configureProjectRoots({ projects: [active, ...projects], roots: [] });
 
-      expect(result.skipped).toEqual([expect.objectContaining({ kind: 'project', ...skipped })]);
-      expect(mountTable.getExactMount(`/projects/${skipped.projectId}`)).toBeUndefined();
-      await expect(rooted.readFile('preserved.txt', 'utf8')).resolves.toBe('preserved');
-    },
-  );
+    expect(result.skipped).toEqual([expect.objectContaining({ kind: 'project', ...skipped })]);
+    expect(mountTable.getExactMount(`/projects/${skipped.projectId}`)).toBeUndefined();
+    await expect(rooted.readFile('preserved.txt', 'utf8')).resolves.toBe('preserved');
+  });
 
   it('applies concurrent project configurations in invocation order', async () => {
     const { service, providerRegistry, mountTable } = await createService();
@@ -527,9 +524,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
         ],
         roots: [],
       });
-      expect(result.skipped).toEqual([
-        { kind: 'project', reason: 'non-canonical-path', projectId: alphaProjectId },
-      ]);
+      expect(result.skipped).toEqual([{ kind: 'project', reason: 'non-canonical-path', projectId: alphaProjectId }]);
       expect(mountTable.getExactMount(`/projects/${alphaProjectId}`)).toBeUndefined();
       expect(getProvider).not.toHaveBeenCalled();
     },

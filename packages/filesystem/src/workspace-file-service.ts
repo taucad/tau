@@ -92,10 +92,9 @@ type ConfiguredRootEntry =
 
 /** The rejection of a configuration whose Home cannot be staged or admitted (blueprint D1). */
 const homeRootUnavailable = (cause: unknown): Error =>
-  Object.assign(
-    new Error(cause instanceof Error ? cause.message : 'The Home root could not be admitted.', { cause }),
-    { code: homeRootUnavailableCode },
-  );
+  Object.assign(new Error(cause instanceof Error ? cause.message : 'The Home root could not be admitted.', { cause }), {
+    code: homeRootUnavailableCode,
+  });
 
 /** One skipped route, with the fields its kind carries. */
 const skippedRoute = (entry: {
@@ -1558,7 +1557,9 @@ export class WorkspaceFileService {
     for (const { kind, prefix, config, storageRootKey } of [...stagedInputs, ...stagedCheckoutInputs]) {
       const state = this._externalChanges.rootState(storageRootKey);
       if (providerFailures.has(prefix)) {
-        skipped.push(skippedRoute({ kind, reason: 'provider-unavailable', storageRootKey, projectId: config.projectId }));
+        skipped.push(
+          skippedRoute({ kind, reason: 'provider-unavailable', storageRootKey, projectId: config.projectId }),
+        );
       } else if (state !== undefined && state !== 'available') {
         skipped.push(skippedRoute({ kind, reason: 'root-unavailable', storageRootKey, projectId: config.projectId }));
       }
@@ -1605,7 +1606,10 @@ export class WorkspaceFileService {
           throw homeRootUnavailable(error);
         }
         const key = 'workspaceId' in root ? `webaccess:${root.workspaceId}` : `${root.backend}:${String(index)}`;
-        rootEntries.push({ status: { storageRootKey: key, backend: root.backend, ...rootStateForError(error) }, error });
+        rootEntries.push({
+          status: { storageRootKey: key, backend: root.backend, ...rootStateForError(error) },
+          error,
+        });
         continue;
       }
       if (physicalRoots.has(storageRootKey)) {
@@ -1632,7 +1636,10 @@ export class WorkspaceFileService {
    * @param pass - Webaccess handles, claimed physical routes and skipped entries of this pass.
    * @returns One staged mount per valid project route, in configuration order.
    */
-  private _stageProjectRoutes(projects: ProjectRootConfiguration['projects'], pass: RouteStagingPass): StagedRouteMount[] {
+  private _stageProjectRoutes(
+    projects: ProjectRootConfiguration['projects'],
+    pass: RouteStagingPass,
+  ): StagedRouteMount[] {
     const { skipped } = pass;
     const stagedPrefixes = new Set<string>();
     const staged: StagedRouteMount[] = [];
@@ -1655,10 +1662,7 @@ export class WorkspaceFileService {
         continue;
       }
       stagedPrefixes.add(prefix);
-      const entry = this._stageRouteMount(
-        { prefix, config, providerBasePath, kind: 'project' },
-        pass,
-      );
+      const entry = this._stageRouteMount({ prefix, config, providerBasePath, kind: 'project' }, pass);
       if (entry !== undefined) {
         staged.push(entry);
       }
@@ -1704,10 +1708,7 @@ export class WorkspaceFileService {
         continue;
       }
       stagedPrefixes.add(prefix);
-      const entry = this._stageRouteMount(
-        { prefix, config, providerBasePath, kind: 'checkout' },
-        pass,
-      );
+      const entry = this._stageRouteMount({ prefix, config, providerBasePath, kind: 'checkout' }, pass);
       if (entry !== undefined) {
         staged.push(entry);
       }

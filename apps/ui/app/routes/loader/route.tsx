@@ -27,7 +27,6 @@ import { LazySection } from '@taucad/ui-kit/components/lazy-section';
 import { ChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { useFeature } from '#flags/use-feature.js';
-import type { Handle } from '#types/matches.types.js';
 
 const MetalMorphLoaderLazy = lazy(async () => {
   const module = await import('#components/geometry/loader/metal-morph-loader.js');
@@ -94,10 +93,6 @@ export const meta: MetaFunction = () => [
   { name: 'description', content: pageDescription },
   { name: 'robots', content: 'noindex' },
 ];
-
-export const handle: Handle = {
-  enableOverflowY: true,
-};
 
 const backendLabels: Readonly<Record<MetalMorphLoaderStatistics['backend'], string>> = {
   webgpu: 'WebGPU',

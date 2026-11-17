@@ -12,7 +12,7 @@ const savedFolds = new Map<string, string>();
 vi.mock('#hooks/use-chat.js', () => ({
   useChatContext: () => ({ activeChatId }),
 }));
-vi.mock('#hooks/use-file-content.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: (path: string) => {
     requestedPaths.push(path);
     return fileContent;

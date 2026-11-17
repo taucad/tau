@@ -612,6 +612,7 @@ describe('hand-off queued send and stored draft (A15d, C10)', () => {
       JSON.stringify({ v: 1, home: { usedAt: 1, text: 'Fillet it' }, projects: {} }),
     );
     const { box, input } = serveInBox(['data-draft-hint', 'data-drops-painted-send']);
+    expect(input.value).toBe('Fillet it');
     const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     input.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(true);

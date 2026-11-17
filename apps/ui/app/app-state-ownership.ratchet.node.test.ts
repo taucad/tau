@@ -459,4 +459,25 @@ describe('app state ownership ratchet', () => {
     expect(manifest.counts).toEqual(endStateCounts);
     expect(manifest.components.files).toContain('apps/ui/app/runtime/app-runtime-provider.tsx');
   });
+
+  it('should hold the GitHub renewal factory, the one module start a component calls, to its one caller (A10 debt)', () => {
+    const appRoot = fileURLToPath(new URL('.', import.meta.url));
+    const callers: string[] = [];
+    const visit = (directory: string): void => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) {
+          visit(path);
+        } else if (
+          sourceFilePattern.test(entry.name) &&
+          !testFilePattern.test(entry.name) &&
+          /\bstartGithubCredentialRenewal\(/u.test(readFileSync(path, 'utf8'))
+        ) {
+          callers.push(relative(appRoot, path).split(sep).join('/'));
+        }
+      }
+    };
+    visit(appRoot);
+    expect(callers).toEqual(['hooks/use-revision-status.ts']);
+  });
 });

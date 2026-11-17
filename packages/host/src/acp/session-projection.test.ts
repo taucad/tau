@@ -196,6 +196,55 @@ it('should keep a Claude MCP failure’s Tau error code', async () => {
   });
 });
 
+it('should read a Claude screenshot’s structured result after its resource-link text', async () => {
+  /* Shaped as claude-agent-acp 0.70.0 forwards Tau's HTTP screenshot result:
+   * Claude Code turns each resource_link into a `[Resource link: …]` text block
+   * and appends `structuredContent` as JSON in the final text block. */
+  const sha256 = 'b'.repeat(64);
+  const image = {
+    view: 'isometric',
+    path: `attachments/${sha256}.webp`,
+    absolutePath: `/tmp/tau-capture/${sha256}.webp`,
+    mimeType: 'image/webp',
+    byteLength: 3,
+    sha256,
+  };
+  const rawOutput = [
+    { type: 'text', text: `[Resource link: isometric screenshot] file://${image.absolutePath}` },
+    { type: 'text', text: JSON.stringify({ images: [image] }) },
+  ];
+  const meta = { claudeCode: { toolName: 'mcp__tau__screenshot' } };
+  const messages = await project(
+    [
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'claude-capture',
+        title: 'mcp__tau__screenshot',
+        rawInput: { targetFile: 'main.ts', mode: 'single' },
+        _meta: meta,
+      },
+      {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'claude-capture',
+        status: 'completed',
+        rawOutput,
+        content: rawOutput.map((block) => ({ type: 'content', content: block })),
+        _meta: meta,
+      },
+    ] as SessionUpdate[],
+    'claude',
+    undefined,
+    'tau',
+  );
+
+  expect(messages[1]).toMatchObject({
+    role: 'tool-output',
+    toolName: 'screenshot',
+    content: { images: [image] },
+    isError: false,
+  });
+});
+
 it('should leave a Claude tool from another MCP server as Claude named it', async () => {
   const messages = await project(
     [

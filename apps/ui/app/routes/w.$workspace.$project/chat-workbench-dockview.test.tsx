@@ -28,8 +28,8 @@ import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
-import { EditorDocument } from '#lib/editor-document.js';
-import type { DocumentChange, DocumentTransaction } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import type { DocumentChange, DocumentTransaction } from '@taucad/editor-ui/lib/editor-document';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { createActor } from 'xstate';
@@ -55,7 +55,7 @@ const { featureState, mobileState, mockOpenPanel, mockProjectSend, mockToastErro
 const mockEditorRuntimeImported = vi.hoisted(() => vi.fn());
 const mockEditorViewMounted = vi.hoisted(() => vi.fn());
 const mockLoadEditorSyntax = vi.hoisted(() => vi.fn(async () => []));
-vi.mock('#components/code/code-editor-view.client.js', () => {
+vi.mock('@taucad/editor-ui/components/code/code-editor-view.client', () => {
   mockEditorRuntimeImported();
   return {
     CodeEditorView: () => {
@@ -64,7 +64,7 @@ vi.mock('#components/code/code-editor-view.client.js', () => {
     },
   };
 });
-vi.mock('#lib/editor-syntax.js', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
+vi.mock('@taucad/editor-ui/lib/editor-syntax', () => ({ loadEditorSyntax: mockLoadEditorSyntax }));
 
 const largeObjectState = vi.hoisted(() => ({ pending: new Set<string>(), opened: [] as string[] }));
 vi.mock('#routes/w.$workspace.$project/project-sync-placeholder.js', async (importOriginal) => ({

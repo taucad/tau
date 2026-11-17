@@ -2,7 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/spec",
-    "types": ["node", "vitest/importMeta", "vitest"],
+    "types": ["node", "vite/client", "vitest/importMeta", "vitest"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",

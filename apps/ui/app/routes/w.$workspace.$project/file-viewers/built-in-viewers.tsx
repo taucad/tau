@@ -9,7 +9,7 @@ import type { FileViewerRenderRequest } from '#routes/w.$workspace.$project/file
 import { sniffNativeImageFormat } from '@taucad/project-workspace/utils/native-image-format';
 import { NativeImageViewer } from '#routes/w.$workspace.$project/file-viewers/native-image-viewer.js';
 import { printerFileKind } from '#components/printer/printer-file-kind.js';
-import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
+import { EditorPanePlaceholder } from '@taucad/editor-ui/components/code/editor-pane-placeholder';
 
 /*
  * The viewers' bodies load when a file first opens in one (progressive loading PL5): the code viewer brings

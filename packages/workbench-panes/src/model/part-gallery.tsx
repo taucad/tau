@@ -380,6 +380,7 @@ function PartSheet({
 
   return (
     <DialogContent
+      scroll='contained'
       aria-describedby={undefined}
       // Focus the sheet, not its first control: a focused header button would open its tooltip unasked,
       // and that tooltip would take the first Escape.

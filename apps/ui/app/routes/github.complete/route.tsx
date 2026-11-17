@@ -1,5 +1,4 @@
 import type { MetaFunction } from 'react-router';
-import type { Handle } from '#types/matches.types.js';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { useEffect, useRef, useState } from 'react';
@@ -15,8 +14,6 @@ import {
 } from '#lib/github-connections.js';
 
 export const meta: MetaFunction = () => [{ title: 'GitHub connection · Tau' }];
-export const handle: Handle = { enableOverflowY: true };
-
 /** What the page says; `code` is the refusal's, when it named one. */
 type Outcome = Readonly<{ title: string; detail: string; failed: boolean; code?: string | undefined }>;
 

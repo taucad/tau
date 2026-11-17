@@ -22,7 +22,7 @@ const state = vi.hoisted(() => ({
   providers: [] as Array<{ handle: { providers: () => React.JSXElementConstructor<React.PropsWithChildren> } }>,
   commandPalette: [] as Array<{ id: string; handle: { commandPalette: () => ReactNode } }>,
   sidebarMounts: 0,
-  enableOverflowY: false,
+  scroll: undefined as 'document' | 'contained' | undefined,
   locationKey: 'default',
   pathname: '/',
   navigationType: 'POP' as 'POP' | 'PUSH' | 'REPLACE',
@@ -85,7 +85,7 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
         state.enablePageWrapper === undefined ? [] : [{ handle: { enablePageWrapper: state.enablePageWrapper } }],
       enablePageHeader:
         state.enablePageHeader === undefined ? [] : [{ handle: { enablePageHeader: state.enablePageHeader } }],
-      enableOverflowY: state.enableOverflowY ? [{ handle: { enableOverflowY: true } }] : [],
+      scroll: state.scroll === undefined ? [] : [{ handle: { scroll: state.scroll } }],
       providers: state.providers,
     }),
 }));
@@ -161,7 +161,7 @@ beforeEach(() => {
   state.providers = [];
   state.commandPalette = [];
   state.sidebarMounts = 0;
-  state.enableOverflowY = false;
+  state.scroll = undefined;
   state.locationKey = 'default';
   state.pathname = '/';
   state.navigationType = 'POP';
@@ -444,6 +444,36 @@ describe('Page auth-aware wrapper contract', () => {
   });
 });
 
+/* T-A1.1 (D4.1): every route scrolls at the shell, wrapped or wrapperless, unless it declares `scroll: 'contained'`. */
+describe('Page scroll contract', () => {
+  const scroller = (): HTMLElement | null => screen.getByText('Page content').closest<HTMLElement>('.overflow-y-auto');
+
+  it.each([
+    ['inside the application shell', undefined],
+    ['without the application shell', false],
+  ] as const)('should scroll a route with no scroll handle %s on both axes', (_label, enablePageWrapper) => {
+    state.enablePageWrapper = enablePageWrapper;
+    render(<Page />);
+
+    expect(scroller()).not.toBeNull();
+    expect(scroller()).toHaveClass('overflow-x-auto');
+  });
+
+  it.each([
+    ['inside the application shell', undefined],
+    ['without the application shell', false],
+  ] as const)(
+    "should leave the scrolling to a route that declares scroll 'contained' %s",
+    (_label, enablePageWrapper) => {
+      state.enablePageWrapper = enablePageWrapper;
+      state.scroll = 'contained';
+      render(<Page />);
+
+      expect(scroller()).toBeNull();
+    },
+  );
+});
+
 describe('Page scroll restoration', () => {
   /* `html, body { overflow: hidden }` makes the shell's inner scroller the page's
    * scroller, which React Router's `ScrollRestoration` never sees (lane C P4). */
@@ -457,7 +487,6 @@ describe('Page scroll restoration', () => {
     ['inside the application shell', undefined],
     ['without the application shell', false],
   ] as const)('should restore the saved offset when Back returns to an entry %s', (_label, enablePageWrapper) => {
-    state.enableOverflowY = true;
     state.enablePageWrapper = enablePageWrapper;
     state.locationKey = 'community';
     state.pathname = '/community';
@@ -495,7 +524,6 @@ describe('Page scroll restoration', () => {
       },
     );
     try {
-      state.enableOverflowY = true;
       state.locationKey = 'community';
       state.pathname = '/community';
       const { rerender } = render(<Page />);
@@ -545,7 +573,6 @@ describe('Page scroll restoration', () => {
     style.textContent = '.contents { display: contents; }';
     document.head.append(style);
     try {
-      state.enableOverflowY = true;
       state.locationKey = 'community';
       state.pathname = '/community';
       const { rerender } = render(<Page />);
@@ -566,7 +593,6 @@ describe('Page scroll restoration', () => {
   });
 
   it('should keep the offset when a filter or dialog replaces the entry on the same page', () => {
-    state.enableOverflowY = true;
     state.locationKey = 'community';
     state.pathname = '/community';
     const { rerender } = render(<Page />);
@@ -589,7 +615,6 @@ describe('Page scroll restoration', () => {
   });
 
   it('should start a new entry at the top when the store is blocked', () => {
-    state.enableOverflowY = true;
     state.locationKey = 'community';
     const { rerender } = render(<Page />);
     const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
@@ -613,6 +638,7 @@ describe('Page scroll restoration', () => {
   });
 
   it('should leave a route that does not scroll the shell untouched', () => {
+    state.scroll = 'contained';
     state.locationKey = 'workspace';
     const { container } = render(<Page />);
 
@@ -629,7 +655,6 @@ describe('Page scroll restoration', () => {
 describe('Page workspace frame ahead of the route', () => {
   it("should lay the pending frame out as the project route does, at the destination's path", () => {
     state.hasBreadcrumb = true;
-    state.enableOverflowY = true;
     state.workspaceFrame = { drawn: true, pending: true, pathname: '/w/home/gearbox' };
     const { container } = render(<Page />);
     const frame = container.querySelector('[data-slot=workspace-frame]');

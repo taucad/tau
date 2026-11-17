@@ -149,7 +149,7 @@ export type QualifiedDesktopDownload = {
   readonly href: string;
   /** The primary artifact's kind; only `macos-dmg` is a disk image. */
   readonly primaryKind: string;
-  /** Whether clean-host (operator VM) acceptance passed; `pending` is admitted only on Mac routes. */
+  /** Whether clean-host (operator VM) acceptance passed; `pending` is admitted only on Mac and Windows routes. */
   readonly cleanHost: 'passed' | 'pending';
   readonly sha256: string;
   readonly size: number;
@@ -273,9 +273,10 @@ const admitDesktopCatalog = (
     seen.add(key);
     const definition = routeDefinitions[key as keyof typeof routeDefinitions];
     const proof = catalogRecord(route['qualification'], ['ci', 'vm', 'trust']);
-    // Clean-host acceptance may be pending only for a Mac route the publisher admitted on CI evidence alone (the
-    // operator verifies the live DMG by hand); every other route needs its clean-host receipt.
-    const cleanHostPending = proof['vm'] === 'pending' && definition.primary === 'macos-dmg';
+    // Clean-host acceptance may be pending only for a Mac route (the operator verifies the live DMG by hand) or the beta
+    // Windows route the publisher admitted on CI evidence alone; every other route needs its clean-host receipt.
+    const cleanHostPending =
+      proof['vm'] === 'pending' && (definition.primary === 'macos-dmg' || definition.primary === 'windows-nsis');
     if (proof['ci'] !== true || (proof['vm'] !== true && !cleanHostPending) || proof['trust'] !== 'release') {
       throw new TypeError('Installer route has not passed release qualification');
     }
@@ -315,7 +316,9 @@ const admitDesktopCatalog = (
     result.push({
       platform: definition.platform,
       label: definition.platform === 'linuxPortable' ? 'Linux portable' : desktopDownloads[definition.platform].label,
-      detail: cleanHostPending ? `${definition.detail} · clean-Mac install testing pending` : definition.detail,
+      detail: cleanHostPending
+        ? `${definition.detail} · clean-${definition.primary === 'windows-nsis' ? 'Windows' : 'Mac'} install testing pending`
+        : definition.detail,
       install: definition.install,
       updates: definition.updates,
       href: definition.platform === 'linux' ? '#linux-installation' : primary.href,

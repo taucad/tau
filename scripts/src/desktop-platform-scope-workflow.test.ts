@@ -298,4 +298,46 @@ describe('desktop route promotion Windows scope', () => {
     }
     expect(load.run).toMatch(/!= windows/u);
   });
+
+  // Operator ruling 2026-11-17T08:27Z: beta Windows promotes without its Windows 11 clean-host run, on either channel.
+  it('promotes Windows with the VM run left empty, as clean-host pending, on both channels', () => {
+    expect(on.workflow_dispatch.inputs['vm-run-id']).not.toHaveProperty('required', true);
+    const publication = jobs['publication']!;
+    for (const channel of ['staging', 'production']) {
+      const inputs = {
+        operation: 'promote-routes',
+        scope: 'windows',
+        channel,
+        'candidate-run-id': '1',
+        'ci-run-id': '2',
+        'vm-run-id': '',
+      };
+      const run: Context = {
+        github: { ref: 'refs/heads/main', event_name: 'workflow_dispatch' },
+        vars: { DESKTOP_INSTALLER_PUBLICATION_STAGING: 'true', DESKTOP_INSTALLER_PUBLICATION_PRODUCTION: 'true' },
+        inputs,
+        matrix: { channel },
+        steps: { selected: { outputs: { run: 'true' } } },
+      };
+      expect(evaluate(condition(publication.if), run)).toBe(true);
+      // The empty input reaches the publisher as an empty string, which it reads as an omitted VM run.
+      expect(interpolate(publication.env?.['TAU_ROUTE_VM_RUN_ID'] ?? '', run)).toBe('');
+      // No workflow gate keys on the VM run, so the publisher alone decides which scope may leave it pending.
+      for (const item of publication.steps ?? []) {
+        expect(`${item.if ?? ''}\n${item.run ?? ''}`).not.toMatch(/vm-run-id|TAU_ROUTE_VM_RUN_ID/u);
+      }
+      for (const name of [
+        'Retrieve qualified candidate or completed metadata',
+        'Publish or renew under the shared channel lock',
+      ]) {
+        expect(evaluate(condition(step(publication, (item) => item.name === name).if), run)).toBe(true);
+      }
+      // Every other production gate is unchanged: the shell conformance check still runs before a production promotion.
+      const conformance = step(
+        publication,
+        (item) => item.name === "Require green shell conformance on the candidate's commit",
+      );
+      expect(evaluate(condition(conformance.if), run)).toBe(channel === 'production');
+    }
+  });
 });

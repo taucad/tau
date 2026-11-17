@@ -234,6 +234,7 @@ describe('compute reuse qualification, known red on main: spur-gearbox', () => {
     expect(hashes(off)).toEqual(pins.models[model]!.off.matrix.map((step) => step.sha256));
   });
 
+  // Expected-failure: @rifont until 2026-12-15
   it.fails('should render every matrix step with reuse on byte-equal to reuse off', () => {
     expect(hashes(memory)).toEqual(hashes(off));
   });

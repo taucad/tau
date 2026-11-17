@@ -3,8 +3,8 @@
  * case cannot run in-process, because the model's synchronous `main()` blocks the thread that would supersede it.
  * Options come from the environment the arm process sets (worker threads share it).
  */
-import { nodeWorkerHost } from '../../../../../packages/runtime/src/transport/node.ts';
-import { createRuntimeWorker } from '../../../../../packages/runtime/src/worker/index.ts';
+import { nodeWorkerHost } from '@taucad/runtime/transport/node';
+import { createRuntimeWorker } from '@taucad/runtime/worker';
 import { qualifyRuntime } from './qualify-runtime.mts';
 
 const runtime = await qualifyRuntime({

@@ -32,6 +32,8 @@ const { values } = parseArgs({
     histories: { type: 'string', default: '10' },
     /** The history gate compares reuse arms against `off`'s matrix hashes; it runs once (pair 1) per arm. */
     historyArms: { type: 'string', default: 'memory,durable' },
+    /** Scenarios repeated in every pair; the others run in pair 1 only (history always runs once). */
+    pairScenarios: { type: 'string', default: 'matrix,scrub,agent,abort' },
     seed: { type: 'string', default: '1' },
     content: { type: 'string', default: 'ui' },
     wasm: { type: 'string', default: 'single' },
@@ -67,7 +69,7 @@ for (const model of values.models.split(',')) {
           : scenario === 'abort'
             ? arms.filter((arm) => arm !== 'durable')
             : arms;
-      if (scenario === 'history' && pair > 1) continue;
+      if (pair > 1 && (scenario === 'history' || !values.pairScenarios.split(',').includes(scenario))) continue;
       const order = pair % 2 === 1 ? armsOf : [...armsOf].reverse();
       for (const arm of order) {
         const file = join(out, `${model}.${scenario}.${arm}.p${pair}.json`);

@@ -29,11 +29,11 @@ import { cpus, loadavg } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseArgs } from 'node:util';
-import { asKnownArtifact, createRuntimeClient } from '../../../../../packages/runtime/src/client/index.ts';
-import { inProcessTransport } from '../../../../../packages/runtime/src/transport/in-process.ts';
-import { fromNodeFs } from '../../../../../packages/runtime/src/filesystem/from-node-fs.ts';
-import { createSqliteComputeEngine, fromSqlite } from '../../../../../packages/runtime/src/node.ts';
-import { nodeWorkerTransport } from '../../../../../packages/runtime/src/transport/node.ts';
+import { asKnownArtifact, createRuntimeClient } from '@taucad/runtime/client';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
+import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
 import { qualifyRuntime } from './qualify-runtime.mts';
 import {
   fullMatrixSteps,

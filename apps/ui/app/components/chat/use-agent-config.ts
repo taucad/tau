@@ -142,6 +142,7 @@ export const useAgentConfig = (
     setActiveExecution,
     status,
   ]);
+  const inFlight = status === 'submitted' || status === 'streaming';
   const pendingValues = pending.owner === owner && pending.confirmed === confirmed ? pending.values : {};
   const options = liveSession
     ? [
@@ -153,10 +154,15 @@ export const useAgentConfig = (
       : [];
   return {
     options,
+    /* A turn in flight shows what it asked for: the session record it opened with can precede the mode Tau sets
+     * (Claude opens in `default`, then moves to `auto`), and settles only with the turn. */
     valueOf: (option) =>
-      liveSession && (liveModel || option.category !== 'thought_level')
+      liveSession && (liveModel || option.category !== 'thought_level') && !inFlight
         ? (pendingValues[option.id] ?? option.currentValue)
-        : ((execution.kind === 'acp' ? execution.config?.[option.id] : undefined) ?? option.currentValue),
+        : (pendingValues[option.id] ??
+          (execution.kind === 'acp' ? execution.config?.[option.id] : undefined) ??
+          (inFlight ? discoveredOptions.find((discovered) => discovered.id === option.id)?.currentValue : undefined) ??
+          option.currentValue),
     select: (id, value) => {
       if (execution.kind !== 'acp' || activeOwner.current !== owner) {
         return;

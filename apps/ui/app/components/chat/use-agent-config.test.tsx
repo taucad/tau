@@ -75,6 +75,29 @@ describe('useAgentConfig', () => {
     expect(option && result.current.valueOf(option)).toBe('acceptEdits');
   });
 
+  it('shows the requested mode while a turn is in flight, then the one the session confirms', () => {
+    const mode = (currentValue: string): AcpSessionData['configOptions'][number] => ({
+      type: 'select',
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      currentValue,
+      options: ['auto', 'default'].map((value) => ({ value, name: value })),
+    });
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'claude' };
+    /* The record a new Claude session opens with still reads `default`; Tau moves it to `auto` before the prompt. */
+    const { hostId: _hostId, ...opened } = session([mode('default')], { agentId: 'claude' });
+    const view = renderConfig({ sessionData: opened, status: 'streaming', discoveredOptions: [mode('auto')] });
+    const valueOf = () => {
+      const option = configOptionOf(view.result.current, 'mode');
+      return option && view.result.current.valueOf(option);
+    };
+    expect(valueOf()).toBe('auto');
+    const { hostId: _settledHost, ...settled } = session([mode('auto')], { agentId: 'claude' });
+    view.rerender({ sessionData: settled, status: 'ready', discoveredOptions: [mode('auto')] });
+    expect(valueOf()).toBe('auto');
+  });
+
   it('offers every non-model option and stores the exact selected value on the execution', () => {
     const model: AcpSessionData['configOptions'][number] = {
       type: 'select',

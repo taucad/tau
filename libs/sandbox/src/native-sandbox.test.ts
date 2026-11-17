@@ -91,7 +91,8 @@ describe('launchInNativeSandbox', () => {
         arrange: () => {
           Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'win32' });
         },
-        message: /Windows is not yet a supported native runtime platform/,
+        // Windows contains a launch through its own helper, which hashes the executable: no digest, no launch.
+        message: /a native launch on Windows needs its executable’s verified digest/u,
       },
       {
         arrange: () => {
@@ -144,6 +145,24 @@ describe('launchInNativeSandbox', () => {
     expect(sandbox.initialize).toHaveBeenLastCalledWith(nativeSandboxPolicy());
     await launchInNativeSandbox(launch);
     expect(sandbox.initialize).toHaveBeenCalledTimes(3);
+  });
+
+  it('should be unavailable on Windows until this host enables the Windows sandbox, never wrapping a command line', async () => {
+    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'win32' });
+    const initializations = sandbox.initialize.mock.calls.length;
+    try {
+      const error: unknown = await launchInNativeSandbox({ ...launch, executableSha256: 'ab'.repeat(32) }).then(
+        () => undefined,
+        (error_: unknown) => error_,
+      );
+      expect(error).toBeInstanceOf(NativeRuntimeUnavailableError);
+      expect((error as NativeRuntimeUnavailableError).message).toBe(
+        'The native runtime is unavailable because its sandbox could not start: the Windows sandbox is not enabled in this Tau build',
+      );
+      expect(sandbox.initialize).toHaveBeenCalledTimes(initializations);
+    } finally {
+      Object.defineProperty(process, 'platform', platformDescriptor);
+    }
   });
 
   it('should quote only the host-owned vector and pass the fixed per-launch profile', async () => {

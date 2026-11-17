@@ -192,6 +192,8 @@ const host = createServicesHost({
   shell,
   /* The human Terminal (W5) opens its sessions through the same memoized probe. */
   terminalShell: shell.probe,
+  /* The Windows sandbox's one-time setup, which the person starts from the Terminal pane's Set up action (D15). */
+  terminalProvision: shell.provision,
   runtimeContext: (action, workspaceRoot, projectRoot) => {
     parentPort.postMessage({ type: `runtime-context-${action}`, workspaceRoot, projectRoot });
   },

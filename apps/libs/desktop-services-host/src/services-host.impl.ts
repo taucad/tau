@@ -79,6 +79,7 @@ import type {
   ProjectHostActor,
   ProjectHostOptions,
 } from '@taucad/host';
+import type { ReportingConsent } from '@taucad/host/telemetry';
 import { createChannelServer, wrapMessagePortMain } from '@taucad/rpc';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
@@ -345,6 +346,8 @@ export type ServicesHostOptions = {
   readonly shell?: DesktopShell | undefined;
   /** The desktop shell probe the `terminal` concern opens human sessions through; absent, each is refused. */
   readonly terminalShell?: TerminalConcernOptions['shell'];
+  /** The shell's one-time setup a person starts from the Terminal pane (`DesktopShell.provision`); absent, none runs. */
+  readonly terminalProvision?: TerminalConcernOptions['provision'];
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -617,6 +620,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let sessionPrincipal: string | undefined;
   /** The signed-in account's display name, sent with its id; the Terminal's git commits under both. */
   let sessionPrincipalName: string | undefined;
+  /**
+   * The renderer's resolved telemetry consent as desktop main relays it (`telemetryConsent` frame, AR-W6-02). Read per
+   * settled sync attempt, so a change applies to every open project; until main says it, `unknown` sends nothing.
+   */
+  let telemetryConsent: ReportingConsent = 'unknown';
   let agentHostConfig: AgentHostConfig | undefined;
   /* One machine host per utility lifetime: opened on the first machines
    * concern or ceremony, surviving every renderer reload, closed on quiesce.
@@ -741,6 +749,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   const terminals = createTerminalConcern({
     shell: options.terminalShell,
+    provision: options.terminalProvision,
     isTrustedRoot,
     canonicalRoot: canonicalPath,
     /* Read at each open: a session opened after a sign-in, a sign-out or an account switch commits as the new state. */
@@ -1234,6 +1243,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         : { prepareKernel: nativeKernels.prepare, preparableKernels: nativeKernels.preparable }),
       apiBaseUrl: config.tauApiUrl,
       syncTelemetryPlacement: 'desktop',
+      /* PR-7 follow-up (AR-W6-02): sync attempts under the renderer's one consent rule, read per attempt. */
+      syncTelemetryConsent: () => telemetryConsent,
       /* B1: every revision this host records names the desktop app as its leg. */
       via: 'desktop',
       tauCredential: () => {
@@ -1520,6 +1531,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             ? frame['principalName']
             : undefined;
         log('credential-updated', { present: authToken !== undefined });
+        return;
+      }
+      case 'telemetryConsent': {
+        /* Main relays the renderer's resolved consent (AR-W4-03c); anything unrecognised reads as `unknown`. */
+        const { consent } = frame;
+        telemetryConsent = consent === 'granted' || consent === 'denied' ? consent : 'unknown';
+        log('telemetry-consent-updated', { consent: telemetryConsent });
         return;
       }
       case 'quiesce': {

@@ -83,7 +83,7 @@ afterEach(async () => {
 });
 
 describe('startNativeStore', () => {
-  const start = async () => {
+  const start = async (extra: Partial<Parameters<typeof startNativeStore>[0]> = {}) => {
     const frames: NativeKernelsFrame[] = [];
     const report = await startNativeStore({
       store,
@@ -93,6 +93,7 @@ describe('startNativeStore', () => {
       log: () => undefined,
       signal: AbortSignal.timeout(30_000),
       plugins: [plugin],
+      ...extra,
     });
     return { frames, report };
   };
@@ -139,6 +140,22 @@ describe('startNativeStore', () => {
     expect(frames[0]?.kernels.map(({ kernel }) => kernel)).toEqual(['demo']);
     expect(frames[0]?.kernels[0]?.refusal).toContain(`Tau could not open its dependency store at ${store}`);
   });
+
+  it('should name the Windows sandbox main composed in every frame, so each utility contains its workers alike', async () => {
+    const windowsSandbox = {
+      helperPath: String.raw`C:\Program Files\Tau\resources\sandbox\tau-windows-sandbox.exe`,
+      journalDirectory: String.raw`C:\Users\someone\AppData\Roaming\Tau\native-sandbox-journals`,
+    };
+    const opened = await start({ windowsSandbox });
+    await writeFile(join(root, 'file'), '');
+    store = join(root, 'file', 'dependencies');
+    const refused = await start({ windowsSandbox });
+
+    expect(opened.frames).toEqual([
+      { type: 'tau:native-kernels', store: await realpath(join(root, 'store')), kernels: [], windowsSandbox },
+    ]);
+    expect(refused.frames[0]?.windowsSandbox).toEqual(windowsSandbox);
+  });
 });
 
 describe('the desktop native packages', () => {
@@ -160,6 +177,7 @@ describe('the desktop native packages', () => {
     const host = detectHostIndicators();
 
     expect(declared).toEqual(expect.arrayContaining([...desktopNativeKernelIds()]));
-    expect(desktopNativeKernelIds().length > 0).toBe(host !== undefined && host.os !== 'win32');
+    /* Build123d and SMLib declare win32-x64 (a Windows arm64 host runs it emulated), contained by the Windows sandbox. */
+    expect(desktopNativeKernelIds().length > 0).toBe(host !== undefined);
   });
 });

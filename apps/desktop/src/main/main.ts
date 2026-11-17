@@ -102,6 +102,7 @@ import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
   bundledGitEnvironment,
   bundledStoreGuardEnvironment,
+  windowsShellSandboxEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -117,7 +118,7 @@ import type { ImportGrant } from '#main/import-grants.js';
 import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
-import { isRendererTelemetryConsent, writeRendererTelemetryConsent } from '#main/telemetry-consent.js';
+import { createRendererTelemetryConsentRelay } from '#main/telemetry-consent.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import { updaterFailureSignal } from '#main/desktop-signals.js';
 import {
@@ -145,6 +146,11 @@ import {
 import { preparableNativeDeployments } from '@taucad/desktop-services-host/desktop-native-deployments';
 import { createDesktopKernelPreparer } from '@taucad/desktop-services-host/native-preparation';
 import { desktopNativeKernelIds, startNativeStore } from '@taucad/desktop-services-host/native-store';
+import {
+  desktopWindowsSandboxSetup,
+  resolveDesktopWindowsNativeSandbox,
+} from '@taucad/desktop-services-host/windows-native-sandbox-main';
+import { installDesktopWindowsNativeSandbox } from '@taucad/desktop-services-host/windows-native-sandbox';
 import {
   appIconThemeChannel,
   telemetryConsentChannel,
@@ -596,6 +602,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const storeGuardEnvironment = bundledStoreGuardEnvironment(
     app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
   );
+  /* The Windows shell sandbox helper this build ships, and its off-by-default switch (Q15, D15). */
+  const windowsSandboxEnvironment = windowsShellSandboxEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
+    environment,
+  );
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
   log.log('info', 'main.ready', {
@@ -987,10 +998,22 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const nativeStorePath =
     desktopChannel === 'staging' ? join(tauConfigDirectory, 'dependencies') : defaultDependencyStore();
   const nativeStoreAbort = new AbortController();
+  /* Windows: native workers and main's own seal step run in the sandbox helper's AppContainer, and only main may run
+   * its one-time elevated setup; the frame names the helper to every kernel utility. Off, a native kernel refuses. */
+  const windowsNativeSandbox = resolveDesktopWindowsNativeSandbox({
+    sandboxEnvironment: windowsSandboxEnvironment,
+    userDataPath: app.getPath('userData'),
+  });
+  if (windowsNativeSandbox !== undefined) {
+    installDesktopWindowsNativeSandbox(windowsNativeSandbox, {
+      setup: desktopWindowsSandboxSetup(windowsNativeSandbox, process.env),
+    });
+  }
   const nativeStore = startNativeStore({
     store: nativeStorePath,
     hostPath: app.getPath('exe'),
     environment: process.env,
+    windowsSandbox: windowsNativeSandbox,
     post: (frame) => {
       runtimeMain.post(frame);
     },
@@ -1092,6 +1115,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       ...desktopShellBwrapEnvironment(),
       ...storeGuardEnvironment,
+      ...windowsSandboxEnvironment,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
@@ -1506,16 +1530,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
       await auth.signOut();
     }
   });
-  /* AR-W4-03c: main follows the renderer's resolved consent; persisted for the next launch's main producers. */
-  const telemetryConsentPath = join(app.getPath('userData'), 'telemetry-consent.json');
+  /* AR-W4-03c: main follows the renderer's resolved consent, persisted for the next launch, and relays it to the
+   * services host, whose desktop project hosts report sync attempts only under `granted` (AR-W6-02). */
+  const telemetryConsent = createRendererTelemetryConsentRelay({
+    path: join(app.getPath('userData'), 'telemetry-consent.json'),
+    publish: (frame) => {
+      services.post(frame);
+    },
+    warn: (event, detail) => {
+      log.log('warn', event, detail);
+    },
+  });
   ipcMain.on(telemetryConsentChannel, (event, consent: unknown) => {
-    if (!trusted(event.senderFrame) || !isRendererTelemetryConsent(consent)) {
-      return;
-    }
-    try {
-      writeRendererTelemetryConsent(telemetryConsentPath, consent);
-    } catch (error) {
-      log.log('warn', 'telemetry-consent.write-failed', { message: String(error) });
+    if (trusted(event.senderFrame)) {
+      telemetryConsent.accept(consent);
     }
   });
   ipcMain.on(appIconThemeChannel, (event, theme: unknown) => {

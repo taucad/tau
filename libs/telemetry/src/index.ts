@@ -20,6 +20,8 @@ export {
   IngestEntryName,
   clientMetricEntrySchema,
   ingestPayloadSchema,
+  retiredIngestEntryNames,
+  retiredIngestEntrySchema,
   agentIdSchema,
   agentErrorCodeSchema,
   knownAgentIds,

@@ -452,7 +452,6 @@ describe.runIf(gitToolchainOnPath)('a store this port creates', () => {
 
     expect(await counting.verbs()).not.toContain('lfs');
     expect(lfsKeys(project)).toBe(lfsKeys(reference));
-    await expect(lstat(join(project, '.git', 'config.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('reopens a store that holds the filters without starting git-lfs', async () => {

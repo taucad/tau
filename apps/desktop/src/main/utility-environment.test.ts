@@ -12,6 +12,7 @@ import {
   packagedEsbuildEnvironment,
   utilityEnvironment,
   utilityEnvironmentNames,
+  windowsShellSandboxEnvironment,
 } from '#main/utility-environment.js';
 
 describe('utilityEnvironment', () => {
@@ -94,6 +95,13 @@ describe('utilityEnvironment', () => {
     expect(utilityEnvironment({ PATH: '/usr/bin' }, { TAU_PROJECT_ROOT: '/root' })).toEqual({
       PATH: '/usr/bin',
       TAU_PROJECT_ROOT: '/root',
+    });
+  });
+
+  it('carries the Windows system drive, which known folders such as ProgramData expand', () => {
+    expect(utilityEnvironment({ SystemRoot: String.raw`C:\Windows`, SystemDrive: 'C:', ProgramData: 'x' })).toEqual({
+      SystemRoot: String.raw`C:\Windows`,
+      SystemDrive: 'C:',
     });
   });
 
@@ -378,5 +386,65 @@ describe('bundledStoreGuardEnvironment', () => {
   it('should keep the store read-only when the build carries no guard for this target', async () => {
     const resources = await resourcesWithGuard();
     expect(bundledStoreGuardEnvironment(resources, { architecture: 'arm64', platform: 'linux' })).toEqual({});
+  });
+});
+
+describe('windowsShellSandboxEnvironment', () => {
+  const roots: string[] = [];
+  afterAll(async () => {
+    await Promise.all(roots.map(async (root) => rm(root, { recursive: true, force: true })));
+  });
+  const win32 = { architecture: 'x64', platform: 'win32' } as const;
+
+  const resourcesWithHelper = async (): Promise<string> => {
+    const resources = await mkdtemp(join(tmpdir(), 'tau-resources-'));
+    roots.push(resources);
+    await mkdir(join(resources, 'windows-sandbox', 'win32-x64'), {
+      recursive: true,
+    });
+    await writeFile(join(resources, 'windows-sandbox', 'win32-x64', 'tau-windows-sandbox.exe'), 'MZ');
+    return resources;
+  };
+
+  it('should point the services utility at the helper a Windows build carries, with the sandbox off by default', async () => {
+    const resources = await resourcesWithHelper();
+    expect(windowsShellSandboxEnvironment(resources, {}, win32)).toEqual({
+      TAU_WINDOWS_SANDBOX_HELPER: join(resources, 'windows-sandbox/win32-x64/tau-windows-sandbox.exe'),
+    });
+  });
+
+  it('should pass the sandbox switch on only when main was started with it', async () => {
+    const resources = await resourcesWithHelper();
+    expect(windowsShellSandboxEnvironment(resources, { TAU_WINDOWS_SHELL_SANDBOX: '1' }, win32)).toEqual({
+      TAU_WINDOWS_SANDBOX_HELPER: join(resources, 'windows-sandbox/win32-x64/tau-windows-sandbox.exe'),
+      TAU_WINDOWS_SHELL_SANDBOX: '1',
+    });
+    expect(windowsShellSandboxEnvironment(resources, { TAU_WINDOWS_SHELL_SANDBOX: 'true' }, win32)).toEqual({
+      TAU_WINDOWS_SANDBOX_HELPER: join(resources, 'windows-sandbox/win32-x64/tau-windows-sandbox.exe'),
+    });
+  });
+
+  it('should never forward an inherited helper path, so a launcher cannot choose what Tau elevates', async () => {
+    const resources = await mkdtemp(join(tmpdir(), 'tau-resources-'));
+    roots.push(resources);
+    const planted = {
+      TAU_WINDOWS_SHELL_SANDBOX: '1',
+      TAU_WINDOWS_SANDBOX_HELPER: String.raw`C:\Users\me\evil.exe`,
+    };
+    expect(windowsShellSandboxEnvironment(resources, planted, win32)).toEqual({
+      TAU_WINDOWS_SHELL_SANDBOX: '1',
+    });
+    expect(utilityEnvironment(planted)).toEqual({});
+  });
+
+  it('should name nothing off Windows, even with the switch set', async () => {
+    const resources = await resourcesWithHelper();
+    expect(
+      windowsShellSandboxEnvironment(
+        resources,
+        { TAU_WINDOWS_SHELL_SANDBOX: '1' },
+        { architecture: 'x64', platform: 'linux' },
+      ),
+    ).toEqual({});
   });
 });

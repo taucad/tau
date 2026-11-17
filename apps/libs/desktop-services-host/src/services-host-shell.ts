@@ -65,6 +65,8 @@ export type DesktopShellOptions = Readonly<{
   toolchain?: Readonly<{ roots: readonly string[]; bins: readonly string[] }> | undefined;
   /** Injected for tests; otherwise {@link desktopShellProvider}. */
   provider?: ShellProvider | undefined;
+  /** Injected for tests; otherwise {@link setUpWindowsShellSandbox}. */
+  setUpWindowsSandbox?: ((helperPath: string) => Promise<WindowsShellSandboxSetup>) | undefined;
   /**
    * The environment composition reads: `TAU_WINDOWS_SHELL_SANDBOX` and `TAU_WINDOWS_SANDBOX_HELPER` on Windows.
    * Defaults to `process.env`.
@@ -93,6 +95,12 @@ export type DesktopShellCheckouts = ReadonlyMap<string, ShellCheckout> &
 export type DesktopShell = Readonly<{
   /** The memoized probe; the first call starts it. */
   probe: () => Promise<ShellProbe>;
+  /**
+   * Run the shell's one-time setup when the probe asks for it (`provisioning-required`), then probe again. Only the
+   * person's own action in Tau's chrome calls it: on Windows it shows one administrator prompt (D15). Any other probe
+   * answer comes back unchanged, and concurrent calls share one setup.
+   */
+  provision: () => Promise<ShellProbe>;
   /**
    * The shell one project's registry offers: register the project's run→checkout map and permission hooks, and read
    * the probe at every listing and call.
@@ -148,13 +156,17 @@ export const bundledShellSupervisor = (): SandboxShellProviderOptions['superviso
   return { executablePath: process.execPath, arguments: [join(dirname(entry), 'shell-supervisor.js')] };
 };
 
-/** The helper's file name, packaged under `<resources>/sandbox/` and built by `sandbox:build:windows-sandbox`. */
+/**
+ * The helper's file name, packaged under `<resources>/windows-sandbox/win32-x64/` by `desktop:prepare-windows-sandbox`
+ * (`libs/sandbox/scripts/build-windows-sandbox.mts`).
+ */
 const windowsSandboxHelperName = 'tau-windows-sandbox.exe';
 
 /**
- * Where the Windows shell sandbox helper is: `TAU_WINDOWS_SANDBOX_HELPER` when set; in source execution, the release
- * build in the sandbox library's Cargo target; packaged, `<resources>/sandbox/tau-windows-sandbox.exe`. It does not
- * check that the file exists.
+ * Where the Windows shell sandbox helper is: `TAU_WINDOWS_SANDBOX_HELPER` when set (main sets it to the packaged
+ * helper, `windowsShellSandboxEnvironment` in the desktop app); in source execution, the release build in the sandbox
+ * library's Cargo target; packaged, `<resources>/windows-sandbox/win32-x64/tau-windows-sandbox.exe`. It does not check
+ * that the file exists.
  *
  * @param input - The environment, Electron's resources folder and whether this module runs from source; each defaults
  *   to this process's own.
@@ -182,7 +194,7 @@ export const bundledWindowsSandboxHelper = (
   const resources = input.resourcesPath ?? (Reflect.get(process, 'resourcesPath') as string | undefined);
   return resources === undefined || resources === ''
     ? undefined
-    : win32.join(resources, 'sandbox', windowsSandboxHelperName);
+    : win32.join(resources, 'windows-sandbox', 'win32-x64', windowsSandboxHelperName);
 };
 
 /**
@@ -234,7 +246,7 @@ const powerShellLiteral = (value: string): string => `'${value.replaceAll("'", "
  * Run the Windows shell sandbox's one-time setup: the helper's `setup --for-user <SID>`, elevated through the fixed
  * Windows PowerShell's `Start-Process -Verb RunAs -Wait`, so Windows shows one administrator prompt (D15). The SID is the
  * current person's, read with System32's `whoami /user`; their host is the one that may read the sandbox password.
- * Nothing calls it yet; the Terminal's setup affordance will.
+ * {@link DesktopShell.provision} calls it when the person chooses Set up in the Terminal.
  *
  * @public
  * @param helperPath - The helper ({@link bundledWindowsSandboxHelper}).
@@ -291,13 +303,51 @@ export const setUpWindowsShellSandbox = async (
   }
 };
 
+/** What the person does about a Windows sandbox that needs its one-time setup, shown beside the pane's Set up action. */
+const windowsSetupRecovery =
+  'Choose Set up in the Terminal and approve the Windows administrator prompt. Tau asks once; then the shell and Terminal work.';
+
 /** Why an enabled Windows sandbox has no shell yet: its one-time elevated setup has not run. */
 const windowsSetupNeeded: ShellUnavailable = {
   status: 'unavailable',
-  code: 'sandbox-unavailable',
+  code: 'provisioning-required',
   message: 'The Windows shell sandbox is not set up on this device.',
-  recovery:
-    'Tau needs one administrator approval to set up the Windows shell sandbox. Approve the Windows prompt when Tau asks, then open the shell again.',
+  recovery: windowsSetupRecovery,
+};
+
+/**
+ * The helper's own word that its elevated `setup` repairs a refusal: a runner copy older than the helper (an app
+ * update), a missing sandbox account, or missing network rules (`libs/sandbox/windows-sandbox/src/win/launch.rs`).
+ */
+const windowsSetupRepairs = '(run setup again)';
+
+/**
+ * Whether an enabled Windows sandbox needs its one-time setup, and what the person is told: not installed, or installed
+ * but refused by the helper with a fault its `setup` repairs. Every other answer stands.
+ *
+ * @public
+ * @param probe - What the shell probe answered.
+ * @param installed - Whether the helper's `status` reports an install record.
+ * @returns The `provisioning-required` answer, or `undefined` when setup would not help.
+ */
+export const windowsSandboxSetupNeeded = (probe: ShellProbe, installed: boolean): ShellUnavailable | undefined => {
+  if (!installed) {
+    return windowsSetupNeeded;
+  }
+  if (
+    probe.status === 'unavailable' &&
+    probe.code === 'sandbox-unavailable' &&
+    probe.message.includes(windowsSetupRepairs)
+  ) {
+    return {
+      status: 'unavailable',
+      code: 'provisioning-required',
+      message: 'The Windows shell sandbox needs to be set up again on this device, for example after a Tau update.',
+      recovery: windowsSetupRecovery,
+      diagnostic: probe.diagnostic === undefined ? probe.message : `${probe.message}\n${probe.diagnostic}`,
+    };
+  }
+  return undefined;
 };
 
 /**
@@ -456,11 +506,15 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
   const permissionModeOf = async (runId: string): Promise<PermissionMode> =>
     (await hooksOfRun(runId)?.permissionModeOf?.(runId)) ?? 'ask';
   let probing: Promise<ShellProbe> | undefined;
+  let provisioning: Promise<ShellProbe> | undefined;
   let recording: HostShell | undefined;
+  const environment = options.environment ?? process.env;
+  /* Read at each probe, as the provider is: a helper staged after start counts at the next one. */
+  const windowsHelper = (): string | undefined =>
+    platform === 'win32' ? enabledWindowsSandboxHelper(environment) : undefined;
 
   const probe = async (): Promise<ShellProbe> => {
     probing ??= (async (): Promise<ShellProbe> => {
-      const environment = options.environment ?? process.env;
       const provider =
         options.provider ??
         desktopShellProvider({
@@ -473,39 +527,42 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
           environment,
         });
       /* An enabled Windows sandbox runs nothing until its one elevated setup has written the install record. */
-      const windowsHelper =
-        platform === 'win32' && options.provider === undefined ? enabledWindowsSandboxHelper(environment) : undefined;
-      const windowsStatus =
-        windowsHelper === undefined ? undefined : await readWindowsSandboxStatus(windowsHelper, { environment });
-      const notSetUp = windowsStatus?.installed === false ? windowsSetupNeeded : undefined;
-      const outcome =
+      const helper = provider === undefined ? undefined : windowsHelper();
+      const windowsStatus = helper === undefined ? undefined : await readWindowsSandboxStatus(helper, { environment });
+      const probed =
         provider === undefined
           ? noProvider(platform)
-          : (notSetUp ??
-            (await probeHostShell({
-              /* One sandbox account serves every Windows launch: one Terminal, and agent calls one at a time (A23). */
-              ...(platform === 'win32' ? { maxTerminals: 1, maxExecutions: 1 } : {}),
-              provider,
-              checkouts,
-              appDataRoots: options.appDataRoots,
-              projectRoots: () => [...new Set([...checkouts.projects.keys(), ...(options.projectRoots?.() ?? [])])],
-              platform,
-              ...(options.home === undefined ? {} : { home: options.home }),
-              ...(options.toolchain === undefined ? {} : { toolchain: options.toolchain }),
-              permissionModeOf,
-              /* I7: an earlier host's agent receipts wait for the project whose run records still name them. */
-              projectExecutions: () =>
-                [...checkouts.projects.values()].flatMap((projectCheckouts) =>
-                  projectCheckouts.executions === undefined ? [] : [projectCheckouts.executions],
-                ),
-            }).catch(
-              (error: unknown): ShellUnavailable => ({
-                status: 'unavailable',
-                code: 'sandbox-unavailable',
-                message: `The shell sandbox could not be checked: ${error instanceof Error ? error.message : String(error)}`,
-                recovery: 'Restart Tau. If it happens again, reinstall Tau to restore its sandbox components.',
-              }),
-            )));
+          : windowsStatus?.installed === false
+            ? {
+                ...windowsSetupNeeded,
+                ...(windowsStatus.diagnostic === undefined ? {} : { diagnostic: windowsStatus.diagnostic }),
+              }
+            : await probeHostShell({
+                /* One sandbox account serves every Windows launch: one Terminal, and agent calls one at a time (A23). */
+                ...(platform === 'win32' ? { maxTerminals: 1, maxExecutions: 1 } : {}),
+                provider,
+                checkouts,
+                appDataRoots: options.appDataRoots,
+                projectRoots: () => [...new Set([...checkouts.projects.keys(), ...(options.projectRoots?.() ?? [])])],
+                platform,
+                ...(options.home === undefined ? {} : { home: options.home }),
+                ...(options.toolchain === undefined ? {} : { toolchain: options.toolchain }),
+                permissionModeOf,
+                /* I7: an earlier host's agent receipts wait for the project whose run records still name them. */
+                projectExecutions: () =>
+                  [...checkouts.projects.values()].flatMap((projectCheckouts) =>
+                    projectCheckouts.executions === undefined ? [] : [projectCheckouts.executions],
+                  ),
+              }).catch(
+                (error: unknown): ShellUnavailable => ({
+                  status: 'unavailable',
+                  code: 'sandbox-unavailable',
+                  message: `The shell sandbox could not be checked: ${error instanceof Error ? error.message : String(error)}`,
+                  recovery: 'Restart Tau. If it happens again, reinstall Tau to restore its sandbox components.',
+                }),
+              );
+      /* A refusal the helper's own setup repairs (an app update, a removed account) asks for setup again. */
+      const outcome = windowsStatus?.installed === true ? (windowsSandboxSetupNeeded(probed, true) ?? probed) : probed;
       recording =
         outcome.status === 'available'
           ? {
@@ -532,13 +589,57 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
             },
         outcome.status === 'available' ? undefined : 'warn',
       );
+      /* "Not set up" is asked again at the next probe, never kept: a status run that failed or ran late at app start
+         must not stand for the app's life (setup itself happens outside it, in an elevated helper). */
+      if (windowsStatus?.installed === false) {
+        probing = undefined;
+      }
       return outcome;
     })();
     return probing;
   };
 
+  /*
+   * The one-time setup the probe asked for, then a fresh probe. Only an answer that offered setup is ever forgotten,
+   * so no shell that is serving anything is replaced; a declined or failed setup keeps it and offers setup again.
+   */
+  const provision = async (): Promise<ShellProbe> => {
+    provisioning ??= (async (): Promise<ShellProbe> => {
+      const current = await probe();
+      const helper = windowsHelper();
+      if (current.status === 'available' || current.code !== 'provisioning-required' || helper === undefined) {
+        return current;
+      }
+      options.log?.('shell.setup', { status: 'started' });
+      const setUp = await (options.setUpWindowsSandbox ?? setUpWindowsShellSandbox)(helper);
+      if (setUp.status === 'failed') {
+        options.log?.('shell.setup', { status: 'failed', message: setUp.message }, 'warn');
+        return {
+          ...current,
+          message: 'The Windows shell sandbox was not set up: the administrator prompt was declined or setup failed.',
+          recovery: 'Choose Set up to try again. Tau starts no shell until the sandbox is set up.',
+          diagnostic: setUp.message,
+        };
+      }
+      options.log?.('shell.setup', { status: 'set-up' });
+      probing = undefined;
+      recording = undefined;
+      const next = await probe();
+      if (next.status === 'available') {
+        await next.shell.reconcile?.();
+      }
+      return next;
+    })();
+    try {
+      return await provisioning;
+    } finally {
+      provisioning = undefined;
+    }
+  };
+
   return {
     probe,
+    provision,
     forProject: (projectRoot, projectCheckouts, projectHooks) => {
       checkouts.projects.set(projectRoot, projectCheckouts);
       if (projectHooks === undefined) {

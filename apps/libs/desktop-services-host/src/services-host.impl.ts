@@ -346,6 +346,8 @@ export type ServicesHostOptions = {
   readonly shell?: DesktopShell | undefined;
   /** The desktop shell probe the `terminal` concern opens human sessions through; absent, each is refused. */
   readonly terminalShell?: TerminalConcernOptions['shell'];
+  /** The shell's one-time setup a person starts from the Terminal pane (`DesktopShell.provision`); absent, none runs. */
+  readonly terminalProvision?: TerminalConcernOptions['provision'];
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -747,6 +749,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   const terminals = createTerminalConcern({
     shell: options.terminalShell,
+    provision: options.terminalProvision,
     isTrustedRoot,
     canonicalRoot: canonicalPath,
     /* Read at each open: a session opened after a sign-in, a sign-out or an account switch commits as the new state. */

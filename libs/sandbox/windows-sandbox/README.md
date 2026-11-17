@@ -446,7 +446,17 @@ few and a count), keeps the journal and exits 1. It is idempotent.
 ## Build
 
 ```bash
-pnpm nx run sandbox:build:windows-sandbox      # on Windows; cargo build --release --target x86_64-pc-windows-msvc
+pnpm nx run sandbox:build:windows-sandbox      # on Windows x64: build, check and stage under out/windows-sandbox/win32-x64
+pnpm nx run desktop:prepare-windows-sandbox    # the same, copied into apps/desktop/resources/windows-sandbox/win32-x64
 cargo check --target x86_64-pc-windows-msvc    # anywhere the target is installed
 pnpm nx run sandbox:test:windows-sandbox       # cargo test: the portable unit tests, on any host
 ```
+
+`.cargo/config.toml` links the C runtime statically, so the helper starts on a machine without the Visual C++
+Redistributable. `scripts/build-windows-sandbox.mts` refuses a build that is not an x64 console executable, imports a
+Visual C++ runtime DLL or does not answer `status`, and stages it with a NOTICE for every linked crate and the
+toolchain, and a manifest with its sha256. `desktop:package-windows` depends on `prepare-windows-sandbox` and ships
+the three files at `resources/windows-sandbox/win32-x64/`; a release archive refuses to assemble without them. The
+Windows installer's signing step signs every PE file in the app, this helper included. Main points the services host
+at it (`TAU_WINDOWS_SANDBOX_HELPER`) and passes `TAU_WINDOWS_SHELL_SANDBOX=1` through when Tau was started with it;
+the Terminal pane then offers the one-time `setup` (one UAC prompt) while the probe answers `provisioning-required`.

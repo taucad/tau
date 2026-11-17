@@ -171,6 +171,9 @@ export const utilityEnvironmentNames = [
   'TEMP',
   'TMP',
   'SystemRoot',
+  /* Windows expands `%SystemDrive%` for known folders such as ProgramData, where the Windows sandbox helper keeps its
+   * install record; without it `SHGetKnownFolderPath` fails with ERROR_PATH_NOT_FOUND in the fork and its children. */
+  'SystemDrive',
   'WINDIR',
   'LANG',
   'LC_ALL',
@@ -346,4 +349,41 @@ export const bundledStoreGuardEnvironment = (
   const executable = join(resourceRoot, 'store-guard', `${platform}-${architecture}`, 'tau-store-guard');
   // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
   return existsSync(executable) ? { TAU_DESKTOP_SHELL_STORE_GUARD: executable } : {};
+};
+
+/**
+ * The Windows shell sandbox for the services utility (desktop Bash/Terminal blueprint Q15, D15): the helper this build
+ * ships, `resources/windows-sandbox/win32-x64/tau-windows-sandbox.exe` (`desktop:prepare-windows-sandbox`), as
+ * `TAU_WINDOWS_SANDBOX_HELPER`, and the switch that composes the sandbox, `TAU_WINDOWS_SHELL_SANDBOX=1`, when main
+ * itself was started with it. The sandbox stays off by default until the WIN-X64 conformance row is green on a merged
+ * head; the services host then asks for the helper's one-time elevated setup from the Terminal.
+ *
+ * The helper path is always the build's own: an inherited `TAU_WINDOWS_SANDBOX_HELPER` is never forwarded, so nothing
+ * that launches Tau can choose the executable Tau asks Windows to run elevated. Absent (another platform, or a
+ * development tree where `prepare-windows-sandbox` has not run), the services host has no Windows sandbox to compose.
+ *
+ * @param resourceRoot - `process.resourcesPath` in a packaged app; `apps/desktop/resources` in a development tree.
+ * @param source - Main's environment, read for `TAU_WINDOWS_SHELL_SANDBOX` only.
+ * @param target - Operating system and CPU architecture the helper was built for.
+ * @returns The helper and the switch, each only where it applies.
+ */
+export const windowsShellSandboxEnvironment = (
+  resourceRoot: string,
+  source: NodeJS.ProcessEnv = process.env,
+  target?: Readonly<{ architecture: string; platform: NodeJS.Platform }>,
+): Readonly<Record<string, string>> => {
+  const { architecture, platform } = target ?? {
+    architecture: process.arch,
+    platform: process.platform,
+  };
+  if (platform !== 'win32') {
+    return {};
+  }
+  const helper = join(resourceRoot, 'windows-sandbox', `${platform}-${architecture}`, 'tau-windows-sandbox.exe');
+  return {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+    ...(existsSync(helper) ? { TAU_WINDOWS_SANDBOX_HELPER: helper } : {}),
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+    ...(source['TAU_WINDOWS_SHELL_SANDBOX'] === '1' ? { TAU_WINDOWS_SHELL_SANDBOX: '1' } : {}),
+  };
 };

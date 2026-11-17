@@ -18,7 +18,9 @@ import {
   desktopShellCustody,
   desktopShellProvider,
   setUpWindowsShellSandbox,
+  windowsSandboxSetupNeeded,
 } from '#services-host-shell.js';
+import type { WindowsShellSandboxSetup } from '#services-host-shell.js';
 
 let base = '';
 let project = '';
@@ -273,15 +275,29 @@ describe('desktopShellProvider', () => {
   });
 
   describe('Windows shell sandbox flag', () => {
+    const installedRecord = JSON.stringify({ version: 1, account: 'TauSandbox', accountSid: 'S-1-5-21-1-2-3-1001' });
+    const absentRecord = JSON.stringify({ installed: false });
     /* A stand-in helper that answers `status` only; it never launches anything. */
     const statusHelper = async (installed: boolean): Promise<string> => {
       const helper = join(base, 'tau-windows-sandbox');
-      const record = installed
-        ? JSON.stringify({ version: 1, account: 'TauSandbox', accountSid: 'S-1-5-21-1-2-3-1001' })
-        : JSON.stringify({ installed: false });
+      const record = installed ? installedRecord : absentRecord;
       await writeFile(helper, `#!/bin/sh\nprintf '%s' '${record}'\n`);
       await chmod(helper, 0o755);
       return helper;
+    };
+    /* A stand-in helper whose `status` reports an install record once `install` (the fake setup) has written one. */
+    const installableHelper = async (): Promise<{ helper: string; install: () => Promise<void> }> => {
+      const helper = join(base, 'tau-windows-sandbox');
+      const record = join(base, 'install.json');
+      await writeFile(record, absentRecord);
+      await writeFile(helper, `#!/bin/sh\ncat '${record}'\n`);
+      await chmod(helper, 0o755);
+      return {
+        helper,
+        install: async () => {
+          await writeFile(record, installedRecord);
+        },
+      };
     };
 
     it('keeps the Windows answer unchanged while the flag is off, even with a helper present', async () => {
@@ -321,13 +337,225 @@ describe('desktopShellProvider', () => {
           createDesktopShell({ appDataRoots: [appData], platform: 'win32', environment }).probe(),
         ).resolves.toStrictEqual({
           status: 'unavailable',
-          code: 'sandbox-unavailable',
+          code: 'provisioning-required',
           message: 'The Windows shell sandbox is not set up on this device.',
           recovery:
-            'Tau needs one administrator approval to set up the Windows shell sandbox. Approve the Windows prompt when Tau asks, then open the shell again.',
+            'Choose Set up in the Terminal and approve the Windows administrator prompt. Tau asks once; then the shell and Terminal work.',
         });
       },
     );
+
+    it.skipIf(process.platform === 'win32')(
+      'says why a status run that failed read as not set up, and asks again at the next probe',
+      async () => {
+        const helper = join(base, 'tau-windows-sandbox');
+        const record = join(base, 'install.json');
+        await writeFile(
+          helper,
+          `#!/bin/sh\nif [ -f '${record}' ]; then cat '${record}'; exit 0; fi\necho 'tau-windows-sandbox status: Access is denied. (os error 5)' >&2\nexit 3\n`,
+        );
+        await chmod(helper, 0o755);
+        const environment = { TAU_WINDOWS_SHELL_SANDBOX: '1', TAU_WINDOWS_SANDBOX_HELPER: helper };
+        const shell = createDesktopShell({ appDataRoots: [appData], platform: 'win32', environment });
+
+        await expect(shell.probe()).resolves.toMatchObject({
+          code: 'provisioning-required',
+          diagnostic:
+            'exit 3; its output is not JSON: ""; stderr: tau-windows-sandbox status: Access is denied. (os error 5)',
+        });
+
+        /* The record was there all along; the next probe reads it, with no setup in between. */
+        await writeFile(record, installedRecord);
+
+        await expect(shell.probe()).resolves.toMatchObject({ status: 'unavailable', code: 'shell-missing' });
+      },
+    );
+
+    describe('provision', () => {
+      it.skipIf(process.platform === 'win32')(
+        'runs the one-time setup with the helper, then probes again past the setup answer',
+        async () => {
+          const { helper, install } = await installableHelper();
+          const environment = {
+            TAU_WINDOWS_SHELL_SANDBOX: '1',
+            TAU_WINDOWS_SANDBOX_HELPER: helper,
+          };
+          const setUps: string[] = [];
+          const shell = createDesktopShell({
+            appDataRoots: [appData],
+            platform: 'win32',
+            environment,
+            setUpWindowsSandbox: async (path): Promise<WindowsShellSandboxSetup> => {
+              setUps.push(path);
+              await install();
+              return { status: 'set-up' };
+            },
+          });
+          await expect(shell.probe()).resolves.toMatchObject({
+            code: 'provisioning-required',
+          });
+
+          const provisioned = await shell.provision();
+
+          expect(setUps).toStrictEqual([helper]);
+          /* Past setup the real probe runs; this Linux host has no Windows PowerShell for it to find. */
+          expect(provisioned).toMatchObject({
+            status: 'unavailable',
+            code: 'shell-missing',
+          });
+          await expect(shell.probe()).resolves.toBe(provisioned);
+        },
+      );
+
+      it.skipIf(process.platform === 'win32')(
+        'keeps offering setup with a clean message when the person declines the prompt',
+        async () => {
+          const declined = String.raw`The Windows shell sandbox was not set up: Command failed: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe The operation was canceled by the user.`;
+          const { helper } = await installableHelper();
+          const environment = {
+            TAU_WINDOWS_SHELL_SANDBOX: '1',
+            TAU_WINDOWS_SANDBOX_HELPER: helper,
+          };
+          let setUps = 0;
+          const shell = createDesktopShell({
+            appDataRoots: [appData],
+            platform: 'win32',
+            environment,
+            setUpWindowsSandbox: async (): Promise<WindowsShellSandboxSetup> => {
+              setUps += 1;
+              return {
+                status: 'failed',
+                message: declined,
+              };
+            },
+          });
+
+          await expect(shell.provision()).resolves.toStrictEqual({
+            status: 'unavailable',
+            code: 'provisioning-required',
+            message: 'The Windows shell sandbox was not set up: the administrator prompt was declined or setup failed.',
+            recovery: 'Choose Set up to try again. Tau starts no shell until the sandbox is set up.',
+            diagnostic: declined,
+          });
+          await expect(shell.probe()).resolves.toMatchObject({
+            code: 'provisioning-required',
+            message: 'The Windows shell sandbox is not set up on this device.',
+          });
+          await expect(shell.provision()).resolves.toMatchObject({
+            code: 'provisioning-required',
+          });
+          expect(setUps).toBe(2);
+        },
+      );
+
+      it.skipIf(process.platform === 'win32')('shares one setup between concurrent requests', async () => {
+        const { helper, install } = await installableHelper();
+        const environment = {
+          TAU_WINDOWS_SHELL_SANDBOX: '1',
+          TAU_WINDOWS_SANDBOX_HELPER: helper,
+        };
+        const approved = Promise.withResolvers<void>();
+        let setUps = 0;
+        const shell = createDesktopShell({
+          appDataRoots: [appData],
+          platform: 'win32',
+          environment,
+          setUpWindowsSandbox: async (): Promise<WindowsShellSandboxSetup> => {
+            setUps += 1;
+            await approved.promise;
+            await install();
+            return { status: 'set-up' };
+          },
+        });
+        const first = shell.provision();
+        const second = shell.provision();
+        approved.resolve();
+
+        expect(await first).toBe(await second);
+        expect(setUps).toBe(1);
+      });
+
+      it('runs no setup where the probe does not ask for one', async () => {
+        let setUps = 0;
+        const setUpWindowsSandbox = async (): Promise<WindowsShellSandboxSetup> => {
+          setUps += 1;
+          return { status: 'set-up' };
+        };
+        const off = createDesktopShell({
+          appDataRoots: [],
+          platform: 'win32',
+          environment: {
+            TAU_WINDOWS_SANDBOX_HELPER: await statusHelper(false),
+          },
+          setUpWindowsSandbox,
+        });
+        await expect(off.provision()).resolves.toMatchObject({
+          code: 'sandbox-unavailable',
+          message: 'The Windows shell sandbox is not part of this Tau build.',
+        });
+        const linux = createDesktopShell({
+          appDataRoots: [appData],
+          platform: 'linux',
+          provider: versionThenOk(),
+          setUpWindowsSandbox,
+        });
+        await expect(linux.provision()).resolves.toBe(await linux.probe());
+        expect(setUps).toBe(0);
+      });
+    });
+  });
+});
+
+describe('windowsSandboxSetupNeeded', () => {
+  const refused = (message: string, diagnostic?: string) =>
+    ({
+      status: 'unavailable',
+      code: 'sandbox-unavailable',
+      message: `The shell sandbox is not available on this device: ${message}`,
+      recovery: 'Reinstall Tau to restore its sandbox components.',
+      ...(diagnostic === undefined ? {} : { diagnostic }),
+    }) as const;
+
+  it('asks for setup while the helper reports no install record, whatever the probe said', () => {
+    expect(windowsSandboxSetupNeeded(refused('anything'), false)).toMatchObject({
+      code: 'provisioning-required',
+      message: 'The Windows shell sandbox is not set up on this device.',
+    });
+  });
+
+  it.each([
+    'the sandbox runner needs repair (run setup again)',
+    'the sandbox network rules are missing or disabled (run setup again)',
+    'the sandbox account is missing (run setup again)',
+  ])('asks for setup again when the helper refuses with a fault its setup repairs: %s', (message) => {
+    expect(
+      windowsSandboxSetupNeeded(refused(message, 'the installed runner differs from this helper'), true),
+    ).toStrictEqual({
+      status: 'unavailable',
+      code: 'provisioning-required',
+      message: 'The Windows shell sandbox needs to be set up again on this device, for example after a Tau update.',
+      recovery:
+        'Choose Set up in the Terminal and approve the Windows administrator prompt. Tau asks once; then the shell and Terminal work.',
+      diagnostic: `The shell sandbox is not available on this device: ${message}\nthe installed runner differs from this helper`,
+    });
+  });
+
+  it('leaves every other answer to the probe', () => {
+    const firewallOff = refused(
+      'Windows Firewall is off for Public, so Tau cannot keep the sandbox off the network. Turn it on, then try again.',
+    );
+    expect(windowsSandboxSetupNeeded(firewallOff, true)).toBeUndefined();
+    expect(
+      windowsSandboxSetupNeeded(
+        {
+          status: 'unavailable',
+          code: 'shell-missing',
+          message: 'No PowerShell (run setup again)',
+          recovery: 'x',
+        },
+        true,
+      ),
+    ).toBeUndefined();
   });
 });
 
@@ -361,7 +589,7 @@ describe('bundledWindowsSandboxHelper', () => {
         source: false,
         resourcesPath: String.raw`C:\Program Files\Tau\resources`,
       }),
-    ).toBe(String.raw`C:\Program Files\Tau\resources\sandbox\tau-windows-sandbox.exe`);
+    ).toBe(String.raw`C:\Program Files\Tau\resources\windows-sandbox\win32-x64\tau-windows-sandbox.exe`);
     expect(bundledWindowsSandboxHelper({ environment: {}, source: false, resourcesPath: '' })).toBeUndefined();
   });
 });

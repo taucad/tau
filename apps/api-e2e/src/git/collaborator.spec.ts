@@ -113,9 +113,10 @@ const invite = async (
   });
   expect(invited.status, await invited.clone().text()).toBe(201);
   const { token } = (await invited.json()) as { readonly token: string };
-  const accepted = await fetch(`${gitE2ESecondaryApiUrl}/v1/invitations/${token}`, {
+  const accepted = await fetch(`${gitE2ESecondaryApiUrl}/v1/invitations/accept`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${who.token}` },
+    headers: { authorization: `Bearer ${who.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ token }),
   });
   expect(accepted.status, await accepted.clone().text()).toBe(201);
 };

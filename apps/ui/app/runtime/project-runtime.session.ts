@@ -23,7 +23,7 @@ import { FileManagerNotReadyError } from '@taucad/ui-core/filesystem/workspace-e
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { ProjectSessionOpenRequest } from '#machines/project-session.machine.js';
 import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
-import { refuseCloseWhileRecording } from '#lib/editor-document-session.js';
+import { refuseCloseWhileRecording } from '@taucad/editor-ui/lib/editor-document-session';
 import { inspect as developmentInspect } from '#machines/inspector.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type {

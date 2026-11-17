@@ -8,7 +8,6 @@ import { toast } from '@taucad/ui/components/sonner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';
-import { recordApiRequestId } from '#lib/api-request-id.js';
 
 export type PublicationAccessGrant = {
   id: string;
@@ -70,8 +69,9 @@ export function PublicationAccessPanel({
             body: JSON.stringify({ email }),
           });
 
+          // The failure ends at the toast below and is never reported, so no request id is recorded on it.
           if (!response.ok) {
-            throw recordApiRequestId(new Error(email), response);
+            throw new Error(email);
           }
         }),
       );
@@ -96,7 +96,7 @@ export function PublicationAccessPanel({
       });
 
       if (!response.ok) {
-        throw recordApiRequestId(new Error(grant.recipientEmail), response);
+        throw new Error(grant.recipientEmail);
       }
 
       await onGrantsChanged();

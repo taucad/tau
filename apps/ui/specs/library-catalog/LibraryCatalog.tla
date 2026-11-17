@@ -96,6 +96,11 @@
 \* to `@taucad/files-ui`; the four sources only re-point their imports. No action or correspondence changes.
 \* Project name fit (2026-11-16): `ProjectCommands` keeps a generated name's first line and fits it, and a duplicate's
 \* name, to the manifest's 200 code units before the create is journaled. No action or correspondence changes.
+\* W30 project lifecycle (2026-11-17): a listing takes a scope (`live`, `trash`, `all`) in place of
+\* `includeDeleted`, and a delete of a project no tab has open checks quiescence by leasing each chat's log
+\* lock and reading its log, instead of refusing until the project is opened. Both stay outside the model,
+\* as the registry and chat store reads did; the journal, apply and gate order is unchanged. No action or
+\* correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

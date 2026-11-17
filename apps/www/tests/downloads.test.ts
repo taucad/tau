@@ -7,6 +7,7 @@ import {
   desktopDownloads,
   desktopFileLabel,
   isArchivePlatform,
+  isBetaPlatform,
 } from '#www/downloads.js';
 
 import { projection } from '#www/download-catalog.fixture.js';
@@ -25,6 +26,15 @@ describe('qualified desktop download catalog', () => {
     expect(isArchivePlatform('macIntel')).toBe(false);
     expect(isArchivePlatform('linux')).toBe(true);
     expect(desktopDownloadHref('linux')).toBe('https://downloads.tau.new/latest/Tau-linux-x64.tar.gz');
+  });
+  it('marks every Windows and Linux route beta until it is qualified on a real device, and no Mac route', () => {
+    expect(select(projection())!.map(({ platform }) => [platform, isBetaPlatform(platform)])).toEqual([
+      ['mac', false],
+      ['macIntel', false],
+      ['windows', true],
+      ['linux', true],
+      ['linuxPortable', true],
+    ]);
   });
   it('selects immutable installer links with retained archives and truthful update ownership', () => {
     const catalog = select(projection())!;
@@ -178,22 +188,35 @@ describe('qualified desktop download catalog', () => {
     expect(
       select(projection())!.every((choice) => choice.cleanHost === 'passed' && !choice.detail.includes('pending')),
     ).toBe(true);
-    // Production admits pending clean-host acceptance only on the Mac routes, and says so on each.
+    // Production admits pending clean-host acceptance only on the Mac and beta Windows routes, and says so on each.
     for (const index of value.routes.keys()) {
       const production = projection();
       production.routes[index]!.qualification = { ci: true, vm: 'pending', trust: 'release' };
-      if (production.routes[index]!.route === 'macos-zip') {
+      const { route } = production.routes[index]!;
+      if (route === 'macos-zip' || route === 'windows-nsis') {
         const admitted = select(production)!;
         expect(admitted.filter((choice) => choice.cleanHost === 'pending')).toHaveLength(1);
         expect(admitted.find((choice) => choice.cleanHost === 'pending')?.detail).toContain(
-          'clean-Mac install testing pending',
+          route === 'windows-nsis' ? 'clean-Windows install testing pending' : 'clean-Mac install testing pending',
         );
       } else {
         expect(() => select(production)).toThrow(/release qualification/u);
       }
     }
-    // Staging admits it only on Mac routes, and only as the exact `pending` marker with release CI evidence.
-    for (const index of [2, 3, 4]) {
+    // Staging admits the beta Windows route as pending too (operator ruling 2026-11-17T08:27Z).
+    const windowsPending = {
+      ...value.routes[2]!,
+      qualification: { ci: true, vm: 'pending', trust: 'release' },
+    };
+    expect(
+      createDesktopDownloadCatalog({
+        enabled: true,
+        channel: 'staging',
+        qualification: staging([windowsPending]),
+      })!.map((choice) => [choice.platform, choice.cleanHost, choice.detail]),
+    ).toEqual([['windows', 'pending', 'Windows x64 · per-user installer · clean-Windows install testing pending']]);
+    // Linux never: only the exact `pending` marker on Mac and Windows routes, with release CI evidence.
+    for (const index of [3, 4]) {
       const route = { ...value.routes[index]!, qualification: { ci: true, vm: 'pending', trust: 'release' } };
       expect(() =>
         createDesktopDownloadCatalog({ enabled: true, channel: 'staging', qualification: staging([route]) }),

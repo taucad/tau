@@ -20,7 +20,7 @@ const bytes = async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
   return Uint8Array.from(await readFile(path));
 };
 
-/** Preserve the authenticated repository closure; only validity times and signatures change. */
+/** Preserve the authenticated repository closure; only the issue time and signatures change. */
 export const renewDesktopApt = async (options: {
   inRelease: Uint8Array<ArrayBuffer>;
   signedInventory: Uint8Array<ArrayBuffer>;

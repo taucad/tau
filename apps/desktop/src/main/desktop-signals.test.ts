@@ -2,6 +2,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   appLoadFailureSignal,
+  bootstrapFailedSignal,
+  errnoOf,
+  mainUncaughtSignal,
+  optionalStepFailedSignal,
+  probeLeftoverIgnoredSignal,
+  storeQuarantinedSignal,
   gitSubcommandOf,
   redactGitErrorLine,
   rendererGoneSignal,
@@ -236,5 +242,38 @@ describe('revisionEngineFailureSignal', () => {
     expect(revisionEngineFailureSignal({ type: 'permission-answered' })).toBeUndefined();
     expect(revisionEngineFailureSignal({ type: 'revision-engine-failed', code: 'REMOTE_NOT_FOUND' })).toBeUndefined();
     expect(revisionEngineFailureSignal(undefined)).toBeUndefined();
+  });
+});
+
+describe('boot hardening signals', () => {
+  it('should carry codes and names only, never the path or message of what failed', () => {
+    const failure = Object.assign(new Error("EACCES: permission denied, mkdir '/Users/someone/Library/Tau/home'"), {
+      code: 'EACCES',
+    });
+    const built = [
+      bootstrapFailedSignal('home-directory', failure),
+      optionalStepFailedSignal('legacy-machines', failure),
+      mainUncaughtSignal('exception', failure),
+      probeLeftoverIgnoredSignal('ota', failure),
+      storeQuarantinedSignal('granted-roots'),
+    ];
+    expect(built.map((signal) => signal.fingerprint[0])).toEqual([
+      'desktop-bootstrap-failed',
+      'desktop-optional-step-failed',
+      'desktop-main-uncaught',
+      'desktop-probe-leftover-ignored',
+      'desktop-store-quarantined',
+    ]);
+    expect(built[0]?.tags).toEqual({ step: 'home-directory', errno: 'EACCES' });
+    expect(built[2]?.tags).toEqual({ kind: 'exception', error_name: 'Error' });
+    for (const signal of built) {
+      expect(JSON.stringify(signal)).not.toContain('someone');
+    }
+  });
+
+  it('should read an unusual code or a non-error throw as nothing in particular', () => {
+    expect(errnoOf(Object.assign(new Error('x'), { code: '/tmp/path' }))).toBe('none');
+    expect(errnoOf('a string')).toBe('none');
+    expect(mainUncaughtSignal('rejection', '/Users/someone').tags).toEqual({ kind: 'rejection', error_name: 'string' });
   });
 });

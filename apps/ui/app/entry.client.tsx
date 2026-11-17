@@ -24,6 +24,7 @@ import { admittedAnalytics } from '#providers/posthog-analytics-provider.js';
 import { ENV } from '#environment.config.js';
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
 import { isSafeModeRequested } from '#lib/boot-signals.js';
+import { desktopSafeMode } from '#lib/desktop-safe-mode.js';
 
 /* D21: started before hydration and never stopped, so the frames that block the first paint are
  * recorded too (the observer is buffered, and the platform only reports frames over 50 ms). */
@@ -58,7 +59,7 @@ if (heldAppRuntime() === undefined) {
       idleFileManagers: isRemoteHostHarness(ENV.TAU_DEBUG, globalThis.location.pathname),
       /* D0: `?safe=1` starts this page load in safe mode, read before the runtime exists. The next navigation drops the
        * parameter, and a reload without it is a normal start. */
-      safeMode: isSafeModeRequested(globalThis.location.search),
+      safeMode: isSafeModeRequested(globalThis.location.search) || desktopSafeMode() !== undefined,
       ...(inspect === undefined ? {} : { inspect }),
     }),
   );

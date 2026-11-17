@@ -25,7 +25,7 @@ import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { buildFrameHintScript } from '#lib/frame-hint.js';
 import { buildBootWatchdogScript, bootWatchdogStripHtml } from '#lib/boot-watchdog.js';
 import { safeModeHref } from '#lib/boot-signals.js';
-import { SafeModeBar } from '#components/layout/safe-mode-bar.js';
+import { SafeModeNotice } from '#components/layout/safe-mode-bar.js';
 import { documentScrollClass } from '#components/layout/document-scroll.js';
 import { Page } from '#components/layout/page.js';
 import { useDocumentFact } from '#lib/client-facts.js';
@@ -239,10 +239,12 @@ export function ProductApp(): React.JSX.Element {
   const { pathname } = useLocation();
   const runtime = useOptionalAppRuntime();
   const isSafeMode = runtime !== undefined && selectRuntimeSafeMode(runtime);
+  /* Desktop safe mode is main's, with its reason and the recovery window behind the bar (D0). Both are read in the
+   * browser only, so the bar mounts after hydration. */
   const shell = (
     <>
       <ProductShell />
-      {isSafeMode ? <SafeModeBar reason='requested' /> : undefined}
+      <SafeModeNotice isRequested={isSafeMode} />
     </>
   );
   if (isRemoteHostHarness(data?.env.TAU_DEBUG, pathname)) {

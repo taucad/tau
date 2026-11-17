@@ -95,7 +95,28 @@ export type DiagnosticsSummary = {
   readonly electron: string | undefined;
   /** How many folders, beside Home, this profile has granted. */
   readonly grantedFolders: number;
+  /** The boot-health ledger's view of this launch and the one before it (D0, D6), when this launch keeps one. */
+  readonly bootHealth?: {
+    readonly mode: string;
+    readonly unhealthyCount: number;
+    readonly stage: string;
+    readonly previous?: { readonly outcome: string; readonly stage: string; readonly ended?: string | undefined };
+  };
 };
+
+const bootHealthLines = (bootHealth: DiagnosticsSummary['bootHealth']): string[] =>
+  bootHealth === undefined
+    ? ['', 'Boot health: not recorded for this launch']
+    : [
+        '',
+        'Boot health:',
+        `Mode: ${bootHealth.mode}`,
+        `Unhealthy launches: ${String(bootHealth.unhealthyCount)}`,
+        bootHealth.previous === undefined
+          ? 'Previous launch: none recorded for this build'
+          : `Previous launch: ${bootHealth.previous.outcome} (stage ${bootHealth.previous.stage}, ended ${bootHealth.previous.ended ?? 'none'})`,
+        `This launch: stage ${bootHealth.stage}`,
+      ];
 
 /** Lines of `desktop.log` a report carries. */
 export const diagnosticsLogLines = 500;
@@ -119,7 +140,11 @@ export const scrubHomePaths = (text: string, home: string): string => {
       scrubbed = scrubbed.replaceAll(new RegExp(escapeRegExp(spelling), 'giu'), '~');
     }
   }
-  return scrubbed.replaceAll(/(?:[a-z]:)?[\\/](?:users|home)[\\/][^\\/:'"\s]+/giu, '~');
+  /* A Windows account name (behind a drive letter or a backslash) may hold spaces, so it runs to the next separator;
+   * a POSIX one cannot, so it ends at whitespace. */
+  return scrubbed
+    .replaceAll(/(?:[a-z]:[\\/]|\\)users[\\/][^\\/:'"\r\n]+/giu, '~')
+    .replaceAll(/[\\/](?:users|home)[\\/][^\\/:'"\s]+/giu, '~');
 };
 
 /* The last bytes of a file, read synchronously: the report is built in a menu click, from a file main itself owns. */
@@ -137,7 +162,8 @@ const readTail = (path: string, bytes: number): string => {
 };
 
 /**
- * The text **Copy Diagnostics** puts on the clipboard: the build, the profile's folder count and the last
+ * The text **Copy Diagnostics** puts on the clipboard: the build, the profile's folder count, the boot-health ledger
+ * and the last
  * {@link diagnosticsLogLines} lines of `desktop.log`, with every home directory replaced by `~`.
  *
  * @param summary - The build and profile facts.
@@ -164,6 +190,7 @@ export const diagnosticsReport = (summary: DiagnosticsSummary, logPath: string, 
     `Packaged: ${String(summary.packaged)}`,
     `Electron: ${summary.electron ?? 'unknown'}`,
     `Granted folders: ${String(summary.grantedFolders)}`,
+    ...bootHealthLines(summary.bootHealth),
   ];
   return scrubHomePaths(`${header.join('\n')}\n\nLast ${String(diagnosticsLogLines)} log lines:\n${log}\n`, home);
 };

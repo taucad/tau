@@ -5,7 +5,7 @@ import { TauWordmark } from '@taucad/ui-kit/icons/tau-wordmark';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { ForkAction } from '#components/share/fork-action.js';
-import type { ParsedPublication } from '#components/share/parsed-publication.js';
+import type { ParsedPublication } from '@taucad/publish-ui/components/share/parsed-publication';
 import { ProjectExportAction } from '#routes/w.$workspace.$project/project-export-action.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { isDesktopTarget } from '#lib/build-target.js';

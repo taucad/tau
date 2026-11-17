@@ -46,6 +46,7 @@ import {
   selectActiveWorkspaceId,
   selectBridgeOpener,
   selectProxy,
+  selectSafeMode,
   servicesBound,
   servicesOf,
 } from '#runtime/file-manager-facade.js';
@@ -943,8 +944,7 @@ function FileManagerScope({
         proxy.disposeStorageRoot(`webaccess:${previousWorkspaceId}`);
       }
       proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-      const { safeMode } = fileManagerRef.getSnapshot().context;
-      await proxy.configureProjectRoots(await readRootConfigurationOnly(safeMode));
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(selectSafeMode(fileManagerRef)));
       const discovery = await proxy.listProjectManifests();
       const matches = discovery.entries.filter(
         (entry) =>
@@ -963,7 +963,7 @@ function FileManagerScope({
         workspaceId,
         providerBasePath: match.locator.relativeDirectory,
       });
-      await proxy.configureProjectRoots(await readRootConfigurationOnly(safeMode));
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(selectSafeMode(fileManagerRef)));
 
       workspaceTelemetry.workspaceSwap({
         previousWorkspaceId,

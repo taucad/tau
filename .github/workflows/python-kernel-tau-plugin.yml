@@ -78,6 +78,10 @@ jobs:
       PACKAGE: ${{ inputs.package }}
       PROJECT: ${{ inputs.project }}
     steps:
+      # Windows checkouts default to CRLF, which would change the pinned worker scripts' bytes; keep the committed ones.
+      - name: Keep committed line endings
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

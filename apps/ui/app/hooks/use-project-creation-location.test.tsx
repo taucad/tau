@@ -25,7 +25,9 @@ const mockGetWorkspace = vi.fn<(workspaceId: string) => Promise<TestWorkspaceEnt
 const mockCheckPermission = vi.fn<(handle: TestHandle) => Promise<PermissionState>>(async () => 'granted');
 const mockRequestPermission = vi.fn<(handle: TestHandle) => Promise<boolean>>(async () => true);
 const mockCreateWorkspace = vi.fn<(handle: TestHandle) => Promise<WorkspaceConnection>>();
-const mockGetPreference = vi.fn<() => Promise<ProjectCreationLocationRead>>(async () => ({
+const mockGetPreference = vi.fn<
+  (options?: { readonly rootStatuses?: readonly unknown[] }) => Promise<ProjectCreationLocationRead>
+>(async () => ({
   location: { kind: 'home' },
   repaired: undefined,
 }));
@@ -38,10 +40,26 @@ const mockToastError = vi.fn();
 const mockToastInfo = vi.fn();
 /** The root file manager's published root statuses, as the hook reads them (D1). */
 const rootStatusState = vi.hoisted(() => ({ roots: [] as unknown[] }));
+const rootStatusListeners = new Set<() => void>();
 const mockFileManagerRef = {
   getSnapshot: () => ({ status: 'active', context: { rootStatuses: rootStatusState.roots } }),
-  subscribe: () => ({ unsubscribe: () => undefined }),
+  subscribe: (listener: (() => void) | { readonly next?: () => void }) => {
+    const notify = typeof listener === 'function' ? listener : () => listener.next?.();
+    rootStatusListeners.add(notify);
+    return {
+      unsubscribe: () => {
+        rootStatusListeners.delete(notify);
+      },
+    };
+  },
   send: vi.fn(),
+};
+/** Publish new root statuses, as the file service does when a root's admission settles. */
+const publishRootStatuses = (roots: unknown[]): void => {
+  rootStatusState.roots = roots;
+  for (const notify of rootStatusListeners) {
+    notify();
+  }
 };
 const mockConnectWorkspace = vi.fn(async () => {
   try {
@@ -293,6 +311,65 @@ describe('useProjectCreationLocation', () => {
     const second = renderHook(() => useProjectCreationLocation());
     await waitForReady(second.result);
     expect(mockToastInfo).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to Home when the chosen folder is reported not found after the choice was read (B9, T-REH.1)', async () => {
+    const workshop = { ...workspace('wsp_node', 'Workshop', 5), path: '/Users/tester/Workshop' };
+    const notFound = {
+      storageRootKey: 'node:/Users/tester/Workshop',
+      backend: 'node',
+      state: 'notFound',
+      code: 'ENOENT',
+    };
+    mockListWorkspaces.mockResolvedValue([workshop]);
+    /* The stored choice, repaired against whatever statuses the read is given: none yet at the first read. */
+    mockGetPreference.mockImplementation(async (options) =>
+      options?.rootStatuses?.includes(notFound) === true
+        ? { location: { kind: 'home' }, repaired: 'workspace-unavailable' }
+        : { location: { kind: 'workspace', workspaceId: 'wsp_node' }, repaired: undefined },
+    );
+
+    const { result } = renderHook(() => useProjectCreationLocation());
+    await waitForReady(result);
+    expect(capableReady(result.current).value).toEqual({ kind: 'workspace', workspaceId: 'wsp_node' });
+
+    act(() => {
+      publishRootStatuses([notFound]);
+    });
+
+    await waitFor(() => {
+      expect(capableReady(result.current).value).toEqual({ kind: 'home' });
+    });
+    expect(result.current.canCreate).toBe(true);
+
+    act(() => {
+      publishRootStatuses([{ ...notFound, state: 'available', code: undefined }]);
+    });
+
+    await waitFor(() => {
+      expect(capableReady(result.current).value).toEqual({ kind: 'workspace', workspaceId: 'wsp_node' });
+    });
+  });
+
+  it('keeps a folder the person picked here when root statuses change', async () => {
+    const workshop = { ...workspace('wsp_node', 'Workshop', 5), path: '/Users/tester/Workshop' };
+    mockListWorkspaces.mockResolvedValue([workshop]);
+
+    const { result } = renderHook(() => useProjectCreationLocation());
+    await waitForReady(result);
+    act(() => {
+      capableReady(result.current).select({ kind: 'workspace', workspaceId: 'wsp_node' });
+    });
+    mockGetPreference.mockClear();
+
+    act(() => {
+      publishRootStatuses([
+        { storageRootKey: 'node:/Users/tester/Workshop', backend: 'node', state: 'available', code: undefined },
+      ]);
+    });
+
+    expect(mockGetPreference).not.toHaveBeenCalled();
+    expect(capableReady(result.current).value).toEqual({ kind: 'workspace', workspaceId: 'wsp_node' });
   });
 
   it('reports an unreconnectable host as unsupported, never as a user cancel', async () => {

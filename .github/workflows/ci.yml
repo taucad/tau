@@ -173,14 +173,14 @@ jobs:
              "formal": {"targets": ["formal:tla"], "pr": "queue"},
              "formal-nightly": {"targets": ["formal:nightly"], "pr": "queue"},
              "geospec-examples": {"targets": ["test-geospec"], "pr": "queue"},
-             "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "queue"},
+             "browser": {"tags": ["ci:browser"], "targets": ["verify-browser"], "pr": "touched"},
              "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue"},
              "native-linux": {"targets": ["test:native-linux"], "pr": "queue"},
              "native-darwin": {"targets": ["test:native-darwin"], "pr": "queue"},
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
              "desktop": {"tags": ["ci:desktop"]},
              "shell": {"tags": ["ci:shell"], "pr": "queue"},
-             "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "queue"}}
+             "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "touched"}}
           SHELL_LANE_PATHS: >-
             [".github/workflows/shell-conformance.yml",
              "apps/desktop/scripts/hosted-linux-bwrap-fixture.mts",
@@ -812,7 +812,8 @@ jobs:
   # e2e-nightly runs leaves the nightly for good and runs here, in the merge queue (and on a push to `main` the
   # queue did not prove), whenever its project is affected. A project lists its ratcheted suites in its
   # `test:e2e:queue` target's `dependsOn`; the plan turns them into one row per suite and e2e-nightly.yml skips
-  # them, so a later ratchet is a one-line `project.json` edit. A pull request leaves the lane to the queue.
+  # them, so a later ratchet is a one-line `project.json` edit. A pull request runs the suites of the projects its
+  # own diff touches (`pr: touched`, merge-queue defect MQ-5), so a deterministic failure is seen before it queues.
   # Each row is the nightly's job for that suite: one suite per runner (one after another they outlast a job,
   # run 37221169741), the same browsers, Pandoc, sandbox, software Vulkan and xvfb, and the same chat log
   # validation for a suite that opens a chat. The slowest first-batch suite took 10.4 min as a whole nightly job

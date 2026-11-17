@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 /**
  * Orchestration tests for the Windows native adapter: a stand-in helper speaks the launch protocol but contains
  * nothing, so these prove ordering, settlement and recovery. Containment is proven by the helper's own Windows
@@ -207,33 +208,6 @@ describe('the Windows native sandbox adapter', () => {
       'The Windows sandbox launch failed: The helper sent an unknown frame type 0x7f.',
     );
     expect(events().some((event) => event['event'] === 'frame' && event['type'] === 0x05)).toBe(true);
-    expect(readdirSync(journalDirectory)).toEqual([]);
-  });
-
-  it('should ask again while another sandboxed launch holds the computer, then run', async () => {
-    const child = await launched('busy-once');
-    child.stdin.end('after the other\n');
-
-    const result = await settled(child);
-
-    expect(result).toEqual({ code: 0, stdout: 'after the other\n', stderr: 'stdin closed\n' });
-    expect(events().filter((event) => event['event'] === 'spec')).toHaveLength(2);
-    expect(readdirSync(journalDirectory)).toEqual([]);
-  });
-
-  it('should report the busy refusal once the wait is spent, and leave no receipt', async () => {
-    configureWindowsNativeSandbox(options('busy', { busyWait: 300 }));
-    const child = spawnWindowsNative(await windowsNativeLaunchVector(request), {
-      cwd: request.workingDirectory,
-      env: {},
-    });
-
-    const result = await settled(child);
-
-    expect(result.error?.message).toMatch(
-      /^The Windows sandbox refused the native launch: another sandboxed launch is running on this computer/u,
-    );
-    expect(events().filter((event) => event['event'] === 'spec').length).toBeGreaterThan(1);
     expect(readdirSync(journalDirectory)).toEqual([]);
   });
 

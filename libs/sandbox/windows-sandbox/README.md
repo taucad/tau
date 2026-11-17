@@ -33,10 +33,18 @@ WRITE_RESTRICTED`) whose restricting SIDs are a fresh random per-launch capabili
   inbound) traffic to non-loopback addresses, block loopback UDP, and block loopback TCP except the fixed proxy port
   block recorded in the install record. A launch with nonempty
   `network.domains` is `unsupported: network-isolation` until the per-launch proxy lands (Q4 §7 risk 2).
-- **ACL lifecycle.** Before it changes any ACL the launcher writes a journal (path → original SDDL, `SE_DACL_PROTECTED`
-  state) and fsyncs it. At exit, and in `restore` after a crash, it writes back exactly those descriptors. It never
-  removes an ACE it did not add (I11, E19; Q4 §7 risk 4). The journal must not already exist (a leftover belongs to a
-  crashed launch: `restore` it first) and must not lie inside a granted or denied path.
+- **ACL lifecycle.** Granting through `SetNamedSecurityInfoW` propagates the inheritable ACEs to every descendant and
+  sets `SE_DACL_AUTO_INHERITED` on the root and on each descendant it rewrites. So before it changes any ACL the
+  launcher journals the full original descriptor (owner, group, DACL and its control flags, as SDDL) of every root and
+  of every object under a directory root, walking each tree without following reparse points (a junction or symbolic
+  link is journaled as itself and not entered), and fsyncs the journal. At exit, and in `restore` after a crash, it
+  writes each root's DACL back with propagation (which also strips the launch's ACEs from objects created during the
+  launch), then writes every journaled object's exact DACL and control flags through its handle with
+  `SetKernelObjectSecurity`, which does not propagate, and reads each back: the full SDDL must equal the journal's. It
+  never removes an ACE it did not add and never writes an owner or group (I11, E19; Q4 §7 risk 4). A granted or denied
+  path that is itself a link or junction is refused (`absolute-paths`). The journal must not already exist (a leftover
+  belongs to a crashed launch: `restore` it first) and must not lie inside a granted or denied path. Journaling costs
+  one handle open per object under the granted paths, the same order of work as the propagation itself.
 - **Desktop.** The launcher (not the runner, which as `TauSandbox` may not change `WinSta0`; this is where both the
   spike and Codex create it) gives the shell a private desktop on its window station whose protected DACL admits the
   person and, as participants, `TauSandbox` and the launch's capability SID. It adds one session ACE per SID to the
@@ -124,7 +132,12 @@ Launch spec (`0x01`):
   "workingDirectory": "C:\\…",
   "environment": { "PATH": "…", "TEMP": "…" },
   "stdio": { "kind": "pipes" },
-  "filesystem": { "readable": [], "writable": [], "readOnly": [], "denied": [] },
+  "filesystem": {
+    "readable": [],
+    "writable": [],
+    "readOnly": [],
+    "denied": []
+  },
   "journal": "C:\\Users\\…\\AppData\\Roaming\\Tau\\shell-custody\\<executionId>.acl.json"
 }
 ```
@@ -158,19 +171,27 @@ which `launch` never forwards to the host.
 
 ## ACL journal
 
-```json
-{
-  "version": 1,
-  "capabilitySid": "S-1-5-21-…",
-  "launcherPid": 1234,
-  "entries": [{ "path": "C:\\…", "sddl": "D:…", "protected": false }],
-  "windowStation": { "sessionId": 1, "name": "WinSta0", "descriptor": "<hex self-relative SD>" }
-}
+JSON lines, streamed on write and on restore so memory stays bounded however large the granted trees are:
+
+```text
+{"kind":"header","version":2,"capabilitySid":"S-1-5-21-…","launcherPid":1234,"windowStation":{"sessionId":1,"name":"WinSta0","descriptor":"<hex self-relative SD>"}}
+{"kind":"root","path":"C:\\…\\home","sddl":"O:S-1-5-21-…G:S-1-5-21-…D:(A;OICI;FA;;;SY)…","fileId":"<volume serial>:<file index>"}
+{"kind":"child","path":"C:\\…\\home\\a.txt","sddl":"O:…G:…D:AI(A;ID;FA;;;SY)…","fileId":"…"}
+{"kind":"end","roots":1,"children":1}
 ```
 
-`restore --journal <path>` restores every entry (children first), confirms each, restores the window station when it
-runs in the journaled session, deletes the journal and prints `{"restored":true}`. A missing journal is success. On any
-unconfirmed entry it prints the failures, keeps the journal and exits 1.
+One `root` line per granted or denied path that exists (in application order), one `child` line per object under a
+directory root (a root nested in another is journaled under its own walk only), then `end` with the counts. The whole
+journal, `end` included, is fsynced before any ACL changes, so a journal without a valid `end` belongs to a launch
+that changed nothing. `fileId` (absent when the attributes were unreadable) tells the journaled object from one put in
+its place during the launch; such a replacement is not rewritten (the root's propagating restore already removed what
+it inherited), and a replaced root only has to name none of the launch's principals. Version 1 journals (one JSON
+document) are refused.
+
+`restore --journal <path>` restores the roots with propagation (children first), then every journaled object and root
+exactly, confirms each by full SDDL, restores the window station when it runs in the journaled session, deletes the
+journal and prints `{"restored":true}`. A missing journal, or one cut short before its `end` line, is success. On any
+unconfirmed entry it prints the failures (the first few and a count), keeps the journal and exits 1. It is idempotent.
 
 ## Build
 

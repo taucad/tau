@@ -15,6 +15,7 @@ mod journal;
 mod paths;
 mod protocol;
 mod spec;
+mod tree;
 #[cfg(windows)]
 mod win;
 

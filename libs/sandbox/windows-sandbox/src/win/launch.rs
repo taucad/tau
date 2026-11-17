@@ -31,9 +31,11 @@ use super::util::{Error, Owned, Result, program_files, random_u32s, system_root,
 use crate::cmdline::{capability_sid, quote_arg};
 use crate::frame::{self, Frame, read_frame, write_frame};
 use crate::install::InstallRecord;
-use crate::journal::{FileEntry, JOURNAL_VERSION, Journal};
+use crate::journal::{Entry, Header, JOURNAL_VERSION, JournalWriter};
+use crate::paths::is_within;
 use crate::protocol::{CleanupFailed, Exit, Ready, Refused, RunnerError, RunnerSpec};
 use crate::spec::{self, ExecutableRoots, ValidSpec};
+use crate::tree::{self, Sample};
 
 const RUNNER_EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 const JOB_EMPTY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -123,7 +125,9 @@ struct Session {
     principals: Principals,
     person: Sid,
     journal_path: String,
-    journal: Journal,
+    capability_sid: String,
+    /// The journaled roots, in application order. Their descendants are only in the journal file.
+    roots: Vec<Entry>,
     /// Opened for `WRITE_DAC` when the person may change it. The session ACEs are best-effort: adding
     /// them only widens access, and Codex's shape runs without them.
     station: Option<WindowStation>,
@@ -163,48 +167,53 @@ impl Session {
             None => None,
         };
 
-        // Snapshot everything first; nothing has been changed yet.
-        let mut entries: Vec<FileEntry> = Vec::new();
+        // Snapshot every root first; nothing has been changed yet.
+        let mut roots: Vec<Entry> = Vec::new();
+        let mut directories: Vec<String> = Vec::new();
         for (path, _) in &valid.grants {
-            if entries.iter().any(|e| e.path.eq_ignore_ascii_case(path)) {
+            if roots.iter().any(|e| e.path.eq_ignore_ascii_case(path)) {
                 continue;
             }
+            match root_kind(path) {
+                Ok(RootKind::Missing) => {
+                    eprintln!("tau-windows-sandbox launch: {path} does not exist; no ACL change");
+                    continue;
+                }
+                Ok(RootKind::Link) => {
+                    return Err(Refused::unsupported(
+                        spec::requirement::ABSOLUTE_PATHS,
+                        format!("{path:?} is a link or junction; granted and denied paths must be resolved"),
+                    ));
+                }
+                Ok(RootKind::Directory) => directories.push(path.clone()),
+                Ok(RootKind::File) => {}
+                Err(err) => return Err(Refused::unavailable("a path could not be read", Some(err.to_string()))),
+            }
             match acl::snapshot(path) {
-                Ok(Some(entry)) => entries.push(entry),
+                Ok(Some(entry)) => roots.push(entry),
                 Ok(None) => eprintln!("tau-windows-sandbox launch: {path} does not exist; no ACL change"),
                 Err(err) => return Err(Refused::unavailable("a path's ACL could not be read", Some(err.to_string()))),
             }
         }
-        let journal = Journal {
+        let header = Header {
             version: JOURNAL_VERSION,
-            capability_sid: capability_text,
+            capability_sid: capability_text.clone(),
             launcher_pid: unsafe { GetCurrentProcessId() },
-            entries,
             window_station: station_entry,
         };
         let journal_path = valid.journal.clone();
-        if let Err(err) = journal.create(Path::new(&journal_path)) {
-            let message = if err.kind() == ErrorKind::AlreadyExists {
-                "a previous launch's ACL journal is still present; run restore first"
-            } else {
-                "the ACL journal could not be written"
-            };
-            return Err(Refused::unavailable(message, Some(err.to_string())));
-        }
+        write_journal(Path::new(&journal_path), &header, &roots, &directories)?;
         Ok(Self {
             valid,
             record: record.clone(),
             principals: Principals { account, group, capability },
             person,
             journal_path,
-            journal,
+            capability_sid: capability_text,
+            roots,
             station,
             station_name,
         })
-    }
-
-    fn principal_sids(&self) -> Vec<String> {
-        vec![self.journal.capability_sid.clone(), self.record.account_sid.clone(), self.record.group_sid.clone()]
     }
 
     /// Undo everything this launch changed. `Ok` only when the job (if any) is empty and every descriptor
@@ -218,7 +227,10 @@ impl Session {
                 Err(err) => failures.push(format!("the sandbox job could not be checked: {err}")),
             }
         }
-        failures.extend(restore_journal(&self.journal, &self.principal_sids()));
+        failures.extend(restore_journal(
+            Path::new(&self.journal_path),
+            &[self.record.account_sid.clone(), self.record.group_sid.clone()],
+        ));
         if failures.is_empty()
             && let Err(err) = std::fs::remove_file(&self.journal_path)
             && err.kind() != ErrorKind::NotFound
@@ -230,8 +242,10 @@ impl Session {
 
     fn apply_grants(&self) -> Result<()> {
         for (path, access) in &self.valid.grants {
-            let Some(entry) = self.journal.entries.iter().find(|e| e.path.eq_ignore_ascii_case(path)) else { continue };
-            acl::apply(entry, &acl::aces_for(*access, &self.principals))?;
+            if !self.roots.iter().any(|e| e.path.eq_ignore_ascii_case(path)) {
+                continue;
+            }
+            acl::apply(path, &acl::aces_for(*access, &self.principals))?;
         }
         if let Some(station) = &self.station
             && let Err(err) = station.grant(&[&self.principals.account, &self.principals.capability])
@@ -279,7 +293,7 @@ impl Session {
         let ready = Ready {
             launcher_pid: unsafe { GetCurrentProcessId() },
             runner_pid: runner.pid,
-            capability_sid: self.journal.capability_sid.clone(),
+            capability_sid: self.capability_sid.clone(),
             journal: self.journal_path.clone(),
         };
         send(&sink, &Frame::json(frame::READY, &ready));
@@ -367,7 +381,7 @@ impl Session {
             return Err((Some(job), err));
         }
         let runner_spec = RunnerSpec {
-            capability_sid: self.journal.capability_sid.clone(),
+            capability_sid: self.capability_sid.clone(),
             desktop: desktop.startup_name.clone(),
             executable: self.valid.executable.clone(),
             arguments: self.valid.arguments.clone(),
@@ -380,6 +394,104 @@ impl Session {
         }
         Ok((desktop, job, runner, to_runner, from_runner))
     }
+}
+
+enum RootKind {
+    Missing,
+    File,
+    Directory,
+    /// A junction, symbolic link or other reparse point: the named ACL calls would act on its target while
+    /// the journal records the link itself, so it is refused.
+    Link,
+}
+
+fn root_kind(path: &str) -> std::io::Result<RootKind> {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(RootKind::Missing),
+        Err(err) => return Err(err),
+    };
+    Ok(if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        RootKind::Link
+    } else if metadata.is_dir() {
+        RootKind::Directory
+    } else {
+        RootKind::File
+    })
+}
+
+/// Write and fsync the whole journal: the header, every root, then every object under each directory
+/// root, streamed as the walk finds it. A root nested in another is journaled once, under its own walk.
+/// On failure the partial journal is removed (nothing has changed yet) and the launch is refused.
+fn write_journal(
+    path: &Path,
+    header: &Header,
+    roots: &[Entry],
+    directories: &[String],
+) -> std::result::Result<(), Refused> {
+    let mut writer = match JournalWriter::create(path, header) {
+        Ok(writer) => writer,
+        Err(err) => {
+            let message = if err.kind() == ErrorKind::AlreadyExists {
+                "a previous launch's ACL journal is still present; run restore first"
+            } else {
+                "the ACL journal could not be written"
+            };
+            return Err(Refused::unavailable(message, Some(err.to_string())));
+        }
+    };
+    let mut skipped = Sample::default();
+    let mut unreadable = Sample::default();
+    let written = (|| -> std::io::Result<()> {
+        for root in roots {
+            writer.root(root.clone())?;
+        }
+        for directory in directories {
+            let other_root = |candidate: &Path| {
+                let candidate = candidate.to_string_lossy();
+                roots.iter().any(|root| {
+                    root.path != *directory && is_within(&candidate, &root.path) && is_within(&root.path, &candidate)
+                })
+            };
+            tree::walk(
+                Path::new(directory),
+                other_root,
+                |child| {
+                    let child = child.to_string_lossy();
+                    match acl::snapshot(&child) {
+                        Ok(Some(entry)) => writer.child(entry),
+                        Ok(None) => Ok(()),
+                        // An object the person cannot read is one ACL propagation cannot change either.
+                        Err(err) => {
+                            unreadable.note(format!("{child}: {err}"));
+                            Ok(())
+                        }
+                    }
+                },
+                &mut skipped,
+            )?;
+        }
+        Ok(())
+    })();
+    let finished = written.and_then(|()| writer.finish());
+    for (sample, what) in
+        [(&skipped, "director(ies) could not be listed"), (&unreadable, "object(s) could not be read")]
+    {
+        if !sample.is_empty() {
+            eprintln!(
+                "tau-windows-sandbox launch: {} {what} under the granted paths and were not journaled: {}",
+                sample.count,
+                sample.messages().join("; ")
+            );
+        }
+    }
+    if let Err(err) = finished {
+        let _ = std::fs::remove_file(path);
+        return Err(Refused::unavailable("the ACL journal could not be written", Some(err.to_string())));
+    }
+    Ok(())
 }
 
 /// PowerShell and most Win32 code need `SystemRoot`; supply it only when the host left it out.

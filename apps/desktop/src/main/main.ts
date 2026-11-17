@@ -166,6 +166,11 @@ import { preparableNativeDeployments } from '@taucad/desktop-services-host/deskt
 import { createDesktopKernelPreparer } from '@taucad/desktop-services-host/native-preparation';
 import { desktopNativeKernelIds, startNativeStore } from '@taucad/desktop-services-host/native-store';
 import {
+  desktopWindowsSandboxSetup,
+  resolveDesktopWindowsNativeSandbox,
+} from '@taucad/desktop-services-host/windows-native-sandbox-main';
+import { installDesktopWindowsNativeSandbox } from '@taucad/desktop-services-host/windows-native-sandbox';
+import {
   appIconThemeChannel,
   telemetryConsentChannel,
   openDirectoryChannel,
@@ -1152,10 +1157,22 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const nativeStorePath =
     desktopChannel === 'staging' ? join(tauConfigDirectory, 'dependencies') : defaultDependencyStore();
   const nativeStoreAbort = new AbortController();
+  /* Windows: native workers and main's own seal step run in the sandbox helper's AppContainer, and only main may run
+   * its one-time elevated setup; the frame names the helper to every kernel utility. Off, a native kernel refuses. */
+  const windowsNativeSandbox = resolveDesktopWindowsNativeSandbox({
+    sandboxEnvironment: windowsSandboxEnvironment,
+    userDataPath: app.getPath('userData'),
+  });
+  if (windowsNativeSandbox !== undefined) {
+    installDesktopWindowsNativeSandbox(windowsNativeSandbox, {
+      setup: desktopWindowsSandboxSetup(windowsNativeSandbox, process.env),
+    });
+  }
   const nativeStore = startNativeStore({
     store: nativeStorePath,
     hostPath: app.getPath('exe'),
     environment: process.env,
+    windowsSandbox: windowsNativeSandbox,
     post: (frame) => {
       runtimeMain.post(frame);
     },

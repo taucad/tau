@@ -380,7 +380,8 @@ export type ExpectedFailureMarker = {
   readonly intended?: true;
 };
 
-const markerSite = /(?:\b(?:it|test|describe)(?:\.\w+)*\.fails\s*\(|\bexpectedFailure:\s*true\b)/u;
+/** `it.fails(`, `test.fails(`, `it.runIf(x).fails(`, or a known-defect row's `expectedFailure: true`. */
+const markerSite = /(?:\.fails\s*\(|\bexpectedFailure:\s*true\b)/u;
 const markerLabel = /expected-failure:\s*@([A-Za-z0-9-]+)\s+until\s+(\d{4}-\d{2}-\d{2})/u;
 const intendedLabel = /expected-failure:\s*intended,\s*\S/u;
 /** A comment or JSDoc line, so a mention of `it.fails` in prose is not a marker. */
@@ -426,7 +427,8 @@ export const expiredMarkers = (markers: readonly ExpectedFailureMarker[], now: D
 export const overlongMarkers = (markers: readonly ExpectedFailureMarker[], now: Date): ExpectedFailureMarker[] =>
   markers.filter(
     (marker) =>
-      marker.until !== undefined && endOfDay(marker.until) - now.getTime() > maximumExpiryDays * dayMilliseconds,
+      marker.until !== undefined &&
+      endOfDay(marker.until) - endOfDay(now.toISOString().slice(0, 10)) > maximumExpiryDays * dayMilliseconds,
   );
 
 /** The flake section of the weekly report. */

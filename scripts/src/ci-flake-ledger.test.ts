@@ -18,6 +18,7 @@ import {
   scanExpectedFailureMarkers,
   testFile,
   touchesFailingTest,
+  overlongMarkers,
   unlabelledMarkers,
 } from '#ci-flake-ledger.js';
 import type { FlakeEntry, FlakeReport, Ledger } from '#ci-flake-ledger.js';
@@ -340,16 +341,18 @@ describe('ledger', () => {
 });
 
 describe('scanExpectedFailureMarkers', () => {
+  /* Built from parts so this file holds no marker of its own. */
+  const fails = ['', 'fails('].join('.');
   const text = [
     '/** Rows stay `it.fails` until fixed. */',
     '// expected-failure: @rifont until 2026-12-01',
-    "it.fails('I10: holds', () => {});",
-    "test.fails('unlabelled', () => {});",
+    `it${fails}'I10: holds', () => {});`,
+    `test${fails}'unlabelled', () => {});`,
     '// expected-failure: intended, proves the guard fails a test',
-    "it.fails('guard', () => {});",
+    `it${fails}'guard', () => {});`,
     'knownDefect("F6", {',
     '  // expected-failure: @rifont until 2026-11-01',
-    '  expectedFailure: true,',
+    `  expectedFailure: ${String(true)},`,
     '  expectedFailure: false,',
     '});',
   ].join('\n');
@@ -364,6 +367,20 @@ describe('scanExpectedFailureMarkers', () => {
     ]);
     expect(unlabelledMarkers(markers).map((marker) => marker.line)).toEqual([4]);
     expect(expiredMarkers(markers, new Date('2026-11-17T00:00:00Z')).map((marker) => marker.line)).toEqual([9]);
+  });
+});
+
+describe('overlongMarkers', () => {
+  it('should count whole days, so a marker 28 days ahead stands at any hour of today', () => {
+    const marker = { path: 'a.test.ts', line: 1, owner: 'rifont', until: '2026-12-15' };
+    expect(overlongMarkers([marker], new Date('2026-11-17T00:00:01Z'))).toEqual([]);
+    expect(overlongMarkers([marker], new Date('2026-11-16T23:59:59Z'))).toEqual([marker]);
+  });
+
+  it('should find a fails() chained after another modifier', () => {
+    const fails = ['', 'fails('].join('.');
+    const text = `it.runIf(ready)${fails}'row', () => {});`;
+    expect(scanExpectedFailureMarkers([{ path: 'b.test.ts', text }])).toEqual([{ path: 'b.test.ts', line: 1 }]);
   });
 });
 

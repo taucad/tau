@@ -322,6 +322,7 @@ const rehearse = async (label: string, producerDesktopRoot: string | undefined):
 
 describe('desktop missing-folder recovery (the operator rehearsal)', () => {
   /* T-REH.1: the incident's profile, produced and opened by the candidate. */
+  // expected-failure: @rifont until 2026-12-15
   it.fails(
     'should start Home over 28 deleted folders with nothing forgotten automatically',
     async () => {
@@ -333,6 +334,7 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
   /* T-REH.2, the release gate: the profile is produced by the release's base commit and opened by the candidate.
    * It needs that build, which only the release-gate job provides (`desktop-e2e:test:e2e:rehearsal-gate` refuses to
    * run without it), so the PR lane reports it as skipped rather than passing it for the wrong reason. */
+  // expected-failure: @rifont until 2026-12-15
   it.runIf(baseDesktopRoot !== undefined).fails(
     "should open the base commit's broken profile in the candidate with nothing forgotten automatically",
     async () => {
@@ -342,6 +344,7 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
   );
 
   /* T-R3.2: removing a folder never touches its chats, and the Home notice is shown once. */
+  // expected-failure: @rifont until 2026-12-15
   it.fails(
     'should keep a removed folder chat history on disk and list it again when the folder is added back',
     async () => {

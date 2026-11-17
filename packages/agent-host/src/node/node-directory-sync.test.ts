@@ -13,7 +13,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     ...actual,
     open: vi.fn(async (...parameters: Parameters<typeof actual.open>) => {
       const handle = await actual.open(...parameters);
-      if ((await handle.stat()).isDirectory()) {
+      const stats = await handle.stat();
+      if (stats.isDirectory()) {
         handle.sync = async () => {
           throw Object.assign(new Error('EPERM: operation not permitted, fsync'), { code: 'EPERM' });
         };

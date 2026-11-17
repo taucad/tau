@@ -703,11 +703,31 @@ describe('createServicesHost — machines', () => {
      * A harness whose utility reports to a recording API, signed in, with the store open and one agent session it
      * issued and revoked: its next admission is refused `SESSION_REVOKED`.
      */
-    const refusingHarness = async (consent: string | undefined) => {
+    const refusingHarness = async (
+      consent: string | undefined,
+      setup?: Readonly<{
+        env?: Readonly<Record<string, string>>;
+        cloudBuild?: boolean;
+        /** Main published the bearer before its `get-session` named the principal. */
+        withoutPrincipal?: boolean;
+      }>,
+    ) => {
       const telemetrySandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-telemetry-'));
       const api = recordingTelemetryApi(join(telemetrySandbox, 'config'));
-      const machines = await machinesHarness({ runtimeTelemetry: api.runtimeTelemetry });
-      machines.host.handleMessage(frame({ type: 'authToken', token: 'bearer-1', principal: 'user_1' }));
+      const machines = await machinesHarness({
+        runtimeTelemetry: {
+          ...api.runtimeTelemetry,
+          ...(setup?.env === undefined ? {} : { env: setup.env }),
+          ...(setup?.cloudBuild === undefined ? {} : { cloudBuild: setup.cloudBuild }),
+        },
+      });
+      machines.host.handleMessage(
+        frame({
+          type: 'authToken',
+          token: 'bearer-1',
+          ...(setup?.withoutPrincipal === true ? {} : { principal: 'user_1' }),
+        }),
+      );
       if (consent !== undefined) {
         machines.host.handleMessage(frame({ type: 'telemetryConsent', consent }));
       }
@@ -779,5 +799,39 @@ describe('createServicesHost — machines', () => {
       },
       20_000,
     );
+
+    it.each([
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      ['TAU_TELEMETRY=off', { TAU_TELEMETRY: 'off' }],
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      ['DO_NOT_TRACK=1', { DO_NOT_TRACK: '1' }],
+    ] as const)(
+      "T19: should send nothing under the environment opt-out %s, even with the renderer's consent granted",
+      async (_why, env) => {
+        const harness = await refusingHarness('granted', { env });
+        try {
+          harness.refuse();
+          await harness.machines.host.quiesce();
+
+          expect(harness.posts()).toEqual([]);
+        } finally {
+          await harness.cleanup();
+        }
+      },
+      20_000,
+    );
+
+    it("T19: should hold, not send as signed out, while main's bearer has no principal yet, even on a Cloud build", async () => {
+      /* A Cloud build reports signed out; a bearer whose `get-session` has not answered must not pass for that. */
+      const harness = await refusingHarness('granted', { cloudBuild: true, withoutPrincipal: true });
+      try {
+        harness.refuse();
+        await harness.machines.host.quiesce();
+
+        expect(harness.posts()).toEqual([]);
+      } finally {
+        await harness.cleanup();
+      }
+    }, 20_000);
   });
 });

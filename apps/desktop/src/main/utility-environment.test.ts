@@ -54,6 +54,13 @@ describe('utilityEnvironment', () => {
     expect(utilityEnvironment({ TAU_SECRET_VAULT: 'file' })).toEqual({ TAU_SECRET_VAULT: 'file' });
   });
 
+  it("should pass the environment telemetry opt-outs to the services utility's reporter", () => {
+    expect(utilityEnvironment({ TAU_TELEMETRY: 'off', DO_NOT_TRACK: '1' })).toEqual({
+      TAU_TELEMETRY: 'off',
+      DO_NOT_TRACK: '1',
+    });
+  });
+
   it('should carry Windows names whatever case the launching shell gave them', () => {
     /* Git Bash and CI `bash` steps start the app with upper-cased names; Explorer with `Path` and `windir`. */
     expect(

@@ -663,11 +663,17 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           configDir: telemetryTarget.configDir,
           env: telemetryTarget.env ?? process.env,
           cloudBuild: telemetryTarget.cloudBuild,
-          /* Main already read the principal from `get-session` and sends it with the bearer. */
+          /*
+           * Main already read the principal from `get-session` and sends it with the bearer. A bearer main published
+           * before its `get-session` answered is not signed out: entries stay held until the principal, and with it
+           * the account's usage-metrics preference, resolves.
+           */
           readIdentity: async () =>
-            authToken === undefined || sessionPrincipal === undefined
+            authToken === undefined
               ? { kind: 'signed-out' }
-              : { kind: 'signed-in', authorization: `Bearer ${authToken}`, principalId: sessionPrincipal },
+              : sessionPrincipal === undefined
+                ? { kind: 'unresolved', reason: 'session-failed' }
+                : { kind: 'signed-in', authorization: `Bearer ${authToken}`, principalId: sessionPrincipal },
           rendererConsent: () => telemetryConsent,
           platform: process.platform,
           ...(telemetryTarget.fetch === undefined ? {} : { fetch: telemetryTarget.fetch }),

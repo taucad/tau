@@ -67,7 +67,8 @@ const contentAddressConflict = (path: string): Error =>
  *
  * The bytes are written to a fresh temporary file and synced, then linked into place, so the final name never
  * names a torn file. A name already present must hold the same bytes. The directory is synced after a publish,
- * so the name survives power loss before the row naming it is appended.
+ * so the name survives power loss before the row naming it is appended; on Windows, which cannot sync a directory,
+ * a power loss just after a publish can still lose the name.
  *
  * @param absolutePath - The final, content-addressed name.
  * @param bytes - The bytes it names.
@@ -319,8 +320,16 @@ const readIfPresent = async (filePath: string): Promise<Uint8Array<ArrayBuffer>>
   }
 };
 
-/** Sync a directory so a file created in it survives power loss (L4 D-107). */
+/**
+ * Sync a directory so a file created in it survives power loss (L4 D-107). Windows refuses `fsync` on a directory
+ * handle, so there this is a no-op and a new name is only as durable as NTFS's metadata journal makes it.
+ */
 const syncDirectory = async (directory: string): Promise<void> => {
+  /* Windows refuses `fsync` on a directory handle (EPERM), which failed every chat write there. The file's own
+   * handle is synced before this, and NTFS journals the rename or create that this sync would make durable. */
+  if (process.platform === 'win32') {
+    return;
+  }
   const handle = await open(directory, 'r');
   try {
     await handle.sync();

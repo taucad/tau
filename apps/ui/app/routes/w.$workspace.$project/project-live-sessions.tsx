@@ -37,6 +37,16 @@ import type { RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
 
+import { warmWorkspaceLayout as warmViewportLayout } from '#routes/w.$workspace.$project/chat-interface-layouts.js';
+
+/**
+ * Warm the layout this viewport will mount (STO-25 SP5): the open calls it through this module once it has loaded it
+ * (`openProjectWorkspace`), so the app runtime's graph never names a layout. Never throws.
+ */
+export function warmWorkspaceLayout(): void {
+  warmViewportLayout();
+}
+
 /**
  * The session's half of a project subtree (S44), reduced to render (A7c).
  *

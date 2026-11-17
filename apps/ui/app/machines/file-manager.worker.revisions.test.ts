@@ -41,6 +41,7 @@ import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { createFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
+import type { ReportingConsent } from '@taucad/telemetry/client';
 
 type Harness = {
   readonly service: WorkspaceFileService;
@@ -116,7 +117,7 @@ const harness = (
   projectIds: readonly string[],
   wrapPort = (port: RevisionPort): RevisionPort => port,
   extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock' | 'observeStatus'> & {
-    onCreatePort?: () => void;
+    onCreatePort?: (telemetryConsent: () => ReportingConsent | undefined) => void;
     observeFileEvents?: boolean;
     wrapFileSystem?: (filesystem: RootedFileSystem) => RootedFileSystem;
   } = {},
@@ -146,8 +147,8 @@ const harness = (
     /* The floor between mints is pinned in `@taucad/revisions`; here a verb runs as soon as the last mint published. */
     mintFloor: 0,
     ...(extra.observeStatus === undefined ? {} : { observeStatus: extra.observeStatus }),
-    createPort: (projectId) => {
-      extra.onCreatePort?.();
+    createPort: (projectId, _credential, telemetryConsent) => {
+      extra.onCreatePort?.(telemetryConsent);
       return wrapPort(
         createIsomorphicGitRevisionPort({
           filesystem: service.createRootedFileSystem(`/projects/${projectId}`, undefined, { placeholders: 'raw' }),
@@ -3265,6 +3266,31 @@ describe('the sync attempt reporter follows the page consent (runtime observabil
     } finally {
       restore();
     }
+  });
+});
+
+/* PR-7 follow-up (AR-W6-02): the port's own load reporters read the same page consent the sync reporter does. */
+describe("the port builder reads the page's consent for its load reporters", () => {
+  it('should hand createPort the last consent the page said on the port, and nothing before it said any', async () => {
+    let consentOf: (() => ReportingConsent | undefined) | undefined;
+    const fixture = harness(['alpha'], (port) => port, {
+      onCreatePort: (telemetryConsent) => {
+        consentOf = telemetryConsent;
+      },
+    });
+    const alpha = await fixture.open('alpha');
+    await vi.waitFor(() => {
+      expect(consentOf).toBeDefined();
+    });
+    expect(consentOf!()).toBeUndefined();
+    alpha.send({ command: 'telemetryConsent', consent: 'granted' });
+    await vi.waitFor(() => {
+      expect(consentOf!()).toBe('granted');
+    });
+    alpha.send({ command: 'telemetryConsent', consent: 'denied' });
+    await vi.waitFor(() => {
+      expect(consentOf!()).toBe('denied');
+    });
   });
 });
 

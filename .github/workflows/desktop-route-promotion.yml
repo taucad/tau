@@ -238,5 +238,5 @@ jobs:
       - name: Report failed metadata renewal or publication
         if: failure() && steps.selected.outputs.run == 'true'
         run: |
-          echo '::error::Desktop installer metadata publication failed. Check the last completed receipt and recover the same candidate before seven-day descriptor/APT validity expires.'
+          echo '::error::Desktop installer metadata publication failed. Check the last completed receipt and re-run the same operation for the same candidate; it resumes from that receipt.'
           echo 'Public promotion remains unqualified unless every pointer has a completed readback receipt. Follow the desktop release handbook.' >> "$GITHUB_STEP_SUMMARY"

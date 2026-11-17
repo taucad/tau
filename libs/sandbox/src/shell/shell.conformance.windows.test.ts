@@ -769,21 +769,20 @@ describe.runIf(enabled)('Windows shell conformance', () => {
      * its write can succeed, since a file already holds that folder's name.
      */
     const cold = { ...environment, [powerShellModuleCacheVariable]: join(executablePath, powerShellModuleCacheFile) };
-    const variants: Array<{ label: string; overrides: Partial<ShellLaunch> }> = [
-      ...(environment[powerShellModuleCacheVariable] === undefined ? [] : [{ label: 'session', overrides }]),
-      { label: 'cold', overrides: { ...overrides, environment: cold } },
-    ];
-    /* The variants only read, so they run side by side. */
-    const sections = await Promise.all(
-      variants.map(async (variant) => {
-        try {
-          const result = await run(moduleDiagnosticsScript, { executablePath, ...variant.overrides });
-          return `[module diagnostics, ${variant.label}, exit ${String(result.exitCode)}]\n${result.stdout.trim()}\n${result.stderr.trim()}`;
-        } catch (error) {
-          return `[module diagnostics, ${variant.label}, failed] ${error instanceof Error ? error.message : String(error)}`;
-        }
-      }),
-    );
+    const diagnose = async (label: string, launch: Partial<ShellLaunch>): Promise<string> => {
+      try {
+        const result = await run(moduleDiagnosticsScript, { executablePath, ...launch });
+        return `[module diagnostics, ${label}, exit ${String(result.exitCode)}]\n${result.stdout.trim()}\n${result.stderr.trim()}`;
+      } catch (error) {
+        return `[module diagnostics, ${label}, failed] ${error instanceof Error ? error.message : String(error)}`;
+      }
+    };
+    /* One after another: the provider runs one sandboxed shell at a time. */
+    const sections: string[] = [];
+    if (environment[powerShellModuleCacheVariable] !== undefined) {
+      sections.push(await diagnose('session', overrides));
+    }
+    sections.push(await diagnose('cold', { ...overrides, environment: cold }));
     try {
       const outside = execFileSync(
         executablePath,

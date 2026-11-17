@@ -2339,8 +2339,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
         bootHealth?.advance('window-loaded');
         watchdog.windowLoaded();
       });
-      window.webContents.on('did-fail-load', (_event, errorCode, _description, _url, isMainFrame) => {
-        watchdog.loadFailed({ isMainFrame, errorCode });
+      window.webContents.on('did-fail-load', (...details) => {
+        watchdog.loadFailed({ isMainFrame: details[4], errorCode: details[1] });
       });
       window.webContents.on('render-process-gone', () => {
         watchdog.rendererGone();
@@ -2361,8 +2361,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
         throw error;
       }
       /* A first load that fails outright opens the recovery window; a slow one is left alone (D0). */
-      log.log('error', 'main.first-load-failed', { errno: Reflect.get(Object(error), 'errno') });
-      const errno: unknown = Reflect.get(Object(error), 'errno');
+      const errno = typeof error === 'object' && error !== null && 'errno' in error ? error.errno : undefined;
+      log.log('error', 'main.first-load-failed', { errno });
       bootWatchdog.loadRejected(typeof errno === 'number' ? errno : undefined);
     }
     clearTimeout(revealDeadline);

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
 /**
  * T-R12.12 (R12, B17, B19): boot health, safe mode and the recovery window, through the real shell.
  *
@@ -69,10 +70,13 @@ const launch = async (
 const readLedger = async (userData: string): Promise<Ledger> =>
   JSON.parse(await readFile(join(userData, 'boot-health.json'), 'utf8')) as Ledger;
 
+const lastStage = async (userData: string): Promise<string | undefined> => {
+  const ledger = await readLedger(userData);
+  return ledger.last?.stage;
+};
+
 const quit = async (application: ElectronApplication): Promise<void> => {
-  const closed = new Promise((resolveClosed) => {
-    application.once('close', resolveClosed);
-  });
+  const closed = application.waitForEvent('close');
   await application.evaluate(({ app }) => {
     app.quit();
   });
@@ -107,7 +111,7 @@ describe('desktop boot recovery (T-R12.12)', () => {
     /* A first launch names this build in the ledger. */
     const first = await launch(userData);
     await appPage(first);
-    await expect.poll(async () => (await readLedger(userData)).last?.stage, { timeout: 120_000 }).toBe('home-ready');
+    await expect.poll(async () => lastStage(userData), { timeout: 120_000 }).toBe('home-ready');
     await quit(first);
     const { build } = await readLedger(userData);
     await writeFile(
@@ -125,8 +129,9 @@ describe('desktop boot recovery (T-R12.12)', () => {
     await expect
       .poll(async () => page.locator('[data-slot="safe-mode-bar"]').isVisible(), { timeout: 120_000 })
       .toBe(true);
-    await expect.poll(async () => (await readLedger(userData)).last?.stage, { timeout: 120_000 }).toBe('home-ready');
-    expect((await readLedger(userData)).last?.mode).toBe('safe-auto');
+    await expect.poll(async () => lastStage(userData), { timeout: 120_000 }).toBe('home-ready');
+    const safeLedger = await readLedger(userData);
+    expect(safeLedger.last?.mode).toBe('safe-auto');
     const compositing = await safe.evaluate(({ app }) => app.getGPUFeatureStatus().gpu_compositing);
     expect(compositing).toMatch(/^disabled/u);
     await quit(safe);
@@ -134,15 +139,16 @@ describe('desktop boot recovery (T-R12.12)', () => {
     /* Probation: the healthy safe launch leaves one, and the next launch is normal. */
     const probation = await launch(userData);
     await appPage(probation);
-    expect(await readLedger(userData)).toEqual(
-      expect.objectContaining({ unhealthyCount: 1, last: expect.objectContaining({ mode: 'normal' }) }),
-    );
-    await expect.poll(async () => (await readLedger(userData)).last?.stage, { timeout: 120_000 }).toBe('home-ready');
+    const probationLedger = await readLedger(userData);
+    expect(probationLedger.unhealthyCount).toBe(1);
+    expect(probationLedger.last?.mode).toBe('normal');
+    await expect.poll(async () => lastStage(userData), { timeout: 120_000 }).toBe('home-ready');
     await quit(probation);
 
     const cleared = await launch(userData);
     await appPage(cleared);
-    expect((await readLedger(userData)).unhealthyCount).toBe(0);
+    const clearedLedger = await readLedger(userData);
+    expect(clearedLedger.unhealthyCount).toBe(0);
   }, 900_000);
 
   it('(b) opens the recovery window when the app page cannot load, with live updater status and working actions', async () => {
@@ -225,8 +231,8 @@ describe('desktop boot recovery (T-R12.12)', () => {
       troubleshooting?.submenu?.items.find((item) => item.label === 'Restart in Safe Mode')?.click();
       for (let waited = 0; waited < 600 && captured.length === 0; waited += 1) {
         // oxlint-disable-next-line no-await-in-loop -- poll until the quit owner has armed the relaunch.
-        await new Promise((resolveWait) => {
-          setTimeout(resolveWait, 100);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 100);
         });
       }
       return captured[0] ?? [];
@@ -238,7 +244,8 @@ describe('desktop boot recovery (T-R12.12)', () => {
     await expect
       .poll(async () => page.locator('[data-slot="safe-mode-bar"]').isVisible(), { timeout: 120_000 })
       .toBe(true);
-    expect((await readLedger(userData)).last?.mode).toBe('safe-requested');
+    const requested = await readLedger(userData);
+    expect(requested.last?.mode).toBe('safe-requested');
     expect(existsSync(join(userData, 'boot-health.json'))).toBe(true);
   }, 600_000);
 });

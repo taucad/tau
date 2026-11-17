@@ -382,11 +382,12 @@ describe('desktop boot and troubleshooting bridge (T-R12.9)', () => {
     restartNormally(): Promise<void>;
     copyDiagnostics(): Promise<void>;
   }>;
-  const tau = (): {
+  type ExposedTau = {
     readonly boot: BootApi;
     readonly troubleshooting: TroubleshootingApi;
     readonly safeMode?: unknown;
-  } => state.exposed.get('tau') as never;
+  };
+  const tau = (): ExposedTau => state.exposed.get('tau') as ExposedTau;
 
   it('should expose tau.boot.report and send only the two stage names on tau:boot:stage', () => {
     vi.mocked(ipcRenderer.send).mockClear();
@@ -419,7 +420,7 @@ describe('desktop boot and troubleshooting bridge (T-R12.9)', () => {
 
   it('should carry safe mode from the bootstrap argument and leave it absent in a normal launch', async () => {
     expect(tau().safeMode).toBeUndefined();
-    const argv = process.argv;
+    const { argv } = process;
     process.argv = [
       ...argv,
       `${bootstrapArgumentPrefix}${JSON.stringify({ env: {}, homeRoot: '/home', safeMode: { reason: 'unhealthy-launches' } })}`,

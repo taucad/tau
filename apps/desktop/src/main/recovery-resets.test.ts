@@ -1,5 +1,4 @@
 import * as fs from 'node:fs';
-import type * as FileSystem from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +15,7 @@ import {
 } from '#main/recovery-resets.js';
 
 vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof FileSystem>();
+  const actual = await importOriginal<typeof fs>();
   const observed = {
     ...actual,
     renameSync: vi.fn(actual.renameSync),

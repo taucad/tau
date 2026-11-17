@@ -2629,8 +2629,11 @@ describe('desktop main boot health and safe mode (WP6)', () => {
     });
   };
   const ledgerPath = (): string => join(state.userData, 'boot-health.json');
-  const readLedger = async (): Promise<Record<string, unknown> & { last?: Record<string, unknown> }> =>
-    JSON.parse(await readFile(ledgerPath(), 'utf8')) as Record<string, unknown> & { last?: Record<string, unknown> };
+  type LedgerOnDisk = { readonly unhealthyCount?: number; readonly last?: Record<string, unknown> };
+  const readLedger = async (): Promise<LedgerOnDisk> => {
+    const text = await readFile(ledgerPath(), 'utf8');
+    return JSON.parse(text) as LedgerOnDisk;
+  };
   const seedLedger = (unhealthyCount: number) => async (userData: string) => {
     await writeFile(
       join(userData, 'boot-health.json'),
@@ -2675,8 +2678,9 @@ describe('desktop main boot health and safe mode (WP6)', () => {
         expect(app.quit).toHaveBeenCalled();
       });
       expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
-      expect((await readLedger()).last).toEqual(expect.objectContaining({ launchId: 'previous' }));
-      expect((await readLedger()).unhealthyCount).toBe(2);
+      const ledger = await readLedger();
+      expect(ledger.last).toEqual(expect.objectContaining({ launchId: 'previous' }));
+      expect(ledger.unhealthyCount).toBe(2);
     },
     bootMilliseconds,
   );
@@ -2693,7 +2697,8 @@ describe('desktop main boot health and safe mode (WP6)', () => {
         vi.doUnmock('#main/ota-probe.js');
       }
       expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
-      expect((await readLedger()).last).toEqual(expect.objectContaining({ launchId: 'previous' }));
+      const ledger = await readLedger();
+      expect(ledger.last).toEqual(expect.objectContaining({ launchId: 'previous' }));
       expect(existsSync(join(state.userData, 'boot-health.json.tmp'))).toBe(false);
     },
     bootMilliseconds,
@@ -2707,10 +2712,12 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       expect(first).toEqual(expect.objectContaining({ schemaVersion: 1, build: testBuild, unhealthyCount: 0 }));
       expect(first.last).toEqual(expect.objectContaining({ mode: 'normal', deadlinePassed: false }));
       reportStage('shell-mounted');
-      expect((await readLedger()).last?.['stage']).toBe('shell-mounted');
+      const mounted = await readLedger();
+      expect(mounted.last?.['stage']).toBe('shell-mounted');
       reportStage('main-started');
       reportStage('home-ready');
-      expect((await readLedger()).last?.['stage']).toBe('home-ready');
+      const ready = await readLedger();
+      expect(ready.last?.['stage']).toBe('home-ready');
     },
     bootMilliseconds,
   );
@@ -2735,7 +2742,8 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       expect(state.utilityEnvironmentAdditions.some((additions) => 'TAU_DESKTOP_MACHINES_DIR' in additions)).toBe(
         false,
       );
-      expect((await readLedger()).last).toEqual(expect.objectContaining({ mode: 'safe-requested' }));
+      const ledger = await readLedger();
+      expect(ledger.last).toEqual(expect.objectContaining({ mode: 'safe-requested' }));
       expect(signals('desktop-safe-mode')).toEqual([
         expect.objectContaining({ tags: { trigger: 'requested', count: '0' } }),
       ]);
@@ -2751,7 +2759,8 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       expect(await bootstrapArgument()).toEqual(
         expect.objectContaining({ safeMode: { reason: 'unhealthy-launches' } }),
       );
-      expect((await readLedger()).unhealthyCount).toBe(2);
+      const ledger = await readLedger();
+      expect(ledger.unhealthyCount).toBe(2);
       expect(signals('desktop-boot-unhealthy')).toEqual([
         expect.objectContaining({ tags: { stage: 'shell-mounted', ended: 'none', count: '2', mode: 'normal' } }),
       ]);
@@ -2785,7 +2794,7 @@ describe('desktop main boot health and safe mode (WP6)', () => {
         expect(app.relaunch).toHaveBeenCalledOnce();
       });
       expect(state.sentToRenderer).not.toContain(quitChannels.ask);
-      expect(app.relaunch.mock.calls[0]![0]).toEqual({ args: expect.arrayContaining(['--safe-mode']) });
+      expect(app.relaunch.mock.calls[0]![0]).toEqual({ args: expect.arrayContaining(['--safe-mode']) as unknown });
     },
     bootMilliseconds,
   );
@@ -2836,7 +2845,7 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       expect(signals('desktop-gpu-process-gone')).toEqual([
         expect.objectContaining({ tags: { reason: 'crashed', exit_code: '133', safe_mode: 'false' } }),
       ]);
-      const last = (await readLedger()).last;
+      const { last } = await readLedger();
       expect(last?.['stage']).not.toBe('home-ready');
       expect(last?.['gpuProcessGone']).toBe(true);
     },
@@ -2853,7 +2862,7 @@ describe('desktop main boot health and safe mode (WP6)', () => {
         expect(vi.mocked(BrowserWindow).mock.calls).toHaveLength(2);
       });
       expect(vi.mocked(BrowserWindow).mock.calls[1]![0]).toEqual(
-        expect.objectContaining({ webPreferences: expect.objectContaining({ partition: 'tau-recovery' }) }),
+        expect.objectContaining({ webPreferences: expect.objectContaining({ partition: 'tau-recovery' }) as unknown }),
       );
       expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
       expect(signals('desktop-recovery-shown')).toEqual([
@@ -2879,9 +2888,8 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       });
       expect(existsSync(join(state.userData, 'recovery', 'pending-resets.json'))).toBe(false);
       const { readdir } = await import('node:fs/promises');
-      const quarantines = (await readdir(join(state.userData, 'recovery'))).filter(
-        (name) => name !== 'pending-resets.json',
-      );
+      const entries = await readdir(join(state.userData, 'recovery'));
+      const quarantines = entries.filter((name) => name !== 'pending-resets.json');
       expect(quarantines).toHaveLength(1);
       expect(
         JSON.parse(await readFile(join(state.userData, 'recovery', quarantines[0]!, 'granted-roots.json'), 'utf8')),
@@ -2904,11 +2912,13 @@ describe('desktop main boot health and safe mode (WP6)', () => {
       } finally {
         vi.mocked(isTrustedSender).mockReturnValue(true);
       }
-      expect((await readLedger()).last?.['stage']).not.toBe('shell-mounted');
+      const refused = await readLedger();
+      expect(refused.last?.['stage']).not.toBe('shell-mounted');
       for (const listener of state.ipcListeners.get('tau:boot:stage') ?? []) {
         listener({ sender: fakeWindow.webContents, senderFrame: { url: 'app://tau/frame' } }, 'shell-mounted');
       }
-      expect((await readLedger()).last?.['stage']).not.toBe('shell-mounted');
+      const wrongFrame = await readLedger();
+      expect(wrongFrame.last?.['stage']).not.toBe('shell-mounted');
     },
     bootMilliseconds,
   );

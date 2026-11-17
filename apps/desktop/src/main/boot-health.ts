@@ -323,7 +323,7 @@ export const startBootHealth = (input: {
   readonly writeFile?: WriteFile;
 }): BootHealth => {
   const begun = beginLaunch({ ...input, previous: readBootHealth(input.path) });
-  let ledger = begun.ledger;
+  let { ledger } = begun;
   let record = ledger.last!;
   const persist = (): void => {
     ledger = { ...ledger, last: record };

@@ -54,8 +54,11 @@ const pendingPath = (userData: string): string => join(recoveryDirectory(userDat
 export const readPendingResets = (userData: string): ResettableStore[] => {
   try {
     const parsed: unknown = JSON.parse(readFileSync(pendingPath(userData), 'utf8'));
-    const stores = (parsed as { schemaVersion?: unknown; stores?: unknown } | null)?.stores;
-    if ((parsed as { schemaVersion?: unknown }).schemaVersion !== 1 || !Array.isArray(stores)) {
+    if (typeof parsed !== 'object' || parsed === null) {
+      return [];
+    }
+    const { schemaVersion, stores } = parsed as { schemaVersion?: unknown; stores?: unknown };
+    if (schemaVersion !== 1 || !Array.isArray(stores)) {
       return [];
     }
     if (!stores.every((store) => isResettableStore(store))) {

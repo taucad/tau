@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
-import type * as FileSystem from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +18,7 @@ import type { RecoveryActions, RecoveryWindowLike } from '#main/recovery-window.
 import { readPendingResets, requestReset } from '#main/recovery-resets.js';
 
 vi.mock('node:fs', async (importOriginal) => {
-  const actual = await importOriginal<typeof FileSystem>();
+  const actual = await importOriginal<typeof fs>();
   const observed = {
     ...actual,
     rmSync: vi.fn(actual.rmSync),
@@ -30,18 +29,20 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 /** A BrowserWindow stand-in whose web contents emit like Electron's. */
-const fakeWindow = (): RecoveryWindowLike & {
+type FakeWindow = RecoveryWindowLike & {
   readonly contents: EventEmitter;
   readonly events: EventEmitter;
   readonly loadFile: ReturnType<typeof vi.fn>;
   readonly focus: ReturnType<typeof vi.fn>;
-} => {
+};
+
+const fakeWindow = (): FakeWindow => {
   // oxlint-disable-next-line unicorn/prefer-event-target -- Electron's emitters are Node EventEmitters.
   const contents = new EventEmitter();
   // oxlint-disable-next-line unicorn/prefer-event-target -- Electron's emitters are Node EventEmitters.
   const events = new EventEmitter();
   const mainFrame = { url: 'file:///resources/recovery/index.html' };
-  return {
+  const window = {
     contents,
     events,
     webContents: Object.assign(contents, { id: 77, mainFrame, send: vi.fn(), isDestroyed: () => false }),
@@ -52,7 +53,8 @@ const fakeWindow = (): RecoveryWindowLike & {
     once: (event: string, listener: (...args: unknown[]) => void) => {
       events.once(event, listener);
     },
-  } as never;
+  };
+  return window as unknown as FakeWindow;
 };
 
 const controllerFor = (window = fakeWindow()) => {
@@ -100,7 +102,7 @@ describe('recovery window (T-R12.6)', () => {
           sandbox: true,
           contextIsolation: true,
           nodeIntegration: false,
-        }),
+        }) as unknown,
       }),
     );
     expect(recoveryPartition).toBe('tau-recovery');
@@ -171,8 +173,8 @@ describe('recovery window (T-R12.6)', () => {
 });
 
 describe('recovery actions (T-R12.6)', () => {
-  const actions = (): RecoveryActions & Record<string, ReturnType<typeof vi.fn>> =>
-    ({
+  const actions = (): RecoveryActions & Record<string, ReturnType<typeof vi.fn>> => {
+    const fakes = {
       restart: vi.fn(async () => undefined),
       showLogs: vi.fn(),
       copyDiagnostics: vi.fn(async () => undefined),
@@ -182,7 +184,9 @@ describe('recovery actions (T-R12.6)', () => {
       cancelAutoInstall: vi.fn(),
       downloadTau: vi.fn(async () => undefined),
       resetsChanged: vi.fn(),
-    }) as never;
+    };
+    return fakes as unknown as RecoveryActions & Record<string, ReturnType<typeof vi.fn>>;
+  };
 
   it('should parse only the actions the specification names', () => {
     expect(parseRecoveryAction({ type: 'restart', mode: 'safe' })).toEqual({ type: 'restart', mode: 'safe' });

@@ -190,7 +190,8 @@ describe('boot-health storage (T-R12.3)', () => {
     expect(readBootHealth(path)).toEqual(written);
     const { stat } = await import('node:fs/promises');
     if (process.platform !== 'win32') {
-      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      const { mode } = await stat(path);
+      expect(mode.toString(8).slice(-3)).toBe('600');
     }
     expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(written);
   });

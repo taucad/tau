@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are snake_case. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { bootDeadlines, bootDeadlineScaleOf, createBootWatchdog } from '#main/boot-watchdog.js';

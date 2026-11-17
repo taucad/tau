@@ -38,7 +38,9 @@ export type RecoveryAction =
   | { readonly type: 'download-tau' }
   | { readonly type: 'reset'; readonly store: ResettableStore };
 
-const simpleActions = new Set([
+type SimpleRecoveryAction = Exclude<RecoveryAction, { readonly type: 'restart' | 'reset' }>;
+
+const simpleActions: ReadonlySet<string> = new Set<SimpleRecoveryAction['type']>([
   'show-logs',
   'copy-diagnostics',
   'open-recovery-window',
@@ -47,6 +49,9 @@ const simpleActions = new Set([
   'cancel-auto-install',
   'download-tau',
 ]);
+
+const isSimpleAction = (type: unknown): type is SimpleRecoveryAction['type'] =>
+  typeof type === 'string' && simpleActions.has(type);
 
 /**
  * Parse an action from either recovery surface.
@@ -65,7 +70,7 @@ export const parseRecoveryAction = (value: unknown): RecoveryAction | undefined 
   if (type === 'reset') {
     return isResettableStore(store) ? { type, store } : undefined;
   }
-  return typeof type === 'string' && simpleActions.has(type) ? ({ type } as RecoveryAction) : undefined;
+  return isSimpleAction(type) ? { type } : undefined;
 };
 
 /** Who sent an action: the app's own trusted page, the recovery window, or nobody main trusts. */
@@ -302,7 +307,12 @@ export const createRecoveryWindowController = (host: {
     }
   };
 
-  const fail = (opened: RecoveryWindowLike, trigger: RecoveryTrigger, reason: string, detail?: unknown): void => {
+  const fail = (
+    opened: RecoveryWindowLike,
+    trigger: RecoveryTrigger,
+    failure: { readonly reason: string; readonly detail?: unknown },
+  ): void => {
+    const { reason, detail } = failure;
     host.log('error', 'main.recovery-window-failed', { reason, detail });
     if (window === opened) {
       window = undefined;
@@ -343,31 +353,27 @@ export const createRecoveryWindowController = (host: {
     window = opened;
     host.log('warn', 'main.recovery-shown', { trigger });
     host.report(recoveryShownSignal('window', trigger));
-    opened.webContents.on('did-fail-load', ((
-      _event: unknown,
-      errorCode: number,
-      _description: string,
-      _url: string,
-      isMainFrame: boolean,
-    ) => {
-      if (isMainFrame) {
-        fail(opened, trigger, 'load', { errorCode });
+    opened.webContents.on('did-fail-load', (...details: unknown[]) => {
+      if (details[4] === true) {
+        fail(opened, trigger, { reason: 'load', detail: { errorCode: details[1] } });
       }
-    }) as never);
-    opened.webContents.on('render-process-gone', ((_event: unknown, details: { reason?: string }) => {
-      fail(opened, trigger, 'renderer-gone', { reason: details?.reason });
-    }) as never);
+    });
+    opened.webContents.on('render-process-gone', (...details: unknown[]) => {
+      const [, gone] = details;
+      const reason = typeof gone === 'object' && gone !== null && 'reason' in gone ? gone.reason : undefined;
+      fail(opened, trigger, { reason: 'renderer-gone', detail: { reason } });
+    });
     opened.once('closed', () => {
       if (window === opened) {
         window = undefined;
       }
     });
-    // async-iife: recovery -- a rejected load falls back to the native dialog.
+    // async-iife: bootstrap -- a rejected load falls back to the native dialog.
     void (async (): Promise<void> => {
       try {
         await opened.loadFile(host.page);
       } catch (error) {
-        fail(opened, trigger, 'load', { message: String(error) });
+        fail(opened, trigger, { reason: 'load', detail: { message: String(error) } });
       }
     })();
   };

@@ -233,7 +233,7 @@ export const createBootWatchdog = (host: BootWatchdogHost): BootWatchdog => {
       if (isSuspended) {
         return;
       }
-      for (const deadline of [...pending.keys()]) {
+      for (const deadline of pending.keys()) {
         clear(deadline);
         suspended.add(deadline);
       }
@@ -244,7 +244,7 @@ export const createBootWatchdog = (host: BootWatchdogHost): BootWatchdog => {
         return;
       }
       isSuspended = false;
-      for (const deadline of [...suspended]) {
+      for (const deadline of suspended) {
         suspended.delete(deadline);
         arm(deadline);
       }

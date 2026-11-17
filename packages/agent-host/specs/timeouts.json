@@ -317,6 +317,14 @@
       "owner": "desktop boot"
     },
     {
+      "id": "B21",
+      "bound": "Desktop boot watchdog (R12): no shell-mounted 45 s after the window loaded offers the recovery window beside the app, and the 60 s launch deadline marks the boot-health record; suspend and resume restart both deadlines (boot-watchdog.ts bootDeadlines)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout: (callback, milliseconds) => setTimeout(callback, milliseconds),",
+      "class": "Liveness",
+      "owner": "desktop boot"
+    },
+    {
       "id": "C1",
       "bound": "Leader heartbeat (M2 leading)",
       "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",

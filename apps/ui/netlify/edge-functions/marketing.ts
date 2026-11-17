@@ -49,6 +49,13 @@ const marketingPrefixes = [
 /** Single files owned by apps/www: its sitemap, served under another name, and the agent page. */
 const marketingFiles = new Set(['/sitemap-marketing.xml', '/llms.txt']);
 
+/**
+ * The root data request of `/`, by both of React Router's names: `/_root.data` before trailing-slash-aware data
+ * requests (`future.v8_trailingSlashAwareDataRequests`, the React Router 8 default) and `/_.data` with them. Both stay
+ * accepted while a tab of a build that sends the old name can still be open (blueprint B5, RR4).
+ */
+export const rootDataPaths: readonly string[] = ['/_root.data', '/_.data'];
+
 /** Query parameters a shared marketing link may carry without leaving `/`. */
 const campaignParameters = new Set(['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref']);
 
@@ -68,7 +75,7 @@ export function resolveMarketingUrl(requestUrl: URL, method: string, origin: str
         return undefined;
       }
     }
-  } else if (pathname === '/_root.data') {
+  } else if (rootDataPaths.includes(pathname)) {
     const routes = searchParams.get('_routes')?.split(',');
     if (!routes?.length || !routes.every((route) => route === 'www-home')) {
       return undefined;
@@ -306,7 +313,7 @@ function privateDocument(response: Response): Response {
 export const config = {
   path: [
     '/',
-    '/_root.data',
+    ...rootDataPaths,
     '/sitemap-marketing.xml',
     '/llms.txt',
     '/robots.txt',

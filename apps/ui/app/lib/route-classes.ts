@@ -81,9 +81,9 @@ export const shellSentinel = '__shell';
 
 /**
  * The one-segment grammar a shell parameter matches: any segment without a dot. Every slug and id the app writes is one
- * (percent escapes included); a dot marks React Router's `<path>.data` requests and file names, which stay on the
- * function. Used as the URLPattern group of the function's `excludedPaths`, so a data request is never excluded. The
- * slash is escaped because a URLPattern group, unlike a regular expression, rejects a bare one.
+ * (percent escapes included); a dot marks React Router's `<path>.data` and `<path>/_.data` requests and file names,
+ * which stay on the function. Used as the URLPattern group of the function's `excludedPaths`, so a data request is never
+ * excluded. The slash is escaped because a URLPattern group, unlike a regular expression, rejects a bare one.
  */
 export const shellSegment = String.raw`[^\/.]+`;
 
@@ -121,7 +121,8 @@ const projectClass: StaticShellClass = {
  * The Home shell (PL4): `/` is marketing or Home by the visitor's `tau-entry` preference, so the marketing edge function
  * chooses per request and rewrites a `tau-entry=app` visit to this document. Home has no server loader and the root
  * loader reads no visitor (PL2), so the function's Home was already a function of the deploy only. Every other answer at
- * `/` (no preference, `?website`, a write, the `www` alias) and `/_root.data` stay where they were.
+ * `/` (no preference, `?website`, a write, the `www` alias) and the root data request (`/_root.data` or `/_.data`) stay
+ * where they were.
  */
 const homeClass: StaticShellClass = {
   id: 'home',

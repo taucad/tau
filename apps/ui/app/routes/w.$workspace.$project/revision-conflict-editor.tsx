@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { EditorDocument } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-import { CodeEditor } from '#components/code/code-editor.client.js';
-import { getEditorLanguage } from '#lib/editor-languages.js';
-import type { CodeEditorProps } from '#components/code/code-editor.client.js';
+import { CodeEditor } from '@taucad/editor-ui/components/code/code-editor.client';
+import { getEditorLanguage } from '@taucad/editor-ui/lib/editor-languages';
+import type { CodeEditorProps } from '@taucad/editor-ui/components/code/code-editor.client';
 
 /** One `<<<<<<< / ======= / >>>>>>>` block, by zero-based line index. */
 type ConflictHunk = Readonly<{ open: number; middle: number; close: number }>;

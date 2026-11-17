@@ -307,7 +307,7 @@ const main = async (): Promise<void> => {
     }
   }
   if (acceptanceKind === 'vm' && !cleanHost && !windowsHost && !linuxHost) {
-    throw new Error('Consumer acceptance requires its staging platform scope');
+    throw new Error('Consumer acceptance requires its own platform scope');
   }
   const files = linuxConsumer ? consumerProfile(linuxConsumer) : localProfile;
   const root = resolve(required('TAU_QUALIFICATION_DIRECTORY'));

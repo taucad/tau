@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useLocation } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
+import { urlCarriesCredential } from '@taucad/ui-core/lib/url-credential.lib';
 import type { PostHog, PostHogConfig } from 'posthog-js';
 import { authClient } from '#lib/auth-client.js';
 import { clearPostHogStorage, posthogConfig } from '#lib/posthog.lib.js';
@@ -114,6 +116,11 @@ function PostHogLifecycle({
 }): undefined {
   const { data: sessionData, isPending } = useSession(authClient);
   const user = sessionData?.user;
+  const location = useLocation();
+  /* #2290: a replay serialises the whole document, and the browser resolves every relative `href` on it against the
+     address bar, so a page whose address holds a credential leaks it through attributes no event hook reads. Replay
+     therefore never runs at such an address: it does not start there, and it stops on the way in. */
+  const isCredentialAddress = urlCarriesCredential(`${location.pathname}${location.search}${location.hash}`);
   /* Identification must not run before the admission it belongs to has configured the SDK, and the
      fetch resolves after the effect that starts it has returned. A boolean cannot say that: one that
      only turns true would let a re-acceptance identify through a singleton still opted out, and
@@ -156,7 +163,6 @@ function PostHogLifecycle({
     }
 
     let withdrawn = false;
-    let cancelReplay: (() => void) | undefined;
     const admit = async (): Promise<void> => {
       let posthog: PostHog;
       try {
@@ -196,27 +202,36 @@ function PostHogLifecycle({
       connectBaselineTelemetry(captureAdmitted);
       // The composer's attachment intake counter (outcome, probed format, declared type) follows admission too.
       connectAttachmentIntakeTelemetry(captureAdmitted);
+      // Replay follows admission in its own effect below, which also follows the address.
       setAdmittedGeneration(generation);
-      if (!isReplayEnabled) {
-        return;
-      }
-      cancelReplay = whenIdle(() => {
-        posthog.startSessionRecording();
-      });
     };
     // async-iife: bootstrap — React effects cannot await the fetch; `withdrawn` owns its lifecycle.
     void admit();
     return () => {
       withdrawn = true;
-      cancelReplay?.();
       setAnalyticsLinkSource(undefined);
       disconnectRemoteFlags();
       disconnectBaselineTelemetry();
       disconnectAttachmentIntakeTelemetry();
       setConsoleClient(undefined);
     };
-    // `options` and `isReplayEnabled` are fixed per host, so only `isActive` re-runs this.
-  }, [isActive, options, isReplayEnabled]);
+    // `options` is fixed per host, so only `isActive` re-runs this.
+  }, [isActive, options]);
+
+  useEffect(() => {
+    if (!isActive || !isReplayEnabled || admittedGeneration !== decision.current || sdk?.__loaded !== true) {
+      return undefined;
+    }
+    const posthog = sdk;
+    if (isCredentialAddress) {
+      posthog.stopSessionRecording();
+      return undefined;
+    }
+    // Started outside the critical rendering path; a second start on an already-running recorder is a no-op.
+    return whenIdle(() => {
+      posthog.startSessionRecording();
+    });
+  }, [isActive, isReplayEnabled, admittedGeneration, isCredentialAddress]);
 
   useEffect(() => {
     if (!isActive || isPending || admittedGeneration !== decision.current || sdk?.__loaded !== true) {

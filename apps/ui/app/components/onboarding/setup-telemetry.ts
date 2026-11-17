@@ -8,7 +8,7 @@ import type { GizmoStyleId, MousePresetId, PersonProfile, SetupStatus, ViewerPre
 import { mergeOnboarding, suggestedGizmo, suggestedPreset } from '@taucad/preferences';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { personRecordStores } from '#preferences/person-record.store.js';
-import { setViewerPersonProperties } from '#components/settings/viewer/viewer-person-properties.js';
+import { setViewerPersonProperties } from '@taucad/settings-ui/components/settings/viewer/viewer-person-properties';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
 import type { SetupEntry } from '#telemetry/onboarding-telemetry.js';
 import type { SetupStepId } from '#components/onboarding/setup-copy.js';

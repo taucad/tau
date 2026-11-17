@@ -340,6 +340,7 @@ describe('PublicationsController', () => {
         sha256Hex: sha,
         etag: `"${sha}"`,
         path: 'main.ts',
+        key: `${sha.slice(0, 2)}/${sha.slice(2)}`,
       });
       vi.mocked(service.openPublicationFile).mockResolvedValue({
         body: Readable.from([new TextEncoder().encode('bytes')]),
@@ -357,6 +358,8 @@ describe('PublicationsController', () => {
       });
       expect(reply.header).toHaveBeenCalledWith('etag', `"${sha}"`);
       expect(reply.header).toHaveBeenCalledWith('cache-control', 'private, no-cache');
+      // The key the resolve answered, which carries how the blob is served (#2008).
+      expect(service.openPublicationFile).toHaveBeenCalledWith(sha, 'main.ts', `${sha.slice(0, 2)}/${sha.slice(2)}`);
       expect(result).toBeInstanceOf(StreamableFile);
       expect(result?.options).toEqual({ type: 'application/octet-stream', length: 5 });
       expect(fileRequestMetricAdd).toHaveBeenCalledWith(1, { outcome: 'served' });
@@ -367,6 +370,7 @@ describe('PublicationsController', () => {
         sha256Hex: sha,
         etag: `"${sha}"`,
         path: 'main.ts',
+        key: `${sha.slice(0, 2)}/${sha.slice(2)}`,
       });
       const reply = mockDeep<FastifyReply>();
 

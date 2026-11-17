@@ -33,7 +33,10 @@ import { mintViewRecordId } from '#workbench-records/converters.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { exceptionsForView, viewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
 import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/records/view-record';
-import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import {
+  useProjectWorkspace,
+  useWorkspaceLayoutReady,
+} from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
@@ -132,14 +135,24 @@ function ViewerPanel({
     () => properties.api.isVisible,
     () => true,
   );
-  return isVisible ? (
+  /* The viewer's first frame waits for layout-ready (#2293). A project's layout record is applied the moment its dock
+   * attaches, which on a return to a live project is before the lanes are laid out: the panel is then at Dockview's
+   * 100 px minimum inside a 1 px lane, and a canvas mounted there takes that box's aspect and keeps it for frames after
+   * the lanes settle. Until then the panel shows the viewer's frame, which has no size of its own to keep. */
+  const isLayoutReady = useWorkspaceLayoutReady();
+  if (!isVisible) {
+    return undefined;
+  }
+  return isLayoutReady ? (
     /* The product tour's Look around tip hangs from this viewer's corner; the first viewer on the page is used. */
     <div ref={viewerAnchor} className='size-full'>
       <Suspense fallback={<ViewerFrame />}>
         <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} profile={profile} />
       </Suspense>
     </div>
-  ) : undefined;
+  ) : (
+    <ViewerFrame />
+  );
 }
 
 export function createViewerNewTab({

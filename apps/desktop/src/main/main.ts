@@ -188,9 +188,13 @@ if (environmentLocked) {
 const desktopChannel = app.isPackaged ? packagedChannel(app.getAppPath()) : 'production';
 app.setName(desktopChannel === 'staging' ? 'Tau Staging' : 'Tau');
 if (desktopChannel === 'staging') {
-  // Development acceptance runs may explicitly isolate their profile; releases retain the channel profile.
-  if (environmentLocked || !app.commandLine.hasSwitch('user-data-dir')) {
+  /* Only a locked release owns `Tau Staging`. A build that honours overrides keeps an explicit `--user-data-dir` and
+   * otherwise uses `Tau Staging Dev`, so a development or test run never defaults into the installed app's profile
+   * (desktop resilient startup blueprint, D7). */
+  if (environmentLocked) {
     app.setPath('userData', join(app.getPath('appData'), 'Tau Staging'));
+  } else if (!app.commandLine.hasSwitch('user-data-dir')) {
+    app.setPath('userData', join(app.getPath('appData'), 'Tau Staging Dev'));
   }
   app.setPath('sessionData', app.getPath('userData'));
 }

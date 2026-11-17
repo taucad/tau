@@ -1593,10 +1593,10 @@ describe('desktop main admission gates', () => {
       );
       await import('#main/main.js');
       const profileCall = app.setPath.mock.calls.find(([name]) => name === 'userData');
-      if (options.profile !== undefined) {
-        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', options.profile)]);
-      } else {
+      if (options.profile === undefined) {
         expect(profileCall).toBeUndefined();
+      } else {
+        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', options.profile)]);
       }
       expect(app.setPath).toHaveBeenCalledWith('sessionData', state.userData);
     },

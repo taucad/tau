@@ -1,6 +1,6 @@
 /**
  * `githubCredentialRenewal` (plan § 4 A10): when a project's GitHub credential is minted again, an `after` on the
- * injected clock (I15) where the revision client held a module `setTimeout`. The lease's own rows, which drive a mint
+ * actor's clock (stepped here; XState's default in production) where the revision client held a module `setTimeout`. The lease's own rows, which drive a mint
  * through it, are in `hooks/use-revision-status.github-credential.test.tsx`.
  *
  * Path table (the shortest path to each state value), kept current with `pathTable`:

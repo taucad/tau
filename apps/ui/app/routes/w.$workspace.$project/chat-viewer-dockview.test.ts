@@ -5,7 +5,7 @@ import { createElement } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { DockviewApi, DockviewDidDropEvent, DockviewGroupPanel } from 'dockview-react';
 import type { CapabilitiesManifest } from '@taucad/runtime';
-import type { FileEntry, FileProvenanceSource, CheckedFileWriteResult } from '@taucad/types';
+import type { FileEntry, FileProvenanceSource, FileStatEntry, CheckedFileWriteResult } from '@taucad/types';
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import { tauEditorPanelDragMime, tauFileDragMime } from '@taucad/types/constants';
@@ -14,6 +14,7 @@ import {
   createViewerFileDataSource,
   handleViewerDrop,
   listViewerSelectableFiles,
+  listViewerSourceFiles,
   replaceViewerNewTabWithFile,
   newViewRecordFrom,
   recordNewView,
@@ -314,7 +315,7 @@ describe('listViewerSelectableFiles', () => {
 
     expect(
       listViewerSelectableFiles(
-        tree,
+        tree.values(),
         capabilities({ kind: 'kernel', id: 'openrscad', extensions: ['scad'] }, { kind: 'transcoder', id: 'image' }),
       ),
     ).toEqual([
@@ -334,7 +335,7 @@ describe('listViewerSelectableFiles', () => {
 
     expect(
       listViewerSelectableFiles(
-        tree,
+        tree.values(),
         capabilities(
           { kind: 'kernel', id: 'replicad', extensions: ['ts', 'js'] },
           { kind: 'kernel', id: 'assimp', extensions: ['mesh.xml'] },
@@ -346,6 +347,62 @@ describe('listViewerSelectableFiles', () => {
       { name: 'model.MESH.XML', path: 'model.MESH.XML', size: 0 },
       { name: 'notes.xml', path: 'notes.xml', size: 0 },
     ]);
+  });
+});
+
+describe('listViewerSourceFiles', () => {
+  const stat = (path: string): FileStatEntry => ({
+    path,
+    name: path.split('/').pop() ?? path,
+    type: 'file',
+    size: 1,
+    mtimeMs: 0,
+  });
+  const capabilities = (...registrations: CapabilitiesManifest['registrations']): CapabilitiesManifest => ({
+    registrations,
+    routes: [],
+    renderCapabilities: {},
+  });
+
+  it('lists sources under folders the tree never expanded, one name glob per kernel extension', async () => {
+    const searchFiles = vi.fn(async (query: string) =>
+      query === '*.ts' ? [stat('src/main.ts'), stat('src/checks/main.geospec.ts')] : [stat('parts/a.scad')],
+    );
+
+    await expect(
+      listViewerSourceFiles(
+        { searchFiles },
+        capabilities(
+          { kind: 'kernel', id: 'replicad', extensions: ['ts', 'js'] },
+          { kind: 'kernel', id: 'openscad', extensions: ['scad'] },
+          { kind: 'transcoder', id: 'image' },
+        ),
+      ),
+    ).resolves.toEqual([
+      { name: 'a.scad', path: 'parts/a.scad', size: 1 },
+      { name: 'main.ts', path: 'src/main.ts', size: 1 },
+    ]);
+    expect(searchFiles.mock.calls.map(([query, options]) => [query, options])).toEqual([
+      ['*.ts', { maxResults: 200, includeDirectories: false }],
+      ['*.js', { maxResults: 200, includeDirectories: false }],
+      ['*.scad', { maxResults: 200, includeDirectories: false }],
+    ]);
+  });
+
+  it('searches every file once for a wildcard kernel', async () => {
+    const searchFiles = vi.fn(async () => [stat('notes.xml')]);
+
+    await expect(
+      listViewerSourceFiles(
+        { searchFiles },
+        capabilities(
+          { kind: 'kernel', id: 'replicad', extensions: ['ts'] },
+          { kind: 'kernel', id: 'catch-all', extensions: ['*'] },
+        ),
+      ),
+    ).resolves.toEqual([{ name: 'notes.xml', path: 'notes.xml', size: 1 }]);
+    expect(searchFiles).toHaveBeenCalledOnce();
+    expect(searchFiles).toHaveBeenCalledWith('', { maxResults: 200, includeDirectories: false });
   });
 });
 

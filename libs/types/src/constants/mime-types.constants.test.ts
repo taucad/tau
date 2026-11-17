@@ -19,8 +19,8 @@ describe('mimeTypes', () => {
     expect(fileExtensionSet.has('json')).toBe(true);
   });
 
-  it('should not catalogue the Rhino 3DM format, which nothing reads or writes since the Rhino kernel was removed', () => {
-    expect(fileExtensions).not.toContain('3dm');
+  it('should catalogue the native CAD formats @taucad/cadmpeg reads', () => {
+    expect(fileExtensions).toEqual(expect.arrayContaining(['sldprt', 'catpart', 'ipt', 'f3d', 'fcstd', '3dm', 'pvz']));
   });
 });
 

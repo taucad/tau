@@ -10,7 +10,7 @@ import { ChatPermissionRequest } from '#components/chat/chat-permission-request.
 import { ChatLoginAffordance } from '#components/chat/chat-login-affordance.js';
 import { answerDeny, pendingMachineActionOf, recordMachineAction } from '#components/print/machine-action-approval.js';
 import { useMachinesFacet } from '#hooks/use-machines.js';
-import { operator } from '#hooks/use-machine-control.js';
+import { operator } from '#components/print/machine-operator.js';
 import type { MachineClient } from '@taucad/runtime/machine';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';

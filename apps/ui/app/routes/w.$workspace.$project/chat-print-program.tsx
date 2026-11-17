@@ -15,7 +15,7 @@ import { ParameterSelect } from '@taucad/viewer/parameters/parameter-select';
 import { describePrintError } from '#components/print/machine-facts.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { operator } from '#hooks/use-machine-control.js';
+import { operator } from '#components/print/machine-operator.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import { useProject } from '#hooks/use-project.js';
 import { PrintNotice, PrintRow, PrintStage } from '#components/machines/machine-section.js';

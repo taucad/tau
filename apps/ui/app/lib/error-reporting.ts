@@ -5,7 +5,7 @@ import { recordErrorDetails } from '#lib/error-details.js';
 import type { ErrorDetails } from '#lib/error-details.js';
 import type * as SentryLibrary from '#lib/sentry.lib.js';
 import { hasPageExited, isPageHidden } from '@taucad/ui-core/lib/page-visibility';
-import { sendSentryEventDirectly, sendSentryEventsOnHide } from '#lib/sentry-event.lib.js';
+import { loadStackParser, sendSentryEventDirectly, sendSentryEventsOnHide } from '#lib/sentry-event.lib.js';
 import { isWeakKey } from '@taucad/ui-core/lib/weak-key';
 
 /**
@@ -439,6 +439,8 @@ export const reportUiError = async (error: unknown, details?: ErrorDetails): Pro
   }
   markReported();
   waitingForLoad = [...waitingForLoad, { error }];
+  // The event without the SDK parses its frames with the SDK's stack parser: in by the time the page hides.
+  void loadStackParser();
   sendNowIfHidden();
   // Starts this page's only load when nothing has; the error goes with what it does.
   await start();

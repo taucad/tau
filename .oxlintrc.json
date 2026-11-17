@@ -2002,11 +2002,13 @@
               "posthog-js/*",
               "@sentry/react"
             ],
-            // Reached only through a dynamic import: the chat's AI SDK (PL1), the editor, the viewer's loaders and
-            // debug tools, the language services, the conversion and preview routes and the e2e fixtures.
+            // Reached only through a dynamic import: the chat's AI SDK (PL1), the editor, the viewer tier, the printer
+            // viewer and the part visuals (PL5), the viewer's loaders and debug tools, the language services, the
+            // conversion and preview routes and the e2e fixtures.
             "deferredLeaves": [
               "apps/libs/chat-ui/src/chat-clients/_internal/shared-chat-transport.ts",
               "apps/libs/ui-core/src/lib/lsp-completion-apply.ts",
+              "apps/libs/ui-core/src/services/headless-capture-presentation.ts",
               "apps/ui/app/components/cad/ar-webxr-scene.ts",
               "apps/ui/app/components/code/code-editor-view.client.tsx",
               "apps/ui/app/components/code/editor-definition.ts",
@@ -2026,27 +2028,6 @@
               "apps/ui/app/components/geometry/loader/metal-morph.constants.ts",
               "apps/ui/app/components/geometry/loader/showcase-capture.ts",
               "apps/ui/app/components/geometry/loader/showcase-post.ts",
-              "apps/ui/app/hooks/rpc-handlers.ts",
-              "apps/ui/app/lib/csharp-language/",
-              "apps/ui/app/lib/json-language/",
-              "apps/ui/app/lib/kcl-language/",
-              "apps/ui/app/lib/openscad-language/",
-              "apps/ui/app/lib/sentry-tracing.lib.ts",
-              "apps/ui/app/lib/sentry.lib.ts",
-              "apps/ui/app/lib/typescript-language/",
-              "apps/ui/app/routes/[__e2e].onshape-render-profile/",
-              "apps/ui/app/routes/[__e2e].remote-host/",
-              "apps/ui/app/routes/[__e2e].shader-fixture/",
-              "apps/ui/app/routes/convert/",
-              "apps/ui/app/routes/w.$workspace.$project_.preview/",
-              "apps/ui/app/runtime/ui-runtime.definition.ts",
-              "apps/ui/app/runtime/usdz-runtime.definition.ts",
-              "apps/ui/app/services/chat-sdk.ts",
-              "apps/ui/app/workers/geospec-runner.impl.ts"
-            ],
-            "known": [
-              // PL5 (interactive-tier cut): the viewer, three.js and the runtime's root entry.
-              "apps/libs/ui-core/src/services/headless-capture-presentation.ts",
               "apps/ui/app/components/printer/printer-camera-controls.tsx",
               "apps/ui/app/components/printer/printer-filament-material.node.ts",
               "apps/ui/app/components/printer/printer-filament-material.ts",
@@ -2055,16 +2036,32 @@
               "apps/ui/app/components/printer/printer-plates.ts",
               "apps/ui/app/components/printer/printer-scene.tsx",
               "apps/ui/app/components/printer/printer-toolpath.ts",
-              "apps/ui/app/hooks/use-thumbnail-generator.ts",
+              "apps/ui/app/hooks/rpc-handlers.ts",
+              "apps/ui/app/lib/csharp-language/",
+              "apps/ui/app/lib/json-language/",
+              "apps/ui/app/lib/kcl-language/",
+              "apps/ui/app/lib/openscad-language/",
+              "apps/ui/app/lib/sentry-stack-parser.ts",
+              "apps/ui/app/lib/sentry-tracing.lib.ts",
+              "apps/ui/app/lib/sentry.lib.ts",
+              "apps/ui/app/lib/typescript-language/",
+              "apps/ui/app/routes/[__e2e].onshape-render-profile/",
+              "apps/ui/app/routes/[__e2e].remote-host/",
+              "apps/ui/app/routes/[__e2e].shader-fixture/",
+              "apps/ui/app/routes/convert/",
               "apps/ui/app/routes/w.$workspace.$project/chat-converter.tsx",
+              "apps/ui/app/routes/w.$workspace.$project/chat-editor-code-viewer.tsx",
               "apps/ui/app/routes/w.$workspace.$project/chat-print-prepare.tsx",
               "apps/ui/app/routes/w.$workspace.$project/chat-viewer.tsx",
+              "apps/ui/app/routes/w.$workspace.$project_.preview/",
+              "apps/ui/app/runtime/ui-runtime.definition.ts",
+              "apps/ui/app/runtime/usdz-runtime.definition.ts",
+              "apps/ui/app/services/chat-sdk.ts",
               "apps/ui/app/services/headless-capture.ts",
               "apps/ui/app/services/part-thumbnail-visual.ts",
-              // PL5: the editor, and the full error-reporting SDK.
-              "apps/ui/app/routes/w.$workspace.$project/chat-editor-code-viewer.tsx",
-              "apps/ui/app/lib/sentry-event.lib.ts"
-            ]
+              "apps/ui/app/workers/geospec-runner.impl.ts"
+            ],
+            "known": []
           }
         ]
       }

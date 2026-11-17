@@ -35,6 +35,7 @@ import {
 } from '@taucad/files-ui/utils/project-creation-location.utils';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { reportProjectCreationFailure } from '#lib/project-creation-failure-reporting.js';
 
 /*
  * `autoFocus` is applied by the browser at its next rendering update, about 90 ms after navigation on an
@@ -199,6 +200,7 @@ export default function ProjectsNew(): React.JSX.Element {
         }
         return;
       }
+      reportProjectCreationFailure(error);
       toast.error('Failed to create project. Please try again.');
     }
   }, [createProject, kernel, location, presentLocationError, projectDescription, projectName]);

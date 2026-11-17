@@ -3,7 +3,12 @@ import { z } from 'zod';
 import type { DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 
 import type { DesktopChannel } from '#main/environment.js';
-import { desktopArchiveName, desktopDownloadOrigin, desktopReleaseIdentity } from '#shared/desktop-release.js';
+import {
+  desktopArchiveName,
+  desktopDownloadOrigin,
+  desktopDownloadPage,
+  desktopReleaseIdentity,
+} from '#shared/desktop-release.js';
 import { moveToApplicationsDetail } from '#main/app-location.js';
 
 export const updateRepository = 'taucad/tau';
@@ -223,10 +228,17 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
     currentVersion,
     channel,
     installOnQuit: platform === 'darwin',
+    downloadPage: desktopDownloadPage(channel),
   };
   const publish = (phase: DesktopUpdateSnapshot['phase'], detail?: string): void => {
     const { detail: _previous, ...rest } = snapshot;
-    snapshot = { ...rest, revision: snapshot.revision + 1, phase, ...(detail === undefined ? {} : { detail }) };
+    snapshot = {
+      ...rest,
+      revision: snapshot.revision + 1,
+      phase,
+      downloadPage: desktopDownloadPage(channel, snapshot),
+      ...(detail === undefined ? {} : { detail }),
+    };
     options.onState?.(snapshot);
   };
   if (!options.packaged || source.kind === 'disabled') {

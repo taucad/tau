@@ -13,6 +13,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { errnoOf } from '#main/desktop-signals.js';
 import type { BootstrapStep } from '#main/desktop-signals.js';
 import type { DesktopChannel } from '#main/environment.js';
+import { desktopDownloadPage } from '#shared/desktop-release.js';
 
 /** The submenu's label under Help. */
 export const troubleshootingMenuLabel = 'Troubleshooting';
@@ -202,8 +203,7 @@ export const diagnosticsReport = (summary: DiagnosticsSummary, logPath: string, 
  * @param channel - The running build's channel.
  * @returns The page.
  */
-export const downloadTauPage = (channel: DesktopChannel): string =>
-  channel === 'staging' ? 'https://github.com/taucad/tau/releases' : 'https://github.com/taucad/tau/releases/latest';
+export const downloadTauPage = (channel: DesktopChannel): string => desktopDownloadPage(channel);
 
 /** What each button of {@link bootstrapFailureDialog} does, in button order. */
 export const bootstrapFailureActions = ['restart-safe-mode', 'show-logs', 'download-tau', 'quit'] as const;

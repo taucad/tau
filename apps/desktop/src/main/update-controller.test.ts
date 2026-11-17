@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { startPlatformUpdateController } from '#main/update-controller.js';
 import type { PlatformUpdateBackend, PlatformUpdateOptions } from '#main/update-controller.js';
+import { UpdateClockError } from '#main/update-identity.js';
 
 const setup = () => {
   const commit = vi.fn();
@@ -434,5 +435,48 @@ describe('a newer release replaces a pending one', () => {
     await updater.check();
     expect(updater.snapshot()).toMatchObject({ phase: 'ready', version: '0.3.0' });
     expect(backend.download).not.toHaveBeenCalled();
+  });
+});
+
+describe('classified update refusals (T-B25.1)', () => {
+  it('should say to check the date and time when the clock refuses the descriptor, with a download page', async () => {
+    const { backend, options } = setup();
+    vi.mocked(backend.check).mockRejectedValueOnce(new UpdateClockError());
+    const updater = startPlatformUpdateController(options, backend);
+    await updater.check();
+    const snapshot = updater.snapshot();
+    expect(snapshot).toMatchObject({
+      phase: 'error',
+      blockedReason: 'clock',
+      downloadPage: 'https://github.com/taucad/tau/releases/latest',
+    });
+    expect(snapshot.detail).toMatch(/date and time/u);
+    /* The next check that passes clears the reason. */
+    await updater.check();
+    expect(updater.snapshot().phase).toBe('ready');
+    expect(updater.snapshot()).not.toHaveProperty('blockedReason');
+    expect(updater.snapshot().downloadPage).toBe('https://github.com/taucad/tau/releases/tag/desktop%400.2.0');
+  });
+
+  it("should keep today's error for any other refusal", async () => {
+    const { backend, options } = setup();
+    vi.mocked(backend.check).mockRejectedValueOnce(
+      new Error('Update descriptor identity, path or validity period is invalid'),
+    );
+    const updater = startPlatformUpdateController(options, backend);
+    await updater.check();
+    const snapshot = updater.snapshot();
+    expect(snapshot.phase).toBe('error');
+    expect(snapshot).not.toHaveProperty('blockedReason');
+    expect(snapshot.detail).toMatch(/^Update failed: /u);
+    expect(snapshot.downloadPage).toBe('https://github.com/taucad/tau/releases/latest');
+  });
+
+  it('should carry the staging download page on a staging build', async () => {
+    const { backend, options } = setup();
+    vi.mocked(backend.check).mockResolvedValueOnce(undefined);
+    const updater = startPlatformUpdateController({ ...options, channel: 'staging' }, backend);
+    await updater.check();
+    expect(updater.snapshot().downloadPage).toBe('https://github.com/taucad/tau/releases');
   });
 });

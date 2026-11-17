@@ -26,6 +26,7 @@ export function UpdateControl({
   isFailed = false,
   isProminent = false,
   releasePage,
+  releaseLabel = 'What’s new',
   action,
   isOpen,
   onOpenChange,
@@ -39,6 +40,8 @@ export function UpdateControl({
   /** Tints the row with the brand colour (a light wash, a half fill in dark mode) when an update is ready. */
   readonly isProminent?: boolean;
   readonly releasePage?: string;
+  /** The link's label; **Download Tau** when the link is the download page rather than release notes. */
+  readonly releaseLabel?: string;
   readonly action?: UpdateControlAction;
   readonly isOpen: boolean;
   readonly onOpenChange: (open: boolean) => void;
@@ -100,7 +103,7 @@ export function UpdateControl({
               {releasePage ? (
                 <Button asChild variant='ghost' size='xs' className='-ml-2'>
                   <a href={releasePage} target='_blank' rel='noopener noreferrer'>
-                    What’s new
+                    {releaseLabel}
                     <ArrowUpRight className='size-3' />
                   </a>
                 </Button>

@@ -29,6 +29,14 @@ export type DesktopUpdateSnapshot = {
   readonly installWhenReady?: boolean;
   /** Main-owned status for system policy and installation failures. */
   readonly detail?: string;
+  /**
+   * Why the updater cannot go on by itself, when the cause is one a person can act on: the computer's clock refused
+   * the update (`clock`), or this copy's installation marker is damaged and it cannot update itself
+   * (`installation-marker`). Absent for every other state.
+   */
+  readonly blockedReason?: 'clock' | 'installation-marker';
+  /** Where **Download Tau** goes: the offered release's page, or the channel's release page on GitHub. */
+  readonly downloadPage: string;
 };
 
 /** Fixed IPC routes; the renderer cannot select update feeds or install paths. */

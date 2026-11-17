@@ -61,54 +61,75 @@ export function DesktopUpdateControl({
   if (!snapshot) {
     return undefined;
   }
-  const { phase } = snapshot;
+  const { phase, blockedReason } = snapshot;
   const busy = phase === 'saving' || phase === 'restarting' || phase === 'checking';
-  const failed = phase === 'error' || phase === 'restart-blocked' || actionFailed;
-  const quiet = phase === 'current' || phase === 'checking' || phase === 'disabled' || phase === 'system-managed';
+  const failed = phase === 'error' || phase === 'restart-blocked' || blockedReason !== undefined || actionFailed;
+  /* A blocked update is never quiet: the person is the only one who can fix the clock or reinstall (B25, B27). */
+  const quiet =
+    blockedReason === undefined &&
+    (phase === 'current' || phase === 'checking' || phase === 'disabled' || phase === 'system-managed');
   if (quiet && !open) {
     return undefined;
   }
+  const blocked =
+    blockedReason === 'clock'
+      ? {
+          title: 'Check your date and time',
+          detail:
+            'Tau couldn’t verify the update because your computer’s date and time look wrong. Correct them, then check again.',
+        }
+      : blockedReason === 'installation-marker'
+        ? {
+            title: 'This copy of Tau can’t update itself',
+            detail:
+              'Its installation is damaged. Download Tau and install it again; your projects stay where they are.',
+          }
+        : undefined;
   const title = actionFailed
     ? 'Couldn’t complete the request'
-    : {
-        'system-managed': 'Updates managed by APT',
-        disabled: 'Updates unavailable',
-        checking: 'Checking for updates',
-        current: 'You’re up to date',
-        downloading: 'Downloading an update',
-        ready: 'Update ready',
-        available: 'Update available',
-        error: 'Update interrupted',
-        saving: 'Saving your work',
-        'restart-blocked': 'Restart paused',
-        restarting: 'Restarting Tau',
-        'move-required': 'Move Tau to Applications',
-      }[phase];
+    : blocked
+      ? blocked.title
+      : {
+          'system-managed': 'Updates managed by APT',
+          disabled: 'Updates unavailable',
+          checking: 'Checking for updates',
+          current: 'You’re up to date',
+          downloading: 'Downloading an update',
+          ready: 'Update ready',
+          available: 'Update available',
+          error: 'Update interrupted',
+          saving: 'Saving your work',
+          'restart-blocked': 'Restart paused',
+          restarting: 'Restarting Tau',
+          'move-required': 'Move Tau to Applications',
+        }[phase];
   /* The user already asked to restart: the download's completion installs without a second ask. */
   const restartsWhenReady = phase === 'downloading' && snapshot.installWhenReady === true;
   const detail = actionFailed
     ? 'Try again. Your current session is still open.'
-    : restartsWhenReady
-      ? 'Tau will save your work and restart as soon as the download finishes.'
-      : (snapshot.detail ??
-        {
-          'system-managed': 'Your administrator manages updates through APT.',
-          disabled: 'Automatic updates are disabled for this build.',
-          checking: 'Looking for the latest version of Tau.',
-          current: 'You have the latest version.',
-          downloading: 'Keep working. We’ll let you know here when it’s ready.',
-          ready:
-            snapshot.installOnQuit === false
-              ? 'Saves your work, then restarts to install. Quitting normally leaves the update for later.'
-              : 'Saves your work, then restarts. Otherwise, installs when you quit Tau.',
-          available: 'Download the latest version. Your session will stay open.',
-          error: 'We’ll retry automatically. Your work is unaffected.',
-          saving: 'Saving your work before restarting…',
-          'restart-blocked': 'Tau stayed open. Finish saving or reviewing active machines, then try again.',
-          restarting: 'Reopening your workspace…',
-          'move-required':
-            'Tau can’t update itself from where it’s running. Move Tau to Applications to receive updates.',
-        }[phase]);
+    : blocked
+      ? blocked.detail
+      : restartsWhenReady
+        ? 'Tau will save your work and restart as soon as the download finishes.'
+        : (snapshot.detail ??
+          {
+            'system-managed': 'Your administrator manages updates through APT.',
+            disabled: 'Automatic updates are disabled for this build.',
+            checking: 'Looking for the latest version of Tau.',
+            current: 'You have the latest version.',
+            downloading: 'Keep working. We’ll let you know here when it’s ready.',
+            ready:
+              snapshot.installOnQuit === false
+                ? 'Saves your work, then restarts to install. Quitting normally leaves the update for later.'
+                : 'Saves your work, then restarts. Otherwise, installs when you quit Tau.',
+            available: 'Download the latest version. Your session will stay open.',
+            error: 'We’ll retry automatically. Your work is unaffected.',
+            saving: 'Saving your work before restarting…',
+            'restart-blocked': 'Tau stayed open. Finish saving or reviewing active machines, then try again.',
+            restarting: 'Reopening your workspace…',
+            'move-required':
+              'Tau can’t update itself from where it’s running. Move Tau to Applications to receive updates.',
+          }[phase]);
   const Icon = failed
     ? ShieldAlert
     : busy || phase === 'downloading'
@@ -121,7 +142,10 @@ export function DesktopUpdateControl({
   const act = async (): Promise<void> => {
     setActionFailed(false);
     try {
-      if (phase === 'ready' || phase === 'restart-blocked' || phase === 'downloading' || phase === 'error') {
+      if (blockedReason === 'clock') {
+        /* Installing would only meet the same refusal; a fresh check is the retry once the clock is right. */
+        await bridge.check();
+      } else if (phase === 'ready' || phase === 'restart-blocked' || phase === 'downloading' || phase === 'error') {
         /* Before the download finishes, main holds the request and restarts when it does. A retry from a failed
          * attempt carries it too, so one click takes an update from failed to installed. */
         await bridge.install();
@@ -136,19 +160,21 @@ export function DesktopUpdateControl({
     }
   };
   const actionLabel =
-    phase === 'ready'
-      ? 'Restart now'
-      : phase === 'restart-blocked'
-        ? 'Retry restart'
-        : phase === 'available'
-          ? 'Download'
-          : phase === 'downloading'
-            ? 'Restart when ready'
-            : phase === 'move-required'
-              ? 'Move to Applications'
-              : phase === 'current' || phase === 'system-managed'
-                ? 'Check again'
-                : 'Retry';
+    blockedReason === 'clock'
+      ? 'Check again'
+      : phase === 'ready'
+        ? 'Restart now'
+        : phase === 'restart-blocked'
+          ? 'Retry restart'
+          : phase === 'available'
+            ? 'Download'
+            : phase === 'downloading'
+              ? 'Restart when ready'
+              : phase === 'move-required'
+                ? 'Move to Applications'
+                : phase === 'current' || phase === 'system-managed'
+                  ? 'Check again'
+                  : 'Retry';
   return (
     <UpdateControl
       title={title}
@@ -157,10 +183,11 @@ export function DesktopUpdateControl({
       icon={Icon}
       isFailed={failed}
       isProminent={phase === 'ready' && !actionFailed}
-      releasePage={snapshot.releasePage}
+      releasePage={blocked ? snapshot.downloadPage : snapshot.releasePage}
+      releaseLabel={blocked ? 'Download Tau' : undefined}
       isOpen={open}
       action={
-        restartsWhenReady || phase === 'disabled'
+        restartsWhenReady || phase === 'disabled' || blockedReason === 'installation-marker'
           ? undefined
           : {
               label: actionLabel,

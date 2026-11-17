@@ -445,3 +445,38 @@ export const gpuProcessGoneSignal = (reason: string, exitCode: number, safeMode:
     tags: { reason: safeReason, exit_code: String(exitCode), safe_mode: String(safeMode) },
   };
 };
+
+/**
+ * The event for an update path blocked for a reason a person can act on (B25, B27), sent once for each launch.
+ *
+ * @param reason - `clock` or `installation-marker`.
+ * @param route - The platform the updater runs on.
+ * @returns The signal.
+ */
+export const updateBlockedSignal = (reason: 'clock' | 'installation-marker', route: string): DesktopSignal => ({
+  message: `Update blocked: ${reason}`,
+  level: 'warning',
+  fingerprint: ['desktop-update-blocked', reason],
+  tags: { reason, route },
+});
+
+/**
+ * The event for the guarded automatic install (decision N1): its countdown ran out and the install started, the person
+ * cancelled it, or its target already failed to take once and was skipped.
+ *
+ * @param outcome - What happened.
+ * @param targetVersion - The version it installs.
+ * @returns The signal.
+ */
+export const autoInstallSignal = (
+  outcome: 'started' | 'cancelled' | 'skipped-repeat',
+  targetVersion: string,
+): DesktopSignal => {
+  const target = /^[\w.+-]{1,64}$/u.test(targetVersion) ? targetVersion : 'unknown';
+  return {
+    message: `Automatic update install: ${outcome}`,
+    level: 'warning',
+    fingerprint: ['desktop-update-auto-install', outcome],
+    tags: { outcome, target_version: target },
+  };
+};

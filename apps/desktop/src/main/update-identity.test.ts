@@ -4,6 +4,7 @@ import {
   allowedUpdateRequest,
   parseDesktopInstallation,
   parseDesktopUpdateDescriptor,
+  UpdateClockError,
   validateWindowsUpdateConfig,
   verifyDesktopDescriptor,
 } from '#main/update-identity.js';
@@ -135,6 +136,38 @@ describe('installed update identity', () => {
       'https://downloads.tau.new/latest/Tau.exe',
     ]) {
       expect(allowedUpdateRequest(request, url)).toBe(false);
+    }
+  });
+});
+
+describe('update refusals by the local clock (T-B25.1)', () => {
+  const installed = parseDesktopInstallation(marker, expected);
+  /* This computer's clock runs ten minutes slow, so the descriptor looks issued ten minutes in the future. */
+  const early = Date.parse('2026-10-20T23:50:00Z');
+  it('should name the clock when a descriptor is issued ten minutes in the local future', () => {
+    expect(() => parseDesktopUpdateDescriptor(descriptor, installed, early)).toThrow(UpdateClockError);
+  });
+
+  it('should not refuse a descriptor that is old by the local clock, since descriptors no longer expire', () => {
+    const late = Date.parse('2027-10-22T00:00:01Z');
+    expect(parseDesktopUpdateDescriptor(descriptor, installed, late).version).toBe('0.2.0');
+  });
+
+  it('should keep the existing error for every other mismatch, even when the clock is also wrong', () => {
+    for (const [change, at] of [
+      [{ path: 'latest/Tau-win32-x64.exe' }, now],
+      [{ path: 'latest/Tau-win32-x64.exe' }, early],
+      [{ channel: 'staging' }, early],
+      [{ version: '0.0.1', tag: 'desktop@0.0.1', path: 'releases/desktop%400.0.1/Tau-win32-x64.exe' }, early],
+    ] as const) {
+      let thrown: unknown;
+      try {
+        parseDesktopUpdateDescriptor({ ...descriptor, ...change }, installed, at);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      expect(thrown).not.toBeInstanceOf(UpdateClockError);
     }
   });
 });

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as files from 'node:fs/promises';
@@ -17,11 +17,17 @@ import {
   startPlatformUpdater,
 } from '#main/update-platform.js';
 import type { DesktopUpdateDescriptor } from '#main/update-identity.js';
+import { desktopArtifactName } from '#shared/desktop-release.js';
 const mocks = vi.hoisted(() => ({
   fetch: vi.fn(),
   spawn: vi.fn(),
   markHealthy: vi.fn(),
+  authenticate: vi.fn(),
   checkForUpdates: vi.fn(),
+  /* The provider the updater was built with, so a check can read the feed through it as electron-updater does. */
+  provider: undefined as
+    | undefined
+    | { updateProvider: new (...args: unknown[]) => { getLatestVersion(): Promise<unknown> } },
   managed: vi.fn().mockResolvedValue(false),
   relaunch: vi.fn(),
 }));
@@ -31,12 +37,17 @@ vi.mock('electron-updater', () => ({ Provider: class {}, NsisUpdater: class {} }
 /* eslint-enable @typescript-eslint/naming-convention -- End upstream constructor exports. */
 vi.mock('#main/managed-appimage.js', () => ({ isManagedAppImage: mocks.managed }));
 vi.mock('#main/update-appimage.js', () => ({
-  createSafeAppImageUpdater: () => ({
-    markHealthy: mocks.markHealthy,
-    checkForUpdates: mocks.checkForUpdates,
-    on: vi.fn(),
-    netSession: { webRequest: { onBeforeRequest: vi.fn() } },
-  }),
+  createSafeAppImageUpdater: (provider: typeof mocks.provider) => {
+    mocks.provider = provider;
+    return {
+      markHealthy: mocks.markHealthy,
+      authenticate: mocks.authenticate,
+      checkForUpdates: mocks.checkForUpdates,
+      downloadUpdate: vi.fn(async () => ['/cache/Tau.AppImage']),
+      on: vi.fn(),
+      netSession: { webRequest: { onBeforeRequest: vi.fn() } },
+    };
+  },
 }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof files>();
@@ -313,6 +324,118 @@ describe('platform update transport and launch', () => {
     expect(child.unref).toHaveBeenCalled();
   });
 });
+describe('AppImage update from a launch that is not healthy (T-B22.1)', () => {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const marker = {
+    schemaVersion: 1,
+    route: 'linux-appimage',
+    tag: 'desktop@0.1.0',
+    channel: 'production',
+    version: '0.1.0',
+    sourceCommit: 'a'.repeat(40),
+    arch: 'x64',
+    trust: 'release',
+    cache: 'tau-updater',
+    keys: { fixture: publicKey.export({ type: 'spki', format: 'pem' }).toString() },
+  };
+  /** A signed feed entry for 0.2.0, issued a minute ago by this machine's clock. */
+  const signedNewer = (): unknown => {
+    const now = Date.now();
+    const descriptor = {
+      schemaVersion: 1,
+      keyId: 'fixture',
+      tag: 'desktop@0.2.0',
+      channel: 'production',
+      version: '0.2.0',
+      sourceCommit: 'b'.repeat(40),
+      arch: 'x64',
+      route: 'linux-appimage',
+      path: `releases/${encodeURIComponent('desktop@0.2.0')}/${desktopArtifactName({ kind: 'linux-appimage', channel: 'production', version: '0.2.0', arch: 'x64' })}`,
+      size: 10,
+      sha512: Buffer.alloc(64).toString('base64'),
+      issuedAt: new Date(now - 60_000).toISOString(),
+      expiresAt: new Date(now + 24 * 60 * 60 * 1000).toISOString(),
+    };
+    const bytes = Buffer.from(JSON.stringify(descriptor));
+    return {
+      schemaVersion: 1,
+      keyId: 'fixture',
+      descriptor: bytes.toString('base64'),
+      signature: sign(null, bytes, privateKey).toString('base64'),
+    };
+  };
+  const baseline = { signed: 'immutable installed 0.1.0 envelope' };
+  let reader: { mockRestore: () => void } | undefined;
+  const start = async (confirmHealthy: () => Promise<boolean>) => {
+    Object.defineProperty(process, 'resourcesPath', { value: '/resources', configurable: true });
+    reader = vi
+      .spyOn(files, 'readFile')
+      .mockImplementation(async (path) =>
+        JSON.stringify(
+          path === '/app/package.json'
+            ? { version: marker.version, tauDesktop: { sourceCommit: marker.sourceCommit } }
+            : marker,
+        ),
+      );
+    mocks.fetch.mockImplementation(
+      async (url: string) =>
+        new Response(
+          JSON.stringify(url.endsWith('/latest/desktop-update-linux-appimage-x64.json') ? signedNewer() : baseline),
+        ),
+    );
+    mocks.checkForUpdates.mockImplementation(async () => {
+      /* The downloader asks its provider for the latest version; the provider reads and admits the feed. */
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- A constructor, so new-cap wants PascalCase.
+      const { updateProvider: InstalledProvider } = mocks.provider!;
+      await new InstalledProvider(undefined, undefined, {}).getLatestVersion();
+    });
+    return startPlatformUpdater({
+      platform: 'linux',
+      arch: 'x64',
+      currentVersion: '0.1.0',
+      packaged: true,
+      environment: {},
+      autoUpdater: { on: vi.fn(), setFeedURL: vi.fn(), checkForUpdates: vi.fn(), quitAndInstall: vi.fn() },
+      fetchJson: vi.fn(),
+      prepareToRestart: vi.fn(),
+      prepareToInstall: vi.fn(),
+      openExternal: vi.fn(),
+      log: vi.fn(),
+      schedule: vi.fn(),
+      retry: vi.fn(),
+      confirmHealthy,
+    });
+  };
+  const original = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
+  afterEach(() => {
+    reader?.mockRestore();
+    reader = undefined;
+    mocks.fetch.mockReset();
+    mocks.checkForUpdates.mockReset();
+    if (original) {
+      Object.defineProperty(process, 'resourcesPath', original);
+    } else {
+      Reflect.deleteProperty(process, 'resourcesPath');
+    }
+  });
+
+  it('should find a newer release without writing the health record when the launch is not healthy', async () => {
+    const updater = await start(async () => false);
+    const found = await updater!.check();
+    expect(found).toEqual(expect.objectContaining({ version: '0.2.0', tag: 'desktop@0.2.0' }));
+    expect(mocks.markHealthy).not.toHaveBeenCalled();
+    expect(mocks.authenticate).toHaveBeenCalledWith(baseline);
+    expect(updater!.snapshot()).toEqual(expect.objectContaining({ phase: 'ready', version: '0.2.0' }));
+  });
+
+  it('should write the health record when the launch is healthy', async () => {
+    const updater = await start(async () => true);
+    const found = await updater!.check();
+    expect(found).toEqual(expect.objectContaining({ version: '0.2.0' }));
+    expect(mocks.markHealthy).toHaveBeenCalledWith(baseline);
+  });
+});
+
 describe('AppImage relaunch', () => {
   const mount = '/tmp/.mount_Tau.Ap1fvY1k';
   it('drops the running image identity and every search path under its mount', () => {

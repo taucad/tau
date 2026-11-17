@@ -118,6 +118,10 @@
     </div>
 
     <h2>Updates</h2>
+    <div id="auto-install" class="row" role="status" hidden>
+      <p id="auto-install-status"></p>
+      <button type="button" data-action="cancel-auto-install">Cancel</button>
+    </div>
     <p id="update-status">Checking the updater…</p>
     <div class="row">
       <button type="button" class="primary" data-action="install-update" hidden>Install update and restart</button>
@@ -153,6 +157,11 @@
         const updateStatus = document.querySelector('#update-status');
         const resetsStatus = document.querySelector('#resets-status');
         const installButton = document.querySelector('[data-action="install-update"]');
+        const autoInstall = document.querySelector('#auto-install');
+        const autoInstallStatus = document.querySelector('#auto-install-status');
+        const autoInstallNote = document.createElement('p');
+        updateStatus.after(autoInstallNote);
+        let countdownTimer;
         const storeNames = {
           'folder-list': 'saved folder list',
           'window-layout': 'window layout',
@@ -195,6 +204,25 @@
             updateStatus.textContent = 'The updater is not running yet. Download Tau always works.';
             installButton.hidden = true;
           }
+          /* N1: an update that installs by itself shows a countdown the person can cancel. */
+          clearInterval(countdownTimer);
+          const auto = state.autoInstall;
+          if (auto && auto.status === 'counting') {
+            let seconds = Math.ceil(auto.milliseconds / 1000);
+            const tick = () => {
+              autoInstallStatus.textContent = `Installing an update to repair Tau… Tau restarts in ${seconds} s.`;
+              seconds = Math.max(0, seconds - 1);
+            };
+            tick();
+            countdownTimer = setInterval(tick, 1000);
+            autoInstall.hidden = false;
+          } else {
+            autoInstall.hidden = true;
+          }
+          autoInstallNote.textContent =
+            auto && auto.status === 'skipped-repeat'
+              ? `Installing Tau ${auto.targetVersion} by itself did not work last time. Install it yourself, or download Tau.`
+              : '';
           const pending = Array.isArray(state.pendingResets) ? state.pendingResets : [];
           resetsStatus.textContent =
             pending.length === 0
@@ -219,6 +247,7 @@
           'restart-safe': { type: 'restart', mode: 'safe' },
           'restart-normal': { type: 'restart', mode: 'normal' },
           'install-update': { type: 'install-update' },
+          'cancel-auto-install': { type: 'cancel-auto-install' },
           'check-for-updates': { type: 'check-for-updates' },
           'download-tau': { type: 'download-tau' },
           'show-logs': { type: 'show-logs' },

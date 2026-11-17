@@ -39,7 +39,9 @@ export type RecoveryTrigger =
   | 'requested'
   | 'second-instance'
   | 'check-for-updates'
-  | 'renderer-deaths';
+  | 'renderer-deaths'
+  /* An update is about to install by itself (N1): the window shows the countdown and its Cancel. */
+  | 'auto-install';
 
 /** Chromium's `ERR_ABORTED`: a load replaced by another, not a failure. */
 const abortedLoad = -3;

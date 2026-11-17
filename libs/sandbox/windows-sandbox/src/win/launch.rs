@@ -23,7 +23,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use super::acl;
-use super::desktop::{PrivateDesktop, WindowStation, current_station_name};
+use super::desktop::{PrivateDesktop, current_station_name};
 use super::exclusive;
 use super::executable::pin;
 use super::job::Job;
@@ -178,9 +178,7 @@ struct Session {
     /// The granted and denied paths that exist, in application order, and the directories among them.
     roots: Vec<String>,
     directories: Vec<String>,
-    /// Opened for `WRITE_DAC` when the person may change it. The session ACEs are best-effort: adding
-    /// them only widens access, and Codex's shape runs without them.
-    station: Option<WindowStation>,
+    /// The window station the private desktop is created on. The launch never changes it (`desktop.rs`).
     station_name: String,
     /// Whether this launch wrote its journal: only then does its teardown restore one.
     journaled: Cell<bool>,
@@ -223,13 +221,6 @@ impl Session {
         eprintln!("tau-windows-sandbox launch: AppContainer {package_label} is {package_text}");
         let person = current_user().map_err(unavailable("the current user cannot be resolved"))?;
         let station_name = current_station_name().map_err(unavailable("the window station cannot be named"))?;
-        let station = match WindowStation::open_current() {
-            Ok(station) => Some(station),
-            Err(err) => {
-                eprintln!("tau-windows-sandbox launch: window station not adjustable, no session ACE: {err}");
-                None
-            }
-        };
         // Classify every root; nothing has been changed yet. Snapshots come once the runner is ready.
         let mut roots: Vec<String> = Vec::new();
         let mut directories: Vec<String> = Vec::new();
@@ -270,7 +261,6 @@ impl Session {
             package_name: package_label,
             roots,
             directories,
-            station,
             station_name,
             journaled: Cell::new(false),
             _live: live,
@@ -280,7 +270,7 @@ impl Session {
     /// Journal and grant, under the person's descriptor lock: read the other unrestored journals, refuse a launch
     /// that would expose one of them (or the ledger) to its shell or put its own journal in reach of another's,
     /// journal every object with its original descriptor (another journal's entry where one covers it), register
-    /// the journal, then add this launch's ACEs and its window-station ACEs.
+    /// the journal, then add this launch's ACEs.
     fn grant(&self) -> std::result::Result<(), Refused> {
         let unavailable = |what: &str, err: String| Refused::unavailable(what.to_owned(), Some(err));
         // Another launch editing descriptors past the wait: the same machine-readable answer as before concurrency.
@@ -393,7 +383,6 @@ impl Session {
             package_sid: self.package_sid.clone(),
             package_name: self.package_name.clone(),
             launcher_pid: unsafe { GetCurrentProcessId() },
-            window_station: self.station.as_ref().map(WindowStation::journal_entry),
         };
         write_journal(Path::new(&self.journal_path), &header, &roots, &self.directories, &original)?;
         self.journaled.set(true);
@@ -446,11 +435,6 @@ impl Session {
                 continue;
             }
             acl::apply(path, &acl::aces_for(*access, &grantees), acl::needs_low_label(*access))?;
-        }
-        if let Some(station) = &self.station
-            && let Err(err) = station.grant(&[&self.capability, &self.package])
-        {
-            eprintln!("tau-windows-sandbox launch: no window-station session ACE: {err}");
         }
         Ok(())
     }

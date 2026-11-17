@@ -323,13 +323,16 @@ export const windowsNativeLaunchVector = async (request: WindowsNativeLaunchRequ
   await persistReceipt(directory, { version: 1, executionId, owner: { pid: process.pid } });
   const carried: CarriedLaunch = {
     executionId,
-    /* The helper refuses a path whose final name differs (a link, a junction, an 8.3 short name): pass the long one. */
+    /*
+     * The helper refuses an executable whose final name differs (a link, a junction, an 8.3 short name such as a
+     * runner's `RUNNER~1` temp folder) and compares the grants with its folder, so every path goes as its long one.
+     */
     executablePath: await realpath(request.executablePath),
     executableSha256: request.executableSha256,
     arguments: [...request.arguments],
-    readablePaths: [...request.readablePaths],
-    writablePath: request.writablePath,
-    workingDirectory: request.workingDirectory,
+    readablePaths: await Promise.all(request.readablePaths.map(async (path) => realpath(path))),
+    writablePath: await realpath(request.writablePath),
+    workingDirectory: await realpath(request.workingDirectory),
   };
   return [
     options.helperPath,
@@ -709,7 +712,7 @@ export const spawnWindowsNative = (
       encodeWindowsHostFrame({
         type: 'spec',
         spec: windowsNativeLaunchSpec(
-          { ...launch, workingDirectory: options.cwd },
+          { ...launch, workingDirectory: realpathSync(options.cwd) },
           options.env,
           journalPath(directory, executionId),
         ),

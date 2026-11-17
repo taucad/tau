@@ -63,16 +63,22 @@ const events = (): Array<Record<string, unknown>> =>
         .map((line) => JSON.parse(line) as Record<string, unknown>)
     : [];
 
-let executablePath: string;
+/* Real folders: the adapter passes every path as its long, resolved one. */
 const request = {
   get executablePath(): string {
-    return executablePath;
+    return join(root, 'closure', 'python', 'python.exe');
   },
   executableSha256: digest,
   arguments: ['-I', '-B', '-u', 'worker.py'],
-  readablePaths: [String.raw`C:\Users\someone\AppData\Local\Tau\store\closure`, String.raw`C:\work\mirror`],
-  writablePath: String.raw`C:\work\artifacts`,
-  workingDirectory: String.raw`C:\work\mirror`,
+  get readablePaths(): string[] {
+    return [join(root, 'closure'), join(root, 'mirror')];
+  },
+  get writablePath(): string {
+    return join(root, 'artifacts');
+  },
+  get workingDirectory(): string {
+    return join(root, 'mirror');
+  },
 };
 
 const settled = async (
@@ -114,8 +120,9 @@ beforeEach(() => {
   journalDirectory = join(root, 'journals');
   logPath = join(root, 'helper.log');
   mkdirSync(join(root, 'closure', 'python'), { recursive: true });
-  executablePath = join(root, 'closure', 'python', 'python.exe');
-  writeFileSync(executablePath, '');
+  mkdirSync(join(root, 'mirror'));
+  mkdirSync(join(root, 'artifacts'));
+  writeFileSync(request.executablePath, '');
 });
 
 afterEach(() => {
@@ -139,10 +146,15 @@ describe('the Windows native sandbox adapter', () => {
       executable: realpathSync(request.executablePath),
       executableDigest: `sha256:${digest}`,
       arguments: request.arguments,
-      workingDirectory: request.workingDirectory,
+      workingDirectory: realpathSync(request.workingDirectory),
       environment: { SystemRoot: String.raw`C:\Windows`, TEMP: request.writablePath },
       stdio: { kind: 'pipes', input: true },
-      filesystem: { readable: request.readablePaths, writable: [request.writablePath], readOnly: [], denied: [] },
+      filesystem: {
+        readable: request.readablePaths.map((path) => realpathSync(path)),
+        writable: [realpathSync(request.writablePath)],
+        readOnly: [],
+        denied: [],
+      },
       journal: expect.stringMatching(/[\da-f-]{36}\.acl\.json$/u) as unknown,
     });
     // Input waits for `started`; the frames go spec, start, input…, close-input.

@@ -1340,8 +1340,19 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         replay.clear();
         writerGenerations.clear();
         placing.abort();
-        await port.close();
-        await host.close();
+        /* Every step runs whatever an earlier one threw: a leadership close that fails must still let the host close
+         * its chat writers, or the lock outlives this launcher and the next host for the project is refused
+         * `WRITER_LOCKED` until the process exits. */
+        const failures: unknown[] = [];
+        const settle = async (step: () => Promise<unknown>): Promise<void> => {
+          try {
+            await step();
+          } catch (error) {
+            failures.push(error);
+          }
+        };
+        await settle(async () => port.close());
+        await settle(async () => host.close());
         const unclaimed = [...views.values()];
         views.clear();
         await Promise.allSettled(
@@ -1354,6 +1365,12 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
           wakeReads(chatId);
         }
         live.close();
+        if (failures.length === 1) {
+          throw failures[0];
+        }
+        if (failures.length > 1) {
+          throw new AggregateError(failures, 'The Tau agent launcher could not close every part.');
+        }
       })();
       const attempt = closing;
       try {

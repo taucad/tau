@@ -1,6 +1,6 @@
 import { useId } from 'react';
-import { SettingsGroup, SettingsItem, SettingsRow } from '#components/settings/settings-item.js';
-import type { SettingId } from '#components/settings/settings-registry.js';
+import { SettingsGroup, SettingsItem, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
+import type { SettingId } from '@taucad/settings-ui/components/settings/settings-catalogue';
 import { Switch } from '@taucad/ui/components/switch';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';

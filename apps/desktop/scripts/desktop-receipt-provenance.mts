@@ -85,8 +85,8 @@ export const verifyDesktopReceiptProvenance = (
 
 /**
  * The fixed producer workflows are qualification gates, not assembly fixtures; absent producers fail closed. Only a
- * Mac-only publication (either channel) may omit the VM run, recording clean-host acceptance as pending; a VM run that is named
- * is authenticated exactly as before.
+ * Mac-only or Windows-only publication (either channel) may omit the VM run, recording clean-host acceptance as pending;
+ * a VM run that is named is authenticated exactly as before.
  */
 export const fetchDesktopQualifiedReceipts = async (
   manifest: DesktopArtifactManifest,
@@ -94,8 +94,8 @@ export const fetchDesktopQualifiedReceipts = async (
   runs: { ci: string; vm?: string | undefined; scope?: DesktopPublicationScope },
 ): Promise<unknown[]> => {
   const scope = runs.scope ?? 'all';
-  if (runs.vm === undefined && scope !== 'macos') {
-    throw new Error('Clean-host VM acceptance run is required outside Mac-only publication');
+  if (runs.vm === undefined && scope !== 'macos' && scope !== 'windows') {
+    throw new Error('Clean-host VM acceptance run is required outside Mac-only or Windows-only publication');
   }
   const api = (path: string): Uint8Array<ArrayBuffer> =>
     Uint8Array.from(

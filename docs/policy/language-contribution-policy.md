@@ -96,5 +96,5 @@ Cover URI normalization, Tier 1 reads, Tier 2 closed-file reads, version lookup,
 - TypeScript worker: `apps/libs/lsp/src/typescript-worker`
 - UI language contributions: `apps/ui/app/lib/*-language`
 - TypeScript view adapters and declarations: `apps/ui/app/lib/typescript-language`
-- Neutral document and checked-edit owners: `apps/ui/app/lib/editor-document-session.ts`, `editor-workspace-edits.ts`
+- Neutral document and checked-edit owners: `apps/libs/editor-ui/src/lib/editor-document-session.ts`, `apps/ui/app/lib/editor-workspace-edits.ts`
 - Shared grammars: `libs/grammars`

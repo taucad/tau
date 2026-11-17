@@ -11,7 +11,7 @@ import { mock } from 'vitest-mock-extended';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
-import type { EditorDocumentSession } from '#lib/editor-document-session.js';
+import type { EditorDocumentSession } from '@taucad/editor-ui/lib/editor-document-session';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import {
   kclDefinition,

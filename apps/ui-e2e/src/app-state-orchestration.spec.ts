@@ -325,9 +325,9 @@ test('A0.1 row 3 (I8): a reload during a pending library operation recovers or r
   const configs = await configsByName();
   const configB = configs[projectNames.b]!;
 
-  /* The person moves B to the Trash, which a permanent delete requires. A project with chats is
-   * trashed only from a live session that has read them (`use-projects.ts` `requireQuiescentProject`),
-   * so B is opened first and left retained. */
+  /* The person moves B to the Trash, which a permanent delete requires. B is opened first and left
+   * retained, so its trash is verified through the live session that has read its chats; a closed
+   * project's chats are verified from their logs instead (`leaseQuiescentProject`, W30). */
   await target.click(projectLink(projectNames.b));
   await expectProjectReady('b');
   await target.click(projectLink(projectNames.a));

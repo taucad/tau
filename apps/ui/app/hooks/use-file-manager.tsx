@@ -23,6 +23,8 @@ import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { OctagonAlert, RefreshCw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
+import { recoveryActions } from '#lib/recovery-actions.js';
+import type { RecoveryActionId } from '#lib/recovery-actions.js';
 import type { FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';
 import type { FileWriteSource } from '@taucad/fs-client/file-write-source';
 import type {
@@ -44,6 +46,7 @@ import {
   selectActiveWorkspaceId,
   selectBridgeOpener,
   selectProxy,
+  selectSafeMode,
   servicesBound,
   servicesOf,
 } from '#runtime/file-manager-facade.js';
@@ -51,7 +54,8 @@ import type { RootFileFacade } from '#runtime/file-manager-facade.js';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError, WatchEvent } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
-import { getProjectRootConfigs, setProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
+import { setProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
+import { readRootConfigurationOnly } from '#runtime/root-configuration.js';
 import type { HomeStorageBackend, WorkspaceEntry } from '@taucad/files-ui/filesystem/handle-store';
 import {
   selectRuntimeFileManagerHost,
@@ -439,6 +443,81 @@ function useHomeBackendFailure(): string | undefined {
   return useSelector(host, (snapshot) => (snapshot === undefined ? undefined : selectHomeBackendFailure(snapshot)));
 }
 
+/** What a classified start failure says and offers (desktop resilient startup blueprint D3). */
+type StartFailureCopy = Readonly<{
+  title: string;
+  description: string;
+  actions: readonly RecoveryActionId[];
+  /** A retry replays the same start; offered beside an action that changes the input, never alone for a deterministic failure. */
+  offersRetry: boolean;
+}>;
+
+const transientFailureCopy: StartFailureCopy = {
+  title: "Couldn't start the file service",
+  description: "Tau's file service did not start, so your files aren't available yet. Try again to restart it.",
+  actions: [],
+  offersRetry: true,
+};
+
+/**
+ * The panel for a start failure, by its class and code (D3): a transient failure offers Try again; a deterministic one
+ * offers the action that changes what failed, with the logs and the recovery entry beside it.
+ *
+ * @param errorClass - The machine's class for the failure.
+ * @param errorCode - The machine's code for the failure.
+ * @returns The panel's copy and actions.
+ */
+function startFailureCopy(errorClass: string | undefined, errorCode: string | undefined): StartFailureCopy {
+  if (errorClass !== 'deterministic') {
+    return transientFailureCopy;
+  }
+  switch (errorCode) {
+    case 'VersionError': {
+      return {
+        title: 'A newer Tau opened your local database',
+        description: 'This copy of Tau is older than the one that last opened its database. Update Tau to open it.',
+        actions: ['updateTau', 'showLogs', 'troubleshooting'],
+        offersRetry: false,
+      };
+    }
+    case 'StorageUpgradeBlockedError': {
+      return {
+        title: 'Another Tau window is holding the database',
+        description: 'Close the other Tau window or tab, then try again.',
+        actions: ['showLogs', 'troubleshooting'],
+        offersRetry: true,
+      };
+    }
+    case 'DatabaseOpenTimeoutError': {
+      return {
+        title: "Tau's local database did not open",
+        description:
+          'The database Tau keeps on this device did not answer. Restart in safe mode, or open Troubleshooting to reset it.',
+        actions: ['restartInSafeMode', 'troubleshooting', 'showLogs'],
+        offersRetry: true,
+      };
+    }
+    case 'SERVICES_UNAVAILABLE': {
+      return {
+        title: "Tau's file services did not start",
+        description:
+          'The part of Tau that reads your folders keeps stopping. Restart in safe mode or check for an update.',
+        actions: ['restartInSafeMode', 'checkForUpdates', 'showLogs'],
+        offersRetry: false,
+      };
+    }
+    default: {
+      return {
+        title: "Couldn't start the file service",
+        description:
+          "Tau's file service failed the same way twice. Restart in safe mode, or open Troubleshooting for the logs and an update.",
+        actions: ['restartInSafeMode', 'troubleshooting', 'showLogs', 'checkForUpdates'],
+        offersRetry: true,
+      };
+    }
+  }
+}
+
 /**
  * What the gate shows when the root mount has no worker (blueprint R7).
  *
@@ -467,6 +546,8 @@ function SharedWorkerFallback({
   readonly placeholder: ReactNode;
 }): React.ReactNode {
   const hasFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
+  const errorClass = useSelector(fileManagerRef, (state) => state.context.errorClass);
+  const errorCode = useSelector(fileManagerRef, (state) => state.context.errorCode);
   const isBackendPending = useSelector(fileManagerRef, (state) => state.context.backendType === undefined);
   const host = useOptionalFileManagerHost();
   const homeFailure = useHomeBackendFailure();
@@ -476,11 +557,17 @@ function SharedWorkerFallback({
     return placeholder;
   }
 
-  const title = homeFailed ? "Couldn't open Home" : "Couldn't start the file service";
-  const description = homeFailed
-    ? "Tau couldn't read your Home storage selection. Try again to open your existing files."
-    : "Tau's file service did not start, so your files aren't available yet. Try again to restart it.";
-  const retry = (
+  const copy: StartFailureCopy = homeFailed
+    ? {
+        title: "Couldn't open Home",
+        description: "Tau couldn't read your Home storage selection. Try again to open your existing files.",
+        actions: [],
+        offersRetry: true,
+      }
+    : startFailureCopy(errorClass, errorCode);
+  const { title, description } = copy;
+  const actions = recoveryActions(copy.actions);
+  const retryButton = (
     <Button
       type='button'
       onClick={() => {
@@ -494,6 +581,30 @@ function SharedWorkerFallback({
       <RefreshCw />
       Try again
     </Button>
+  );
+  /* Never a lone retry of a deterministic failure (D3): where none of its actions is available here, retry stays. */
+  const retry = (
+    <>
+      {actions.map((action) =>
+        action.kind === 'link' ? (
+          <Button key={action.id} asChild variant='outline'>
+            <a href={action.href}>{action.label}</a>
+          </Button>
+        ) : (
+          <Button
+            key={action.id}
+            type='button'
+            variant='outline'
+            onClick={() => {
+              void action.run();
+            }}
+          >
+            {action.label}
+          </Button>
+        ),
+      )}
+      {copy.offersRetry || actions.length === 0 ? retryButton : undefined}
+    </>
   );
   if (isInline) {
     return (
@@ -833,7 +944,7 @@ function FileManagerScope({
         proxy.disposeStorageRoot(`webaccess:${previousWorkspaceId}`);
       }
       proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-      await proxy.configureProjectRoots(await getProjectRootConfigs());
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(selectSafeMode(fileManagerRef)));
       const discovery = await proxy.listProjectManifests();
       const matches = discovery.entries.filter(
         (entry) =>
@@ -852,7 +963,7 @@ function FileManagerScope({
         workspaceId,
         providerBasePath: match.locator.relativeDirectory,
       });
-      await proxy.configureProjectRoots(await getProjectRootConfigs());
+      await proxy.configureProjectRoots(await readRootConfigurationOnly(selectSafeMode(fileManagerRef)));
 
       workspaceTelemetry.workspaceSwap({
         previousWorkspaceId,

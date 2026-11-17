@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import {
   access,
   chmod,
+  link,
   mkdir,
   mkdtemp,
   readdir,
@@ -16,7 +17,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -170,14 +171,33 @@ describe('runtime child control frames', () => {
 });
 
 describe('native workers brokered for a runtime child (D37, North Star S2)', () => {
-  const daemonTemporary = process.env['TMPDIR'];
+  /* `os.tmpdir()` reads TMPDIR on POSIX and TEMP or TMP on Windows, so the daemon's temp directory moves with all three. */
+  const temporaryVariables = ['TMPDIR', 'TEMP', 'TMP'] as const;
   afterEach(() => {
-    if (daemonTemporary === undefined) {
-      delete process.env['TMPDIR'];
-    } else {
-      process.env['TMPDIR'] = daemonTemporary;
-    }
+    vi.unstubAllEnvs();
   });
+
+  /** A path with `/` separators, so one pattern reads it on every platform. */
+  const slashed = (path: string): string => path.split(sep).join('/');
+  const escapeRegExp = (text: string): string => text.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
+
+  /*
+   * The echoing worker a sealed closure holds. Windows runs no shell script, so there the worker is Node.js itself,
+   * hard-linked into the closure (a copy would be another 80 MB per closure), echoing the same lines.
+   */
+  const echoWorker =
+    process.platform === 'win32'
+      ? {
+          name: 'worker.exe',
+          arguments: ['-e', String.raw`process.stdout.write('worker ready\n'); process.stdin.pipe(process.stdout);`],
+        }
+      : { name: 'worker.sh', arguments: [] as string[] };
+  const shellWorker = '#!/bin/sh\necho worker ready\ncat\n';
+  /** @returns The digest of the worker's bytes, as a launch names it. */
+  const echoWorkerSha256 = async (): Promise<string> =>
+    createHash('sha256')
+      .update(process.platform === 'win32' ? await readFile(process.execPath) : shellWorker)
+      .digest('hex');
 
   /**
    * A scratch tree laid out like a daemon's: its temp directory (which the child may write) and, beside it, the
@@ -187,7 +207,9 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     temporaryDirectory = await realpath(await mkdtemp(join(tmpdir(), prefix)));
     const daemonTemporaryDirectory = join(temporaryDirectory, 'tmp');
     await mkdir(daemonTemporaryDirectory);
-    process.env['TMPDIR'] = daemonTemporaryDirectory;
+    for (const name of temporaryVariables) {
+      vi.stubEnv(name, daemonTemporaryDirectory);
+    }
     return { scratch: temporaryDirectory, daemonTemporaryDirectory, directory: join(temporaryDirectory, 'children') };
   };
 
@@ -215,17 +237,22 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
   /** A closure sealed in a store under `root`, holding a worker that echoes its stdin. */
   const sealedClosure = async (root: string, name = 'a'.repeat(64)) => {
     const closure = join(root, 'store', 'closures', 'sha256', name);
-    const worker = '#!/bin/sh\necho worker ready\ncat\n';
+    const worker = join(closure, echoWorker.name);
     await mkdir(closure, { recursive: true });
-    await writeFile(join(closure, 'worker.sh'), worker);
-    await chmod(join(closure, 'worker.sh'), 0o755);
+    if (process.platform === 'win32') {
+      await link(process.execPath, worker);
+    } else {
+      await writeFile(worker, shellWorker);
+      await chmod(worker, 0o755);
+    }
+    const executableSha256 = await echoWorkerSha256();
     return {
       closure,
       launchFrom: (overrides: Partial<RuntimeChildWorkerLaunch> = {}) => ({
-        executablePath: join(closure, 'worker.sh'),
-        executableSha256: createHash('sha256').update(worker).digest('hex'),
+        executablePath: worker,
+        executableSha256,
         executableName: 'Fixture worker',
-        arguments: [],
+        arguments: echoWorker.arguments,
         runtimePath: closure,
         resources: [],
         workspacePath: '<private>/workspace',
@@ -275,7 +302,10 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     const { closure: unsealed } = await sealedClosure(join(scratch, 'unsealed'), 'b'.repeat(64));
     const requests = [
       { name: 'sealed', launch: launchFrom() },
-      { name: 'unsealed', launch: launchFrom({ runtimePath: unsealed, executablePath: join(unsealed, 'worker.sh') }) },
+      {
+        name: 'unsealed',
+        launch: launchFrom({ runtimePath: unsealed, executablePath: join(unsealed, echoWorker.name) }),
+      },
       { name: 'escapedExecutable', launch: launchFrom({ executablePath: '/bin/sh' }) },
       { name: 'foreignWorkspace', launch: launchFrom({ workspacePath: scratch }) },
     ];
@@ -298,7 +328,9 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
 
     expect(proof.execArgv).toEqual(permissionFlags(modulePath, childTemporaryDirectory));
     /* The child's temp directory sits in one the daemon created outside its own temp directory. */
-    expect(childTemporaryDirectory).toMatch(new RegExp(`^${directory}/tau-runtime-child-[^/]+/tmp$`, 'u'));
+    expect(slashed(childTemporaryDirectory)).toMatch(
+      new RegExp(`^${escapeRegExp(slashed(directory))}/tau-runtime-child-[^/]+/tmp$`, 'u'),
+    );
     expect({ childPermission: proof.childPermission, ownSpawn: proof.ownSpawn }).toEqual({
       childPermission: false,
       ownSpawn: 'ERR_ACCESS_DENIED',
@@ -337,7 +369,7 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     expect(start).toHaveBeenCalledOnce();
     const [started] = start.mock.calls[0] ?? [];
     expect(started?.runtimePath).toBe(sealed);
-    expect(started?.workspacePath).toMatch(/\/tau-runtime-child-[^/]+\/tmp\/mirror-[^/]+\/workspace$/u);
+    expect(slashed(started?.workspacePath ?? '')).toMatch(/\/tau-runtime-child-[^/]+\/tmp\/mirror-[^/]+\/workspace$/u);
     expect(started?.sandboxRoot).toBe(dirname(childTemporaryDirectory));
   });
 
@@ -346,10 +378,10 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     const proofPath = join(daemonTemporaryDirectory, 'proof.json');
     const closure = join(scratch, 'store', 'closures', 'sha256', 'a'.repeat(64));
     const launch = {
-      executablePath: join(closure, 'worker.sh'),
-      executableSha256: createHash('sha256').update('#!/bin/sh\necho worker ready\ncat\n').digest('hex'),
+      executablePath: join(closure, echoWorker.name),
+      executableSha256: await echoWorkerSha256(),
       executableName: 'Fixture worker',
-      arguments: [],
+      arguments: echoWorker.arguments,
       runtimePath: closure,
       resources: [],
       workspacePath: '<private>/workspace',
@@ -445,9 +477,15 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     await symlink(sealed, alias);
     const requests = [
       { name: 'linked', launch: launchFrom() },
-      { name: 'real', launch: launchFrom({ runtimePath: sealedReal, executablePath: join(sealedReal, 'worker.sh') }) },
-      { name: 'escaping', launch: launchFrom({ runtimePath: escaping, executablePath: join(escaping, 'worker.sh') }) },
-      { name: 'alias', launch: launchFrom({ runtimePath: alias, executablePath: join(alias, 'worker.sh') }) },
+      {
+        name: 'real',
+        launch: launchFrom({ runtimePath: sealedReal, executablePath: join(sealedReal, echoWorker.name) }),
+      },
+      {
+        name: 'escaping',
+        launch: launchFrom({ runtimePath: escaping, executablePath: join(escaping, echoWorker.name) }),
+      },
+      { name: 'alias', launch: launchFrom({ runtimePath: alias, executablePath: join(alias, echoWorker.name) }) },
     ];
     const start = vi.fn(async (launch: RuntimeChildWorkerLaunch & { readonly sandboxRoot: string }) =>
       spawnUncontained(launch),
@@ -522,9 +560,9 @@ describe('native workers brokered for a runtime child (D37, North Star S2)', () 
     expect(redirected).toBe(elsewhere);
     /* The sandbox grants the daemon's directory, which still resolves to itself and does not hold elsewhere. */
     expect(grantedNow).toBe(granted);
-    expect(granted.startsWith(`${directory}/tau-runtime-child-`)).toBe(true);
-    expect(elsewhere.startsWith(`${granted}/`)).toBe(false);
-    expect(granted.startsWith(`${daemonTemporaryDirectory}/`)).toBe(false);
+    expect(granted.startsWith(join(directory, 'tau-runtime-child-'))).toBe(true);
+    expect(elsewhere.startsWith(`${granted}${sep}`)).toBe(false);
+    expect(granted.startsWith(`${daemonTemporaryDirectory}${sep}`)).toBe(false);
   });
 
   it('reclaims the child directories a gone daemon left in its native directory, and keeps those of a running one', async () => {

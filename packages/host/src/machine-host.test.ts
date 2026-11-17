@@ -186,8 +186,10 @@ describe('openMachineHostIdentity', () => {
     expect(second).toEqual(first);
     expect(first.hostId).not.toBe(first.authorityId);
     const { mode } = await stat(join(directory, 'identity.json'));
+    /* Windows has no POSIX mode bits (Node reports 0o666 there); the store is private because it lives in the
+     * user's own profile. */
     // oxlint-disable-next-line no-bitwise -- POSIX group/world bits must be absent on protected state.
-    expect(mode & 0o077).toBe(0);
+    expect(mode & 0o077).toBe(process.platform === 'win32' ? 0o066 : 0);
     /* An older build opening the same store still reads a `generation`. */
     expect(JSON.parse(await readFile(join(directory, 'identity.json'), 'utf8'))).toEqual({
       v: 1,

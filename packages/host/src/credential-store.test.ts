@@ -34,11 +34,29 @@ describe('host credential store', () => {
 
     expect(await readHostCredential()).toEqual(credential);
     const credentialStat = await stat(hostCredentialPath());
-    expect(credentialStat.mode % 0o1000).toBe(0o600);
+    /* Windows has no POSIX mode bits: Node reports any writable file as 0o666 there, and the credential is private
+     * because it lives in the user's own profile (the APPDATA test below). */
+    expect(credentialStat.mode % 0o1000).toBe(process.platform === 'win32' ? 0o666 : 0o600);
     expect(await readFile(hostCredentialPath(), 'utf8')).not.toContain('authorization');
     await removeHostCredential();
     expect(await readHostCredential()).toBeUndefined();
   });
+});
+
+describe('defaultConfigDirectory', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.runIf(process.platform === 'win32')(
+    "should keep the credential in the user's own roaming profile on Windows, whose ACL admits only that user",
+    () => {
+      vi.stubEnv('TAU_CONFIG_DIR', '');
+      vi.stubEnv('APPDATA', String.raw`C:\Users\ada\AppData\Roaming`);
+
+      expect(hostCredentialPath()).toBe(String.raw`C:\Users\ada\AppData\Roaming\tau\host.json`);
+    },
+  );
 });
 
 describe('defaultDependencyStore', () => {

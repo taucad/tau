@@ -73,13 +73,6 @@ import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
 import type { RuntimeChildHandle, RuntimeChildNativeKernels } from '#runtime-child-supervisor.js';
 import type { ReportingConsent } from '#telemetry.js';
 
-/**
- * The API's deployment answer, asked at each run's admission (D1): it, not this process's environment, chooses whether
- * a run carries the billing layer, so a Cloud host the provisioner started without `TAU_CLOUD_ENABLED` is funded too.
- * One per process, in memory, keyed by the gateway's origin.
- */
-const deployment = createDeploymentModeResolver();
-
 /** Milliseconds. */
 const socketOpenTimeout = 15_000;
 /** Milliseconds. */
@@ -594,6 +587,10 @@ const localRoute = (childUrl: URL, route: 'runtime' | 'fs' | 'agent', sessionId:
  */
 export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle => {
   const maxSessions = options.maxSessions ?? 1;
+  /* The API's deployment answer, asked at each run's admission (D1): it, not this process's environment, chooses
+   * whether a run carries the billing layer, so a Cloud host the provisioner started without `TAU_CLOUD_ENABLED` is
+   * funded too. One per daemon, in memory, keyed by the gateway's origin. */
+  const deployment = createDeploymentModeResolver();
   if (!Number.isInteger(maxSessions) || maxSessions < 1) {
     throw new TypeError('startHostDaemon: maxSessions must be a positive integer');
   }
@@ -932,6 +929,12 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   const startAgent = async (agent: HostDaemonAgentOptions): Promise<void> => {
     const localAccountSession =
       options.relay === false && agent.tauCloudEnabled !== true && agent.tauApiToken ? agent.tauApiToken : undefined;
+    /* The CLI session's account (`session.user.id`, as the web and desktop hosts name theirs): a funded run stamps its
+     * attempts with it, so another account's resume is refused (GI-Q6). Never an anonymous pseudonym. */
+    const sessionPrincipal =
+      localAccountSession === undefined || agent.revisionActor?.anonymous === true
+        ? undefined
+        : agent.revisionActor?.id;
     const canonicalWorkspaceRoot = await realpath(agent.workspaceRoot);
     const authorityRoot = join(
       defaultConfigDirectory(),
@@ -1092,11 +1095,15 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         billing: {
           /* The gateway's API answers whether a run is funded; an unknown answer refuses the run (I1). */
           deployment: async () => deployment.mode(agent.gatewayBaseUrl),
-          /* The account the credential port names: the paired device's, or none on the CLI account session. */
-          principal: () => (localAccountSession === undefined ? credentialPrincipal(credentialState) : undefined),
+          /* The account the credential port names: the paired device's, or the CLI session's. */
+          principal: () =>
+            localAccountSession === undefined ? credentialPrincipal(credentialState) : sessionPrincipal,
         },
       }),
-      credential: () => (localAccountSession === undefined ? credentialState : { mode: 'session' }),
+      credential: () =>
+        localAccountSession === undefined
+          ? credentialState
+          : { mode: 'session', ...(sessionPrincipal === undefined ? {} : { principal: sessionPrincipal }) },
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
       /* The host's own decision, not a resolution accident: `false` withholds
        * `test_model` from an installation whose GeoSpec engine resolves. */

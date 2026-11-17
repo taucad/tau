@@ -29,7 +29,9 @@ export type DeploymentModeResolverInput = Readonly<{
 /** Reads the mode for an API origin. @public */
 export type DeploymentModeResolver = Readonly<{
   /**
-   * The mode for the origin of `url`. Never rejects: a URL with no origin, like any failure, is `unknown`.
+   * The mode for the origin of `url`. Never rejects: a URL with no origin, like any failure, is `unknown`. Only the
+   * origin of `url` is used, so the question is always `GET <origin>/v1/deployment`; an API served under a path prefix
+   * is not supported (I5).
    *
    * @param url - The API origin, or any URL on it (the gateway base URL); only its origin is used.
    */
@@ -73,35 +75,48 @@ const parseBody = (body: unknown): Readonly<{ answer: DeploymentAnswer; maxAgeSe
   return parsed.status === 'valid' ? { answer: parsed.answer, maxAgeSeconds: parsed.answer.maxAgeSeconds } : undefined;
 };
 
-const parseCached = (value: unknown): CachedAnswer<DeploymentAnswer> | undefined => {
+/** A cached answer; `absent` marks the reading of a `404`, which never stands in for a later failure (I2). */
+type DeploymentEntry = CachedAnswer<DeploymentAnswer> & Readonly<{ absent?: true }>;
+
+const parseCached = (value: unknown): DeploymentEntry | undefined => {
   if (typeof value !== 'object' || value === null || !('answer' in value) || !('expiresAt' in value)) {
     return undefined;
   }
   const { expiresAt } = value;
   const parsed = parseDeploymentAnswer(value.answer);
-  return parsed.status === 'valid' && typeof expiresAt === 'number' && Number.isFinite(expiresAt)
-    ? { answer: parsed.answer, expiresAt }
-    : undefined;
+  if (parsed.status !== 'valid' || typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) {
+    return undefined;
+  }
+  return 'absent' in value && value.absent === true
+    ? { answer: parsed.answer, expiresAt, absent: true }
+    : { answer: parsed.answer, expiresAt };
 };
 
 /**
  * One origin's store: memory first, mirrored into `storage` when there is one, so a worker with no `localStorage`
- * still caches, and a page reload reuses a stored answer. A corrupt stored entry reads as empty.
+ * still caches, and a page reload reuses a stored answer. A corrupt stored entry reads as empty. A `404`'s reading is
+ * kept only while fresh: expired, it reads as empty, so a failure after it is `unknown`, never a stale `unfunded`
+ * (I2). A valid answer may still stand in within the grace window.
  */
 const originStore = (
   origin: string,
   storage: DeploymentModeResolverInput['storage'],
+  now: () => number,
 ): AnswerStore<CachedAnswer<DeploymentAnswer>> => {
-  const memory = createMemoryAnswerStore<CachedAnswer<DeploymentAnswer>>();
+  const memory = createMemoryAnswerStore<DeploymentEntry>();
   const stored =
     storage === undefined
       ? undefined
       : createStorageAnswerStore({ storage, key: `${deploymentAnswerKeyPrefix}${origin}`, parse: parseCached });
   return {
-    read: () => memory.read() ?? stored?.read(),
+    read: () => {
+      const entry = memory.read() ?? stored?.read();
+      return entry?.absent === true && now() >= entry.expiresAt ? undefined : entry;
+    },
     write: (value) => {
-      memory.write(value);
-      stored?.write(value);
+      const entry: DeploymentEntry = value.answer === absentAnswer ? { ...value, absent: true } : value;
+      memory.write(entry);
+      stored?.write(entry);
     },
   };
 };
@@ -144,6 +159,7 @@ export const deploymentModeOf = (resolution: OriginAnswer<DeploymentAnswer>): De
  */
 export const createDeploymentModeResolver = (input: DeploymentModeResolverInput = {}): DeploymentModeResolver => {
   const stores = new Map<string, AnswerStore<CachedAnswer<DeploymentAnswer>>>();
+  const now = input.now ?? Date.now;
   const resolver = createOriginAnswerResolver<DeploymentAnswer>({
     path: deploymentAnswerPath,
     parse: parseBody,
@@ -151,13 +167,13 @@ export const createDeploymentModeResolver = (input: DeploymentModeResolverInput 
     staleGraceSeconds: deploymentModeDefaults.staleGraceSeconds,
     absent: absentAnswer,
     store: (origin) => {
-      const existing = stores.get(origin) ?? originStore(origin, input.storage);
+      const existing = stores.get(origin) ?? originStore(origin, input.storage, now);
       stores.set(origin, existing);
       return existing;
     },
     /* Read per request, not bound at creation, so a host's later fetch instrumentation is used. */
     fetch: input.fetch ?? (async (request, init) => globalThis.fetch(request, init)),
-    ...(input.now === undefined ? {} : { now: input.now }),
+    now,
     ...(input.requestTimeout === undefined ? {} : { requestTimeout: input.requestTimeout }),
   });
   const resolve = async (url: string): Promise<OriginAnswer<DeploymentAnswer>> => {

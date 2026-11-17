@@ -176,6 +176,37 @@ describe('createDeploymentModeResolver', () => {
     await expect(resolver.mode(api)).resolves.toBe('unknown');
   });
 
+  /* I2: only a 404 means "no route"; once that reading expires, a later failure never stands in for it. */
+  it.each([
+    ['in memory', undefined],
+    ['in storage', 'storage'],
+  ] as const)('should never let an expired 404 answer stand in for a failure (%s)', async (_name, kind) => {
+    const storage = memoryStorage();
+    const first = harness(
+      { [api]: [json({}, 404), json({}, 503)] },
+      kind === undefined ? {} : { storage: () => storage },
+    );
+
+    await expect(first.resolver.mode(api)).resolves.toBe('unfunded');
+    first.advance(deploymentModeDefaults.maxAgeBounds.minimum + 1);
+    await expect(first.resolver.mode(api)).resolves.toBe('unknown');
+
+    if (kind === 'storage') {
+      /* A reloaded page reads the stored 404 entry: fresh, it still answers; expired, a failure is unknown. */
+      const second = harness({ [api]: [json({}, 503)] }, { storage: () => storage });
+      second.advance(deploymentModeDefaults.maxAgeBounds.minimum + 1);
+      await expect(second.resolver.mode(api)).resolves.toBe('unknown');
+    }
+  });
+
+  it('should still let an explicit self-host answer stand in within the grace window', async () => {
+    const { resolver, advance } = harness({ [api]: [json(selfHost), json({}, 503)] });
+
+    await expect(resolver.mode(api)).resolves.toBe('unfunded');
+    advance(301);
+    await expect(resolver.resolve(api)).resolves.toMatchObject({ state: 'known', source: 'stale' });
+  });
+
   it('should keep each origin to its own answer (I5)', async () => {
     const { resolver, fetch } = harness({ [api]: [json(cloud)], [other]: [json({}, 404)] });
 

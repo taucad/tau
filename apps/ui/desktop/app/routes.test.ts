@@ -25,13 +25,16 @@ describe('desktop route manifest', () => {
   });
 
   /* The `tau://` contract main loads against (R4). `/i/*` is a server redirect,
-     so `tau://i/<repo>` lands on `/import/<repo>` instead; `/s/:slug` keeps its
-     path and swaps its module, because SPA mode admits no server `loader`. */
+     so `tau://i/<repo>` lands on `/import/<repo>` instead; `/s/:slug` and
+     `/invitations/:token` keep their paths and swap their modules, because SPA
+     mode admits no server `loader`. */
   it('should carry every page a tau:// content link resolves to', () => {
     const manifest = JSON.stringify(routes);
 
     expect(manifest).toContain('../../app/routes/import.$/route.tsx');
-    expect(manifest).toContain('../../app/routes/invitations.$token/route.tsx');
+    expect(manifest).toContain('../../app/routes/invitations.$token/desktop-route.tsx');
+    expect(manifest).toContain('../../app/routes/invitations._index/route.tsx');
+    expect(manifest).not.toContain('"file":"../../app/routes/invitations.$token/route.ts"');
     expect(manifest).toContain('../../app/routes/s.$slug/desktop-route.tsx');
     expect(manifest).not.toContain('../../app/routes/i.$/');
     expect(manifest).not.toContain('"file":"../../app/routes/s.$slug/route.tsx"');

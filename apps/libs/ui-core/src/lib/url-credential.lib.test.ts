@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { redactUrlCredentials } from '#lib/url-credential.lib.js';
+import { redactUrlCredentials, urlCarriesCredential } from '#lib/url-credential.lib.js';
 
 describe('redactUrlCredentials', () => {
   it('removes the token from a plain invitation path', () => {
@@ -45,5 +45,36 @@ describe('redactUrlCredentials', () => {
     expect(redactUrlCredentials('/docs?access_token_help=1&codec=h264&tokens=2')).toBe(
       '/docs?access_token_help=1&codec=h264&tokens=2',
     );
+  });
+});
+
+describe('urlCarriesCredential', () => {
+  it.each([
+    '/invitations/AbC-123_xyz',
+    'https://tau.new/auth/sign-in?redirectTo=%2Finvitations%2FAbC-123_xyz',
+    '/auth/reset-password?token=abc.DEF-123',
+    '/api/auth/callback/github?code=gho_1&state=s',
+    '/auth/cli?user_code=ABCD-EFGH',
+  ])('answers true for %s', (url) => {
+    expect(urlCarriesCredential(url)).toBe(true);
+  });
+
+  it.each([
+    '/',
+    '/invitations',
+    '/projects?view=grid#top',
+    '/invitations/[redacted]',
+    '/auth/sign-in?redirectTo=%2Finvitations',
+  ])('answers false for %s', (url) => {
+    expect(urlCarriesCredential(url)).toBe(false);
+  });
+
+  it('answers the same on every call, so it can gate a render', () => {
+    const url = '/invitations/AbC-123_xyz';
+    expect([urlCarriesCredential(url), urlCarriesCredential(url), urlCarriesCredential(url)]).toStrictEqual([
+      true,
+      true,
+      true,
+    ]);
   });
 });

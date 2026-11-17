@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
+import { MemoryRouter } from 'react-router';
 import type { ReactNode } from 'react';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterAll, describe, expect, it, vi } from 'vitest';
@@ -83,7 +84,7 @@ afterAll(() => {
 // The SDK singleton is loaded once per module graph, so these run in order.
 describe('PostHog-backed flags through the web analytics boundary', () => {
   it('resolves to defaults and requests no flags when analytics are declined', async () => {
-    const view = render(tree());
+    const view = render(tree(), { wrapper: MemoryRouter });
     await settle();
     expect(screen.getByText('onboarding=false viewerControls=false autoOpen=false')).toBeInTheDocument();
     expect(requests.some((url) => url.includes('/flags/'))).toBe(false);
@@ -93,7 +94,7 @@ describe('PostHog-backed flags through the web analytics boundary', () => {
 
   it("follows PostHog's evaluation after consent and console overrides live", async () => {
     state.consent = 'accepted';
-    const view = render(tree());
+    const view = render(tree(), { wrapper: MemoryRouter });
     await vi.waitFor(() => {
       expect((globalThis as ConsoleWindow).posthog).toBe(posthog);
     }, sdkResponse);

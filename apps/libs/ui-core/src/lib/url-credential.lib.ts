@@ -36,3 +36,20 @@ export const redactUrlCredentials = (value: string): string =>
   value
     .replaceAll(invitationTokenPattern, '$1invitations$2[redacted]')
     .replaceAll(queryCredentialPattern, '$1$2$3[redacted]');
+
+/**
+ * Whether a URL carries a credential `redactUrlCredentials` would remove.
+ *
+ * Redaction cleans a URL once it is inside an event; this answers the earlier
+ * question of whether to record a page at all. A replay serialises the whole
+ * document, and the browser resolves every relative `href` (`#main`,
+ * `#home-composer-end`) against the address bar, so a page whose own URL holds a
+ * token leaks it through attributes no event hook sees. One predicate, built on
+ * the same patterns, keeps the two answers from drifting apart: a URL already
+ * redacted carries nothing, and so reads as clean.
+ *
+ * @param value - A URL, a path with its query and fragment, or any string.
+ * @returns `true` when the value holds an invitation token or a sign-in credential.
+ * @public
+ */
+export const urlCarriesCredential = (value: string): boolean => redactUrlCredentials(value) !== value;

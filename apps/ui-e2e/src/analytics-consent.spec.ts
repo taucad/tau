@@ -202,25 +202,51 @@ test('redacts invitation credentials from decoded replay and autocapture transpo
   expect(summary.present['Public replay control']).toBe(true);
 });
 
-test.each(['/invitations/Replay-Bearer-123', '/auth/sign-in?redirectTo=%2Finvitations%2FReplay-Bearer-123'])(
-  'redacts rrweb Meta URL on an accepted initial route: %s',
-  async (path) => {
-    await target.installPostHogFixture('phc_test_key');
-    await target.navigate('/');
-    await target.addCookies([
-      {
-        name: consentCookieName,
-        value: encodeURIComponent(JSON.stringify({ status: 'accepted', version: 1 })),
-        url: await target.currentUrl(),
-      },
-    ]);
-    await target.navigate(path);
-    await expect.poll(snapshotsAfterInteraction, { timeout: 30_000 }).toBeGreaterThan(0);
-    const summary = await target.readPostHogSummary(['Replay-Bearer-123']);
-    expect(summary.events).toContain('$snapshot');
-    expect(summary.present['Replay-Bearer-123']).toBe(false);
-  },
-);
+/** Accept analytics on a first document, then open `path` as a fresh document with consent already recorded. */
+const openAcceptedAt = async (path: string): Promise<void> => {
+  await target.installPostHogFixture('phc_test_key');
+  await target.navigate('/');
+  await target.addCookies([
+    {
+      name: consentCookieName,
+      value: encodeURIComponent(JSON.stringify({ status: 'accepted', version: 1 })),
+      url: await target.currentUrl(),
+    },
+  ]);
+  await target.navigate(path);
+};
+
+/* #2290: an invitation link never renders at its own address. The server holds the token and redirects to
+ * `/invitations` before any document exists, so the page that records carries no token to copy. */
+test('lands an invitation link on /invitations, so its replay never carries the token', async () => {
+  await openAcceptedAt('/invitations/Replay-Bearer-123');
+  await target.expectUrl(/\/invitations$/u, 30_000);
+  await expect.poll(snapshotsAfterInteraction, { timeout: 30_000 }).toBeGreaterThan(0);
+  const summary = await target.readPostHogSummary(['Replay-Bearer-123']);
+  expect(summary.events).toContain('$snapshot');
+  expect(summary.present['Replay-Bearer-123']).toBe(false);
+});
+
+/* #2290: a replay serialises attributes no event hook reads, and the browser resolves relative hrefs against the
+ * address bar, so replay does not run at an address that holds a credential. Analytics still admit the page. */
+test('does not record a replay at an address that carries a credential', async () => {
+  await openAcceptedAt('/auth/sign-in?redirectTo=%2Finvitations%2FReplay-Bearer-123');
+  await expect.poll(async () => hasEvent('$pageview'), { timeout: 30_000 }).toBe(true);
+  await target.mouseMove(24, 24);
+  expect(
+    await target.evaluate(
+      () =>
+        (
+          globalThis as typeof globalThis & {
+            posthog?: { sessionRecordingStarted: () => boolean };
+          }
+        ).posthog?.sessionRecordingStarted() ?? 'no client',
+    ),
+  ).toBe(false);
+  const summary = await target.readPostHogSummary(['Replay-Bearer-123']);
+  expect(summary.events).not.toContain('$snapshot');
+  expect(summary.present['Replay-Bearer-123']).toBe(false);
+});
 
 test('records editor, chat and file text in replay but never a credential block', async () => {
   await target.installPostHogFixture('phc_test_key');
@@ -244,14 +270,10 @@ test('records editor, chat and file text in replay but never a credential block'
   await target.expectVisible(sourceTab, 60_000);
   await target.click(sourceTab);
   await target.expectVisible(selectors.getByCss('.cm-editor .cm-content').first(), 60_000);
-  const chatToggle = selectors.getByRole('button', { name: 'Toggle Chat lane' });
-  if ((await target.getAttribute(chatToggle, 'aria-pressed')) === 'false') {
-    await target.click(chatToggle);
-  }
-  await target.fill(
-    selectors.getByCss('.tiptap[contenteditable="true"], textarea[placeholder="Ask Tau to build anything..."]').last(),
-    'Private composer sentinel',
-  );
+  /* The source and file probes go in while the editor is on screen. Below the compact width
+   * (`compactWorkspaceWidth`, `chat-interface-desktop.tsx`) the workspace shows one auxiliary lane, so
+   * opening Chat at this 1280 px viewport hides the Workbench and unmounts its editor, as #2219 found for
+   * the desktop print dry run. A replay accumulates, so each surface is recorded while it is shown. */
   const surfaces = await target.evaluate(() => {
     const editor = document.querySelector<HTMLElement>('.editor-container');
     const files = document.querySelector<HTMLElement>('[role="treeitem"]')?.parentElement ?? null;
@@ -277,16 +299,51 @@ test('records editor, chat and file text in replay but never a credential block'
     return { editor: Boolean(editor), files: Boolean(files) };
   });
   expect(surfaces).toStrictEqual({ editor: true, files: true });
-  await expect.poll(async () => sentinelPresent('Public project control'), { timeout: 30_000 }).toBe(true);
+  await expect
+    .poll(
+      async () => {
+        await snapshotsAfterInteraction();
+        return sentinelPresent('Visible source sentinel');
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+  const chatToggle = selectors.getByRole('button', {
+    name: 'Toggle Chat lane',
+  });
+  if ((await target.getAttribute(chatToggle, 'aria-pressed')) === 'false') {
+    await target.click(chatToggle);
+  }
+  await target.fill(
+    selectors.getByCss('.tiptap[contenteditable="true"], textarea[placeholder="Ask Tau to build anything..."]').last(),
+    'Private composer sentinel',
+  );
+  // A public marker added after the composer is typed into, so the read below covers the composer's recording.
+  await target.evaluate(() => {
+    const control = document.createElement('span');
+    control.textContent = 'Public chat control';
+    document.body.append(control);
+  });
+  await expect
+    .poll(
+      async () => {
+        await snapshotsAfterInteraction();
+        return sentinelPresent('Public chat control');
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
   const summary = await target.readPostHogSummary([
     'Visible source sentinel',
     'Visible filename sentinel',
     'Private credential sentinel',
     'Private composer sentinel',
     'Public project control',
+    'Public chat control',
   ]);
   expect(summary.events).toContain('$snapshot');
   expect(summary.present['Public project control']).toBe(true);
+  expect(summary.present['Public chat control']).toBe(true);
   expect(summary.present['Visible source sentinel']).toBe(true);
   expect(summary.present['Visible filename sentinel']).toBe(true);
   expect(summary.present['Private credential sentinel']).toBe(false);

@@ -193,56 +193,55 @@ const sentryRead = async (path: string, token: string): Promise<unknown> => {
 };
 
 describe('R9 desktop boot signals on staging (T-R9.3)', () => {
-  it.fails(
-    'should receive one file_service.start_failed and one desktop-boot-unhealthy for the release with no path and fire both alerts',
-    async () => {
-      const token = process.env['SENTRY_E2E_READ_TOKEN'] ?? '';
-      expect(Boolean(token), 'Configure staging SENTRY_E2E_READ_TOKEN').toBe(true);
-      const release = process.env['TAU_DESKTOP_SENTRY_RELEASE'] ?? '';
-      expect(release, 'Name the forced staging release in TAU_DESKTOP_SENTRY_RELEASE').toMatch(/^tau-desktop@\S+$/u);
-      const rules = await sentryRead('projects/taucad/tau-desktop/rules/?expand=lastTriggered', token);
-      expect(Array.isArray(rules), 'tau-desktop issue alert rules').toBe(true);
-      for (const signal of desktopBootSignals) {
-        const query = new URLSearchParams({
-          project: '-1',
-          query: `project:tau-desktop tau_event:${signal} release:"${release}"`,
-          field: 'id',
-          statsPeriod: '24h',
-        });
-        for (const environment of harnessSentryEnvironments) {
-          query.append('environment', environment);
-        }
-        // oxlint-disable-next-line no-await-in-loop -- Two queries, read in order so a refusal names its signal.
-        const listing = await sentryRead(`organizations/taucad/events/?${query.toString()}`, token);
-        const ids =
-          typeof listing === 'object' && listing !== null && 'data' in listing && Array.isArray(listing.data)
-            ? listing.data.flatMap((row: unknown) =>
-                typeof row === 'object' && row !== null && 'id' in row && typeof row.id === 'string' ? [row.id] : [],
-              )
-            : [];
-        expect(ids, `exactly one ${signal} for the release`).toHaveLength(1);
-        const id = ids[0] ?? '';
-        expect(id).toMatch(/^[\da-f]{32}$/u);
-        // oxlint-disable-next-line no-await-in-loop -- One detail read for each signal.
-        const detail = await sentryRead(`projects/taucad/tau-desktop/events/${id}/`, token);
-        // Assert only a boolean so a leaked path never reaches the test output.
-        expect(personalPathPattern.test(JSON.stringify(detail)), `${signal} carries no path`).toBe(false);
-        const created =
-          typeof detail === 'object' && detail !== null && 'dateCreated' in detail && typeof detail.dateCreated === 'string'
-            ? Date.parse(detail.dateCreated)
-            : Number.NaN;
-        const fired = (Array.isArray(rules) ? rules : []).some((rule: unknown) => {
-          const text = JSON.stringify(rule);
-          const lastTriggered =
-            typeof rule === 'object' && rule !== null && 'lastTriggered' in rule && typeof rule.lastTriggered === 'string'
-              ? Date.parse(rule.lastTriggered)
-              : Number.NaN;
-          return text.includes('tau_event') && text.includes(signal) && lastTriggered >= created;
-        });
-        expect(fired, `the ${signal} alert fired for the event`).toBe(true);
-        console.info('Desktop boot signal observed', { signal, eventId: id });
+  it.fails('should receive one file_service.start_failed and one desktop-boot-unhealthy for the release with no path and fire both alerts', async () => {
+    const token = process.env['SENTRY_E2E_READ_TOKEN'] ?? '';
+    expect(Boolean(token), 'Configure staging SENTRY_E2E_READ_TOKEN').toBe(true);
+    const release = process.env['TAU_DESKTOP_SENTRY_RELEASE'] ?? '';
+    expect(release, 'Name the forced staging release in TAU_DESKTOP_SENTRY_RELEASE').toMatch(/^tau-desktop@\S+$/u);
+    const rules = await sentryRead('projects/taucad/tau-desktop/rules/?expand=lastTriggered', token);
+    expect(Array.isArray(rules), 'tau-desktop issue alert rules').toBe(true);
+    for (const signal of desktopBootSignals) {
+      const query = new URLSearchParams({
+        project: '-1',
+        query: `project:tau-desktop tau_event:${signal} release:"${release}"`,
+        field: 'id',
+        statsPeriod: '24h',
+      });
+      for (const environment of harnessSentryEnvironments) {
+        query.append('environment', environment);
       }
-    },
-    120_000,
-  );
+      // oxlint-disable-next-line no-await-in-loop -- Two queries, read in order so a refusal names its signal.
+      const listing = await sentryRead(`organizations/taucad/events/?${query.toString()}`, token);
+      const ids =
+        typeof listing === 'object' && listing !== null && 'data' in listing && Array.isArray(listing.data)
+          ? listing.data.flatMap((row: unknown) =>
+              typeof row === 'object' && row !== null && 'id' in row && typeof row.id === 'string' ? [row.id] : [],
+            )
+          : [];
+      expect(ids, `exactly one ${signal} for the release`).toHaveLength(1);
+      const id = ids[0] ?? '';
+      expect(id).toMatch(/^[\da-f]{32}$/u);
+      // oxlint-disable-next-line no-await-in-loop -- One detail read for each signal.
+      const detail = await sentryRead(`projects/taucad/tau-desktop/events/${id}/`, token);
+      // Assert only a boolean so a leaked path never reaches the test output.
+      expect(personalPathPattern.test(JSON.stringify(detail)), `${signal} carries no path`).toBe(false);
+      const created =
+        typeof detail === 'object' &&
+        detail !== null &&
+        'dateCreated' in detail &&
+        typeof detail.dateCreated === 'string'
+          ? Date.parse(detail.dateCreated)
+          : Number.NaN;
+      const fired = (Array.isArray(rules) ? rules : []).some((rule: unknown) => {
+        const text = JSON.stringify(rule);
+        const lastTriggered =
+          typeof rule === 'object' && rule !== null && 'lastTriggered' in rule && typeof rule.lastTriggered === 'string'
+            ? Date.parse(rule.lastTriggered)
+            : Number.NaN;
+        return text.includes('tau_event') && text.includes(signal) && lastTriggered >= created;
+      });
+      expect(fired, `the ${signal} alert fired for the event`).toBe(true);
+      console.info('Desktop boot signal observed', { signal, eventId: id });
+    }
+  }, 120_000);
 });

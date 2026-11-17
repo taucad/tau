@@ -1543,6 +1543,99 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(latest()?.entryManifest).toBe(digest);
   });
 
+  /*
+   * STO-25, I7: between a failed write's failure and its rollback, nothing it latched speaks. The capture that decides
+   * the rollback is held here; inside that window the host must already have stopped naming the write's manifest and
+   * reading its closure landed, though the write's release is still held.
+   */
+  it('should stop naming a failed write’s manifest at its failure, before its rollback begins', async () => {
+    let failNext = false;
+    let failed = false;
+    let window: (() => Promise<void>) | undefined;
+    /* The first read after the failure (the rollback's capture) waits on the window's check. */
+    const holdOnce = async (): Promise<void> => {
+      if (failed && window !== undefined) {
+        const held = window;
+        window = undefined;
+        await held();
+      }
+    };
+    const fixture = harness(['alpha'], (port) => port, {
+      observeFileEvents: true,
+      wrapFileSystem: (filesystem) => {
+        const wrapped: Record<string, unknown> = { ...filesystem };
+        for (const name of ['readdir', 'readdirEntries', 'readFile', 'stat', 'getFileMode']) {
+          const original = (filesystem as unknown as Record<string, unknown>)[name];
+          if (typeof original === 'function') {
+            wrapped[name] = async (...args: unknown[]): Promise<unknown> => {
+              await holdOnce();
+              return (original as (...parameters: unknown[]) => Promise<unknown>).apply(filesystem, args);
+            };
+          }
+        }
+        wrapped['endExpectation'] = (options?: Readonly<{ failed?: boolean }>): void => {
+          filesystem.endExpectation?.(options);
+          failed ||= options?.failed === true;
+        };
+        if (filesystem.apply !== undefined) {
+          wrapped['apply'] = async (changeset: Parameters<NonNullable<RootedFileSystem['apply']>>[0]) => {
+            if (failNext && changeset.entries.some((entry) => entry.op === 'write' && entry.path.startsWith('lib/'))) {
+              failNext = false;
+              throw new Error('The disk went away.');
+            }
+            return filesystem.apply!(changeset);
+          };
+        }
+        return wrapped as unknown as RootedFileSystem;
+      },
+    });
+    const manifest = serializeProjectManifest({
+      $schema: projectManifestSchemaUrl,
+      name: 'Alpha',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.scad' } },
+    });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('tau.json', manifest);
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('lib/a.scad', 'a();');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await project.writeFile('tau.json', '{}');
+    await project.writeFile('lib/a.scad', 'b();');
+    await settle(10);
+    const latest = (): RevisionStatusProjection | undefined =>
+      alpha.frames.findLast((frame) => frame.type === 'status')?.status;
+
+    let inWindow: RevisionStatusProjection | undefined;
+    window = async () => {
+      /* Told at the failure itself, not by whatever publishes next. */
+      await settle(10);
+      inWindow = latest();
+    };
+    failNext = true;
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      () => {
+        expect(window).toBeUndefined();
+        expect(latest()?.applyingRoots).toBeUndefined();
+      },
+      { timeout: 10_000 },
+    );
+    /* The window was entered while the failed write still held the root: its release came after the rollback. */
+    expect(inWindow?.applyingRoots).toBeDefined();
+    expect(inWindow?.entryManifest).toBeUndefined();
+    expect(inWindow?.readiness).toBe('treeReady');
+    expect(latest()?.entryManifest).toBeUndefined();
+  });
+
   /* D10, I7: an aborted restore's tree is never read as written, and its rollback, which writes the checkout whole again, is. */
   it('should reach materialized after an aborted restore rolls the checkout back', async () => {
     let failNext = false;

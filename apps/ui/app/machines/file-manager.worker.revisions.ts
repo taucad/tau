@@ -746,6 +746,8 @@ export type TreeWriteWatch = {
   landedPaths?: Set<string>;
   /** The SHA-256 of the `tau.json` bytes its closure lands, once hashed: what the page's manifest is checked against. */
   manifest?: string;
+  /** Set once the filesystem says the write failed: none of its landings is the tree, whatever was latched (I7). */
+  failed?: boolean;
 };
 
 /**
@@ -931,10 +933,18 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const entryClosures = new Map<string, TreeWriteWatch>();
   const entryClosureLanded = (root: string | undefined): boolean => {
     const entry = root === undefined ? undefined : entryClosures.get(root);
-    if (entry !== undefined && !entry.landed && entry.view?.entriesLanded?.(entry.closure) === true) {
+    if (entry === undefined || entry.failed === true) {
+      return false;
+    }
+    /*
+     * Asked live while the write is open: a write that failed answers `false` from its failure through its rollback,
+     * so a latched landing never outlives it (I7). Once the write's expectation has ended, the latch stands.
+     */
+    const now = entry.view?.entriesLanded?.(entry.closure);
+    if (now === true) {
       entry.landed = true;
     }
-    return entry?.landed === true;
+    return now !== false && entry.landed;
   };
   /*
    * STO-25: the paths open file panes wait on (`watchLanding`), by watcher, and of each root the tree write whose
@@ -951,6 +961,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const landingWrites = new Map<string, TreeWriteWatch>();
   const closureWrites = new Map<string, number>();
   const recovering = new Set<string>();
+  /*
+   * Roots whose tree write the filesystem said failed, until every write on the root (its rollback too) is released:
+   * the reading is of another tree from the failure on, never the `entryReady` the write had reached (I7).
+   */
+  const failing = new Set<string>();
   let watchedPaths: ReadonlySet<string> = new Set();
   /* Each watched path the write has newly landed, recorded on it; `true` when any was. */
   const recordLandings = (write: TreeWriteWatch, paths: Iterable<string>): boolean => {
@@ -969,7 +984,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   };
   const landedOf = (root: string | undefined): readonly string[] | undefined => {
     const write = root === undefined ? undefined : landingWrites.get(root);
-    if (root === undefined || write === undefined || watchedPaths.size === 0 || recovering.has(root)) {
+    if (
+      root === undefined ||
+      write === undefined ||
+      write.failed === true ||
+      watchedPaths.size === 0 ||
+      recovering.has(root)
+    ) {
       return undefined;
     }
     if (entryClosures.get(root) === write) {
@@ -984,10 +1005,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    */
   const entryManifestOf = (root: string | undefined): string | undefined => {
     const write = root === undefined ? undefined : landingWrites.get(root);
-    if (root === undefined || write?.manifest === undefined || recovering.has(root)) {
+    if (root === undefined || write?.manifest === undefined || write.failed === true || recovering.has(root)) {
       return undefined;
     }
-    return write.landed || (entryClosures.get(root) === write && entryClosureLanded(root)) ? write.manifest : undefined;
+    /* While the write is open its landing is asked live; after, the latch it reached stands. */
+    const landed = entryClosures.get(root) === write ? entryClosureLanded(root) : write.landed;
+    return landed ? write.manifest : undefined;
   };
   const watchEntryClosure = async (
     root: string,
@@ -1009,6 +1032,15 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       console.warn('[revisions] the entry closure cannot be watched', error);
       return;
     }
+    /* The write's end is read again at once: a failed one's landings, and its manifest, stop speaking (I7). */
+    const stop = entry.view.onExpectationEnd?.(({ failed }) => {
+      stop?.();
+      if (failed) {
+        entry.failed = true;
+        failing.add(root);
+      }
+      republish();
+    });
     republish();
   };
   /* Checkouts whose last write of another revision's tree failed: that tree is never read as written (D10, I7). */
@@ -1196,6 +1228,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
             closureWrites.delete(root);
           }
           const recovered = open === 0 && recovering.delete(root);
+          if (open === 0) {
+            failing.delete(root);
+          }
           if (outcome?.failed === true || recovered) {
             /* A failed write's tree is not the tree, nor a rollback's (I7): nothing either landed opens a pane. */
             landingWrites.delete(root);
@@ -1256,7 +1291,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         {
           ...merged,
           entryClosureLanded: entryClosureLanded(status.checkoutRoot),
-          treeWriteFailed: status.checkoutId !== undefined && failedTreeWrites.has(status.checkoutId),
+          treeWriteFailed:
+            (status.checkoutId !== undefined && failedTreeWrites.has(status.checkoutId)) ||
+            (status.checkoutRoot !== undefined && failing.has(status.checkoutRoot)),
         },
         status.checkoutId !== undefined && largeObjectsTold.has(status.checkoutId),
         status.checkoutId === undefined ? 0 : (treeWrites.get(status.checkoutId) ?? 0),

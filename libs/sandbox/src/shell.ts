@@ -44,5 +44,11 @@ export type {
 } from '#shell/shell-identity.js';
 export { createSandboxShellProvider } from '#shell/srt-shell-provider.js';
 export type { SandboxShellProviderOptions } from '#shell/srt-shell-provider.js';
+export { createWindowsShellProvider, readWindowsSandboxStatus } from '#shell/windows-shell-provider.js';
+export type {
+  WindowsSandboxHelperSpawn,
+  WindowsSandboxStatus,
+  WindowsShellProviderOptions,
+} from '#shell/windows-shell-provider.js';
 export { createFakeShellProvider } from '#shell/shell-fake.js';
 export type { FakeShellOptions, FakeShellPhase, FakeShellProvider, FakeShellScript } from '#shell/shell-fake.js';

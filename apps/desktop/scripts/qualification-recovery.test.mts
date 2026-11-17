@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-// oxlint-disable-next-line no-restricted-imports -- Exercise the installed runner's own scenario module.
+/* oxlint-disable no-restricted-imports -- Exercise the installed runner's own scenario module. */
 import {
   assertBaselineShipsAutoInstall,
   assertRecoveryReceipts,
@@ -25,11 +25,12 @@ import {
   squashfsCompressor,
 } from './qualification-recovery.mjs';
 import type { RecoveryReceipt } from './qualification-recovery.mjs';
+/* oxlint-enable no-restricted-imports */
 
 const a = { tag: 'desktop-staging@0.9.0-staging.10', version: '0.9.0', sourceCommit: 'a'.repeat(40) };
 const b = { tag: 'desktop-staging@0.9.1-staging.11', version: '0.9.1', sourceCommit: 'b'.repeat(40) };
-const line = (event: string, detail?: unknown, at = '2026-11-17T10:00:00.000Z', level = 'INFO'): string =>
-  `${at} ${level} ${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`;
+const line = (event: string, detail?: unknown, level = 'INFO'): string =>
+  `2026-11-17T10:00:00.000Z ${level} ${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`;
 const launchOf = (version: string, pid: number): string => line('main.ready', { packaged: true, version, pid });
 const ledgerOf = (version: string, sourceCommit: string, stage: string) => ({
   schemaVersion: 1,
@@ -41,11 +42,11 @@ const ledgerOf = (version: string, sourceCommit: string, stage: string) => ({
 const healthyRecovery = [
   launchOf(a.version, 4100),
   line('main.boot-stage', { stage: 'window-loaded' }),
-  line('main.boot-deadline-passed', { stage: 'window-loaded' }, undefined, 'WARN'),
-  line('main.recovery-opened', { trigger: 'shell-deadline' }, undefined, 'WARN'),
-  line('main.recovery-shown', { trigger: 'shell-deadline' }, undefined, 'WARN'),
-  line('updater.auto-install-countdown', { targetVersion: b.version, mode: 'normal' }, undefined, 'WARN'),
-  line('updater.auto-install-started', { targetVersion: b.version }, undefined, 'WARN'),
+  line('main.boot-deadline-passed', { stage: 'window-loaded' }, 'WARN'),
+  line('main.recovery-opened', { trigger: 'shell-deadline' }, 'WARN'),
+  line('main.recovery-shown', { trigger: 'shell-deadline' }, 'WARN'),
+  line('updater.auto-install-countdown', { targetVersion: b.version, mode: 'normal' }, 'WARN'),
+  line('updater.auto-install-started', { targetVersion: b.version }, 'WARN'),
   launchOf(b.version, 5200),
   line('main.boot-stage', { stage: 'shell-mounted' }),
   line('main.boot-stage', { stage: 'home-ready' }),
@@ -89,11 +90,12 @@ const tests: Array<[string, () => Promise<void> | void]> = [
         return true;
       });
       assert.deepEqual(seen, [`${a.sourceCommit}:${autoInstallModulePath}`]);
-      assert.throws(
-        () => assertBaselineShipsAutoInstall(a.sourceCommit, () => false),
-        /predates the guarded automatic install/u,
-      );
-      assert.throws(() => assertBaselineShipsAutoInstall('main', () => true), /full source commit/u);
+      assert.throws(() => {
+        assertBaselineShipsAutoInstall(a.sourceCommit, () => false);
+      }, /predates the guarded automatic install/u);
+      assert.throws(() => {
+        assertBaselineShipsAutoInstall('main', () => true);
+      }, /full source commit/u);
     },
   ],
   [
@@ -110,7 +112,7 @@ const tests: Array<[string, () => Promise<void> | void]> = [
   [
     'the managed AppImage is rebuilt with its own squashfs compressor and refuses anything else',
     () => {
-      const superblock = (magic: string, compression: number): Uint8Array => {
+      const superblock = (magic: string, compression: number): Uint8Array<ArrayBuffer> => {
         const bytes = new Uint8Array(96);
         bytes.set(Buffer.from(magic, 'latin1'), 0);
         new DataView(bytes.buffer).setUint16(20, compression, true);
@@ -152,7 +154,10 @@ const tests: Array<[string, () => Promise<void> | void]> = [
             }
             if (file === 'mksquashfs') {
               const root = args[0]!;
-              assert.equal(await readFile(join(root, 'resources/ui/client/index.html'), 'utf8'), brokenRendererDocument);
+              assert.equal(
+                await readFile(join(root, 'resources/ui/client/index.html'), 'utf8'),
+                brokenRendererDocument,
+              );
               await writeFile(args[1]!, 'rebuilt-payload');
               return '';
             }
@@ -177,10 +182,8 @@ const tests: Array<[string, () => Promise<void> | void]> = [
         assert.equal(mksquashfs[mksquashfs.indexOf('-comp') + 1], 'zstd');
         const install = calls.find(([file]) => file === 'sudo')!;
         assert.deepEqual(install.slice(2, 9), ['install', '-o', 'root', '-g', 'root', '-m', '0755']);
-        assert.equal(
-          (await readFile(image)).toString('latin1'),
-          `${runtime.toString('latin1')}rebuilt-payload`,
-        );
+        const rebuilt = await readFile(image);
+        assert.equal(rebuilt.toString('latin1'), `${runtime.toString('latin1')}rebuilt-payload`);
         await assert.rejects(stat(join(work, 'rebuild')), /ENOENT/u);
       } finally {
         await rm(work, { recursive: true, force: true });
@@ -227,7 +230,13 @@ const tests: Array<[string, () => Promise<void> | void]> = [
         b,
       });
       assert.deepEqual(assessed, {
-        a: { pid: 4100, recoveryTriggers: ['shell-deadline'], countdown: true, started: true, furthestStage: 'window-loaded' },
+        a: {
+          pid: 4100,
+          recoveryTriggers: ['shell-deadline'],
+          countdown: true,
+          started: true,
+          furthestStage: 'window-loaded',
+        },
         b: { pid: 5200, build: `${b.version}+${b.sourceCommit}+packaged`, stage: 'home-ready' },
       });
     },
@@ -244,7 +253,12 @@ const tests: Array<[string, () => Promise<void> | void]> = [
       assert.throws(() => assessRecovery({ log: '', ledger, a, b }), /never started version 0\.9\.0/u);
       assert.throws(
         () =>
-          assessRecovery({ log: without('main.recovery-opened').replace(/.*main\.recovery-shown.*\n/u, ''), ledger, a, b }),
+          assessRecovery({
+            log: without('main.recovery-opened').replace(/.*main\.recovery-shown.*\n/u, ''),
+            ledger,
+            a,
+            b,
+          }),
         /without the recovery window/u,
       );
       assert.throws(
@@ -260,9 +274,10 @@ const tests: Array<[string, () => Promise<void> | void]> = [
           assessRecovery({
             log: healthyRecovery.replace(
               line('main.boot-stage', { stage: 'window-loaded' }),
-              [line('main.boot-stage', { stage: 'window-loaded' }), line('main.boot-stage', { stage: 'home-ready' })].join(
-                '\n',
-              ),
+              [
+                line('main.boot-stage', { stage: 'window-loaded' }),
+                line('main.boot-stage', { stage: 'home-ready' }),
+              ].join('\n'),
             ),
             ledger,
             a,
@@ -274,10 +289,10 @@ const tests: Array<[string, () => Promise<void> | void]> = [
         () =>
           assessRecovery({
             log: healthyRecovery.replace(
-              line('updater.auto-install-started', { targetVersion: b.version }, undefined, 'WARN'),
+              line('updater.auto-install-started', { targetVersion: b.version }, 'WARN'),
               [
                 line('updater.auto-install-stopped', { reason: 'cancelled', targetVersion: b.version }),
-                line('updater.auto-install-started', { targetVersion: b.version }, undefined, 'WARN'),
+                line('updater.auto-install-started', { targetVersion: b.version }, 'WARN'),
               ].join('\n'),
             ),
             ledger,
@@ -288,7 +303,7 @@ const tests: Array<[string, () => Promise<void> | void]> = [
       );
       assert.throws(
         () => assessRecovery({ log: healthyRecovery.split('\n').slice(0, 7).join('\n'), ledger, a, b }),
-        /version 0\.9\.1 has not started/u,
+        /Version 0\.9\.1 has not started/u,
       );
       assert.throws(
         () =>
@@ -305,7 +320,11 @@ const tests: Array<[string, () => Promise<void> | void]> = [
   [
     'the receipts job admits exactly the scope rows, each passed, all on one A and B',
     () => {
-      const receipt = (id: string, route: RecoveryReceipt['route'], target: RecoveryReceipt['target']): RecoveryReceipt => ({
+      const receipt = (
+        id: string,
+        route: RecoveryReceipt['route'],
+        target: RecoveryReceipt['target'],
+      ): RecoveryReceipt => ({
         schemaVersion: 1,
         scenario: 'T-B22.4',
         id,
@@ -316,7 +335,13 @@ const tests: Array<[string, () => Promise<void> | void]> = [
         a,
         b,
         evidence: {
-          a: { pid: 1, recoveryTriggers: ['shell-deadline'], countdown: true, started: true, furthestStage: 'window-loaded' },
+          a: {
+            pid: 1,
+            recoveryTriggers: ['shell-deadline'],
+            countdown: true,
+            started: true,
+            furthestStage: 'window-loaded',
+          },
           b: { pid: 2, build: `${b.version}+${b.sourceCommit}+packaged`, stage: 'home-ready' },
           installed: { executableSha256: 'c'.repeat(64), asarSha256: 'd'.repeat(64) },
         },
@@ -333,7 +358,11 @@ const tests: Array<[string, () => Promise<void> | void]> = [
       assert.deepEqual(assertRecoveryReceipts('macos', []), []);
       assert.throws(() => assertRecoveryReceipts('linux', linux.slice(0, 1)), /missing ubuntu-appimage-recovery-x11/u);
       assert.throws(
-        () => assertRecoveryReceipts('linux', [...linux, receipt('windows-nsis-recovery-x64', 'windows-nsis', 'win32-x64')]),
+        () =>
+          assertRecoveryReceipts('linux', [
+            ...linux,
+            receipt('windows-nsis-recovery-x64', 'windows-nsis', 'win32-x64'),
+          ]),
         /not a linux recovery row/u,
       );
       assert.throws(
@@ -348,10 +377,7 @@ const tests: Array<[string, () => Promise<void> | void]> = [
         () => assertRecoveryReceipts('linux', [linux[0]!, { ...linux[1]!, route: 'linux-apt' }]),
         /runs another route/u,
       );
-      assert.throws(
-        () => assertRecoveryReceipts('linux', [linux[0]!, { ...linux[1]!, b: a }]),
-        /distinct versions/u,
-      );
+      assert.throws(() => assertRecoveryReceipts('linux', [linux[0]!, { ...linux[1]!, b: a }]), /distinct versions/u);
     },
   ],
 ];

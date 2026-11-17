@@ -15,7 +15,7 @@ import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
-import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
+import type { DraftAttachment, DraftAttachmentSource, PendingDraftImage } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { attachmentModelForExecution, attachmentSendBlockReason } from '#utils/chat.utils.js';
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
@@ -250,6 +250,8 @@ export function useChatTextareaLogic({
   sendBlockReason: string | undefined;
   /** An attachment is still being resized or stored; sending now would leave it behind. */
   isAttaching: boolean;
+  /** The draft's images still converting or storing, whose thumbnail slots the rail holds. */
+  pendingImages: readonly PendingDraftImage[];
   /** The caller's `isSubmitDisabled`, or an attachment still on its way (F4). */
   isSubmitDisabled: boolean;
   /** The directory the draft's attachment references resolve against. */
@@ -373,6 +375,7 @@ export function useChatTextareaLogic({
   );
   const sendBlockReason = attachmentSendBlockReason(attachments, attachmentModel);
   const isAttaching = useDraftSelector((state) => (mode === 'main' ? state.attachingMain : state.attachingEdit));
+  const pendingImages = useDraftSelector((state) => (mode === 'main' ? state.pendingMain : state.pendingEdit));
   const canResume =
     mode === 'main' &&
     resume !== undefined &&
@@ -897,6 +900,7 @@ export function useChatTextareaLogic({
     attachments,
     sendBlockReason,
     isAttaching,
+    pendingImages,
     isSubmitDisabled: isSubmitDisabled || isAttaching,
     attachmentDirectory,
     attachmentAccept: pickerAccept,

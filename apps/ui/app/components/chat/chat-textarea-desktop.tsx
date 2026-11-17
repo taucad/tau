@@ -43,7 +43,7 @@ import { ChatTextareaBorderBeam } from '@taucad/chat-ui/components/chat-textarea
 import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
-import type { DraftAttachment } from '#hooks/draft.machine.js';
+import type { DraftAttachment, PendingDraftImage } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
 import { ChatEditor } from '@taucad/chat-ui/components/tiptap/chat-editor';
@@ -64,6 +64,8 @@ import type { ChatContextReference } from '@taucad/chat-ui/components/chat-conte
 
 /** One identity for "no skills", so an unavailable catalog does not re-derive the slash items each render. */
 const noSkills: SkillsCatalogState['commands'] = [];
+/** One identity for "nothing converting", so the memoised rail is not re-rendered for a new empty list. */
+const noPendingImages: readonly PendingDraftImage[] = [];
 
 const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
   image: 'Add files',
@@ -91,6 +93,8 @@ type ChatTextareaDesktopProperties = {
   readonly isSubmitting: boolean;
   readonly canResume?: boolean;
   readonly isAttaching: boolean;
+  /** Images still converting or storing; the rail holds their thumbnail slots. */
+  readonly pendingImages?: readonly PendingDraftImage[];
   readonly inputText: string;
   readonly attachments: readonly DraftAttachment[];
   readonly attachmentDirectory: AttachmentDirectories;
@@ -170,6 +174,7 @@ const isComposerAtRest = (input: {
   readonly dragKind: ChatTextareaDragKind | undefined;
   readonly inputText: string;
   readonly attachments: readonly DraftAttachment[];
+  readonly pendingImages: readonly PendingDraftImage[];
 }): boolean =>
   input.enableMobileCollapse === true &&
   input.isFocused !== true &&
@@ -177,7 +182,8 @@ const isComposerAtRest = (input: {
   !input.isSubmitting &&
   input.dragKind === undefined &&
   input.inputText.trim().length === 0 &&
-  input.attachments.length === 0;
+  input.attachments.length === 0 &&
+  input.pendingImages.length === 0;
 
 /**
  * Why Send refuses, in the words its tooltip and description use (F14).
@@ -253,6 +259,7 @@ export const ChatTextareaDesktop = memo(function ({
   isSubmitting,
   canResume = false,
   isAttaching,
+  pendingImages = noPendingImages,
   inputText,
   attachments,
   attachmentDirectory,
@@ -680,6 +687,7 @@ export const ChatTextareaDesktop = memo(function ({
     dragKind,
     inputText,
     attachments,
+    pendingImages,
   });
   /* F19: the beam follows the box's corners. */
   const radius = mode === 'edit' ? 'rounded-lg' : 'rounded-2xl';
@@ -715,6 +723,7 @@ export const ChatTextareaDesktop = memo(function ({
         {/* Attachments */}
         <ChatTextareaAttachmentRail
           attachments={attachments}
+          pendingImages={pendingImages}
           directory={attachmentDirectory}
           blockReason={sendBlockReason}
           blockReasonId={blockReasonId}

@@ -8,6 +8,7 @@
  * sampled while the agent works (SP-4's measurement, ported into Node).
  */
 
+import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
 import type { Server } from 'node:http';
@@ -16,6 +17,7 @@ import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } f
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
@@ -66,7 +68,7 @@ const fakeAgent: AcpAdapter = {
   displayName: 'Codex',
   /* V5 deleted the pin's default model: with no turn selection the fixture runs
    * its own first model, which is `fakeAgentModel`. */
-  modulePath: new URL('fixtures/fake-agent.ts', import.meta.url).pathname,
+  modulePath: fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url)),
 };
 
 /** The same fixture under a second id, so an agent switch inside a chat is testable. */
@@ -759,7 +761,7 @@ describe('the external agent run kind', () => {
                   id: 'grok',
                   displayName: 'Grok Build',
                   cli: process.execPath,
-                  args: [new URL('fixtures/fake-agent.ts', import.meta.url).pathname],
+                  args: [fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url))],
                   configEnv: [],
                   // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture environment variable.
                   spawnEnv: { TAU_FAKE_AGENT_MODE: 'grok' },
@@ -1634,7 +1636,11 @@ const openFixture = async (
     cwd,
   });
   closers.push(async () => {
+    /* Gone before its cwd is removed: Windows refuses to remove a live process's working directory (EBUSY). */
+    const { child } = adapter;
+    const exited = child.exitCode === null && child.signalCode === null ? once(child, 'exit') : undefined;
     adapter.close();
+    await exited;
   });
   const handler: Client = {
     sessionUpdate: (params) => {
@@ -1933,7 +1939,7 @@ describe('one ACP session per chat', () => {
         id: 'grok',
         displayName: 'Grok Build',
         cli: process.execPath,
-        args: [new URL('fixtures/fake-agent.ts', import.meta.url).pathname],
+        args: [fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url))],
         configEnv: [],
         // eslint-disable-next-line @typescript-eslint/naming-convention -- fixture environment variable.
         spawnEnv: { TAU_FAKE_AGENT_MODE: operation === 'load' ? 'grok-load' : 'grok' },
@@ -2741,7 +2747,7 @@ describe('authentication, initialize and prompt content', () => {
     );
     expect(initialized?.frame).toContain(JSON.stringify(process.execPath));
     expect(JSON.stringify(login)).not.toContain(process.execPath);
-    expect(JSON.stringify(login)).not.toContain(new URL('fixtures/fake-agent.ts', import.meta.url).pathname);
+    expect(JSON.stringify(login)).not.toContain(fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url)));
   }, 30_000);
 
   it('should refuse a raw secret form before SDK normalization can create a plaintext question record', async () => {

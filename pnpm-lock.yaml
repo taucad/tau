@@ -3951,6 +3951,25 @@ importers:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
 
+  apps/libs/settings-ui:
+    dependencies:
+      '@taucad/preferences':
+        specifier: workspace:*
+        version: link:../preferences
+    devDependencies:
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.6.3
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.2)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.1(react@19.3.1)
+
   apps/libs/share:
     dependencies:
       '@taucad/project-core':
@@ -4618,6 +4637,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      '@taucad/settings-ui':
+        specifier: workspace:*
+        version: link:../libs/settings-ui
       '@taucad/share':
         specifier: workspace:*
         version: link:../libs/share

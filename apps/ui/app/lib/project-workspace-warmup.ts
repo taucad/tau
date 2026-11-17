@@ -1,4 +1,5 @@
 import type * as ProjectWorkspace from '#routes/w.$workspace.$project/project-live-sessions.js';
+import { warmWorkspaceLayout } from '#lib/workspace-layout-warmup.js';
 
 type ProjectWorkspaceModule = typeof ProjectWorkspace;
 
@@ -46,6 +47,19 @@ export const loadProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
   load = pending;
   void tagSettlement(pending);
   return pending;
+};
+
+/**
+ * The session module focus waits for as it opens a project, with the layout that project will mount once live warmed
+ * beside it (STO-25 SP5): the layout's chunk graph then loads while the session starts instead of after it. A link's
+ * intent warms only the shell ({@link warmProjectWorkspace}); the layout is asked for once a project is being opened.
+ *
+ * @returns The workspace shell import, as {@link loadProjectWorkspace} shares it.
+ */
+// oxlint-disable-next-line @typescript-eslint/promise-function-async -- the shared tagged promise itself, as `loadProjectWorkspace` returns it.
+export const openProjectWorkspace = (): Promise<ProjectWorkspaceModule> => {
+  warmWorkspaceLayout();
+  return loadProjectWorkspace();
 };
 
 /** Start the workspace shell import when a project link shows intent or a project route mounts. */

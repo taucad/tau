@@ -11,6 +11,10 @@
 //   links/<sha256(hostPath)>.json       the closures each host installation uses (the GC roots)
 //   tmp/<attemptId>/owner.json          one staging directory per attempt, swept when its owner is gone
 //   tmp/gc-<id>/                        closures being deleted
+//
+// On Windows the store is compact: closures live at `c/<first 16 hex of the key>` and each attempt stages under
+// `tmp/<12 hex>`, because a closure's own files run 140 characters deep (Python packages' stubs and libraries) and
+// Windows opens and loads them only within its 259-character MAX_PATH.
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -40,23 +44,49 @@ export type StoreLayout = {
   readonly closures: string;
   readonly links: string;
   readonly staging: string;
+  /** The directory name a closure's key is published under, inside {@link StoreLayout.closures}. */
+  readonly closureName: (key: string) => string;
+  /** The staging directory name of an attempt, inside {@link StoreLayout.staging}. */
+  readonly attemptName: (attemptId: string) => string;
+  /** Whether names are shortened for Windows' MAX_PATH. */
+  readonly compact: boolean;
 };
+
+/** Hex characters of a closure key a compact store names it by: 64 bits, unique among one store's closures. */
+const compactClosureNameLength = 16;
+const compactClosurePattern = /^[\da-f]{16}$/u;
 
 /**
  * Lay out a store root.
  * @internal
  * @param root - Absolute store root.
+ * @param options - `compact` for a Windows host, whose closures must fit MAX_PATH.
  * @returns Every directory and file the store uses.
  */
-export const storeLayout = (root: string): StoreLayout => ({
-  root,
-  generation: join(root, 'generation'),
-  blobs: join(root, 'blobs', 'sha256'),
-  aliases: join(root, 'blobs', 'alias'),
-  closures: join(root, 'closures', 'sha256'),
-  links: join(root, 'links'),
-  staging: join(root, 'tmp'),
-});
+export const storeLayout = (root: string, options: Readonly<{ compact?: boolean }> = {}): StoreLayout => {
+  const compact = options.compact ?? false;
+  return {
+    root,
+    generation: join(root, 'generation'),
+    blobs: join(root, 'blobs', 'sha256'),
+    aliases: join(root, 'blobs', 'alias'),
+    closures: compact ? join(root, 'c') : join(root, 'closures', 'sha256'),
+    links: join(root, 'links'),
+    staging: join(root, 'tmp'),
+    closureName: compact ? (key) => key.slice(0, compactClosureNameLength) : (key) => key,
+    attemptName: compact ? (attemptId) => attemptId.replaceAll('-', '').slice(0, 12) : (attemptId) => attemptId,
+    compact,
+  };
+};
+
+/**
+ * Where a closure is published.
+ * @internal
+ * @param layout - The store.
+ * @param key - The closure's sha256 hex key.
+ * @returns The closure root.
+ */
+export const closureRoot = (layout: StoreLayout, key: string): string => join(layout.closures, layout.closureName(key));
 
 const errorCode = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | undefined)?.code;
 
@@ -226,7 +256,7 @@ const isReceipt = (value: unknown): value is ClosureReceipt => {
  * @returns The receipt, or `undefined` when the closure is not sealed or its receipt is unreadable.
  */
 export const readReceipt = async (layout: StoreLayout, key: string): Promise<ClosureReceipt | undefined> => {
-  const root = join(layout.closures, key);
+  const root = closureRoot(layout, key);
   try {
     const parsed: unknown = JSON.parse(await readFile(join(root, 'receipt.json'), 'utf8'));
     return isReceipt(parsed) ? { ...parsed, root } : undefined;
@@ -281,7 +311,7 @@ export const readLaunch = async (
   layout: StoreLayout,
   key: string,
 ): Promise<{ readonly launch: ClosureLaunch; readonly tauVersion: string } | undefined> => {
-  const root = join(layout.closures, key);
+  const root = closureRoot(layout, key);
   const [stamp, text] = await Promise.all([
     readStamp(root),
     readFile(join(root, launchIndexPath), 'utf8').catch(() => undefined),
@@ -311,7 +341,7 @@ export const retireClosure = async (layout: StoreLayout, key: string): Promise<v
   const trash = join(layout.staging, `gc-${randomUUID()}`);
   await mkdir(trash, { recursive: true });
   try {
-    await rename(join(layout.closures, key), join(trash, key));
+    await rename(closureRoot(layout, key), join(trash, layout.closureName(key)));
   } catch (error) {
     if (errorCode(error) !== 'ENOENT') {
       throw error;
@@ -331,7 +361,7 @@ export const retireClosure = async (layout: StoreLayout, key: string): Promise<v
  */
 export const sealClosure = async (layout: StoreLayout, staged: string, key: string): Promise<ClosureReceipt> => {
   await mkdir(layout.closures, { recursive: true });
-  const target = join(layout.closures, key);
+  const target = closureRoot(layout, key);
   try {
     await rename(staged, target);
   } catch (error) {
@@ -362,12 +392,31 @@ export const sealClosure = async (layout: StoreLayout, staged: string, key: stri
  * @returns Hex keys.
  */
 export const closureKeys = async (layout: StoreLayout): Promise<string[]> => {
+  let names: string[];
   try {
-    const names = await readdir(layout.closures);
-    return names.filter((name) => hexPattern.test(name));
+    names = await readdir(layout.closures);
   } catch {
     return [];
   }
+  if (!layout.compact) {
+    return names.filter((name) => hexPattern.test(name));
+  }
+  // A compact name is the key's prefix; the receipt names the whole key. A closure whose receipt cannot be read
+  // answers its name, which no live link holds, so GC removes it as it removes any damaged closure.
+  return Promise.all(
+    names
+      .filter((name) => compactClosurePattern.test(name))
+      .map(async (name) => {
+        try {
+          const parsed: unknown = JSON.parse(await readFile(join(layout.closures, name, 'receipt.json'), 'utf8'));
+          const integrity = isReceipt(parsed) ? parsed.closureIntegrity : undefined;
+          const key = integrity === undefined ? undefined : sha256Key(integrity);
+          return key !== undefined && layout.closureName(key) === name ? key : name;
+        } catch {
+          return name;
+        }
+      }),
+  );
 };
 
 // ============================================================================
@@ -455,7 +504,7 @@ type StagingOwner = { readonly pid: number; readonly hostname: string; readonly 
  * @returns The staging directory.
  */
 export const createStaging = async (layout: StoreLayout, attemptId: string): Promise<string> => {
-  const directory = join(layout.staging, attemptId);
+  const directory = join(layout.staging, layout.attemptName(attemptId));
   await mkdir(directory, { recursive: true });
   const owner: StagingOwner = { pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString() };
   await writeFile(join(directory, 'owner.json'), JSON.stringify(owner));
@@ -593,7 +642,7 @@ export const collectStoreGarbage = async (
   const { live, deadLinks } = await liveClosures(layout, input.signal);
   const sealed = await closureKeys(layout);
   const deadClosures = sealed.filter((key) => !live.has(key));
-  const closureBytes = await Promise.all(deadClosures.map(async (key) => treeBytes(join(layout.closures, key))));
+  const closureBytes = await Promise.all(deadClosures.map(async (key) => treeBytes(closureRoot(layout, key))));
 
   const liveBlobs = new Set<string>();
   for (const key of await closureKeys(layout)) {

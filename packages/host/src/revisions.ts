@@ -14,7 +14,7 @@
 import { waitFor } from 'xstate';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, watch as watchDirectory } from 'node:fs';
+import { readFileSync, realpathSync, watch as watchDirectory } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
@@ -1146,7 +1146,11 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const watchRoot = (key: WatchKey, root: string): void => {
     watchedRoots.set(key, root);
     try {
-      const watcher = watchDirectory(root, { recursive: true, persistent: false }, (_event, filename) => {
+      /* Windows: libuv aborts the whole process (`Assertion failed: !_wcsnicmp(filename, dir, dirlen)`, fs-event.c)
+       * on the first event under a root spelled with an 8.3 short name, such as a `%TEMP%` of `C:\Users\RUNNER~1`,
+       * because it compares the event's long path with the root as given. The native real path is the long one. */
+      const watched = process.platform === 'win32' ? realpathSync.native(root) : root;
+      const watcher = watchDirectory(watched, { recursive: true, persistent: false }, (_event, filename) => {
         if (filename === null) {
           lose(key);
           return;

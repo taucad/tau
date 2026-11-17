@@ -66,6 +66,7 @@ import { discoverAcpAgents } from '#acp/registry.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import { openAcpSession } from '#acp/acp-session.js';
+import { writeWindowsExecutable } from '#acp/fixtures/windows-executable.js';
 import { defaultConfigDirectory } from '#credential-store.js';
 import { createHostMcpEndpoint } from '#mcp-server.js';
 import { grokPermissionConfigId, grokPlanningConfigId } from '#acp/grok-controls.js';
@@ -746,49 +747,59 @@ describe.skipIf(!liveEnabled || codexAdapter === undefined)('native Codex skill 
     }
   }, 270_000);
 
-  it.skipIf(process.platform === 'win32')(
-    'does not advertise a natively disabled skill',
-    async () => {
-      if (!codexAdapter) {
-        throw new Error('The selected Codex adapter is unavailable.');
-      }
-      const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-disabled-skill-'));
-      roots.push(cwd);
-      const slug = `tau-disabled-${randomUUID()}`;
-      const skill = join(cwd, '.agents/skills', slug);
-      await mkdir(skill, { recursive: true });
-      await writeFile(
-        join(skill, 'SKILL.md'),
-        `---\nname: ${slug}\ndescription: Disabled native conformance skill\n---\nDo not invoke this disabled fixture.\n`,
+  it('does not advertise a natively disabled skill', async () => {
+    if (!codexAdapter) {
+      throw new Error('The selected Codex adapter is unavailable.');
+    }
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-disabled-skill-'));
+    roots.push(cwd);
+    const slug = `tau-disabled-${randomUUID()}`;
+    const skill = join(cwd, '.agents/skills', slug);
+    await mkdir(skill, { recursive: true });
+    await writeFile(
+      join(skill, 'SKILL.md'),
+      `---\nname: ${slug}\ndescription: Disabled native conformance skill\n---\nDo not invoke this disabled fixture.\n`,
+    );
+    // Configure only this test child through Codex's own CLI. User configuration is untouched.
+    const override = `skills.config=[{name="${slug}",enabled=false}]`;
+    let wrapper = join(cwd, 'codex-fixture');
+    if (process.platform === 'win32') {
+      /* No shebang on Windows: a real `.exe` that runs the located Codex with the same override. */
+      wrapper = await writeWindowsExecutable(
+        `${wrapper}.exe`,
+        [
+          `const { status } = require('node:child_process').spawnSync(`,
+          `  ${JSON.stringify(codexAdapter.executablePath ?? 'codex')},`,
+          `  ['-c', ${JSON.stringify(override)}, ...process.argv.slice(2)],`,
+          `  { stdio: 'inherit' },`,
+          `);`,
+          `process.exit(status ?? 1);`,
+        ].join('\n'),
       );
-      // Configure only this test child through Codex's own CLI. User configuration is untouched.
-      const wrapper = join(cwd, 'codex-fixture');
-      await writeFile(wrapper, `#!/bin/sh\nexec codex -c 'skills.config=[{name="${slug}",enabled=false}]' "$@"\n`);
+    } else {
+      await writeFile(wrapper, `#!/bin/sh\nexec codex -c '${override}' "$@"\n`);
       await chmod(wrapper, 0o700);
-      const frames: AcpWireFrame[] = [];
-      const session = await openAcpSession({
-        adapter: { ...codexAdapter, spawnEnv: { ...codexAdapter.spawnEnv, CODEX_PATH: wrapper } },
-        cwd,
-        createId: randomUUID,
-        onFrame: (frame) => frames.push(frame),
-      });
-      try {
-        await expect
-          .poll(() => frames.some(({ frame }) => frame.includes('available_commands_update')), { timeout: 30_000 })
-          .toBe(true);
-        const commands = frames
-          .filter(
-            ({ direction, frame }) => direction === 'agent->client' && frame.includes('available_commands_update'),
-          )
-          .map(({ frame }) => frame)
-          .join('\n');
-        expect(commands).not.toContain(`$${slug}`);
-      } finally {
-        await session.close();
-      }
-    },
-    60_000,
-  );
+    }
+    const frames: AcpWireFrame[] = [];
+    const session = await openAcpSession({
+      adapter: { ...codexAdapter, spawnEnv: { ...codexAdapter.spawnEnv, CODEX_PATH: wrapper } },
+      cwd,
+      createId: randomUUID,
+      onFrame: (frame) => frames.push(frame),
+    });
+    try {
+      await expect
+        .poll(() => frames.some(({ frame }) => frame.includes('available_commands_update')), { timeout: 30_000 })
+        .toBe(true);
+      const commands = frames
+        .filter(({ direction, frame }) => direction === 'agent->client' && frame.includes('available_commands_update'))
+        .map(({ frame }) => frame)
+        .join('\n');
+      expect(commands).not.toContain(`$${slug}`);
+    } finally {
+      await session.close();
+    }
+  }, 60_000);
 
   it.each(['read-only', 'agent', 'agent-full-access'])(
     'preserves native %s authority for an additional skill root',

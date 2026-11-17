@@ -28,6 +28,8 @@ import {
 import type { AcpAgentDiscovery, AcpSupportedPlatform, ReviewedAcpAgentProfile } from '#acp/registry.js';
 import { externalAgentDescriptorSchema } from '@taucad/agent-host/wire';
 
+import { answeringScript, writeWindowsExecutable } from '#acp/fixtures/windows-executable.js';
+
 /** The PATH a Finder or launchd launch gives an app. */
 const launchdPath = '/usr/bin:/bin:/usr/sbin:/sbin';
 
@@ -425,6 +427,132 @@ describe.each(profiles)('the $label profile', ({ profile }) => {
       expect(discovery.refused).toEqual([]);
       expect(discovery.agents.map((agent) => agent.id)).toEqual([profile.id]);
       expect(warnings).toEqual([expect.stringContaining('ready')]);
+    });
+  });
+
+  /* The same rules on a Windows host, with real `.exe` stubs (`fixtures/windows-executable.ts`): Windows has no
+   * shebang, and Tau never starts a `.cmd` shim. The POSIX block above stays POSIX: it drives `/bin/sh` stubs,
+   * `:`-separated PATHs and the launchd PATH, none of which exist here. */
+  describe.runIf(process.platform === 'win32')('with stub executables on Windows', () => {
+    const systemPath = win32.join(process.env['SystemRoot'] ?? String.raw`C:\Windows`, 'System32');
+
+    /**
+     * Discover one profile against a temporary Windows home.
+     *
+     * @param home - The temporary home; the only place files exist.
+     * @param options - PATH entries ahead of System32 and the probe budget.
+     * @returns The discovery and the warnings it logged.
+     */
+    const discoverOnWindows = async (
+      home: string,
+      options: { readonly path?: readonly string[]; readonly probeTimeout?: number } = {},
+    ): Promise<{ readonly discovery: AcpAgentDiscovery; readonly warnings: readonly string[] }> => {
+      const warnings: string[] = [];
+      const discovery = await discoverAcpAgents({
+        resolveFrom,
+        pins: [profile],
+        /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+        environment: {
+          PATH: [...(options.path ?? []), systemPath].join(';'),
+          PATHEXT: '.COM;.EXE;.BAT;.CMD',
+          USERPROFILE: home,
+          SystemRoot: process.env['SystemRoot'],
+        },
+        /* eslint-enable @typescript-eslint/naming-convention -- end of wire-named environment. */
+        platform: 'win32',
+        fileSystem: confinedTo(home),
+        probeModels: false,
+        ...(options.probeTimeout === undefined ? {} : { probeTimeout: options.probeTimeout }),
+        onWarning: (message) => warnings.push(message),
+      });
+      return { discovery, warnings };
+    };
+
+    /** The profile's home-relative win32 fallbacks, as files under `home`. */
+    const windowsHomeEntries = profile.fallbackExecutables.win32.filter((entry) => entry.startsWith('~/'));
+    const inWindowsHome = (home: string, entry: string): string => win32.join(home, ...entry.slice(2).split('/'));
+
+    it('should read its own version sample from an .exe on PATH, at or above the floor', async () => {
+      const home = await temporaryHome();
+      const file = await writeWindowsExecutable(
+        win32.join(home, 'bin', `${profile.cli}.exe`),
+        answeringScript(profile.versionSample),
+      );
+
+      const { discovery, warnings } = await discoverOnWindows(home, { path: [dirname(file)] });
+
+      expect(discovery.refused).toEqual([]);
+      expect(discovery.agents[0]).toMatchObject({ id: profile.id, executablePath: file, executableSource: 'path' });
+      expect(warnings).toEqual([]);
+    });
+
+    it.each(windowsHomeEntries)('should resolve the win32 fallback %s under USERPROFILE', async (entry) => {
+      const home = await temporaryHome();
+      const file = inWindowsHome(home, entry.replaceAll('/*/', '/2.1.325/'));
+      await writeWindowsExecutable(file, answeringScript(profile.versionSample));
+
+      const { discovery } = await discoverOnWindows(home);
+
+      expect(discovery.refused).toEqual([]);
+      expect(discovery.agents[0]).toMatchObject({ executablePath: file, executableSource: 'fallback' });
+    });
+
+    it('should never start a .cmd shim, and name it when nothing else is found', async () => {
+      const home = await temporaryHome();
+      const shim = win32.join(home, 'npm', `${profile.cli}.cmd`);
+      await mkdir(dirname(shim), { recursive: true });
+      await writeFile(shim, `@echo ${profile.versionSample}\r\n`);
+
+      const { discovery } = await discoverOnWindows(home, { path: [dirname(shim)] });
+
+      expect(discovery.agents).toEqual([]);
+      expect(discovery.refused).toEqual([expect.objectContaining({ id: profile.id, code: 'CLI_NOT_FOUND' })]);
+      expect(discovery.refused[0]?.message).toContain(`${profile.cli}.cmd`);
+      expect(parsedDescriptors(discovery, profile, 'win32')[0]?.fixCommand).toBe(profile.installCommand.windows);
+    });
+
+    it('should refuse CLI_TOO_OLD below the floor, with the PowerShell update command', async () => {
+      const home = await temporaryHome();
+      const file = await writeWindowsExecutable(
+        win32.join(home, 'bin', `${profile.cli}.exe`),
+        answeringScript(`${profile.cli} 0.0.1`),
+      );
+
+      const { discovery } = await discoverOnWindows(home, { path: [dirname(file)] });
+
+      expect(discovery.refused).toEqual([expect.objectContaining({ id: profile.id, code: 'CLI_TOO_OLD' })]);
+      expect(parsedDescriptors(discovery, profile, 'win32')[0]?.fixCommand).toBe(profile.updateCommand.windows);
+    });
+
+    it('should refuse EXTERNAL_AGENT_UNAVAILABLE inside the budget when the CLI and a process it started hang', async () => {
+      const home = await temporaryHome();
+      /* The stub is itself a launcher: its Node.js child holds stdout too, as a vendor launcher's would. */
+      const file = await writeWindowsExecutable(
+        win32.join(home, 'bin', `${profile.cli}.exe`),
+        'setTimeout(() => undefined, 30_000);',
+      );
+      const started = performance.now();
+
+      const { discovery } = await discoverOnWindows(home, { path: [dirname(file)], probeTimeout: 500 });
+
+      expect(discovery.refused).toEqual([
+        expect.objectContaining({ id: profile.id, code: 'EXTERNAL_AGENT_UNAVAILABLE' }),
+      ]);
+      expect(discovery.refused[0]?.message).toMatch(/did not answer within 500 ms/u);
+      /* The hang is cut at the budget, not when the last process holding the pipe gives up. */
+      expect(performance.now() - started).toBeLessThan(10_000);
+    }, 40_000);
+
+    it('should refuse EXTERNAL_AGENT_UNAVAILABLE when the CLI exits non-zero', async () => {
+      const home = await temporaryHome();
+      const file = await writeWindowsExecutable(win32.join(home, 'bin', `${profile.cli}.exe`), 'process.exit(3);');
+
+      const { discovery } = await discoverOnWindows(home, { path: [dirname(file)] });
+
+      expect(discovery.refused).toEqual([
+        expect.objectContaining({ id: profile.id, code: 'EXTERNAL_AGENT_UNAVAILABLE' }),
+      ]);
+      expect(discovery.refused[0]?.message).toMatch(/exited with code 3/u);
     });
   });
 });

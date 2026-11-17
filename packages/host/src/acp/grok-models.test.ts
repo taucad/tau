@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { createActor } from 'xstate';
 import { describe, expect, it } from 'vitest';
@@ -168,7 +169,7 @@ describe('a live ACP session', () => {
         displayName: 'Codex',
         // eslint-disable-next-line @typescript-eslint/naming-convention -- child-process environment variable names.
         spawnEnv: { TAU_FAKE_AGENT_MODE: 'pushed-models' },
-        modulePath: new URL('fixtures/fake-agent.ts', import.meta.url).pathname,
+        modulePath: fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url)),
       },
       cwd,
       createId: randomUUID,

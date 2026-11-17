@@ -9,6 +9,7 @@ import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AcpAdapter } from '#acp/registry.js';
 import { createGrokPermissionReadback } from '#acp/grok-permission-readback.js';
+import { writeWindowsExecutable } from '#acp/fixtures/windows-executable.js';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof FileSystem>();
@@ -59,7 +60,15 @@ const fixture = async (version = '1.0.52') => {
   return { root, cwd, home, grokHome, cli, adapter, save, pathFor };
 };
 
-describe('Grok provider permission settings readback', () => {
+/* Readback exists on macOS and Linux only, by design: `resolveLocation` declines `win32`, because native
+ * Grok's session namespace is the URI-encoded POSIX cwd under `$HOME/.grok`, and its Windows spelling
+ * (drive letter, backslashes, `USERPROFILE`) has not been verified against Grok, so Tau reports no
+ * observation rather than guess one. These suites also drive `#!/bin/sh` CLIs, `mkfifo` and names Windows
+ * refuses, such as `*` in a directory. What Windows does instead is proved by 'Grok permission readback on
+ * Windows' below. */
+const readbackPlatform = process.platform !== 'win32';
+
+describe.runIf(readbackPlatform)('Grok provider permission settings readback', () => {
   it('should observe an exact newly present rule without claiming effective permission or exposing config', async () => {
     const f = await fixture();
     const prepared = await createGrokPermissionReadback(f)?.prepare(request());
@@ -304,7 +313,7 @@ const shellRequest = (command = 'python3 -c "print(42)"'): RequestPermissionRequ
   toolCall: { toolCallId: 'shell-call', kind: 'execute', rawInput: { variant: 'Bash', command, is_background: false } },
 });
 
-describe('Grok exact shell preference readback', () => {
+describe.runIf(readbackPlatform)('Grok exact shell preference readback', () => {
   it('should observe a persisted exact command without claiming effective approval', async () => {
     const f = await fixture();
     const prepared = await createGrokPermissionReadback(f)?.prepare(shellRequest());
@@ -358,5 +367,28 @@ describe('Grok exact shell preference readback', () => {
     expect(await prepared?.observe()).toMatchObject({ stored: 'unknown', reason: 'config-read-failed' });
     controller.abort();
     expect(await prepared?.observe()).toMatchObject({ stored: 'unknown', reason: 'request-cancelled' });
+  });
+});
+
+describe.runIf(process.platform === 'win32')('Grok permission readback on Windows', () => {
+  it('should run the qualified CLI and still offer no observation, even when a matching rule is saved', async () => {
+    const f = await fixture();
+    const marker = join(f.root, 'probe.log');
+    const cli = await writeWindowsExecutable(
+      join(f.root, 'grok.exe'),
+      [
+        `require('node:fs').appendFileSync(${JSON.stringify(marker)}, process.argv.slice(2).join(' ') + '\\n');`,
+        `process.stdout.write('grok 1.0.52 (0920c8169e27)\\n');`,
+      ].join('\n'),
+    );
+    await f.save('allowed_mcp_tools = ["tau__ask_questions"]');
+
+    const reader = createGrokPermissionReadback({ ...f, adapter: { ...f.adapter, cli } });
+
+    expect(reader).toBeDefined();
+    await expect(reader?.prepare(request())).resolves.toBeUndefined();
+    await expect(reader?.prepare(shellRequest())).resolves.toBeUndefined();
+    /* The version probe ran once, and its answer qualifies on macOS and Linux: the decline is the platform's. */
+    await expect(readFile(marker, 'utf8')).resolves.toBe('--no-auto-update --version\n');
   });
 });

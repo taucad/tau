@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -1742,7 +1743,7 @@ describe('ACP usage durability', () => {
       version: '0.0.0',
       configEnv: [],
       displayName: 'Codex',
-      modulePath: new URL('fixtures/fake-agent.ts', import.meta.url).pathname,
+      modulePath: fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url)),
     };
     const session = await openAcpSession({ adapter, cwd, createId: randomUUID });
     const firstTurn: AcpPromptTurn = {

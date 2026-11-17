@@ -13,6 +13,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -32,7 +33,7 @@ const fakeAgent: AcpAdapter = {
   version: '0.0.0',
   configEnv: [],
   displayName: 'Codex',
-  modulePath: new URL('fixtures/fake-agent.ts', import.meta.url).pathname,
+  modulePath: fileURLToPath(new URL('fixtures/fake-agent.ts', import.meta.url)),
 };
 
 const registry: ToolRegistry = {

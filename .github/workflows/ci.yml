@@ -92,6 +92,7 @@ jobs:
       shell-projects: ${{ steps.plan.outputs.shell-projects }}
       e2e-queue: ${{ steps.plan.outputs.e2e-queue }}
       e2e-queue-suites: ${{ steps.plan.outputs.e2e-queue-suites }}
+      compute-qualify: ${{ steps.plan.outputs.compute-qualify }}
       reused: ${{ steps.queue.outputs.run-id }}
       affected-base: ${{ steps.queue.outputs.affected-base }}
     steps:
@@ -180,12 +181,25 @@ jobs:
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
              "desktop": {"tags": ["ci:desktop"]},
              "shell": {"tags": ["ci:shell"], "pr": "queue"},
-             "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "queue"}}
+             "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "queue"},
+             "compute-qualify": {"targets": ["compute-qualify-ci"]}}
           SHELL_LANE_PATHS: >-
             [".github/workflows/shell-conformance.yml",
              "apps/desktop/scripts/hosted-linux-bwrap-fixture.mts",
              "apps/desktop/scripts/linux-apt-package.mts",
              "apps/desktop/scripts/runtime-stage.mts"]
+          # Compute reuse qualification lane (`compute-qualify`, audit R5): `runtime-e2e:compute-qualify-ci` asserts the
+          # Replicad reuse-off GLB hashes and work counts of `apps/runtime-e2e/src/compute-baseline`. runtime-e2e stays
+          # quarantined from the test lanes, and it is affected by most of the workspace, so the selector's project is
+          # kept only when a project the qualification measures is affected (COMPUTE_QUALIFY_LANE_PROJECTS) or a file it
+          # reads outside the graph changed (COMPUTE_QUALIFY_LANE_PATHS: the harness and the pinned example models).
+          COMPUTE_QUALIFY_LANE_PROJECTS: '["replicad", "runtime", "middleware", "occt-core", "esbuild"]'
+          COMPUTE_QUALIFY_LANE_PATHS: >-
+            ["apps/runtime-e2e/src/compute-baseline",
+             "apps/runtime-e2e/project.json",
+             "libs/tau-examples/src/kernels/replicad/gridfinity-box",
+             "libs/tau-examples/src/kernels/replicad/six-axis-arm",
+             "libs/tau-examples/src/kernels/replicad/spur-gearbox"]
           NATIVE_DARWIN_LANE_PATHS: >-
             [".github/workflows/native-darwin.yml",
              "scripts/src/check-standalone-project.ts",
@@ -233,6 +247,21 @@ jobs:
             lanes=$(jq -c --slurpfile graph "$RUNNER_TEMP/graph.json" \
               '."native-darwin" = ([$graph[0].graph.nodes[] | select(.data.targets // {} | has("test:native-darwin")) | .name] | sort)' <<< "$lanes")
             echo "Native darwin lane paths changed: $darwin_paths"
+          fi
+          # The compute qualification lane's input check: keep its project only when a measured project is affected or a
+          # qualification path changed (a path names a file or a directory).
+          if [ "$(jq -c '."compute-qualify"' <<< "$lanes")" != '[]' ]; then
+            qualify_projects=$(jq -c --argjson projects "$COMPUTE_QUALIFY_LANE_PROJECTS" \
+              '[.[] | select(. as $name | $projects | index([$name]) != null)]' <<< "$affected")
+            qualify_paths=$(git diff --name-only --no-renames "$NX_BASE" "${NX_HEAD:-HEAD}" \
+              | jq -cRn --argjson paths "$COMPUTE_QUALIFY_LANE_PATHS" \
+                  '[inputs | select(. as $file | any($paths[] as $path | $file == $path or ($file | startswith($path + "/")); .))]')
+            if [ "$qualify_projects" = '[]' ] && [ "$qualify_paths" = '[]' ]; then
+              lanes=$(jq -c '."compute-qualify" = []' <<< "$lanes")
+              echo "Compute qualification lane: no measured project affected and no qualification path changed."
+            else
+              echo "Compute qualification inputs: projects $qualify_projects, paths $qualify_paths"
+            fi
           fi
           jq -r 'to_entries[] | "Affected \(.key): \(.value | tojson)"' <<< "$lanes"
           # What `nx affected` selected, for `lanes.json` below.
@@ -328,6 +357,7 @@ jobs:
             echo "shell-projects=$shell_projects"
             echo "e2e-queue=$e2e_queue"
             echo "e2e-queue-suites=$e2e_queue_suites"
+            echo "compute-qualify=$(flag compute-qualify)"
           } >> "$GITHUB_OUTPUT"
           # `staging.yml` reads which service lanes `nx affected` selected (`api`, `billing-e2e`,
           # keyed by their job), before the reuse and pull-request rules above, and the merge-queue
@@ -913,9 +943,36 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Compute reuse qualification (audit R5): the cheap subset of the Replicad qualification matrix, run whenever the
+  # plan's input check selects it. It asserts reuse-off GLB hashes, byte parity with reuse on across cache histories,
+  # multi-thread WASM parity and the per-step work counts pinned in
+  # `apps/runtime-e2e/src/compute-baseline/qualification-baselines.json`; timings are recorded, never asserted. Only
+  # this target runs here; runtime-e2e's other suites stay quarantined.
+  compute-qualify:
+    name: Compute reuse qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.compute-qualify == 'true' }}
+    permissions:
+      contents: 'read'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Run the qualification subset
+        timeout-minutes: 40
+        # The plan selected the lane through the target; the one project that declares it runs.
+        run: pnpm nx run-many -t compute-qualify-ci --parallel=1 --outputStyle=stream
+
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (browser, GeoSpec example contracts, CLI
-  # end-to-end, the end-to-end ratchet, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
+  # end-to-end, the end-to-end ratchet, compute reuse qualification, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
   # rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected fails it. It waits for every
   # lane, so a merge-queue run whose gate passed proves every lane it selected, which is the one
   # proof `queue-verdict` reuses on the push (Brain ci-audit 2026-11-12, F1). API tests are a
@@ -940,6 +997,7 @@ jobs:
         shell,
         formal-nightly,
         e2e-queue,
+        compute-qualify,
       ]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -972,6 +1030,8 @@ jobs:
           FORMAL_NIGHTLY_RESULT: ${{ needs.formal-nightly.result }}
           E2E_QUEUE_REQUIRED: ${{ needs.plan.outputs.e2e-queue }}
           E2E_QUEUE_RESULT: ${{ needs.e2e-queue.result }}
+          COMPUTE_QUALIFY_REQUIRED: ${{ needs.plan.outputs.compute-qualify }}
+          COMPUTE_QUALIFY_RESULT: ${{ needs.compute-qualify.result }}
           EVENT: ${{ github.event_name }}
           REUSED: ${{ needs.plan.outputs.reused }}
           DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -998,6 +1058,7 @@ jobs:
           if [ "$SHELL_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$SHELL_RESULT" = success; fi
           if [ "$FORMAL_NIGHTLY_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$FORMAL_NIGHTLY_RESULT" = success; fi
           if [ "$E2E_QUEUE_REQUIRED" = true ]; then test "$E2E_QUEUE_RESULT" = success; fi
+          if [ "$COMPUTE_QUALIFY_REQUIRED" = true ]; then test "$COMPUTE_QUALIFY_RESULT" = success; fi
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal:tla` or `formal:lean` target. A known counterexample is an

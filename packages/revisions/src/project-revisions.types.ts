@@ -131,6 +131,16 @@ export type RevisionStatusProjection = Readonly<{
    */
   applyingRoots?: readonly string[];
   /**
+   * The paths a page asked after that the selected checkout's tree write has
+   * landed for good, sorted; absent when none has, which reads as unknown, never
+   * as landed (I7). A file pane outside the entry closure opens on it before the
+   * whole write lands (STO-25).
+   *
+   * Like `applyingRoots`, the root does not set it: the host that brackets the
+   * apply merges it.
+   */
+  landedPaths?: readonly string[];
+  /**
    * How far the selected checkout's tree has arrived (D10). Absent until the
    * host has published a reading, which reads as unknown, never as empty (I7).
    *

@@ -115,15 +115,10 @@ if (tauAblation.has('surfaceFilter')) throw new Error('surfaceFilter is retired:
       "  const array = uniformArray<'vec4'>(values, 'vec4').setName(name);",
       "  if (tauAblation.get('shaderNames') === 'legacy') return uniformArray<'vec4'>(values, 'vec4');\n  const array = uniformArray<'vec4'>(values, 'vec4').setName(name);",
     );
-  } else if (file.endsWith('/graphics/three/controls/viewport-gizmo-cube-surface.ts')) {
+  } else if (file.endsWith('/graphics/three/controls/viewport-gizmo-styles.ts')) {
     replace(
-      "if (backend === 'webgpu') {",
-      "if (backend === 'webgpu' && tauAblation.get('pickerIdentity') !== 'legacy') {",
-    );
-  } else if (file.endsWith('/graphics/three/controls/viewport-gizmo-cube-axes.ts')) {
-    replace(
-      "const SpriteMaterial = renderingBackend === 'webgpu' ? SpriteNodeMaterial : THREE.SpriteMaterial;",
-      "const SpriteMaterial = renderingBackend === 'webgpu' && tauAblation.get('pickerIdentity') !== 'legacy' ? SpriteNodeMaterial : THREE.SpriteMaterial;",
+      '    material.positionNode = positionLocal;',
+      "    if (tauAblation.get('pickerIdentity') !== 'legacy') material.positionNode = positionLocal;",
     );
   } else if (file.endsWith('/graphics/three/controls/section-plane-picker.ts')) {
     replace(

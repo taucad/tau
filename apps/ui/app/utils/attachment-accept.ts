@@ -28,6 +28,15 @@ export type AttachmentAcceptInput = {
 const isImageFormat = (format: string): format is ImageFormat => Object.hasOwn(imageFormats, format);
 
 /**
+ * Sources the runtime names that the image probe files under another format, by the media type a picker knows them
+ * by. HEIF bytes probe as `heic`, whose entry already offers `.heif`, but a picker filters `image/heif` separately.
+ */
+const sourceMediaTypes: ReadonlyMap<string, string> = new Map([['heif', 'image/heif']]);
+
+/** HEIC and HEIF, which iOS WebKit's picker converts to JPEG unless `accept` asks for them (review AR8). */
+const heifSources: ReadonlySet<string> = new Set(['heic', 'heif']);
+
+/**
  * Build the picker's `accept` attribute.
  *
  * @param input - What the model reads, what the host converts, and whether this is iOS WebKit.
@@ -39,7 +48,14 @@ export const attachmentAccept = ({ images, documents, transcodeSources, isIos }:
   );
   if (images) {
     for (const format of transcodeSources) {
-      if (!isImageFormat(format) || (isIos && format === 'heic')) {
+      if (isIos && heifSources.has(format)) {
+        continue;
+      }
+      if (!isImageFormat(format)) {
+        const sourceMediaType = sourceMediaTypes.get(format);
+        if (sourceMediaType !== undefined) {
+          accepted.add(sourceMediaType);
+        }
         continue;
       }
       const { mediaType, extensions } = imageFormats[format];

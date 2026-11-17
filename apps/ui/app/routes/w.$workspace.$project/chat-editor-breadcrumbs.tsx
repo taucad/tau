@@ -14,7 +14,7 @@ import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
-import { virtualDeclarationRoot } from '#lib/virtual-declarations.js';
+import { virtualDeclarationRoot } from '@taucad/editor-ui/lib/virtual-declarations';
 import { symbolGlyph } from '@taucad/editor-ui/components/code/editor-completion-icon';
 import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
 import { cn } from '@taucad/ui/utils/cn';

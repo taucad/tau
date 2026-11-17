@@ -24,7 +24,7 @@ describe('PrometheusExporter withResourceConstantLabels', () => {
       readers: [exporter],
     });
     const meter = provider.getMeter('test');
-    meter.createCounter('kernel.executions').add(1);
+    meter.createCounter('ws.disconnections').add(1);
     meter.createHistogram('tau.storage.operation.duration', { unit: 's' }).record(0.2);
 
     const body = await new Promise<string>((resolve) => {
@@ -39,7 +39,7 @@ describe('PrometheusExporter withResourceConstantLabels', () => {
     });
     await provider.shutdown();
 
-    const series = body.split('\n').find((line) => line.startsWith('kernel_executions_total{'));
+    const series = body.split('\n').find((line) => line.startsWith('ws_disconnections_total{'));
     expect(series).toContain('service_name="tau-api"');
     expect(series).toContain('tau_process="app"');
     expect(series).not.toContain('deployment_environment');

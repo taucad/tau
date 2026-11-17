@@ -7,7 +7,6 @@
  * - {@link viewCameraOrientation}: the direction and up of a preset or look camera.
  * - {@link viewSettingsOf}: the live graphics owner's view fields besides its camera, as a record holds them.
  */
-import * as THREE from 'three';
 import { cameraPresetOrientations, lengthUnits, viewFieldValuesOf, workbenchRecords } from '@taucad/workbench';
 import type { ViewFieldValues, ViewSettings, WorkbenchView } from '@taucad/workbench';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
@@ -17,7 +16,7 @@ import type {
   PinnedMeasurement,
 } from '@taucad/viewer/graphics/graphics-settings';
 import type { SectionCut } from '@taucad/viewer/graphics/section-cuts';
-import { resolveCameraUp } from '@taucad/viewer/graphics/three/utils/camera-controls-adapter';
+import { resolveCameraUp } from '@taucad/camera';
 
 /**
  * Translate a portable view into the graphics owner's create-only seed.
@@ -106,12 +105,8 @@ export const viewCameraOrientation = (
           : record.upDirection === 'y'
             ? ([0, 1, 0] as const)
             : ([0, 0, 1] as const)));
-  const up = resolveCameraUp({
-    direction: new THREE.Vector3(...direction),
-    preferredUp: new THREE.Vector3(...preferred),
-    fallbackUp: new THREE.Vector3(0, 1, 0),
-  });
-  return { direction: [...direction], up: [up.x, up.y, up.z] };
+  const up = resolveCameraUp({ direction, preferredUp: preferred, fallbackUp: [0, 1, 0] });
+  return { direction: [...direction], up: [...up] };
 };
 
 /**

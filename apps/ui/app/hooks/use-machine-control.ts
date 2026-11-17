@@ -5,13 +5,10 @@ import type {
   MachineClient,
   MachineDirectoryEntry,
   MachineJogHoldParameters,
-  MachineRequester,
 } from '@taucad/runtime/machine';
 import { randomUuid } from '@taucad/utils/id';
 import { describePrintError, failureCodeOf } from '#components/print/machine-facts.js';
-
-/** Who the pane acts as: the person at this computer. @public */
-export const operator: MachineRequester = { kind: 'user', id: 'operator', label: 'You' };
+import { operator } from '#components/print/machine-operator.js';
 
 /** How long "I am at the machine" lasts without a control being used. Milliseconds. @public */
 export const presenceLease = 10 * 60_000;

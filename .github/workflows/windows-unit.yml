@@ -57,7 +57,9 @@ concurrency:
 jobs:
   plan:
     name: Select the Windows unit rows
+    # Called, the caller's event is this run's event (a pull request too), so `ref` admits it before the label test.
     if: >-
+      inputs.ref != '' ||
       github.event_name != 'pull_request' ||
       (contains(github.event.pull_request.labels.*.name, 'windows-unit') &&
       (github.event.action != 'labeled' || github.event.label.name == 'windows-unit') &&

@@ -183,6 +183,10 @@ export function AgentSignInTab({
       disposed = true;
       runRef.current = undefined;
       observer.disconnect();
+      if (started && session !== undefined) {
+        /* Closing the tab stops a CLI that was still running; the card hears that as a stop, never a success. */
+        reportAgentSignInExit(agentId, undefined);
+      }
       session?.close();
       session = undefined;
       view?.dispose();

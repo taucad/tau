@@ -196,6 +196,35 @@ describe('AgentSignInTab', () => {
     expect(changes).not.toHaveBeenCalled();
   });
 
+  it('should report a stop when the tab closes while the CLI runs', async () => {
+    const { view, unmount } = await openTab();
+    view.type('\r');
+
+    unmount();
+
+    function Outcome(): React.JSX.Element {
+      const outcome = useAgentSignInOutcome('acme');
+      return <p data-testid='outcome'>{typeof outcome === 'object' ? String(outcome.exitCode) : String(outcome)}</p>;
+    }
+    render(<Outcome />);
+    expect(screen.getByTestId('outcome')).toHaveTextContent('undefined');
+    expect(takeAgentSignInSuccess('acme')).toBe(false);
+  });
+
+  it('should report nothing more when the tab closes after the CLI exited', async () => {
+    const { view, emit, unmount } = await openTab();
+    view.type('\r');
+    emit({ type: 'exited', exitCode: 0, signal: null });
+    const changes = vi.fn();
+    const unsubscribe = subscribeAgentSignIns(changes);
+
+    unmount();
+    unsubscribe();
+
+    expect(changes).not.toHaveBeenCalled();
+    expect(takeAgentSignInSuccess('acme')).toBe(true);
+  });
+
   it("should show main's refusal", async () => {
     const { emit } = await openTab();
 

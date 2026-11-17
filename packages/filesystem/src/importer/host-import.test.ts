@@ -337,6 +337,84 @@ describe('a host-side import', () => {
     expect(existsSync(join(fixture.root, 'secret.txt'))).toBe(false);
   });
 
+  it.each(['linux', 'darwin', 'win32'] as const)(
+    'never lands bytes from a directory swapped in and back while a page was listed (%s)',
+    async (platform) => {
+      const fixture = serve();
+      const { grant } = folderGrant(fixture);
+      const listed = join(fixture.folder, 'src');
+      const swapped = join(fixture.sandbox, 'swapped');
+      const foreign = 'export const p = 666; // from the swapped folder';
+      write(swapped, { 'stranger.ts': foreign, 'part.ts': foreign });
+      const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', {
+        ...original,
+        value: platform,
+      });
+      const swap: { state: 'listed' | 'swapped' | 'restored' } = {
+        state: 'listed',
+      };
+      const opendir = fs.opendir.bind(fs);
+      const opened = vi.spyOn(fs, 'opendir').mockImplementation(async (path, options) => {
+        if (swap.state === 'listed') {
+          renameSync(listed, `${listed}.chosen`);
+          renameSync(swapped, listed);
+          swap.state = 'swapped';
+        }
+        return opendir(path, options);
+      });
+      const lstat = fs.lstat.bind(fs);
+      vi.spyOn(fs, 'lstat').mockImplementation((async (path: string, options?: never) => {
+        const stats = await lstat(path, options);
+        /* Put the chosen folder back after the first row, before the walk that checks it again. */
+        if (swap.state === 'swapped' && String(path).startsWith(`${listed}/`)) {
+          renameSync(listed, swapped);
+          renameSync(`${listed}.chosen`, listed);
+          swap.state = 'restored';
+        }
+        return stats;
+      }) as typeof fs.lstat);
+      try {
+        const page = await fixture.sources.list(grant, 'src', 0);
+        opened.mockRestore();
+        vi.mocked(fs.lstat).mockRestore();
+        if (swap.state === 'swapped') {
+          /* Linux reads the rows beneath the held descriptor: no row lstat went by path, so put it back here. */
+          renameSync(listed, swapped);
+          renameSync(`${listed}.chosen`, listed);
+        }
+        /* Linux lists beneath the held descriptor; elsewhere the advisory listing can carry the swapped rows. */
+        expect(page.rows.map(({ name }) => name).toSorted()).toEqual(
+          platform === 'linux' ? ['deep', 'part.ts'] : ['part.ts', 'stranger.ts'],
+        );
+        /* The copy is the authority, the same on every platform: it is run as this host runs it. */
+        Object.defineProperty(process, 'platform', original);
+        const files = page.rows.filter(({ kind }) => kind === 'file');
+        const copied = await fixture.client.copyFromImportGrant(
+          grant,
+          files.map(({ name, size }) => ({
+            from: `src/${name}`,
+            path: name,
+            size,
+          })),
+        );
+        for (const [index, { name }] of files.entries()) {
+          const landed = join(fixture.root, name);
+          if (copied[index]!.outcome === 'failed') {
+            expect(existsSync(landed)).toBe(false);
+          } else {
+            expect(readFileSync(landed, 'utf8')).toBe(tree[`src/${name}`]);
+          }
+        }
+        expect(
+          readdirSync(fixture.root).some((name) => readFileSync(join(fixture.root, name), 'utf8') === foreign),
+        ).toBe(false);
+      } finally {
+        Object.defineProperty(process, 'platform', original);
+      }
+    },
+  );
+
   it('refuses bytes from a directory swapped for a link and back while the file was opened', async () => {
     const fixture = serve();
     const { grant } = folderGrant(fixture);

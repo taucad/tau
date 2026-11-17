@@ -555,11 +555,16 @@ fn write_journal(
             writer.root(root.clone())?;
         }
         for directory in directories {
+            // Another journaled root nested in this one, or the journal itself, which lies inside a denied root when
+            // the host keeps its journals in denied app data: it is being written and is deleted at teardown.
             let other_root = |candidate: &Path| {
                 let candidate = candidate.to_string_lossy();
-                roots.iter().any(|root| {
-                    root.path != *directory && is_within(&candidate, &root.path) && is_within(&root.path, &candidate)
-                })
+                candidate.eq_ignore_ascii_case(&path.to_string_lossy())
+                    || roots.iter().any(|root| {
+                        root.path != *directory
+                            && is_within(&candidate, &root.path)
+                            && is_within(&root.path, &candidate)
+                    })
             };
             tree::walk(
                 Path::new(directory),

@@ -297,11 +297,15 @@ pub fn validate(spec: LaunchSpec, roots: &ExecutableRoots) -> Result<ValidSpec, 
     if let Some(runtime_root) = &executable.runtime_root {
         check_runtime_root(runtime_root, &grants)?;
     }
-    for (path, _) in &grants {
-        if is_within(&journal, path) {
+    // The shell must never read or rewrite the record that restores the descriptors: no granted path may hold it.
+    // A denied path may, and is the natural place (Tau keeps its journals in its own app data, which every launch
+    // denies whole): the deny is the strongest protection the journal can have, and `launch` leaves the journal out
+    // of the descriptors it records.
+    for (path, access) in &grants {
+        if *access != Access::Denied && is_within(&journal, path) {
             return Err(Refused::unsupported(
                 requirement::SPEC,
-                "the journal must not lie inside a path the sandbox is granted or denied",
+                "the journal must not lie inside a path the sandbox is granted",
             ));
         }
     }
@@ -457,6 +461,26 @@ mod tests {
         let mut spec = base();
         spec["journal"] = "C:\\Users\\a\\home\\j.json".into();
         assert_eq!(requirement_of(spec), requirement::SPEC);
+    }
+
+    #[test]
+    fn refuses_a_journal_inside_a_readable_or_read_only_root() {
+        for set in ["readable", "readOnly"] {
+            let mut spec = base();
+            spec["filesystem"][set] = serde_json::json!(["C:\\Users\\a\\AppData\\Roaming\\Tau"]);
+            spec["journal"] = "C:\\Users\\a\\AppData\\Roaming\\Tau\\shell-custody\\j.acl.json".into();
+            assert_eq!(requirement_of(spec), requirement::SPEC, "{set}");
+        }
+    }
+
+    #[test]
+    fn accepts_a_journal_inside_a_denied_root() {
+        // Tau's desktop keeps its journals in its own app data, under the person's profile, and denies that whole.
+        let mut spec = base();
+        spec["filesystem"]["denied"] = serde_json::json!(["C:\\Users\\a\\AppData\\Roaming\\Tau"]);
+        spec["journal"] = "C:\\Users\\a\\AppData\\Roaming\\Tau\\shell-custody\\j.acl.json".into();
+        let valid = check(spec).unwrap();
+        assert!(valid.grants.iter().any(|(path, access)| *access == Access::Denied && path.ends_with("Tau")));
     }
 
     #[test]

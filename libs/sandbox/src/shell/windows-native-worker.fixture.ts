@@ -382,6 +382,12 @@ export type PersonSession = Readonly<{
   /** Whether the process could create a window on that desktop. */
   window: boolean;
   windowError?: string | undefined;
+  /**
+   * What a Chromium-style child makes of the session: started by the person under a restricted, Low-integrity token
+   * in a job, on an alternate desktop the person created on the station, it creates a window and exits `0x00000000`.
+   * `stage` names the step that failed otherwise.
+   */
+  restrictedChild: Readonly<{ stage: string; exitCode?: string; error?: string }>;
   /** Each fixed volume's root folder and its DACL, as SDDL: `setup` grants the volume capability there; no launch may. */
   volumes: Readonly<Record<string, string>>;
 }>;

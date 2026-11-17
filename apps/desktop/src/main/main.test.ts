@@ -1,9 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
+import type * as FileSystem from 'node:fs';
 import type { StreamingMachine, MachineQuitDecision } from '@taucad/types/desktop';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
@@ -32,7 +33,7 @@ import {
   windowFullscreenChannel,
 } from '#shared/desktop-bootstrap.js';
 
-type UpdateMenuItem = { label: string; click?: () => void };
+type UpdateMenuItem = { label?: string; type?: string; role?: string; click?: () => void; submenu?: unknown };
 const originalTitle = process.title;
 const originalResourcesPath = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
 const originalUncaught = new Set(process.listeners('uncaughtException'));
@@ -119,10 +120,19 @@ const state = vi.hoisted(() => ({
   prepareToInstall: undefined as DesktopUpdaterOptions['prepareToInstall'],
   /* Lets a case hold ACP discovery open while the window boots (D17). */
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
+  acpDiscoveryCalls: 0,
   bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
   log: vi.fn(),
   updateMenuItems: [{ label: 'About Tau' }] as UpdateMenuItem[],
   installedUpdateMenuItems: [] as UpdateMenuItem[],
+  helpMenuItems: [{ label: 'Learn More' }] as UpdateMenuItem[],
+  installedHelpMenuItems: [] as UpdateMenuItem[],
+  reportSignal: vi.fn(),
+  flushReports: vi.fn(async () => true),
+  authSignIn: vi.fn(async () => undefined),
+  /* Per-case faults in synchronous filesystem calls main makes during bootstrap (B18). */
+  mkdirSync: undefined as undefined | ((path: string) => void),
+  realpathNative: undefined as undefined | ((path: string) => void),
   updaterCheck: vi.fn(async () => undefined),
   updaterInstall: vi.fn(async () => undefined),
   nativeStoreOptions: undefined as unknown,
@@ -133,9 +143,29 @@ const state = vi.hoisted(() => ({
   servicesPost: vi.fn(),
 }));
 
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof FileSystem>();
+  const mkdirSync = ((path: FileSystem.PathLike, options?: FileSystem.MakeDirectoryOptions) => {
+    state.mkdirSync?.(String(path));
+    return actual.mkdirSync(path, options);
+  }) as typeof actual.mkdirSync;
+  const native = ((path: FileSystem.PathLike) => {
+    state.realpathNative?.(String(path));
+    return actual.realpathSync.native(path);
+  }) as typeof actual.realpathSync.native;
+  const realpathSync = Object.assign(
+    ((path: FileSystem.PathLike, options?: FileSystem.EncodingOption) =>
+      actual.realpathSync(path, options)) as typeof actual.realpathSync,
+    { native },
+  );
+  const overridden = { ...actual, mkdirSync, realpathSync };
+  return { ...overridden, default: overridden };
+});
+
 vi.mock('#main/error-reporting.js', () => ({
   initializeDesktopErrorReporting: state.initializeErrorReporting,
-  reportDesktopSignal: vi.fn(),
+  reportDesktopSignal: state.reportSignal,
+  flushDesktopErrorReporting: state.flushReports,
   rendererErrorReportingEnvironment: vi.fn(() => ({})),
 }));
 
@@ -207,6 +237,8 @@ const app = {
   once: vi.fn(),
   quit: vi.fn(),
   exit: vi.fn(),
+  relaunch: vi.fn(),
+  disableHardwareAcceleration: vi.fn(),
   setName: vi.fn(),
   setAppUserModelId: vi.fn(),
 };
@@ -243,7 +275,9 @@ const fakeWindow = {
   setMinimumSize: vi.fn(),
   restore: vi.fn(),
   loadURL: vi.fn(async () => undefined),
+  loadFile: vi.fn(async () => undefined),
   reload: vi.fn(),
+  close: vi.fn(),
   show: vi.fn(),
   focus: vi.fn(),
   once: vi.fn(),
@@ -267,13 +301,24 @@ vi.mock('electron', () => ({
     getApplicationMenu: vi.fn(() => ({
       items: [
         { submenu: { insert: (index: number, item: UpdateMenuItem) => state.updateMenuItems.splice(index, 0, item) } },
+        {
+          role: 'help',
+          label: 'Help',
+          submenu: {
+            items: state.helpMenuItems,
+            append: (item: UpdateMenuItem) => state.helpMenuItems.push(item),
+          },
+        },
       ],
+      append: vi.fn(),
     })),
     setApplicationMenu: vi.fn(() => {
       // Electron's native menu does not reflect additions until it is installed again.
       state.installedUpdateMenuItems = [...state.updateMenuItems];
+      state.installedHelpMenuItems = [...state.helpMenuItems];
     }),
   },
+  clipboard: { writeText: vi.fn() },
   MenuItem: vi.fn(function MenuItem(options: UpdateMenuItem) {
     return options;
   }),
@@ -348,7 +393,10 @@ vi.mock('@taucad/host', async (importOriginal) => {
   return {
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
     defaultDependencyStore: vi.fn(() => join(state.userData, 'store')),
-    discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
+    discoverAcpAgents: vi.fn(async () => {
+      state.acpDiscoveryCalls += 1;
+      return state.acpDiscovery ?? { agents: [], refused: [] };
+    }),
     externalAgentDescriptors: vi.fn(() => []),
     keepAwakeWhileStreaming,
     projectCloseMilliseconds,
@@ -370,12 +418,17 @@ vi.mock('#main/auth-service.js', () => ({
     onChange: vi.fn(),
     dispose: vi.fn(),
     handleCallback: state.authHandleCallback,
-    signIn: vi.fn(),
+    signIn: state.authSignIn,
     signOut: vi.fn(),
   })),
 }));
 vi.mock('#main/diagnostics.js', () => ({
-  createDiagnosticsLog: vi.fn(() => ({ log: state.log, dispose: vi.fn() })),
+  createDiagnosticsLog: vi.fn(() => ({
+    filePath: join(state.userData, 'logs', 'desktop.log'),
+    log: state.log,
+    flush: vi.fn(async () => undefined),
+    dispose: vi.fn(),
+  })),
   forwardRendererDiagnostics: vi.fn(),
   forwardUtilityDiagnostics: vi.fn(),
   kernelUtilityDiagnostics: vi.fn(() => ({})),
@@ -495,8 +548,14 @@ afterEach(async () => {
   state.prepareToInstall = undefined;
   state.updateMenuItems = [{ label: 'About Tau' }];
   state.installedUpdateMenuItems = [];
+  state.helpMenuItems = [{ label: 'Learn More' }];
+  state.installedHelpMenuItems = [];
+  state.mkdirSync = undefined;
+  state.realpathNative = undefined;
+  state.flushReports.mockImplementation(async () => true);
   getWindows.mockReturnValue([fakeWindow]);
   state.acpDiscovery = undefined;
+  state.acpDiscoveryCalls = 0;
   state.ready = undefined;
   state.shellApplied = undefined;
   state.authRestored = undefined;
@@ -1698,35 +1757,53 @@ describe('desktop main admission gates', () => {
   );
 
   it(
-    'restores the credential before the first page can request an authenticated origin',
+    'holds the first authenticated request, not the first page, until the credential is restored (B32)',
     async () => {
       const restore = Promise.withResolvers<void>();
       state.authRestored = restore.promise;
-      const { injectTauHeaders } = await vi.importActual<{
-        injectTauHeaders: (
-          url: string,
-          headers: Record<string, string>,
+      const { installTauHeaderInjection } = await vi.importActual<{
+        installTauHeaderInjection: (
+          webRequest: {
+            onBeforeSendHeaders: (
+              filter: unknown,
+              listener: (
+                details: { url: string; requestHeaders: Record<string, string> },
+                callback: (response: { requestHeaders: Record<string, string> }) => void,
+              ) => void,
+            ) => void;
+          },
           options: TauHeaderInjectionOptions,
-        ) => Record<string, string>;
+        ) => void;
       }>('#main/header-injection.js');
       let firstRequestHeaders: Record<string, string> | undefined;
       fakeWindow.loadURL.mockImplementationOnce(async () => {
-        firstRequestHeaders = injectTauHeaders('http://127.0.0.1:1/v1/projects', {}, state.headerOptions!);
+        installTauHeaderInjection(
+          {
+            onBeforeSendHeaders: (_filter, listener) => {
+              listener({ url: 'http://127.0.0.1:1/v1/projects', requestHeaders: {} }, ({ requestHeaders }) => {
+                firstRequestHeaders = requestHeaders;
+              });
+            },
+          },
+          state.headerOptions!,
+        );
       });
 
       await boot();
       await vi.waitFor(() => {
-        expect(state.headerOptions).toBeDefined();
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
       });
-      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
       expect(state.headerOptions?.token()).toBeUndefined();
+      expect(firstRequestHeaders).toBeUndefined();
 
       state.authToken = 'restored-token';
       restore.resolve();
       await vi.waitFor(() => {
-        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+        expect(firstRequestHeaders).toEqual({
+          authorization: 'Bearer restored-token',
+          'tau-client': 'tau-desktop/test',
+        });
       });
-      expect(firstRequestHeaders).toEqual({ authorization: 'Bearer restored-token', 'tau-client': 'tau-desktop/test' });
     },
     bootMilliseconds,
   );
@@ -1740,7 +1817,10 @@ describe('desktop main admission gates', () => {
       const openUrl = state.appListeners.get('open-url')?.at(-1);
       expect(openUrl).toBeDefined();
       openUrl?.({ preventDefault: vi.fn() }, 'tau://invitations/queued-token');
-      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/');
+      });
+      expect(fakeWindow.loadURL).not.toHaveBeenCalledWith('app://tau/invitations/queued-token');
 
       restore.resolve();
       await vi.waitFor(() => {
@@ -1751,20 +1831,21 @@ describe('desktop main admission gates', () => {
   );
 
   it(
-    'reports a failed credential restore without loading an unauthenticated page',
+    'logs a failed credential restore and starts signed out instead of ending the launch',
     async () => {
       const restore = Promise.withResolvers<void>();
       state.authRestored = restore.promise;
       await boot();
       await vi.waitFor(() => {
-        expect(state.headerOptions).toBeDefined();
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
       });
       restore.reject(new Error('credential store failed'));
 
       await vi.waitFor(() => {
-        expect(app.exit).toHaveBeenCalledWith(1);
+        expect(state.log).toHaveBeenCalledWith('warn', 'auth.restore-failed', expect.any(Error));
       });
-      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+      expect(app.exit).not.toHaveBeenCalled();
+      expect(state.headerOptions?.token()).toBeUndefined();
     },
     bootMilliseconds,
   );
@@ -2299,3 +2380,603 @@ describe('desktop main machine store', () => {
 });
 
 /* eslint-enable @typescript-eslint/naming-convention -- End environment fixtures. */
+
+/* eslint-disable @typescript-eslint/naming-convention -- Electron exports keep their names; Sentry tags are snake_case. */
+describe('desktop main boot hardening (WP5)', () => {
+  const bootMilliseconds = 30_000;
+
+  /** Boot main over fresh user data, after `before` lays out what an earlier launch left there. */
+  const boot = async (before?: (userData: string) => Promise<void>): Promise<void> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-hardening-'));
+    await before?.(state.userData);
+    await import('#main/main.js');
+  };
+  const booted = async (before?: (userData: string) => Promise<void>): Promise<void> => {
+    await boot(before);
+    await vi.waitFor(() => {
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+    });
+  };
+  const signals = (name: string): Array<{ tags: Record<string, string> }> =>
+    state.reportSignal.mock.calls
+      .map(([signal]) => signal as { fingerprint?: readonly string[]; tags: Record<string, string> } | undefined)
+      .filter((signal) => signal?.fingerprint?.[0] === name) as Array<{ tags: Record<string, string> }>;
+  const troubleshooting = (): UpdateMenuItem[] => {
+    const entry = state.installedHelpMenuItems.find((item) => item.label === 'Troubleshooting');
+    return (entry?.submenu ?? []) as UpdateMenuItem[];
+  };
+
+  it(
+    'should start the updater and install the menu before the first page loads, and show the window at 15 s (T-B17.1)',
+    async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        fakeWindow.loadURL.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
+        await boot();
+        /* `vi.waitFor` advances fake timers while it polls, which would spend the deadline under test. */
+        const giveUpAt = Date.now() + 20_000;
+        while (Date.now() < giveUpAt && fakeWindow.loadURL.mock.calls.length === 0) {
+          // oxlint-disable-next-line no-await-in-loop -- yield to bootstrap without touching the faked clock
+          await new Promise((resolve) => {
+            setImmediate(resolve);
+          });
+        }
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+        const { Menu } = await import('electron');
+        expect(state.prepareToRestart).toBeDefined();
+        expect(state.installedUpdateMenuItems.map((item) => item.label)).toContain('Check for Updates…');
+        expect(troubleshooting().map((item) => item.label)).toContain('Check for Updates…');
+        expect(vi.mocked(Menu.setApplicationMenu).mock.invocationCallOrder[0]).toBeLessThan(
+          fakeWindow.loadURL.mock.invocationCallOrder[0] ?? 0,
+        );
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(14_999);
+        expect(fakeWindow.show).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(fakeWindow.show).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should show the window as soon as it is ready to show (T-B17.2)',
+    async () => {
+      fakeWindow.loadURL.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
+      await boot();
+      await vi.waitFor(() => {
+        expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      });
+      const readyToShow = [...fakeWindow.once.mock.calls, ...fakeWindow.on.mock.calls].find(
+        ([event]) => event === 'ready-to-show',
+      )?.[1] as (() => void) | undefined;
+      expect(readyToShow).toBeTypeOf('function');
+      expect(fakeWindow.show).not.toHaveBeenCalled();
+      readyToShow!();
+      expect(fakeWindow.show).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should explain a bootstrap failure in a native dialog before it exits (T-B18.1)',
+    async () => {
+      state.mkdirSync = (path) => {
+        if (path === join(state.userData, 'home')) {
+          throw Object.assign(new Error(`EACCES: permission denied, mkdir '${path}'`), { code: 'EACCES' });
+        }
+      };
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 3 });
+      await boot();
+      await vi.waitFor(() => {
+        expect(app.exit).toHaveBeenCalled();
+      });
+      expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+      const options = dialog.showMessageBox.mock.calls[0]![0];
+      expect(options.buttons).toEqual(['Restart in Safe Mode', 'Show Logs', 'Download Tau', 'Quit']);
+      expect(dialog.showMessageBox.mock.invocationCallOrder[0]).toBeLessThan(app.exit.mock.invocationCallOrder[0]!);
+      expect(state.flushReports.mock.invocationCallOrder[0]).toBeLessThan(
+        dialog.showMessageBox.mock.invocationCallOrder[0]!,
+      );
+      expect(signals('desktop-bootstrap-failed')).toEqual([
+        expect.objectContaining({ tags: { step: 'home-directory', errno: 'EACCES' } }),
+      ]);
+      expect(state.log).toHaveBeenCalledWith(
+        'error',
+        'main.bootstrap-failed',
+        expect.objectContaining({ step: 'home-directory' }),
+      );
+      expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should log and report an uncaught exception and an unhandled rejection after bootstrap (T-B18.3)',
+    async () => {
+      await booted();
+      const added = (event: 'uncaughtException' | 'unhandledRejection', original: ReadonlySet<unknown>) =>
+        (process.listeners(event as 'uncaughtException') as unknown[]).filter(
+          (listener) => !original.has(listener),
+        ) as Array<(...args: unknown[]) => void>;
+      const exception = new TypeError('late fault');
+      const rejection = new RangeError('late rejection');
+      for (const listener of added('uncaughtException', originalUncaught)) {
+        listener(exception, 'uncaughtException');
+      }
+      for (const listener of added('unhandledRejection', originalUnhandled)) {
+        listener(rejection, Promise.resolve());
+      }
+      expect(state.log).toHaveBeenCalledWith('error', 'main.uncaught-exception', exception);
+      expect(state.log).toHaveBeenCalledWith('error', 'main.unhandled-rejection', rejection);
+      expect(signals('desktop-main-uncaught')).toEqual([
+        expect.objectContaining({ tags: { kind: 'exception', error_name: 'TypeError' } }),
+        expect.objectContaining({ tags: { kind: 'rejection', error_name: 'RangeError' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should skip a failing optional step and still load the first page (T-B18.4)',
+    async () => {
+      const { removeStaleQuickLookSessions } = await import('#main/quick-look.js');
+      vi.mocked(removeStaleQuickLookSessions).mockImplementationOnce(() => {
+        throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+      });
+      await booted(async (userData) => {
+        await mkdir(join(userData, 'machines'));
+        state.realpathNative = (path) => {
+          if (path === join(userData, 'machines')) {
+            throw Object.assign(new Error('EIO'), { code: 'EIO' });
+          }
+        };
+      });
+      expect(signals('desktop-optional-step-failed').map(({ tags }) => tags)).toEqual(
+        expect.arrayContaining([
+          { step: 'quick-look-cleanup', errno: 'EBUSY' },
+          { step: 'legacy-machines', errno: 'EIO' },
+        ]),
+      );
+      expect(signals('desktop-optional-step-failed')).toHaveLength(2);
+      expect(app.exit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should create a window for a second launch when none exists, and show a hidden one (T-B19.1)',
+    async () => {
+      await booted();
+      const { BrowserWindow } = await import('electron');
+      const created = vi.mocked(BrowserWindow).mock.calls.length;
+      const secondInstance = state.appListeners.get('second-instance')!.at(-1)!;
+      getWindows.mockReturnValue([]);
+      secondInstance({}, ['tau']);
+      await vi.waitFor(() => {
+        expect(vi.mocked(BrowserWindow).mock.calls.length).toBe(created + 1);
+      });
+      getWindows.mockReturnValue([fakeWindow]);
+      fakeWindow.show.mockClear();
+      secondInstance({}, ['tau']);
+      expect(fakeWindow.show).toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should boot normally past a leftover route qualification state file and report it once (T-B23.1)',
+    async () => {
+      await booted(async (userData) => {
+        await writeFile(join(userData, 'route-qualification.state.json'), '{}');
+      });
+      expect(signals('desktop-probe-leftover-ignored')).toEqual([
+        expect.objectContaining({ tags: { probe: 'route-qualification', error_name: 'Error' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should boot normally past a leftover OTA receipt and report it once (T-B29.1)',
+    async () => {
+      await booted(async (userData) => {
+        await writeFile(join(userData, 'ota-probe.pending.json'), 'not json');
+      });
+      expect(signals('desktop-probe-leftover-ignored')).toEqual([
+        expect.objectContaining({ tags: { probe: 'ota', error_name: 'Error' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should load the first page while the credential is unread, and hold sign-in until it is (T-B32.1)',
+    async () => {
+      const restore = Promise.withResolvers<void>();
+      state.authRestored = restore.promise;
+      await booted();
+      const signIn = state.handlers.get('tau:auth:sign-in')!;
+      const pending = signIn({ senderFrame: {} });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(state.authSignIn).not.toHaveBeenCalled();
+      restore.resolve();
+      await pending;
+      expect(state.authSignIn).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should offer Help → Troubleshooting with logs and scrubbed diagnostics (T-U5.1)',
+    async () => {
+      await booted();
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toEqual([
+          'Restart in Safe Mode',
+          'Show Logs',
+          'Copy Diagnostics',
+          'Check for Updates…',
+        ]);
+      });
+      const { clipboard, shell } = await import('electron');
+      troubleshooting().find((item) => item.label === 'Show Logs')!.click!();
+      expect(shell.showItemInFolder).toHaveBeenCalledWith(join(state.userData, 'logs', 'desktop.log'));
+      troubleshooting().find((item) => item.label === 'Copy Diagnostics')!.click!();
+      await vi.waitFor(() => {
+        expect(clipboard.writeText).toHaveBeenCalledOnce();
+      });
+      const text = vi.mocked(clipboard.writeText).mock.calls[0]![0];
+      expect(text).toContain('Version: test');
+      expect(text).not.toContain(homedir());
+    },
+    bootMilliseconds,
+  );
+});
+/* eslint-enable @typescript-eslint/naming-convention -- End WP5 boot hardening rows. */
+
+/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag names are snake_case. */
+describe('desktop main boot health and safe mode (WP6)', () => {
+  const bootMilliseconds = 30_000;
+  /** This test build's identity, as main computes it: version `test`, no stamped commit, unpackaged. */
+  const testBuild = 'test+unknown+unpackaged';
+
+  const boot = async (before?: (userData: string) => Promise<void>, argv: readonly string[] = []): Promise<void> => {
+    vi.stubGlobal('tauCloudBuildEnabled', false);
+    state.userData = await mkdtemp(join(tmpdir(), 'tau-main-boot-health-'));
+    await before?.(state.userData);
+    const original = process.argv;
+    process.argv = [...original, ...argv];
+    try {
+      await import('#main/main.js');
+    } finally {
+      process.argv = original;
+    }
+  };
+  const booted = async (before?: (userData: string) => Promise<void>, argv: readonly string[] = []): Promise<void> => {
+    await boot(before, argv);
+    await vi.waitFor(() => {
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+    });
+  };
+  const ledgerPath = (): string => join(state.userData, 'boot-health.json');
+  type LedgerOnDisk = { readonly unhealthyCount?: number; readonly last?: Record<string, unknown> };
+  const readLedger = async (): Promise<LedgerOnDisk> => {
+    const text = await readFile(ledgerPath(), 'utf8');
+    return JSON.parse(text) as LedgerOnDisk;
+  };
+  const seedLedger = (unhealthyCount: number) => async (userData: string) => {
+    await writeFile(
+      join(userData, 'boot-health.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        build: testBuild,
+        unhealthyCount,
+        last: { launchId: 'previous', mode: 'normal', stage: 'shell-mounted', deadlinePassed: true },
+      }),
+    );
+  };
+  const signals = (name: string): Array<{ tags: Record<string, string> }> =>
+    state.reportSignal.mock.calls
+      .map(([signal]) => signal as { fingerprint?: readonly string[]; tags: Record<string, string> } | undefined)
+      .filter((signal) => signal?.fingerprint?.[0] === name) as Array<{ tags: Record<string, string> }>;
+  const bootstrapArgument = async (): Promise<Record<string, unknown>> => {
+    const { BrowserWindow } = await import('electron');
+    const options = vi.mocked(BrowserWindow).mock.calls[0]?.[0] as
+      | { webPreferences?: { additionalArguments?: string[] } }
+      | undefined;
+    const argument = options?.webPreferences?.additionalArguments?.find((value) =>
+      value.startsWith('--tau-bootstrap='),
+    );
+    return JSON.parse(argument!.slice('--tau-bootstrap='.length)) as Record<string, unknown>;
+  };
+  const reportStage = (stage: string): void => {
+    for (const listener of state.ipcListeners.get('tau:boot:stage') ?? []) {
+      listener({ sender: fakeWindow.webContents, senderFrame: fakeWindow.webContents.mainFrame }, stage);
+    }
+  };
+  const troubleshooting = (): UpdateMenuItem[] => {
+    const entry = state.installedHelpMenuItems.find((item) => item.label === 'Troubleshooting');
+    return (entry?.submenu ?? []) as UpdateMenuItem[];
+  };
+
+  it(
+    'should neither read nor write the ledger in a launch that does not hold the single-instance lock (T-R12.4)',
+    async () => {
+      app.requestSingleInstanceLock.mockReturnValueOnce(false);
+      await boot(seedLedger(2));
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalled();
+      });
+      expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+      const ledger = await readLedger();
+      expect(ledger.last).toEqual(expect.objectContaining({ launchId: 'previous' }));
+      expect(ledger.unhealthyCount).toBe(2);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should neither read nor write the ledger in a probe launch (T-R12.4)',
+    async () => {
+      vi.doMock('#main/ota-probe.js', () => ({
+        admitOtaProbe: vi.fn(() => ({ candidateTag: 'v0.0.0', complete: vi.fn() })),
+      }));
+      try {
+        await booted(seedLedger(2));
+      } finally {
+        vi.doUnmock('#main/ota-probe.js');
+      }
+      expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+      const ledger = await readLedger();
+      expect(ledger.last).toEqual(expect.objectContaining({ launchId: 'previous' }));
+      expect(existsSync(join(state.userData, 'boot-health.json.tmp'))).toBe(false);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should record this launch at main-started and advance it through the renderer stages',
+    async () => {
+      await booted();
+      const first = await readLedger();
+      expect(first).toEqual(expect.objectContaining({ schemaVersion: 1, build: testBuild, unhealthyCount: 0 }));
+      expect(first.last).toEqual(expect.objectContaining({ mode: 'normal', deadlinePassed: false }));
+      reportStage('shell-mounted');
+      const mounted = await readLedger();
+      expect(mounted.last?.['stage']).toBe('shell-mounted');
+      reportStage('main-started');
+      reportStage('home-ready');
+      const ready = await readLedger();
+      expect(ready.last?.['stage']).toBe('home-ready');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should start in safe mode with --safe-mode: no hardware acceleration before ready, the bootstrap names it, and the optional subsystems stay off (T-R12.8)',
+    async () => {
+      await booted(undefined, ['--safe-mode']);
+      expect(app.disableHardwareAcceleration).toHaveBeenCalledOnce();
+      expect(app.disableHardwareAcceleration.mock.invocationCallOrder[0]).toBeLessThan(
+        app.whenReady.mock.invocationCallOrder[0]!,
+      );
+      expect(await bootstrapArgument()).toEqual(expect.objectContaining({ safeMode: { reason: 'requested' } }));
+      const { removeStaleQuickLookSessions } = await import('#main/quick-look.js');
+      const { installBrowserHost } = await import('#main/browser-host.js');
+      const { createBambuStudioService } = await import('#main/bambu-studio-service.js');
+      expect(removeStaleQuickLookSessions).not.toHaveBeenCalled();
+      expect(installBrowserHost).not.toHaveBeenCalled();
+      expect(state.acpDiscoveryCalls).toBe(0);
+      expect(createBambuStudioService).not.toHaveBeenCalled();
+      expect(state.utilityEnvironmentAdditions.some((additions) => 'TAU_DESKTOP_MACHINES_DIR' in additions)).toBe(
+        false,
+      );
+      const ledger = await readLedger();
+      expect(ledger.last).toEqual(expect.objectContaining({ mode: 'safe-requested' }));
+      expect(signals('desktop-safe-mode')).toEqual([
+        expect.objectContaining({ tags: { trigger: 'requested', count: '0' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should start in safe mode by itself after two unhealthy launches of this build (T-R12.8)',
+    async () => {
+      await booted(seedLedger(1));
+      expect(app.disableHardwareAcceleration).toHaveBeenCalledOnce();
+      expect(await bootstrapArgument()).toEqual(
+        expect.objectContaining({ safeMode: { reason: 'unhealthy-launches' } }),
+      );
+      const ledger = await readLedger();
+      expect(ledger.unhealthyCount).toBe(2);
+      expect(signals('desktop-boot-unhealthy')).toEqual([
+        expect.objectContaining({ tags: { stage: 'shell-mounted', ended: 'none', count: '2', mode: 'normal' } }),
+      ]);
+      expect(signals('desktop-safe-mode')).toEqual([
+        expect.objectContaining({ tags: { trigger: 'unhealthy-launches', count: '2' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should start normally with no safe mode in the bootstrap',
+    async () => {
+      await booted();
+      expect(app.disableHardwareAcceleration).not.toHaveBeenCalled();
+      expect(await bootstrapArgument()).not.toHaveProperty('safeMode');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should not wait for the page to save when a restart is asked for before shell-mounted (T-R12.8)',
+    async () => {
+      state.autoQuiesce = false;
+      await booted();
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toContain('Restart in Safe Mode');
+      });
+      troubleshooting().find((item) => item.label === 'Restart in Safe Mode')!.click!();
+      await vi.waitFor(() => {
+        expect(app.relaunch).toHaveBeenCalledOnce();
+      });
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(app.relaunch.mock.calls[0]![0]).toEqual({ args: expect.arrayContaining(['--safe-mode']) as unknown });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should still wait for the page to save once the shell has mounted',
+    async () => {
+      await booted();
+      reportStage('shell-mounted');
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toContain('Restart in Safe Mode');
+      });
+      troubleshooting().find((item) => item.label === 'Restart in Safe Mode')!.click!();
+      await vi.waitFor(() => {
+        expect(app.relaunch).toHaveBeenCalledOnce();
+      });
+      expect(state.sentToRenderer).toContain(quitChannels.ask);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should ask once, in a native prompt, when a second launch carries --safe-mode (T-R12.8)',
+    async () => {
+      await booted();
+      dialog.showMessageBox.mockClear();
+      dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+      const secondInstance = state.appListeners.get('second-instance')!.at(-1)!;
+      secondInstance({}, ['tau', '--safe-mode']);
+      secondInstance({}, ['tau', '--safe-mode']);
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]![0].buttons).toEqual(['Restart in Safe Mode', 'Not Now']);
+      expect(app.relaunch).not.toHaveBeenCalled();
+      secondInstance({}, ['tau']);
+      expect(dialog.showMessageBox).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should report a GPU process that exited and not count the launch healthy for it (T-B26.1)',
+    async () => {
+      await booted();
+      const gone = state.appListeners.get('child-process-gone')!.at(-1)!;
+      gone({}, { type: 'GPU', reason: 'crashed', exitCode: 133 });
+      expect(signals('desktop-gpu-process-gone')).toEqual([
+        expect.objectContaining({ tags: { reason: 'crashed', exit_code: '133', safe_mode: 'false' } }),
+      ]);
+      const { last } = await readLedger();
+      expect(last?.['stage']).not.toBe('home-ready');
+      expect(last?.['gpuProcessGone']).toBe(true);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should open the recovery window in its own partition when the first load fails',
+    async () => {
+      fakeWindow.loadURL.mockRejectedValueOnce(Object.assign(new Error('ERR_FILE_NOT_FOUND'), { errno: -6 }));
+      await booted();
+      const { BrowserWindow } = await import('electron');
+      await vi.waitFor(() => {
+        expect(vi.mocked(BrowserWindow).mock.calls).toHaveLength(2);
+      });
+      expect(vi.mocked(BrowserWindow).mock.calls[1]![0]).toEqual(
+        expect.objectContaining({ webPreferences: expect.objectContaining({ partition: 'tau-recovery' }) as unknown }),
+      );
+      expect(fakeWindow.loadFile).toHaveBeenCalledOnce();
+      expect(signals('desktop-recovery-shown')).toEqual([
+        expect.objectContaining({ tags: { surface: 'window', trigger: 'load-failed' } }),
+      ]);
+      expect(app.exit).not.toHaveBeenCalled();
+      expect(fakeWindow.reload).not.toHaveBeenCalled();
+      expect(fakeWindow.close).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should apply a pending reset at the next start before the window, and never delete it',
+    async () => {
+      await booted(async (userData) => {
+        await writeFile(join(userData, 'granted-roots.json'), JSON.stringify([join(userData, 'gone')]));
+        await mkdir(join(userData, 'recovery'), { recursive: true });
+        await writeFile(
+          join(userData, 'recovery', 'pending-resets.json'),
+          JSON.stringify({ schemaVersion: 1, stores: ['folder-list'] }),
+        );
+      });
+      expect(existsSync(join(state.userData, 'recovery', 'pending-resets.json'))).toBe(false);
+      const { readdir } = await import('node:fs/promises');
+      const entries = await readdir(join(state.userData, 'recovery'));
+      const quarantines = entries.filter((name) => name !== 'pending-resets.json');
+      expect(quarantines).toHaveLength(1);
+      expect(
+        JSON.parse(await readFile(join(state.userData, 'recovery', quarantines[0]!, 'granted-roots.json'), 'utf8')),
+      ).toEqual([join(state.userData, 'gone')]);
+      expect(signals('desktop-store-reset')).toEqual([
+        expect.objectContaining({ tags: { store: 'folder-list', outcome: 'moved' } }),
+      ]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should accept a boot stage only from a trusted main frame',
+    async () => {
+      await booted();
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      vi.mocked(isTrustedSender).mockReturnValue(false);
+      try {
+        reportStage('shell-mounted');
+      } finally {
+        vi.mocked(isTrustedSender).mockReturnValue(true);
+      }
+      const refused = await readLedger();
+      expect(refused.last?.['stage']).not.toBe('shell-mounted');
+      for (const listener of state.ipcListeners.get('tau:boot:stage') ?? []) {
+        listener({ sender: fakeWindow.webContents, senderFrame: { url: 'app://tau/frame' } }, 'shell-mounted');
+      }
+      const wrongFrame = await readLedger();
+      expect(wrongFrame.last?.['stage']).not.toBe('shell-mounted');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should put the boot-health ledger in Copy Diagnostics',
+    async () => {
+      await booted(seedLedger(1));
+      const { clipboard } = await import('electron');
+      await vi.waitFor(() => {
+        expect(troubleshooting().map((item) => item.label)).toContain('Copy Diagnostics');
+      });
+      troubleshooting().find((item) => item.label === 'Copy Diagnostics')!.click!();
+      await vi.waitFor(() => {
+        expect(clipboard.writeText).toHaveBeenCalledOnce();
+      });
+      const text = vi.mocked(clipboard.writeText).mock.calls[0]![0];
+      expect(text).toContain('Boot health:');
+      expect(text).toContain('Mode: safe-auto');
+      expect(text).toContain('Unhealthy launches: 2');
+      expect(text).toContain('Previous launch: unhealthy (stage shell-mounted');
+    },
+    bootMilliseconds,
+  );
+});
+/* eslint-enable @typescript-eslint/naming-convention -- End WP6 boot health rows. */

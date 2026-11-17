@@ -317,6 +317,22 @@
       "owner": "desktop updater"
     },
     {
+      "id": "B20",
+      "bound": "Desktop first-window reveal (15 s): a window whose first page has not painted is shown as it is, so a load that never finishes still leaves a visible window and its menu (B17)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout(reveal, windowRevealMilliseconds)",
+      "class": "Presentation",
+      "owner": "desktop boot"
+    },
+    {
+      "id": "B21",
+      "bound": "Desktop boot watchdog (R12): no shell-mounted 45 s after the window loaded offers the recovery window beside the app, and the 60 s launch deadline marks the boot-health record; suspend and resume restart both deadlines (boot-watchdog.ts bootDeadlines)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout: (callback, milliseconds) => setTimeout(callback, milliseconds),",
+      "class": "Liveness",
+      "owner": "desktop boot"
+    },
+    {
       "id": "C1",
       "bound": "Leader heartbeat (M2 leading)",
       "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",

@@ -2,10 +2,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-import { prepareOtaProbe } from '#main/ota-probe.js';
+import { admitOtaProbe, prepareOtaProbe } from '#main/ota-probe.js';
 
 const roots: string[] = [];
 const fixture = (channel: 'staging' | 'production' = 'staging') => {
@@ -78,5 +78,51 @@ describe('OTA probe', () => {
     expect(() => prepareOtaProbe({ ...options, arguments: [] })).toThrow(
       new Error('OTA probe installation identity or expiry is invalid'),
     );
+  });
+});
+
+describe('leftover OTA receipt on an ordinary launch', () => {
+  /* A receipt left by a probe run whose target never relaunched, then aged or damaged another way. */
+  const leftover = (rewrite: (receipt: Record<string, unknown>, pending: string) => void) => {
+    const options = fixture();
+    prepareOtaProbe(options);
+    const pending = join(options.profile, 'ota-probe.pending.json');
+    rewrite(z.looseObject({}).parse(JSON.parse(readFileSync(pending, 'utf8'))), pending);
+    return options;
+  };
+  const damages: ReadonlyArray<readonly [string, (receipt: Record<string, unknown>, pending: string) => void]> = [
+    [
+      '31 minutes old',
+      (receipt, pending) => {
+        writeFileSync(pending, JSON.stringify({ ...receipt, startedAt: Date.now() - 31 * 60 * 1000 }));
+      },
+    ],
+    [
+      'not JSON',
+      (_receipt, pending) => {
+        writeFileSync(pending, 'not json');
+      },
+    ],
+    [
+      'from another app path',
+      (receipt, pending) => {
+        writeFileSync(pending, JSON.stringify({ ...receipt, appPath: '/Applications/Other.app' }));
+      },
+    ],
+  ];
+
+  it.each(damages)('should boot as no probe and report once for a receipt %s', (_name, rewrite) => {
+    const options = leftover(rewrite);
+    const ignored = vi.fn();
+    expect(admitOtaProbe({ ...options, arguments: [] }, ignored)).toBeUndefined();
+    expect(ignored).toHaveBeenCalledOnce();
+    expect(ignored.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+  });
+
+  it.each(damages)('should stay strict for a receipt %s when the probe argument is present', (_name, rewrite) => {
+    const options = leftover(rewrite);
+    const ignored = vi.fn();
+    expect(() => admitOtaProbe(options, ignored)).toThrow();
+    expect(ignored).not.toHaveBeenCalled();
   });
 });

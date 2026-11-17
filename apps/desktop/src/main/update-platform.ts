@@ -10,6 +10,7 @@ import { z } from 'zod';
 import type { ProviderRuntimeOptions } from 'electron-updater/out/providers/Provider.js';
 import type { AppUpdater, UpdateInfo, ResolvedUpdateFileInfo } from 'electron-updater';
 
+import { safeModeSwitch } from '#shared/desktop-bootstrap.js';
 import { linuxInstallation } from '#shared/linux-installation.js';
 import { isManagedAppImage } from '#main/managed-appimage.js';
 import { startPlatformUpdateController } from '#main/update-controller.js';
@@ -29,13 +30,14 @@ import { verifyWindowsSignature } from '#main/windows-signature.js';
 /**
  * Electron replaces the whole command line whenever `app.relaunch` is given an `execPath`, so carry the
  * launch switches (graphics, sandbox, Ozone) into the updated process. Positional files and deep links stay
- * behind so an update never reopens what the old process was asked to open.
+ * behind so an update never reopens what the old process was asked to open, and `--safe-mode` stays behind
+ * because safe mode lasts one launch: the launch after an update is a normal one.
  */
 export const relaunchSwitches = (argv: readonly string[]): string[] => {
   const options = argv.slice(1);
   const separator = options.indexOf('--');
   return (separator === -1 ? options : options.slice(0, separator)).filter(
-    (value) => value.startsWith('--') && value.length > 2,
+    (value) => value.startsWith('--') && value.length > 2 && value !== safeModeSwitch,
   );
 };
 
@@ -107,6 +109,28 @@ export const relaunchAppImage = async (execPath: string, args: readonly string[]
       resolve();
     });
   });
+};
+
+/**
+ * Start this app again with `switches` (D0's Restart, Restart in Safe Mode): the AppImage relauncher when this is an
+ * AppImage, because Electron's own relauncher starts the image in a way that cannot mount it, and `app.relaunch`
+ * otherwise. The next launch keeps this launch's arguments, less `--safe-mode`, plus `switches`.
+ *
+ * @param switches - Switches the next launch carries, such as `--safe-mode`.
+ * @param argv - This process's arguments.
+ */
+export const relaunchSelf = async (
+  switches: readonly string[],
+  argv: readonly string[] = process.argv,
+): Promise<void> => {
+  const image = process.env['APPIMAGE'];
+  const carried = (values: readonly string[]): string[] =>
+    values.filter((value) => value !== safeModeSwitch && !switches.includes(value));
+  if (image !== undefined && image !== '') {
+    await relaunchAppImage(image, [...carried(relaunchSwitches(argv)), ...switches]);
+    return;
+  }
+  app.relaunch({ args: [...carried(argv.slice(1)), ...switches] });
 };
 
 /** APT runtimes are plain executables and keep Electron's relauncher; managed AppImages must mount. */

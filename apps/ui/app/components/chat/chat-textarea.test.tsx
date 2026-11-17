@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => {
     draftSend: vi.fn(),
     isRecordUnread: true,
     recordDraft: undefined as string | undefined,
+    recordDraftFile: false,
     paintedSendVerdict: undefined as unknown,
     cloudIntent: undefined as 'open' | undefined,
   };
@@ -133,7 +134,16 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
                       ? undefined
                       : {
                           version: 1,
-                          draft: { id: 'd', role: 'user', parts: [{ type: 'text', text: mocks.recordDraft }] },
+                          draft: {
+                            id: 'd',
+                            role: 'user',
+                            parts: [
+                              { type: 'text', text: mocks.recordDraft },
+                              ...(mocks.recordDraftFile
+                                ? [{ type: 'file', mediaType: 'image/png', url: 'tau-attachment://photo' }]
+                                : []),
+                            ],
+                          },
                         },
                 },
               }),
@@ -349,6 +359,7 @@ describe('ChatTextarea Enter queued on a painted draft', () => {
       mocks.activeChatId = undefined;
       mocks.isRecordUnread = true;
       mocks.recordDraft = undefined;
+      mocks.recordDraftFile = false;
     });
   });
 
@@ -392,6 +403,15 @@ describe('ChatTextarea Enter queued on a painted draft', () => {
       chatId: 'c1',
       verdict: { kind: 'cancel', recordText: '' },
     },
+    /* The hint holds text only: a draft that also holds an attachment is not what the box showed (review round 20). */
+    {
+      name: 'the record holds the same text with an attachment',
+      isRecordUnread: false,
+      recordDraft: 'Fillet it',
+      recordDraftFile: true,
+      chatId: 'c1',
+      verdict: { kind: 'cancel', recordText: 'Fillet it' },
+    },
     {
       name: 'the painted draft was another chat’s',
       isRecordUnread: false,
@@ -399,14 +419,18 @@ describe('ChatTextarea Enter queued on a painted draft', () => {
       chatId: 'c2',
       verdict: { kind: 'cancel', recordText: 'Fillet it' },
     },
-  ])('should decide the queued send when $name', ({ isRecordUnread, recordDraft, chatId, verdict }) => {
-    mocks.isRecordUnread = isRecordUnread;
-    mocks.recordDraft = recordDraft;
-    serveQueued('Fillet it', chatId);
-    render(<ChatTextarea onSubmit={vi.fn()} handOff={{ surface: 'project-composer', scope: 'acme/bracket' }} />);
-    expect(mocks.earlyInput).toMatchObject({ text: 'Fillet it', prefilled: true, submitQueued: true });
-    expect(mocks.paintedSendVerdict).toEqual(verdict);
-  });
+  ])(
+    'should decide the queued send when $name',
+    ({ isRecordUnread, recordDraft, recordDraftFile = false, chatId, verdict }) => {
+      mocks.isRecordUnread = isRecordUnread;
+      mocks.recordDraft = recordDraft;
+      mocks.recordDraftFile = recordDraftFile;
+      serveQueued('Fillet it', chatId);
+      render(<ChatTextarea onSubmit={vi.fn()} handOff={{ surface: 'project-composer', scope: 'acme/bracket' }} />);
+      expect(mocks.earlyInput).toMatchObject({ text: 'Fillet it', prefilled: true, submitQueued: true });
+      expect(mocks.paintedSendVerdict).toEqual(verdict);
+    },
+  );
 
   it('should leave an edited Enter to the composer', () => {
     render(<HandOffSlot surface='project-composer' scope='acme/bracket' label='Chat message' placeholder='Ask Tau' />);

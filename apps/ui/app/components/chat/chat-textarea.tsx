@@ -47,14 +47,19 @@ const handOffTarget = (
   enableEarlyInput: boolean,
 ): HandOffTarget | undefined => (adoptedEarlyInput === undefined && !enableEarlyInput ? target : undefined);
 
+/** Whether a read record's draft holds anything besides text (an attachment), which a painted draft never shows. */
+const recordedDraftHasMore = (record: ComposerRecord | undefined): boolean =>
+  record?.draft?.parts.some((part) => part.type !== 'text') ?? false;
+
 /** The text a read record's draft shows (its first text), empty for a record with no draft or none at all. */
 const recordedDraftText = (record: ComposerRecord | undefined): string =>
   record?.draft?.parts.map((part) => (part.type === 'text' ? part.text : '')).find((text) => text !== '') ?? '';
 
 /**
  * What becomes of an Enter pressed on a painted draft nobody edited (ruling 2026-11-17T03:28Z): it waits while the
- * chat's record is unread, is sent when the record holds the painted text for this chat, and is cancelled otherwise
- * (another chat's draft, another text, or no record to confirm it).
+ * chat's record is unread, is sent when the record holds the painted text for this chat and nothing more, and is
+ * cancelled otherwise (another chat's draft, another text, an attachment the box never showed, or no record to confirm
+ * it).
  *
  * @param paintedSend - The painted text the Enter queued, and the chat it was painted for.
  * @param record - Whether there is a record, its draft's text once read, and the chat on screen.
@@ -62,7 +67,12 @@ const recordedDraftText = (record: ComposerRecord | undefined): string =>
  */
 const paintedSendVerdictOf = (
   paintedSend: { readonly text: string; readonly chatId?: string } | undefined,
-  record: { readonly hasRecord: boolean; readonly recordDraftText: string | undefined; readonly activeChatId?: string },
+  record: {
+    readonly hasRecord: boolean;
+    readonly recordDraftText: string | undefined;
+    readonly recordDraftHasMore: boolean;
+    readonly activeChatId?: string;
+  },
 ): PaintedSendVerdict | undefined => {
   if (paintedSend === undefined) {
     return undefined;
@@ -72,7 +82,9 @@ const paintedSendVerdictOf = (
   }
   const recordText = record.recordDraftText ?? '';
   const isSameChat = paintedSend.chatId === undefined || paintedSend.chatId === record.activeChatId;
-  return isSameChat && recordText === paintedSend.text ? { kind: 'send' } : { kind: 'cancel', recordText };
+  return isSameChat && recordText === paintedSend.text && !record.recordDraftHasMore
+    ? { kind: 'send' }
+    : { kind: 'cancel', recordText };
 };
 
 /**
@@ -179,6 +191,9 @@ export const ChatTextarea = memo(function ({
       ? undefined
       : recordedDraftText(state.context.record),
   );
+  const recordDraftHasMore = useSelector(composerSession?.composerRecordRef, (state) =>
+    state === undefined ? false : recordedDraftHasMore(state.context.record),
+  );
   /* An Enter pressed on a painted draft nobody edited (ruling 2026-11-17T03:28Z): it queued visibly as any Enter, and
    * is replayed only if the chat's record holds that very text; otherwise it is cancelled, the record's text shows and
    * the status says why. Undefined for any other early input. */
@@ -215,9 +230,10 @@ export const ChatTextarea = memo(function ({
       paintedSendVerdictOf(paintedSend, {
         hasRecord: composerSession !== undefined,
         recordDraftText,
+        recordDraftHasMore,
         activeChatId: composerSession?.activeChatId,
       }),
-    [paintedSend, composerSession, recordDraftText],
+    [paintedSend, composerSession, recordDraftText, recordDraftHasMore],
   );
   const handOff = useHandOffAdoption(
     handOffTarget(handOffTargetProperty, adoptedEarlyInput, enableEarlyInput),

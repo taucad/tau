@@ -91,10 +91,14 @@ export function ChatEarlyInput({
     state.context.draftText === '' && state.context.draftAttachments.length === 0 ? undefined : state.context.draftText,
   );
   const draftTextRef = useRef(draftText);
+  /* An attachment in the draft is something the painted box never showed, so an Enter on it is not sent. */
+  const hasDraftAttachments = useSelector(draftActorRef, (state) => state.context.draftAttachments.length > 0);
+  const hasDraftAttachmentsRef = useRef(hasDraftAttachments);
   /* Declared before adoption's effect, so adoption reads this commit's value. */
   useEffect(() => {
     draftTextRef.current = draftText;
-  }, [draftText]);
+    hasDraftAttachmentsRef.current = hasDraftAttachments;
+  }, [draftText, hasDraftAttachments]);
 
   /* Text typed before hydration is already in the input; the bar reads it once React is here. */
   useEffect(() => {
@@ -123,7 +127,11 @@ export function ChatEarlyInput({
         draftActorRef.send({ type: 'setDraftText', text: snapshot.text, adoptedEdit: true });
       } else if (snapshot.prefilled === true && draftTextRef.current === undefined) {
         draftActorRef.send({ type: 'hydrateDraft', draft: buildDraftMessage(snapshot.text, []) });
-      } else if (snapshot.prefilled === true && snapshot.submitQueued && draftTextRef.current !== snapshot.text) {
+      } else if (
+        snapshot.prefilled === true &&
+        snapshot.submitQueued &&
+        (draftTextRef.current !== snapshot.text || hasDraftAttachmentsRef.current)
+      ) {
         /* The record holds another draft, which wins: the Enter was pressed on text the composer will not hold, so it
          * is cancelled, and the composer says so. */
         setAdopted({ ...snapshot, paintedSendCancelled: { recordText: draftTextRef.current ?? '' } });

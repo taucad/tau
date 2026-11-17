@@ -24,10 +24,11 @@ const runEarlyScript = (container: HTMLElement): void => {
 const send = vi.hoisted(() => vi.fn());
 /* The draft the record holds; empty unless a row loads one. */
 let recordDraftText = '';
+let recordDraftAttachments: readonly unknown[] = [];
 /* The draft owner's surface the early input reads: its sends, and the draft to select from. */
 const draftActorRef = {
   send,
-  getSnapshot: () => ({ context: { draftText: recordDraftText, draftAttachments: [] } }),
+  getSnapshot: () => ({ context: { draftText: recordDraftText, draftAttachments: recordDraftAttachments } }),
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
 vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => ({ draftActorRef }) }));
@@ -36,6 +37,7 @@ describe('Home early input', () => {
   beforeEach(() => {
     send.mockClear();
     recordDraftText = '';
+    recordDraftAttachments = [];
   });
 
   it.each([
@@ -478,11 +480,19 @@ describe('Home early input: queued send and stored draft (C10)', () => {
     { name: 'the same draft', record: 'A bracket for the shelf', cancelled: undefined },
     /* Ruling 2026-11-17T03:43Z: the Enter stays visibly queued until the composer cancels it and says why. */
     { name: 'another draft', record: 'A hinge for the door', cancelled: { recordText: 'A hinge for the door' } },
+    /* The hint holds text only: a draft that also holds an attachment is not what the box showed (review round 20). */
+    {
+      name: 'the same text with an attachment',
+      record: 'A bracket for the shelf',
+      attachments: [{ id: 'photo' }],
+      cancelled: { recordText: 'A bracket for the shelf' },
+    },
   ])(
     'should not hydrate a draft the record already holds, $name, and send Enter only on it',
-    async ({ record, cancelled }) => {
+    async ({ record, attachments = [], cancelled }) => {
       writeDraftHint({ kind: 'home' }, { text: 'A bracket for the shelf' });
       recordDraftText = record;
+      recordDraftAttachments = attachments;
       const { content, adopted } = adopting();
       const { container, input } = serve(content);
       press(input, { key: 'Enter' });

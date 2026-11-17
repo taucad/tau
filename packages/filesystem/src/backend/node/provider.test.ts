@@ -17,7 +17,13 @@ import { pbkdf2 } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 import { join, sep } from 'node:path';
-import { NodeFsProvider, drainNodeFsProviderWatchClosures, nodeDiskKeepsFileModes } from '#backend/node/provider.js';
+import {
+  NodeFsProvider,
+  drainNodeFsProviderWatchClosures,
+  nodeDiskKeepsFileModes,
+  writeNodeFileCheckedWithAuthority,
+} from '#backend/node/provider.js';
+import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { BatchEntry } from '#changeset.js';
 import parcelWatcher from '@parcel/watcher';
@@ -185,6 +191,126 @@ describe('NodeFsProvider file modes', () => {
     try {
       expect(provider.getFileMode).toBeTypeOf('function');
       expect(provider.setFileMode).toBeTypeOf('function');
+    } finally {
+      provider.dispose();
+    }
+  });
+});
+
+/** Run `body` while this process reports `platform`, restoring it however `body` ends. */
+const whileOnPlatform = async <Result>(platform: NodeJS.Platform, body: () => Promise<Result>): Promise<Result> => {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  if (original === undefined) {
+    throw new Error('process.platform has no descriptor to fake.');
+  }
+  Object.defineProperty(process, 'platform', { ...original, value: platform });
+  try {
+    return await body();
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+};
+
+/** A rename that fails with `code` for its first `failures` calls, then renames. */
+const renameFailingFirst = (code: string, failures: number) => {
+  const rename = fs.rename.bind(fs);
+  let calls = 0;
+  const spy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+    calls += 1;
+    if (calls <= failures) {
+      throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+    }
+    await rename(from, to);
+  });
+  return { spy, calls: () => calls };
+};
+
+/* A Windows scanner or indexer holds a freshly written file for a moment (revisions A4, Windows run 44028941814:
+ * EPERM renaming `.gitignore`'s temporary file into place). */
+describe('NodeFsProvider atomic writes over a briefly held file on Windows', () => {
+  it.each(['EPERM', 'EACCES', 'EBUSY'])('should retry a rename that fails with %s until it lands', async (code) => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst(code, 3);
+    try {
+      await whileOnPlatform('win32', async () => provider.writeFile('target.txt', 'new'));
+
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('new');
+      expect(calls()).toBe(4);
+      expect(temporaryFiles(root)).toEqual([]);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should give up after about a second and answer the last error', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst('EPERM', Number.POSITIVE_INFINITY);
+    const startedAt = Date.now();
+    try {
+      await expect(whileOnPlatform('win32', async () => provider.writeFile('target.txt', 'new'))).rejects.toMatchObject(
+        { code: 'EPERM' },
+      );
+
+      const elapsed = Date.now() - startedAt;
+      expect(elapsed).toBeGreaterThanOrEqual(1000);
+      expect(elapsed).toBeLessThan(3000);
+      expect(calls()).toBeGreaterThan(3);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should refuse a retry once the writer lost its claim during the backoff, publishing nothing', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst('EPERM', Number.POSITIVE_INFINITY);
+    let asked = 0;
+    const writer: NodeAuthorityWriter = {
+      lockPath: join(root, '.lock'),
+      /* Current for the write's own checks and its first rename; lost while that rename's backoff runs. */
+      assertCurrent: async () => {
+        asked += 1;
+        if (calls() > 0) {
+          throw Object.assign(new Error('Another window owns this project.'), { code: 'AUTHORITY_LOCK_UNAVAILABLE' });
+        }
+      },
+      release: async () => undefined,
+    };
+    try {
+      await expect(
+        whileOnPlatform('win32', async () =>
+          writeNodeFileCheckedWithAuthority(
+            provider,
+            { path: 'target.txt', data: 'new', preconditions: [{ path: 'target.txt', expected: 'old' }] },
+            writer,
+          ),
+        ),
+      ).rejects.toMatchObject({ code: 'AUTHORITY_LOCK_UNAVAILABLE', applicationState: 'known-not-applied' });
+
+      expect(calls()).toBe(1);
+      expect(asked).toBe(3);
+      expect(readFileSync(join(root, 'target.txt'), 'utf8')).toBe('old');
+      expect(temporaryFiles(root)).toEqual([]);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should answer a rename error at once off Windows, where it is never a passing lock', async () => {
+    const root = createRoot();
+    const provider = new NodeFsProvider(root);
+    const { calls } = renameFailingFirst('EPERM', 1);
+    try {
+      await expect(whileOnPlatform('linux', async () => provider.writeFile('target.txt', 'new'))).rejects.toMatchObject(
+        {
+          code: 'EPERM',
+        },
+      );
+
+      expect(calls()).toBe(1);
     } finally {
       provider.dispose();
     }

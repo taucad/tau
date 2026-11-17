@@ -9,7 +9,7 @@
  */
 
 export { gitCommandActivity, runCommand, runGitCommand } from '#git-command.js';
-export type { GitCommandResult } from '#git-command.js';
+export type { GitActivityEvent, GitCommandPhase, GitCommandResult } from '#git-command.js';
 export { GitToolchainError, resolveGitToolchain } from '#git-toolchain.js';
 export type { MissingGitTool } from '#git-toolchain.js';
 export { createNativeGitRevisionPort } from '#native-git-port.js';

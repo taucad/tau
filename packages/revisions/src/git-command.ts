@@ -256,25 +256,44 @@ const emitGitActivity = (event: GitActivityEvent): void => {
   }
 };
 
-/* Git's global options that take their value as the next argument; every other leading `-` argument stands alone. */
-const valuedGitOptions = new Set(['-c', '-C']);
+/*
+ * Git's global options that may take their value as the next argument (git.c `handle_options`); every other leading
+ * `-` argument stands alone or carries its value after `=`.
+ */
+const valuedGitOptions = new Set([
+  '-c',
+  '-C',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--config-env',
+  '--attr-source',
+  '--super-prefix',
+]);
+
+/* The shape of a Git subcommand or option name: a diagnostic never carries a word outside it, such as a path. */
+const gitWord = /^-{0,2}[a-z][a-z0-9-]*$/u;
 
 /*
  * A command's subcommand, and `lfs`'s own after it: the only words of its arguments a diagnostic may carry. With no
- * subcommand (`--version`), the option that stood in for one.
+ * subcommand (`--version`), the option that stood in for one, without any `=` value. A word not shaped like a Git
+ * name, such as an unlisted option's separate value, is never reported: the label falls back to the option, then
+ * `git`.
  */
 const gitCommandName = (args: readonly string[]): string => {
   let index = 0;
   let option: string | undefined;
   for (let word = args[0]; word?.startsWith('-') === true; word = args[index]) {
-    option ??= valuedGitOptions.has(word) ? undefined : word;
+    option ??= valuedGitOptions.has(word) ? undefined : word.split('=', 1)[0];
     index += valuedGitOptions.has(word) ? 2 : 1;
   }
   const name = args[index];
+  const named = (word: string | undefined): string | undefined =>
+    word !== undefined && gitWord.test(word) ? word : undefined;
   if (name === 'lfs') {
-    return `lfs ${args[index + 1] ?? ''}`.trimEnd();
+    return `lfs ${named(args[index + 1]) ?? ''}`.trimEnd();
   }
-  return name ?? option ?? 'git';
+  return named(name) ?? named(option) ?? 'git';
 };
 
 /**

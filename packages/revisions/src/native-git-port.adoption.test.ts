@@ -19,7 +19,7 @@ import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { RevisionId } from '#algorithms/index.js';
 import { lfsObjectPath, lfsPointerFor, readLfsPointer } from '#lfs.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
-import { gitToolchainOnPath } from '#test/native-git-harness.js';
+import { gitToolchainOnPath, removalRetries } from '#test/native-git-harness.js';
 import { generatedGitattributesContent, generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { recordedBy } from '#test/identity.js';
 import { shellWord, writeShellExecutable } from '#test/script-executable.js';
@@ -28,7 +28,8 @@ const author = { name: 'Tau', email: 'tau@example.com' };
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  /* Windows can hold a just-exited Git's files for a moment (`ENOTEMPTY` under `.git/refs`). */
+  await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true, ...removalRetries })));
 });
 
 const git = (cwd: string, args: readonly string[]): string =>

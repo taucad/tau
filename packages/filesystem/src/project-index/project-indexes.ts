@@ -525,64 +525,6 @@ export class ProjectIndexes {
     this.clear();
   }
 
-  private async _persist(key: string, cleared: AbortSignal): Promise<'written' | 'stale' | 'skipped' | 'busy'> {
-    const state = this._states.get(key);
-    if (state === undefined || !state.index.isComplete) {
-      return 'skipped';
-    }
-    clearTimeout(state.persistTimer);
-    state.persistTimer = undefined;
-    const resolution = this._resolve(key);
-    if (resolution.persist === undefined) {
-      return 'skipped';
-    }
-    /* A snapshot claims every notice its vector names: re-observe what those
-     * notices left unknown first, so it never stores a view older than its vector.
-     * A pending entry still waiting for its mtime is observed too, so the stored
-     * mtime is the provider's and the reload keeps it pending (D9). */
-    for (const path of state.index.unmeasuredPendingPaths) {
-      state.index.invalidate(path);
-    }
-    if (state.index.stalePaths.length > 0) {
-      await this._refreshStale(key, state.index);
-      clearTimeout(state.persistTimer);
-      state.persistTimer = undefined;
-    }
-    /* A clear can come at any await: read the signal afresh each time. */
-    const overtaken = (): boolean => cleared.aborted;
-    if (overtaken()) {
-      return 'skipped';
-    }
-    /* Storing creates `.tau` when the root has none: hold it first, or the next
-     * compare finds it new and stores the snapshot again for it. */
-    const container = projectIndexDirectory.split('/', 1)[0]!;
-    if (state.index.entry(container) === undefined) {
-      state.index.recordDirectory(container);
-    }
-    const written = await writeIndexSnapshot({
-      provider: resolution.provider,
-      providerRoot: resolution.path,
-      lockName: resolution.persist.lockName,
-      signal: cleared,
-      snapshot: () => {
-        const pending = state.index.pendingSnapshot();
-        return {
-          vector: this.vector(key),
-          rescan: false,
-          writtenAt: Date.now(),
-          entries: state.index.toSnapshot(),
-          ...(Object.keys(pending).length === 0 ? {} : { pending }),
-          ...(state.index.declared ? { declared: true } : {}),
-          removals: state.index.removalSnapshot(),
-        };
-      },
-    });
-    if (written === 'busy' && !overtaken()) {
-      this._schedulePersist(key);
-    }
-    return written;
-  }
-
   /**
    * The vector one root's index has reached: its generation and, per tab, the
    * last notice it accounted for — this tab's own included.
@@ -1762,6 +1704,64 @@ export class ProjectIndexes {
       throw new Error('This index set was built without a provider resolver.');
     }
     return resolve(root);
+  }
+
+  private async _persist(key: string, cleared: AbortSignal): Promise<'written' | 'stale' | 'skipped' | 'busy'> {
+    const state = this._states.get(key);
+    if (state === undefined || !state.index.isComplete) {
+      return 'skipped';
+    }
+    clearTimeout(state.persistTimer);
+    state.persistTimer = undefined;
+    const resolution = this._resolve(key);
+    if (resolution.persist === undefined) {
+      return 'skipped';
+    }
+    /* A snapshot claims every notice its vector names: re-observe what those
+     * notices left unknown first, so it never stores a view older than its vector.
+     * A pending entry still waiting for its mtime is observed too, so the stored
+     * mtime is the provider's and the reload keeps it pending (D9). */
+    for (const path of state.index.unmeasuredPendingPaths) {
+      state.index.invalidate(path);
+    }
+    if (state.index.stalePaths.length > 0) {
+      await this._refreshStale(key, state.index);
+      clearTimeout(state.persistTimer);
+      state.persistTimer = undefined;
+    }
+    /* A clear can come at any await: read the signal afresh each time. */
+    const overtaken = (): boolean => cleared.aborted;
+    if (overtaken()) {
+      return 'skipped';
+    }
+    /* Storing creates `.tau` when the root has none: hold it first, or the next
+     * compare finds it new and stores the snapshot again for it. */
+    const container = projectIndexDirectory.split('/', 1)[0]!;
+    if (state.index.entry(container) === undefined) {
+      state.index.recordDirectory(container);
+    }
+    const written = await writeIndexSnapshot({
+      provider: resolution.provider,
+      providerRoot: resolution.path,
+      lockName: resolution.persist.lockName,
+      signal: cleared,
+      snapshot: () => {
+        const pending = state.index.pendingSnapshot();
+        return {
+          vector: this.vector(key),
+          rescan: false,
+          writtenAt: Date.now(),
+          entries: state.index.toSnapshot(),
+          ...(Object.keys(pending).length === 0 ? {} : { pending }),
+          ...(state.index.declared ? { declared: true } : {}),
+          removals: state.index.removalSnapshot(),
+        };
+      },
+    });
+    if (written === 'busy' && !overtaken()) {
+      this._schedulePersist(key);
+    }
+    return written;
   }
 
   private _schedulePersist(root: string): void {

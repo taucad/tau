@@ -9,6 +9,7 @@ DELETE /publications/:id/access/:accessId | v1 | AuthGuard,AuthGuard | required 
 GET /agents | v1 | AuthGuard | optional | HostsController.listDevices
 GET /agents/:id/runs | v1 | AuthGuard,AuthGuard | required | HostsController.listRuns
 GET /agents/worker-affinity | v1 | AuthGuard | public | HostsController.getWorkerAffinity
+GET /deployment | v1 | AuthGuard | public | DeploymentController.deployment
 GET /email/deliverability | v1 | AuthGuard | required | EmailDeliverabilityController.getOwnDeliverability
 GET /git/:repo/info/refs | v1 | AuthGuard | required | GitController.infoRefs
 GET /git/lfs/:handle | v1 | AuthGuard | required | GitProxyController.relayGet

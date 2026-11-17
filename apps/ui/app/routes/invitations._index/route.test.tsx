@@ -129,8 +129,9 @@ describe('AcceptInvitation', () => {
       }),
     );
     /* No request line carries the token: access logs record paths, not bodies. */
-    for (const [url] of vi.mocked(globalThis.fetch).mock.calls) {
-      expect(String(url)).not.toContain('tok_abcdef');
+    for (const [input] of vi.mocked(globalThis.fetch).mock.calls) {
+      const address = input instanceof Request ? input.url : input.toString();
+      expect(address).not.toContain('tok_abcdef');
     }
     expect(mockCreateProject).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'proj_shared00000000000000', files: {} }),

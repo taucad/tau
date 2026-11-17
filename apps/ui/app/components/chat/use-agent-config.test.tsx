@@ -57,6 +57,24 @@ describe('useAgentConfig', () => {
     execution.current = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
   });
 
+  it('reads the mode the desktop session runs, not the requested one, from its unstamped record', () => {
+    const mode = (currentValue: string): AcpSessionData['configOptions'][number] => ({
+      type: 'select',
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      currentValue,
+      options: ['auto', 'acceptEdits'].map((value) => ({ value, name: value })),
+    });
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'claude', config: { mode: 'auto' } };
+    /* The desktop launcher records no host; a model without `auto` moved the session to Accept Edits. */
+    const { hostId: _hostId, ...unstamped } = session([mode('acceptEdits')], { agentId: 'claude' });
+    const { result } = renderConfig({ sessionData: unstamped, status: 'ready', discoveredOptions: [mode('auto')] });
+
+    const option = configOptionOf(result.current, 'mode');
+    expect(option && result.current.valueOf(option)).toBe('acceptEdits');
+  });
+
   it('offers every non-model option and stores the exact selected value on the execution', () => {
     const model: AcpSessionData['configOptions'][number] = {
       type: 'select',

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AcpSessionData } from '@taucad/chat';
+import { isRecordedOnHost } from '@taucad/chat-ui/utils/chat-execution';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 
 /** One option an external agent's session offers, besides its model. */
@@ -66,7 +67,9 @@ export const useAgentConfig = (
     };
   }, [owner]);
   const liveSession =
-    execution.kind === 'acp' && sessionData?.agentId === execution.agentId && sessionData.hostId === execution.hostId;
+    execution.kind === 'acp' &&
+    sessionData?.agentId === execution.agentId &&
+    isRecordedOnHost(sessionData.hostId, execution.hostId);
   const sessionModel = sessionData?.configOptions.find((option) => option.category === 'model')?.currentValue;
   const liveModel = liveSession && (execution.model === undefined || execution.model === sessionModel);
   const confirmedOptions = useMemo(

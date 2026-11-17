@@ -862,7 +862,7 @@ describe('createProjectHost', () => {
     const first = createProjectHost(options);
     expect(await first.launcher.host.claim('chat-late-read')).not.toHaveProperty('refused');
     await first.close();
-    await first.launcher.host.readEvents({ chatId: 'chat-late-read' }).catch(() => undefined);
+    await first.launcher.host.readEvents({ chatId: 'chat-late-read', cursor: 0, limit: 10 }).catch(() => undefined);
 
     const second = createProjectHost(options);
     cleanups.push(async () => second.close());

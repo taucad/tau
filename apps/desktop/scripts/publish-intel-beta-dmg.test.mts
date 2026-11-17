@@ -2,7 +2,7 @@
 /**
  * Purpose: Check the Intel Mac beta DMG publication decisions without a bucket.
  * Why: The beta DMG sits outside the qualified catalog, so its own rules (immutable release key, a latest pointer only
- * for the promoted release, public readback) are the only guard on what users download.
+ * for the release the Intel feed serves, public readback) are the only guard on what users download.
  * Usage: node --import @oxc-node/core/register apps/desktop/scripts/publish-intel-beta-dmg.test.mts
  * Exit codes: 0 when every check passes; non-zero on regression.
  */
@@ -39,7 +39,7 @@ const fake = (state: { objects?: Record<string, string>; latest?: string }) => {
   return { calls, dependencies };
 };
 
-await test('publishes the release DMG once and points latest at the promoted release', async () => {
+await test('publishes the release DMG once and points latest at it while the Intel feed serves that release', async () => {
   const { calls, dependencies } = fake({});
   assert.deepEqual(await publishIntelBetaDmg({ tag, sha256, size: 1, dependencies }), { latest: true });
   assert.deepEqual(calls, [
@@ -62,7 +62,7 @@ await test('refuses to replace different release bytes', async () => {
   assert.deepEqual(calls, []);
 });
 
-await test('leaves latest alone for a release the channel has not promoted', async () => {
+await test('leaves latest alone for a release the Intel feed does not serve', async () => {
   const { calls, dependencies } = fake({ latest: 'desktop@0.6.0' });
   assert.deepEqual(await publishIntelBetaDmg({ tag, sha256, size: 1, dependencies }), { latest: false });
   assert.ok(!calls.some((call) => call.includes('latest/')));

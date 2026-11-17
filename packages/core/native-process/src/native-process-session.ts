@@ -239,6 +239,20 @@ export const terminateProcessTree = async (child: ChildProcessWithoutNullStreams
       killer.once('close', resolve);
       killer.once('error', fallback);
     });
+    /* `taskkill` returns once the tree is told to end, not once it has: until the worker is gone it still holds its
+     * working directory, which then cannot be removed. Settle on its exit, within the same bound as the POSIX path. */
+    await new Promise<void>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(resolve, terminationGraceMilliseconds);
+      timer.unref();
+      child.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
     return;
   }
 

@@ -1318,11 +1318,13 @@ ${keepAlive}`);
         process.env['SystemRoot'] = previous;
       }
     });
-    const environment = processEnvironment('/artifacts');
-    expect(environment['LANG']).toBe('C.UTF-8');
-    expect(environment['TMPDIR']).toBe('/artifacts');
-    expect(environment['HOME']).toBe('/artifacts');
-    expect(environment['PATH']).toBe('/usr/bin:/bin');
+    await withPlatform('linux', async () => {
+      const environment = processEnvironment('/artifacts');
+      expect(environment['LANG']).toBe('C.UTF-8');
+      expect(environment['TMPDIR']).toBe('/artifacts');
+      expect(environment['HOME']).toBe('/artifacts');
+      expect(environment['PATH']).toBe('/usr/bin:/bin');
+    });
     await withPlatform('win32', async () => {
       expect(processEnvironment('/artifacts')).not.toHaveProperty('PATH');
     });

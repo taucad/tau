@@ -83,8 +83,6 @@ export const queuedSendAttribute = 'data-queued-send';
 export const earlyTextAttribute = 'data-early-text';
 /** On the box: the served input paints the stored draft (the draft hint) into an empty input before first paint. */
 export const draftHintAttribute = 'data-draft-hint';
-/** On the box: an Enter on a painted draft nobody edited is not queued, as the record may hold another draft. */
-export const dropsPaintedSendAttribute = 'data-drops-painted-send';
 /** The box's status slot, which says a queued send aloud. */
 export const queuedSendStatusSlot = 'queued-send-status';
 /** What a queued send's status says, before and after adoption. */
@@ -117,7 +115,7 @@ const scriptBody = (target: string, queueSubmit: boolean): string =>
   (queueSubmit
     ? boxScript +
       `input.addEventListener('keydown',(event)=>{if(event.key==='Escape'){if(state.submitQueued)q(false);return}if(event.key!=='Enter'||event.shiftKey||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.keyCode===229||(typeof matchMedia==='function'&&matchMedia('(pointer: coarse)').matches))return;event.preventDefault();` +
-      `const box=bx();if(box&&box.hasAttribute('${dropsPaintedSendAttribute}')&&state.edited!==true&&state.prefill&&input.value===state.prefill)return;q(input.value.trim()!=='')});`
+      `q(input.value.trim()!=='')});`
     : '') +
   `const mark=()=>{if(input.getClientRects().length===0)return false;const time=performance.now();state.acceptedAt=time;try{if(performance.getEntriesByName('${inputAcceptedMarkName}','mark').length===0)performance.mark('${inputAcceptedMarkName}',{startTime:time})}catch{}return true};` +
   `requestAnimationFrame(()=>{try{if(mark()||typeof ResizeObserver!=='function')return;const observer=new ResizeObserver(()=>{if(mark())observer.disconnect()});observer.observe(input)}catch{}})}catch{}})()`;
@@ -264,15 +262,6 @@ export const installHandOffTracker = (element: HandOffElement, options: HandOffO
         return;
       }
       event.preventDefault();
-      if (
-        (boxOf()?.hasAttribute(dropsPaintedSendAttribute) ?? false) &&
-        !state.edited &&
-        state.prefill !== undefined &&
-        state.prefill !== '' &&
-        element.value === state.prefill
-      ) {
-        return;
-      }
       setQueued(element.value.trim() !== '');
     });
   }

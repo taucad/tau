@@ -7,6 +7,7 @@ import type { captureDictation } from '#components/dictation/dictation-capture.j
 import type { transcribeDictation } from '#components/dictation/dictation-client.js';
 import type { AcpSessionData } from '@taucad/chat';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
+import type { PaintedSendVerdict } from '#components/chat/chat-textarea-desktop.js';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
@@ -389,6 +390,8 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       earlyInput?: EarlyChatInput;
       setDraftText?: (text: string) => void;
       isSubmitDisabled?: boolean;
+      /** Read at each render, so a row can change the verdict between renders. */
+      paintedSendVerdict?: { current: PaintedSendVerdict | undefined };
     } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
@@ -400,6 +403,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       <TooltipProvider>
         <ChatTextareaDesktop
           earlyInput={options.earlyInput}
+          paintedSendVerdict={options.paintedSendVerdict?.current}
           isSubmitDisabled={isSubmitDisabled}
           enableAutoFocus={options.enableAutoFocus ?? false}
           mode={options.mode}
@@ -793,6 +797,78 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     scrollTop: 0,
     submitQueued: true,
   };
+
+  /* Ruling 2026-11-17T03:28Z: an Enter on a painted draft nobody edited queued visibly; it is replayed only when the chat's
+   * record holds that text, and otherwise cancelled with the record's text shown and a status saying why. */
+  describe('an Enter queued on a painted draft', () => {
+    const paintedQueued: EarlyChatInput = {
+      text: 'Fillet it',
+      edited: false,
+      focused: true,
+      focusUnclaimed: false,
+      start: 9,
+      end: 9,
+      direction: 'none',
+      scrollTop: 0,
+      submitQueued: true,
+      prefilled: true,
+    };
+
+    it('should hold it, shown as queued, while the record is unread, and send it once the record holds the same text', async () => {
+      const handleSubmit = vi.fn(asyncNoop);
+      const verdict: { current: PaintedSendVerdict | undefined } = { current: { kind: 'wait' } };
+      const view = renderComposer('Fillet it', codexSession, {
+        earlyInput: paintedQueued,
+        handleSubmit,
+        paintedSendVerdict: verdict,
+      });
+      await waitFor(() => {
+        expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+      });
+      expect(screen.getByRole('status')).toHaveTextContent('Send queued. Press Escape to cancel.');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(handleSubmit).not.toHaveBeenCalled();
+
+      verdict.current = { kind: 'send' };
+      view.rerenderWith(codexSession, 'Fillet it');
+      await waitFor(() => {
+        expect(handleSubmit).toHaveBeenCalledOnce();
+      });
+      expect(handleSubmit.mock.calls[0]?.[0]).toBe('Fillet it');
+    });
+
+    it('should cancel it when the record holds another text, show that text, and say why', async () => {
+      const handleSubmit = vi.fn(asyncNoop);
+      const setDraftText = vi.fn();
+      const verdict: { current: PaintedSendVerdict | undefined } = { current: { kind: 'wait' } };
+      const view = renderComposer('Fillet it', codexSession, {
+        earlyInput: paintedQueued,
+        handleSubmit,
+        setDraftText,
+        paintedSendVerdict: verdict,
+      });
+      await waitFor(() => {
+        expect(view.container.querySelector('[data-queued-send]')).not.toBeNull();
+      });
+
+      /* A record with no draft at all: the painted text is not the record's, so it goes too. */
+      verdict.current = { kind: 'cancel', recordText: '' };
+      view.rerenderWith(codexSession, 'Fillet it');
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Queued send cancelled: the saved draft differs.');
+      });
+      expect(view.container.querySelector('[data-queued-send]')).toBeNull();
+      const editor = view.container.querySelector<HTMLElement & { editor?: Editor }>('.ProseMirror')?.editor;
+      expect(editor!.getText()).toBe('');
+      expect(setDraftText).toHaveBeenLastCalledWith('');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(handleSubmit).not.toHaveBeenCalled();
+    });
+  });
 
   /* Home's creation location can still be loading at adoption (H-f): the queued send waits, shown on Send. */
   it('should hold a queued send, shown as queued, until nothing refuses it', async () => {

@@ -72,8 +72,23 @@ const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
   reference: 'Add reference',
 };
 
+/**
+ * What becomes of an Enter queued on a painted draft nobody edited, decided by the draft's owner from the chat's record
+ * (ruling 2026-11-17T03:28Z): wait while the record is unread, send when it holds the painted text, or cancel and show
+ * the record's text.
+ */
+export type PaintedSendVerdict =
+  | { readonly kind: 'wait' }
+  | { readonly kind: 'send' }
+  | { readonly kind: 'cancel'; readonly recordText: string };
+
+/** What the status says once a queued send on a painted draft is cancelled because the saved draft differs. */
+export const paintedSendCancelledStatus = 'Queued send cancelled: the saved draft differs.';
+
 type ChatTextareaDesktopProperties = {
   readonly earlyInput?: EarlyChatInput;
+  /** For an Enter queued on a painted draft: whether it waits, is sent or is cancelled (see {@link PaintedSendVerdict}). */
+  readonly paintedSendVerdict?: PaintedSendVerdict;
   /**
    * Called once `earlyInput` is in the editor, so its owner does not hand it over again. Returns whether a painted
    * draft becomes the draft (its owner's record is not read yet and holds nothing), so the editor keeps it.
@@ -259,6 +274,7 @@ const isQueuedSendPermitted = (
 export const ChatTextareaDesktop = memo(function ({
   earlyInput,
   onEarlyInputAdopted,
+  paintedSendVerdict,
   className,
   enableAutoFocus = true,
   enableContextActions = true,
@@ -639,6 +655,10 @@ export const ChatTextareaDesktop = memo(function ({
   /* The queued send (above): an edit in the native input after its Enter had already cancelled it (`submitQueued` is
    * false then). It waits, still queued, while sending is not permitted, and carries the editor's text, since the
    * draft this composer was rendered with can still be the previous one; it also waits for a model and dictation. */
+  /* An Enter on a painted draft the record does not hold is cancelled (shown as such while the queue was still live),
+   * never sent; one the record holds waits for the record to be read. */
+  const isPaintedSendCancelled = paintedSendVerdict?.kind === 'cancel' && isQueuedSubmitShown;
+  const isQueuedSendShown = isQueuedSubmitShown && !isPaintedSendCancelled;
   const isQueuedSubmitPermitted = isQueuedSendPermitted({
     dictationPhase: dictation.phase,
     sendBlockReason,
@@ -648,7 +668,20 @@ export const ChatTextareaDesktop = memo(function ({
     execution,
   });
   useEffect(() => {
-    if (!editor || !queuedSubmitRef.current || !isQueuedSubmitPermitted) {
+    if (!editor || !queuedSubmitRef.current) {
+      return;
+    }
+    if (paintedSendVerdict?.kind === 'cancel') {
+      queuedSubmitRef.current = false;
+      /* The record's text shows, not the painted one: a record with another draft already put it in the draft, and
+       * one with none leaves the painted text there until this. */
+      if (extractContent(editor).text !== paintedSendVerdict.recordText) {
+        editor.commands.setContent(plainTextDocument(paintedSendVerdict.recordText), { emitUpdate: false });
+        setDraftText(paintedSendVerdict.recordText);
+      }
+      return;
+    }
+    if (paintedSendVerdict?.kind === 'wait' || !isQueuedSubmitPermitted) {
       return;
     }
     queuedSubmitRef.current = false;
@@ -662,7 +695,7 @@ export const ChatTextareaDesktop = memo(function ({
       }
     };
     void replay();
-  }, [editor, isQueuedSubmitPermitted, submitWithReferences]);
+  }, [editor, isQueuedSubmitPermitted, paintedSendVerdict, setDraftText, submitWithReferences]);
 
   const cancelQueuedSubmitOnEscape = useCallback(
     (event: React.KeyboardEvent): void => {
@@ -781,7 +814,7 @@ export const ChatTextareaDesktop = memo(function ({
           className,
         )}
         data-collapsed={isCollapsed ? '' : undefined}
-        data-queued-send={isQueuedSubmitShown ? '' : undefined}
+        data-queued-send={isQueuedSendShown ? '' : undefined}
         onKeyDownCapture={cancelQueuedSubmitOnEscape}
         onFocus={handleTextareaFocus}
         onBlur={handleTextareaBlur}
@@ -834,7 +867,7 @@ export const ChatTextareaDesktop = memo(function ({
         {/* Present from mount for an input that queued a send, so the status is read when it changes. */}
         {earlyInput?.submitQueued === true ? (
           <span role='status' className='sr-only'>
-            {isQueuedSubmitShown ? queuedSendStatus : ''}
+            {isQueuedSendShown ? queuedSendStatus : isPaintedSendCancelled ? paintedSendCancelledStatus : ''}
           </span>
         ) : null}
         <ChatTextareaBar

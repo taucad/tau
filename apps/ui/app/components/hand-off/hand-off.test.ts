@@ -9,6 +9,7 @@ import {
   resetInputAcceptedForTest,
 } from '#components/hand-off/hand-off.js';
 import type { HandOffElement, HandOffOptions } from '#components/hand-off/hand-off.js';
+import { projectComposerBox } from '#components/chat/project-composer-hand-off.js';
 
 const record = vi.hoisted(() => vi.fn());
 vi.mock('@taucad/ui-core/lib/project-open-performance', () => ({
@@ -605,24 +606,24 @@ describe('hand-off queued send and stored draft (A15d, C10)', () => {
     }
   });
 
-  it('should not queue an Enter on a painted draft nobody edited where the box drops it, and queue it after an edit', () => {
+  it('should queue an Enter on a painted draft nobody edited visibly, as any Enter, and cancel it on Escape', () => {
     history.replaceState(null, '', '/');
     localStorage.setItem(
       'tau-draft-hint',
       JSON.stringify({ v: 1, home: { usedAt: 1, text: 'Fillet it' }, projects: {} }),
     );
-    const { box, input } = serveInBox(['data-draft-hint', 'data-drops-painted-send']);
+    /* The project composer's own box. */
+    const { box, input } = serveInBox(Object.keys(projectComposerBox));
     expect(input.value).toBe('Fillet it');
     const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     input.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(true);
+    expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(true);
+    expect(statusOf(box)).toBe(status);
+    expect(captureHandOff(input)).toMatchObject({ submitQueued: true, prefilled: true, edited: false });
+
+    play(input, [{ kind: 'key', init: { key: 'Escape' } }]);
     expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(false);
     expect(captureHandOff(input).submitQueued).toBe(false);
-
-    play(input, [
-      { kind: 'type', text: '!' },
-      { kind: 'key', init: { key: 'Enter' } },
-    ]);
-    expect(captureHandOff(input).submitQueued).toBe(true);
   });
 });

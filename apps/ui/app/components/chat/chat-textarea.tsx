@@ -5,6 +5,7 @@ import type { ActorRefFrom } from 'xstate';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
 import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
+import type { PaintedSendVerdict } from '#components/chat/chat-textarea-desktop.js';
 import { ChatEarlyInput } from '#components/chat/chat-early-input.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { useHandOffAdoption } from '#components/hand-off/hand-off-store.js';
@@ -29,6 +30,7 @@ import { ChatPlacementNotice } from '#components/chat/chat-placement-notice.js';
 import { ChatRunElsewhereNotice } from '#components/chat/chat-run-elsewhere-notice.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { buildDraftMessage } from '#hooks/draft.machine.js';
+import type { ComposerRecord } from '@taucad/chat-ui/db/composer-record-store';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { CadAgentExecution } from '@taucad/chat';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
@@ -44,6 +46,34 @@ const handOffTarget = (
   adoptedEarlyInput: EarlyChatInput | undefined,
   enableEarlyInput: boolean,
 ): HandOffTarget | undefined => (adoptedEarlyInput === undefined && !enableEarlyInput ? target : undefined);
+
+/** The text a read record's draft shows (its first text), empty for a record with no draft or none at all. */
+const recordedDraftText = (record: ComposerRecord | undefined): string =>
+  record?.draft?.parts.map((part) => (part.type === 'text' ? part.text : '')).find((text) => text !== '') ?? '';
+
+/**
+ * What becomes of an Enter pressed on a painted draft nobody edited (ruling 2026-11-17T03:28Z): it waits while the
+ * chat's record is unread, is sent when the record holds the painted text for this chat, and is cancelled otherwise
+ * (another chat's draft, another text, or no record to confirm it).
+ *
+ * @param paintedSend - The painted text the Enter queued, and the chat it was painted for.
+ * @param record - Whether there is a record, its draft's text once read, and the chat on screen.
+ * @returns The verdict, or undefined when no such Enter is queued.
+ */
+const paintedSendVerdictOf = (
+  paintedSend: { readonly text: string; readonly chatId?: string } | undefined,
+  record: { readonly hasRecord: boolean; readonly recordDraftText: string | undefined; readonly activeChatId?: string },
+): PaintedSendVerdict | undefined => {
+  if (paintedSend === undefined) {
+    return undefined;
+  }
+  if (record.hasRecord && record.recordDraftText === undefined) {
+    return { kind: 'wait' };
+  }
+  const recordText = record.recordDraftText ?? '';
+  const isSameChat = paintedSend.chatId === undefined || paintedSend.chatId === record.activeChatId;
+  return isSameChat && recordText === paintedSend.text ? { kind: 'send' } : { kind: 'cancel', recordText };
+};
 
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the
@@ -142,11 +172,28 @@ export const ChatTextarea = memo(function ({
   const isRecordLoading = useSelector(composerSession?.composerRecordRef, (state) =>
     state ? state.matches({ lifecycle: 'loading' }) : false,
   );
+  /* The text of the draft the chat's record held when it was read, or undefined while it is unread (or there is no
+   * record to read). */
+  const recordDraftText = useSelector(composerSession?.composerRecordRef, (state) =>
+    state === undefined || state.matches({ lifecycle: 'loading' })
+      ? undefined
+      : recordedDraftText(state.context.record),
+  );
+  /* An Enter pressed on a painted draft nobody edited (ruling 2026-11-17T03:28Z): it queued visibly as any Enter, and
+   * is replayed only if the chat's record holds that very text; otherwise it is cancelled, the record's text shows and
+   * the status says why. Undefined for any other early input. */
+  const [paintedSend, setPaintedSend] = useState<{ readonly text: string; readonly chatId?: string }>();
   const handleHandOffAdopted = useCallback(
     (snapshot: HandOffSnapshot): void => {
       if (snapshot.edited) {
         draftActorRef.send({ type: 'setDraftText', text: snapshot.text, adoptedEdit: true });
         return;
+      }
+      if (snapshot.prefilled === true && snapshot.submitQueued) {
+        setPaintedSend({
+          text: snapshot.text,
+          ...(snapshot.prefilledChatId === undefined ? {} : { chatId: snapshot.prefilledChatId }),
+        });
       }
       const isPaintedDraftTakenNow =
         snapshot.prefilled === true &&
@@ -163,6 +210,15 @@ export const ChatTextarea = memo(function ({
   /* Whether the adopted snapshot's painted draft became the draft, for the editor to keep it (read once, at its
    * handover). */
   const takePaintedDraft = useCallback((): boolean => isPaintedDraftTaken, [isPaintedDraftTaken]);
+  const paintedSendVerdict = useMemo(
+    () =>
+      paintedSendVerdictOf(paintedSend, {
+        hasRecord: composerSession !== undefined,
+        recordDraftText,
+        activeChatId: composerSession?.activeChatId,
+      }),
+    [paintedSend, composerSession, recordDraftText],
+  );
   const handOff = useHandOffAdoption(
     handOffTarget(handOffTargetProperty, adoptedEarlyInput, enableEarlyInput),
     handleHandOffAdopted,
@@ -436,6 +492,7 @@ export const ChatTextarea = memo(function ({
       <ChatTextareaDesktop
         earlyInput={earlyInput}
         onEarlyInputAdopted={onEarlyInputAdopted}
+        paintedSendVerdict={onEarlyInputAdopted === undefined ? undefined : paintedSendVerdict}
         className={className}
         enableAutoFocus={enableAutoFocus}
         enableContextActions={enableContextActions}

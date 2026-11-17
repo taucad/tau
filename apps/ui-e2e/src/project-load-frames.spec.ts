@@ -6,6 +6,7 @@ import { filesPane, treeItem } from '#support/file-tree.js';
 import { axeAudit } from '#support/page-audit.js';
 import { writeWorkbenchFile } from '#support/workbench-files.js';
 import type {
+  EarlyInput,
   ShownSpan,
   ProjectLoadFrame,
   ProjectLoadBox,
@@ -1660,6 +1661,134 @@ knownDefect(
         first?.text,
         `H-e (project): the composer's first painted value, ${first === undefined ? 'absent' : describeFrame(first)}`,
         projectDraft,
+      );
+    },
+  },
+);
+
+/** The reply the agent host gives a sent painted draft, so a row can tell a send happened. */
+const paintedReply = 'Filleting the bracket edges.';
+/** Another text the draft hint can hold than the chat's record does. */
+const otherDraft = 'Chamfer the bracket edges';
+/** What the composer's status says once a queued send on a painted draft is cancelled. */
+const paintedSendCancelled = 'Queued send cancelled: the saved draft differs.';
+
+/**
+ * Enter pressed on a project chat's painted draft before hydration (ruling 2026-11-17T03:28Z): the chat's record holds
+ * `projectDraft`; the draft hint paints it (`same`) or another text (`other`).
+ */
+const enterOnPaintedDraft = async (
+  label: string,
+  hint: 'same' | 'other',
+): Promise<{
+  readonly early: EarlyInput;
+  readonly served: { readonly painted: string; readonly queued: boolean; readonly status: string };
+  readonly replied: boolean;
+  readonly text: string;
+  readonly status: string;
+}> => {
+  const { path } = await seedProjects('wide');
+  await target.type(composer, projectDraft);
+  /* The draft is in the chat's composer record, and its hint, before the measured load. */
+  await target.delay(settleWindow);
+  if (hint === 'other') {
+    await target.evaluate((text) => {
+      const stored = JSON.parse(localStorage.getItem('tau-draft-hint') ?? '{"v":1,"projects":{}}') as {
+        projects: Record<string, { text: string }>;
+      };
+      for (const entry of Object.values(stored.projects)) {
+        entry.text = text;
+      }
+      localStorage.setItem('tau-draft-hint', JSON.stringify(stored));
+    }, otherDraft);
+  }
+  await target.installAgentHostGatewayFixture([{ text: paintedReply, usage }]);
+  /* Hydration waits for the Enter, not for a fixed time a loaded runner can outlast. */
+  await holdRequestsUntilReleased(entryChunk);
+  const early = await openBeforeHydration({
+    path,
+    input: anyComposerInput,
+    hydrated: richComposer,
+    text: '',
+    enter: true,
+    wait: 1500,
+    settle: 0,
+  });
+  const served = await target.evaluate(
+    (input) => ({
+      painted: document.querySelector<HTMLTextAreaElement>(input)?.value ?? '',
+      queued: document.querySelector('[data-hand-off-box][data-queued-send]') !== null,
+      status: document.querySelector('[data-hand-off-box] [role=status]')?.textContent ?? '',
+    }),
+    'textarea[aria-label="Chat message"]',
+  );
+  await releaseHeldRequests();
+  await target.expectVisible(selectors.getByCss(richComposer), 60_000);
+  /* A send reaches the agent host and its reply shows; time for it to happen, or not. */
+  await target.delay(settleWindow * 4);
+  const state = await target.evaluate(
+    ([selector, reply]) => ({
+      replied: document.body.textContent.includes(reply),
+      text: document.querySelector(selector)?.textContent.trim() ?? '',
+      status: [...document.querySelectorAll('[role=status]')].map((node) => node.textContent).join(' | '),
+    }),
+    [richComposer, paintedReply] as const,
+  );
+  await target.writeArtifact(
+    `project-load-frames/${label}.json`,
+    `${JSON.stringify({ early: { ...early, before: undefined, after: undefined }, served, state }, null, 2)}\n`,
+  );
+  precondition(early.found, `${label}: the served composer was not on screen before hydration`);
+  precondition(!early.hydratedBeforeAct, `${label}: the page had hydrated before the Enter`);
+  const held = await readDelayedRequests();
+  precondition(
+    held.some((url) => new RegExp(entryChunk, 'u').test(url)),
+    `${label}: the entry chunk was never delayed`,
+  );
+  return { early, served, ...state };
+};
+
+knownDefect(
+  'H-f (A15d, project route, painted draft the record holds): Enter on the painted draft before hydration queues visibly and sends it once after adoption',
+  {
+    artifact: 'h-f-painted-same-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => enterOnPaintedDraft('h-f-painted-same-wide', 'same'),
+    assert: ({ served, replied, text }) => {
+      expectMeasured(
+        { painted: served.painted, queued: served.queued, servedStatus: served.status, replied, text },
+        'H-f (project, same): the Enter on the painted draft was not queued visibly, or not sent once after adoption',
+        {
+          painted: projectDraft,
+          queued: true,
+          servedStatus: 'Send queued. Press Escape to cancel.',
+          replied: true,
+          text: '',
+        },
+      );
+    },
+  },
+);
+
+knownDefect(
+  'H-f (A15d, project route, painted draft the record does not hold): Enter on it queues visibly, then is cancelled with the record’s text shown and a status saying why',
+  {
+    artifact: 'h-f-painted-other-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => enterOnPaintedDraft('h-f-painted-other-wide', 'other'),
+    assert: ({ served, replied, text, status }) => {
+      expectMeasured(
+        {
+          painted: served.painted,
+          queued: served.queued,
+          replied,
+          text,
+          cancelledNotice: status.includes(paintedSendCancelled),
+        },
+        'H-f (project, other): the Enter on a painted draft the record does not hold was not queued visibly, or was sent, or not cancelled with the record’s text and a notice',
+        { painted: otherDraft, queued: true, replied: false, text: projectDraft, cancelledNotice: true },
       );
     },
   },

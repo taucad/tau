@@ -1,5 +1,5 @@
 import { act, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { ContextSuggestionItem } from '@taucad/chat-ui/components/tiptap/suggestion-types';
 import { toast } from '@taucad/ui/components/sonner';
 import { captureCadImages } from '#services/headless-capture.js';
@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => {
     onEarlyInputAdopted: undefined as (() => boolean) | undefined,
     draftSend: vi.fn(),
     isRecordUnread: true,
+    recordDraft: undefined as string | undefined,
+    paintedSendVerdict: undefined as unknown,
     cloudIntent: undefined as 'open' | undefined,
   };
 });
@@ -69,13 +71,16 @@ vi.mock('#components/chat/chat-textarea-desktop.js', () => ({
     actionItems,
     earlyInput,
     onEarlyInputAdopted,
+    paintedSendVerdict,
   }: {
     readonly onScreenshotAction: (item: ContextSuggestionItem) => void;
     readonly actionItems: ContextSuggestionItem[];
     readonly earlyInput?: unknown;
     readonly onEarlyInputAdopted?: () => boolean;
+    readonly paintedSendVerdict?: unknown;
   }) => {
     mocks.earlyInput = earlyInput;
+    mocks.paintedSendVerdict = paintedSendVerdict;
     mocks.onEarlyInputAdopted = onEarlyInputAdopted;
     mocks.onScreenshotAction = onScreenshotAction;
     mocks.actionItems = actionItems;
@@ -120,7 +125,18 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
         : {
             activeChatId: mocks.activeChatId,
             composerRecordRef: {
-              getSnapshot: () => ({ matches: () => mocks.isRecordUnread }),
+              getSnapshot: () => ({
+                matches: () => mocks.isRecordUnread,
+                context: {
+                  record:
+                    mocks.recordDraft === undefined
+                      ? undefined
+                      : {
+                          version: 1,
+                          draft: { id: 'd', role: 'user', parts: [{ type: 'text', text: mocks.recordDraft }] },
+                        },
+                },
+              }),
             },
           },
     execution: { execution: { kind: 'native' } },
@@ -320,6 +336,86 @@ describe('ChatTextarea painted draft hand-off', () => {
       mocks.activeChatId = undefined;
     },
   );
+});
+
+/* Ruling 2026-11-17T03:28Z: an Enter on a painted draft nobody edited is replayed only when the chat's record holds that
+ * text, and cancelled with the record's text otherwise. */
+describe('ChatTextarea Enter queued on a painted draft', () => {
+  beforeEach(() => {
+    resetHandOffStoreForTest();
+    mocks.draftSend.mockClear();
+    mocks.activeChatId = 'c1';
+    onTestFinished(() => {
+      mocks.activeChatId = undefined;
+      mocks.isRecordUnread = true;
+      mocks.recordDraft = undefined;
+    });
+  });
+
+  const serveQueued = (text: string, chatId?: string): void => {
+    render(<HandOffSlot surface='project-composer' scope='acme/bracket' label='Chat message' placeholder='Ask Tau' />);
+    const input = document.querySelector<HandOffElement>('textarea[aria-label="Chat message"]')!;
+    input.value = text;
+    Object.assign(input.tauHandOff!, {
+      prefill: text,
+      submitQueued: true,
+      ...(chatId === undefined ? {} : { prefillChat: chatId }),
+    });
+  };
+
+  it.each([
+    {
+      name: 'the record is unread',
+      isRecordUnread: true,
+      recordDraft: undefined,
+      chatId: 'c1',
+      verdict: { kind: 'wait' },
+    },
+    {
+      name: 'the record holds the same text',
+      isRecordUnread: false,
+      recordDraft: 'Fillet it',
+      chatId: 'c1',
+      verdict: { kind: 'send' },
+    },
+    {
+      name: 'the record holds another text',
+      isRecordUnread: false,
+      recordDraft: 'Chamfer it',
+      chatId: 'c1',
+      verdict: { kind: 'cancel', recordText: 'Chamfer it' },
+    },
+    {
+      name: 'the record holds no draft',
+      isRecordUnread: false,
+      recordDraft: undefined,
+      chatId: 'c1',
+      verdict: { kind: 'cancel', recordText: '' },
+    },
+    {
+      name: 'the painted draft was another chat’s',
+      isRecordUnread: false,
+      recordDraft: 'Fillet it',
+      chatId: 'c2',
+      verdict: { kind: 'cancel', recordText: 'Fillet it' },
+    },
+  ])('should decide the queued send when $name', ({ isRecordUnread, recordDraft, chatId, verdict }) => {
+    mocks.isRecordUnread = isRecordUnread;
+    mocks.recordDraft = recordDraft;
+    serveQueued('Fillet it', chatId);
+    render(<ChatTextarea onSubmit={vi.fn()} handOff={{ surface: 'project-composer', scope: 'acme/bracket' }} />);
+    expect(mocks.earlyInput).toMatchObject({ text: 'Fillet it', prefilled: true, submitQueued: true });
+    expect(mocks.paintedSendVerdict).toEqual(verdict);
+  });
+
+  it('should leave an edited Enter to the composer', () => {
+    render(<HandOffSlot surface='project-composer' scope='acme/bracket' label='Chat message' placeholder='Ask Tau' />);
+    const input = document.querySelector<HandOffElement>('textarea[aria-label="Chat message"]')!;
+    input.value = 'Typed';
+    Object.assign(input.tauHandOff!, { edited: true, submitQueued: true });
+    render(<ChatTextarea onSubmit={vi.fn()} handOff={{ surface: 'project-composer', scope: 'acme/bracket' }} />);
+    expect(mocks.paintedSendVerdict).toBeUndefined();
+  });
 });
 
 /* SP2h: the chats open while a Tau Cloud open still writes the files; a turn in this checkout waits for them. */

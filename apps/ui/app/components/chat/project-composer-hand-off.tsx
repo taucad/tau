@@ -18,13 +18,14 @@ import {
 } from '@taucad/chat-ui/components/chat-input-styles';
 import { ServedSendButton } from '#components/chat/chat-textarea-submit-button.js';
 import { HandOffSlot } from '#components/hand-off/hand-off-slot.js';
-import {
-  draftHintAttribute,
-  dropsPaintedSendAttribute,
-  handOffBoxAttribute,
-  queuedSendStatusSlot,
-} from '#components/hand-off/hand-off.js';
+import { draftHintAttribute, handOffBoxAttribute, queuedSendStatusSlot } from '#components/hand-off/hand-off.js';
 import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
+
+/**
+ * The project composer box's marks for the recorder: a hand-off box that paints the draft hint. An Enter on the painted
+ * draft queues as any Enter does; the composer replays it only when the chat's record holds that text.
+ */
+export const projectComposerBox = { [handOffBoxAttribute]: '', [draftHintAttribute]: '' } as const;
 
 /**
  * The project composer's hand-off, scoped to the project in the route: the placeholder serves it and the live
@@ -64,11 +65,10 @@ export function useProjectComposerHandOff(pathname?: string): HandOffTarget {
  */
 export function ProjectComposerHandOff({ target }: { readonly target: HandOffTarget }): React.JSX.Element {
   const { surface, scope } = target;
-  const box = { [handOffBoxAttribute]: '', [draftHintAttribute]: '', [dropsPaintedSendAttribute]: '' };
   return (
     /* The composer's own column inside the frame's box, with the composer frame's top inset, so the input row and the
      * bar sit where the rich composer's do (F7b). The served recorder marks it before React hydrates it. */
-    <div className='flex min-h-0 flex-1 flex-col pt-3' suppressHydrationWarning {...box}>
+    <div className='flex min-h-0 flex-1 flex-col pt-3' suppressHydrationWarning {...projectComposerBox}>
       {/* Says a queued send aloud, as Send's pending state shows it; the served recorder writes it. */}
       <span
         data-slot={queuedSendStatusSlot}

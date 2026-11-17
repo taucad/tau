@@ -178,10 +178,14 @@ export const rebuildAppImageWithEntry = async (options: {
 };
 
 type Identity = { readonly tag: string; readonly version: string; readonly sourceCommit: string };
-type LogEvent = { readonly event: string; readonly detail: Record<string, unknown> };
+type LogEvent = { readonly at: number; readonly event: string; readonly detail: Record<string, unknown> };
 type Launch = { readonly version: string; readonly pid: number; readonly events: LogEvent[] };
 
-const logLine = /^\S+ [A-Z]+ (\S+)(?: (.*))?$/u;
+const logLine = /^(\S+) [A-Z]+ (\S+)(?: (.*))?$/u;
+/** N1's countdown (`autoInstallCountdownMilliseconds` in `update-auto-install.ts`): Cancel stays offered this long. */
+export const autoInstallCountdownMilliseconds = 10_000;
+/** Main logs the countdown just after scheduling it and Node's cached loop clock can run a few ms behind the log clock. */
+const countdownToleranceMilliseconds = 50;
 const readySchema = z.object({ version: z.string(), pid: z.number().int().positive() });
 
 /** Split `desktop.log` into launches at each `main.ready`, keeping each event's JSON detail. */
@@ -194,12 +198,13 @@ const launchesOf = (log: string): Launch[] => {
     }
     let detail: Record<string, unknown> = {};
     try {
-      const parsed: unknown = match[2] === undefined ? {} : JSON.parse(match[2]);
+      const parsed: unknown = match[3] === undefined ? {} : JSON.parse(match[3]);
       detail = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
     } catch {
       /* A stack trace or other non-JSON detail: the event name is all the assessment reads. */
     }
-    const event = match[1]!;
+    const event = match[2]!;
+    const at = Date.parse(match[1]!);
     if (event === 'main.ready') {
       const ready = readySchema.safeParse(detail);
       if (ready.success) {
@@ -207,7 +212,7 @@ const launchesOf = (log: string): Launch[] => {
       }
       continue;
     }
-    launches.at(-1)?.events.push({ event, detail });
+    launches.at(-1)?.events.push({ at, event, detail });
   }
   return launches;
 };
@@ -275,6 +280,15 @@ export const assessRecovery = (input: {
   }
   if (triggers.length === 0) {
     throw new Error(`Version ${a.version} installed ${b.version} without the recovery window`);
+  }
+  const waited = first.events[started]!.at - first.events[countdown]!.at;
+  if (!Number.isFinite(waited)) {
+    throw new TypeError(`Version ${a.version}'s automatic-install countdown or start has no readable timestamp`);
+  }
+  if (waited < autoInstallCountdownMilliseconds - countdownToleranceMilliseconds) {
+    throw new Error(
+      `Version ${a.version} started the automatic install ${waited} ms after its countdown, before the ${autoInstallCountdownMilliseconds / 1000} s Cancel window ran out`,
+    );
   }
   const next = launches.slice(aIndex + 1).find((launch) => launch.version === b.version);
   if (!next) {

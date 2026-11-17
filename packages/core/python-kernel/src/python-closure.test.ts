@@ -264,6 +264,7 @@ describe('createPythonSeal', () => {
       readablePaths: [compiler],
       writablePath: input.root,
     });
+    expect(compile!.arguments.at(-2)).toBe(shippedBytecodeExclusion(input.root, [], ['python/tcl']));
     expect(staged).toEqual({
       names: ['python._pth', 'python.exe', 'python313.dll', 'vcruntime140.dll'],
       pth: `${join(input.root, 'python', 'Lib')}\r\n${join(input.root, 'python', 'DLLs')}\r\n`,
@@ -396,6 +397,25 @@ describe('shippedBytecodeExclusion', () => {
     expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c11\python\Lib\os.py`)).toBe(false);
     expect(matches(pattern, String.raw`D:\x\C:\Users\RUNNER~1\store\c+1\python\Lib\os.py`)).toBe(false);
     expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\os.pyc`)).toBe(false);
+  });
+
+  it('should skip every file under a data tree, and only under it', () => {
+    const root = String.raw`C:\Users\RUNNER~1\store\c+1`;
+    const pattern = shippedBytecodeExclusion(root, ['python/Lib/os.py'], ['python/tcl']);
+
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\tcl\tix8.4.3\pref\WmDefault.py`)).toBe(true);
+    expect(matches(pattern, 'C:/Users/RUNNER~1/store/c+1/python/tcl/tix8.4.3/pref/WmDefault.py')).toBe(true);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\os.py`)).toBe(true);
+    // A sibling whose name starts with the tree's, the tree's name deeper down, or the module beside the data.
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\tclx\a.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\tkinter\tcl\a.py`)).toBe(false);
+    expect(matches(pattern, String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\tkinter\tix.py`)).toBe(false);
+    expect(
+      matches(
+        shippedBytecodeExclusion(root, [], ['python/tcl']),
+        String.raw`C:\Users\RUNNER~1\store\c+1\python\Lib\os.py`,
+      ),
+    ).toBe(false);
   });
 
   it("should stay far under Windows' 32,767-character command line for the interpreter's 566 shipped sources", () => {

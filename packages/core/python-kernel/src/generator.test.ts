@@ -118,10 +118,12 @@ describe('the Python kernel lock compactor', () => {
 
   it('should compact for Windows x64 by its own markers and its one platform tag, with no wheel floor', () => {
     expect(markerEnvironment(win32X64)).toMatchObject({
+      /* eslint-disable @typescript-eslint/naming-convention -- PEP 508 fixes the marker variable names. */
       os_name: 'nt',
       sys_platform: 'win32',
       platform_system: 'Windows',
       platform_machine: 'AMD64',
+      /* eslint-enable @typescript-eslint/naming-convention -- Back to camelCase after the PEP 508 names. */
     });
     const windows = compactLock(parseRequirementsLock(lock), index, win32X64);
 

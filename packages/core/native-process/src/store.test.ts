@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 import type * as PreparationNode from '@taucad/runtime/preparation/node';
@@ -10,7 +10,15 @@ import { readManagedPreparation } from '@taucad/runtime/preparation/node';
 import type { ClosureLaunch } from '@taucad/runtime/preparation/node';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { withNativeDeployment } from '#native-kernel-adopter.js';
-import { deployments, engineNative, fixtureUrl, seal, voxelManifest, voxelNative } from '#store.fixture.js';
+import {
+  deployments,
+  engineNative,
+  fixtureUrl,
+  seal,
+  voxelManifest,
+  voxelNative,
+  voxelPackageRoot,
+} from '#store.fixture.js';
 import {
   bindNativeKernel,
   defaultDependencyStore,
@@ -100,7 +108,7 @@ describe('native deployments of a resolved runtime', () => {
       {
         package: '@acme/voxel',
         entry: fixtureUrl,
-        packageRoot: 'file:///packages/voxel/',
+        packageRoot: voxelPackageRoot,
         manifest: voxelManifest,
         kernels: ['voxel'],
       },
@@ -145,7 +153,7 @@ describe('native kernels from the dependency store', () => {
 
     expect([engine?.package, voxel?.package]).toEqual(['@acme/engine', '@acme/voxel']);
     expect(engine?.deployment.kernels).toEqual({ engine: { requires: ['runtime'], extensions: ['eng'] } });
-    expect(engine?.directory).toBe(join('/', 'packages', 'engine'));
+    expect(engine?.directory).toBe(resolve('/packages/engine'));
     expect(engine?.seal).toBe(seal);
     expect(voxel).not.toHaveProperty('seal');
     expect(engine?.launchSet?.([])).toEqual(['bin/worker']);
@@ -305,7 +313,7 @@ describe('native kernels from the dependency store', () => {
 
     expect(bound).toEqual({
       options: {
-        executable: '/store/closures/sha256/abc/bin/worker',
+        executable: join('/store/closures/sha256/abc', 'bin', 'worker'),
         runtimePath: '/store/closures/sha256/abc',
         requestTimeout: 1000,
         maxArtifactBytes: 64,

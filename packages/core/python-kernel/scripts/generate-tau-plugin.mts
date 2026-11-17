@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 
 import {
   fetchVerified,
@@ -41,6 +41,8 @@ import {
   targetKey,
 } from '@taucad/runtime/preparation/node';
 import type { DependencyFile, DependencyVariant, PluginDeployment } from '@taucad/runtime/preparation/node';
+import { configureWindowsNativeSandbox, nativeSandboxRefusal } from '@taucad/native-process-core';
+import { readWindowsSandboxStatus } from '@taucad/native-process-core/shell';
 
 import { compactLock, normalizeName, parseRequirementsLock, renderPylock, variantFloor } from '#generator.js';
 import type { IndexFile, LockPin, SelectedWheel, TargetConfig } from '#generator.js';
@@ -688,11 +690,33 @@ const runSeed = async ({ kernel, paths, seed }: Context, key?: string): Promise<
   );
 };
 
+/**
+ * On Windows, seal in the sandbox helper named by `TAU_WINDOWS_SANDBOX_HELPER`, whose one-time setup the caller ran
+ * (the golden workflow's Windows row does, elevated). Without it, Windows preparation refuses, as no native step runs
+ * unsandboxed.
+ * @param store - The golden store; its journals sit beside it.
+ */
+const configureGoldenWindowsSandbox = (store: string): void => {
+  const helperPath = process.env['TAU_WINDOWS_SANDBOX_HELPER'];
+  if (process.platform !== 'win32' || helperPath === undefined || helperPath === '') {
+    return;
+  }
+  configureWindowsNativeSandbox({
+    helperPath,
+    journalDirectory: join(dirname(store), `${basename(store)}-journals`),
+    installed: async () => {
+      const status = await readWindowsSandboxStatus(helperPath);
+      return status.installed;
+    },
+  });
+};
+
 /** Prepare this host's variant from the seed, sandbox and seal included, and record its golden receipt. */
 const runGolden = async ({ kernel, paths, seed }: Context, storeOption?: string): Promise<void> => {
   const deployment = await readManifest(kernel, paths);
   const variant = hostVariant(kernel, deployment);
   const store = storeOption ?? (await mkdtemp(join(tmpdir(), `tau-${kernel.adopter.worker.kernelId}-golden-`)));
+  configureGoldenWindowsSandbox(store);
   try {
     const host = createPreparationHost({
       plugins: [
@@ -706,6 +730,7 @@ const runGolden = async ({ kernel, paths, seed }: Context, storeOption?: string)
       ],
       store,
       seed,
+      nativeContainment: nativeSandboxRefusal,
     });
     const outcome = await host.prepare({
       package: kernel.packageName,

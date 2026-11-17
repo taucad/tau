@@ -59,15 +59,19 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || inputs.test-python
     strategy:
       fail-fast: false
-      # A draft pull request seals the two Linux targets only and requests no macOS runner; the
-      # caller's `ready_for_review` trigger seals all four once it is ready. A dispatch seals all four.
+      # A draft pull request seals the two Linux targets only and requests no macOS or Windows runner; the
+      # caller's `ready_for_review` trigger seals all five once it is ready. A dispatch seals all five. Windows seals in
+      # the Windows sandbox helper, built from this commit and set up for the runner's account.
       matrix:
         include: >-
           ${{ fromJSON(github.event.pull_request.draft
           && '[{"target":"linux-x64-glibc","runner":"ubuntu-24.04"},{"target":"linux-arm64-glibc","runner":"ubuntu-24.04-arm"}]'
-          || '[{"target":"linux-x64-glibc","runner":"ubuntu-24.04"},{"target":"linux-arm64-glibc","runner":"ubuntu-24.04-arm"},{"target":"darwin-arm64","runner":"macos-26"},{"target":"darwin-x64","runner":"macos-26-intel"}]') }}
+          || '[{"target":"linux-x64-glibc","runner":"ubuntu-24.04"},{"target":"linux-arm64-glibc","runner":"ubuntu-24.04-arm"},{"target":"darwin-arm64","runner":"macos-26"},{"target":"darwin-x64","runner":"macos-26-intel"},{"target":"win32-x64","runner":"windows-2025"}]') }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     env:
       NX_DAEMON: 'false'
       NX_NO_CLOUD: 'true'
@@ -83,6 +87,24 @@ jobs:
       - name: Setup Linux sandbox prerequisites
         if: runner.os == 'Linux'
         uses: ./.github/actions/setup-linux-sandbox
+      - name: Install the Windows sandbox helper's pinned Rust toolchain
+        if: runner.os == 'Windows'
+        working-directory: libs/sandbox/windows-sandbox
+        run: |
+          set -euo pipefail
+          rustup toolchain install
+          rustup show active-toolchain
+      - name: Build the Windows sandbox helper and set it up for the runner's account (elevated)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pnpm nx run sandbox:build:windows-sandbox --skip-nx-cache
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $helper = (Resolve-Path 'libs/sandbox/windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe').Path
+          $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          & $helper setup --for-user $sid
+          if ($LASTEXITCODE -ne 0) { throw "the sandbox setup exited $LASTEXITCODE" }
+          "TAU_WINDOWS_SANDBOX_HELPER=$helper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Seed, prepare in the sandbox and record the golden receipt
         run: pnpm nx run "${PROJECT}:golden-tau-plugin" --outputStyle=stream
       - name: Report the golden entry

@@ -8,11 +8,13 @@
  * optional TAU_DESKTOP_PACKAGE_OUTPUT_ROOT (default apps/desktop/package-out); optional TAU_DESKTOP_CHANNEL
  * (production, the default, or staging).
  * Payloads: no native kernel closure ships; the app downloads each one the first time a model needs it (desktop
- * first-use download blueprint, DS-1). git ships on linux-x64 when prepare-git has built it, and a linux-x64
- * --archive (a release) refuses to assemble without an executable git and git-lfs; it never ships on win32-x64
- * (prepare-git compiles kernel.org source, which is not how git ships on Windows). The Terminal's git store guard
+ * first-use download blueprint, DS-1). git ships when prepare-git has prepared it (compiled from kernel.org source on
+ * linux-x64, Git for Windows' MinGit on win32-x64), and an --archive (a release) refuses to assemble without an
+ * executable git and git-lfs. The Terminal's git store guard
  * (`tau-store-guard`, `sandbox:build:store-guard`) ships on linux-x64, and a linux-x64 --archive refuses to assemble
- * without it, since the APT package and the AppImage are built from that archive. PicoGK
+ * without it, since the APT package and the AppImage are built from that archive. The Windows shell sandbox helper
+ * (`tau-windows-sandbox.exe`, `desktop:prepare-windows-sandbox`) ships on win32-x64, and a win32-x64 --archive refuses
+ * to assemble without it and its NOTICE, since the signed NSIS installer is built from that archive. PicoGK
  * and the GeoSpec native engine ship on darwin-arm64 only: the desktop enables PicoGK there alone, its voxel
  * natives are built on Darwin arm64 only, and the GeoSpec native assembly is produced for darwin-arm64 only.
  * Each omission is printed before packaging.
@@ -20,11 +22,13 @@
  *   [--archive]
  * Output: <output root>/Tau-<target>/ (the unpacked app); with --archive, after the vendored-licence gate,
  * <output root>/Tau-linux-x64.tar.gz or <output root>/Tau-win32-x64.zip.
- * Exit codes: 0 on an assembled app (and archive); non-zero on a wrong host, missing artifacts, a held licence, or a
- * linux-x64 archive without an executable bundled git and git-lfs, or without the store guard.
+ * Exit codes: 0 on an assembled app (and archive); non-zero on a wrong host, missing artifacts, a held licence, an
+ * archive without an executable bundled git and git-lfs, a linux-x64 archive without the store guard, or a win32-x64
+ * archive without the shell sandbox helper.
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import { access, cp, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -38,10 +42,11 @@ import {
   desktopArchiveCommand,
   desktopGitPayloadRefusal,
   desktopStoreGuardRefusal,
+  desktopWindowsSandboxRefusal,
   desktopPackageOmissions,
   parseDesktopPackageArguments,
 } from './desktop-package-target.mjs';
-import { gitPayloadExecutables } from './git-payload.mjs';
+import { gitPayloadExecutables, gitPayloadLayout } from './git-payload.mjs';
 import { copyTree } from '@taucad/nx/runtime-closure';
 import {
   desktopManifestFields,
@@ -75,8 +80,10 @@ if (writesArchive) {
 const stageRoot = resolve(outputRoot, 'stage');
 const uiClientRoot = resolve(workspaceRoot, 'apps/ui/desktop/build/client');
 const gitResourceRoot = resolve(desktopRoot, 'resources/git', plan.target);
-/* GPL-2.0 §3(a): the exact source the payload was built from travels with it (`prepare-git.mts`). */
+/* GPL-2.0 §3(a): the exact source a source-built payload was built from travels with it (`prepare-git.mts`); the
+ * Windows payload is MinGit's release, whose NOTICE names its source instead. */
 const gitSourceRoot = resolve(desktopRoot, 'resources/git/SOURCES');
+const gitShipsSource = gitPayloadLayout(resolve(desktopRoot, 'resources/git'), plan.target).source !== undefined;
 const shipsGit = plan.gitPayloadSupported && existsSync(gitResourceRoot);
 /* A distribution archive is a release: it ships the payload as macOS does, with both binaries executable. */
 const gitRefusal = desktopGitPayloadRefusal(plan, writesArchive, {
@@ -86,7 +93,7 @@ const gitRefusal = desktopGitPayloadRefusal(plan, writesArchive, {
 if (gitRefusal !== undefined) {
   throw new Error(gitRefusal);
 }
-if (shipsGit && !existsSync(gitSourceRoot)) {
+if (shipsGit && gitShipsSource && !existsSync(gitSourceRoot)) {
   throw new Error(`The git payload ships with its source; ${gitSourceRoot} is missing. Run prepare-git again.`);
 }
 /* The Linux Terminal's git store guard (blueprint LP8): APT and AppImage are built from this archive. */
@@ -113,12 +120,46 @@ if (storeGuardRefusal !== undefined) {
   throw new Error(storeGuardRefusal);
 }
 const shipsStoreGuard = plan.storeGuard && storeGuard.executable && storeGuard.notice;
+/* The Windows shell sandbox helper (desktop Bash/Terminal blueprint Q15): the signed NSIS installer is built from this
+ * archive, and its signing step signs every PE file in it, the helper included. */
+const windowsSandboxRoot = resolve(desktopRoot, 'resources/windows-sandbox', plan.target);
+const windowsSandboxFile = async (name: string): Promise<boolean> => {
+  const status = await stat(resolve(windowsSandboxRoot, name)).catch(() => undefined);
+  return status?.isFile() === true;
+};
+/* The manifest names the executable it was staged with, so a NOTICE for another build cannot ride along. */
+const windowsSandboxManifestMatches = async (): Promise<boolean> => {
+  try {
+    const manifest = JSON.parse(await readFile(resolve(windowsSandboxRoot, 'manifest.json'), 'utf8')) as {
+      readonly sha256?: unknown;
+    };
+    const image = await readFile(resolve(windowsSandboxRoot, 'tau-windows-sandbox.exe'));
+    return manifest.sha256 === createHash('sha256').update(image).digest('hex');
+  } catch {
+    return false;
+  }
+};
+const windowsSandboxExecutable = await windowsSandboxFile('tau-windows-sandbox.exe');
+const windowsSandbox = {
+  executable: windowsSandboxExecutable,
+  notice: await windowsSandboxFile('NOTICE'),
+  manifestMatches: windowsSandboxExecutable && (await windowsSandboxManifestMatches()),
+  windowsSandboxRoot,
+};
+const windowsSandboxRefusal = desktopWindowsSandboxRefusal(plan, writesArchive, windowsSandbox);
+if (windowsSandboxRefusal !== undefined) {
+  throw new Error(windowsSandboxRefusal);
+}
+const shipsWindowsSandbox =
+  plan.windowsSandbox && windowsSandbox.executable && windowsSandbox.notice && windowsSandbox.manifestMatches;
 console.log(`Tau ${plan.target} leaves out:`);
 for (const omission of desktopPackageOmissions(plan, {
   git: shipsGit,
   gitResourceRoot,
   storeGuard: shipsStoreGuard,
   storeGuardRoot,
+  windowsSandbox: shipsWindowsSandbox,
+  windowsSandboxRoot,
 })) {
   console.log(`  - ${omission}`);
 }
@@ -175,10 +216,11 @@ await Promise.all([
   ...(shipsGit
     ? [
         copyTree(gitResourceRoot, resolve(resources, 'git', plan.target)),
-        copyTree(gitSourceRoot, resolve(resources, 'git/SOURCES')),
+        ...(gitShipsSource ? [copyTree(gitSourceRoot, resolve(resources, 'git/SOURCES'))] : []),
       ]
     : []),
   ...(shipsStoreGuard ? [copyTree(storeGuardRoot, resolve(resources, 'store-guard', plan.target))] : []),
+  ...(shipsWindowsSandbox ? [copyTree(windowsSandboxRoot, resolve(resources, 'windows-sandbox', plan.target))] : []),
 ]);
 await rm(stageRoot, { recursive: true, force: true });
 

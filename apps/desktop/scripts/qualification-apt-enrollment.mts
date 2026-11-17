@@ -28,7 +28,7 @@ const metadataSchema = z.strictObject({
   primaryFingerprint: z.string(),
   signingFingerprint: z.string(),
   issuedAt: z.iso.datetime(),
-  validUntil: z.iso.datetime(),
+  validUntil: z.iso.datetime().optional(),
   snapshotPrefix: z.string().regex(/^snapshots\/[a-f\d]{64}$/u),
 });
 const command = (file: string, args: string[]): string =>
@@ -126,10 +126,9 @@ const admitSnapshot = async (options: {
     metadata.signingFingerprint !== options.signingFingerprint ||
     !info.isFile() ||
     info.size !== metadata.archiveSize ||
-    (await digest(archive)) !== metadata.archiveSha256 ||
-    Date.parse(metadata.validUntil) <= Date.now()
+    (await digest(archive)) !== metadata.archiveSha256
   ) {
-    throw new Error('APT snapshot candidate/archive binding differs or expired');
+    throw new Error('APT snapshot candidate/archive binding differs');
   }
   const bytes = async (name: string): Promise<Uint8Array<ArrayBuffer>> =>
     Uint8Array.from(await readFile(join(options.bundleDirectory, name)));

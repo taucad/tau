@@ -238,6 +238,9 @@ const fakeWindow = {
   isDestroyed: vi.fn(() => false),
   isMinimized: vi.fn(() => false),
   isFullScreen: vi.fn(() => false),
+  getSize: vi.fn((): [number, number] => [1216, 859]),
+  getContentSize: vi.fn((): [number, number] => [1200, 800]),
+  setMinimumSize: vi.fn(),
   restore: vi.fn(),
   loadURL: vi.fn(async () => undefined),
   reload: vi.fn(),
@@ -445,6 +448,9 @@ vi.mock('#main/utility-environment.js', () => ({
   packagedEsbuildEnvironment: vi.fn(() => ({ ESBUILD_BINARY_PATH: '/staged/esbuild' })),
   bundledGitEnvironment: vi.fn(() => ({})),
   bundledStoreGuardEnvironment: vi.fn(() => ({})),
+  windowsShellSandboxEnvironment: vi.fn(() => ({
+    TAU_WINDOWS_SANDBOX_HELPER: String.raw`C:\Tau\resources\windows-sandbox\win32-x64\tau-windows-sandbox.exe`,
+  })),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
   })),
@@ -849,6 +855,34 @@ describe('desktop main compute owner', () => {
     bootMilliseconds,
   );
 
+  /* T-A2.1 (D4.6): the floor is a 400 × 300 content area, so the minimum set on the frame adds the frame's own size,
+   * measured after creation and again whenever full screen changes the chrome. */
+  it(
+    'should hold the window to a 400 x 300 content floor through its frame, and measure again after full screen',
+    async () => {
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1216, 859]);
+      fakeWindow.getContentSize.mockReturnValue([1200, 800]);
+      await bootstrap();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(416, 359);
+
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1440, 900]);
+      fakeWindow.getContentSize.mockReturnValue([1440, 900]);
+      const enter = fakeWindow.on.mock.calls.findLast(([name]) => name === 'enter-full-screen')?.[1];
+      enter?.();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(400, 300);
+
+      fakeWindow.setMinimumSize.mockClear();
+      fakeWindow.getSize.mockReturnValue([1216, 859]);
+      fakeWindow.getContentSize.mockReturnValue([1200, 800]);
+      const leave = fakeWindow.on.mock.calls.findLast(([name]) => name === 'leave-full-screen')?.[1];
+      leave?.();
+      expect(fakeWindow.setMinimumSize).toHaveBeenLastCalledWith(416, 359);
+    },
+    bootMilliseconds,
+  );
+
   /* AF-L03-1: the descriptors used to be frozen into the window's
    * `additionalArguments`, so a vendor model probe on a 5 s clock was a
    * prerequisite of the window's existence (D17). */
@@ -1079,6 +1113,22 @@ describe('desktop main compute owner', () => {
       expect(carrying).toHaveLength(1);
       expect(carrying[0]?.['TAU_DESKTOP_USER_DATA_DIR']).toBe(state.userData);
       expect(carrying[0]?.['TAU_DESKTOP_AUTHORITY_DIR']).toBe(join(state.userData, 'filesystem-authority'));
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'gives the Windows shell sandbox helper to the services utility alone',
+    async () => {
+      await bootstrap();
+      const carrying = state.utilityEnvironmentAdditions.filter(
+        (additions) => 'TAU_WINDOWS_SANDBOX_HELPER' in additions,
+      );
+      expect(carrying).toHaveLength(1);
+      expect(carrying[0]).toHaveProperty('TAU_DESKTOP_USER_DATA_DIR', state.userData);
+      expect(carrying[0]?.['TAU_WINDOWS_SANDBOX_HELPER']).toBe(
+        String.raw`C:\Tau\resources\windows-sandbox\win32-x64\tau-windows-sandbox.exe`,
+      );
     },
     bootMilliseconds,
   );
@@ -1571,11 +1621,14 @@ describe('desktop main compute owner', () => {
 describe('desktop main admission gates', () => {
   const bootMilliseconds = 30_000;
 
+  /* T-R11.2 (D7): only a locked release owns `Tau Staging`. A staging build that honours overrides and is started
+   * without `--user-data-dir` uses `Tau Staging Dev`, so a development or test run can never default into the
+   * installed app's profile. */
   it.each([
-    { overrides: true, explicitProfile: true, usesChannelProfile: false },
-    { overrides: true, explicitProfile: false, usesChannelProfile: true },
-    { overrides: false, explicitProfile: true, usesChannelProfile: true },
-    { overrides: false, explicitProfile: false, usesChannelProfile: true },
+    { overrides: true, explicitProfile: true, profile: undefined },
+    { overrides: true, explicitProfile: false, profile: 'Tau Staging Dev' },
+    { overrides: false, explicitProfile: true, profile: 'Tau Staging' },
+    { overrides: false, explicitProfile: false, profile: 'Tau Staging' },
   ])(
     'should isolate a staging profile according to $overrides/$explicitProfile',
     async (options) => {
@@ -1590,10 +1643,10 @@ describe('desktop main admission gates', () => {
       );
       await import('#main/main.js');
       const profileCall = app.setPath.mock.calls.find(([name]) => name === 'userData');
-      if (options.usesChannelProfile) {
-        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', 'Tau Staging')]);
-      } else {
+      if (options.profile === undefined) {
         expect(profileCall).toBeUndefined();
+      } else {
+        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', options.profile)]);
       }
       expect(app.setPath).toHaveBeenCalledWith('sessionData', state.userData);
     },

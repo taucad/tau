@@ -89,9 +89,15 @@ function SheetContent({
   className,
   children,
   side = 'right',
+  scroll = 'document',
   ...properties
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   readonly side?: 'top' | 'right' | 'bottom' | 'left';
+  /**
+   * Who scrolls the sheet. `document` (the default): the sheet's body scrolls on both axes within the dynamic viewport
+   * (D4.7). `contained`: the sheet manages its own inner scroller.
+   */
+  readonly scroll?: 'document' | 'contained';
 }): React.JSX.Element {
   return (
     <SheetPortal>
@@ -108,6 +114,7 @@ function SheetContent({
             'inset-x-0 top-0 h-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top',
           side === 'bottom' &&
             'inset-x-0 bottom-0 h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom',
+          scroll === 'document' && 'max-h-dvh overflow-x-auto overflow-y-auto',
           className,
         )}
         {...properties}

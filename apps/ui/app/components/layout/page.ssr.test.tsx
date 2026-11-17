@@ -27,7 +27,7 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
       commandPalette: [],
       enablePageWrapper: [],
       enablePageHeader: [{ handle: { enablePageHeader: false } }],
-      enableOverflowY: [],
+      scroll: [],
       providers: [],
     }),
 }));

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
 import type { ObservationSnapshot } from '@taucad/fs-client/observation-service';
-import { useFileManager } from '#hooks/use-file-manager.js';
+import { useFileServices } from '#hooks/use-file-services.js';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 
 const noop = (): void => undefined;
@@ -27,7 +27,7 @@ export function useFileContent(
   options: Readonly<{ retainValue?: boolean }> = {},
 ): FileContentSelection {
   const { retainValue = true } = options;
-  const { contentService } = useFileManager();
+  const { contentService } = useFileServices();
   const service = path ? contentService?.observeContent(path) : undefined;
   const observation = useObservation(service);
   const result = useSyncExternalStore(
@@ -79,7 +79,7 @@ export type FreshContent = Readonly<{
  * @returns What the pane shows.
  */
 export function useFreshContent(path: string | undefined, open: boolean, owedOnMount: boolean): FreshContent {
-  const { contentService } = useFileManager();
+  const { contentService } = useFileServices();
   const [owed, setOwed] = useState(() => !open || owedOnMount);
   const [readAfresh, setReadAfresh] = useState(() => !open || owedOnMount);
   const [failure, setFailure] = useState<Readonly<{ path: string; cause: unknown }>>();

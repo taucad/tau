@@ -30,7 +30,7 @@ import { cloudProjectsQueryKeyFor, fetchCloudProjects } from '#hooks/use-cloud-p
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
 
 export const meta: MetaFunction = () => [{ title: 'Project invitation · Tau' }];
-export const handle: Handle = { title: 'Project invitation', enableOverflowY: true };
+export const handle: Handle = { title: 'Project invitation' };
 
 /** What the route can end in, once the token has been offered. */
 type AcceptOutcome =

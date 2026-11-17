@@ -9,7 +9,7 @@ import type { ChatMode } from '@taucad/chat/constants';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
 import { createAttachmentStore } from '@taucad/chat-ui/db/attachment-store';
-import { draftIgnoredEvents, draftMachine } from '#hooks/draft.machine.js';
+import { draftIgnoredEvents, draftMachine, pendingDraftImages } from '#hooks/draft.machine.js';
 import type { DraftAttachmentModel, DraftEmittedEvents } from '#hooks/draft.machine.js';
 import { attachmentCapBytes } from '@taucad/chat-ui/utils/attachment.utils';
 import type { Attachment, StoredAttachment } from '@taucad/chat-ui/utils/attachment.utils';
@@ -1218,6 +1218,88 @@ describe('draftMachine', () => {
       actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
       expect(() => actor.stop()).not.toThrow();
       expect(actor.getSnapshot().status).toBe('stopped');
+    });
+  });
+
+  // ===========================================================================
+  // Pending images: what the composer draws while an image is converted and
+  // stored, so the thumbnail slot is held from the drop to the stored image.
+  // ===========================================================================
+  describe('pendingDraftImages', () => {
+    const heic = 'data:image/heic;base64,AAEC';
+
+    it('should list each image of a draft still converting or storing, in order, and none once stored', async () => {
+      const conversion = Promise.withResolvers<string>();
+      const { actor } = createHarness({
+        resize: async (image) => (image === heic ? conversion.promise : image),
+      });
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: heic, model: imageOnlyModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+
+      expect(pendingDraftImages(actor.getSnapshot().context, 'main')).toEqual([
+        { isConverting: true },
+        { isConverting: false },
+      ]);
+      expect(pendingDraftImages(actor.getSnapshot().context, 'edit')).toEqual([]);
+
+      conversion.resolve(jpegResized);
+      await settled(actor);
+      expect(pendingDraftImages(actor.getSnapshot().context, 'main')).toEqual([]);
+      expect(actor.getSnapshot().context.draftAttachments).toHaveLength(2);
+      actor.stop();
+    });
+
+    it('should still say converting while the converted image is being stored', async () => {
+      const { actor } = createHarness({ resize: async () => jpegResized, store: pendingForever });
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: heic, model: imageOnlyModel });
+      await waitFor(actor, (snapshot) => snapshot.matches({ attachmentProcessing: 'storing' }));
+
+      expect(pendingDraftImages(actor.getSnapshot().context, 'main')).toEqual([{ isConverting: true }]);
+      actor.stop();
+    });
+
+    it('should hold no slot for a document, which has no thumbnail', () => {
+      const { actor } = createHarness({ store: pendingForever });
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: pdf, model: imageAndPdfModel });
+
+      expect(actor.getSnapshot().context.attachmentQueue).toHaveLength(1);
+      expect(pendingDraftImages(actor.getSnapshot().context, 'main')).toEqual([]);
+      actor.stop();
+    });
+
+    it('should release the slot of a refused image, and say why as before', async () => {
+      const { actor } = createHarness({
+        resize: async () => {
+          throw new Error('HEIC images over 100 MP can not be attached.');
+        },
+      });
+      const failures: DraftEmittedEvents[] = [];
+      actor.on('imageResizeFailed', (event) => failures.push(event));
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: heic, model: imageOnlyModel });
+      expect(pendingDraftImages(actor.getSnapshot().context, 'main')).toHaveLength(1);
+
+      await settled(actor);
+      expect(pendingDraftImages(actor.getSnapshot().context, 'main')).toEqual([]);
+      expect(failures).toHaveLength(1);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([]);
+      actor.stop();
+    });
+
+    it('should list an edit image only for the edit that is open', () => {
+      const { actor } = createHarness({ resize: pendingForever });
+      actor.start();
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('original') });
+      actor.send({ type: 'addEditDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+
+      expect(pendingDraftImages(actor.getSnapshot().context, 'edit')).toEqual([{ isConverting: false }]);
+      expect(pendingDraftImages(actor.getSnapshot().context, 'main')).toEqual([]);
+      actor.send({ type: 'exitEditMode' });
+      expect(pendingDraftImages(actor.getSnapshot().context, 'edit')).toEqual([]);
+      actor.stop();
     });
   });
 });

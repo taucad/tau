@@ -246,6 +246,49 @@ describe('createServicesHost — root admission', () => {
       await rm(sandbox, { recursive: true, force: true });
     }
   });
+  it('should serve Home while another root canonicalises in the background (T-B30.2)', async () => {
+    const { promises: fsPromises } = await import('node:fs');
+    const home = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-home-root-')));
+    const hung = '/Volumes/tau-unanswering-drive/workspace';
+    const nativeRealpath = realpathSync.native;
+    const syncCalls: string[] = [];
+    const syncRealpath = vi.spyOn(realpathSync, 'native').mockImplementation(((candidate: string) => {
+      syncCalls.push(String(candidate));
+      if (String(candidate).startsWith(hung)) {
+        throw Object.assign(new Error(`EIO: i/o error, realpath '${String(candidate)}'`), { code: 'EIO' });
+      }
+      return nativeRealpath(candidate);
+    }) as typeof realpathSync.native);
+    const realpathAsync = fsPromises.realpath;
+    const asyncRealpath = vi.spyOn(fsPromises, 'realpath').mockImplementation((async (candidate: string) => {
+      if (String(candidate).startsWith(hung)) {
+        return Promise.withResolvers<string>().promise;
+      }
+      return realpathAsync(candidate);
+    }) as typeof fsPromises.realpath);
+    const serve = vi.fn<NonNullable<ServicesHostOptions['serve']>>(() => ({
+      run: vi.fn(),
+      close: async () => undefined,
+    }));
+    const { host } = hostHarness({ serve });
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [home, hung] }));
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+      const [, options] = serve.mock.calls[0]!;
+
+      expect(options.allowRoot(join(home, 'widget'))).toBe(true);
+      /* Review of #2384 (CodeRabbit): a path no spelling matches was answered by canonicalising, on the request's
+       * path, every root whose background call had not settled, a hung one included. */
+      expect(options.allowRoot('/srv/not-a-granted-root/file.ts')).toBe(false);
+      expect(syncCalls.filter((candidate) => candidate.startsWith(hung))).toEqual([]);
+    } finally {
+      syncRealpath.mockRestore();
+      asyncRealpath.mockRestore();
+      host.dispose();
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('createServicesHost — concern ports', () => {
@@ -547,7 +590,10 @@ public static class Params
         frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: physical } }, [port]),
       );
 
-      expect(log).toHaveBeenCalledWith('runtime-fs-served', { workspaceRoot: physical });
+      /* Served once the alias's background `realpath` settles: no root is canonicalised on the request's path. */
+      await vi.waitFor(() => {
+        expect(log).toHaveBeenCalledWith('runtime-fs-served', { workspaceRoot: physical });
+      });
       expect(port.close).not.toHaveBeenCalled();
     } finally {
       host.dispose();
@@ -596,14 +642,14 @@ describe('createServicesHost — filesystem authority lifetime', () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
     type ServeRuntimeFileSystem = NonNullable<ServicesHostOptions['serveRuntimeFileSystem']>;
-    let capturedHandlers: Parameters<ServeRuntimeFileSystem>[0] | undefined;
+    const served = Promise.withResolvers<Parameters<ServeRuntimeFileSystem>[0]>();
     const bridge = { emit: vi.fn(), dispose: vi.fn() };
     const host = createServicesHost({
       authorityDirectory,
       log: vi.fn(),
       serveRuntimeFileSystem: (handlers, port) => {
         void port;
-        capturedHandlers = handlers;
+        served.resolve(handlers);
         vi.spyOn(handlers, 'writeFile').mockImplementation(async (path, data) => {
           entered.resolve();
           await release.promise;
@@ -619,10 +665,11 @@ describe('createServicesHost — filesystem authority lifetime', () => {
     host.handleMessage(
       frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: root } }, [stubPort()]),
     );
-    if (capturedHandlers === undefined) {
-      throw new Error('The runtime filesystem concern was not served.');
-    }
-    return { bridge, entered, handlers: capturedHandlers, host, release, root, sandbox };
+    /* Under macOS `$TMPDIR` the admitted spelling is not canonical, so the
+     * concern is served once the background `realpath` settles (D8), not
+     * synchronously. A refusal closes the port and never serves. */
+    const handlers = await served.promise;
+    return { bridge, entered, handlers, host, release, root, sandbox };
   };
 
   it('waits for a dispatched runtime bridge success reply before quiescing', async () => {
@@ -2228,8 +2275,11 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       ),
     );
 
-    expect(log).toHaveBeenCalledWith('agent-host.untrusted-root', {
-      workspaceRoot: '/etc',
+    /* Refused once the admitted root's background `realpath` settles: a spelling no root matches yet may be its alias. */
+    await vi.waitFor(() => {
+      expect(log).toHaveBeenCalledWith('agent-host.untrusted-root', {
+        workspaceRoot: '/etc',
+      });
     });
     expect(port.close).toHaveBeenCalled();
   });

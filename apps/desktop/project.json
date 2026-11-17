@@ -175,12 +175,28 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts --target linux-x64"
       }
     },
+    "prepare-git-windows": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/git/win32-x64"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts --target win32-x64"
+      }
+    },
     "prepare-store-guard-linux": {
       "executor": "nx:run-commands",
       "outputs": ["{projectRoot}/resources/store-guard/linux-x64"],
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts --resources apps/desktop/resources/store-guard/linux-x64"
+      }
+    },
+    "prepare-windows-sandbox": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/windows-sandbox/win32-x64"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-windows-sandbox.mts --resources apps/desktop/resources/windows-sandbox/win32-x64"
       }
     },
     "test-git-payload": {
@@ -298,7 +314,9 @@
           "projects": ["ui"],
           "target": "check-desktop-payload"
         },
-        "prepare-build123d-python-windows"
+        "prepare-build123d-python-windows",
+        "prepare-git-windows",
+        "prepare-windows-sandbox"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {
@@ -512,6 +530,18 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-route-publication.test.mts"
+      }
+    },
+    "test-windows-git-payload": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["prepare-git-windows"],
+      "options": {
+        "cwd": ".",
+        "commands": [
+          "node --import @oxc-node/core/register apps/desktop/scripts/check-windows-git-payload.mts",
+          "node --import @oxc-node/core/register apps/desktop/scripts/windows-git-payload-roundtrip.mts"
+        ],
+        "parallel": false
       }
     },
     "test-windows-package": {

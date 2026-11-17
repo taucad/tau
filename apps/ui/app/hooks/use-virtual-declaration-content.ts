@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import type { EditorDocumentSession } from '#lib/editor-document-session.js';
-import { isVirtualDeclarationPath } from '#lib/virtual-declarations.js';
+import { isVirtualDeclarationPath } from '@taucad/editor-ui/lib/virtual-declarations';
 
 const encoder = new TextEncoder();
 

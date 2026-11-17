@@ -151,10 +151,11 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   const selectedRef = useRef<ProjectCreationLocation | undefined>(undefined);
   const loadRef = useRef<(restorePreference: boolean) => Promise<void>>(async () => undefined);
   /* The chosen folder is not available, so creation falls back to Home without saving that (R4); the stored choice
-   * applies again when the folder is back. */
+   * applies again when the folder is back. The selection follows the stored choice, read against the published root
+   * statuses, until the person picks or connects a location here. */
   const rootStatuses = useRootStatuses(fileManager.fileManagerRef);
   const rootStatusesRef = useRef(rootStatuses);
-  const isFallbackRef = useRef(false);
+  const isStoredChoiceRef = useRef(false);
 
   const grantWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
@@ -252,7 +253,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   const select = useCallback(
     (value: ProjectCreationLocation): void => {
       selectedRef.current = value;
-      isFallbackRef.current = false;
+      isStoredChoiceRef.current = false;
       setState((current) => {
         if (current.phase !== 'ready' || !current.hasWebAccessCapability) {
           return current;
@@ -281,8 +282,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
         restorePreference
           ? getProjectCreationLocation({ webAccessSupported: true, rootStatuses: rootStatusesRef.current }).then(
               ({ location, repaired }) => {
-                isFallbackRef.current = repaired === 'workspace-unavailable';
-                if (isFallbackRef.current && !hasShownUnavailableFallback) {
+                if (repaired === 'workspace-unavailable' && !hasShownUnavailableFallback) {
                   hasShownUnavailableFallback = true;
                   toast.info(
                     'Your chosen folder can’t be found right now, so new projects go to Home. Tau uses that folder again when it is back.',
@@ -302,7 +302,12 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
         return;
       }
       const options = [homeOption, ...workspaceOptions] as const;
-      const value = selectedRef.current ?? preferred;
+      /* Checked after the reads: a location picked here while they ran wins over the stored choice. */
+      const followsStoredChoice = restorePreference && (selectedRef.current === undefined || isStoredChoiceRef.current);
+      if (followsStoredChoice) {
+        isStoredChoiceRef.current = true;
+      }
+      const value = followsStoredChoice ? preferred : (selectedRef.current ?? preferred);
       const selectedOption =
         options.find((option) => projectCreationLocationsEqual(option.location, value)) ?? homeOption;
       selectedRef.current = selectedOption.location;
@@ -339,6 +344,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
         telemetry.workspaceConnected({ workspaceId: connected.workspace.workspaceId });
       }
       selectedRef.current = { kind: 'workspace', workspaceId: connected.workspace.workspaceId };
+      isStoredChoiceRef.current = false;
       await loadRef.current(false);
     } catch (error) {
       telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown', error });
@@ -348,15 +354,14 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
 
   const refresh = useCallback(async (): Promise<void> => loadRef.current(false), []);
 
-  /* Keep the statuses a preference read repairs against current. While creation fell back to Home, a changed root
-   * status may mean the chosen folder is back: read the choice again, unless the person picked another location
-   * meanwhile. */
+  /* Keep the statuses a preference read repairs against current. While the selection is the stored choice, a changed
+   * root status may mean its folder is gone or back, and the first read usually comes before the file service has
+   * published any status at all: read the choice again, unless the person picked another location meanwhile. */
   useEffect(() => {
     rootStatusesRef.current = rootStatuses;
-    if (!isFallbackRef.current || selectedRef.current?.kind !== 'home') {
+    if (!isStoredChoiceRef.current) {
       return;
     }
-    selectedRef.current = undefined;
     void loadRef.current(true);
   }, [rootStatuses]);
 

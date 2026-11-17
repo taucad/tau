@@ -153,10 +153,12 @@ const delay = async (milliseconds: number): Promise<void> =>
 const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 /**
  * PowerShell that writes `value` (an expression) to `path` (an expression) atomically: a sibling temporary file, then a
- * rename into place (`File.Replace` over an existing target, which never leaves it missing). A file the test polls while a shell writes it must never be seen half written.
+ * rename into place (`File.Replace` over an existing target, which never leaves it missing). `File.Move` and
+ * `File.Replace` touch only the two paths; `Move-Item` inspects the destination's ancestors, which the AppContainer may
+ * not read. A file the test polls while a shell writes it must never be seen half written.
  */
 const atomicWrite = (path: string, value: string): string =>
-  `& { param($target, $text) $partial = $target + '.partial'; Set-Content -LiteralPath $partial -Value $text -NoNewline -ErrorAction Stop; if (Test-Path -LiteralPath $target) { [System.IO.File]::Replace($partial, $target, [NullString]::Value) } else { Move-Item -LiteralPath $partial -Destination $target -ErrorAction Stop } } ${path} ${value}`;
+  `& { param($target, $text) $ErrorActionPreference = 'Stop'; $partial = $target + '.partial'; Set-Content -LiteralPath $partial -Value $text -NoNewline; if (Test-Path -LiteralPath $target) { [System.IO.File]::Replace($partial, $target, [NullString]::Value) } else { [System.IO.File]::Move($partial, $target) } } ${path} ${value}`;
 
 /** `-EncodedCommand` text: UTF-16LE, base64, so a nested script survives every command line it passes through. */
 const encoded = (script: string): string => Buffer.from(script, 'utf16le').toString('base64');

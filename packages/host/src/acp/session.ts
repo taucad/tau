@@ -1041,8 +1041,12 @@ const withoutDuplicateMcpContent = (
   tool: NormalizedTauMcpCall | undefined,
   rawOutput: unknown,
 ): NonNullable<ToolInputProviderMessage['call']> => {
-  if (!tool || !Array.isArray(facts.content)) {
+  if (!tool) {
     return facts;
+  }
+  /* The canonical Tau tool name, whatever the adapter spelled (Claude's `mcp__tau__test_model`). */
+  if (!Array.isArray(facts.content)) {
+    return { ...facts, nativeName: tool.toolName };
   }
   const normalized = rawOutput === undefined ? undefined : mcpResult(rawOutput, tool, facts.status === 'failed');
   const result = normalized?.isError === false ? asRecord(normalized.content) : undefined;
@@ -1067,7 +1071,9 @@ const withoutDuplicateMcpContent = (
     );
   });
   const { content: _content, ...rest } = facts;
-  return content.length === 0 ? rest : { ...rest, content };
+  return content.length === 0
+    ? { ...rest, nativeName: tool.toolName }
+    : { ...rest, nativeName: tool.toolName, content };
 };
 
 /**

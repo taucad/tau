@@ -2,8 +2,8 @@
 import { act, render, renderHook } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
-import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import type { DesktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
+import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { toast } from '@taucad/ui/components/sonner';
 import {
   NativeFileManagerIcon,
@@ -18,11 +18,11 @@ const mockOpen = vi.fn(async (_path: string) => undefined);
 const mockReveal = vi.fn(async (_path: string) => undefined);
 const mockWorkspaceRoot = vi.fn(async (projectId: string) => `/home/${projectId}`);
 
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   desktopBridge: () => bridge,
   nodeHomeRoot: () => '/home',
 }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectFileSystemConfig: async () => config,
 }));
 vi.mock('#lib/agent-host-placement.js', () => ({

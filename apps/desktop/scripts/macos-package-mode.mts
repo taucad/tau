@@ -56,6 +56,26 @@ export const macosPackageFuses = (
   [FuseV1Options.OnlyLoadAppFromAsar]: true,
 });
 
+/**
+ * The host app's `CFBundleIdentifier` for a package mode.
+ *
+ * Only a release carries `com.taucad.tau.desktop`. A locally signed development package keeps
+ * `com.taucad.tau.desktop.local`, and every other development package (unsigned or ad-hoc, the
+ * packaged e2e lane and device runs) gets `com.taucad.tau.desktop.e2e`, so LaunchServices never
+ * treats it as the installed Tau or Tau Staging. The profile and single-instance lock are separate:
+ * a development package honours `--user-data-dir`, a release does not.
+ *
+ * @param mode - The package mode; only `release` changes the id.
+ * @param localSigned - Whether the package is signed with a local Apple Development identity.
+ * @returns The bundle identifier to write into the host `Info.plist`.
+ */
+export const macosBundleId = (mode: Pick<MacosPackageMode, 'release'>, localSigned: boolean): string => {
+  if (mode.release) {
+    return 'com.taucad.tau.desktop';
+  }
+  return localSigned ? 'com.taucad.tau.desktop.local' : 'com.taucad.tau.desktop.e2e';
+};
+
 /** Select the native Mac host; cross-packaging cannot verify the installed payload. */
 export const macosPackageArchitecture = (platform: string, architecture: string): 'arm64' | 'x64' => {
   if (platform !== 'darwin' || (architecture !== 'arm64' && architecture !== 'x64')) {

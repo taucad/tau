@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
-import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-provider.js';
 import { LayoutPriority } from 'allotment';
 import { PanelBottom } from 'lucide-react';
 import { Allotment } from '#components/panes/allotment.js';

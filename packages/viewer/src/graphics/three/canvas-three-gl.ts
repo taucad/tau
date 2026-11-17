@@ -5,6 +5,7 @@ import type { RendererInstance } from '#graphics/three/renderer.js';
 import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
 import { createRenderer } from '#graphics/three/renderer.js';
 import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
+import { GraphicsContextUnavailableError } from '#graphics/graphics-backend.js';
 import { beginViewerLoadSpan } from '#lib/viewer-load-timing.js';
 
 type TauR3fGlDefaults = Parameters<Extract<CanvasProps['gl'], (defaults: never) => unknown>>[0];
@@ -167,7 +168,10 @@ export function createTauR3fGlProp(
       }
       const cause = error instanceof Error ? error : new Error(String(error));
       const failure =
-        graphicsBackend === 'webgpu' && !(cause instanceof WebGpuInitializationError)
+        // A missing WebGL 2 context stays itself: the WebGL remount a WebGPU failure gets would meet it again.
+        graphicsBackend === 'webgpu' &&
+        !(cause instanceof WebGpuInitializationError) &&
+        !(cause instanceof GraphicsContextUnavailableError)
           ? new WebGpuInitializationError(cause.message, { cause })
           : cause;
       console.warn('[createTauR3fGlProp] Renderer creation failed:', failure);

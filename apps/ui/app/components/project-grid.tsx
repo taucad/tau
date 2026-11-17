@@ -1,5 +1,5 @@
 import { ArrowRight } from 'lucide-react';
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react';
 import { resolveKernel } from '@taucad/types/constants';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -8,19 +8,19 @@ import { cn } from '@taucad/ui/utils/cn';
 import { formatSharePath } from '@taucad/share/locator';
 import { Loader } from '@taucad/ui/components/loader';
 import { SvgIcon } from '@taucad/ui-kit/icons/svg-icon';
-import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import type { BuiltinProjectCardModel, ProjectFiles } from '#constants/project-examples.js';
 import { loadBuiltinProjectFiles } from '#constants/project-examples.js';
-import {
-  ProjectCard,
-  ProjectCardCadPreview,
-  ProjectCardMedia,
-  projectCardVerticalFieldOfView,
-} from '#components/project-card.js';
+import { ProjectCard, ProjectCardMedia } from '#components/project-card.js';
 import { RemixDialog } from '#components/share/fork-action.js';
 import type { RemixSource } from '#components/share/fork-action.js';
 
 import { projectGridClassName } from '#components/project-grid-layout.js';
+
+/* A card's live model preview, with its CAD and graphics machines, loads when it is first turned on (PL5). */
+const CommunityCardLivePreview = lazy(async () => {
+  const module = await import('#components/community-card-live-preview.js');
+  return { default: module.CommunityCardLivePreview };
+});
 
 export type CommunityProjectGridProperties = {
   readonly projects: readonly BuiltinProjectCardModel[];
@@ -126,14 +126,9 @@ function CommunityProjectCard({
         >
           {/* An entry-less project has no model to preview yet. */}
           {files && mainFile !== undefined ? (
-            <CadPreviewProvider
-              projectId={id}
-              mainFile={mainFile}
-              files={files}
-              initialVerticalFieldOfView={projectCardVerticalFieldOfView}
-            >
-              <ProjectCardCadPreview />
-            </CadPreviewProvider>
+            <Suspense fallback={null}>
+              <CommunityCardLivePreview projectId={id} mainFile={mainFile} files={files} />
+            </Suspense>
           ) : null}
         </ProjectCardMedia>
       </div>

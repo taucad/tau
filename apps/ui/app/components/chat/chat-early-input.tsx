@@ -3,6 +3,13 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { markPageUsed } from '#components/onboarding/home-interaction.js';
 import {
+  captureHandOff,
+  handOffScript,
+  isHandOffComposing,
+  recordInputAccepted,
+} from '#components/hand-off/hand-off.js';
+import type { HandOffElement, HandOffSnapshot } from '#components/hand-off/hand-off.js';
+import {
   chatComposerEditorAreaClassName,
   chatComposerEditorTextClassName,
   chatComposerFrameClassName,
@@ -11,26 +18,15 @@ import {
   chatComposerShellClassName,
 } from '@taucad/chat-ui/components/chat-input-styles';
 
-export type EarlyChatInput = {
-  readonly text: string;
-  readonly edited: boolean;
-  readonly focused: boolean;
-  readonly focusUnclaimed: boolean;
-  readonly start: number;
-  readonly end: number;
-  readonly direction: 'forward' | 'backward' | 'none';
-};
+/** What the rich composer takes over from the native input: the hand-off contract's snapshot (P4). */
+export type EarlyChatInput = HandOffSnapshot;
 
-type EarlyTextarea = HTMLTextAreaElement & {
-  tauEarlyDraft?: { edited: boolean; composing: boolean };
-};
-
-// This fixed script runs right after the server-rendered composer, before the application
-// bundle. DOM-local state records type-then-delete and an IME still in progress. It sits
-// after the whole box rather than beside the input because a browser may paint the
-// half-parsed document when the parser reaches a script: here that cut can only fall
-// after the box and its bar, never between them.
-const earlyInputScript = `(()=>{const input=document.currentScript.previousElementSibling.querySelector('textarea');const state=input.tauEarlyDraft={edited:false,composing:false};input.addEventListener('input',()=>{state.edited=true});input.addEventListener('compositionstart',()=>{state.composing=true});input.addEventListener('compositionend',()=>{state.composing=false})})()`;
+/*
+ * The hand-off recorder, served right after the whole box rather than beside the input: a browser may paint the
+ * half-parsed document when the parser reaches a script, and here that cut can only fall after the box and its bar,
+ * never between them. Home leaves Enter as a line break until its adopter can send (H-f).
+ */
+const earlyInputScript = handOffScript('within-previous-sibling', { queueSubmit: false });
 
 /** What the bar under the native input is drawn from. */
 export type EarlyChatInputBarState = {
@@ -65,7 +61,7 @@ export function ChatEarlyInput({
   readonly bar?: (state: EarlyChatInputBarState) => React.ReactNode;
   readonly children: (input: EarlyChatInput) => React.ReactNode;
 }): React.JSX.Element {
-  const inputRef = useRef<EarlyTextarea>(null);
+  const inputRef = useRef<HandOffElement>(null);
   const [adopted, setAdopted] = useState<EarlyChatInput>();
   const [isEmpty, setIsEmpty] = useState(true);
   const { draftActorRef } = useChatComposer();
@@ -75,6 +71,11 @@ export function ChatEarlyInput({
     setIsEmpty((inputRef.current?.value.trim() ?? '') === '');
   }, []);
 
+  /* The served script left the first-input mark; the bundle turns it into `tau.load.input.accepted`. */
+  useEffect(() => {
+    recordInputAccepted();
+  }, []);
+
   useEffect(() => {
     const input = inputRef.current;
     if (!input || !isHostReady) {
@@ -82,18 +83,10 @@ export function ChatEarlyInput({
     }
     let active = true;
     const adopt = (): void => {
-      if (!active || input.tauEarlyDraft?.composing) {
+      if (!active || isHandOffComposing(input)) {
         return;
       }
-      const snapshot: EarlyChatInput = {
-        text: input.value,
-        edited: input.tauEarlyDraft?.edited === true || input.value !== input.defaultValue,
-        focused: document.activeElement === input,
-        focusUnclaimed: document.activeElement === document.body,
-        start: input.selectionStart,
-        end: input.selectionEnd,
-        direction: input.selectionDirection,
-      };
+      const snapshot: EarlyChatInput = captureHandOff(input);
       if (snapshot.edited) {
         /* Keys typed before the bundle ran reached no listener: the edit is the only record that home was used. */
         markPageUsed();

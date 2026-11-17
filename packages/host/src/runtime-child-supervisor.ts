@@ -18,6 +18,8 @@ const readyMessageSchema = z.object({
   type: z.literal('ready'),
   url: z.url(),
   runtimeVersion: z.string().min(1),
+  /* What the child's runtime converts to JPEG (`HostRuntimeHandle.transcodeSources`); an older child sends none. */
+  transcodeSources: z.array(z.string().min(1)).optional(),
 });
 
 const errorMessageSchema = z.object({
@@ -29,6 +31,8 @@ const errorMessageSchema = z.object({
 export type RuntimeChildHandle = {
   readonly url: URL;
   readonly runtimeVersion: string;
+  /** The formats the child's runtime converts to JPEG; empty when it reported none. */
+  readonly transcodeSources: readonly string[];
   readonly authorizationToken: string;
   /** Settles when the process exits, before its temp directory is removed: the signal that attributes a crash. */
   readonly exited: Promise<{ readonly exitCode?: number; readonly signal?: NodeJS.Signals }>;
@@ -767,6 +771,7 @@ export const startRuntimeChild = async (options: {
   return {
     url,
     runtimeVersion: message.runtimeVersion,
+    transcodeSources: message.transcodeSources ?? [],
     authorizationToken,
     exited,
     closed,

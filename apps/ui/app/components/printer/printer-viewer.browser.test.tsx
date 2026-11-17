@@ -34,7 +34,7 @@ import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-gua
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { probeWebGpuSupport } from '@taucad/viewer/graphics/graphics-backend';
-import type { PrinterFileKind } from '#components/printer/printer-file.js';
+import type { PrinterFileKind } from '#components/printer/printer-file-kind.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
 import { a1MiniManifest } from '#components/print/testing/machines.fixture.js';

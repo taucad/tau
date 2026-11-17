@@ -1,4 +1,15 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useSelector } from '@xstate/react';
 import type {
   DockviewApi,
@@ -31,7 +42,6 @@ import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { useProject } from '#hooks/use-project.js';
 import { useModelAvailability } from '#hooks/use-project-availability.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
-import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
 import { chooseProjection } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { Dockview } from '#components/panes/dockview.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
@@ -40,6 +50,7 @@ import { getViewerTabIcon, ViewerDockviewTab } from '#components/panes/viewer-ta
 import { DockviewLeftActions, DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
 import { ProjectWorkspaceActions } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import { ViewerChatLaneToggle } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
+import { isModelFilesWait } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { selectCadEvaluation } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ActorRefFrom } from 'xstate';
@@ -47,6 +58,7 @@ import { setLocalInstanceChoice } from '#workbench-records/local-instance.js';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useTourAnchor } from '#components/tour/tour-anchors.js';
+import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import {
   createViewerAdapterFactsPort,
   ensureViewerGroup,
@@ -63,6 +75,29 @@ import type {
   ViewerPanelParameters,
   ViewSource,
 } from '#workbench-records/viewer-adapter.js';
+
+/*
+ * The viewer is deferred (progressive loading PL5, rule 10): three.js, the viewer package and the runtime client
+ * load when a viewer pane first mounts, and the model appears in the pane's frame when it is ready. There is no
+ * cached picture of the model (operator ruling).
+ */
+const ChatViewer = lazy(async () => {
+  // `tau.load.viewer.chunk`: how long the deferred viewer took to arrive, for the harness.
+  const span = pageProjectOpenPerformance().begin('viewer.chunk');
+  try {
+    const module = await import('#routes/w.$workspace.$project/chat-viewer.js');
+    span.finish('ok');
+    return { default: module.ChatViewer };
+  } catch (error) {
+    span.finish('error');
+    throw error;
+  }
+});
+
+/** The viewer's frame until its chunk is in: the pane's own box, busy. */
+function ViewerFrame(): React.JSX.Element {
+  return <div aria-busy='true' data-slot='viewer-frame' className='size-full' />;
+}
 
 type ViewerNewTabParameters = { mode: 'launcher' };
 type ViewerProfile = 'editor' | 'shared';
@@ -100,7 +135,9 @@ function ViewerPanel({
   return isVisible ? (
     /* The product tour's Look around tip hangs from this viewer's corner; the first viewer on the page is used. */
     <div ref={viewerAnchor} className='size-full'>
-      <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} profile={profile} />
+      <Suspense fallback={<ViewerFrame />}>
+        <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} profile={profile} />
+      </Suspense>
     </div>
   ) : undefined;
 }
@@ -786,7 +823,9 @@ export const ViewerDockview = memo(function ({
   const adapterLayout = useViewerLayoutPort(profile === 'editor' ? layoutController : undefined);
   const adapterFacts = useMemo(
     (): ViewerAdapterFacts => ({
-      admitsDemand: projectIsReady && availability === 'ready',
+      /* The view is admitted once the project is on this device, and through a check of its model files (A15e). */
+      admitsView: projectIsReady && (availability === 'ready' || isModelFilesWait(availability)),
+      admitsGeometry: projectIsReady && availability === 'ready',
       mainEntryPath,
       viewRecords,
       entriesRecord,

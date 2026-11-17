@@ -105,10 +105,10 @@ catalog:
   buffer: 6.0.3
   playwright: ^1.61.0
   '@pyroscope/nodejs': ^0.4.13
-  '@react-router/dev': 7.18.2
-  '@react-router/express': 7.18.2
-  '@react-router/fs-routes': 7.18.2
-  '@react-router/node': 7.18.2
+  '@react-router/dev': 7.18.5
+  '@react-router/express': 7.18.5
+  '@react-router/fs-routes': 7.18.5
+  '@react-router/node': 7.18.5
   '@size-limit/file': ^12.1.0
   '@tanstack/react-pacer': ^0.22.1
   '@tanstack/react-query': ^5.101.0
@@ -254,7 +254,7 @@ catalog:
   pdf-parse: 2.4.5
   polygon-clipping: ^0.15.7
   replicad: npm:@taulabs/replicad@1.1.0-taulabs.1
-  replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
+  replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.1
   publint: ^0.3.21
   qrcode-terminal: ^0.12.0
   radix-ui: ^1.6.0
@@ -262,7 +262,7 @@ catalog:
   react-day-picker: ^10.0.0
   react-dom: 19.3.1
   react-email: ^6.6.3
-  react-router: 7.18.2
+  react-router: 7.18.5
   rehype-sanitize: ^6.0.0
   rehype-stringify: ^10.0.1
   remark-gfm: 4.0.1
@@ -303,6 +303,22 @@ catalog:
   xstate: 6.0.0-alpha.59
   zod: 4.4.3
   nanoraster: ^0.9.0
+  # Raster codecs for @taucad/image's raster transcoder. Exact: the golden output hashes
+  # (packages/plugins/image/src/raster/fixtures/golden.json) and the pinned WASM SHA-256 values
+  # change with any codec release.
+  '@jsquash/avif': 2.1.1
+  '@jsquash/jpeg': 1.6.0
+  '@jsquash/png': 3.1.1
+  '@jsquash/resize': 2.1.1
+  '@jsquash/webp': 1.5.0
+  jpeg-js: 0.4.4
+  omggif: 1.0.10
+  '@types/omggif': 1.0.5
+  utif2: 4.1.0
+  # HEIC decoder for @taucad/heif (LGPL-3.0, never bundled; operator ruling O2). Exact: the pinned
+  # libheif.wasm SHA-256 and packages/plugins/heif/src/fixtures/golden.json change with any release.
+  # 1.23.5 carries libheif 1.23.5 and libde265 1.0.15.
+  libheif-js: 1.23.5
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
   picovoxel: 0.2.1
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.
@@ -383,9 +399,9 @@ catalogs:
     electron-vite: 6.0.0-beta.1
     vite: 8.0.16
   react-router7:
-    '@react-router/dev': 7.18.2
-    '@react-router/node': 7.18.2
-    react-router: 7.18.2
+    '@react-router/dev': 7.18.5
+    '@react-router/node': 7.18.5
+    react-router: 7.18.5
     vite: 7.3.6
   react-router8:
     '@react-router/dev': 8.3.0
@@ -478,9 +494,9 @@ patchedDependencies:
   n8ao@1.10.2: tools/pnpm/patches/n8ao@1.10.2.patch
   vaul@1.1.2: tools/pnpm/patches/vaul@1.1.2.patch
   three@0.184.0: tools/pnpm/patches/three@0.184.0.patch
-  react-router@7.18.2: tools/pnpm/patches/react-router@7.18.2.patch
   '@aurigax-ai/ghostty-web@0.3.6': tools/pnpm/patches/@aurigax-ai__ghostty-web@0.3.6.patch
   '@anthropic-ai/sandbox-runtime@0.0.75': tools/pnpm/patches/@anthropic-ai__sandbox-runtime@0.0.75.patch
+  react-router@7.18.5: tools/pnpm/patches/react-router@7.18.5.patch
 overrides:
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2
@@ -491,8 +507,8 @@ overrides:
   '@types/react-dom@>=19.0.0 <20.0.0': 19.2.3
   '@types/react@>=19.0.0 <20.0.0': 19.2.17
   fastify: 'catalog:'
-  graphics-debug@0.0.100>react-router-dom: 7.18.2
-  graphics-debug@0.0.99>react-router-dom: 7.18.2
+  graphics-debug@0.0.100>react-router-dom: '-'
+  graphics-debug@0.0.99>react-router-dom: '-'
   ipx@3.1.1>sharp: 0.35.5
   mermaid>dompurify: 3.4.16
   mermaid>katex: 0.18.2

@@ -985,7 +985,7 @@ export function RenderingProfile(): React.JSX.Element {
     }
   }, []);
   return (
-    <ThemeProvider specifiedTheme='light' themeAction='/action/set-theme'>
+    <ThemeProvider initialTheme='light'>
       <main className='fixed inset-0 overflow-auto bg-background text-foreground'>
         <aside className='absolute top-0 left-0 h-screen w-[440px] space-y-3 overflow-auto bg-muted p-4 text-sm [&_button]:rounded [&_button]:border [&_button]:bg-background [&_button]:px-2 [&_button]:py-1 [&_input]:w-24 [&_input]:border [&_input]:bg-background [&_select]:border [&_select]:bg-background'>
           <h1 className='text-lg font-semibold'>PBR rendering calibration</h1>

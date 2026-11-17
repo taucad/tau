@@ -23,9 +23,9 @@ import {
   permissionModeOptions,
 } from '#components/chat/permission-mode-copy.js';
 import { toast } from '@taucad/ui/components/sonner';
-import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
-import { desktopPermissions } from '#filesystem/desktop-permissions.js';
-import type { PermissionMode } from '#filesystem/desktop-permissions.js';
+import { isDesktopTarget } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { desktopPermissions } from '@taucad/files-ui/filesystem/desktop-permissions';
+import type { PermissionMode } from '@taucad/files-ui/filesystem/desktop-permissions';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatPermissionMode } from '#hooks/use-permission-mode.js';
 import { useProject } from '#hooks/use-project.js';

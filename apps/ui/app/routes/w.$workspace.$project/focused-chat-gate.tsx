@@ -1,15 +1,20 @@
 import { useProjectAvailability } from '#hooks/use-project-availability.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useProject } from '#hooks/use-project.js';
 import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
-import { DebugProbes } from '#chat-clients/debug-probes.js';
 import { ENV } from '#environment.config.js';
-import { ChatPaneSkeleton } from '@taucad/project-workspace/components/chat-pane-skeleton';
+import { ChatLaneFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
+
+/* Debug-only probes for the e2e specs, with the headless capture recipe: their own chunk (progressive loading PL5). */
+const DebugProbes = lazy(async () => {
+  const module = await import('#chat-clients/debug-probes.js');
+  return { default: module.DebugProbes };
+});
 
 /**
  * Renders when `ensureFocusedChatActor` rejects. Surfaces the typed
@@ -106,7 +111,11 @@ export function ChatInterfaceSessionGate({
           bodyless body factory, which every consumer of `useCadChatClient`
           used to write over each other. */}
       <ChatTurnHost />
-      {ENV.TAU_DEBUG ? <DebugProbes /> : null}
+      {ENV.TAU_DEBUG ? (
+        <Suspense fallback={null}>
+          <DebugProbes />
+        </Suspense>
+      ) : null}
       {children}
     </ActiveChatProvider>
   );
@@ -125,7 +134,8 @@ export function ChatInterfaceSessionGate({
  */
 export function ChatHistoryGate({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const { editorRef } = useProject();
-  const availability = useProjectAvailability();
+  /* Open on the chats' own records (SP2h), never on a partial history (I7): not on the whole apply. */
+  const availability = useProjectAvailability('chats');
   const chats = useRevisionStatus()?.sync.chats;
   const { syncNow } = useRevisionCommands();
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
@@ -178,7 +188,7 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
   }
 
   if (isEnsuring) {
-    return <ChatPaneSkeleton variant='ensuring' />;
+    return <ChatLaneFrame busyLabel='Preparing chat session…' />;
   }
 
   // oxlint-disable-next-line react/jsx-no-useless-fragment -- forwarding children verbatim

@@ -1,10 +1,16 @@
+import { RouterContextProvider } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { loader } from '#routes/settings_/route.js';
 
 const redirectFor = (search = ''): string | undefined => {
   const request = new Request(`https://tau.new/settings${search}`);
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Route.LoaderArgs has many fields this loader never reads
-  const response = loader({ request } as Parameters<typeof loader>[0]);
+  const response = loader({
+    request,
+    url: new URL(request.url),
+    pattern: '/settings',
+    params: {},
+    context: new RouterContextProvider(),
+  });
   return response.headers.get('Location') ?? undefined;
 };
 

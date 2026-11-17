@@ -29,7 +29,7 @@ import type {
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { Project } from '@taucad/types';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
-import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
@@ -227,7 +227,7 @@ const mockGetWorkspace =
 /** Whether this tab may write through a held folder handle; `prompt` means the person must grant it again. */
 const mockCheckHandlePermission = vi.fn<(handle: unknown) => Promise<'granted' | 'prompt' | 'denied'>>();
 let projectRootConfigurationListener: (() => void) | undefined;
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   requestHomeStoragePersistence: vi.fn(async () => undefined),
   createWorkspace: vi.fn(),
   createNodeWorkspace: vi.fn(),
@@ -272,7 +272,7 @@ vi.mock('#filesystem/build-skew.js', () => ({
 }));
 /** Whether this browser can hold a workspace folder; only the workspace row turns it on. */
 let mockWebAccessAvailable = false;
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: false,
   directoryPicker: () => ({ available: mockWebAccessAvailable, backend: 'webaccess', pick: async () => undefined }),
   webAccessDirectoryPicker: () => undefined,

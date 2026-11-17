@@ -28,6 +28,7 @@
  * what the fetch path calls with the refs the fetch wrote.
  */
 
+import { attachmentExtensions } from '@taucad/utils/attachment-media';
 import { chatProjectionConcurrency, settleBounded } from '#chat-projection-pool.js';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileSystemProvider } from '@taucad/filesystem';
@@ -95,15 +96,14 @@ const isOwnSegment = (context: ChatRefContext, path: string): boolean =>
 
 /**
  * One attachment blob as the closed tree spells it: `attachments/<64 hex>.<ext>`
- * over the five media types the composer stores (blueprint D12).
+ * over the canonical extensions of the media types Tau stores (blueprint D12).
  *
- * Restated here rather than imported: `apps/libs/chat-ui/src/utils/attachment.utils.ts`
- * owns the canonical media-type table and mints the names, and nothing under
- * `packages/**` may depend on `apps/**`. Lower-case hex only, because the store
- * writes lower-case and two spellings of one hash would be two entries for one
- * blob — the opposite of what content addressing buys.
+ * Built from `attachmentMedia` in `@taucad/utils/attachment-media` (bundled), the one
+ * stored-media table (I2), so a type added there is admitted here at once. Lower-case hex only,
+ * because the store writes lower-case and two spellings of one hash would be two
+ * entries for one blob — the opposite of what content addressing buys.
  */
-const chatAttachmentPattern = /^attachments\/[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/u;
+const chatAttachmentPattern = new RegExp(`^attachments/[\\da-f]{64}\\.(?:${attachmentExtensions.join('|')})$`, 'u');
 
 /**
  * Every path the chat ref's tree admits: the record, one log per device, and
@@ -1054,6 +1054,11 @@ export const projectChats = async (input: ProjectChatsInput): Promise<readonly s
       ],
       signal: input.signal,
     });
+    /* Stopped once its files are written: they are on disk, so the chat is announced before the stop is honoured; a
+     * later pull finds it current and would never announce it (SP2h review). */
+    if (input.signal?.aborted === true && entries.some((entry) => entry[2])) {
+      input.onWritten?.(chatId);
+    }
     input.signal?.throwIfAborted();
     /* Each other device's segment here after the pull, as its record names it (round 19). */
     const segments = entries.flatMap(([path, size]) =>

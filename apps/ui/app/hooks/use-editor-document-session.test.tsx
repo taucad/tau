@@ -269,3 +269,29 @@ describe('EditorDocumentSessionProvider language reads (D9, W4 review 3)', () =>
     }
   });
 });
+
+describe('EditorDocumentSessionProvider owed text (A7e)', () => {
+  it('should record text the page has not confirmed on disk when it goes, under the published scope', async () => {
+    const { editorTextDebts, setEditorTextScope } = await import('#lib/editor-document-session.js');
+    const scope = { workspace: 'w', actorId: 'usr_1' };
+    setEditorTextScope('p', scope);
+    const environment = await mountEnvironment();
+    const content = vi.mocked(contentService.current!);
+    content.resolve.mockResolvedValue({ kind: 'text', content: new TextEncoder().encode('one\n') });
+    content.saveEditor.mockReturnValue(Promise.withResolvers<void>().promise);
+    await environment.session.acquire('main.ts');
+    environment.session.apply('main.ts', {
+      expectedVersion: 1,
+      origin: 'view',
+      changes: [{ from: 0, to: 3, insert: 'mine' }],
+    });
+    /* Never answers; held only so the save is in flight. */
+    const pending = environment.session.scheduleSave('main.ts');
+    expect(pending).toBeInstanceOf(Promise);
+    globalThis.dispatchEvent(new Event('pagehide'));
+    expect(content.saveEditor).toHaveBeenCalledOnce();
+    expect(editorTextDebts.list({ scope, projectId: 'p' })).toMatchObject([{ path: 'main.ts', text: 'mine\n' }]);
+    setEditorTextScope('p', undefined);
+    localStorage.clear();
+  });
+});

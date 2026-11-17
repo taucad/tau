@@ -1,7 +1,7 @@
 import { sha256BytesSync } from '@taucad/utils/hash';
 import { ToolpathParseError } from '@taucad/slicer/toolpath';
 import { preparePrinterProgram } from '#components/printer/printer-program.js';
-import type { PrinterFileKind } from '#components/printer/printer-file.js';
+import type { PrinterFileKind } from '#components/printer/printer-file-kind.js';
 import type { PrinterPreparationResult } from '#components/printer/printer-preparation.js';
 
 globalThis.addEventListener(

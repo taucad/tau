@@ -75,7 +75,11 @@ test('defaults actions to arrows and persists the pointer-cursor opt-in', async 
   expect(await computedCursor(linkProbe)).toBe('pointer');
   const cookies = await target.cookies();
   expect(cookies.some(({ name }) => name === 'tau-pointer-cursors')).toBe(false);
-  expect(await target.evaluate(() => localStorage.getItem('tau-pointer-cursors'))).toBe('true');
+  expect(
+    await target.evaluate(
+      () => JSON.parse(localStorage.getItem('tau-client-facts') ?? '{}') as { pointerCursors?: boolean },
+    ),
+  ).toMatchObject({ pointerCursors: true });
 
   await target.reload();
   await target.expectAttribute(pointerSwitch, 'data-state', 'checked');
@@ -85,7 +89,11 @@ test('defaults actions to arrows and persists the pointer-cursor opt-in', async 
   await target.click(pointerSwitch);
   await expect.poll(async () => target.getAttribute(html, 'data-pointer-cursors')).toBeNull();
   await expect.poll(async () => computedCursor(themeButton)).toBe('default');
-  expect(await target.evaluate(() => localStorage.getItem('tau-pointer-cursors'))).toBe('false');
+  expect(
+    await target.evaluate(
+      () => JSON.parse(localStorage.getItem('tau-client-facts') ?? '{}') as { pointerCursors?: boolean },
+    ),
+  ).toMatchObject({ pointerCursors: false });
 
   await target.evaluateLocator(pointerSwitch, (element) => {
     element.setAttribute('disabled', '');

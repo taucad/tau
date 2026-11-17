@@ -17,13 +17,13 @@
 import type { ReactNode } from 'react';
 import { useSelector } from '@xstate/react';
 import { WebglContextTrackerProvider } from '@taucad/viewer/hooks/use-webgl-context-tracker';
-import { SessionProjectProvider } from '#hooks/use-project.js';
+import { SessionProjectProvider } from '#hooks/project-provider.js';
 import { SessionFileManagerProvider } from '#hooks/use-file-manager.js';
 import { EditorDocumentSessionProvider } from '#hooks/use-editor-document-session.js';
 import { useProjectSession } from '#hooks/use-sessions.js';
 import { ChatWorkspaceAuthorityProvider } from '#providers/chat-workspace-authority-provider.js';
 import { selectProjectSessionFileManager, selectProjectSessionRuntime } from '#services/sessions-store.js';
-import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-provider.js';
 import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-record-host.js';
 import { ProjectPrintRouteIntent } from '#routes/w.$workspace.$project/project-print-route-intent.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';

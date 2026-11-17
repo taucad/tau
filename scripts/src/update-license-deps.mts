@@ -342,9 +342,11 @@ function getLicenseNotice(license: string): string[] {
       '> **LGPL License Notice**',
       '>',
       '> Library-style copyleft. Tau consumes these packages as libraries; the LGPL',
-      '> obligation is satisfied by attribution and source availability.',
-      '>',
-      '> Source for Tau forks of LGPL libraries is available at: https://github.com/taucad',
+      '> obligation is satisfied by attribution, the license texts and the exact',
+      '> corresponding source of each library, which is its upstream source (linked in',
+      '> the table) or, for a Tau fork, https://github.com/taucad. The exact sources of',
+      '> the LGPL code the apps convey to users are listed in the open-source notices',
+      '> (apps/www/content/legal/open-source.md).',
       '',
     ];
   }

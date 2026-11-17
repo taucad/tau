@@ -6,7 +6,7 @@ import { util as zodUtility } from 'zod';
  * Vertex AI's OpenAI-compatible Gemini wire carries two fields no OpenAI codec
  * reads: thought deltas marked by `extra_content.google.thought` and wrapped in
  * the `<think>` marker Tau asks for, and `extra_content.google.thought_signature`
- * on tool calls, which Gemini 3 requires back on the tool-result continuation or
+ * on tool calls, which Gemini requires back on the tool-result continuation or
  * rejects the turn with HTTP 400.
  *
  * Both were carried by a pnpm patch on `@earendil-works/pi-ai`. They now live
@@ -172,7 +172,7 @@ const signatureOf = (call: Record<string, unknown>): unknown =>
 /**
  * Echo captured Gemini thought signatures onto the outbound tool calls.
  *
- * Gemini 3 rejects a tool-result continuation whose assistant tool calls lost
+ * Gemini rejects a tool-result continuation whose assistant tool calls lost
  * their `thought_signature`, so the value Tau persisted on the durable row and
  * re-materialised onto the pi `ToolCall` is put back on the wire here.
  *

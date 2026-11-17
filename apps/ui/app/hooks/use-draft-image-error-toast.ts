@@ -7,7 +7,8 @@
  * the resize or store step. Without this hook, Tiptap paste in particular used
  * to swallow resize errors silently.
  *
- * - `imageResizeFailed`: the image could not be processed.
+ * - `imageResizeFailed`: the storage policy refused the image (the toast names the
+ *   format and the next step), or it could not be read.
  * - `attachmentStoreFailed`: the bytes were over the cap or could not be written.
  * - `attachmentRefused`: the selected model cannot read that kind (D20); the
  *   toast names the model.
@@ -17,13 +18,19 @@ import { useEffect } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { draftMachine } from '#hooks/draft.machine.js';
 import { toast } from '@taucad/ui/components/sonner';
+import { AttachmentRefusedError } from '#utils/attachment-refusal.js';
 
 export function useDraftImageErrorToast(draftActorRef: ActorRefFrom<typeof draftMachine>): void {
   useEffect(() => {
     const subscriptions = [
       draftActorRef.on('imageResizeFailed', (event) => {
-        toast.error('Failed to process image', {
-          description: event.error.message,
+        const { error } = event;
+        if (error instanceof AttachmentRefusedError) {
+          toast.error(error.copy.title, { description: error.copy.description });
+          return;
+        }
+        toast.error("Couldn't attach this image", {
+          description: error.message,
         });
       }),
       draftActorRef.on('attachmentStoreFailed', (event) => {

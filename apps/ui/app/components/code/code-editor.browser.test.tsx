@@ -74,7 +74,7 @@ it.each([
   const source = 'function rotate(radius: number) {\n  return radius * Math.PI;\n}\n';
   const sourceDocument = new EditorDocument('main.ts', source);
   const { container } = render(
-    <ThemeProvider specifiedTheme={theme} themeAction='/'>
+    <ThemeProvider initialTheme={theme}>
       <div
         style={{
           position: 'fixed',
@@ -266,7 +266,7 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
       theme === Theme.BLACK || theme === Theme.HIGH_CONTRAST ? `dark ${theme}` : theme;
     const sourceDocument = new EditorDocument('main.ts', 'const value = 1;');
     const { container } = render(
-      <ThemeProvider specifiedTheme={theme} themeAction='/'>
+      <ThemeProvider initialTheme={theme}>
         <div className='h-72'>
           <CodeEditor document={sourceDocument} viewId='search-colors' languageId='typescript' />
         </div>
@@ -819,6 +819,7 @@ it('releases views and TypeScript mirrors across twenty open/switch/close cycles
   ]);
   const content = mock<FileContentService>();
   content.addEditorSaveFlusher.mockReturnValue(() => undefined);
+  content.retain.mockReturnValue(() => undefined);
   const source = Array.from(
     { length: 80 },
     (_, index) => `const value${String(index)}: number = ${String(index)};`,
@@ -964,7 +965,7 @@ it.each([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])(
         navigate: async () => undefined,
       });
       const { container } = render(
-        <ThemeProvider specifiedTheme={theme} themeAction='/'>
+        <ThemeProvider initialTheme={theme}>
           <div
             style={{
               position: 'fixed',

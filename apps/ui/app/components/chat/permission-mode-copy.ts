@@ -4,7 +4,7 @@
  * Settings, so the person reads the same terms everywhere.
  */
 
-import type { PermissionMode } from '#filesystem/desktop-permissions.js';
+import type { PermissionMode } from '@taucad/files-ui/filesystem/desktop-permissions';
 
 /** Each mode's name and what it does, as the pill and Settings list them. */
 export const permissionModeOptions: ReadonlyArray<

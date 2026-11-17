@@ -9,6 +9,7 @@ import {
   materializeAttachments,
 } from '#harness/session-record.js';
 import { createMemoryLogFile } from '#host/tau-agent-host.fixture.js';
+import { imageBytes as headerBytes } from '#wire/attachment-media.fixture.js';
 
 const imageHash = 'a'.repeat(64);
 const pdfHash = 'b'.repeat(64);
@@ -17,6 +18,7 @@ const pdfPath = `attachments/${pdfHash}.pdf`;
 const imageBytes: Uint8Array<ArrayBuffer> = new Uint8Array([137, 80, 78, 71]);
 const pdfBytes = new TextEncoder().encode('%PDF-1.7');
 const base64 = (bytes: Uint8Array<ArrayBuffer>): string => Buffer.from(bytes).toString('base64');
+const hashOfPath = (path: string): string => path.slice('attachments/'.length, 'attachments/'.length + 64);
 
 const history = (): ProviderMessage[] => [
   {
@@ -174,6 +176,57 @@ describe('materializeAttachments', () => {
   });
 });
 
+describe('materializeAttachments — labels from the bytes (I1, I10)', () => {
+  const jpgPath = `attachments/${'c'.repeat(64)}.jpg`;
+  const reference = (mimeType: string): ProviderMessage => ({
+    id: 'user-stuck',
+    role: 'user',
+    content: [{ type: 'file-ref', path: jpgPath, mimeType }],
+  });
+
+  it('should send a file-ref recorded as image/jpeg that holds PNG bytes as an image/png block', async () => {
+    const outcome = await materializeAttachments(
+      [reference('image/jpeg')],
+      reader({ [jpgPath]: new Uint8Array(headerBytes.png) }),
+    );
+
+    expect(outcome.messages[0]?.content).toEqual([
+      { type: 'image', mimeType: 'image/png', data: base64(new Uint8Array(headerBytes.png)) },
+    ]);
+  });
+
+  it('should send WebP bytes stored under a .jpg name as image/webp', async () => {
+    const outcome = await materializeAttachments(
+      [reference('image/jpeg')],
+      reader({ [jpgPath]: new Uint8Array(headerBytes.webp) }),
+    );
+
+    expect(outcome.messages[0]?.content).toEqual([
+      { type: 'image', mimeType: 'image/webp', data: base64(new Uint8Array(headerBytes.webp)) },
+    ]);
+  });
+
+  it('should keep the durable row as recorded while repairing the label it sends', async () => {
+    const row = reference('image/jpeg');
+    await materializeAttachments([row], reader({ [jpgPath]: new Uint8Array(headerBytes.png) }));
+
+    expect(row).toEqual(reference('image/jpeg'));
+  });
+
+  it('should send a document recorded as an image as the document its bytes are', async () => {
+    const outcome = await materializeAttachments([reference('image/jpeg')], reader({ [jpgPath]: pdfBytes }));
+
+    expect(outcome.messages[0]?.content).toEqual([{ type: 'text', text: documentSentinel(hashOfPath(jpgPath)) }]);
+    expect([...outcome.documents.values()]).toEqual([{ data: base64(pdfBytes), mediaType: 'application/pdf' }]);
+  });
+
+  it('should keep the recorded type for bytes no probe recognises', async () => {
+    const outcome = await materializeAttachments([reference('image/jpeg')], reader({ [jpgPath]: imageBytes }));
+
+    expect(outcome.messages[0]?.content).toEqual([{ type: 'image', mimeType: 'image/jpeg', data: base64(imageBytes) }]);
+  });
+});
+
 describe('chatAttachmentPath', () => {
   it('resolves an attachment beside the chat log', () => {
     expect(chatAttachmentPath('chat-1', pdfPath)).toBe(`.tau/chats/chat-1/${pdfPath}`);
@@ -227,6 +280,16 @@ describe('stored screenshot captures (D-UI-04)', () => {
     });
     expect(hasFileRef(outcome.messages[0]!)).toBe(false);
     expect(row).toEqual(stored());
+  });
+
+  it('should restore a capture recorded as image/webp that holds PNG bytes as a PNG data URL', async () => {
+    const png = new Uint8Array(headerBytes.png);
+    const outcome = await materializeAttachments([stored()], reader({ [webpPath]: png }));
+
+    expect(outcome.messages[0]?.content).toEqual({
+      images: [{ view: '3d', angle: 'front', dataUrl: `data:image/png;base64,${base64(png)}` }],
+      message: 'No section cut.',
+    });
   });
 
   it('omits a capture whose bytes are not on this device and reports it absent', async () => {

@@ -810,6 +810,54 @@ describe('landing large objects from the store (W11.3)', () => {
     expect(litterIn(await filesOf(tree))).toEqual([]);
   });
 
+  /* #2010: a flush verifies what it wrote, not the checkout: no walk, and a cloned object is checked by its size. */
+  it('should verify a fill flush by the paths it wrote, without walking the checkout or reading a cloned object back', async () => {
+    const { tree } = await storeProject(true);
+    await fs.writeFile(join(tree.root, 'models', 'c.step'), 'bytes the flush does not touch\n');
+    const flushBefore = new ImmutableRevisionTree([
+      ['models/b.step', 'old bytes\n'],
+      ['models/c.step', 'bytes the flush does not touch\n'],
+    ]);
+    const flushTarget = new ImmutableRevisionTree([
+      ['models/a.step', pointerBytes],
+      ['models/b.step', pointerBytes],
+      ['models/c.step', 'bytes the flush does not touch\n'],
+    ]);
+    const listings = [vi.spyOn(tree, 'readdir'), vi.spyOn(tree, 'readdirEntries')];
+    const reads = [vi.spyOn(tree, 'readFile'), vi.spyOn(tree, 'readFileStream')];
+
+    await materializer(tree)(liveCheckout, flushTarget, {
+      before: flushBefore,
+      purpose: 'fill',
+      largeObjects: sourced,
+    });
+
+    expect(listings.flatMap((spy) => spy.mock.calls).filter(([path]) => path === '')).toEqual([]);
+    const read = reads.flatMap((spy) => spy.mock.calls.map(([path]) => path));
+    expect(read.filter((path) => path === 'models/a.step' || path === 'models/c.step')).toEqual([]);
+    expect(await tree.readFile('models/a.step')).toStrictEqual(part);
+    expect(await tree.readFile('models/b.step')).toStrictEqual(part);
+  });
+
+  it('should refuse a fill flush whose written path did not keep what it wrote', async () => {
+    const flushBefore = new ImmutableRevisionTree([['models/b.step', 'old bytes\n']]);
+    const flushTarget = new ImmutableRevisionTree([['models/b.step', 'filled bytes\n']]);
+    const { tree, batch } = await storeProject(true);
+    const applyBatch = NodeFsProvider.prototype.applyBatch.bind(tree);
+    batch.mockImplementation(async (entries, batchOptions) => {
+      const receipts = await applyBatch(entries, batchOptions);
+      /* A writer replaces the published file before the flush verifies it. */
+      if (entries.some((entry) => entry.op === 'delete')) {
+        await fs.writeFile(join(tree.root, 'models', 'b.step'), 'someone else\n');
+      }
+      return receipts;
+    });
+
+    await expect(
+      materializer(tree)(liveCheckout, flushTarget, { before: flushBefore, purpose: 'fill' }),
+    ).rejects.toMatchObject({ code: 'ENGINE_FAILED' });
+  });
+
   it('should refuse a side map on a checkout that cannot land from a store', async () => {
     const { tree } = await storeProject(false);
 
@@ -863,7 +911,9 @@ describe('the entry closure of a tree write (D10)', () => {
         'cube(1);\n',
       ]),
       ['old.scad', 'old\n'],
+      ['.gitattributes', '*.step filter=lfs diff=lfs merge=lfs -text\n'],
       ['models/part.step', pointerBytes],
+      ['notes/pointer.txt', pointerBytes],
       ['tau.json', manifest],
       ['zz/main.scad', 'cube(2);\n'],
     ]);
@@ -898,11 +948,17 @@ describe('the entry closure of a tree write (D10)', () => {
     /* The index learns the whole tree as the bracket opens, before any byte lands. */
     expect(events.slice(0, 2)).toEqual(['bracket', 'expect']);
     expect(outcomes).toEqual([{ failed: false }]);
-    expect(expected).toHaveLength(604);
+    expect(expected).toHaveLength(606);
     expect(expected.find((entry) => entry.path === 'models/part.step')).toEqual({
       path: 'models/part.step',
       size: pointerBytes.byteLength,
       pending: { oid: pointer.oid, size: pointer.size },
+      arriving: true,
+    });
+    /* A pointer the attributes do not track is a person's text, never a placeholder. */
+    expect(expected.find((entry) => entry.path === 'notes/pointer.txt')).toEqual({
+      path: 'notes/pointer.txt',
+      size: pointerBytes.byteLength,
       arriving: true,
     });
     expect(expected.find((entry) => entry.path === 'old.scad')?.arriving).toBe(false);
@@ -1019,6 +1075,8 @@ describe('the entry closure of a tree write (D10)', () => {
       })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree' }),
     ).rejects.toThrow('host bracket failed');
     expect(endExpectation).toHaveBeenCalledTimes(1);
+    /* A failed write's entries no longer answer: what it did not land is what is on disk (I7). */
+    expect(endExpectation).toHaveBeenLastCalledWith({ failed: true });
 
     /* An aborted write releases its bracket as failed, so its tree is never read as written. */
     const outcomes: unknown[] = [];

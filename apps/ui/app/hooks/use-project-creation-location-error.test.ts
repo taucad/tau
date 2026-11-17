@@ -19,7 +19,7 @@ const mockBlocked = vi.fn();
 const mockToastError = vi.fn<(message: string, options?: ToastOptions) => void>();
 const mockToastSuccess = vi.fn();
 
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getWorkspace: mockGetWorkspace,
   requestHandlePermission: mockRequestPermission,
 }));

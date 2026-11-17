@@ -412,18 +412,18 @@ const recallTurn = `Without calling any tool, reply with the exact marker the ea
 const switchPairs: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
   { from: 'anthropic-claude-sonnet-5.5', to: 'anthropic-claude-fable-5.2' },
   { from: 'anthropic-claude-fable-5.2', to: 'anthropic-claude-sonnet-5.5' },
-  { from: 'openai-gpt-6.1-terra', to: 'google-gemini-3.8-flash' },
-  { from: 'google-gemini-3.8-flash', to: 'openai-gpt-6.1-terra' },
+  { from: 'openai-gpt-6.1-terra', to: 'google-gemini-4-hydrogen' },
+  { from: 'google-gemini-4-hydrogen', to: 'openai-gpt-6.1-terra' },
   { from: 'openai-gpt-6.1-terra', to: 'anthropic-claude-sonnet-5.5' },
   { from: 'anthropic-claude-sonnet-5.5', to: 'openai-gpt-6.1-terra' },
-  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
-  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-sonnet-5.5' },
-  { from: 'xai-grok-4.7', to: 'google-gemini-3.8-flash' },
-  { from: 'google-gemini-3.8-flash', to: 'xai-grok-4.7' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-4-hydrogen' },
+  { from: 'google-gemini-4-hydrogen', to: 'anthropic-claude-sonnet-5.5' },
+  { from: 'xai-grok-4.7', to: 'google-gemini-4-hydrogen' },
+  { from: 'google-gemini-4-hydrogen', to: 'xai-grok-4.7' },
   { from: 'xai-grok-4.7', to: 'anthropic-claude-sonnet-5.5' },
   { from: 'anthropic-claude-sonnet-5.5', to: 'xai-grok-4.7' },
-  { from: 'google-gemini-3.8-flash', to: 'google-gemini-3.1-pro' },
-  { from: 'google-gemini-3.1-pro', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-4-hydrogen', to: 'google-gemini-4-argon' },
+  { from: 'google-gemini-4-argon', to: 'google-gemini-4-hydrogen' },
 ];
 
 const credentialsFor = (from: string, to: string): string =>
@@ -536,8 +536,8 @@ for (const pair of switchPairs) {
  */
 const orphanRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
   { from: 'anthropic-claude-fable-5.2', to: 'anthropic-claude-fable-5.2' },
-  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-sonnet-5.5' },
-  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
+  { from: 'google-gemini-4-hydrogen', to: 'anthropic-claude-sonnet-5.5' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-4-hydrogen' },
   { from: 'anthropic-claude-sonnet-5.5', to: 'openai-gpt-6.1-terra' },
 ];
 
@@ -576,9 +576,9 @@ for (const { from, to } of orphanRows) {
 
 /** Compaction then switch, once per target wire, so the summary is proven to replay everywhere. */
 const compactionRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
-  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-4-hydrogen' },
   { from: 'openai-gpt-6.1-terra', to: 'anthropic-claude-sonnet-5.5' },
-  { from: 'google-gemini-3.8-flash', to: 'openai-gpt-6.1-terra' },
+  { from: 'google-gemini-4-hydrogen', to: 'openai-gpt-6.1-terra' },
 ];
 
 for (const { from, to } of compactionRows) {
@@ -654,8 +654,8 @@ for (const { from, to } of compactionRows) {
 
 /** A parallel tool batch then a switch, on the two wires whose signature and id rules differ most. */
 const parallelRows: ReadonlyArray<{ readonly from: string; readonly to: string }> = [
-  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-3.8-flash' },
-  { from: 'google-gemini-3.8-flash', to: 'anthropic-claude-sonnet-5.5' },
+  { from: 'anthropic-claude-sonnet-5.5', to: 'google-gemini-4-hydrogen' },
+  { from: 'google-gemini-4-hydrogen', to: 'anthropic-claude-sonnet-5.5' },
 ];
 
 for (const { from, to } of parallelRows) {
@@ -983,7 +983,7 @@ for (const replayModelId of replayModelIds) {
    * signature (docs/research/chat-compaction-morph-google-thought-signature-failure.md).
    */
   for (const modelId of replayModelId === replayModelIds[0]
-    ? [replayModelId, 'google-gemini-3.8-flash']
+    ? [replayModelId, 'google-gemini-4-hydrogen']
     : [replayModelId]) {
     describe.skipIf(!hasLiveCredential(modelId))(
       replayTitle(modelId, 'tool results cleared mid tool loop'),
@@ -1099,7 +1099,7 @@ for (const replayModelId of replayModelIds) {
 /* The rule is one comparison on every wire, so the two edits that need no bulk history also run on a model of each
  * other wire that returns signed reasoning: OpenAI's Responses items and Vertex's thought signatures. Those providers
  * refuse nothing; the rows hold them to the same typed break, with reasoning left out and then replayed. */
-for (const replayModelId of [...replayModelIds, 'openai-gpt-6.1-terra', 'google-gemini-3.8-flash']) {
+for (const replayModelId of [...replayModelIds, 'openai-gpt-6.1-terra', 'google-gemini-4-hydrogen']) {
   describe.skipIf(!hasLiveCredential(replayModelId))(
     replayTitle(replayModelId, 'mode change'),
     { repeats: liveRepeats },
@@ -1280,7 +1280,7 @@ for (const modelId of ['anthropic-claude-fable-5.2', 'anthropic-claude-haiku-5.5
   );
 }
 
-for (const modelId of ['anthropic-claude-sonnet-4.6', 'google-gemini-3.8-flash']) {
+for (const modelId of ['anthropic-claude-sonnet-4.6', 'google-gemini-4-hydrogen']) {
   describe.skipIf(!hasLiveCredential(modelId))(
     `live effort change on the request: ${modelId} (set ${liveCredentialName(modelId)} in apps/api/.env to run)`,
     { repeats: liveRepeats },

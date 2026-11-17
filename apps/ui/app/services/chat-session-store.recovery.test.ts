@@ -1,9 +1,10 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { UIMessageChunk, ChatStatus } from 'ai';
-import type { Chat } from '@ai-sdk/react';
+import type { ChatView } from '#services/deferred-chat.js';
 import type { MyUIMessage } from '@taucad/chat';
 import type * as SharedChat from '@taucad/chat-ui/chat-clients/_internal/shared-chat-transport';
 import { BrowserPlacementChatTransport } from '@taucad/chat-ui/chat-clients/_internal/browser-agent-host-transport';
@@ -68,7 +69,7 @@ const poisonedStream = (status: 'submitted' | 'streaming' = 'submitted'): Readab
   });
 
 /** Hydrate a real store without filesystem or execution effects. */
-const acquire = (): Readonly<{ store: ChatSessionStore; chat: Chat<MyUIMessage>; deps: ChatSessionDeps }> => {
+const acquire = (): Readonly<{ store: ChatSessionStore; chat: ChatView; deps: ChatSessionDeps }> => {
   const deps = mock<ChatSessionDeps>({
     getChat: vi.fn(async () => ({
       id: 'chat_1',
@@ -114,6 +115,15 @@ const replyRow = (sequence: number, text: string): Record<string, unknown> =>
     message: { id: `assistant-${sequence}`, role: 'assistant', content: [{ type: 'text', text }] },
   });
 
+/** The facts of each presentation diagnostic under `label`, which the store logs as JSON text. */
+const presentationWarnings = (
+  diagnostic: { readonly mock: { readonly calls: readonly unknown[][] } },
+  label: string,
+): unknown[] =>
+  diagnostic.mock.calls.flatMap(([logged, facts]) =>
+    logged === label && typeof facts === 'string' ? [JSON.parse(facts) as unknown] : [],
+  );
+
 const stores: ChatSessionStore[] = [];
 afterEach(async () => {
   for (const store of stores.splice(0)) {
@@ -124,6 +134,12 @@ afterEach(async () => {
   vi.restoreAllMocks();
   harness.errorStatuses.length = 0;
   resetChatTurnServices();
+});
+
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
 });
 
 describe('ChatSessionStore real SDK presentation recovery', () => {
@@ -194,11 +210,12 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
       expect(exported).toContain('after');
       expect(deps.patchChat).not.toHaveBeenCalled();
       expect(hostCommand).not.toHaveBeenCalled();
-      expect(diagnostic).toHaveBeenCalledWith('[ChatSessionStore] presentation recovery', {
+      expect(presentationWarnings(diagnostic, '[ChatSessionStore] presentation recovery')).toContainEqual({
         chatId: 'chat_1',
         runId: 'run_1',
         status: 'error',
         errorName: 'AI_UIMessageStreamError',
+        errorMessage: 'No tool invocation found for tool call ID "missing-input".',
         chunkId: 'missing-input',
         chunkType: 'tool-invocation',
         cursor: 2,
@@ -259,8 +276,7 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
     unregister();
     expect(reconnect).toHaveBeenCalledOnce();
     expect(hostCommand).not.toHaveBeenCalled();
-    expect(diagnostic).toHaveBeenCalledWith(
-      '[ChatSessionStore] presentation recovery',
+    expect(presentationWarnings(diagnostic, '[ChatSessionStore] presentation recovery')).toContainEqual(
       expect.objectContaining({ phase: 'completed', mode: 'durable-only', cursor: 4 }),
     );
   });
@@ -298,7 +314,7 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
     );
     const { store, chat } = acquire();
     stores.push(store);
-    let replacement: Chat<MyUIMessage> | undefined;
+    let replacement: ChatView | undefined;
     const unregister = chat['~registerStatusCallback'](() => {
       if (chat.status === 'error') {
         publishLogRows(store, 'chat_1', [lifecycleRow(2, 'completed')], 2);
@@ -316,7 +332,7 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
     });
     unregister();
     expect(replacement?.error).toBeUndefined();
-    expect(diagnostic).not.toHaveBeenCalledWith('[ChatSessionStore] presentation recovery', expect.anything());
+    expect(presentationWarnings(diagnostic, '[ChatSessionStore] presentation recovery')).toEqual([]);
   });
 
   it('should retire a failed old run and recover the newer active run before its queued reset', async () => {
@@ -384,8 +400,7 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
     stores.push(store);
     publishLogRows(store, 'chat_1', runningRows());
     await vi.waitFor(() => {
-      expect(diagnostic).toHaveBeenCalledWith(
-        '[ChatSessionStore] projected run could not be watched',
+      expect(presentationWarnings(diagnostic, '[ChatSessionStore] projected run could not be watched')).toContainEqual(
         expect.objectContaining({ chatId: 'chat_1', runId: 'run_1', cursor: 2, errorName: 'Error' }),
       );
     });
@@ -428,8 +443,9 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
       lifecycleRow(4, 'completed'),
     ]);
     await vi.waitFor(() => {
-      expect(diagnostic).toHaveBeenCalledWith(
-        '[ChatSessionStore] projected transcript could not be materialized',
+      expect(
+        presentationWarnings(diagnostic, '[ChatSessionStore] projected transcript could not be materialized'),
+      ).toContainEqual(
         expect.objectContaining({
           chatId: 'chat_1',
           runId: 'run_1',

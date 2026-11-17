@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { filesPane, treeItem } from '#support/file-tree.js';
+import { axeAudit } from '#support/page-audit.js';
 import { writeWorkbenchFile } from '#support/workbench-files.js';
 import type {
   ShownSpan,
@@ -28,6 +29,7 @@ import {
   holdRequestsUntilReleased,
   releaseHeldRequests,
   readProjectLoad,
+  readFirstInputAccepted,
   firstDelayedRead,
   readLaneBordersNow,
   readWorkerDeliveries,
@@ -76,6 +78,8 @@ const projectNames = { a: 'Project Navigation A', b: 'Project Navigation B' } as
 const usage = { inputTokens: 12, outputTokens: 6 };
 const finalReply = 'The task list is up to date.';
 const composer = selectors.getByCss('[aria-label="Ask Tau to build anything..."]');
+/** The destination composer's native input that the frame's composer box serves (PL6). */
+const servedComposerInput = '[data-slot="workspace-frame-composer"] textarea[aria-label="Chat message"]';
 const traySummary = selectors.getByRole('button', { name: /^Tasks: 0 of 2 done/u });
 
 const cookieValue = (value: unknown): string => encodeURIComponent(JSON.stringify(value));
@@ -443,12 +447,141 @@ test(
   },
 );
 
+/*
+ * PL6 (progressive loading, OD1): a project URL's placeholder serves the composer's native input, so the gate's first
+ * mark, "first input accepted", is set on a direct load, before the workspace is live, and the bundle reports it as
+ * `tau.load.input.accepted`. Its distance from first contentful paint is kept as evidence (G5), not asserted: the
+ * project document is not held for first paint.
+ */
+test('should mark the first input accepted on a direct project load', { timeout: loadBudget }, async () => {
+  const { path } = await seedProjects('wide');
+  await target.navigate(path);
+  await settleProject();
+  const accepted = await readFirstInputAccepted();
+  await target.writeArtifact(
+    'project-load-frames/first-input-accepted-wide.json',
+    `${JSON.stringify(accepted, null, 2)}\n`,
+  );
+
+  expect(accepted.mark, 'the served recorder left no first-input mark').toEqual(expect.any(Number));
+  expect(accepted.measure).toEqual({ start: 0, end: accepted.mark, phase: 'input.accepted' });
+});
+
+/*
+ * PL6 on A15b's frame: the composer's native input stands in the frame's chat-lane composer box, the one part of the
+ * frame exposed to assistive technology, and the live composer adopts it when the panes are revealed. Before the
+ * reveal and after it the page has exactly one textbox, and the frame breaks no axe rule (a focusable input under
+ * `aria-hidden` would).
+ */
+test(
+  'should expose exactly one composer textbox before the workspace is revealed and one after',
+  { timeout: loadBudget },
+  async () => {
+    await seedProjects('wide');
+    await holdRequestsUntilReleased(workspaceChunk);
+    await target.reload();
+    const textboxes = selectors.getByRole('textbox');
+    await target.expectVisible(selectors.getByRole('textbox', { name: 'Chat message' }), 60_000);
+    await target.expectCount(textboxes, 1);
+    const before = await axeAudit({ selector: '[data-slot="workspace-frame"]' });
+    await releaseHeldRequests();
+    await settleProject();
+    await target.expectVisible(selectors.getByCss(richComposer), 60_000);
+    await target.expectCount(textboxes, 1);
+    await target.expectCount(selectors.getByCss('[data-slot="workspace-frame"] textarea'), 0);
+    const after = await axeAudit({ selector: '[data-slot="workspace-frame"]' });
+    await target.writeArtifact(
+      'project-load-frames/composer-textbox-axe.json',
+      `${JSON.stringify({ before: before.violations, after: after.violations }, null, 2)}\n`,
+    );
+
+    expect(before.violations, 'the frame before the reveal').toEqual([]);
+    expect(after.violations, 'the frame after the reveal').toEqual([]);
+  },
+);
+
+/*
+ * PL6 on A15b2's pending frame: a click on a project row from Home draws the destination's frame ahead of the route
+ * while the page being left is hidden. The frame's composer box is exempt from that hiding, so the destination's native
+ * input is on screen and takes typing during the wait, and the live composer adopts the text when the panes are revealed.
+ */
+test(
+  'should take typing in the destination composer while a click from Home waits for the workspace',
+  { timeout: loadBudget },
+  async () => {
+    await seedProjects('wide');
+    await target.navigate('/');
+    await target.expectVisible(composer, 60_000);
+    await target.delay(settleWindow);
+    await holdRequestsUntilReleased(workspaceChunk);
+    /* The pending window is the router's transition, tens of milliseconds: each animation frame of it is sampled in the
+     * page, where the served input must be on screen and focusable. */
+    await target.evaluate((selector) => {
+      const record = globalThis as typeof globalThis & {
+        __pendingComposer?: Array<{ visible: boolean; focused: boolean }>;
+      };
+      record.__pendingComposer = [];
+      const sample = (): void => {
+        if (document.querySelector('[data-workspace-pending]') !== null) {
+          const input = document.querySelector<HTMLTextAreaElement>(selector);
+          input?.focus();
+          record.__pendingComposer!.push({
+            visible: input?.checkVisibility({ visibilityProperty: true }) ?? false,
+            focused: input !== null && document.activeElement === input,
+          });
+        }
+        if (record.__pendingComposer!.length < 600) {
+          requestAnimationFrame(sample);
+        }
+      };
+      requestAnimationFrame(sample);
+    }, servedComposerInput);
+    const row = selectors.getByRole('link', { name: projectNames.a }).first();
+    await target.expectVisible(row, 60_000);
+    await target.click(row);
+    const served = selectors.getByCss(servedComposerInput);
+    await target.expectVisible(served, 60_000);
+    const pendingFrames = await target.evaluate(
+      () =>
+        (globalThis as typeof globalThis & { __pendingComposer?: Array<{ visible: boolean; focused: boolean }> })
+          .__pendingComposer ?? [],
+    );
+    precondition(pendingFrames.length > 0, 'PL6: no frame was drawn pending after the click from Home');
+    /* The workspace chunk is still held, so the served input is the one the pending frames showed. */
+    await target.type(served, 'Hold the bracket');
+    const typed = await target.evaluate((selector) => {
+      const input = document.querySelector<HTMLTextAreaElement>(selector);
+      return { visible: input?.checkVisibility({ visibilityProperty: true }) ?? false, value: input?.value ?? '' };
+    }, servedComposerInput);
+    await releaseHeldRequests();
+    await settleProject();
+    await target.expectVisible(selectors.getByCss(richComposer), 60_000);
+    const adopted = await target.textContent(selectors.getByCss(richComposer));
+    await target.writeArtifact(
+      'project-load-frames/pending-composer-typing-wide.json',
+      `${JSON.stringify({ pendingFrames, typed, adopted }, null, 2)}\n`,
+    );
+
+    expect(
+      pendingFrames.filter((frame) => !frame.visible || !frame.focused),
+      `the served input in the ${pendingFrames.length} pending frames`,
+    ).toEqual([]);
+    expect(typed, 'the served input before the reveal').toEqual({ visible: true, value: 'Hold the bracket' });
+    expect(adopted, 'the live composer after the reveal').toContain('Hold the bracket');
+  },
+);
+
+/*
+ * U4's placeholder node is, from A15b, the persistent workspace frame (`[data-slot="workspace-frame"]`), which took the
+ * skeleton's place. The row counts that node, and both kinds: the frame must be created exactly once and never
+ * removed, and the skeleton must never be created, so the row cannot pass because nothing stands in the content region.
+ */
 knownDefect('U4: the workspace placeholder node is created at most once per load with the workspace chunk 3 s late', {
   artifact: 'u4-wide',
-  expectedFailure: true,
+  expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
-    await seedProjects('wide');
+    await seedProjects('wide', { regions: { workspaceFrame: '[data-slot="workspace-frame"]' } });
     await delayWorkspaceChunk();
     await target.reload();
     await settleProject();
@@ -456,10 +589,12 @@ knownDefect('U4: the workspace placeholder node is created at most once per load
     return keepRecord('u4-wide');
   },
   assert: (record) => {
+    const frames = record.regionMounts['workspaceFrame'] ?? [];
+    const removals = record.regionRemovals['workspaceFrame'] ?? [];
     expect(
-      record.placeholders.length,
-      `U4: [data-testid=workspace-skeleton] was created ${record.placeholders.length} times, in ${describeFrames(record.placeholders)}`,
-    ).toBeLessThanOrEqual(1);
+      { frames: frames.length, removals: removals.length, skeletons: record.placeholders.length },
+      `U4: the workspace frame was created ${frames.length} times (${describeFrames(frames)}) and removed ${removals.length} times; [data-testid=workspace-skeleton] was created ${record.placeholders.length} times, in ${describeFrames(record.placeholders)}`,
+    ).toEqual({ frames: 1, removals: 0, skeletons: 0 });
   },
 });
 
@@ -496,7 +631,7 @@ knownDefect(
   'U5: a workbench-closed project never paints a third lane border in any frame with the workspace chunk 3 s late',
   {
     artifact: 'u5-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('wide', { laneBorders: true });
@@ -635,7 +770,7 @@ knownDefect(
   'M1: on a 390 by 844 reload with the workspace chunk 3 s late, first contentful paint is within 100 ms of first paint',
   {
     artifact: 'm1-phone',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('phone');
@@ -818,6 +953,8 @@ const boxChanges = (entries: readonly ProjectLoadRegionEntry[]): string[] => {
 
 /** The persistent workspace frame A15b adds (blueprint: `R/workspace-frame*`, "the workspace-frame element"). */
 const workspaceFrame = '[data-slot="workspace-frame"]';
+/** The frame's lanes layer, which a pending frame shows over the hidden page being left (A15b2). */
+const frameLanes = '[data-slot="workspace-frame-lanes"]';
 /** The chat lane, by the history region it holds. */
 const chatLane = '[data-slot="floating-panel"]:has([role="region"][aria-label="Chat history"])';
 /** The entry chunk every page loads first: holding it holds hydration. */
@@ -992,7 +1129,7 @@ knownDefect(
   'F1 (A15b): with the workspace chunk 3 s late, the content region draws no skeleton and every lane is at its final box from its first frame',
   {
     artifact: 'f1-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: measureClosedWorkbenchLoad,
     assert: ({ record, settled }) => {
@@ -1013,7 +1150,7 @@ knownDefect(
   'F2 (A15b): with the workspace chunk 3 s late, one workspace frame element is created and never removed, and no workspace placeholder exists',
   {
     artifact: 'f2-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: measureClosedWorkbenchLoad,
     assert: ({ record }) => {
@@ -1032,7 +1169,7 @@ knownDefect(
   'F3 (A15b): with the workspace chunk 3 s late, no lane container runs an animation and the first lanes drawn are the final ones',
   {
     artifact: 'f3-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: measureClosedWorkbenchLoad,
     assert: ({ record, settled }) => {
@@ -1062,13 +1199,13 @@ const findSidebarStandIns = (html: Document): string[] =>
     .filter((node) => node.closest('[data-slot="sidebar"]') === null && !node.classList.contains('fixed'))
     .map((node) => `${node.tagName.toLowerCase()}.${node.className.split(' ').slice(0, 6).join('.')}`);
 
-knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a project draws no sidebar stand-in', {
+knownDefect('F4 (A11, A15b, P2): the server HTML for a project draws no sidebar stand-in', {
   artifact: 'f4-wide',
   expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
     const { path } = await seedProjects('wide');
-    await target.addCookies([{ domain: 'localhost', name: 'tau-shell-op-sidebar', path: '/', value: '0' }]);
+    /* P2: the sidebar state is a client fact the server never reads, so this HTML is every visitor's. */
     const server = await target.evaluate(async (url) => {
       const response = await fetch(url, { credentials: 'same-origin' });
       const text = await response.text();
@@ -1082,23 +1219,139 @@ knownDefect('F4 (A11, A15b): with the sidebar closed, the server HTML for a proj
     return standIns;
   },
   assert: (standIns) => {
-    expectMeasured(standIns, 'F4: the server HTML, with tau-shell-op-sidebar=0, draws a sidebar stand-in', []);
+    expectMeasured(standIns, 'F4: the server HTML draws a sidebar stand-in', []);
   },
 });
 
-/** The phone frame's four parts (blueprint P-h). */
+/*
+ * F11, A15b half (programme control, 2026-11-13T14:40Z): S-nav took the root loader's half
+ * (`root-revalidation.spec.ts`). This row holds the destination's code 3 s, both the project route module and the
+ * workspace chunk, and asks that the click still commits the URL and paints the destination's workspace frame within
+ * the acknowledge time (blueprint, § One timing ladder: 100 ms).
+ *
+ * A15b2: React Router commits only once the destination's route module has loaded, so the module is in the entry graph
+ * (`lib/eager-route-modules.ts`) and is never requested after Home has loaded. The forcing is therefore the workspace
+ * chunk's hold, which every click from Home meets: the route module's hold stays, and whether the module was requested
+ * at all is recorded, not required.
+ */
+const acknowledgeMilliseconds = 100;
+
+type DestinationFrameLoad = {
+  readonly record: ProjectLoadRecord;
+  readonly click: ProjectLoadFrame;
+  readonly pushAt: number | undefined;
+  readonly routeChunk: string;
+};
+
+knownDefect(
+  'F11 (A15b): a click on a project row from Home, with the project route module and the workspace chunk 3 s late, commits the URL and paints the destination workspace frame within 100 ms, in its final box',
+  {
+    artifact: 'f11-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async (): Promise<DestinationFrameLoad> => {
+      await seedProjects('wide', { regions: { workspaceFrame, frameLanes } });
+      await target.navigate('/');
+      await target.expectVisible(composer, 60_000);
+      await target.delay(settleWindow);
+      /* The project route's module, as the router's manifest names it. */
+      const routeChunk = await target.evaluate(() => {
+        const manifest = (
+          globalThis as typeof globalThis & {
+            __reactRouterManifest?: { routes: Record<string, { module?: string }> };
+          }
+        ).__reactRouterManifest;
+        return manifest?.routes['routes/w.$workspace.$project']?.module ?? '';
+      });
+      precondition(routeChunk !== '', 'F11: the router manifest names no module for the project route');
+      await delayRequests(routeChunk.replaceAll(/[.*+?^${}()|[\]\\/]/gu, String.raw`\$&`), chunkDelay);
+      await delayWorkspaceChunk();
+      await target.evaluate(() => {
+        const record = globalThis as typeof globalThis & { __f11PushAt?: number };
+        const push = history.pushState.bind(history);
+        history.pushState = (...parameters: Parameters<History['pushState']>) => {
+          record.__f11PushAt ??= performance.now();
+          push(...parameters);
+        };
+      });
+      const row = selectors.getByRole('link', { name: projectNames.a }).first();
+      await target.expectVisible(row, 60_000);
+      await markProjectLoadOnClick('click');
+      await target.click(row);
+      await target.expectUrl(/\/w\/[^/]+\/[^/?]+/u, 60_000);
+      await settleProject();
+      const delayed = await readDelayedRequests();
+      precondition(
+        delayed.some((url) => new RegExp(workspaceChunk, 'u').test(url)),
+        `F11: the workspace chunk was never delayed: ${delayed.join(', ') || 'none'}`,
+      );
+      /* Recorded, not required: the route module is in the entry graph, so this is normally false. */
+      const routeModuleRequested = delayed.some((url) => url.includes(routeChunk));
+      const pushAt = await target.evaluate(
+        () => (globalThis as typeof globalThis & { __f11PushAt?: number }).__f11PushAt,
+      );
+      const record = await keepRecord('f11-wide', { routeChunk, routeModuleRequested, pushAt });
+      const click = record.marks.find((mark) => mark.name === 'click');
+      precondition(click !== undefined, 'F11: the click was not marked');
+      return { record, click: click!, pushAt, routeChunk };
+    },
+    assert: ({ record, click, pushAt }) => {
+      const drawn = regionsOf(record, 'workspaceFrame').filter((entry) => entry.present && entry.t >= click.t);
+      const frame = drawn[0];
+      /* The lanes as they stand in the frame's first frame: shown, not hidden with the page being left. */
+      const lanes = regionsOf(record, 'frameLanes').findLast((entry) => frame !== undefined && entry.t <= frame.t);
+      /* A15b2 review: drawn ahead of the route, the frame is already the destination's, one node in its final box, on
+       * screen, so the route's commit moves and replaces nothing. */
+      const settled = drawn.at(-1);
+      const moved = drawn.filter(
+        (entry) =>
+          entry.node !== settled?.node ||
+          entry.x !== settled.x ||
+          entry.y !== settled.y ||
+          entry.width !== settled.width ||
+          entry.height !== settled.height,
+      );
+      expectMeasured(
+        {
+          pushWithin: pushAt !== undefined && pushAt - click.t <= acknowledgeMilliseconds,
+          frameWithin: frame !== undefined && frame.t - click.t <= acknowledgeMilliseconds,
+          frameVisible: frame?.visible === true,
+          lanesVisible: lanes?.present === true && lanes.visible,
+          frameMoves: moved.map(
+            (entry) =>
+              `${describeFrame(entry)}: node ${entry.node} ${entry.x},${entry.y} ${entry.width}x${entry.height}`,
+          ),
+        },
+        `F11: after the click in ${describeFrame(click)}, pushState came ${pushAt === undefined ? 'never' : `${Math.round(pushAt - click.t)} ms`} later and the workspace frame ${frame === undefined ? 'never' : `${Math.round(frame.t - click.t)} ms later, in ${describeFrame(frame)}`}, settling at ${settled === undefined ? 'none' : `node ${settled.node} ${settled.x},${settled.y} ${settled.width}x${settled.height}`}`,
+        { pushWithin: true, frameWithin: true, frameVisible: true, lanesVisible: true, frameMoves: [] },
+      );
+    },
+  },
+);
+
+/**
+ * The phone frame's four parts (blueprint P-h), whatever draws them: the workspace frame's part in its box until the
+ * phone workspace has restored its layout (A15c), then the phone workspace's own. This is the rows' contract with the
+ * frame, as `workspaceLanes` is at wide size: each part of the phone frame carries `data-frame-part` inside
+ * `[data-slot="workspace-frame-phone"]`, and hands over on `[data-mobile-workspace="ready"]` (the viewer's box once the
+ * live stage is drawn as well). Each frame part's selector stops matching at its hand-over, so from then on only the
+ * live part is read, its box, its skeletons and its animations.
+ */
+const livePhoneSheet = '[role="dialog"]:has([aria-label="Drawer height"])';
+const phoneFramePart = (part: string, handedOver = '[data-mobile-workspace="ready"]'): string =>
+  `[data-slot="workspace-frame"]:not(:has(${handedOver})) [data-slot="workspace-frame-phone"] [data-frame-part="${part}"]`;
 const phoneFrameRegions = {
-  topBar: '[data-slot="mobile-project-top-bar"]',
-  viewer: '[data-slot="viewer-stage"]',
-  sheet: '[role="dialog"]:has([aria-label="Drawer height"])',
-  tabBar: 'nav[aria-label="Workbench"]',
+  topBar: `[data-slot="mobile-project-top-bar"], ${phoneFramePart('top-bar')}`,
+  viewer: `[data-slot="viewer-stage"], ${phoneFramePart('viewer', '[data-mobile-workspace="ready"] [data-slot="viewer-stage"]')}`,
+  sheet: `${livePhoneSheet}, ${phoneFramePart('sheet')}`,
+  tabBar: `nav[aria-label="Workbench"], ${phoneFramePart('tab-bar')}`,
 } as const;
 
 knownDefect(
-  'F5 (A15c): on a 390 by 844 reload with the workspace chunk 3 s late, the top bar, viewer, sheet and tab bar hold their final boxes from the first frame, with no skeleton and no sheet animation',
+  'F5 (A15c): on a 390 by 844 reload with the workspace chunk 3 s late, the top bar, viewer, sheet and tab bar hold their final boxes from the first frame, with no skeleton in them and no sheet animation',
   {
     artifact: 'f5-phone',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       await seedProjects('phone', { regions: phoneFrameRegions });
@@ -1108,7 +1361,7 @@ knownDefect(
           .getByRole('navigation', { name: 'Workbench' })
           .getByRole('button', { name: 'Parameters', exact: true }),
       );
-      await target.expectVisible(selectors.getByCss(phoneFrameRegions.sheet), 30_000);
+      await target.expectVisible(selectors.getByCss(livePhoneSheet), 30_000);
       await target.delay(settleWindow);
       await delayWorkspaceChunk();
       await target.reload();
@@ -1139,17 +1392,28 @@ knownDefect(
         return [
           ...(standing === undefined ? [`${name} at first paint (${painted} ms): absent`] : []),
           ...boxChanges(fromPaint).map((change) => `${name} ${change}`),
+          /* In its box is not enough: a part held there but hidden is not drawn. */
+          ...fromPaint
+            .filter((entry) => entry.present && !entry.visible)
+            .map((entry) => `${name} hidden ${describeEntry(entry)}`),
         ];
       });
       const sheetAnimations = regionsOf(record, 'sheet').filter((entry) => entry.animations > 0);
+      /* Under the 2026-11-15 ruling (#2307) a skeleton in final geometry is allowed, so the sidebar sheet's held
+       * Recents and chat rows do not count: the phone frame's own four parts draw none. */
+      const partSkeletons = Object.keys(phoneFrameRegions).flatMap((name) =>
+        regionsOf(record, name)
+          .filter((entry) => entry.skeletons > 0)
+          .map((entry) => `${name} ${describeEntry(entry)}`),
+      );
       expectMeasured(
         {
           moved: moved.slice(0, 6),
-          skeletonFrames: record.skeletonFrames.length,
+          partSkeletons: partSkeletons.slice(0, 6),
           sheetAnimations: sheetAnimations.map((entry) => describeEntry(entry)),
         },
-        'F5: a part of the phone frame was absent or away from its settled box, a skeleton was drawn, or the sheet animated',
-        { moved: [], skeletonFrames: 0, sheetAnimations: [] },
+        'F5: a part of the phone frame was absent or away from its settled box, drew a skeleton, or the sheet animated',
+        { moved: [], partSkeletons: [], sheetAnimations: [] },
       );
     },
   },
@@ -1224,7 +1488,7 @@ knownDefect(
   'F7 (A15d): text typed at first paint on a project URL, with the entry chunk held until the typing is done, is in the composer after hydration with its caret and focus, and the composer never moved',
   {
     artifact: 'f7-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
       const { path } = await seedProjects('wide');
@@ -1287,46 +1551,145 @@ knownDefect(
 /** The viewer stage's parts F8 reads. */
 const viewerRegions = {
   preparing: '[aria-label="Preparing model"]',
+  stage: '[data-slot="viewer-stage"]',
   canvas: '[data-slot="viewer-canvas-region"] canvas',
   pill: '[data-slot="viewer-stage"] [data-slot="wait-indicator-body"]',
 } as const;
 
 /** The first file check: the revision status that reports the tree filled, delivered 3 s late. */
-const filledStatus: WorkerReadDelay = { method: 'revisionStatus', path: '^"filled"$', milliseconds: readDelay };
+const filledStatus: WorkerReadDelay = {
+  method: 'revisionStatus',
+  path: '^"filled"$',
+  milliseconds: readDelay,
+};
+
+/**
+ * Which backend the stage's last canvas draws on, and whether the page could have started WebGPU at all (an adapter
+ * answers). The canvas has its context by now, so asking for WebGL hands back the context it has, or nothing on WebGPU.
+ */
+const readCanvasBackend = async (): Promise<{
+  readonly backend: string;
+  readonly hasWebGpuAdapter: boolean;
+}> =>
+  target.evaluate(async (selector) => {
+    const canvases = [...document.querySelectorAll(selector)];
+    const canvas = canvases.at(-1);
+    const backend =
+      canvas instanceof HTMLCanvasElement
+        ? canvas.getContext('webgl2') === null && canvas.getContext('webgl') === null
+          ? 'webgpu'
+          : 'webgl'
+        : 'none';
+    const { gpu } = navigator as Navigator & {
+      readonly gpu?: { requestAdapter: () => Promise<unknown> };
+    };
+    const adapter = gpu === undefined ? undefined : await gpu.requestAdapter().catch(() => undefined);
+    return {
+      backend,
+      hasWebGpuAdapter: adapter !== undefined && adapter !== null,
+    };
+  }, viewerRegions.canvas);
+
+/** Make WebGPU unavailable to every document of this target, as on a browser without it: no adapter answers. */
+function withoutWebGpu(): void {
+  Object.defineProperty(Navigator.prototype, 'gpu', {
+    configurable: true,
+    get: () => undefined,
+  });
+}
+
+type ViewerStageLoad = Readonly<{
+  record: ProjectLoadRecord;
+  backend: Awaited<ReturnType<typeof readCanvasBackend>>;
+}>;
+
+/** F8's forced load: the first check held 3 s past a reload, then the stage read once its canvas shows. */
+const measureViewerStage = async (artifact: string): Promise<ViewerStageLoad> => {
+  await seedProjects('wide', { regions: viewerRegions });
+  await armWorkerReadDelay([filledStatus]);
+  await target.reload();
+  await settleProject();
+  await target.delay(readDelay);
+  await target.expectVisible(selectors.getByCss(viewerRegions.canvas), 60_000);
+  const backend = await readCanvasBackend();
+  const record = await keepRecord(artifact, { backend });
+  await requireReadDelayed('F8', filledStatus);
+  return { record, backend };
+};
+
+/**
+ * F8's assertion. The stage is created once and never removed. One canvas is created, except where the renderer starts
+ * on WebGPU and remounts once on WebGL because the adapter's renderer fails to start (`ThreeProvider`'s fallback, a
+ * viewer-owned remount ruled outside A15e by programme control on 2026-11-15T23:47Z): then two, the last on WebGL.
+ * `strict` is the variant with WebGPU unavailable, where that fallback cannot happen, so exactly one canvas counts.
+ */
+const assertViewerStage = ({ record, backend }: ViewerStageLoad, strict: boolean): void => {
+  const preparing = regionsOf(record, 'preparing').filter((entry) => entry.present);
+  const stages = record.regionMounts['stage'] ?? [];
+  const stageRemovals = record.regionRemovals['stage'] ?? [];
+  const canvases = record.regionMounts['canvas'] ?? [];
+  const firstCanvas = regionsOf(record, 'canvas').find((entry) => entry.present);
+  const pill = shownSpans(regionsOf(record, 'pill'));
+  const isRendererFallback = !strict && backend.hasWebGpuAdapter && backend.backend === 'webgl';
+  expectMeasured(
+    {
+      preparing: preparing.slice(0, 3).map((entry) => describeEntry(entry)),
+      stages: stages.length,
+      stageRemovals: stageRemovals.length,
+      canvases: canvases.length,
+      defaultSize: firstCanvas?.width === 300 && firstCanvas.height === 150,
+      pillShown: pill.length > 0,
+      pillEarly: pill.filter((span) => span.from < 1000).map((span) => span.from),
+    },
+    `F8: the viewer stage during the held file check (canvases created in ${describeFrames(canvases) || 'no frame'}, last on ${backend.backend}; a WebGPU adapter ${backend.hasWebGpuAdapter ? 'answers' : 'does not answer'})`,
+    {
+      preparing: [],
+      stages: 1,
+      stageRemovals: 0,
+      canvases: isRendererFallback ? 2 : 1,
+      defaultSize: false,
+      pillShown: true,
+      pillEarly: [],
+    },
+  );
+};
 
 knownDefect(
-  'F8 (A14, A15e): with the first file check 3 s late, no "Preparing model" block shows, one canvas is created at a real size, and the pill shows from 1,000 ms',
+  'F8 (A14, A15e): with the first file check 3 s late, no "Preparing model" block shows, the stage mounts once with one canvas per renderer backend at a real size, and the pill shows from 1,000 ms',
   {
     artifact: 'f8-wide',
-    expectedFailure: true,
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => measureViewerStage('f8-wide'),
+    assert: (load) => {
+      assertViewerStage(load, false);
+    },
+  },
+);
+
+knownDefect(
+  'F8 strict (A15e): with WebGPU unavailable and the first file check 3 s late, exactly one canvas is created, on WebGL, and the stage mounts once',
+  {
+    artifact: 'f8-wide-no-webgpu',
+    expectedFailure: false,
     budget: loadBudget,
     measure: async () => {
-      await seedProjects('wide', { regions: viewerRegions });
-      await armWorkerReadDelay([filledStatus]);
-      await target.reload();
-      await settleProject();
-      await target.delay(readDelay);
-      await target.expectVisible(selectors.getByCss(viewerRegions.canvas), 60_000);
-      const record = await keepRecord('f8-wide');
-      await requireReadDelayed('F8', filledStatus);
-      return record;
+      /* A fresh target, so the stub reaches no other row: the next row opens its own again below. */
+      await target.commands.uiOpenTarget();
+      try {
+        await target.addInitScript(withoutWebGpu);
+        const load = await measureViewerStage('f8-wide-no-webgpu');
+        if (load.backend.hasWebGpuAdapter) {
+          throw new Error('F8 strict: a WebGPU adapter still answered, so the variant did not run without WebGPU');
+        }
+        return load;
+      } finally {
+        await target.commands.uiOpenTarget();
+      }
     },
-    assert: (record) => {
-      const preparing = regionsOf(record, 'preparing').filter((entry) => entry.present);
-      const canvases = record.regionMounts['canvas'] ?? [];
-      const firstCanvas = regionsOf(record, 'canvas').find((entry) => entry.present);
-      const pill = shownSpans(regionsOf(record, 'pill'));
-      expectMeasured(
-        {
-          preparing: preparing.slice(0, 3).map((entry) => describeEntry(entry)),
-          canvases: canvases.length,
-          defaultSize: firstCanvas?.width === 300 && firstCanvas.height === 150,
-          pillShown: pill.length > 0,
-          pillEarly: pill.filter((span) => span.from < 1000).map((span) => span.from),
-        },
-        `F8: the viewer stage during the held file check (canvases created in ${describeFrames(canvases) || 'no frame'})`,
-        { preparing: [], canvases: 1, defaultSize: false, pillShown: true, pillEarly: [] },
-      );
+    assert: (load) => {
+      expect(load.backend.backend, 'F8 strict: the last canvas draws on WebGL').toBe('webgl');
+      assertViewerStage(load, true);
     },
   },
 );
@@ -1706,7 +2069,7 @@ knownDefect(
 
 knownDefect('F15 (A15b): a project at its default layout draws its lanes at their final boxes from the first frame', {
   artifact: 'f15-wide',
-  expectedFailure: true,
+  expectedFailure: false,
   budget: loadBudget,
   measure: async () => {
     await seedProjects('wide', { regions: { content: wideFrameRegions.content }, boxSets: workspaceLanes });

@@ -107,10 +107,10 @@ describe('BillingEstimatesService', () => {
       tier: 'base',
     });
     expect(estimates.routes).toContainEqual({
-      routeId: 'google-gemini-3.8-flash',
-      modelId: 'gemini-3.8-flash',
-      typicalHoldAtoms: '213164',
-      minimumHoldAtoms: '84464',
+      routeId: 'google-gemini-4-hydrogen',
+      modelId: 'gemini-4-hydrogen',
+      typicalHoldAtoms: '414212',
+      minimumHoldAtoms: '168512',
       tier: 'base',
     });
   });

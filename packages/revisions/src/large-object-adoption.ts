@@ -19,7 +19,8 @@
  * never touched: a pointer with no attribute behind it is a file a person can
  * never read again.
  */
-import { generatedGitattributesPath, isTrackedLargeObjectPath } from '#workspace-config.js';
+import { attributesOf, placeholderPathMatcher } from '#workspace-config.js';
+import type { AttributesReading } from '#workspace-config.js';
 import type { ImmutableRevisionTree } from '#algorithms/index.js';
 import { adoptRevisionTree, revisionTreeFiles } from '#algorithms/revision-tree.js';
 import type { RevisionTreeFile } from '#algorithms/revision-tree.js';
@@ -27,8 +28,6 @@ import { lfsPointerFor, readLfsPointer } from '#lfs.js';
 import type { LfsPointer } from '#lfs.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { Checkout } from '#revision-port.js';
-
-const decoder = new TextDecoder();
 
 /** What adoption is built over. */
 export type LargeObjectAdoptionDependencies = Readonly<{
@@ -44,6 +43,8 @@ export type LargeObjectAdoptionDependencies = Readonly<{
   storeObject: (pointer: LfsPointer, content: Uint8Array<ArrayBuffer>) => Promise<void>;
   /** One object from the store alone. */
   readStoredObject: (pointer: LfsPointer) => Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /** How the repository reads its attributes (`core.ignoreCase`), as the declaration and the fill read them. */
+  attributesReading?: () => Promise<AttributesReading>;
 }>;
 
 /** What one adoption did. @public */
@@ -76,15 +77,13 @@ export const createLargeObjectAdoption = (
       const before = await capture(place);
       /* The capture's own records, uncopied: only the file being stored is copied, one at a time. */
       const files = revisionTreeFiles(before);
-      const attributesFile = files.get(generatedGitattributesPath)?.content;
-      const attributes = attributesFile === undefined ? undefined : decoder.decode(attributesFile);
+      /* The rule the fill, the declaration and the read-through use: every attributes file on the path. */
+      const tracked = placeholderPathMatcher(
+        attributesOf([...files].map(([path, { content }]) => ({ path, content }))),
+        await (dependencies.attributesReading?.() ?? {}),
+      );
       const candidates = [...files]
-        .filter(
-          ([path, { content }]) =>
-            path !== generatedGitattributesPath &&
-            isTrackedLargeObjectPath(path, attributes) &&
-            readLfsPointer(content) === undefined,
-        )
+        .filter(([path, { content }]) => tracked(path) && readLfsPointer(content) === undefined)
         .map(([path]) => path);
       if (candidates.length === 0) {
         return { adopted: [], left: [] };

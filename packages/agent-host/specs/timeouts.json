@@ -767,6 +767,14 @@
       "owner": "W9"
     },
     {
+      "id": "D17b",
+      "bound": "Retry of a run watch or transcript read that failed on a dropped or replaced connection (250 ms doubling, three rounds per run, then latched)",
+      "site": "apps/ui/app/services/chat-session-store.ts",
+      "token": "const presentationRetry = setTimeout",
+      "class": "Backoff",
+      "owner": "W9"
+    },
+    {
       "id": "D19",
       "bound": "Host command retry delay (20 ms doubling to 250 ms within its 30 s deadline)",
       "site": "apps/ui/app/chat-clients/_internal/host-command.ts",
@@ -1026,6 +1034,14 @@
       "owner": "W10"
     },
     {
+      "id": "E40",
+      "bound": "Agent media transcode: one host-runtime conversion of an ACP image is aborted after 30 s and the image is filed as sent",
+      "site": "packages/host/src/acp/media.ts",
+      "token": "transcodeTimeout",
+      "class": "External edge",
+      "owner": "composer-image-format-support WP6"
+    },
+    {
       "id": "D25",
       "bound": "Charter D17: read-only oversized replay retirement after 2 s idle; cancelled by active reads/acquisition, never source freshness authority",
       "site": "packages/agent-host/src/launchers/agent-launcher.ts",
@@ -1104,6 +1120,14 @@
       "token": "this.idleTimer = setTimeout(",
       "class": "Debounce",
       "owner": "viewer memory"
+    },
+    {
+      "id": "AI1",
+      "bound": "Composer attachment worker idle release (60 s after the last conversion)",
+      "site": "apps/ui/app/services/attachment-image.service.ts",
+      "token": "this.idleTimer = setTimeout(",
+      "class": "Debounce",
+      "owner": "composer-image-format-support WP5"
     },
     {
       "id": "M12",

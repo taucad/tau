@@ -690,7 +690,7 @@ describe('ThreeCanvasInstance', () => {
     expect(adapters.isInteractionLocked?.()).toBe(false);
 
     report?.({ type: 'gizmoPressed' });
-    report?.({ type: 'gizmoTurned' });
+    report?.({ type: 'gizmoTurned', cause: 'drag' });
 
     expect(adapters.isInteractionLocked?.()).toBe(true);
     report?.({ type: 'gizmoReleased' });

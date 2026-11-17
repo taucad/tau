@@ -194,6 +194,7 @@ describe('sessionRuntimeWork — the close flush (A7c, S6)', () => {
     const editor = mock<ActorRefFrom<typeof editorMachine>>();
     const content = mock<FileContentService>();
     content.addEditorSaveFlusher.mockReturnValue(() => undefined);
+    content.retain.mockReturnValue(() => undefined);
     const encode = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
     content.resolve.mockResolvedValue({ kind: 'text', content: encode('one') });
     content.peekOutcome.mockReturnValue({ kind: 'text', content: encode('theirs') });

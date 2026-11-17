@@ -43,5 +43,17 @@ export {
   toolSuggestions,
 } from '#suggestions.js';
 export type { ToolSuggestion } from '#suggestions.js';
-export { emptyViewerPreferences, gizmoStyleIds, mousePresetIds, viewerPreferencesSchema } from '#viewer-preferences.js';
-export type { GizmoStyleId, MousePresetId, PersonalViewDefaults, ViewerPreferences } from '#viewer-preferences.js';
+export {
+  emptyViewerPreferences,
+  gizmoStyleIds,
+  mousePresetIds,
+  orbitStyleIds,
+  viewerPreferencesSchema,
+} from '#viewer-preferences.js';
+export type {
+  GizmoStyleId,
+  MousePresetId,
+  OrbitStyleId,
+  PersonalViewDefaults,
+  ViewerPreferences,
+} from '#viewer-preferences.js';

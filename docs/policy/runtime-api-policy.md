@@ -3,7 +3,7 @@ title: 'Runtime API Policy'
 description: 'Naming and ownership rules for runtime consumer, plugin-author, transport, filesystem, and artifact APIs.'
 status: active
 created: '2026-07-20'
-updated: '2026-10-13'
+updated: '2026-11-16'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/runtime-architecture-policy.md
@@ -345,13 +345,13 @@ type CompatibleCreateGeometryInput = {
 
 Use `definePlugin` for package-level Tau plugin toolkits. Do not use `defineTauPlugin`: the import path already supplies the Tau namespace, and the runtime authoring APIs are named `defineRuntime`, `defineKernel`, `defineTranscoder`, `defineBundler`, and `defineMiddleware`.
 
-Plugin packages declare the package-named camelCase callable factory at `definePlugin`, re-export that same binding as `plugin` from the root (`export { image, image as plugin }`), and expose no default export. Humans and IDE navigation use the package name; mechanical loaders read `plugin`. Also expose role-named direct factories such as `assimpKernel`, `imageTranscoder`, or `geometryCache`.
+Plugin packages declare the package-named camelCase callable factory at `definePlugin`, re-export that same binding as `plugin` from the root (`export { image, image as plugin }`), and expose no default export. Humans and IDE navigation use the package name; mechanical loaders read `plugin`. Also expose role-named direct factories such as `assimpKernel`, `renderTranscoder`, or `geometryCache`.
 
 Name presets by what they select: every package offers `default`, and role-named presets (`import`, `export`) only where a package carries more than one capability.
 
 Configure selected packaged capabilities through role-nested plugin options derived from their factory parameters. Do not duplicate capability schemas in the plugin definition, and do not encode an option value as a second capability or preset. Supplying an unknown role/name, an unselected capability path, or options to a factory without an options schema must fail.
 
-Keep plugin metadata to `meta: { name }`. The wrapper separates toolkit identity from the read-only `Function.name`; `meta.name` is the package/toolkit identity used by loaders and diagnostics. Capability ids stay the flat author-declared ids from their `define*` calls, and diagnostic origins use `${meta.name}/${capabilityPath}`.
+Keep plugin metadata to `meta: { name }`. The wrapper separates toolkit identity from the read-only `Function.name`; `meta.name` is the package/toolkit identity used by loaders and diagnostics. Capability ids stay the flat author-declared ids from their `define*` calls and equal the capability's name (`renderTranscoder` is `render`, `svgTranscoder` is `svg`, `rasterTranscoder` is `raster`), and diagnostic origins use `${meta.name}/${capabilityPath}`.
 
 Declare `@taucad/runtime` as a required peer dependency in every published plugin package. Dynamic loaders check that manifest range against their bundled runtime and warn on mismatch; the runtime never performs package-version checks because it does not own package resolution. Path-loaded plugins without a resolvable package manifest deliberately skip this check. Any future dynamic-load surface owns the same manifest check.
 
@@ -368,13 +368,13 @@ import { definePlugin } from '@taucad/runtime/plugin';
 
 export const image = definePlugin({
   meta: { name: '@taucad/image' },
-  transcoders: { export: imageTranscoder },
-  presets: { default: ['transcoders.export'] },
+  transcoders: { render: renderTranscoder, svg: svgTranscoder, raster: rasterTranscoder },
+  presets: { default: ['transcoders.render', 'transcoders.svg', 'transcoders.raster'] },
 });
 
 // src/index.ts
 export { image, image as plugin } from '#image.plugin.js';
-export { imageTranscoder } from '#image.transcoder.js';
+export { renderTranscoder } from '#image.transcoder.js';
 ```
 
 CORRECT:
@@ -395,7 +395,7 @@ INCORRECT:
 ```typescript
 export default defineTauPlugin({
   meta: { name: '@taucad/image' },
-  contributions: [imageTranscoder],
+  contributions: [renderTranscoder],
 });
 ```
 

@@ -32,7 +32,7 @@ vi.mock('#lib/github-connections.js', async (importOriginal) => ({
   ...(await importOriginal<typeof GithubConnectionsModule>()),
   githubConnections: github,
 }));
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   get isDesktopTarget() {
     return desktop.current;
   },

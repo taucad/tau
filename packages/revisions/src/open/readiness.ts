@@ -96,10 +96,16 @@ export const readinessOf = (
   largeObjectsTold = true,
   treeWrites = 0,
 ): ProjectReadinessReading => {
+  /*
+   * A failed write's tree is another tree than the one it was writing: its end took away the rows it never landed, so
+   * what the write had reached no longer stands, and only a write running or landed raises it again (I7).
+   */
   const tree =
     status.headRevisionId === undefined && treeWrites === 0
       ? undefined
-      : `${status.checkoutId ?? ''}:${status.headRevisionId ?? ''}:${String(treeWrites)}`;
+      : `${status.checkoutId ?? ''}:${status.headRevisionId ?? ''}:${String(treeWrites)}${
+          status.treeWriteFailed === true ? ':failed' : ''
+        }`;
   if (!status.registrySettled || status.checkoutRoot === undefined) {
     return { state: 'connected', tree };
   }
@@ -112,7 +118,7 @@ export const readinessOf = (
     return { state: status.entryClosureLanded === true ? 'entryReady' : 'treeReady', tree };
   }
   if (status.treeWriteFailed === true) {
-    /* An aborted write of a new tree: known, never `materialized` (I7 keeps what it already showed). */
+    /* An aborted write of a new tree: known, never `materialized`, and never more than known (I7). */
     return { state: 'treeReady', tree };
   }
   if (tree !== undefined || status.remote.phase === 'none') {

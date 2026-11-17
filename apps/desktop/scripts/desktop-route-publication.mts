@@ -290,6 +290,13 @@ export const desktopLaneKeys = (
         catalog: `latest/installers-${lane}.json`,
       };
 
+/**
+ * The immutable candidate manifest key of one lane. Platform lanes of one tag are separate candidates with different
+ * manifests (D-H5), so each lane's manifest has its own key; the `all` lane keeps the original single key.
+ */
+export const desktopLaneManifestKey = (tag: string, lane: DesktopPublicationScope): string =>
+  `releases/${tag}/${lane === 'all' ? 'desktop-artifacts.json' : `desktop-artifacts-${lane}.json`}`;
+
 const routeKey = ({ route, target }: { route: string; target: string }): string => `${route}:${target}`;
 
 /** Compose platform catalogs: each carries exactly its platform's routes, on one channel, in a fixed lane order. */

@@ -19,7 +19,7 @@ vi.mock('#hooks/use-project.js', () => ({ useProject: () => project }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ fileManagerRef: { send: vi.fn() }, workspace: { syncProjectRoots: vi.fn() } }),
 }));
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectRootConfigs: async () => ({ projects: [], roots: [] }),
   setCheckoutRootConfigs: () => false,
 }));

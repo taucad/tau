@@ -15,7 +15,7 @@ vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
   reportAppRuntimeFault: () => undefined,
 }));
 
-vi.mock('#constants/browser.constants.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   directoryPicker: () => ({ available: true, backend: 'webaccess', pick: async () => undefined }),
 }));

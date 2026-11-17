@@ -196,6 +196,9 @@ export class EditorSaveConflictError extends Error {
  */
 const loadingOutcome: FileContentResult = { kind: 'loading' };
 
+/** How long a fresh read waits for a later read that superseded it to settle before it reads again itself. */
+const supersededReadPatienceMilliseconds = 1000;
+
 /**
  * Orphan state transition for editor routing.
  *
@@ -307,6 +310,11 @@ export class FileContentService {
   private readonly pathNotifyRegistry = new PathSubscriberRegistry();
   private readonly contentChangeRegistry = new PathSubscriberRegistry<ContentChangeEvent>();
   private readonly orphanedPaths = new Set<string>();
+  /** The latest generation whose read settled as each path's answer, and who waits for the next. */
+  private readonly settledReads = new Map<string, number>();
+  private readonly settleTopics = new Map<string, Topic<number>>();
+  /** Paths a consumer keeps state for without a view, by how many times each is retained. */
+  private readonly retainedPaths = new Map<string, number>();
   private readonly editorSaves = new Map<string, EditorSaveState>();
   private readonly editorMutationBarriers: EditorMutationBarrier[] = [];
   private readonly fileOperationParticipants = new Set<FileOperationParticipant>();
@@ -573,6 +581,31 @@ export class FileContentService {
     this.observations.set(path, reference);
     this.retiredObservations.register(service, { path, reference }, reference);
     return service;
+  }
+
+  /**
+   * Read a path afresh now, and answer with the outcome this service then holds for it (STO-25, I7).
+   *
+   * The answer comes from a read begun at or after this call: a read begun earlier can no longer publish (its
+   * generation is superseded). When a later read begins before this one settles, its answer, or any later one's, is
+   * just as fresh, so this waits for it rather than reading again; only when none settles in a while does it read
+   * again itself. Two callers on one path therefore settle on the same read and never supersede each other for ever.
+   * A failed read answers its `error` outcome, never a value retained from before.
+   *
+   * @param path - Workspace-relative path.
+   * @returns The held outcome, from a read begun at or after this call.
+   */
+  public async rereadOutcome(path: string): Promise<FileContentResult> {
+    const since = this.refreshGuard.begin(path);
+    await this.computeOutcome(path, since);
+    while ((this.settledReads.get(path) ?? 0) < since) {
+      // oxlint-disable-next-line no-await-in-loop -- each wait is for the read that superseded the one before.
+      if (!(await this.settledSince(path, since))) {
+        // oxlint-disable-next-line no-await-in-loop -- nothing settled: read again, once.
+        await this.computeOutcome(path, this.refreshGuard.begin(path));
+      }
+    }
+    return this.outcomes.get(path) ?? loadingOutcome;
   }
 
   /**
@@ -1176,6 +1209,34 @@ export class FileContentService {
   }
 
   /**
+   * Hold a path's outcome for state kept without a view, such as an editor
+   * document language work opened: until released, the path is never pruned
+   * and every change or removal of it is told, as for a subscribed path, so
+   * the state never outlives the file or misses a write (STO-25 SP2g, I5, I7).
+   * Unlike {@link subscribe}, it registers no watch and reads nothing.
+   *
+   * @param path - Workspace-relative path.
+   * @returns Releases this hold; calling it again does nothing.
+   */
+  public retain(path: string): () => void {
+    this.retainedPaths.set(path, (this.retainedPaths.get(path) ?? 0) + 1);
+    let held = true;
+    return () => {
+      if (!held) {
+        return;
+      }
+      held = false;
+      const count = (this.retainedPaths.get(path) ?? 1) - 1;
+      if (count > 0) {
+        this.retainedPaths.set(path, count);
+      } else {
+        this.retainedPaths.delete(path);
+        this.pruneRetainedOutcomes();
+      }
+    };
+  }
+
+  /**
    * Sync check of cached orphan flag. A file is orphaned when a resolve
    * attempt fails with ENOENT or after an explicit delete.
    * @param path - Workspace-relative path.
@@ -1250,6 +1311,7 @@ export class FileContentService {
     this.pendingResolves.clear();
     this.orphanedPaths.clear();
     this.outcomes.clear();
+    this.settledReads.clear();
     this.refreshGuard.reset();
   }
 
@@ -1270,6 +1332,11 @@ export class FileContentService {
     this.orphanedPaths.clear();
     this.#orphanTopic.dispose();
     this.outcomes.clear();
+    this.settledReads.clear();
+    for (const topic of this.settleTopics.values()) {
+      topic.dispose();
+    }
+    this.settleTopics.clear();
     this.#outcomeTopic.dispose();
     this.refreshGuard.reset();
   }
@@ -1616,6 +1683,11 @@ export class FileContentService {
       return;
     }
     this.refreshGuard.begin(relativePath);
+    if (!this.shouldRefreshWorkerPath(relativePath)) {
+      /* Nothing here holds or waits on the path, so there is nothing to tell:
+       * a later read finds it gone itself (STO-25 SP2g). */
+      return;
+    }
     this.cache.delete(relativePath);
     this.setOrphaned(relativePath, true);
     this.publishOutcome(relativePath, { kind: 'orphaned' });
@@ -1634,9 +1706,9 @@ export class FileContentService {
         // oxlint-disable-next-line promise/prefer-await-to-then -- fire-and-forget refresh
         void this.refreshOutcomeInPlace(oldPath).catch(() => undefined);
       } else {
+        /* A path nothing holds mints no orphaned outcome: a revision write moves
+         * every replaced file aside, and the page heard each as gone (I7). */
         this.refreshGuard.begin(oldPath);
-        this.setOrphaned(oldPath, true);
-        this.publishOutcome(oldPath, { kind: 'orphaned' });
       }
     }
     if (newPath !== undefined && !this.hasAuthorityObservation(newPath)) {
@@ -1724,7 +1796,11 @@ export class FileContentService {
   }
 
   private onWorkerBackendChanged(): void {
-    const pathsToRefresh = new Set<string>([...this.outcomes.keys(), ...this.pathNotifyRegistry.subscribedPaths()]);
+    const pathsToRefresh = new Set<string>([
+      ...this.outcomes.keys(),
+      ...this.pathNotifyRegistry.subscribedPaths(),
+      ...this.retainedPaths.keys(),
+    ]);
     for (const [path] of this.cache.entries()) {
       pathsToRefresh.add(path);
     }
@@ -1759,7 +1835,7 @@ export class FileContentService {
         toRefresh.add(path);
       }
     }
-    for (const path of this.pathNotifyRegistry.subscribedPaths()) {
+    for (const path of [...this.pathNotifyRegistry.subscribedPaths(), ...this.retainedPaths.keys()]) {
       if (directoryPrefix === '' || path === relativeDirectory || path.startsWith(directoryPrefix)) {
         toRefresh.add(path);
       }
@@ -1773,7 +1849,10 @@ export class FileContentService {
 
   private shouldRefreshWorkerPath(relative: string): boolean {
     return (
-      this.outcomes.has(relative) || this.cache.has(relative) || this.pathNotifyRegistry.hasPathSubscribers(relative)
+      this.outcomes.has(relative) ||
+      this.cache.has(relative) ||
+      this.pathNotifyRegistry.hasPathSubscribers(relative) ||
+      this.retainedPaths.has(relative)
     );
   }
 
@@ -1833,7 +1912,64 @@ export class FileContentService {
     }
   }
 
+  /* Whether a read of `path` at or after `since` settles within the patience. */
+  private async settledSince(path: string, since: number): Promise<boolean> {
+    if ((this.settledReads.get(path) ?? 0) >= since) {
+      return true;
+    }
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    const topic = this.settleTopics.get(path) ?? new Topic<number>({ name: 'FileContentService.settled' });
+    this.settleTopics.set(path, topic);
+    const finish = (answer: boolean): void => {
+      clearTimeout(timer);
+      unsubscribe();
+      if (topic.size === 0 && this.settleTopics.get(path) === topic) {
+        this.settleTopics.delete(path);
+        topic.dispose();
+      }
+      resolve(answer);
+    };
+    const timer = setTimeout(() => {
+      finish(false);
+    }, supersededReadPatienceMilliseconds);
+    const unsubscribe = topic.subscribe({
+      handler: () => {
+        finish(true);
+      },
+      interestedIn: (generation) => generation >= since,
+    });
+    return promise;
+  }
+
+  /* The path's outcome is gone: forget which read settled it, unless a reread still waits on one. */
+  private forgetSettled(path: string): void {
+    if (!this.settleTopics.has(path)) {
+      this.settledReads.delete(path);
+    }
+  }
+
+  /* A read settled as the path's answer: those waiting on a generation at or below it are answered. */
+  private noteSettled(path: string, generation: number): void {
+    if ((this.settledReads.get(path) ?? 0) >= generation) {
+      return;
+    }
+    this.settledReads.set(path, generation);
+    this.settleTopics.get(path)?.emit(generation);
+  }
+
   private async computeOutcome(path: string, generation: number, options?: ResolveOptions): Promise<FileContentResult> {
+    const outcome = await this.computeOutcomeOnce(path, generation, options);
+    if (this.refreshGuard.isCurrent(path, generation)) {
+      this.noteSettled(path, generation);
+    }
+    return outcome;
+  }
+
+  private async computeOutcomeOnce(
+    path: string,
+    generation: number,
+    options?: ResolveOptions,
+  ): Promise<FileContentResult> {
     const read = await this.readBytes(path, generation);
     if (read === undefined) {
       return this.outcomes.get(path) ?? loadingOutcome;
@@ -1965,19 +2101,21 @@ export class FileContentService {
       ) {
         this.outcomes.delete(path);
         this.orphanedPaths.delete(path);
+        this.forgetSettled(path);
         bytes -= resultBytes;
       }
     }
     this.budget?.reclaim(this.budgetMember);
   }
 
-  /** Whether a subscriber, lease, save or pending read still holds this path's outcome. */
+  /** Whether a subscriber, lease, save, pending read or retention still holds this path's outcome. */
   private isOutcomeHeld(path: string): boolean {
     return (
       this.pathNotifyRegistry.hasPathSubscribers(path) ||
       (this.observations.get(path)?.deref()?.activeLeaseCount ?? 0) > 0 ||
       this.editorSaves.has(path) ||
-      this.pendingResolves.has(path)
+      this.pendingResolves.has(path) ||
+      this.retainedPaths.has(path)
     );
   }
 
@@ -2026,6 +2164,7 @@ export class FileContentService {
       const cached = this.cache.peek(path);
       this.outcomes.delete(path);
       this.orphanedPaths.delete(path);
+      this.forgetSettled(path);
       shed += retainedBytesOf(result);
       if (cached !== undefined) {
         this.cache.delete(path);

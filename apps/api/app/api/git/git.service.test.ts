@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -494,6 +494,32 @@ describe('abandoned lease directories', () => {
     await settledBoth(service);
 
     expect(existsSync(path.join(ownDirectory, 'pack')), 'a previous run’s lease must be reclaimed at boot').toBe(false);
+  });
+
+  it('leaves a sibling host’s lease directory alone when a second host boots in the same process', async () => {
+    /* Every host in one process shares its pid, and the test suites build many:
+       a later host's boot sweep used to remove the whole pid directory, so an
+       earlier host between its `mkdir` and its `mkdtemp` failed with ENOENT. */
+    const ownDirectory = path.join(leaseRoot, String(process.pid));
+    const first = createService(
+      memoryStore(),
+      databaseStub({ storageBytes: 0, generation: 0, derivedGeneration: 0 }, { failTransaction: false }),
+    );
+    await settledBoth(first);
+    await fetchOnce(first, access);
+    const held = readdirSync(ownDirectory).map((name) => path.join(ownDirectory, name));
+
+    const second = createService(
+      memoryStore(),
+      databaseStub({ storageBytes: 0, generation: 0, derivedGeneration: 0 }, { failTransaction: false }),
+    );
+    await settledBoth(second);
+
+    expect(existsSync(ownDirectory), 'the second host’s boot must not remove the process’s lease directory').toBe(true);
+    for (const directory of held) {
+      expect(existsSync(directory), 'a live host’s lease parent is not a dead run’s').toBe(true);
+    }
+    await fetchOnce(first, access);
   });
 });
 

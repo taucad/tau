@@ -103,7 +103,7 @@ const laneSelectors = JSON.parse(planStep?.env?.['LANE_SELECTORS'] ?? '{}') as R
     readonly tags?: readonly string[];
     readonly targets?: readonly string[];
     readonly pr?: 'queue' | 'touched';
-    readonly queue?: 'touched' | 'any-touched';
+    readonly queue?: 'touched' | 'any-touched' | 'closure';
   }
 >;
 
@@ -148,7 +148,9 @@ describe('ci.yml affected-only lanes', () => {
     // A selector naming a tag or target that no project has fails the plan instead of leaving its lane off.
     expect(planScript).toContain('error("lane selectors name a tag or target no project has');
     expect(planScript).toContain('error("lane selectors name a pull-request rule other than queue or touched")');
-    expect(planScript).toContain('error("lane selectors name a merge-queue rule other than touched or any-touched")');
+    expect(planScript).toContain(
+      'error("lane selectors name a merge-queue rule other than touched, any-touched or closure")',
+    );
     expect(laneSelectors).toEqual({
       apps: { type: 'app' },
       api: { tags: ['scope:api'], pr: 'touched' },
@@ -160,8 +162,8 @@ describe('ci.yml affected-only lanes', () => {
       'formal-nightly': { targets: ['formal:nightly'], pr: 'queue', queue: 'touched' },
       'geospec-examples': { targets: ['test-geospec'], pr: 'queue' },
       browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'queue' },
-      'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue', queue: 'touched' },
-      'native-linux': { targets: ['test:native-linux'], pr: 'queue', queue: 'touched' },
+      'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue', queue: 'closure' },
+      'native-linux': { targets: ['test:native-linux'], pr: 'queue', queue: 'closure' },
       'native-darwin': { targets: ['test:native-darwin'], pr: 'queue' },
       'viewer-parity': { targets: ['test:viewer-parity'], pr: 'queue' },
       desktop: { tags: ['ci:desktop'] },
@@ -317,6 +319,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(Object.keys(planStep?.env ?? {}).sort()).toEqual([
       'LANE_SELECTORS',
       'NATIVE_DARWIN_LANE_PATHS',
+      'QUEUE_HUBS',
       'REUSED',
       'SHELL_LANE_PATHS',
     ]);
@@ -1135,11 +1138,13 @@ describe('plan lane selection', () => {
       files,
       selectors = planStep?.env?.['LANE_SELECTORS'] ?? '',
       graphNodes = nodes,
+      dependencies = {},
     }: {
       readonly affected: readonly string[];
       readonly files: readonly string[];
       readonly selectors?: string;
       readonly graphNodes?: Record<string, Node>;
+      readonly dependencies?: Record<string, readonly string[]>;
     },
   ): {
     readonly status: number | undefined;
@@ -1165,6 +1170,12 @@ describe('plan lane selection', () => {
                   ),
                 },
               },
+            ]),
+          ),
+          dependencies: Object.fromEntries(
+            Object.entries(dependencies).map(([name, targets]) => [
+              name,
+              targets.map((target) => ({ source: name, target, type: 'static' })),
             ]),
           ),
         },
@@ -1222,6 +1233,7 @@ describe('plan lane selection', () => {
           ['LANE_SELECTORS', selectors],
           ['SHELL_LANE_PATHS', planStep?.env?.['SHELL_LANE_PATHS'] ?? '[]'],
           ['NATIVE_DARWIN_LANE_PATHS', planStep?.env?.['NATIVE_DARWIN_LANE_PATHS'] ?? '[]'],
+          ['QUEUE_HUBS', planStep?.env?.['QUEUE_HUBS'] ?? '[]'],
         ]),
       });
       const outputs = Object.fromEntries(
@@ -1363,6 +1375,17 @@ describe('plan lane selection', () => {
     const own = plan('merge_group', { affected: everything, files: ['packages/plugins/picogk/src/index.ts'] });
     expect(own.status, own.stderr).toBe(0);
     expect(own.outputs['native-intel']).toBe('true');
+    // A project the row depends on outside a hub selects it; the same project reached only through a hub does not.
+    const dependencies = { cli: ['host', 'build123d'], host: ['sandbox'], build123d: ['core'] };
+    const direct = plan('merge_group', { affected: everything, files: ['packages/core/src/index.ts'], dependencies });
+    expect(direct.status, direct.stderr).toBe(0);
+    expect(direct.stdout).toContain('Merge queue (closure) native-hosts: ["cli"]');
+    const throughHub = plan('merge_group', { affected: everything, files: ['libs/sandbox/src/a.ts'], dependencies });
+    expect(throughHub.stdout).toContain('Merge queue (closure) native-hosts: []');
+    // A lockfile change applies no merge-queue rule.
+    const lockfile = plan('merge_group', { affected: everything, files: ['pnpm-lock.yaml'] });
+    expect(lockfile.stdout).toContain('The entry changes pnpm-lock.yaml: no merge-queue rule applies.');
+    expect(lockfile.outputs['native-intel']).toBe('true');
   });
 
   it('should not select the shell lane for a file beside the fixture paths', () => {

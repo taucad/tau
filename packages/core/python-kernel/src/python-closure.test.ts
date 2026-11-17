@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -163,10 +172,11 @@ describe('createPythonSeal', () => {
       return exited(0);
     };
 
-  const seal = (run: ReturnType<typeof runner>['run'], compileall?: boolean) =>
+  const seal = (run: ReturnType<typeof runner>['run'], compileall?: boolean, platform: NodeJS.Platform = 'linux') =>
     createPythonSeal(
       { worker, selfTestImports: ['example', 'numpy'], ...(compileall === undefined ? {} : { compileall }) },
       run,
+      platform,
     );
 
   it('should compile once in the sandbox, skip shipped bytecode and prove the closure imports', async () => {
@@ -182,6 +192,7 @@ describe('createPythonSeal', () => {
     const python = join(input.root, 'python', 'bin', 'python3');
     expect(compile).toMatchObject({
       executablePath: python,
+      executableSha256: hex('e'),
       readablePaths: [input.root],
       writablePath: input.root,
       workingDirectory: input.root,
@@ -211,6 +222,7 @@ describe('createPythonSeal', () => {
     ]);
     expect(selfTest).toMatchObject({
       executablePath: python,
+      executableSha256: hex('e'),
       arguments: ['-I', '-B', '-c', 'import example, numpy'],
       readablePaths: [input.root],
       commandId: 'Example self-test#engine',
@@ -219,6 +231,59 @@ describe('createPythonSeal', () => {
     expect(selfTest!.writablePath).toContain('tau-example-seal-');
     expect(selfTest!.workingDirectory).toBe(selfTest!.writablePath);
     expect(existsSync(selfTest!.writablePath)).toBe(false);
+  });
+
+  it('should compile on Windows with a staged copy of the interpreter outside the closure it writes', async () => {
+    const input = closure([
+      'python/python.exe',
+      'python/python313.dll',
+      'python/vcruntime140.dll',
+      'python/Lib/os.py',
+      'python/DLLs/_socket.pyd',
+    ]);
+    let staged: { readonly names: readonly string[]; readonly pth: string } | undefined;
+    const { commands, run } = runner([
+      (command) => {
+        const directory = dirname(command.executablePath);
+        staged = {
+          names: readdirSync(directory).toSorted(),
+          pth: readFileSync(join(directory, 'python._pth'), 'utf8'),
+        };
+        return compileInto(input.root, 'python/Lib/__pycache__/os.cpython-313.pyc')(command);
+      },
+      () => exited(0),
+    ]);
+
+    await expect(seal(run, undefined, 'win32')(input)).resolves.toBeUndefined();
+
+    const [compile, selfTest] = commands;
+    const compiler = dirname(compile!.executablePath);
+    expect(compiler).toContain('tau-example-compile-');
+    expect(compile).toMatchObject({
+      executableSha256: hex('e'),
+      readablePaths: [compiler],
+      writablePath: input.root,
+    });
+    expect(staged).toEqual({
+      names: ['python._pth', 'python.exe', 'python313.dll', 'vcruntime140.dll'],
+      pth: `${join(input.root, 'python', 'Lib')}\r\n${join(input.root, 'python', 'DLLs')}\r\n`,
+    });
+    expect(existsSync(compiler)).toBe(false);
+    expect(selfTest).toMatchObject({
+      executablePath: join(input.root, 'python', 'python.exe'),
+      executableSha256: hex('e'),
+      readablePaths: [input.root],
+    });
+  });
+
+  it('should refuse a closure without its interpreter before running anything', async () => {
+    const input = closure(['python/lib/python3.13/os.py']);
+    const { commands, run } = runner([]);
+
+    await expect(seal(run)(input)).rejects.toThrow(
+      'The @taucad/example closure has no python/bin/python3, so it cannot be sealed. Nothing was sealed.',
+    );
+    expect(commands).toEqual([]);
   });
 
   it('should pass no exclusion when no dependency file ships bytecode', async () => {
@@ -311,7 +376,7 @@ describe('pythonInterpreterPath', () => {
 });
 
 describe('shippedBytecodeExclusion', () => {
-  // compileall searches each path it visits with `re.search`; these patterns use only syntax JavaScript reads alike.
+  // The compileall module searches each path it visits with `re.search`; these patterns use only syntax JavaScript reads alike.
   const matches = (pattern: string, path: string): boolean => new RegExp(pattern, 'u').test(path);
 
   it('should match exactly the shipped sources under the root, by either separator', () => {

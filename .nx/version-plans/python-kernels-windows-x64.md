@@ -9,3 +9,5 @@ Python kernels declare a Windows x64 closure. The shared `interpreter.json` pins
 A sealed closure launches `python\python.exe` on Windows (`pythonInterpreterPath`), and a session's default runtime root is the interpreter's own directory there. The seal's compileall skips shipped bytecode with one pattern grouped by directory (`shippedBytecodeExclusion`), which matches either path separator. Windows' interpreter ships 566 compiled sources, so one absolute path per source would exceed the 32,767-character command line.
 
 The host still refuses native kernels on Windows until the Windows sandbox runs them.
+
+The seal step passes the interpreter's verified digest to every sandboxed run, as the Windows sandbox requires. On Windows, compileall runs from a staged copy of `python.exe` and its DLLs outside the closure it writes, because the sandbox never runs an executable from a folder it may also write. A `python._pth` file names the closure's standard library for that copy.

@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 
@@ -108,8 +108,8 @@ const escapeRegExp = (text: string): string => text.replaceAll(/[$()*+.?[\\\]^{|
 const separatorPattern = String.raw`[\\/]`;
 
 /**
- * compileall's `-x` pattern for the sources whose bytecode a dependency file ships, grouped by directory so it stays
- * short: Windows' interpreter ships hundreds (its standard library and pip), and one absolute path each would pass the
+ * The `-x` pattern that keeps compileall off the sources whose bytecode a dependency file ships, grouped by
+ * directory so it stays short: Windows' interpreter ships hundreds (its standard library and pip), and one absolute path each would pass the
  * 32,767-character command-line limit.
  * @param root - The closure's real root, as compileall is handed it.
  * @param sources - Closure-relative POSIX paths of the sources to skip.
@@ -127,10 +127,19 @@ export const shippedBytecodeExclusion = (root: string, sources: readonly string[
   const directories = [...byDirectory.entries()]
     .toSorted(([left], [right]) => (left < right ? -1 : 1))
     .map(([directory, names]) => {
-      const prefix = directory.split('/').map(escapeRegExp).join(separatorPattern);
-      return `${prefix}(?:${names.toSorted().map(escapeRegExp).join('|')})`;
+      const prefix = directory
+        .split('/')
+        .map((part) => escapeRegExp(part))
+        .join(separatorPattern);
+      return `${prefix}(?:${names
+        .toSorted()
+        .map((name) => escapeRegExp(name))
+        .join('|')})`;
     });
-  const rootPattern = root.split(/[\\/]/u).map(escapeRegExp).join(separatorPattern);
+  const rootPattern = root
+    .split(/[\\/]/u)
+    .map((part) => escapeRegExp(part))
+    .join(separatorPattern);
   return `^${rootPattern}${separatorPattern}(?:${directories.join('|')})\\.py$`;
 };
 
@@ -167,6 +176,30 @@ const assertOnlyBytecodeAdded = async (input: SealClosureInput): Promise<void> =
 };
 
 /**
+ * Stage the interpreter compileall runs on Windows outside the closure it compiles. The Windows sandbox runs an
+ * executable only from a runtime root no writable grant overlaps, and compileall must write the closure that holds
+ * `python/python.exe`. So a copy of `python.exe` and the DLLs beside it (the same bytes, so the same verified digest)
+ * runs from a scratch folder, and its `python._pth` names the closure's standard library: a `._pth` file fixes
+ * `sys.path` and does not import `site`, so nothing else of the closure is read.
+ *
+ * @param root - The closure root.
+ * @param kernelId - The kernel, for the folder's name.
+ * @returns The staged interpreter and its folder, which the caller removes.
+ */
+const stageWindowsCompiler = async (
+  root: string,
+  kernelId: string,
+): Promise<{ readonly executablePath: string; readonly directory: string }> => {
+  const prefix = join(root, 'python');
+  const directory = await mkdtemp(join(await realpath(tmpdir()), `tau-${kernelId}-compile-`));
+  const entries = await readdir(prefix);
+  const staged = entries.filter((name) => name === 'python.exe' || /\.dll$/iu.test(name));
+  await Promise.all(staged.map(async (name) => copyFile(join(prefix, name), join(directory, name))));
+  await writeFile(join(directory, 'python._pth'), `${join(prefix, 'Lib')}\r\n${join(prefix, 'DLLs')}\r\n`);
+  return { executablePath: join(directory, 'python.exe'), directory };
+};
+
+/**
  * Create a Python kernel's seal step: it compiles the whole closure's bytecode inside the kernel sandbox (D22), then
  * proves the kernel's libraries import, refusing with `missing-system-library` when the host lacks a library the
  * closure links against.
@@ -174,6 +207,7 @@ const assertOnlyBytecodeAdded = async (input: SealClosureInput): Promise<void> =
  * @param options - The kernel's worker, the modules its self-test imports and whether to compile bytecode (default
  *   `true`).
  * @param run - The sandboxed command runner; tests replace it.
+ * @param platform - The host platform, which lays out the closure; tests replace it.
  * @returns The seal step a preparation host runs; it throws `PreparationError` `EXTRACTION_REFUSED` when compilation
  *   fails or the closure does not import.
  * @public
@@ -186,11 +220,21 @@ export const createPythonSeal =
       readonly compileall?: boolean;
     },
     run: PythonSandboxRunner = runInNativeSandbox,
+    platform: NodeJS.Platform = process.platform,
   ) =>
   async (input: SealClosureInput): Promise<SealClosureRefusal | undefined> => {
     const { kernelId, kernelName } = options.worker;
     const root = await realpath(input.root);
-    const python = join(root, ...pythonPath.split('/'));
+    const interpreter = pythonInterpreterPath(platform);
+    const python = join(root, ...interpreter.split('/'));
+    // The sandbox runs the interpreter only with the digest the host verified (always required on Windows).
+    const executableSha256 = input.files.find((file) => file.path === interpreter)?.sha256;
+    if (executableSha256 === undefined) {
+      throw new PreparationError(
+        'EXTRACTION_REFUSED',
+        `The ${input.package} closure has no ${interpreter}, so it cannot be sealed. Nothing was sealed.`,
+      );
+    }
     if (options.compileall !== false) {
       // D22: compile once at seal, with source hashes the interpreter never re-checks, so the worker's `-B` launch
       // imports bytecode instead of compiling thousands of modules. For S26's byte-determinism: `-B` keeps the
@@ -198,8 +242,10 @@ export const createPythonSeal =
       // staging root from the recorded file names, and `-x` leaves alone the sources whose bytecode a dependency file ships
       // (python-build-standalone's three `encodings` files), which a seal step may not rewrite.
       const shipped = shippedBytecodeSources(input.files);
+      const compiler = platform === 'win32' ? await stageWindowsCompiler(root, kernelId) : undefined;
       const compiled = await run({
-        executablePath: python,
+        executablePath: compiler?.executablePath ?? python,
+        executableSha256,
         arguments: [
           '-I',
           '-B',
@@ -220,11 +266,15 @@ export const createPythonSeal =
           ...(shipped.length === 0 ? [] : ['-x', shippedBytecodeExclusion(root, shipped)]),
           root,
         ],
-        readablePaths: [root],
+        readablePaths: compiler === undefined ? [root] : [compiler.directory],
         writablePath: root,
         workingDirectory: root,
         commandId: `${kernelName} compileall#${input.dependency}`,
         signal: input.signal,
+      }).finally(async () => {
+        if (compiler !== undefined) {
+          await rm(compiler.directory, { recursive: true, force: true });
+        }
       });
       if (compiled.exitCode !== 0) {
         throw new PreparationError(
@@ -242,6 +292,7 @@ export const createPythonSeal =
     try {
       const imported = await run({
         executablePath: python,
+        executableSha256,
         arguments: ['-I', '-B', '-c', statement],
         readablePaths: [root],
         writablePath: scratch,

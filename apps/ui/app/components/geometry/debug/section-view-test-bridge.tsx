@@ -42,7 +42,11 @@ import { getModelComponentIdInHierarchy } from '@taucad/viewer/graphics/three/ut
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
 import { getControlsDistance } from '@taucad/viewer/graphics/three/utils/camera-controls-adapter';
 import { hasSceneTag, sceneTag } from '@taucad/viewer/graphics/three/utils/scene-tags';
-import { sectionCapStencilDebugUserDataKey } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
+import {
+  sectionCapOutlineDebugUserDataKey,
+  sectionCapStencilDebugUserDataKey,
+} from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
+import type { SectionCapOutlineDebugControl } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
 import type { SectionCapStencilDiagnostics } from '@taucad/viewer/graphics/three/utils/section-cap-stencil-debug';
 import { selectGraphicsViewportGizmoLocked } from '@taucad/viewer/machines/graphics.machine';
 import { getSceneRenderRoots } from '@taucad/viewer/graphics/three/scene-overlay';
@@ -996,6 +1000,18 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       },
       getSectionCapStencilDiagnostics() {
         return getSectionViewTestCapStencilDiagnostics(scene);
+      },
+      setSectionCapOutlinesVisible(visible) {
+        let found = false;
+        scene.traverse((child) => {
+          if (sectionCapStencilDebugUserDataKey in child.userData) {
+            const control: SectionCapOutlineDebugControl = { hidden: !visible };
+            child.userData[sectionCapOutlineDebugUserDataKey] = control;
+            found = true;
+          }
+        });
+        get().invalidate();
+        return found;
       },
     };
 

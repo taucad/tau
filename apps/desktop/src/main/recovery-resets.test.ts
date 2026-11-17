@@ -184,7 +184,8 @@ describe('local database reset', () => {
     expect(applyPendingResets(run)).toEqual([{ store: 'local-database', outcome: 'moved' }]);
 
     const quarantine = join(root, 'recovery', run.stamp, 'IndexedDB');
-    expect((await readdir(quarantine)).toSorted()).toEqual(['app_tau_0.indexeddb.blob', 'app_tau_0.indexeddb.leveldb']);
+    const quarantined = await readdir(quarantine);
+    expect(quarantined.toSorted()).toEqual(['app_tau_0.indexeddb.blob', 'app_tau_0.indexeddb.leveldb']);
     expect(await readFile(join(quarantine, 'app_tau_0.indexeddb.leveldb'), 'utf8')).toBe('not a directory');
     expect(await readdir(join(root, 'IndexedDB'))).toEqual([]);
     expect(await readFile(join(root, 'granted-roots.json'), 'utf8')).toBe('["/projects/a"]');

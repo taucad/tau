@@ -34,6 +34,8 @@ export const directoryGrantChannels = {
   list: 'tau:directories:list',
   disconnect: 'tau:directories:disconnect',
   changed: 'tau:directories:changed',
+  /** A granted folder's `.tau/workspace.json`, read so a reset database adopts the folder's id (R7). */
+  marker: 'tau:directories:marker',
 } as const;
 
 /** Theme notification shared by main and preload for the native app icon. */

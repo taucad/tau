@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CommandAbortedError, runCommand, runGitCommand } from '#git-command.js';
+import { removalRetries } from '#test/native-git-harness.js';
 import { writeShellExecutable } from '#test/script-executable.js';
 
 const cwd = tmpdir();
@@ -76,7 +77,7 @@ describe('bounded engine commands', () => {
           /* Already reaped. */
         }
       }
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, ...removalRetries });
     }
   });
 
@@ -112,7 +113,8 @@ describe('bounded engine commands', () => {
         CommandAbortedError,
       );
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      // Windows refuses to unlink the stand-in while the image of the launcher it just killed is still mapped.
+      await rm(directory, { recursive: true, force: true, ...removalRetries });
     }
   });
 

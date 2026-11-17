@@ -155,6 +155,32 @@ jobs:
             src/desktop-webgl-renderer.spec.ts src/desktop-build123d.spec.ts \
             | tee "$RUNNER_TEMP/desktop-packaged-windows.log"
 
+      - name: Record the Windows sandbox and crash evidence
+        if: failure()
+        shell: pwsh
+        run: |
+          # The sandbox setup grants volume roots and adds firewall and WFP rules; a failed run keeps what the helper
+          # reports now, the top-level ACLs it touched, and Windows' own crash records (faulting module and code).
+          $out = Join-Path $env:RUNNER_TEMP 'desktop-e2e-services/windows-sandbox-diagnostics.log'
+          New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
+          $helper = 'apps/desktop/package-out/Tau-win32-x64/resources/windows-sandbox/win32-x64/tau-windows-sandbox.exe'
+          & {
+            '--- helper status ---'
+            & $helper status 2>&1
+            "exit $LASTEXITCODE"
+            '--- volume root ACLs ---'
+            icacls 'C:\' 2>&1
+            icacls 'D:\' 2>&1
+            icacls $env:TEMP 2>&1
+            '--- application crashes (Event 1000, 1001) ---'
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001; StartTime = (Get-Date).AddHours(-2) } -ErrorAction SilentlyContinue |
+              Select-Object -First 40 | Format-List TimeCreated, Id, ProviderName, Message
+            '--- sandbox processes still running ---'
+            Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'tau-windows-sandbox|python|Tau' } |
+              Format-Table Id, Name, StartTime -AutoSize
+          } *> $out
+          Get-Content $out -TotalCount 400
+
       - name: Summarise the packaged suite and the WebGL measurement
         if: always()
         env:

@@ -5,6 +5,7 @@ export {
   type CaptureExportOptions,
   type CaptureExportOptionsInput,
   describeCaptureSection,
+  planarMultiAngleNotice,
   resolveCaptureSectionKeep,
 } from '#capture/capture-views.js';
 export {

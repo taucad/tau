@@ -162,6 +162,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
+      // Expected-failure: @rifont until 2026-12-15
       expectedFailure: true,
       title: 'N2: requests get-session and /v1/agents once per load of a project route',
     },
@@ -383,6 +384,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
   cloudDefectRow(
     {
       api: test,
+      // Expected-failure: @rifont until 2026-12-15
       expectedFailure: true,
       title:
         'F14: an offline reload of a project on this device renders the workspace frame and the workspace, the service worker installed',

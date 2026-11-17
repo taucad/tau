@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -204,24 +205,164 @@ export const runCommand = async (options: RunCommandOptions): Promise<GitCommand
 };
 
 type ActivityTotals = { count: number; totalMilliseconds: number; longestMilliseconds: number };
-const gitActivityWindows = new Set<ActivityTotals>();
+
+/** A span of work a Git process can be counted in: a store's open, or a turn's admission. @public */
+export type GitCommandPhase = 'open' | 'admission';
 
 /**
- * Every Git process this realm runs through {@link runGitCommand}, timed from spawn to exit, read over windows: a
- * caller opens one, and closing it answers how many processes finished while it was open, their total time and the
- * longest (a turn's admission, for one). With no window open a process costs one empty loop.
+ * One diagnostic fact about this realm's Git processes (W8 diagnostics). Ids and milliseconds only, never a path or
+ * an argument:
+ *
+ * - `command`: one process that ran for {@link slowGitCommandMilliseconds} or longer, named by its subcommand (with
+ *   `lfs`'s own, `lfs install`), how it ended (`exited` with its code, the bound that stopped it, or `unstarted`), and
+ *   the phase it ran in, `other` outside one.
+ * - `phase`: one {@link gitCommandActivity}`.during` span when it ends, with the Git processes it ran.
+ *
+ * @public
+ */
+export type GitActivityEvent =
+  | Readonly<{
+      type: 'command';
+      command: string;
+      milliseconds: number;
+      outcome: 'exited' | CommandAbortReason | 'unstarted';
+      exitCode?: number;
+      phase: GitCommandPhase | 'other';
+    }>
+  | Readonly<{
+      type: 'phase';
+      phase: GitCommandPhase;
+      status: 'completed' | 'failed';
+      milliseconds: number;
+      git: Readonly<ActivityTotals>;
+    }>;
+
+/** Milliseconds. A Git process this long is reported one by one: a healthy store answers in tens. @public */
+export const slowGitCommandMilliseconds = 1000;
+
+const gitActivityWindows = new Set<ActivityTotals>();
+const gitActivityListeners = new Set<(event: GitActivityEvent) => void>();
+const gitPhase = new AsyncLocalStorage<Readonly<{ phase: GitCommandPhase; totals: ActivityTotals }>>();
+
+const emptyTotals = (): ActivityTotals => ({ count: 0, totalMilliseconds: 0, longestMilliseconds: 0 });
+
+const emitGitActivity = (event: GitActivityEvent): void => {
+  for (const listener of gitActivityListeners) {
+    try {
+      listener(event);
+    } catch {
+      /* A diagnostic sink that fails never changes a command's result. */
+    }
+  }
+};
+
+/* Git's global options that take their value as the next argument; every other leading `-` argument stands alone. */
+const valuedGitOptions = new Set(['-c', '-C']);
+
+/*
+ * A command's subcommand, and `lfs`'s own after it: the only words of its arguments a diagnostic may carry. With no
+ * subcommand (`--version`), the option that stood in for one.
+ */
+const gitCommandName = (args: readonly string[]): string => {
+  let index = 0;
+  let option: string | undefined;
+  for (let word = args[0]; word?.startsWith('-') === true; word = args[index]) {
+    option ??= valuedGitOptions.has(word) ? undefined : word;
+    index += valuedGitOptions.has(word) ? 2 : 1;
+  }
+  const name = args[index];
+  if (name === 'lfs') {
+    return `lfs ${args[index + 1] ?? ''}`.trimEnd();
+  }
+  return name ?? option ?? 'git';
+};
+
+/**
+ * Time one Git process for {@link gitCommandActivity}: its windows, the phase it runs in, and a `command` event when
+ * it ran {@link slowGitCommandMilliseconds} or longer.
+ *
+ * @internal
+ * @param args - The arguments Git is given, global options included.
+ * @param run - Spawns the process and answers its result.
+ * @returns What `run` answers.
+ */
+export const meteredGitCommand = async (
+  args: readonly string[],
+  run: () => Promise<GitCommandResult>,
+): Promise<GitCommandResult> => {
+  const start = performance.now();
+  let outcome: Extract<GitActivityEvent, { type: 'command' }>['outcome'] = 'unstarted';
+  let exitCode: number | undefined;
+  try {
+    const result = await run();
+    outcome = 'exited';
+    ({ exitCode } = result);
+    return result;
+  } catch (error) {
+    if (error instanceof CommandAbortedError) {
+      outcome = error.reason;
+    }
+    throw error;
+  } finally {
+    const milliseconds = performance.now() - start;
+    const scope = gitPhase.getStore();
+    for (const totals of scope === undefined ? gitActivityWindows : [...gitActivityWindows, scope.totals]) {
+      totals.count += 1;
+      totals.totalMilliseconds += milliseconds;
+      totals.longestMilliseconds = Math.max(totals.longestMilliseconds, milliseconds);
+    }
+    if (milliseconds >= slowGitCommandMilliseconds && gitActivityListeners.size > 0) {
+      emitGitActivity({
+        type: 'command',
+        command: gitCommandName(args),
+        milliseconds,
+        outcome,
+        ...(exitCode === undefined ? {} : { exitCode }),
+        phase: scope?.phase ?? 'other',
+      });
+    }
+  }
+};
+
+/**
+ * Every Git process this realm runs through {@link runGitCommand} (and the toolchain's version probes), timed from
+ * spawn to exit.
+ *
+ * - `open()` starts a window: closing it answers how many processes finished while it was open, their total time and
+ *   the longest (a turn's admission, for one). With no window open a process costs one empty loop.
+ * - `during(phase, run)` names the span `run` is: the processes it starts, and only those, are counted in it, a slow
+ *   one is reported with it, and a `phase` event reports it when it ends.
+ * - `observe(listener)` hears each {@link GitActivityEvent} until the returned function is called.
  *
  * @public
  */
 export const gitCommandActivity = Object.freeze({
   open: (): Readonly<{ close: () => Readonly<ActivityTotals> }> => {
-    const totals = { count: 0, totalMilliseconds: 0, longestMilliseconds: 0 };
+    const totals = emptyTotals();
     gitActivityWindows.add(totals);
     return {
       close: () => {
         gitActivityWindows.delete(totals);
         return { ...totals };
       },
+    };
+  },
+  during: async <Result>(phase: GitCommandPhase, run: () => Promise<Result>): Promise<Result> => {
+    const totals = emptyTotals();
+    const start = performance.now();
+    let status: 'completed' | 'failed' = 'failed';
+    try {
+      const result = await gitPhase.run({ phase, totals }, run);
+      status = 'completed';
+      return result;
+    } finally {
+      emitGitActivity({ type: 'phase', phase, status, milliseconds: performance.now() - start, git: { ...totals } });
+    }
+  },
+  observe: (listener: (event: GitActivityEvent) => void): (() => void) => {
+    gitActivityListeners.add(listener);
+    return () => {
+      gitActivityListeners.delete(listener);
     };
   },
 });
@@ -233,10 +374,9 @@ export const gitCommandActivity = Object.freeze({
  * @returns Captured process bytes and exit status.
  * @public
  */
-export const runGitCommand = async (options: RunGitCommandOptions): Promise<GitCommandResult> => {
-  const start = performance.now();
-  try {
-    return await runCommand({
+export const runGitCommand = async (options: RunGitCommandOptions): Promise<GitCommandResult> =>
+  meteredGitCommand(options.args, async () =>
+    runCommand({
       executable: options.gitExecutable,
       cwd: options.cwd,
       args: ['-C', options.cwd, ...options.args],
@@ -245,13 +385,5 @@ export const runGitCommand = async (options: RunGitCommandOptions): Promise<GitC
       ...(options.deadline === undefined ? {} : { deadline: options.deadline }),
       ...(options.maxBuffer === undefined ? {} : { maxBuffer: options.maxBuffer }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
-  } finally {
-    const milliseconds = performance.now() - start;
-    for (const totals of gitActivityWindows) {
-      totals.count += 1;
-      totals.totalMilliseconds += milliseconds;
-      totals.longestMilliseconds = Math.max(totals.longestMilliseconds, milliseconds);
-    }
-  }
-};
+    }),
+  );

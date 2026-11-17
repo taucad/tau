@@ -26,7 +26,8 @@ import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { RecordedProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
-import { CommandAbortedError, runGitCommand } from '#git-command.js';
+import { CommandAbortedError, gitCommandActivity, runGitCommand } from '#git-command.js';
+import { largeObjectFiltersIn, writeLargeObjectFilters } from '#lfs-filters.js';
 import type { GitCommandResult } from '#git-command.js';
 import { parseTransportValue } from '#native-git-adapter.js';
 import { createTreeIdMemo } from '#tree-id-memo.js';
@@ -183,6 +184,13 @@ export type NativeGitRevisionPortOptions = Readonly<{
   tauCredential?: () => TauApiCredential | undefined;
   /** Read per network command and injected through the child environment, never argv or git config. */
   remoteCredential?: () => NativeGitRemoteCredential | undefined;
+  /**
+   * Whether this machine's `git` answers `git lfs` (the host's toolchain probe). When it does, a store with none of
+   * git-lfs's filter keys gets them written directly, exactly as `git lfs install --local --skip-repo` writes them,
+   * rather than through that command and the Git processes it starts. Absent or `false`, the port runs the command,
+   * which fails on a machine without git-lfs and leaves the store without filters it could not run.
+   */
+  gitLfsInstalled?: () => Promise<boolean>;
 }>;
 
 /**
@@ -308,6 +316,15 @@ const diffKind = (status: string): RevisionDiffEntry['kind'] | undefined => {
   }
 };
 
+/*
+ * One queue per repository for the whole process, never one per port (tau #1282). A host opens one project from more
+ * than one place and each place makes its own port: queued per port, two ports on the same repository each ran
+ * `git init` and `git lfs install --local` at once, and the loser failed with "could not lock config file". Keyed by
+ * the repository's canonical path, so a port opened through a symlink queues with one opened on the real path. Another
+ * process still races; git's own locks and the compare-and-swap ref writes answer that.
+ */
+const repositoryQueue = new ResourceQueue();
+
 /**
  * Create a `RevisionPort` over a native Git repository.
  *
@@ -328,7 +345,24 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   }
   const { repositoryPath, checkouts } = options;
   const gitExecutable = options.gitExecutable ?? 'git';
-  const refQueue = new ResourceQueue();
+  /* The repository's canonical path, read once: the key every port on this repository queues under. A path that cannot
+   * be resolved yet keys by its absolute spelling. */
+  let canonical: Promise<string> | undefined;
+  const resolveCanonical = async (): Promise<string> => {
+    try {
+      return await realpath(repositoryPath);
+    } catch {
+      return resolvePath(repositoryPath);
+    }
+  };
+  const canonicalPath = async (): Promise<string> => {
+    canonical ??= resolveCanonical();
+    return canonical;
+  };
+  const refQueue = {
+    queueFor: async <T>(name: string, operation: () => Promise<T>): Promise<T> =>
+      repositoryQueue.queueFor(`${await canonicalPath()}:${name}`, operation),
+  };
   let objectFormat: ObjectFormat | undefined;
 
   /**
@@ -2083,7 +2117,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * @returns Once every matching worktree's index was refreshed or skipped.
    */
   const syncIndexes = async (moved: string | undefined, replaced?: ReplacedHead): Promise<void> =>
-    refQueue.queueFor(`${repositoryPath}:index`, async () => {
+    refQueue.queueFor('index', async () => {
       const listing = await run(['worktree', 'list', '--porcelain']);
       if (listing.exitCode !== 0) {
         return;
@@ -2357,6 +2391,26 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
+  /*
+   * Git-lfs's filters in a store this port did not adopt, without a process when it can (W8 diagnostics): a store
+   * that holds them already is left alone, and one with none of them gets them written when the host knows git-lfs
+   * is installed. Anything else, a value somebody changed included, is git-lfs's own to answer.
+   */
+  const configureLargeObjectFilters = async (): Promise<void> => {
+    const state = largeObjectFiltersIn(await readFile(join(storePath, 'config'), 'utf8').catch(() => ''));
+    if (state === 'configured') {
+      return;
+    }
+    if (
+      state === 'absent' &&
+      (await options.gitLfsInstalled?.()) === true &&
+      (await writeLargeObjectFilters(storePath))
+    ) {
+      return;
+    }
+    await run(['lfs', 'install', '--local', '--skip-repo']);
+  };
+
   const initStore = async (input: InitRevisionStoreInput): Promise<void> => {
     /* Asked first, and it throws for a bare repository or a `.git` file: a path this port
      * refuses is left exactly as it was, ignore file included (review 4 R40).
@@ -2422,7 +2476,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * config is the person's: the pointers its own attributes ask for are
      * resolved by whatever filters they configured (D16). Asked on every
      * open and idempotent, so a session after a crash between `git init` and
-     * here still configures them.
+     * here still configures them; read from the store's `config` first, so an
+     * open that finds them spawns nothing (`configureLargeObjectFilters`).
      *
      * The filters only: `--skip-repo` installs no hooks. Tau's plumbing runs
      * none (`core.hooksPath` names the store's empty hooks file). Without it,
@@ -2430,7 +2485,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * flag reverted (run 44036304364) left `dev/null/pre-push` and three more
      * in a Windows project under the old `/dev/null` pin. */
     if (!(await isAdopted())) {
-      await run(['lfs', 'install', '--local', '--skip-repo']);
+      await configureLargeObjectFilters();
     }
     /* Every project an older build recorded has no index at all, so this open
      * heals it. An existing index is left alone: in a repository Tau adopted
@@ -2472,16 +2527,17 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * rewrite cannot repeat.
      */
     /*
-     * One `init` at a time per repository. A host opens its store from more
-     * than one place — the effects' `ensureStore`, which the large-object
-     * resume reaches on a timer as the root starts, and a caller's own
-     * `init` — and two runs at once each ran `git init` and `git lfs install
-     * --local`, which take `.git/config.lock`: the loser failed with
-     * "could not lock config file". Queued, the second run finds the store
-     * the first one made.
+     * One `init` at a time per repository, across every port on it (tau
+     * #1282). A host opens its store from more than one place — the effects'
+     * `ensureStore`, which the large-object resume reaches on a timer as the
+     * root starts, a caller's own `init`, and a second port on the same
+     * project — and two runs at once each ran `git init` and `git lfs install
+     * --local`, which take `.git/config.lock`: the loser failed with "could
+     * not lock config file". Queued, the second run finds the store the first
+     * one made.
      */
     init: async (input: InitRevisionStoreInput): Promise<void> =>
-      refQueue.queueFor(`${repositoryPath}:init`, async () => initStore(input)),
+      gitCommandActivity.during('open', async () => refQueue.queueFor('init', async () => initStore(input))),
 
     ignoredPaths: async (root?: string, paths?: readonly string[]): Promise<readonly string[] | undefined> => {
       /* Git's own answer, on every repository: the checkout's nested ignore
@@ -2694,11 +2750,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        * Choosing the number and claiming its ref are one step (B6):
        * `update-ref` writes the ref only while it still holds what the choice
        * read — the zero id for a new number — so of two writers that chose
-       * the same number one wins and the other chooses again. Calls on this
-       * port also queue behind each other, so only another process ever makes
-       * one choose again.
+       * the same number one wins and the other chooses again. Calls on every
+       * port this process opened on the repository also queue behind each
+       * other, so only another process ever makes one choose again.
        */
-      return refQueue.queueFor(`${repositoryPath}:refs/tags/v*`, async () => {
+      return refQueue.queueFor('refs/tags/v*', async () => {
         const zero = await zeroObjectId();
         for (let attempt = 0; attempt < tagWriteAttempts; attempt += 1) {
           // oxlint-disable-next-line no-await-in-loop -- each attempt reads what the last one lost to.
@@ -2763,7 +2819,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      */
     updateRef: async (input: UpdateRevisionRefInput): Promise<UpdateRevisionRefResult> => {
       const ref = refOf(input.name);
-      const result = await refQueue.queueFor(`${repositoryPath}:${input.name}`, async () => {
+      const result = await refQueue.queueFor(input.name, async () => {
         const expected = input.expectedHead ?? (await zeroObjectId());
         const conflicted = async (): Promise<UpdateRevisionRefResult> => {
           const actual = await resolve(ref);
@@ -2826,7 +2882,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
     setHead: async (branch: string): Promise<void> => {
       /* The head the live worktree's index was read from, so staging into it survives the switch. */
-      const replaced = await refQueue.queueFor(`${repositoryPath}:HEAD`, async () => {
+      const replaced = await refQueue.queueFor('HEAD', async () => {
         const previous = await run(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']);
         await output(['symbolic-ref', 'HEAD', refOf(branch)]);
         return previous.exitCode === 0 ? textDecoder.decode(previous.stdout).trim() : undefined;

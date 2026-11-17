@@ -48,7 +48,7 @@ import { startGitHttpBackend } from '#test/git-http-backend.js';
 import { gitToolchainOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesContent, generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
 import { recordedBy } from '#test/identity.js';
-import { shellPath, writeShellExecutable } from '#test/script-executable.js';
+import { shellWord, writeShellExecutable } from '#test/script-executable.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -1305,7 +1305,7 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
           '    *) verb="$argument"; break ;;',
           '  esac',
           'done',
-          `echo "$verb	$*" >> ${shellPath(log)}`,
+          `echo "$verb	$*" >> ${shellWord(log)}`,
           'exec git "$@"',
         ]);
         const counted = createNativeGitRevisionPort({ repositoryPath, gitExecutable: wrapper });
@@ -2035,8 +2035,8 @@ describe.runIf(gitToolchainOnPath)('native remote credential transport', () => {
       try {
         await mkdir(repositoryPath, { recursive: true });
         const wrapper = await writeShellExecutable(join(root, 'git-credential-check'), [
-          `printf '%s\\n' "$@" > ${shellPath(argumentsLog)}`,
-          `printf '%s\n%s\n%s\n%s' "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" "$GIT_CONFIG_KEY_1" "$GIT_CONFIG_VALUE_1" > ${shellPath(environmentLog)}`,
+          `printf '%s\\n' "$@" > ${shellWord(argumentsLog)}`,
+          `printf '%s\n%s\n%s\n%s' "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" "$GIT_CONFIG_KEY_1" "$GIT_CONFIG_VALUE_1" > ${shellWord(environmentLog)}`,
           'exec git "$@"',
         ]);
         const port = createNativeGitRevisionPort({

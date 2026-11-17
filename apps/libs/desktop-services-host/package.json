@@ -71,6 +71,7 @@
     "@taucad/picogk": "workspace:*",
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
+    "@taucad/revisions": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@taucad/shell-service": "workspace:*",
     "@taucad/skills": "workspace:*",

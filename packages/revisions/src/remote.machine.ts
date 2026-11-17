@@ -96,6 +96,8 @@ type RemoteMachineContextFields = Readonly<{
   refusedReplacement: RemoteRefusedReplacement | undefined;
   /** How many replacements have been refused, so each refusal carries its own `attempt`. */
   refusals: number;
+  /** How many remotes reads in a row have failed, for `retrying`'s backoff (tau #1098). */
+  readFailures: number;
 }>;
 
 /** The destination a `connect` names. @public */
@@ -170,6 +172,19 @@ export type RemoteInitialSyncActorOutput = Readonly<{
 }>;
 
 const defaultBranch = 'main';
+
+/**
+ * The first wait before a failed remotes read is asked again (tau #1098); each failure after it doubles the wait.
+ *
+ * @public
+ */
+export const remoteReadRetryMilliseconds = 1000;
+/**
+ * The longest wait between remotes reads, however many have failed.
+ *
+ * @public
+ */
+export const remoteReadRetryMaxMilliseconds = 60_000;
 
 /*
  * The failure that means "grant the credential again", not "the remote is
@@ -399,6 +414,14 @@ const remoteMachineDefinition = setup({
     readStorage: createAsyncLogic<RemoteStorage | undefined, RemoteReadStorageActorInput>({ run: unsupported }),
     initialSync: createAsyncLogic<RemoteInitialSyncActorOutput, RemoteInitialSyncActorInput>({ run: unsupported }),
   },
+  delays: {
+    /* Doubling, capped: a remotes read that keeps failing is asked again less often, never given up on. */
+    remoteReadRetry: ({ context }) =>
+      Math.min(
+        remoteReadRetryMilliseconds * 2 ** Math.max(0, context.readFailures - 1),
+        remoteReadRetryMaxMilliseconds,
+      ),
+  },
 }).createMachine({
   id: 'remote',
   context: ({ input }) => ({
@@ -417,6 +440,7 @@ const remoteMachineDefinition = setup({
     probeReturn: 'connected',
     refusedReplacement: undefined,
     refusals: 0,
+    readFailures: 0,
   }),
   /* A fact about the remote, not about where the connect sequence is (L2-F10):
    * `sync` forwards a refusal from whichever push it was making, and one that
@@ -439,17 +463,24 @@ const remoteMachineDefinition = setup({
       invoke: {
         src: 'readRemote',
         input: ({ context }) => ({ projectId: context.projectId }),
+        /* A read that settles forgets the failures before it, and their reason. */
         onDone: ({ event }) =>
           event.output.remote === undefined
-            ? { target: 'none' }
+            ? { target: 'none', context: { readFailures: 0, error: undefined, reason: undefined } }
             : {
                 target: 'connected',
-                context: { remote: event.output.remote, kind: event.output.remote.kind },
+                context: {
+                  remote: event.output.remote,
+                  kind: event.output.remote.kind,
+                  readFailures: 0,
+                  error: undefined,
+                  reason: undefined,
+                },
               },
-        onError: {
-          target: 'failed',
-          context: ({ event }) => failWith(event.error),
-        },
+        onError: ({ context, event }) => ({
+          target: 'retrying',
+          context: { ...failWith(event.error), readFailures: context.readFailures + 1 },
+        }),
       },
       /* A route can carry a connect gesture into the project before this
        * first config read settles. The gesture is newer than the read, so it
@@ -702,6 +733,21 @@ const remoteMachineDefinition = setup({
       },
     },
 
+    /**
+     * Tau #1098: the remotes read failed, so whether this project has a remote is unknown. Not `failed`, which nothing
+     * leaves on its own: a project whose first read failed stayed there until it was reopened, and turn placement,
+     * which never takes a read failure for no remote, kept a chat waiting on pulls no remote would bring. Read again
+     * after a doubling, capped wait, until the read settles on `none` or `connected`. The person sees the failure and
+     * its reason meanwhile (the facet's phase is `failed`), and can connect or disconnect exactly as from `failed`.
+     */
+    retrying: {
+      after: { remoteReadRetry: { target: 'reading' } },
+      on: {
+        connect: ({ event }) => reconnect(event),
+        disconnect: { target: 'disconnecting' },
+      },
+    },
+
     failed: {
       on: {
         connect: ({ event }) => reconnect(event),
@@ -716,12 +762,19 @@ const remoteMachineDefinition = setup({
  *
  * - `authorized` and `validated` in `probing` (R2): each finishes a step of a
  *   recorded remote's own connect, and a probe records nothing either could finish.
+ * - `authorized`, `validated` and `cancel` in `retrying` (tau #1098): no connect
+ *   is running, and the remotes read it waits to ask again is not cancellable.
  *
  * @public
  */
 export const remoteIgnoredEvents: ReadonlyArray<readonly [state: string, eventType: string]> = [
   ['probing', 'authorized'],
   ['probing', 'validated'],
+  /* Tau #1098: `retrying` runs no connect for `authorized`, `validated` or `cancel` to finish or stop; the read it
+   * waits to ask again is not the person's to cancel. */
+  ['retrying', 'authorized'],
+  ['retrying', 'validated'],
+  ['retrying', 'cancel'],
   /* Audit R6: a session change matters only to `connected`'s stored-size
    * figure. Elsewhere the sequence in flight, or the credential frame the page
    * sent with the change, decides what this session reads; a refused connect
@@ -738,6 +791,7 @@ export const remoteIgnoredEvents: ReadonlyArray<readonly [state: string, eventTy
       'abandoning',
       'disconnecting',
       'reconnectRequired',
+      'retrying',
       'failed',
     ] as const
   ).map((state) => [state, 'sessionChanged'] as const),
@@ -779,7 +833,9 @@ const phaseOf = (value: string): RemoteFacet['phase'] => {
     case 'connected': {
       return 'connected';
     }
-    case 'failed': {
+    case 'failed':
+    case 'retrying': {
+      /* A remotes read that failed and will be asked again is a failure the person sees, with its reason (tau #1098). */
       return 'failed';
     }
     case 'reconnectRequired': {

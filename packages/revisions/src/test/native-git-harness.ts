@@ -38,7 +38,8 @@ const directoryFiles = async (directory: string, path = ''): Promise<readonly st
 /**
  * `rm` options for a test's temporary roots. Windows refuses to remove a
  * directory (EBUSY, ENOTEMPTY) while a git child that just exited, or one a
- * stopped actor's background read started, still holds a handle in it; Node
+ * stopped actor's background read started, still holds a handle in it, and to
+ * unlink an executable (EPERM) whose killed process is still mapped; Node
  * retries those codes, with a short backoff, only when asked.
  *
  * @internal

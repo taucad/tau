@@ -34,6 +34,8 @@ const sessions = vi.hoisted(() => ({
   author: [] as Array<{ options: CreatePicoOptions; pico: Pico }>,
   memoryTotal: undefined as number | undefined,
   heapBytes: undefined as number | undefined,
+  farBytes: undefined as number | undefined,
+  footprintThrows: false,
   disposeThrows: false,
   runtimeDisposeThrows: false,
   failStart: undefined as 'serial' | 'multi' | undefined,
@@ -70,6 +72,17 @@ const recordSession = (artifact: Artifact, pico: Pico, options: CreatePicoOption
     get(target, property) {
       if (property === 'memory' && sessions.memoryTotal !== undefined) {
         return { ...target.memory, total: sessions.memoryTotal };
+      }
+      if (property === 'footprint') {
+        if (sessions.footprintThrows) {
+          throw new Error('PICO_DISPOSED');
+        }
+        const { footprint } = target;
+        return {
+          ...footprint,
+          heapBytes: sessions.heapBytes ?? footprint.heapBytes,
+          farBytes: sessions.farBytes ?? footprint.farBytes,
+        };
       }
       if (property === 'module' && sessions.heapBytes !== undefined) {
         const heap = { byteLength: sessions.heapBytes };
@@ -236,6 +249,8 @@ beforeEach(() => {
   sessions.author.length = 0;
   sessions.memoryTotal = undefined;
   sessions.heapBytes = undefined;
+  sessions.farBytes = undefined;
+  sessions.footprintThrows = false;
   sessions.disposeThrows = false;
   sessions.runtimeDisposeThrows = false;
   sessions.failStart = undefined;
@@ -844,6 +859,36 @@ describe('picovoxel kernel', () => {
       });
     });
 
+    // I2: the grid pager reports a park or restore that runs out of heap or far-store space as PICO_OUT_OF_MEMORY,
+    // which takes the kernel's out-of-memory path: a resource-limit issue, and a recycled runtime.
+    it("should take the out-of-memory path for the grid pager's out-of-memory error", async () => {
+      const picovoxelModule = await import('picovoxel');
+      const runtime = createRuntime({
+        default: () => {
+          throw new picovoxelModule.PicoError(
+            'PICO_OUT_OF_MEMORY',
+            'pager: parking a grid ran out of far-store space.',
+          );
+        },
+      });
+      const context = await initialize({ wasm: 'serial' }, runtime);
+      const issues = await buildIssues(
+        definition.evaluate(
+          { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'exact' } },
+          runtime,
+          context,
+        ),
+      );
+
+      expect(issues[0]).toMatchObject({
+        code: 'RESOURCE_LIMIT',
+        message: expect.stringContaining('pager: parking a grid ran out of far-store space.'),
+        details: { picoCode: 'PICO_OUT_OF_MEMORY', lane: 'exact', artifact: 'serial' },
+      });
+      expect(runtime.logger.debug).toHaveBeenCalledWith('PicoVoxel recycled the serial runtime: the build trapped');
+      await definition.onDispose!(context);
+    });
+
     it('should refuse fast-lane data in an exact build with a typed issue and the Tau remedy', async () => {
       const issues = await buildIssues(
         evaluate({
@@ -944,7 +989,7 @@ describe('picovoxel kernel', () => {
       const { runtime } = await evaluate({ module: sphere() });
 
       expect(runtime.logger.debug).toHaveBeenCalledWith(
-        expect.stringMatching(/^PicoVoxel session memory native=2147483648 heap=\d+ variant=serial$/),
+        expect.stringMatching(/^PicoVoxel session memory native=2147483648 heap=\d+ far=0 variant=serial$/),
       );
       expect(runtime.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('PicoVoxel held 2147483648 bytes of native memory on the serial artifact.'),
@@ -956,6 +1001,46 @@ describe('picovoxel kernel', () => {
       const { runtime } = await evaluate({ module: sphere() });
 
       expect(runtime.logger.warn).not.toHaveBeenCalled();
+    });
+
+    // I6b: grids the pager parked live in its far store, not the heap, so the log reports both.
+    it('should report the far store beside the heap', async () => {
+      sessions.memoryTotal = 2 ** 31;
+      sessions.farBytes = 3 * 2 ** 20;
+      const { runtime } = await evaluate({ module: sphere() });
+
+      expect(runtime.logger.debug).toHaveBeenCalledWith(
+        expect.stringMatching(/^PicoVoxel session memory native=2147483648 heap=\d+ far=3145728 variant=serial$/),
+      );
+      expect(runtime.logger.warn).toHaveBeenCalledWith(expect.any(String), {
+        data: expect.objectContaining({ farBytes: 3 * 2 ** 20 }),
+      });
+    });
+
+    it("should run PicoVoxel's grid pager at its default budget, with nothing parked on an ordinary model", async () => {
+      let footprint: Pico['footprint'] | undefined;
+      await evaluate({
+        module: {
+          default: (pico: Pico): Voxels => {
+            const shape = pico.createVoxels({ shape: 'sphere', radius: 3 });
+            ({ footprint } = pico);
+            return shape;
+          },
+        },
+      });
+
+      expect(sessions.runtimes.at(-1)!.options).not.toHaveProperty('pager');
+      expect(footprint!.pager).toMatchObject({ budgetBytes: 2 ** 31, store: 'ram', parks: 0 });
+      expect(footprint!.farBytes).toBe(0);
+    });
+
+    it('should read the heap alone from a session author code disposed', async () => {
+      sessions.footprintThrows = true;
+      const { runtime } = await evaluate({ module: sphere() });
+
+      expect(runtime.logger.debug).toHaveBeenCalledWith(
+        expect.stringMatching(/^PicoVoxel session memory native=\d+ heap=\d+ far=0 variant=serial$/),
+      );
     });
   });
 
@@ -2337,6 +2422,25 @@ describe('picovoxel host recycle threshold', () => {
 
   it('should default to recycling past 1.5 GiB', () => {
     expect(definition.optionsSchema!.parse({})).toMatchObject({ recycleHeapBytes: 1.5 * 2 ** 30 });
+  });
+
+  // I6b: what the pager parked counts toward the threshold, or paged-out grids would be invisible to it.
+  it('should recycle a runtime whose heap and far store together passed the threshold', async () => {
+    const runtime = createRuntime(sphere());
+    const context = await initialize({ wasm: 'serial', recycleHeapBytes: 512 * mebibyte }, runtime);
+    sessions.heapBytes = 400 * mebibyte;
+    sessions.farBytes = 200 * mebibyte;
+    await definition.evaluate(
+      { entryPath: 'main.ts', parameters: {}, options: { ...uniformMesh, lane: 'fast' } },
+      runtime,
+      context,
+    );
+
+    expect(context.runtimes.size).toBe(0);
+    expect(runtime.logger.debug).toHaveBeenCalledWith(
+      `PicoVoxel recycled the serial runtime: its heap and far store reached ${String(600 * mebibyte)} bytes (heap ${String(400 * mebibyte)}, far ${String(200 * mebibyte)})`,
+    );
+    await definition.onDispose!(context);
   });
 
   it("should recycle a runtime whose heap passed the host's threshold", async () => {

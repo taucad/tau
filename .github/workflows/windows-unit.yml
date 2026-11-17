@@ -1,8 +1,10 @@
 # The Windows unit lane (Windows desktop production readiness R2): the `test` target of every affected
-# `tag:ci:windows-unit` project on `windows-2025`, one job per project. These are the projects whose source
-# has win32 branches the Linux and macOS lanes never execute: the desktop main process, the host (ACP
-# external-agent registry, locate and spawn), the filesystem authority writer, revisions, the native
-# process core and the agent plugin. A project joins by adding the tag.
+# `tag:ci:windows-unit` project on `windows-2025`, one job per project. It is for the projects whose source has
+# win32 branches the Linux and macOS lanes never execute: the desktop main process, the host (ACP external-agent
+# registry, locate and spawn), the filesystem authority writer, revisions, the native process core and the agent
+# plugin. A project joins by adding the tag once its suite passes on Windows, so a required row is never red on
+# `main`; the Brain programme log (research/artifacts/windows-desktop-production-readiness/log.md) tracks which
+# have joined and the measured reason for every remaining Windows gate.
 #
 # Placement:
 # - `ci.yml` calls this workflow (`workflow_call`) with the affected projects as `projects` (its plan lane
@@ -57,7 +59,9 @@ concurrency:
 jobs:
   plan:
     name: Select the Windows unit rows
+    # Called, the caller's event is this run's event (a pull request too), so `ref` admits it before the label test.
     if: >-
+      inputs.ref != '' ||
       github.event_name != 'pull_request' ||
       (contains(github.event.pull_request.labels.*.name, 'windows-unit') &&
       (github.event.action != 'labeled' || github.event.label.name == 'windows-unit') &&

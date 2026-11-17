@@ -871,7 +871,13 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       // provider. POSIX answers EINVAL for removing `.`; so does `rename` here.
       throw this._einval(path_);
     }
-    await fs.rmdir(await this._resolve(path_, 'mutate'));
+    const target = await this._resolve(path_, 'mutate');
+    // Windows answers `rmdir` on a file with ENOENT; the library contract is ENOTDIR.
+    const entry = await this._lstatOrUndefined(target);
+    if (entry !== undefined && !entry.isDirectory()) {
+      throw this._enotdir(path_);
+    }
+    await fs.rmdir(target);
   }
 
   public async rename(from: string, to: string): Promise<void> {

@@ -11,7 +11,7 @@ import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { randomUuid } from '@taucad/utils/id';
 import { CopyButton } from '@taucad/ui/components/copy-button';
-import { useFileContent } from '#hooks/use-file-content.js';
+import { useFileContent } from '@taucad/files-ui/hooks/use-file-content';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { ENV } from '#environment.config.js';
 import { ChatMessageToolInstallPackages } from '#routes/w.$workspace.$project/chat-message-tool-install-packages.js';

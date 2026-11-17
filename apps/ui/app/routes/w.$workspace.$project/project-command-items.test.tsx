@@ -128,7 +128,7 @@ vi.mock('#providers/headless-image-provider.js', () => ({
   useHeadlessImageService: () => imageService,
 }));
 
-vi.mock('#hooks/use-file-tree.js', () => ({
+vi.mock('@taucad/files-ui/hooks/use-file-tree', () => ({
   useFileTreeMap: () => new Map([['main.ts', {}]]),
 }));
 

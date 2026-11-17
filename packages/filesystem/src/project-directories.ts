@@ -64,6 +64,7 @@ import type {
   PermanentDeleteProjectDirectoryResult,
   ProjectLocator,
   ProjectRootConfiguration,
+  RootState,
   StorageRootConfig,
   WorkspaceScope,
 } from '#mount-table.js';
@@ -329,6 +330,8 @@ export class ProjectDirectories {
   private readonly _projectIndexes: ProjectIndexes;
   /** The configured discovery roots, owned by the authority's mount lifecycle. */
   private readonly _discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
+  /** A root's published state; a root that is not `available` is never scanned (blueprint D1). */
+  private readonly _rootState: (storageRootKey: string) => RootState | 'pending' | undefined;
   /** Retire one logical project route the authority installed, as a delete must. */
   private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
 
@@ -344,6 +347,8 @@ export class ProjectDirectories {
     pipeline: MutationPipeline;
     projectIndexes: ProjectIndexes;
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
+    /** A root's admission state; `pending` while a non-Home root is still being admitted. */
+    rootState?: (storageRootKey: string) => RootState | 'pending' | undefined;
     revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
   }) {
     this._observedIdentityResolver = createProjectIdentityResolver({
@@ -373,6 +378,7 @@ export class ProjectDirectories {
     this._pipeline = options.pipeline;
     this._projectIndexes = options.projectIndexes;
     this._discoveryRoots = options.discoveryRoots;
+    this._rootState = options.rootState ?? (() => undefined);
     this._revokeProjectRoute = options.revokeProjectRoute;
   }
 
@@ -395,6 +401,14 @@ export class ProjectDirectories {
     /* oxlint-disable eslint/no-await-in-loop -- Root scans are deliberately serialized to bound filesystem-handle and IndexedDB pressure. */
     for (const resolvedRoot of this._discoveryRoots()) {
       const { root, scope, storageRootKey } = resolvedRoot;
+      /* Home is the first root and is scanned first; a root that is lost, hung
+       * or still being admitted is reported by its state without resolving its
+       * provider, so it cannot hold Home's project list. */
+      const state = this._rootState(storageRootKey);
+      if (state !== undefined && state !== 'available') {
+        roots.push({ status: 'inaccessible', root, reason: state });
+        continue;
+      }
       let provider: FileSystemProvider;
       try {
         // Out-of-band writes reach the provider through the external-change path

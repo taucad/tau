@@ -23,7 +23,6 @@ import type { ShowcaseFrameCapture } from '#components/geometry/loader/showcase-
 import { LazySection } from '@taucad/ui-kit/components/lazy-section';
 import { Loader } from '@taucad/ui/components/loader';
 import { useFeature } from '#flags/use-feature.js';
-import type { Handle } from '#types/matches.types.js';
 
 const GlassPrismLoaderLazy = lazy(async () => {
   const module = await import('#components/geometry/loader/glass-prism-loader.js');
@@ -52,10 +51,6 @@ export const meta: MetaFunction = () => [
   { name: 'description', content: pageDescription },
   { name: 'robots', content: 'noindex' },
 ];
-
-export const handle: Handle = {
-  enableOverflowY: true,
-};
 
 const backendLabels: Readonly<Record<GlassPrismLoaderStatistics['backend'], string>> = {
   webgpu: 'WebGPU',

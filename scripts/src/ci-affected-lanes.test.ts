@@ -1485,6 +1485,10 @@ describe('ci.yml Windows unit lane (Windows desktop production readiness R2)', (
     expect(windows.jobs['unit']?.['runs-on']).toBe('windows-2025');
     expect(windows.concurrency?.group).toContain("inputs.ref != '' && github.run_id");
   });
+
+  it('should plan a called run without the label, since a call from a pull request sees the pull_request event', () => {
+    expect(windows.jobs['plan']?.if?.trimStart().startsWith("inputs.ref != '' ||")).toBe(true);
+  });
 });
 
 describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {

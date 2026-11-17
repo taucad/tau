@@ -21,7 +21,7 @@ import { nativeKernelRequirementForEntryPath } from '#constants/available-kernel
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 import { ProjectExportAction } from '#routes/w.$workspace.$project/project-export-action.js';
-import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
+import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { ProjectSettingsDialog } from '#routes/w.$workspace.$project_.preview/project-settings-dialog.js';
 import { usePreviewProject } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
 import { PreviewPhoneTopBar } from '#routes/w.$workspace.$project_.preview/preview-phone-top-bar.js';

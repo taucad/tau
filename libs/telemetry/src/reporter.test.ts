@@ -24,9 +24,9 @@ describe('createReporter', () => {
     const backend = createMockBackend();
     const reporter = createReporter(backend, TauMetrics);
 
-    const record = reporter['kernelExecutions']!;
-    record(1, { 'kernel.status': 'success' });
-    expect(backend.recordCounter).toHaveBeenCalledWith('kernel.executions', 1, { 'kernel.status': 'success' });
+    const record = reporter['wsDisconnections']!;
+    record(1, { 'ws.gateway': 'hosts' });
+    expect(backend.recordCounter).toHaveBeenCalledWith('ws.disconnections', 1, { 'ws.gateway': 'hosts' });
   });
 
   it('should delegate histogram metrics to recordHistogram', () => {
@@ -69,7 +69,7 @@ describe('createReporter', () => {
     const backend = createMockBackend();
     const reporter = createReporter(backend, TauMetrics);
 
-    reporter['kernelExecutions']!(1, {});
+    reporter['wsDisconnections']!(1, {});
     expect(backend.recordHistogram).not.toHaveBeenCalled();
     expect(backend.recordGauge).not.toHaveBeenCalled();
     expect(backend.recordUpDownCounter).not.toHaveBeenCalled();
@@ -79,8 +79,8 @@ describe('createReporter', () => {
     const backend = createMockBackend();
     const reporter = createReporter(backend, TauMetrics);
 
-    reporter['kernelExecutions']!(1, { 'kernel.status': 'success' });
-    reporter['kernelExecutions']!(1, { 'kernel.status': 'error' });
+    reporter['wsDisconnections']!(1, { 'ws.gateway': 'hosts' });
+    reporter['wsDisconnections']!(1, { 'ws.gateway': 'kernels' });
     expect(backend.recordCounter).toHaveBeenCalledTimes(2);
   });
 

@@ -1,7 +1,7 @@
 import type * as LSP from 'vscode-languageserver-protocol';
 import { URI } from 'vscode-uri';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
-import type { EditorDocument } from '#lib/editor-document.js';
+import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { applyEditorWorkspaceEdits } from '#lib/editor-workspace-edits.js';
 import type { EditorWorkspaceEdit } from '#lib/editor-workspace-edits.js';

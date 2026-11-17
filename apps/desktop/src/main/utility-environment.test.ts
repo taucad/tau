@@ -55,6 +55,42 @@ describe('utilityEnvironment', () => {
     expect(utilityEnvironment({ TAU_SECRET_VAULT: 'file' })).toEqual({ TAU_SECRET_VAULT: 'file' });
   });
 
+  it('should carry Windows names whatever case the launching shell gave them', () => {
+    /* Git Bash and CI `bash` steps start the app with upper-cased names; Explorer with `Path` and `windir`. */
+    expect(
+      utilityEnvironment(
+        {
+          SYSTEMROOT: String.raw`C:\Windows`,
+          Path: String.raw`C:\Windows\System32`,
+          windir: 'w',
+        },
+        {},
+        'win32',
+      ),
+    ).toEqual({
+      SystemRoot: String.raw`C:\Windows`,
+      PATH: String.raw`C:\Windows\System32`,
+      WINDIR: 'w',
+    });
+  });
+
+  it('should prefer the exact spelling when Windows names differ only by case', () => {
+    expect(utilityEnvironment({ SYSTEMROOT: 'upper', SystemRoot: 'exact' }, {}, 'win32')).toEqual({
+      SystemRoot: 'exact',
+    });
+    expect(utilityEnvironment({ SystemRoot: 'exact', SYSTEMROOT: 'upper' }, {}, 'win32')).toEqual({
+      SystemRoot: 'exact',
+    });
+  });
+
+  it('should keep names case-sensitive outside Windows', () => {
+    expect(utilityEnvironment({ SYSTEMROOT: '/x', Path: '/usr/bin' }, {}, 'linux')).toEqual({});
+  });
+
+  it('should not widen the allowlist on Windows', () => {
+    expect(utilityEnvironment({ node_options: '--require ./evil.cjs', Openai_Api_Key: 'k' }, {}, 'win32')).toEqual({});
+  });
+
   it('merges caller-named additions last', () => {
     expect(utilityEnvironment({ PATH: '/usr/bin' }, { TAU_PROJECT_ROOT: '/root' })).toEqual({
       PATH: '/usr/bin',

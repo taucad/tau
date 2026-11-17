@@ -6,7 +6,7 @@
 import { useCallback, useState } from 'react';
 import { GizmoGroup, NavigationGroup } from '#components/settings/viewer/navigation-groups.js';
 import { ViewDefaultsGroup } from '#components/settings/viewer/view-defaults-group.js';
-import { viewerStorageRefused } from '#components/settings/viewer/viewer-settings-copy.js';
+import { viewerStorageRefused } from '@taucad/settings-ui/components/settings/viewer/viewer-settings-copy';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import type { SectionWriteResult } from '#preferences/section-store.js';
 

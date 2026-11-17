@@ -5,11 +5,14 @@ describe('viewerRenderProfile', () => {
   it('should hold the GTAO controls the viewer runs', () => {
     expect(viewerRenderProfile.ambientOcclusion).toStrictEqual({
       intensity: 0.75,
-      distanceFalloff: 1,
+      distanceFalloff: 0.5,
       radiusCssPixels: 'viewport',
       radiusViewportFraction: 0.01,
       radiusMinimumDevicePixels: 4,
       thicknessRatio: 1 / 0.09,
+      slabDistanceFalloff: 1,
+      falloffEndRatio: 22,
+      falloffRange: 0.8,
       denoiseDepthTolerance: 0.1,
       samples: 16,
       resolutionScale: 0.5,

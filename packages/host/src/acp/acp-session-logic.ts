@@ -215,7 +215,7 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
                   id: effects.createId(),
                   role: 'assistant',
                   content: [{ type: 'text', text: input.opening.notice }],
-                  metadata: { tauInternal: { origin: 'external', agentId: input.adapter.id } },
+                  metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: input.adapter.id } },
                 },
               },
             ]);

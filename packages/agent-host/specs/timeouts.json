@@ -485,6 +485,22 @@
       "owner": "W6"
     },
     {
+      "id": "FS-START-DEADLINE",
+      "bound": "File service start deadline (20 s, fileManagerStartDeadlineMilliseconds): connecting the worker and initializing its services each end in the error state with code START_DEADLINE when it passes",
+      "site": "apps/ui/app/machines/file-manager.machine.ts",
+      "token": "startDeadline",
+      "class": "Liveness",
+      "owner": "desktop resilient startup WP2 (B31)"
+    },
+    {
+      "id": "FS-TRANSIENT-RETRY",
+      "bound": "One automatic retry of a transient root-mount start failure after 1 s; a second failure waits for the person",
+      "site": "apps/ui/app/machines/file-manager.machine.ts",
+      "token": "transientRetry",
+      "class": "Backoff",
+      "owner": "desktop resilient startup WP2 (D3)"
+    },
+    {
       "id": "E5",
       "bound": "Socket open",
       "site": "apps/ui/app/lib/agent-host-placement.ts",

@@ -1256,6 +1256,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       syncTelemetryConsent: () => telemetryConsent,
       /* B1: every revision this host records names the desktop app as its leg. */
       via: 'desktop',
+      /* W8 diagnostics: each turn admission's phases and the Git it waited on, ids and milliseconds only. */
+      admissionTimed: (timing) => {
+        log('turn-admission-timed', timing);
+      },
       tauCredential: () => {
         const token = authToken;
         return token === undefined ? undefined : { apiBaseUrl: config.tauApiUrl, authorization: `Bearer ${token}` };

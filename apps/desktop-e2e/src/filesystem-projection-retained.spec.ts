@@ -87,18 +87,7 @@ test('adopts independent native layout and view records in the retained document
       .poll(
         async () =>
           page.evaluate(() => {
-            const bridges =
-              (
-                globalThis as {
-                  __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                    getCamera(): { position: number[]; target: number[] };
-                    getSectionState(): {
-                      isActive: boolean;
-                      cuts: Array<{ kind: string; plane?: string; offset?: number }>;
-                    };
-                  }>;
-                }
-              ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+            const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
             return bridges.some((bridge) => {
               const camera = bridge.getCamera();
               const direction = camera.position.map((value, index) => value - camera.target[index]!);
@@ -124,8 +113,7 @@ test('adopts independent native layout and view records in the retained document
     );
     const componentIds = async (): Promise<string[]> =>
       page.evaluate(() => {
-        const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getModelComponents(): Array<{ id: string }> } })
-          .__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         return bridge?.getModelComponents().map(({ id }) => id) ?? [];
       });
     await expect
@@ -152,12 +140,7 @@ test('adopts independent native layout and view records in the retained document
       .poll(
         async () =>
           page.evaluate((id) => {
-            const bridges =
-              (
-                globalThis as {
-                  __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{ getModelVisibility(): { hiddenComponentIds: string[] } }>;
-                }
-              ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+            const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
             return bridges.some((bridge) => bridge.getModelVisibility().hiddenComponentIds.includes(id));
           }, componentId),
         { timeout: 60_000 },
@@ -180,19 +163,7 @@ test('adopts independent native layout and view records in the retained document
         async () =>
           page.evaluate(
             ({ id, otherId }) => {
-              const bridges =
-                (
-                  globalThis as {
-                    __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                      getModelVisibility(): { isolatedComponentIds: string[] };
-                      getRenderedModelComponentState(id: string): {
-                        meshCount: number;
-                        visibleMeshCount: number;
-                        materialOpacities: number[];
-                      };
-                    }>;
-                  }
-                ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+              const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
               return bridges.some((bridge) => {
                 const chosen = bridge.getRenderedModelComponentState(id);
                 const other = bridge.getRenderedModelComponentState(otherId);
@@ -942,14 +913,7 @@ export default function main() { return [{ name: 'Base', shape: makeBaseBox(20, 
 `;
       await writeFile(join(root, 'public/models/honeycomb.js'), model);
       const components = async (): Promise<string[]> =>
-        page.evaluate(
-          () =>
-            (
-              globalThis as { __TAU_SECTION_VIEW_TEST__?: { getModelComponents(): Array<{ id: string }> } }
-            ).__TAU_SECTION_VIEW_TEST__
-              ?.getModelComponents()
-              .map(({ id }) => id) ?? [],
-        );
+        page.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getModelComponents().map(({ id }) => id) ?? []);
       await expect
         .poll(
           async () => {

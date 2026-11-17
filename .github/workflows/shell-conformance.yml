@@ -18,13 +18,13 @@
 # Fresh by construction except where reuse is asked for (CF-1): the sandbox, service, host, qualification and Terminal
 # concern targets are cacheable only under the environment fingerprint of `scripts/src/shell-evidence.ts`, which is a
 # fresh nonce unless `TAU_SHELL_EVIDENCE` is `reuse`. Only the merge queue's semantics-tier call and a labelled pull
-# request run ask for reuse; the nightly, `workflow_dispatch` and the candidate gate's call run fresh and still pass
+# request run ask for reuse; `workflow_dispatch` (including the drift check's) and the candidate gate's call run fresh and still pass
 # `--skip-nx-cache`, `desktop-services-host:test:terminal-conformance` is never cached, and the Linux guests and WIN-X64 always run fresh. The
 # stamp step then records each macOS receipt as fresh or as a verdict reused from an Nx hash first proven at another
 # commit, and refuses a reused receipt in a fresh run.
 #
 # Remote cache (CP-5b follow-up to CF-1): only the macOS job of a reuse run gets the Nx remote cache env, so a fresh run
-# (nightly, dispatch, candidate gate) has no cache server at all, on top of its nonce and `--skip-nx-cache`. The merge
+# (dispatch, candidate gate) has no cache server at all, on top of its nonce and `--skip-nx-cache`. The merge
 # queue's semantics call runs that job in environment `nx-cache-write` (branch policies `main` and
 # `gh-readonly-queue/main/*`), whose write token replaces the read token `ci.yml` passes, so one queue run's verdict can
 # be reused by a later one with the same fingerprint and inputs. A labelled pull request reads with the repository read
@@ -35,12 +35,13 @@
 name: Shell conformance
 
 # Placement (CI throughput review, operator decision D3 of 2026-11-08): the rows (the five Linux and macOS rows and
-# WIN-X64) run nightly on `main` head, on demand, and on a pull request only while it carries the `shell-conformance`
-# label. They no longer run on every `main` push or on every pull request that touches a shell path. The nightly
-# watchdog alerts the operator when a nightly is red or missing. `release-desktop-staging.yml` calls the rows on
-# the commit it is about to tag, so no desktop candidate exists without green rows on its own commit.
+# WIN-X64) run in the merge queue when a `ci:shell` project is affected, on demand, when the daily drift check
+# (`drift-check.yml`) sees a runner image or guest package change, and on a pull request only while it carries the
+# `shell-conformance` label. The 02:17 nightly was retired after two green full-tier dispatches (§ 5b of the program's
+# handoff); the watchdog judges the drift check and every candidate's shell gate instead. `release-desktop-staging.yml`
+# calls the rows on the commit it is about to tag, so no desktop candidate exists without green rows on its own commit.
 #
-# Tiers (shell split blueprint PR 4): the nightly, a dispatch, the label and the candidate gate pass no
+# Tiers (shell split blueprint PR 4): a dispatch, the label and the candidate gate pass no
 # `tier` and run the `full` tier, every row and target. The merge queue calls the `semantics` tier from
 # `ci.yml` with the affected `tag:ci:shell` projects: the Linux guests skip the Electron build, its transfer
 # and the application tier, MAC-X does not run (MAC-A covers macOS), and each row runs only the listed
@@ -66,8 +67,6 @@ on:
       NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:
         description: Read token of the Nx remote cache, used only by a reuse run (the merge queue's call passes it)
         required: false
-  schedule:
-    - cron: '17 2 * * *'
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
@@ -86,7 +85,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # One normalization of the inputs: they are empty on `schedule`, `pull_request` and a dispatch, so every
+  # One normalization of the inputs: they are empty on `pull_request` and a dispatch, so every
   # guard below reads these outputs, never `inputs.*`, and `fromJSON('')` is never evaluated.
   select:
     name: Select the shell rows
@@ -205,7 +204,7 @@ jobs:
     environment: ${{ (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/') && needs.select.outputs.tier == 'semantics') && 'nx-cache-write' || null }}
     env:
       # Reuse a fingerprinted verdict only in the merge queue's semantics-tier call and on this workflow's own pull
-      # request trigger; the candidate gate (no tier, never `merge_group` or `pull_request`), the nightly and a
+      # request trigger; the candidate gate (no tier, never `merge_group` or `pull_request`) and a
       # dispatch need fresh evidence (CF-1). Nothing reads a pull request run's verdict: the promotion lookup skips it.
       TAU_SHELL_EVIDENCE: ${{ ((github.event_name == 'merge_group' && needs.select.outputs.tier == 'semantics') || (github.event_name == 'pull_request' && !inputs.ref && needs.select.outputs.tier == 'full')) && 'reuse' || 'fresh' }}
       TAU_SHELL_TIER: ${{ needs.select.outputs.tier }}

@@ -161,14 +161,14 @@ describe('ci.yml affected-only lanes', () => {
       formal: { targets: ['formal:tla'], pr: 'queue' },
       'formal-nightly': { targets: ['formal:nightly'], pr: 'queue', queue: 'touched' },
       'geospec-examples': { targets: ['test-geospec'], pr: 'queue' },
-      browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'queue' },
+      browser: { tags: ['ci:browser'], targets: ['verify-browser'], pr: 'touched' },
       'native-hosts': { tags: ['ci:native-hosts'], pr: 'queue', queue: 'closure' },
       'native-linux': { targets: ['test:native-linux'], pr: 'queue', queue: 'closure' },
       'native-darwin': { targets: ['test:native-darwin'], pr: 'queue' },
       'viewer-parity': { targets: ['test:viewer-parity'], pr: 'queue' },
       desktop: { tags: ['ci:desktop'] },
       shell: { tags: ['ci:shell'], pr: 'queue', queue: 'any-touched' },
-      'e2e-queue': { targets: ['test:e2e:queue'], pr: 'queue' },
+      'e2e-queue': { targets: ['test:e2e:queue'], pr: 'touched' },
     });
   });
 
@@ -735,8 +735,12 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
     expect(lane?.uses).toBeDefined();
     const rest = condition.replace(" && github.event_name == 'merge_group'", '');
     expect(rest).not.toMatch(/\|\||\bgithub\.(?:ref|ref_name|event_name|base_ref|head_ref)\b/u);
+    // The required gate and the fail-fast jobs run no lane (ci-fail-fast.test.ts).
     for (const [name, definition] of Object.entries(ci.jobs)) {
-      if ((definition.if ?? '').includes("github.event_name == 'merge_group'")) {
+      if (
+        !/^(?:affected|fail-fast-.*)$/u.test(name) &&
+        (definition.if ?? '').includes("github.event_name == 'merge_group'")
+      ) {
         expect(definition.uses, name).toBeDefined();
       }
     }
@@ -1324,6 +1328,17 @@ describe('plan lane selection', () => {
     expect(outputs['browser-projects']).toBe('[]');
   });
 
+  it('should run the browser lane on a pull request only for the browser projects its diff touches (MQ-5)', () => {
+    const touched = plan('pull_request', { affected: everything, files: ['apps/ui/app/root.tsx'] });
+    expect(touched.status, touched.stderr).toBe(0);
+    expect(touched.outputs['browser']).toBe('true');
+    expect(touched.outputs['browser-projects']).toBe('["ui"]');
+    const untouched = plan('pull_request', { affected: everything, files: ['packages/core/src/index.ts'] });
+    expect(untouched.status, untouched.stderr).toBe(0);
+    expect(untouched.outputs['browser']).toBe('false');
+    expect(untouched.outputs['browser-projects']).toBe('[]');
+  });
+
   it('should own a file by the deepest project root above it, as Nx does', () => {
     // `apps/api-e2e/…` is not under `apps/api`; a root-level file belongs to the workspace project.
     const outside = plan('pull_request', {
@@ -1472,7 +1487,7 @@ describe('plan lane selection', () => {
     expect(stderr).toContain('lane selectors name a pull-request rule other than queue or touched');
   });
 
-  it('should run one row per ratcheted suite of an affected project in the merge queue and none on a pull request', () => {
+  it('should run one row per ratcheted suite of an affected project in the merge queue, and on a pull request only when its diff touches the project', () => {
     const queue = plan('merge_group', { affected: ['ui-e2e'], files: ['apps/ui-e2e/src/smoke.test.ts'] });
     expect(queue.status, queue.stderr).toBe(0);
     expect(queue.outputs['e2e-queue']).toBe('true');
@@ -1490,10 +1505,16 @@ describe('plan lane selection', () => {
         slug: 'ui-e2e-test-e2e-development',
       },
     ]);
+    // MQ-5: a pull request that touches the project runs its suites before it queues.
     const pullRequest = plan('pull_request', { affected: ['ui-e2e'], files: ['apps/ui-e2e/src/smoke.test.ts'] });
     expect(pullRequest.status, pullRequest.stderr).toBe(0);
-    expect(pullRequest.outputs['e2e-queue']).toBe('false');
-    expect(pullRequest.outputs['e2e-queue-suites']).toBe('[]');
+    expect(pullRequest.outputs['e2e-queue']).toBe('true');
+    expect(pullRequest.outputs['e2e-queue-suites']).toBe(queue.outputs['e2e-queue-suites']);
+    // A pull request that reaches the project only through a dependency runs none.
+    const dependency = plan('pull_request', { affected: ['ui-e2e', 'ui'], files: ['apps/ui/app/root.tsx'] });
+    expect(dependency.status, dependency.stderr).toBe(0);
+    expect(dependency.outputs['e2e-queue']).toBe('false');
+    expect(dependency.outputs['e2e-queue-suites']).toBe('[]');
     const unrelated = plan('merge_group', { affected: ['api'], files: ['apps/api/app/main.ts'] });
     expect(unrelated.status, unrelated.stderr).toBe(0);
     expect(unrelated.outputs['e2e-queue']).toBe('false');

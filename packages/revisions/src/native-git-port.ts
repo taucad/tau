@@ -18,7 +18,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { access, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, normalize, resolve as resolvePath } from 'node:path';
+import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import { ResourceQueue } from '@taucad/filesystem';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { FileMode } from '@taucad/filesystem';
@@ -1824,13 +1824,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     const collected: Checkout[] = [];
     for (const block of blocks) {
       const lines = block.split('\n').filter((line) => line !== '');
-      const listed = lines.find((line) => line.startsWith('worktree '))?.slice('worktree '.length);
-      if (listed === undefined) {
+      const root = lines.find((line) => line.startsWith('worktree '))?.slice('worktree '.length);
+      if (root === undefined) {
         continue;
       }
-      /* Git for Windows lists `C:/Users/…`: a checkout's root is a path of this
-       * platform, the one its host opens and compares, so `C:\Users\…` there. */
-      const root = normalize(listed);
       const head = lines.find((line) => line.startsWith('HEAD '))?.slice('HEAD '.length);
       const branch = lines.find((line) => line.startsWith('branch '))?.slice('branch '.length);
       const linked = collected.length > 0;

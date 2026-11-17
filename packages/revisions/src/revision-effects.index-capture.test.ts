@@ -28,7 +28,7 @@ import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { recordedBy, testIdentity } from '#test/identity.js';
-import { diskKeepsExecutableBit } from '#test/native-git-harness.js';
+import { diskKeepsExecutableBit, fileHeavyTimeout } from '#test/native-git-harness.js';
 import { generatedGitattributesContent, generatedGitattributesPath, tauRevisionPolicy } from '#workspace-config.js';
 
 const author = { name: 'Tau', email: 'noreply@tau.new' };
@@ -344,7 +344,8 @@ const moveHead = async (at: Fixture, entries: ReadonlyArray<readonly [string, st
 
 const outside = (at: Fixture, path: string): string => join(at.root, path);
 
-describe('a cut driven by a real Project Index (S10)', () => {
+/* A real index over a real disk: file-heavy, so ten times as long on Windows (`fileHeavyTimeout`). */
+describe('a cut driven by a real Project Index (S10)', { timeout: fileHeavyTimeout(5000) }, () => {
   it('should read only the file Tau wrote, and hash what a walk hashes', async () => {
     const at = await fixture(files(50));
     await mint(at);

@@ -27,6 +27,7 @@ import { buildBootWatchdogScript, bootWatchdogStripHtml } from '#lib/boot-watchd
 import { safeModeHref } from '#lib/boot-signals.js';
 import { DesktopSafeModeActions, SafeModeBar } from '#components/layout/safe-mode-bar.js';
 import { desktopSafeMode } from '#lib/desktop-safe-mode.js';
+import { documentScrollClass } from '#components/layout/document-scroll.js';
 import { Page } from '#components/layout/page.js';
 import { useDocumentFact } from '#lib/client-facts.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -321,7 +322,7 @@ export function RootErrorBoundary(): React.JSX.Element {
   /* A refusal or a missing page is not a failed start; safe mode would not help with it. */
   const offersSafeMode = !isRouteErrorResponse(error) || error.status >= 500;
   return (
-    <div data-slot='root-error-document' className='flex h-dvh flex-col overflow-x-auto overflow-y-auto'>
+    <div data-slot='root-error-document' className={cn('flex flex-col', documentScrollClass)}>
       <ErrorPage />
       {offersSafeMode ? (
         <p className='px-4 pb-8 text-center text-sm text-muted-foreground'>

@@ -1494,7 +1494,10 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await settle(10);
     const latest = (): RevisionStatusProjection | undefined =>
       alpha.frames.findLast((frame) => frame.type === 'status')?.status;
-    expect(latest()?.entryManifest).toBeUndefined();
+    /* The turn's finish applied `Alpha`'s tau.json into the checkout's own tree: an apply names no manifest. */
+    expect(alpha.frames.some((frame) => frame.type === 'status' && frame.status.entryManifest !== undefined)).toBe(
+      false,
+    );
 
     /* A failed write landed its closure, then failed: its manifest is never named once it has. */
     failNext = true;

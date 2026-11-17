@@ -1209,7 +1209,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         void watchEntryClosure(root, {
           closure: bracket.closure,
           touched: paths,
-          ...(bracket.manifest === undefined ? {} : { manifest: bracket.manifest }),
+          /*
+           * Only a write of another revision's tree (an open, restore, switch or pull) names its manifest: a write into
+           * the checkout's own tree (a turn's apply) is no first view, and whether its closure was read landed before
+           * its release would otherwise decide whether it is named (STO-25, I7).
+           */
+          ...(bracket.manifest === undefined || bracket.purpose !== 'tree' ? {} : { manifest: bracket.manifest }),
         });
       }
       writing.set(root, (writing.get(root) ?? 0) + 1);

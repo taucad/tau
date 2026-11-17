@@ -141,11 +141,13 @@ export type RevisionStatusProjection = Readonly<{
    */
   landedPaths?: readonly string[];
   /**
-   * Which `tau.json` the selected checkout's tree write landed with its entry
-   * closure: the SHA-256 (lowercase hex) of its bytes, once that closure has
-   * landed and until the next tree write; absent while it has not, for a
-   * failed write and its rollback, and for a tree with no `tau.json`, which all
-   * read as unknown (I7). A page whose loaded manifest was read from these
+   * Which `tau.json` the selected checkout's write of another revision's
+   * tree (an open, restore, switch or pull: purpose `tree`) landed with its
+   * entry closure: the SHA-256 (lowercase hex) of its bytes, once that closure
+   * has landed and until the next tree write; absent while it has not, for a
+   * failed write and its rollback, for a write into the checkout's own tree
+   * (purpose `apply`), and for a tree with no `tau.json`, which all read as
+   * unknown (I7). A page whose loaded manifest was read from these
    * bytes renders the model from the first view (STO-25).
    *
    * Like `landedPaths`, the root does not set it: the host that brackets the

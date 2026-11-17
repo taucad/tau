@@ -9,6 +9,7 @@ on:
     branches:
       - claude/win-l2-load-probe-2
       - claude/win-l2-load-probe-3
+      - claude/win-l2-load-probe-4
 
 permissions:
   contents: read
@@ -24,8 +25,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        workers: ['default', '2']
-        rep: [1, 2, 3, 4, 5, 6]
+        workers: ['2']
+        rep: [1, 2, 3, 4, 5, 6, 7, 8]
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -103,7 +104,7 @@ jobs:
           if [ "$WORKERS" = default ]; then
             pnpm nx run revisions:test --outputStyle=static -- --reporter=verbose --reporter="$GITHUB_WORKSPACE/tools/probe/timing-reporter.mjs" | tee "$RUNNER_TEMP/probe/test.log" || true
           else
-            pnpm nx run revisions:test --outputStyle=static -- --maxWorkers="$WORKERS" --reporter=verbose --reporter="$GITHUB_WORKSPACE/tools/probe/timing-reporter.mjs" | tee "$RUNNER_TEMP/probe/test.log" || true
+            pnpm nx run revisions:test --outputStyle=static -- --maxWorkers="$WORKERS" --testTimeout=15000 --hookTimeout=30000 --reporter=verbose --reporter="$GITHUB_WORKSPACE/tools/probe/timing-reporter.mjs" | tee "$RUNNER_TEMP/probe/test.log" || true
           fi
           echo "wall seconds: $(( $(date +%s) - start ))" | tee -a "$RUNNER_TEMP/probe/test.log"
 

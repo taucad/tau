@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

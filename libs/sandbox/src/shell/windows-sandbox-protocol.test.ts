@@ -10,6 +10,7 @@ import {
   encodeWindowsHostFrame,
   isShellRequirement,
   windowsFramePayloadLimit,
+  windowsExclusiveLaunchRequirement,
   windowsLaunchSpec,
 } from '#shell/windows-sandbox-protocol.js';
 
@@ -178,6 +179,14 @@ describe('windows helper frames', () => {
     expect(decodeWindowsHelperFrame(raw(0x86, { status: 'sandbox-unavailable', message: 'missing' }))).toStrictEqual({
       type: 'refused',
       refusal: { status: 'sandbox-unavailable', message: 'missing' },
+    });
+    expect(
+      decodeWindowsHelperFrame(
+        raw(0x86, { status: 'sandbox-unavailable', requirement: windowsExclusiveLaunchRequirement, message: 'busy' }),
+      ),
+    ).toStrictEqual({
+      type: 'refused',
+      refusal: { status: 'sandbox-unavailable', requirement: 'exclusive-launch', message: 'busy' },
     });
   });
 

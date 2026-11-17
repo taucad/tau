@@ -155,8 +155,9 @@ create object, create subdirectory and read-control; never`DELETE`or`WRITE_DAC`)
   last would write the other's grants back after it ended. So `launch` holds the named mutex
   `Global\tau.sandbox.descriptors` from before it journals until its teardown has restored everything, and `restore`
   holds it while it writes a journal back. A second launch is refused at once, before anything changes: `refused`
-  with status `sandbox-unavailable` and the message "another sandboxed launch is running on this computer, and Windows
-  runs one at a time; try again when it ends" (NW02). `restore` then exits 1 with the same failure and keeps
+  with status `sandbox-unavailable`, `requirement: "exclusive-launch"` (what a host matches to wait and retry; the
+  TS constant is `windowsExclusiveLaunchRequirement`) and the message "another sandboxed launch is running on this computer, and Windows
+  runs one at a time; try again when it ends" (NW02). `restore` then exits 1 with the same failure and `"requirement": "exclusive-launch"` and keeps
   the journal. A launcher that dies abandons the mutex, and the next caller takes it. The provider also serializes its
   own launches and answers a second one `sandbox-unavailable` without running the helper.
 - **Descendants.** The runner places the shell in a Job Object with `KILL_ON_JOB_CLOSE`, no `BREAKAWAY_OK` and no
@@ -340,7 +341,9 @@ The helper fails closed: an unknown field anywhere in the spec is refused. `unsu
 `.exe`, a `.cmd`/`.bat`, one outside `%ProgramFiles%` and `%SystemRoot%` without `executableDigest`, a runtime root
 that is not readable or is writable, or a file that is missing, a link or open for writing elsewhere),
 `executable-digest` (a malformed digest, or one the file does not match), `absolute-paths`, `environment` (a name with
-`=` or NUL, or a name given twice in different case), `stdio` (a zero terminal size), `network-isolation`.
+`=` or NUL, or a name given twice in different case), `stdio` (a zero terminal size), `network-isolation`. A `sandbox-unavailable` refusal carries a `requirement` only
+when another launch holds the sandbox: `exclusive-launch` ("Sessions"); nothing changed, and the launch may be
+retried once that one has ended.
 
 Ordering. `refused` normally comes instead of `ready`. If the runner reported `ready` but the shell then could not be
 started (for example `CreateProcessAsUserW` failed), the helper restores the ACLs and sends `refused`

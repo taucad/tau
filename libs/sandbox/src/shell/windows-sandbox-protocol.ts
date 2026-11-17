@@ -108,9 +108,16 @@ export type WindowsHelperReady = Readonly<{
   journal: string;
 }>;
 
+/**
+ * The `requirement` of a `sandbox-unavailable` refusal sent while another launch holds the sandbox: nothing changed,
+ * and the same launch may be retried once that one has ended. Match it, never the message. @public
+ */
+export const windowsExclusiveLaunchRequirement = 'exclusive-launch';
+
 /** The helper's `refused` payload (`0x86`); nothing ran. @public */
 export type WindowsHelperRefusal = Readonly<{
   status: 'sandbox-unavailable' | 'unsupported';
+  /** For `unsupported`, what cannot be enforced; for `sandbox-unavailable`, {@link windowsExclusiveLaunchRequirement} or absent. */
   requirement?: string | undefined;
   message: string;
   diagnostic?: string | undefined;

@@ -11,6 +11,12 @@ import { ResourceQueue } from '#resource-queue.js';
 import { createWorkspaceFileService, decoder, encoder, waitFor } from '#testing/workspace-service-harness.js';
 import type { ChangeEvent, FileSystemProvider } from '#types.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
+import { serveNodeFsProvider } from '#backend/node/host.js';
+import { NodeFsProvider } from '#backend/node/provider.js';
+import { tauPathPolicy } from '#path-registry.js';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   parseProjectManifestBytes,
   projectManifestSchemaUrl,
@@ -1372,28 +1378,30 @@ describe('WorkspaceFileService', () => {
 
 describe('project discovery over unavailable roots (T-B13.3)', () => {
   it('should list Home and report a root that is not available as inaccessible without resolving its provider', async () => {
-    const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
-    const { tmpdir } = await import('node:os');
-    const { join } = await import('node:path');
-    const { serveNodeFsProvider } = await import('#backend/node/host.js');
-    const { NodeFsProvider } = await import('#backend/node/provider.js');
-    const { tauPathPolicy } = await import('#path-registry.js');
     const homeProjectId = 'proj_hhhhhhhhhhhhhhhhhhhhh';
     const home = mkdtempSync(join(tmpdir(), 'tau-discovery-home-'));
     const hung = mkdtempSync(join(tmpdir(), 'tau-discovery-hung-'));
     mkdirSync(join(home, 'alpha'));
+    const project: Project = {
+      id: homeProjectId,
+      ...projectToManifest({ name: 'Alpha', description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } }),
+    };
+    writeFileSync(join(home, 'alpha', 'tau.json'), serializeProjectManifest(projectToManifest(project)));
+    mkdirSync(join(home, 'alpha', projectIdentityPath, '..'), { recursive: true });
     writeFileSync(
-      join(home, 'alpha', 'tau.json'),
-      JSON.stringify({ $schema: projectManifestSchemaUrl, id: homeProjectId, name: 'Alpha' }),
+      join(home, 'alpha', projectIdentityPath),
+      serializeProjectIdentity({ version: 1, projectId: homeProjectId }),
     );
     const nativeWatch = NodeFsProvider.prototype.watch;
+    /* Released at teardown, so the host can close; never during the row. */
+    const release = Promise.withResolvers<() => void>();
     vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(async function (
-      this: InstanceType<typeof NodeFsProvider>,
+      this: NodeFsProvider,
       request,
       handler,
     ) {
       if ((this as unknown as { _base: string })._base === hung) {
-        return new Promise<() => void>(() => undefined);
+        return release.promise;
       }
       return nativeWatch.call(this, request, handler);
     });
@@ -1436,6 +1444,7 @@ describe('project discovery over unavailable roots (T-B13.3)', () => {
     } finally {
       vi.useRealTimers();
       vi.restoreAllMocks();
+      release.resolve(() => undefined);
       nodeService.dispose();
       await stopHost();
       port2.close();

@@ -211,9 +211,18 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     });
   };
 
-  const invalidTopologyCases: Array<{ name: string; projects: ProjectRootConfig[] }> = [
+  /* Each case's invalid entry is skipped with its reason (blueprint B3) and
+   * never mounts; the valid entries beside it, and the active route the case
+   * keeps naming, are untouched. */
+  const activeProjectId = 'proj_ggggggggggggggggggggg';
+  const invalidTopologyCases: Array<{
+    name: string;
+    projects: ProjectRootConfig[];
+    skipped: { reason: string; projectId: string };
+  }> = [
     {
       name: 'a duplicate physical route',
+      skipped: { reason: 'duplicate-physical-route', projectId: betaProjectId },
       projects: [
         {
           projectId: alphaProjectId,
@@ -231,6 +240,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     },
     {
       name: 'a late invalid project id',
+      skipped: { reason: 'invalid-project-id', projectId: '../invalid' },
       projects: [
         {
           projectId: betaProjectId,
@@ -405,16 +415,27 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     await expect(replacement.exists('still-current.txt')).resolves.toBe(false);
   });
 
-  it.each(invalidTopologyCases)('preflights $name without replacing the active topology', async ({ projects }) => {
-    const { service } = await createService();
-    await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:active' }]);
-    const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
-    await rooted.writeFile('preserved.txt', 'preserved');
+  it.each(invalidTopologyCases)(
+    'skips $name without disturbing the active topology',
+    async ({ projects, skipped }) => {
+      const { service, mountTable } = await createService();
+      await configureProjects(service, [{ projectId: activeProjectId, storageRootKey: 'memory:active' }]);
+      const rooted = service.createRootedFileSystem(`/projects/${activeProjectId}`);
+      await rooted.writeFile('preserved.txt', 'preserved');
+      const active: ProjectRootConfig = {
+        projectId: activeProjectId,
+        backend: 'memory',
+        storageRootKey: 'memory:active',
+        providerBasePath: activeProjectId,
+      };
 
-    await expect(service.configureProjectRoots({ projects, roots: [] })).rejects.toThrow();
+      const result = await service.configureProjectRoots({ projects: [active, ...projects], roots: [] });
 
-    await expect(rooted.readFile('preserved.txt', 'utf8')).resolves.toBe('preserved');
-  });
+      expect(result.skipped).toEqual([expect.objectContaining({ kind: 'project', ...skipped })]);
+      expect(mountTable.getExactMount(`/projects/${skipped.projectId}`)).toBeUndefined();
+      await expect(rooted.readFile('preserved.txt', 'utf8')).resolves.toBe('preserved');
+    },
+  );
 
   it('applies concurrent project configurations in invocation order', async () => {
     const { service, providerRegistry, mountTable } = await createService();
@@ -491,23 +512,25 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
   });
 
   it.each(['', '.tau', 'projects/nested/child', 'other/project', '/slash-prefixed'])(
-    'rejects invalid configured provider base %s before provider lookup',
+    'skips invalid configured provider base %s before provider lookup',
     async (providerBasePath) => {
-      const { service, providerRegistry } = await createService();
+      const { service, providerRegistry, mountTable } = await createService();
       const getProvider = vi.spyOn(providerRegistry, 'getProvider');
-      await expect(
-        service.configureProjectRoots({
-          projects: [
-            {
-              projectId: alphaProjectId,
-              backend: 'memory',
-              storageRootKey: `memory:invalid-base:${providerBasePath}`,
-              providerBasePath,
-            },
-          ],
-          roots: [],
-        }),
-      ).rejects.toThrow();
+      const result = await service.configureProjectRoots({
+        projects: [
+          {
+            projectId: alphaProjectId,
+            backend: 'memory',
+            storageRootKey: `memory:invalid-base:${providerBasePath}`,
+            providerBasePath,
+          },
+        ],
+        roots: [],
+      });
+      expect(result.skipped).toEqual([
+        { kind: 'project', reason: 'non-canonical-path', projectId: alphaProjectId },
+      ]);
+      expect(mountTable.getExactMount(`/projects/${alphaProjectId}`)).toBeUndefined();
       expect(getProvider).not.toHaveBeenCalled();
     },
   );

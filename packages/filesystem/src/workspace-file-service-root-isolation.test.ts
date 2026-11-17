@@ -31,6 +31,8 @@ const validProjectId = 'proj_vvvvvvvvvvvvvvvvvvvvv';
 const cleanups: Array<() => Promise<void> | void> = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const cleanup of cleanups.splice(0).reverse()) {
     // oxlint-disable-next-line no-await-in-loop -- Each fixture owns its host and temporary roots.
     await cleanup();
@@ -80,6 +82,20 @@ const createNodeService = (allowed: readonly string[]) => {
 
 const nodeKey = (path: string): string => `node:${path}`;
 
+/**
+ * Poll on real I/O turns while `setTimeout` is faked; `vi.waitFor` would
+ * advance the fake clock and fire the deadline under test.
+ */
+const until = async (condition: () => boolean): Promise<void> => {
+  for (let turn = 0; turn < 10_000 && !condition(); turn += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- Each turn yields to the host's message port.
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+  expect(condition()).toBe(true);
+};
+
 /** The host directory one node provider serves. */
 const baseOf = (provider: NodeFsProvider): string => (provider as unknown as { _base: string })._base;
 
@@ -99,7 +115,12 @@ const stubAdmission = (behaviour: ReadonlyMap<string, string | 'hang' | (() => P
       calls.push(base);
       const outcome = behaviour.get(base);
       if (outcome === 'hang') {
-        return new Promise<() => void>(() => undefined);
+        /* Released at teardown, so the host can close; never during the row. */
+        const hung = Promise.withResolvers<() => void>();
+        cleanups.push(() => {
+          hung.resolve(() => undefined);
+        });
+        return hung.promise;
       }
       if (typeof outcome === 'function') {
         return outcome();
@@ -207,7 +228,7 @@ describe('WorkspaceFileService root isolation', () => {
     const statuses = await service.recheckRoots();
 
     expect(statuses.map(({ state }) => state)).toEqual(['available', 'available']);
-    expect(service.getRootStatuses()).toEqual(statuses);
+    await expect(service.getRootStatuses()).resolves.toEqual(statuses);
     expect(events).toEqual([statuses]);
     await expect(service.readFile(`/projects/${lostProjectId}/main.ts`, 'utf8')).resolves.toBe('lost source');
   });
@@ -226,7 +247,9 @@ describe('WorkspaceFileService root isolation', () => {
         nodeProject(home, 'proj_nnnnnnnnnnnnnnnnnnnnn', './valid/../valid'),
         nodeProject(home, validProjectId, 'valid'),
       ],
-      checkouts: [{ backend: 'node', path: home, checkoutId: 'chk_one', providerBasePath: 'outside-checkouts' }],
+      checkouts: [
+        { backend: 'node', path: home, projectId: homeProjectId, checkoutId: 'chk_one', providerBasePath: 'outside-checkouts' },
+      ],
       roots: [{ backend: 'node', path: home }],
     });
 
@@ -280,13 +303,12 @@ describe('WorkspaceFileService root isolation', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 
     let settled: Awaited<ReturnType<WorkspaceFileService['configureProjectRoots']>> | undefined;
-    const first = service.configureProjectRoots(configuration).then((result) => {
-      settled = result;
-      return result;
-    });
-    await vi.waitFor(() => {
-      expect(calls).toContain(slow);
-    });
+    const track = async (): Promise<Awaited<ReturnType<WorkspaceFileService['configureProjectRoots']>>> => {
+      settled = await service.configureProjectRoots(configuration);
+      return settled;
+    };
+    const first = track();
+    await until(() => calls.includes(slow));
     await vi.advanceTimersByTimeAsync(4999);
     expect(settled).toBeUndefined();
     await vi.advanceTimersByTimeAsync(1);
@@ -305,9 +327,8 @@ describe('WorkspaceFileService root isolation', () => {
     const events: Array<readonly RootStatus[]> = [];
     service.onRootStatusChange((roots) => events.push(roots));
     late.resolve(() => undefined);
-    await vi.waitFor(() => {
-      expect(service.getRootStatuses()[1]?.state).toBe('available');
-    });
+    await until(() => events.at(-1)?.[1]?.state === 'available');
+    await expect(service.getRootStatuses()).resolves.toEqual(events.at(-1));
     expect(events.at(-1)?.map(({ state }) => state)).toEqual(['available', 'available']);
   });
 
@@ -322,9 +343,7 @@ describe('WorkspaceFileService root isolation', () => {
       projects: [],
       roots: [{ backend: 'node', path: home }, ...hung.map((path) => ({ backend: 'node', path }) as const)],
     });
-    await vi.waitFor(() => {
-      expect(calls.filter((base) => base !== home).length).toBeGreaterThan(0);
-    });
+    await until(() => calls.some((base) => base !== home));
     await vi.advanceTimersByTimeAsync(5000);
     const result = await configured;
     expect(result.roots.slice(1).map(({ state }) => state)).toEqual(Array.from({ length: 5 }, () => 'unreachable'));
@@ -375,6 +394,9 @@ describe('WorkspaceFileService root isolation', () => {
 
     gone = true;
     dropWatcher?.();
+    await vi.waitFor(async () => {
+      expect(await service.pollExternalChanges()).toBe(false);
+    });
     const second = await service.configureProjectRoots(configuration);
 
     expect(second.roots[1]).toEqual({

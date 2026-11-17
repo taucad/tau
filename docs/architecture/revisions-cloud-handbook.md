@@ -173,7 +173,7 @@ window on each worker. Only hits are cached, so nothing has to be invalidated ac
 in flight finishes.
 
 Owner-facing routes: `GET`/`POST`/`PATCH`/`DELETE` `/v1/projects/:projectId/collaborators[/:email]`;
-the invitee accepts at `POST /v1/invitations/:token`. Invitations are idempotent on
+the invitee accepts at `POST /v1/invitations/accept`, with the token in the body so no access log sees it. Invitations are idempotent on
 `(project, email)`, a re-invite un-revokes and re-issues, a `PATCH` changes a role without
 invalidating a link the invitee already holds, and the rate limit is 200 invitations per owner per
 day, **failing closed**.

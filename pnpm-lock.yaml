@@ -3659,9 +3659,18 @@ importers:
       '@taucad/events':
         specifier: workspace:*
         version: link:../../../libs/events
+      '@taucad/fs-client':
+        specifier: workspace:*
+        version: link:../fs-client
       '@taucad/grammars':
         specifier: workspace:*
         version: link:../../../libs/grammars
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../../packages/parameters
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:../../../packages/revisions
       '@taucad/ui':
         specifier: workspace:*
         version: link:../../../packages/ui
@@ -3695,6 +3704,9 @@ importers:
       remark-rehype:
         specifier: 'catalog:'
         version: 11.1.2
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
       unified:
         specifier: 'catalog:'
         version: 11.0.5
@@ -3708,6 +3720,9 @@ importers:
       '@taucad/kcl-wasm-lib':
         specifier: 'catalog:'
         version: 0.1.192
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
       '@testing-library/jest-dom':
         specifier: 'catalog:'
         version: 6.6.3
@@ -3723,6 +3738,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
+      vitest-mock-extended:
+        specifier: 'catalog:'
+        version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
 
   apps/libs/files-ui:
     dependencies:

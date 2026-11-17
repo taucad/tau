@@ -21,6 +21,12 @@ export type TauHeaderInjectionOptions = {
   readonly token: () => string | undefined;
   /** `tau-client` value, e.g. `tau-desktop/0.0.1`. */
   readonly clientHeader: string;
+  /**
+   * Settles once the stored credential has been read. The window no longer waits for it (B32), so a request to an
+   * allowed origin made before then waits instead, at most {@link credentialWaitMilliseconds}, and then carries
+   * whatever token there is. Omitted, nothing waits.
+   */
+  readonly ready?: Promise<unknown>;
 };
 
 /**
@@ -86,6 +92,9 @@ type WebRequestLike = {
   ): void;
 };
 
+/** The longest an authenticated request waits for the stored credential to be read: a keychain prompt can take minutes. */
+export const credentialWaitMilliseconds = 10_000;
+
 /**
  * Install the injection listener on one session.
  *
@@ -94,10 +103,37 @@ type WebRequestLike = {
  * @returns Nothing.
  */
 export const installTauHeaderInjection = (webRequest: WebRequestLike, options: TauHeaderInjectionOptions): void => {
+  const { ready } = options;
+  let credentialRead = ready === undefined;
+  const waitForCredential = (async (): Promise<void> => {
+    try {
+      await ready;
+    } catch {
+      /* A credential that could not be read leaves the session signed out; requests go without one. */
+    }
+    credentialRead = true;
+  })();
   /* `<all_urls>` with an in-listener origin test, never a URL-pattern filter:
    * pattern filters do not match custom standard schemes, and the exactness of
    * the decision matters more than the small cost of seeing every request. */
   webRequest.onBeforeSendHeaders({ urls: ['<all_urls>'] }, (details, callback) => {
-    callback({ requestHeaders: injectTauHeaders(details.url, details.requestHeaders, options) });
+    const origin = originOf(details.url);
+    if (credentialRead || origin === undefined || !options.allowedOrigins.includes(origin)) {
+      callback({ requestHeaders: injectTauHeaders(details.url, details.requestHeaders, options) });
+      return;
+    }
+    /* Only a request that would carry the credential waits for it; everything else goes at once. */
+    // async-iife: bootstrap -- webRequest listeners answer through their callback, not a promise.
+    void (async (): Promise<void> => {
+      let bound: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        waitForCredential,
+        new Promise<void>((resolve) => {
+          bound = setTimeout(resolve, credentialWaitMilliseconds);
+        }),
+      ]);
+      clearTimeout(bound);
+      callback({ requestHeaders: injectTauHeaders(details.url, details.requestHeaders, options) });
+    })();
   });
 };

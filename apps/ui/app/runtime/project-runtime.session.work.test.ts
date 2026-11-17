@@ -12,7 +12,7 @@ import { EditorSaveConflictError } from '@taucad/fs-client/file-content-service'
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
-import { EditorDocumentSession, isRecordingEditorConflict } from '#lib/editor-document-session.js';
+import { EditorDocumentSession, isRecordingEditorConflict } from '@taucad/editor-ui/lib/editor-document-session';
 import { sessionRuntimeWork } from '#runtime/project-runtime.session.js';
 import type { SessionRuntimeFlushKind } from '#services/sessions-store.js';
 

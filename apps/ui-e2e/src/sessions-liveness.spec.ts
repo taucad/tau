@@ -3,6 +3,10 @@
  *
  * Dedicated workers come from Playwright, not product instrumentation. The
  * basename Vite gives the project kernel entry counts.
+ *
+ * Needs: the self-host tier `test:e2e` starts (UI only). Runs answer from the agent-host gateway stand-in
+ * (`installAgentHostGatewayFixture`), as every other chat spec's do, so no row signs in or reaches a Tau API: a
+ * self-host build has no credit fence (#2288).
  */
 
 /* oxlint-disable eslint/no-await-in-loop -- projects and sidebar pages must open in browser-observed order. */
@@ -66,15 +70,6 @@ const seedProject = async (): Promise<string> => {
    * it proves that creation has reached a resolved project route. */
   await target.expectVisible(selectors.getByRole('button', { name: /^Open History\./u }), 120_000);
   return target.currentUrl();
-};
-
-const authenticateAgentSession = async (): Promise<void> => {
-  await target.authenticateTauTestUser({
-    creditAtoms: '100000000',
-    email: `sessions-liveness-${globalThis.crypto.randomUUID()}@e2e.tau`,
-    name: 'Sessions Liveness E2E',
-    password: 'Tau-test-password-7!',
-  });
 };
 
 /** Page the sidebar until it has no next page, waiting on the list itself. */
@@ -317,7 +312,6 @@ const startAgent = async (projectMarker: string): Promise<void> => {
 
 describe('liveness across navigation (S48(16), V21)', () => {
   test('keeps two running projects live, settles one, and releases the other on manual Close', async () => {
-    await authenticateAgentSession();
     await target.setViewport({ width: 1440, height: 900 });
     const first = await seedProject();
     const second = await seedProject();

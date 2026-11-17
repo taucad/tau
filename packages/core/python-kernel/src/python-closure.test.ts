@@ -131,11 +131,14 @@ describe('createPythonSeal', () => {
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, 'x');
     }
+    const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'tau-python-seal-scratch-')));
+    roots.push(scratch);
     return {
       package: '@taucad/example',
       dependency: 'engine',
       target,
       root: directory,
+      scratch,
       files: paths.map((path) => row(path, 'e')),
       signal: new AbortController().signal,
     };
@@ -229,6 +232,7 @@ describe('createPythonSeal', () => {
     });
     expect(selfTest!.writablePath).not.toBe(input.root);
     expect(selfTest!.writablePath).toContain('tau-example-seal-');
+    expect(dirname(selfTest!.writablePath)).toBe(input.scratch);
     expect(selfTest!.workingDirectory).toBe(selfTest!.writablePath);
     expect(existsSync(selfTest!.writablePath)).toBe(false);
   });
@@ -259,6 +263,7 @@ describe('createPythonSeal', () => {
     const [compile, selfTest] = commands;
     const compiler = dirname(compile!.executablePath);
     expect(compiler).toContain('tau-example-compile-');
+    expect(dirname(compiler)).toBe(input.scratch);
     expect(compile).toMatchObject({
       executableSha256: hex('e'),
       readablePaths: [compiler],

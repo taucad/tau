@@ -533,7 +533,10 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
         provider === undefined
           ? noProvider(platform)
           : windowsStatus?.installed === false
-            ? windowsSetupNeeded
+            ? {
+                ...windowsSetupNeeded,
+                ...(windowsStatus.diagnostic === undefined ? {} : { diagnostic: windowsStatus.diagnostic }),
+              }
             : await probeHostShell({
                 /* One sandbox account serves every Windows launch: one Terminal, and agent calls one at a time (A23). */
                 ...(platform === 'win32' ? { maxTerminals: 1, maxExecutions: 1 } : {}),
@@ -586,6 +589,11 @@ export const createDesktopShell = (options: DesktopShellOptions): DesktopShell =
             },
         outcome.status === 'available' ? undefined : 'warn',
       );
+      /* "Not set up" is asked again at the next probe, never kept: a status run that failed or ran late at app start
+         must not stand for the app's life (setup itself happens outside it, in an elevated helper). */
+      if (windowsStatus?.installed === false) {
+        probing = undefined;
+      }
       return outcome;
     })();
     return probing;

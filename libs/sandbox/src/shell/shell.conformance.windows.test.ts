@@ -40,7 +40,7 @@ import { arch, homedir, networkInterfaces, platform, release, tmpdir, version } 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { refusedShellEnvironment } from '#shell/shell-environment.js';
 import {
@@ -54,8 +54,12 @@ import {
 } from '#shell/shell-identity.js';
 import type { ShellExecutable } from '#shell/shell-identity.js';
 import type { ShellLaunch, ShellLaunchOutcome, ShellProcess, ShellProvider } from '#shell/shell-provider.js';
-import { launchExclusionConformance, nativeWorkerConformance } from '#shell/windows-native-worker.fixture.js';
-import type { NativeWorkerContext } from '#shell/windows-native-worker.fixture.js';
+import {
+  launchExclusionConformance,
+  nativeWorkerConformance,
+  personSession,
+} from '#shell/windows-native-worker.fixture.js';
+import type { NativeWorkerContext, PersonSession } from '#shell/windows-native-worker.fixture.js';
 import { createWindowsShellProvider } from '#shell/windows-shell-provider.js';
 
 const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
@@ -151,6 +155,14 @@ const delay = async (milliseconds: number): Promise<void> =>
 
 /** A PowerShell single-quoted literal. */
 const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+/**
+ * PowerShell that writes `value` (an expression) to `path` (an expression) atomically: a sibling temporary file, then a
+ * rename into place (`File.Replace` over an existing target, which never leaves it missing). `File.Move` and
+ * `File.Replace` touch only the two paths; `Move-Item` inspects the destination's ancestors, which the AppContainer may
+ * not read. A file the test polls while a shell writes it must never be seen half written.
+ */
+const atomicWrite = (path: string, value: string): string =>
+  `& { param($target, $text) $ErrorActionPreference = 'Stop'; $partial = $target + '.partial'; Set-Content -LiteralPath $partial -Value $text -NoNewline; if (Test-Path -LiteralPath $target) { [System.IO.File]::Replace($partial, $target, [NullString]::Value) } else { [System.IO.File]::Move($partial, $target) } } ${path} ${value}`;
 
 /** `-EncodedCommand` text: UTF-16LE, base64, so a nested script survives every command line it passes through. */
 const encoded = (script: string): string => Buffer.from(script, 'utf16le').toString('base64');
@@ -374,14 +386,14 @@ const pipeServer = async (
     '$servers = @(1..4 | ForEach-Object { New-Instance })',
     '$waits = @($servers | ForEach-Object { $_.WaitForConnectionAsync() })',
     '$accepted = 0',
-    'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_COUNT -Value 0 -NoNewline',
+    atomicWrite('$env:CONFORMANCE_PIPE_COUNT', "'0'"),
     'Set-Content -LiteralPath $env:CONFORMANCE_PIPE_LISTENING -Value 1 -NoNewline',
     'while (-not (Test-Path -LiteralPath $env:CONFORMANCE_PIPE_STOP)) {',
     '  for ($i = 0; $i -lt $servers.Count; $i++) {',
     '    if ($waits[$i].IsCompleted) {',
     "      if ($waits[$i].Status -eq 'RanToCompletion') {",
     '        $accepted++',
-    '        Set-Content -LiteralPath $env:CONFORMANCE_PIPE_COUNT -Value $accepted -NoNewline',
+    `        ${atomicWrite('$env:CONFORMANCE_PIPE_COUNT', '"$accepted"')}`,
     '      }',
     '      $servers[$i].Dispose()',
     '      $servers[$i] = New-Instance',
@@ -547,6 +559,8 @@ const receipt = (): Record<string, unknown> => {
   };
 };
 
+let sessionBefore: PersonSession | undefined;
+
 describe.runIf(enabled)('Windows shell conformance', () => {
   beforeAll(async () => {
     if (process.platform !== 'win32') {
@@ -559,6 +573,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     if (helperStatus['installed'] === false) {
       throw new Error('the Windows sandbox is not set up on this machine; run the helper `setup --for-user` elevated.');
     }
+    sessionBefore = personSession(workerProbe);
+    observations['session'] = sessionBefore;
     proxyPorts = Array.isArray(helperStatus['proxyPorts']) ? (helperStatus['proxyPorts'] as number[]) : [];
     const resolved = await resolveShellExecutable({ platform: 'win32', environment: process.env });
     if ('status' in resolved) {
@@ -630,6 +646,12 @@ describe.runIf(enabled)('Windows shell conformance', () => {
       onHelperDiagnostic: recordHelperDiagnostic,
     });
     ready = true;
+  });
+
+  /* Every row ends with the person's session as it began: the same window-station, desktop and volume-root DACLs (as
+     `setup` left them), and a new process of theirs that starts and creates a window. */
+  afterEach(() => {
+    expect(personSession(workerProbe)).toStrictEqual(sessionBefore);
   });
 
   afterAll(() => {
@@ -1168,7 +1190,8 @@ describe.runIf(enabled)('Windows shell conformance', () => {
         mkdirSync(sync, { recursive: true });
         const parked = run(
           [
-            `@{ pid = $PID; TEMP = $env:TEMP; LOCALAPPDATA = $env:LOCALAPPDATA; APPDATA = $env:APPDATA } | ConvertTo-Json -Compress | Set-Content -LiteralPath ${quote(join(sync, 'seen.json'))} -NoNewline`,
+            `$seen = @{ pid = $PID; TEMP = $env:TEMP; LOCALAPPDATA = $env:LOCALAPPDATA; APPDATA = $env:APPDATA } | ConvertTo-Json -Compress`,
+            atomicWrite(quote(join(sync, 'seen.json')), '$seen'),
             `while (-not (Test-Path -LiteralPath ${quote(join(sync, 'release'))})) { Start-Sleep -Milliseconds 50 }`,
           ].join('\n'),
           { commandId: `conformance#w08-${tag}` },
@@ -1178,8 +1201,9 @@ describe.runIf(enabled)('Windows shell conformance', () => {
           return parked;
         };
         try {
-          if (!(await waitUntil(() => existsSync(join(sync, 'seen.json')), 30_000))) {
-            throw new Error(`the ${tag} launch never recorded its PID`);
+          await Promise.race([waitUntil(() => existsSync(join(sync, 'seen.json')), 30_000), parked]);
+          if (!existsSync(join(sync, 'seen.json'))) {
+            throw new Error(`the ${tag} launch recorded no PID: ${JSON.stringify(await release())}`);
           }
           const seen = JSON.parse(readFileSync(join(sync, 'seen.json'), 'utf8')) as Record<string, string | number>;
           const token = shellTokenOf(Number(seen['pid']));
@@ -1234,7 +1258,7 @@ describe.runIf(enabled)('Windows shell conformance', () => {
     const sentinels = Object.fromEntries(names.map((name) => [name, join(work, `${prefix}-${name}.beat`)]));
     const pids = Object.fromEntries(names.map((name) => [name, join(work, `${prefix}-${name}.pid`)]));
     const writer = (name: (typeof names)[number]): string =>
-      `Set-Content -LiteralPath ${quote(pids[name]!)} -Value $PID -NoNewline; while ($true) { Add-Content -LiteralPath ${quote(sentinels[name]!)} -Value b -NoNewline; Start-Sleep -Milliseconds 100 }`;
+      `${atomicWrite(quote(pids[name]!), '"$PID"')}; while ($true) { Add-Content -LiteralPath ${quote(sentinels[name]!)} -Value b -NoNewline; Start-Sleep -Milliseconds 100 }`;
     const argumentsOf = (name: (typeof names)[number]): string =>
       `-NoLogo -NoProfile -NonInteractive -EncodedCommand ${encoded(writer(name))}`;
     const breakaway = [

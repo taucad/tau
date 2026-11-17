@@ -421,3 +421,37 @@ export const windowsLaunchSpec = (
   },
   journal: extra.journal,
 });
+
+/**
+ * Exit codes a Windows process can end with before any of its own code runs (NTSTATUS values, as Node reports them),
+ * and what each says about the helper.
+ */
+const windowsProcessFailures: ReadonlyMap<number, string> = new Map([
+  [
+    0xc0_00_01_42,
+    'STATUS_DLL_INIT_FAILED: Windows could not start it, so it could not say why; a window station or desktop that no longer admits the person is the usual cause',
+  ],
+  [0xc0_00_01_35, 'STATUS_DLL_NOT_FOUND: a DLL it needs is missing'],
+  [0xc0_00_00_05, 'STATUS_ACCESS_VIOLATION: it crashed'],
+  [0xc0_00_04_09, 'STATUS_STACK_BUFFER_OVERRUN: it aborted'],
+]);
+
+/**
+ * How a helper that ended without a frame ended: its exit code, in hex with the NTSTATUS name and meaning when it is
+ * one Windows ends a process with before the process can report anything, or the signal.
+ *
+ * @param code - The exit code Node reported, or `undefined` with a signal.
+ * @param signal - The signal Node reported, or `undefined` with a code.
+ * @returns Text for a refusal's message.
+ */
+export const windowsHelperEnd = (code: number | undefined, signal: string | undefined): string => {
+  if (code === undefined) {
+    return `signal ${String(signal)}`;
+  }
+  /* Node may report an NTSTATUS as a negative 32-bit value. */
+  const status = code < 0 ? code + 2 ** 32 : code;
+  const known = windowsProcessFailures.get(status);
+  return known === undefined
+    ? `exit ${String(code)}`
+    : `exit ${String(code)}, 0x${status.toString(16).toUpperCase()} ${known}`;
+};

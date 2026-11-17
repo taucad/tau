@@ -345,6 +345,32 @@ describe('desktopShellProvider', () => {
       },
     );
 
+    it.skipIf(process.platform === 'win32')(
+      'says why a status run that failed read as not set up, and asks again at the next probe',
+      async () => {
+        const helper = join(base, 'tau-windows-sandbox');
+        const record = join(base, 'install.json');
+        await writeFile(
+          helper,
+          `#!/bin/sh\nif [ -f '${record}' ]; then cat '${record}'; exit 0; fi\necho 'tau-windows-sandbox status: Access is denied. (os error 5)' >&2\nexit 3\n`,
+        );
+        await chmod(helper, 0o755);
+        const environment = { TAU_WINDOWS_SHELL_SANDBOX: '1', TAU_WINDOWS_SANDBOX_HELPER: helper };
+        const shell = createDesktopShell({ appDataRoots: [appData], platform: 'win32', environment });
+
+        await expect(shell.probe()).resolves.toMatchObject({
+          code: 'provisioning-required',
+          diagnostic:
+            'exit 3; its output is not JSON: ""; stderr: tau-windows-sandbox status: Access is denied. (os error 5)',
+        });
+
+        /* The record was there all along; the next probe reads it, with no setup in between. */
+        await writeFile(record, installedRecord);
+
+        await expect(shell.probe()).resolves.toMatchObject({ status: 'unavailable', code: 'shell-missing' });
+      },
+    );
+
     describe('provision', () => {
       it.skipIf(process.platform === 'win32')(
         'runs the one-time setup with the helper, then probes again past the setup answer',

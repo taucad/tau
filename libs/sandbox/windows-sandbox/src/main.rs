@@ -37,7 +37,7 @@ fn main() {
 #[cfg(windows)]
 fn dispatch(command: Command) -> i32 {
     match command {
-        Command::Status => win::setup::status(),
+        Command::Status { quick } => win::setup::status(quick),
         Command::Setup { for_user, proxy_ports } => {
             match win::setup::setup(&win::setup::SetupOptions { for_user, proxy_ports }) {
                 Ok(record) => {
@@ -86,7 +86,7 @@ fn dispatch(command: Command) -> i32 {
 #[cfg(not(windows))]
 fn dispatch(command: Command) -> i32 {
     match command {
-        Command::Status => {
+        Command::Status { .. } => {
             println!("{{\"installed\":false}}");
             0
         }

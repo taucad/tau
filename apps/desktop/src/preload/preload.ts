@@ -38,6 +38,9 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 
 import {
   appIconThemeChannel,
+  bootChannels,
+  recoveryChannels,
+  rendererBootStages,
   telemetryConsentChannel,
   openDirectoryChannel,
   directoryGrantChannels,
@@ -269,6 +272,34 @@ contextBridge.exposeInMainWorld('tau', {
     },
   },
   nodeFs: { homeRoot: bootstrap.homeRoot },
+  /* D0: present only in a launch that started in safe mode, with why. */
+  ...(bootstrap.safeMode === undefined ? {} : { safeMode: { reason: bootstrap.safeMode.reason } }),
+  /* D0: the renderer's two boot stages for main's ledger and watchdog; anything else is dropped here. */
+  boot: {
+    report: (stage: unknown): void => {
+      if (rendererBootStages.includes(stage as (typeof rendererBootStages)[number])) {
+        ipcRenderer.send(bootChannels.stage, stage);
+      }
+    },
+  },
+  /* D0, D6: the exits a classified error panel and the safe-mode bar offer. Main checks the sender and the action. */
+  troubleshooting: {
+    showLogs: async (): Promise<void> => {
+      await ipcRenderer.invoke(recoveryChannels.action, { type: 'show-logs' });
+    },
+    open: async (): Promise<void> => {
+      await ipcRenderer.invoke(recoveryChannels.action, { type: 'open-recovery-window' });
+    },
+    restartInSafeMode: async (): Promise<void> => {
+      await ipcRenderer.invoke(recoveryChannels.action, { type: 'restart', mode: 'safe' });
+    },
+    restartNormally: async (): Promise<void> => {
+      await ipcRenderer.invoke(recoveryChannels.action, { type: 'restart', mode: 'normal' });
+    },
+    copyDiagnostics: async (): Promise<void> => {
+      await ipcRenderer.invoke(recoveryChannels.action, { type: 'copy-diagnostics' });
+    },
+  },
   runtimeKernelIds: bootstrap.runtimeKernelIds,
   firstRun: bootstrap.firstRun,
   /* A call, not a value (D17): main answers when ACP discovery settles, which no

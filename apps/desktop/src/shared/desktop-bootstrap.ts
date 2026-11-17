@@ -117,6 +117,35 @@ export const computeControlChannels = {
   collect: 'tau:compute:collect',
 } as const;
 
+/**
+ * The renderer's two boot stages (D0, R12): `shell-mounted` and `home-ready`, sent from the app's trusted main frame to
+ * main's boot-health ledger and watchdog. Exposed to the page as `tau.boot.report`.
+ */
+export const bootChannels = {
+  stage: 'tau:boot:stage',
+} as const;
+
+/** The stages the renderer may report on {@link bootChannels}. */
+export const rendererBootStages = ['shell-mounted', 'home-ready'] as const;
+export type RendererBootStage = (typeof rendererBootStages)[number];
+
+/**
+ * The recovery surfaces' channels (D0, D6, R12). `state` returns the launch's mode, the ledger summary, the updater's
+ * snapshot and the pending resets; `changed` is main telling the recovery window that one of them changed; `action`
+ * runs one recovery action (`recovery-window.ts` names them and who may send each).
+ */
+export const recoveryChannels = {
+  state: 'tau:recovery:state',
+  changed: 'tau:recovery:changed',
+  action: 'tau:recovery:action',
+} as const;
+
+/** The switch that starts one launch in safe mode (D0). Never stored, and dropped from every relaunch. */
+export const safeModeSwitch = '--safe-mode';
+
+/** Why a launch started in safe mode: the switch, or the ledger's count of unhealthy launches. */
+export type SafeModeReason = 'requested' | 'unhealthy-launches';
+
 /** The two native app-icon variants. */
 export type AppIconTheme = 'light' | 'dark';
 
@@ -133,6 +162,8 @@ export type DesktopBootstrap = {
    * the setup offer reads it, and only the first window of that launch carries it.
    */
   readonly firstRun: boolean;
+  /** Present only when this launch started in safe mode (D0). Safe mode is a property of one launch, never a setting. */
+  readonly safeMode?: { readonly reason: SafeModeReason };
 };
 
 /**
@@ -148,11 +179,13 @@ export const readBootstrap = (argv: readonly string[]): DesktopBootstrap => {
   }
   try {
     const parsed = JSON.parse(argument.slice(bootstrapArgumentPrefix.length)) as Partial<DesktopBootstrap>;
+    const reason = parsed.safeMode?.reason;
     return {
       env: parsed.env ?? {},
       homeRoot: parsed.homeRoot ?? '',
       runtimeKernelIds: parsed.runtimeKernelIds ?? [],
       firstRun: parsed.firstRun === true,
+      ...(reason === 'requested' || reason === 'unhealthy-launches' ? { safeMode: { reason } } : {}),
     };
   } catch {
     /* A malformed payload is a shell bug, not a renderer input; boot with

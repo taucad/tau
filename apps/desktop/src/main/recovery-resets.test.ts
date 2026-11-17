@@ -143,8 +143,8 @@ describe('recovery resets (T-R12.7)', () => {
     requestReset(root, 'folder-list');
     expect(cacheDirectories).toContain('GPUCache');
     expect(applyPendingResets(options(root))).toEqual([
-      { store: 'caches', outcome: 'absent' },
       { store: 'folder-list', outcome: 'absent' },
+      { store: 'caches', outcome: 'absent' },
     ]);
   });
 

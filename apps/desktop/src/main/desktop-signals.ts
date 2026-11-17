@@ -367,3 +367,81 @@ export const storeQuarantinedSignal = (store: 'granted-roots'): DesktopSignal =>
   fingerprint: ['desktop-store-quarantined', store],
   tags: { store },
 });
+
+/**
+ * The event for a launch the ledger counted as unhealthy (D0, R12), sent by the launch after it.
+ *
+ * @param previous - The previous launch's furthest stage, how it ended and its mode.
+ * @param count - Consecutive unhealthy launches of this build, this one included.
+ * @returns The signal.
+ */
+export const bootUnhealthySignal = (
+  previous: { readonly stage: string; readonly ended?: string | undefined; readonly mode: string },
+  count: number,
+): DesktopSignal => ({
+  message: `Unhealthy launch: ${previous.stage}`,
+  level: 'error',
+  fingerprint: ['desktop-boot-unhealthy', previous.stage],
+  tags: { stage: previous.stage, ended: previous.ended ?? 'none', count: String(count), mode: previous.mode },
+});
+
+/**
+ * The event for a launch that started in safe mode (D0, R12).
+ *
+ * @param trigger - `requested` (the switch) or `unhealthy-launches` (the ledger's count).
+ * @param count - Consecutive unhealthy launches of this build.
+ * @returns The signal.
+ */
+export const safeModeSignal = (trigger: 'requested' | 'unhealthy-launches', count: number): DesktopSignal => ({
+  message: `Safe mode: ${trigger}`,
+  level: 'warning',
+  fingerprint: ['desktop-safe-mode', trigger],
+  tags: { trigger, count: String(count) },
+});
+
+/**
+ * The event for a recovery surface main showed (D0, R12).
+ *
+ * @param surface - The recovery window, or the native dialog under it.
+ * @param trigger - Why it was shown.
+ * @returns The signal.
+ */
+export const recoveryShownSignal = (surface: 'window' | 'dialog', trigger: string): DesktopSignal => ({
+  message: `Recovery shown: ${surface}`,
+  level: 'warning',
+  fingerprint: ['desktop-recovery-shown', surface, trigger],
+  tags: { surface, trigger },
+});
+
+/**
+ * The event for a reset main applied at startup (D0, R12): the store was moved into the quarantine folder, was not
+ * there, or could not be moved.
+ *
+ * @param store - The store.
+ * @param outcome - What happened to it.
+ * @returns The signal.
+ */
+export const storeResetSignal = (store: string, outcome: 'moved' | 'absent' | 'failed'): DesktopSignal => ({
+  message: `Store reset: ${store} ${outcome}`,
+  level: 'warning',
+  fingerprint: ['desktop-store-reset', store, outcome],
+  tags: { store, outcome },
+});
+
+/**
+ * The event for a GPU process that exited (B26).
+ *
+ * @param reason - Electron's exit reason.
+ * @param exitCode - Its exit code.
+ * @param safeMode - Whether this launch is in safe mode.
+ * @returns The signal.
+ */
+export const gpuProcessGoneSignal = (reason: string, exitCode: number, safeMode: boolean): DesktopSignal => {
+  const safeReason = /^[a-z-]{1,32}$/u.test(reason) ? reason : 'unknown';
+  return {
+    message: `GPU process gone: ${safeReason}`,
+    level: 'error',
+    fingerprint: ['desktop-gpu-process-gone', safeReason],
+    tags: { reason: safeReason, exit_code: String(exitCode), safe_mode: String(safeMode) },
+  };
+};

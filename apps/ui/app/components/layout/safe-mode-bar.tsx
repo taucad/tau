@@ -5,6 +5,7 @@
  */
 import { ShieldAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { desktopTroubleshooting } from '#lib/desktop-safe-mode.js';
 
 /** Why this load started in safe mode. `requested`: the person asked for it; `unhealthy-launches`: the watchdog did. */
 export type SafeModeReason = 'requested' | 'unhealthy-launches';
@@ -45,5 +46,44 @@ export function SafeModeBar({
         </a>
       )}
     </div>
+  );
+}
+
+/**
+ * The desktop bar's exits: the recovery panel (main's recovery window) and a normal restart. A shell whose preload
+ * lacks a call shows no button for it.
+ *
+ * @returns The actions.
+ * @public
+ */
+export function DesktopSafeModeActions(): React.JSX.Element {
+  const troubleshooting = desktopTroubleshooting();
+  const open = troubleshooting?.open;
+  const restartNormally = troubleshooting?.restartNormally;
+  return (
+    <>
+      {open === undefined ? undefined : (
+        <button
+          type='button'
+          className='underline underline-offset-2'
+          onClick={() => {
+            void open();
+          }}
+        >
+          Open Recovery…
+        </button>
+      )}
+      {restartNormally === undefined ? undefined : (
+        <button
+          type='button'
+          className='underline underline-offset-2'
+          onClick={() => {
+            void restartNormally();
+          }}
+        >
+          Restart normally
+        </button>
+      )}
+    </>
   );
 }

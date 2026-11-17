@@ -50,7 +50,7 @@ export const defaultKernelSelectionReport: KernelSelectionReport = (entry) => {
       reportUrl: `${requireClientEnvironmentUrl('TAU_API_URL')}/v1/telemetry/ingest`,
       name: entry.name,
       duration: entry.duration,
-      detail: entry.detail ?? {},
+      detail: entry.detail,
     });
   } catch (error) {
     console.warn('[kernelSelectionTelemetry] dropped', error);

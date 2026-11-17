@@ -882,18 +882,51 @@ assert.deepEqual(
   ['win32-x64/windows-nsis:passed'],
 );
 rejectPlatform(windowsProduction, windowsProductionReceipts, { scope: 'all', pattern: /all five in production/u });
-for (const index of windowsProductionReceipts.keys()) {
-  rejectPlatform(
-    windowsProduction,
-    windowsProductionReceipts.filter((_, other) => other !== index),
-    { scope: 'windows' },
-  );
+// Every Windows CI receipt stays individually required; dropping the VM receipt is the pending case below.
+for (const [index, proof] of windowsProductionReceipts.entries()) {
+  if (proof.environment.kind === 'ci') {
+    rejectPlatform(
+      windowsProduction,
+      windowsProductionReceipts.filter((_, other) => other !== index),
+      { scope: 'windows' },
+    );
+  }
 }
-// Windows clean-host acceptance is never pending: unlike Mac-only, a CI-only Windows promotion is refused.
+// Operator ruling 2026-11-17T08:27Z: the beta Windows route may publish on CI receipts alone, explicitly clean-host
+// pending, until its Windows 11 clean-host run; a later VM receipt promotes it to passed.
+assert.deepEqual(
+  qualifyDesktopScopedRoutes(
+    windowsProduction,
+    windowsProductionReceipts.filter((proof) => proof.environment.kind === 'ci'),
+    { trust: productionTrust, scope: 'windows' },
+  ).routes.map((route) => route.cleanHost),
+  ['pending'],
+);
+assert.deepEqual(
+  qualifyDesktopScopedRoutes(windowsProduction, windowsProductionReceipts, {
+    trust: productionTrust,
+    scope: 'windows',
+  }).routes.map((route) => route.cleanHost),
+  ['passed'],
+);
+// Pending covers only the absent VM run: CI stays required, and a VM receipt that is present must still be release-trusted.
 rejectPlatform(
   windowsProduction,
-  windowsProductionReceipts.filter((proof) => proof.environment.kind === 'ci'),
+  windowsProductionReceipts.filter((proof) => proof.environment.kind === 'vm'),
+  { scope: 'windows', pattern: /ci receipt/u },
+);
+rejectPlatform(
+  windowsProduction,
+  windowsProductionReceipts.map((proof) =>
+    proof.environment.kind === 'vm' ? { ...proof, trust: { kind: 'release', identity: 'other-signer' } } : proof,
+  ),
   { scope: 'windows', pattern: /vm receipt/u },
+);
+// The all-platform scope still needs every VM receipt, Windows included.
+rejectPlatform(
+  production,
+  productionReceipts.filter((proof) => proof.environment.kind === 'ci' || proof.route !== 'windows-nsis'),
+  { scope: 'all', pattern: /vm receipt for win32-x64\/windows-nsis/u },
 );
 rejectPlatform(windowsProduction, [...windowsProductionReceipts, ...linuxProductionReceipts], { scope: 'windows' });
 rejectPlatform(linuxProduction, [...linuxProductionReceipts, ...windowsProductionReceipts], { scope: 'linux' });

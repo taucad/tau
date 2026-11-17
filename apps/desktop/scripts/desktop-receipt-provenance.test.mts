@@ -167,17 +167,16 @@ for (const candidate of [manifest, productionCopy]) {
     ),
   );
 }
-// Only a Mac-only publication (either channel) may omit the clean-host VM run; every other omission fails before any fetch.
+// Only a Mac-only or Windows-only publication (either channel) may omit the clean-host VM run; every other omission
+// fails before any fetch.
 // The guard reads only the channel, so a production-labelled copy suffices without five-route fixtures.
 const production: typeof manifest = { ...manifest, channel: 'production' };
 for (const [candidate, scope] of [
   [manifest, 'all'],
   [manifest, undefined],
   [manifest, 'linux'],
-  [manifest, 'windows'],
   [production, 'all'],
   [production, 'linux'],
-  [production, 'windows'],
 ] as const) {
   // oxlint-disable-next-line no-await-in-loop -- Each refusal is independent and must not reach the GitHub API.
   await assert.rejects(

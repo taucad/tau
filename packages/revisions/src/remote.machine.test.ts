@@ -66,7 +66,13 @@ import type { IgnoredEvents } from '@taucad/xstate-testing/inspect';
 import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 
 import * as machineModule from '#remote.machine.js';
-import { remoteIgnoredEvents, remoteMachine, selectRemoteFacet } from '#remote.machine.js';
+import {
+  remoteIgnoredEvents,
+  remoteMachine,
+  remoteReadRetryMaxMilliseconds,
+  remoteReadRetryMilliseconds,
+  selectRemoteFacet,
+} from '#remote.machine.js';
 import { reauthorizationRequired } from '#remotes.js';
 import { RevisionPortError } from '#revision-port.js';
 import { createFakeParent } from '@taucad/xstate-testing/fakes';
@@ -199,7 +205,7 @@ type Overrides = Partial<RemoteActors>;
 const start = (
   overrides: Overrides = {},
   parentRef?: AnyActorRef,
-): Readonly<{ actor: Actor<typeof remoteMachine>; emitted: RemoteMachineEmitted[] }> => {
+): Readonly<{ actor: Actor<typeof remoteMachine>; emitted: RemoteMachineEmitted[]; clock: StepClock }> => {
   const actors: RemoteActors = {
     readRemote: reads(undefined),
     writeRemote: createAsyncLogic({ run: async () => ({ remote: tauRemote }) }),
@@ -216,9 +222,10 @@ const start = (
     ...overrides,
   };
   const guard = guardActors({ ignore: ignoredEvents });
+  const clock = new StepClock();
   const actor = createActor(remoteMachine.provide({ actors }), {
     input: { projectId: 'p1', ...(parentRef === undefined ? {} : { parentRef }) },
-    clock: new StepClock(),
+    clock,
     inspect: guard.inspect,
   });
   const emitted: RemoteMachineEmitted[] = [];
@@ -226,7 +233,7 @@ const start = (
     actor.on(type, (event) => emitted.push(event));
   }
   actor.start();
-  return { actor, emitted };
+  return { actor, emitted, clock };
 };
 
 const settle = async (): Promise<void> => {
@@ -318,8 +325,64 @@ describe('remoteMachine', () => {
 
     await settle();
 
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
-    expect(selectRemoteFacet(actor.getSnapshot()).error).toBe('config unreadable');
+    expect(actor.getSnapshot().matches('retrying')).toBe(true);
+    expect(selectRemoteFacet(actor.getSnapshot())).toMatchObject({ phase: 'failed', error: 'config unreadable' });
+    actor.stop();
+  });
+
+  /*
+   * Tau #1098, item 1: a failed remotes read used to land in `failed`, which nothing leaves on its own, so turn
+   * placement, which never takes a read failure for no remote, waited on pulls that no remote would bring until the
+   * project was reopened. The read is asked again on a doubling, capped wait, until it settles.
+   */
+  it('reads the remotes list again on a doubling wait until the read settles, and forgets the failure', async () => {
+    let calls = 0;
+    const { actor, clock } = start({
+      readRemote: createAsyncLogic({
+        run: async () => {
+          calls += 1;
+          await Promise.resolve();
+          if (calls < 4) {
+            throw new Error('config unreadable');
+          }
+          return { remote: tauRemote };
+        },
+      }),
+    });
+    await settle();
+    const waits: number[] = [];
+    for (let retry = 0; retry < 3; retry += 1) {
+      expect(actor.getSnapshot().matches('retrying')).toBe(true);
+      const at = clock.now();
+      waits.push((clock.nextDue() ?? at) - at);
+      clock.next();
+      // oxlint-disable-next-line no-await-in-loop -- each retry's read settles before the next wait is armed
+      await settle();
+    }
+
+    expect(waits).toStrictEqual([
+      remoteReadRetryMilliseconds,
+      remoteReadRetryMilliseconds * 2,
+      remoteReadRetryMilliseconds * 4,
+    ]);
+    expect(calls).toBe(4);
+    expect(actor.getSnapshot().matches('connected')).toBe(true);
+    expect(actor.getSnapshot().context.readFailures).toBe(0);
+    expect(selectRemoteFacet(actor.getSnapshot()).error).toBeUndefined();
+    actor.stop();
+  });
+
+  it('waits no longer than the cap between remotes reads, however many fail', async () => {
+    const { actor, clock } = start({ readRemote: failing('config unreadable') });
+    await settle();
+    for (let retry = 0; retry < 12; retry += 1) {
+      clock.next();
+      // oxlint-disable-next-line no-await-in-loop -- each retry's read settles before the next wait is armed
+      await settle();
+    }
+
+    expect(actor.getSnapshot().matches('retrying')).toBe(true);
+    expect((clock.nextDue() ?? 0) - clock.now()).toBe(remoteReadRetryMaxMilliseconds);
     actor.stop();
   });
 
@@ -969,7 +1032,7 @@ describe('remoteMachine', () => {
   it('32 (L2-F10): a quota refusal that arrives outside `connected` still names its files', async () => {
     const { actor } = start({ readRemote: failing('config unreadable') });
     await settle();
-    expect(actor.getSnapshot().matches('failed')).toBe(true);
+    expect(actor.getSnapshot().matches('retrying')).toBe(true);
 
     actor.send({ type: 'quotaRefused', paths: ['huge.bin'] });
 

@@ -97,7 +97,12 @@ import type {
   RevisionVia,
   SyncPushOutcome,
 } from '@taucad/revisions';
-import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
+import {
+  GitToolchainError,
+  createNativeGitRevisionPort,
+  gitCommandActivity,
+  resolveGitToolchain,
+} from '@taucad/revisions/node';
 import type {
   MissingGitTool,
   NativeGitCheckoutOptions,
@@ -105,7 +110,11 @@ import type {
   TauApiCredential,
 } from '@taucad/revisions/node';
 import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
-import type { TurnPlacementAdapter, TurnPlacementPortOptions } from '@taucad/revisions/turn-placement';
+import type {
+  TurnAdmissionTiming,
+  TurnPlacementAdapter,
+  TurnPlacementPortOptions,
+} from '@taucad/revisions/turn-placement';
 import type { TurnSettlement } from '@taucad/revisions/turn-machine';
 
 import { defaultConfigDirectory } from '#credential-store.js';
@@ -223,6 +232,11 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
   readonly filesystem?: CheckoutFileSystems | undefined;
   /** Optional host-owned admission wrapper around checkout tree reads and writes. */
   readonly useFileSystem?: UseCheckoutFileSystem | undefined;
+  /**
+   * Report each turn admission's timing once its placement answers it (W8 diagnostics): its phases and the Git
+   * processes it waited on, ids and milliseconds only. A host passes its own diagnostics log.
+   */
+  readonly admissionTimed?: ((timing: TurnAdmissionTiming) => void) | undefined;
   /** Native linked-checkout mutations under the embedding host's writer authority. */
   readonly checkoutMutation?: NativeGitCheckoutOptions['withMutationAuthority'];
   /** Established identity supplied by the host's shared project identity lifecycle. */
@@ -1944,6 +1958,9 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
         root: (checkout) => (checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
         /* E1: the watcher catches up before an admission's dirty base and before a completion cut. */
         settle: settleWatch,
+        ...(options.admissionTimed === undefined
+          ? {}
+          : { admissionTiming: { activity: { git: gitCommandActivity }, report: options.admissionTimed } }),
       });
       placed = session;
       return session;

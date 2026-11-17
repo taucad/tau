@@ -27,7 +27,6 @@
   "apps/ui/app/components/settings/compute-reuse-settings.tsx": 2,
   "apps/ui/app/components/settings/settings-dialog.tsx": 1,
   "apps/ui/app/components/share/shared-project-workbench.tsx": 1,
-  "apps/ui/app/components/share/use-view-ping.ts": 1,
   "apps/ui/app/components/terminal/terminal-pane.tsx": 1,
   "apps/ui/app/components/ui/image-carousel-dialog.tsx": 2,
   "apps/ui/app/hooks/active-chat-provider.tsx": 6,

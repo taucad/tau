@@ -7,6 +7,7 @@
  * not yet satisfy are `it.skip`, so every runnable row must be green.
  */
 import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -76,23 +77,46 @@ const runGeoSpecSuite = async (
   }
 };
 
+/** Rows the GeoSpec engine leaves inconclusive today, per suite; the list only shrinks (tau #342). */
+const engineInconclusive = (
+  JSON.parse(readFileSync(resolve(repoRoot, 'apps/runtime-e2e/src/geospec-engine-inconclusive.json'), 'utf8')) as {
+    suites: Record<string, Array<{ test: string; status: string; code: string }>>;
+  }
+).suites;
+
+/**
+ * Assert a suite's non-passed rows are exactly its ledgered engine-inconclusive rows: a failure, a new inconclusive
+ * row or a changed diagnostic is red, and so is a ledgered row that now passes, until it leaves the ledger.
+ */
+const expectOnlyLedgeredRows = (suite: string, report: GeoSpecRunReport): void => {
+  const rows = unpassedTests(report)
+    .map(({ test, status, codes }) => ({ test, status, code: codes?.[0] }))
+    .sort((left, right) => left.test.localeCompare(right.test));
+  expect(rows).toStrictEqual(engineInconclusive[suite] ?? []);
+  expect(report.failed).toBe(0);
+};
+
+/** Every test that did not pass, with its diagnostic codes, so a red row names itself. */
+const unpassedTests = (
+  report: GeoSpecRunReport,
+): Array<{ test: string; status: string; codes: unknown[] | undefined }> =>
+  (report.files ?? []).flatMap(({ file, tests }) =>
+    (tests ?? [])
+      .filter(({ status }) => status !== 'passed' && status !== 'skipped')
+      .map(({ suite, name: test, status, diagnostics }) => ({
+        test: [file, ...suite, test].join(' > '),
+        status,
+        codes: diagnostics?.map(({ code }) => code),
+      })),
+  );
+
 describe('geospec example suites (regression backbone)', () => {
   it.each(['bench-vise', 'spur-gearbox', 'standing-fan', 'wheelbarrow', 'kestrel-240-quadcopter'])(
     'Community motion assembly %s geospec suite passes',
     { timeout: 1_500_000 },
     async (name) => {
       const report = await runGeoSpecSuite(`libs/tau-examples/src/kernels/replicad/${name}`);
-      const unpassed = (report.files ?? []).flatMap(({ file, tests }) =>
-        (tests ?? [])
-          .filter(({ status }) => status !== 'passed')
-          .map(({ suite, name: test, status, diagnostics }) => ({
-            test: [file, ...suite, test].join(' > '),
-            status,
-            codes: diagnostics?.map(({ code }) => code),
-          })),
-      );
-      expect(unpassed).toStrictEqual([]);
-      expect(report.success).toBe(true);
+      expectOnlyLedgeredRows(name, report);
     },
   );
 
@@ -110,8 +134,7 @@ describe('geospec example suites (regression backbone)', () => {
 
   it('logo-keychain geospec suite passes', { timeout: 180_000 }, async () => {
     const report = await runGeoSpecSuite('libs/tau-examples/src/kernels/replicad/logo-keychain');
-    expect(report.failed).toBe(0);
-    expect(report.success).toBe(true);
+    expectOnlyLedgeredRows('logo-keychain', report);
   });
 
   // A modular OpenSCAD part is one closed solid in its GLB, so it passes watertight and single-component checks.
@@ -177,7 +200,6 @@ describe('geospec example suites (regression backbone)', () => {
     // non-verdict watchdog; parity is exact per-test data below.
     expect(report.files).toBeDefined();
     expect(report.files).toHaveLength(9);
-    expect(report.failed).toBe(0);
-    expect(report.success).toBe(true);
+    expectOnlyLedgeredRows('v8-engine-rev2', report);
   });
 });

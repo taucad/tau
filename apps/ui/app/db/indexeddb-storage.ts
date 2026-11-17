@@ -9,6 +9,7 @@ import type { ProjectLibraryState } from '#types/project-library.types.js';
 import { announceCandidateConsent, withCandidateConsentLock } from '@taucad/ui-core/lib/geospec-candidate-consent';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';
+import { armDatabaseOpenDeadline } from '@taucad/ui-core/lib/database-open-deadline';
 
 /** Normalize only pre-release manifest-owned identity rows before replaying their existing resources. */
 const normalizePendingProjectOperation = (operation: PendingProjectOperation): PendingProjectOperation => {
@@ -632,18 +633,26 @@ export class IndexedDbStorageProvider implements StorageProvider {
   private async getDb(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.version);
+      /* An open that fires no event must not hold its caller forever (B31); the next call opens again. */
+      const deadline = armDatabaseOpenDeadline(request, this.dbName, reject);
 
       // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
       request.onerror = () => {
+        deadline.clear();
         // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
         reject(request.error);
       };
 
       request.onblocked = () => {
+        deadline.clear();
         reject(new StorageUpgradeBlockedError());
       };
 
       request.onsuccess = () => {
+        deadline.clear();
+        if (deadline.expired()) {
+          return; // The deadline closed this late connection.
+        }
         const db = request.result;
         // Never be the tab that blocks another tab's upgrade.
         db.onversionchange = () => {

@@ -16,6 +16,7 @@ const projectWorkspaceDirectory = join(import.meta.dirname, '../../../../apps/li
 const filesUiDirectory = join(import.meta.dirname, '../../../../apps/libs/files-ui/src');
 const editorUiDirectory = join(import.meta.dirname, '../../../../apps/libs/editor-ui/src');
 const settingsUiDirectory = join(import.meta.dirname, '../../../../apps/libs/settings-ui/src');
+const publishUiDirectory = join(import.meta.dirname, '../../../../apps/libs/publish-ui/src');
 const uiCoreDirectory = join(import.meta.dirname, '../../../../apps/libs/ui-core/src');
 
 const sourcesIn = (directory: string, recursive = false) =>
@@ -33,6 +34,7 @@ const appSources = [
   ...sourcesIn(filesUiDirectory, true),
   ...sourcesIn(editorUiDirectory, true),
   ...sourcesIn(settingsUiDirectory, true),
+  ...sourcesIn(publishUiDirectory, true),
   ...sourcesIn(uiCoreDirectory, true),
 ];
 

@@ -10,7 +10,8 @@
  */
 
 import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
-import { appendFile, rename, stat } from 'node:fs/promises';
+import { appendFile, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prettyFactory } from 'pino-pretty';
 
@@ -48,6 +49,10 @@ export type DiagnosticsLogOptions = {
 };
 
 const defaultMaxBytes = 5 * 1024 * 1024;
+/** Rotated generations kept beside `desktop.log`: `desktop.1.log` (newest) to `desktop.3.log` (D6). */
+export const rotatedLogGenerations = 3;
+/** Where the log goes when its own directory cannot be created (a full, read-only or permission-broken profile). */
+const fallbackLogDirectory = (): string => join(tmpdir(), `tau-desktop-logs-${String(process.getuid?.() ?? 'user')}`);
 /* Coalescing window for queued records, and the queue size that writes at once:
  * a renderer console loop or a chatty kernel then costs one append per window
  * rather than a stat and an append per line on main's event loop. */
@@ -116,18 +121,44 @@ const abbreviateHashes = (message: string | undefined): string | undefined =>
  */
 export const createDiagnosticsLog = (options: DiagnosticsLogOptions): DiagnosticsFileLog => {
   const maxBytes = options.maxBytes ?? defaultMaxBytes;
-  const filePath = join(options.directory, 'desktop.log');
-  const previousPath = join(options.directory, 'desktop.1.log');
+  /* Opening the log is the first thing main does that can fail on a broken profile, and the log is what explains
+   * that failure (B18): a directory that cannot be created moves the log under the system's temporary folder. */
+  const directory = ((): string => {
+    try {
+      mkdirSync(options.directory, { recursive: true });
+      return options.directory;
+    } catch {
+      const fallback = fallbackLogDirectory();
+      try {
+        mkdirSync(fallback, { recursive: true });
+      } catch {
+        /* Every write below is already guarded: a log with nowhere to go is silent, never fatal. */
+      }
+      return fallback;
+    }
+  })();
+  const filePath = join(directory, 'desktop.log');
+  const generationPath = (generation: number): string => join(directory, `desktop.${String(generation)}.log`);
   const echo = options.echo ?? true;
   const producer = options.producer ?? 'desktop';
   const echoDebug = /^(1|true)$/iu.test(process.env['TAU_DEBUG'] ?? '');
   let previousConsoleRecord: { readonly key: string; readonly level: DiagnosticLevel; repeats: number } | undefined;
-  mkdirSync(options.directory, { recursive: true });
 
+  /* Each generation moves one older, the oldest is replaced, and the current file becomes `desktop.1.log`. */
+  const shiftGenerations = (move: (from: string, to: string) => void): void => {
+    for (let generation = rotatedLogGenerations - 1; generation >= 1; generation -= 1) {
+      try {
+        move(generationPath(generation), generationPath(generation + 1));
+      } catch {
+        /* That generation does not exist yet. */
+      }
+    }
+    move(filePath, generationPath(1));
+  };
   const rotate = (): void => {
     try {
       if (statSync(filePath).size > maxBytes) {
-        renameSync(filePath, previousPath);
+        shiftGenerations(renameSync);
       }
     } catch {
       /* No file yet, or a racing writer — either way the next append creates one. */
@@ -137,7 +168,8 @@ export const createDiagnosticsLog = (options: DiagnosticsLogOptions): Diagnostic
     try {
       const { size } = await stat(filePath);
       if (size > maxBytes) {
-        await rename(filePath, previousPath);
+        /* Renames are quick and must not interleave with another writer's rotation, so they run synchronously. */
+        shiftGenerations(renameSync);
       }
     } catch {
       /* No file yet, or a racing writer — either way the next append creates one. */

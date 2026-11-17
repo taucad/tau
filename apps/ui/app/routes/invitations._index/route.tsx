@@ -165,10 +165,12 @@ export default function AcceptInvitation(): React.JSX.Element {
     const accept = async (): Promise<void> => {
       try {
         const apiBaseUrl = ENV.TAU_API_URL.replace(/\/$/u, '');
-        const response = await fetch(`${apiBaseUrl}/v1/invitations/${encodeURIComponent(token)}`, {
+        /* The token rides in the body: a request line reaches access logs. */
+        const response = await fetch(`${apiBaseUrl}/v1/invitations/accept`, {
           method: 'POST',
           credentials: 'include',
-          headers: { Accept: 'application/json' },
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
         });
         if (!response.ok) {
           const refused = (await response.json().catch(() => ({}))) as Readonly<{ code?: unknown }>;

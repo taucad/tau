@@ -139,6 +139,11 @@ jobs:
         working-directory: apps/desktop-e2e
         env:
           TAU_E2E_SERVICES: host
+          # Each launch's user data (and its dependency store) lives under the temporary folder. The runner's own
+          # (C:\Users\RUNNER~1\AppData\Local\Temp) leaves too little of Windows' 259-character library path for
+          # Build123d's closure, so use the runner's short temp folder.
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
           # Contain native kernels and the Terminal in the Windows sandbox the step above set up (Q15 gate).
           TAU_WINDOWS_SHELL_SANDBOX: '1'
           # The API listens on IPv4 only. On windows-2025 the packaged app's services process failed every gateway

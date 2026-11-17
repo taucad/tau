@@ -135,8 +135,8 @@ jobs:
         env:
           OUTCOME: ${{ steps.packaged.outcome }}
         run: |
-          counts=$(sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/desktop-packaged-windows.log" 2>/dev/null \
-            | grep -E '^ +Tests ' | tail -1 | sed -E 's/^ +Tests +//')
+          counts=$( { sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/desktop-packaged-windows.log" 2>/dev/null || true; } \
+            | grep -E '^ +Tests ' | tail -1 | sed -E 's/^ +Tests +//' || true)
           {
             echo "- Packaged desktop end-to-end (win32-x64, windows-2025) on \`$TAU_DESKTOP_SOURCE_SHA\`: ${OUTCOME}${counts:+, ${counts}}"
             if [ -f out/test-results/desktop-e2e/webgl-renderer.json ]; then

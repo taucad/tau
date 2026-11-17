@@ -94,8 +94,10 @@ wait_for Redis "$memurai_cli" -h 127.0.0.1 -p 6379 ping
 
 # MinIO and mc from source, unless a cached build is already here.
 if [ ! -x "$MINIO_BIN/minio.exe" ] || [ ! -x "$MINIO_BIN/mc.exe" ]; then
-  GOBIN="$(cygpath -w "$MINIO_BIN")" CGO_ENABLED=0 go install "$MINIO_MODULE" "$MC_MODULE" 2>&1 \
-    | tee "$WORK/minio-build.log"
+  # One module per `go install`: Go refuses to install packages from two modules at different versions together.
+  for module in "$MINIO_MODULE" "$MC_MODULE"; do
+    GOBIN="$(cygpath -w "$MINIO_BIN")" CGO_ENABLED=0 go install "$module" 2>&1 | tee -a "$WORK/minio-build.log"
+  done
 fi
 "$MINIO_BIN/minio.exe" --version
 "$MINIO_BIN/mc.exe" --version

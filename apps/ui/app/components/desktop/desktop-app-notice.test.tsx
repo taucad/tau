@@ -37,6 +37,16 @@ describe('DesktopAppNotice', () => {
     expect(link).toHaveAttribute('target', '_blank');
   });
 
+  it.each([
+    ['macos', '0 0 384 512'],
+    ['windows', '0 0 448 512'],
+    ['linux', '0 0 448 512'],
+  ])('shows the %s mark in the tile', (os, viewBox) => {
+    mockState.os = os;
+    const { container } = renderStack();
+    expect(container.querySelector('section svg')).toHaveAttribute('viewBox', viewBox);
+  });
+
   it('stays dismissed on this device, across remounts', async () => {
     const { container, unmount } = renderStack();
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss desktop app offer' }));

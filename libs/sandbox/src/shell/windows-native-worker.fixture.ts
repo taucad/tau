@@ -562,3 +562,36 @@ export const personSession = (workerProbe: string): PersonSession => {
   assert.ok(answer.ok && answer.value !== undefined, answer.error);
   return answer.value;
 };
+
+/**
+ * W09: the helper's `status`, quick and full, started from a PowerShell that removed `SystemDrive`, `SystemRoot`,
+ * `windir`, `ProgramData` and `ALLUSERSPROFILE` from its own environment (Node's spawn would copy `SystemDrive` and
+ * `SystemRoot` back from this process). Both must read the install record: the helper completes the system variables
+ * Windows expands for the ProgramData known folder from the Windows directory itself.
+ *
+ * @param shellPath - The PowerShell that starts the helper.
+ * @param helperPath - The helper.
+ * @param accountSid - The sandbox account the install record names, from the suite's own `status`.
+ */
+export const statusWithoutSystemEnvironment = (shellPath: string, helperPath: string, accountSid: unknown): void => {
+  const script = [
+    "foreach ($name in 'SystemDrive', 'SystemRoot', 'windir', 'ProgramData', 'ALLUSERSPROFILE') { Remove-Item -LiteralPath \"Env:$name\" -ErrorAction SilentlyContinue }",
+    '$quick = & $env:CONFORMANCE_HELPER status --quick 2>&1 | Out-String',
+    '$full = & $env:CONFORMANCE_HELPER status 2>$null | Out-String',
+    '@{ quick = $quick; full = $full } | ConvertTo-Json -Compress',
+  ].join('\n');
+  const run = spawnSync(shellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8',
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+    env: { ...process.env, CONFORMANCE_HELPER: helperPath },
+    timeout: 60_000,
+  });
+  assert.equal(run.status, 0, run.stderr);
+  const answers = JSON.parse(run.stdout) as { quick: string; full: string };
+  for (const answer of [answers.quick, answers.full]) {
+    assert.doesNotMatch(answer, /SHGetKnownFolderPath/u);
+    const record = JSON.parse(answer.trim()) as Record<string, unknown>;
+    assert.equal(record['installed'], true, answer);
+    assert.equal(record['accountSid'], accountSid, answer);
+  }
+};

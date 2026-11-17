@@ -265,6 +265,30 @@ describe('large workspace connection', () => {
     expect(copyMarker?.['workspaceId']).not.toEqual(originalMarker?.['workspaceId']);
   });
 
+  test('relinks the same workspace with its projects when Change folder picks a copy at another place (T-R4.7)', async () => {
+    const originalName = 'workspace-connection-before-move';
+    const movedName = 'workspace-connection-after-move';
+    await installWorkspacePicker([originalName, movedName]);
+    await target.navigate('/');
+    await seedWorkspace(originalName, 2);
+    await target.navigate('/files');
+    await target.click(selectors.getByRole('button', { name: 'Add Workspace' }));
+    await target.expectVisible(selectors.getByText('2 projects ready'), 10_000);
+    const before = await readProjectStorageState();
+    const originalMarker = await readOpfsWorkspaceMarker(originalName);
+    await copyOpfsDirectory(originalName, movedName);
+
+    await target.click(selectors.getByRole('button', { name: 'Change folder' }));
+    await target.expectVisible(selectors.getByText(/Relinked/u), 10_000);
+    const after = await readProjectStorageState();
+
+    expect(after.workspaces).toHaveLength(1);
+    expect(after.workspaces[0]?.workspaceId).toBe(before.workspaces[0]?.workspaceId);
+    expect(after.configs).toEqual(before.configs);
+    const movedMarker = await readOpfsWorkspaceMarker(movedName);
+    expect(movedMarker?.['workspaceId']).toBe(originalMarker?.['workspaceId']);
+  });
+
   test('leaves durable state untouched when generic and exact reconnect pickers are cancelled', async () => {
     const workspaceName = 'workspace-connection-cancel';
     await target.addInitScript(() => {

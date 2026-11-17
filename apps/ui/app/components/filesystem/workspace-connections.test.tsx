@@ -26,6 +26,11 @@ const state = vi.hoisted(() => ({
   rootStatuses: [] as RootStatus[],
   fileManagerState: 'ready' as 'ready' | 'error',
   sendToFileManager: vi.fn(),
+  selectDirectory: vi.fn<(options?: { id?: string; defaultPath?: string }) => Promise<string | undefined>>(),
+  relink: vi.fn(),
+  readEvidence: vi.fn(async () => ({ marker: undefined, projects: [], subfolders: [] })),
+  syncMarker: vi.fn(async () => 'written'),
+  createNodeWorkspace: vi.fn(),
 }));
 /** The root file manager, as far as the rows read it: its published root statuses and whether it is in `error`. */
 const fileManagerRef = {
@@ -46,7 +51,7 @@ const workspace = {
 };
 const directories = { list: async () => [...state.paths], disconnect: state.disconnect };
 vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
-  desktopBridge: () => ({ directories }),
+  desktopBridge: () => ({ directories, dialog: { selectDirectory: state.selectDirectory } }),
   nodeHomeRoot: state.homeRoot,
 }));
 vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
@@ -54,6 +59,10 @@ vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getWorkspace: async () => undefined,
   listProjectsForWorkspace: async () => [],
   removeWorkspace: state.removeWorkspace,
+  relinkWorkspace: state.relink,
+  syncNodeWorkspaceMarker: state.syncMarker,
+  createNodeWorkspace: state.createNodeWorkspace,
+  createWorkspace: vi.fn(),
   subscribeProjectRootConfigurationChanges: (listener: () => void) => {
     state.changed = listener;
     return () => {
@@ -67,7 +76,14 @@ vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     fileManagerRef,
-    workspace: { disposeStorageRoot: state.dispose, syncProjectRoots: state.sync },
+    workspace: {
+      disposeStorageRoot: state.dispose,
+      syncProjectRoots: state.sync,
+      mount: vi.fn(async () => undefined),
+      unmount: vi.fn(),
+    },
+    scopedStorage: { readFile: vi.fn(async () => undefined) },
+    writeFiles: vi.fn(async () => undefined),
   }),
 }));
 vi.mock('#hooks/use-project-manager.js', () => ({
@@ -76,6 +92,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
     refreshWorkspaceCatalog: state.refreshCatalog,
     connectWorkspace: state.connect,
     retryWorkspaceConnection: state.retry,
+    readFolderEvidence: state.readEvidence,
     workspaceConnection: state.connection(),
   }),
 }));
@@ -105,6 +122,11 @@ beforeEach(() => {
     state.paths = [workspace.path];
     return { workspace, minted: false, projectCount: 0 };
   });
+  state.selectDirectory.mockImplementation(async () => {
+    state.paths = [...new Set([...state.paths, workspace.path])];
+    return workspace.path;
+  });
+  state.relink.mockImplementation(async () => ({ status: 'relinked', workspace, matched: 0, unmatched: [] }));
 });
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -142,7 +164,8 @@ describe('WorkspaceConnections', () => {
     state.paths = [];
     state.connect.mockRejectedValueOnce(new Error('Could not load workspace projects.'));
     const { rerender } = render(<WorkspaceConnections />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+    await screen.findByRole('button', { name: 'Reconnect' });
+    fireEvent.click(screen.getByRole('button', { name: 'Add workspace' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load workspace projects.');
     state.connection.mockReturnValue({
       phase: 'failed',
@@ -214,7 +237,10 @@ describe('WorkspaceConnections', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
     expect(await screen.findByRole('button', { name: 'Disconnect workspace' })).toBeInTheDocument();
-    expect(state.connect).toHaveBeenCalledOnce();
+    /* Reconnect relinks this workspace (D2, U2): the picked folder is the same one, so the row comes back as it was. */
+    expect(state.relink).toHaveBeenCalledOnce();
+    expect(state.relink.mock.calls[0]![0]).toBe(workspace.workspaceId);
+    expect(state.connect).not.toHaveBeenCalled();
     expect(screen.getAllByText('Tau Workspace')).toHaveLength(1);
   });
 
@@ -291,15 +317,81 @@ describe('WorkspaceConnections', () => {
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
   });
 
-  /* Locate is WP4's: the row offers it once that package wires the command, and removes this mark. */
-  // Expected-failure: @rifont until 2026-12-15
-  it.fails('should offer Locate on a folder that is not found', async () => {
+  it('should offer Locate on a folder that is not found', async () => {
     state.rootStatuses = [
       { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
     ];
     render(<WorkspaceConnections />);
 
     expect(await screen.findByRole('button', { name: 'Locate…' })).toBeEnabled();
+  });
+
+  it('should relink a lost folder to the place Locate picks, open at its old place, and re-check it', async () => {
+    const moved = '/Volumes/Archive/Tau Workspace';
+    state.rootStatuses = [
+      { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    state.selectDirectory.mockImplementation(async () => {
+      state.paths = [...state.paths, moved];
+      return moved;
+    });
+    state.relink.mockImplementation(async () => {
+      state.paths = [moved];
+      state.listWorkspaces.mockResolvedValue([{ ...workspace, path: moved }]);
+      return { status: 'relinked', workspace: { ...workspace, path: moved }, matched: 1, unmatched: [] };
+    });
+    render(<WorkspaceConnections />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Locate…' }));
+
+    await waitFor(() => {
+      expect(state.relink).toHaveBeenCalledOnce();
+    });
+    expect(state.selectDirectory).toHaveBeenCalledWith(expect.objectContaining({ defaultPath: workspace.path }));
+    const [workspaceId, target, ports] = state.relink.mock.calls[0]! as [string, unknown, { readEvidence: unknown }];
+    expect(workspaceId).toBe(workspace.workspaceId);
+    expect(target).toEqual({ backend: 'node', path: moved, wasGranted: false });
+    expect(ports.readEvidence).toBe(state.readEvidence);
+    expect(await screen.findByText(moved)).toBeInTheDocument();
+    expect(state.dispose).toHaveBeenCalledWith(`node:${workspace.path}`);
+    expect(state.sync).toHaveBeenCalled();
+    expect(state.createNodeWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('should ask before relinking on weak evidence and release the pick when cancelled', async () => {
+    const moved = '/Volumes/Archive/Tau Workspace';
+    state.rootStatuses = [
+      { storageRootKey: `node:${workspace.path}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+    state.selectDirectory.mockResolvedValue(moved);
+    state.relink.mockResolvedValue({ status: 'confirm', matched: 3, total: 5 });
+    render(<WorkspaceConnections />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Locate…' }));
+
+    expect(await screen.findByText(/contains 3 of the 5 projects/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(state.disconnect).toHaveBeenCalledWith(moved);
+    });
+    expect(state.relink).toHaveBeenCalledOnce();
+  });
+
+  it('should relink this workspace when Reconnect picks another folder, adding no workspace (T-U2.1)', async () => {
+    const elsewhere = '/Users/tester/Elsewhere/Tau Workspace';
+    state.paths = [];
+    state.selectDirectory.mockResolvedValue(elsewhere);
+    render(<WorkspaceConnections />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+
+    await waitFor(() => {
+      expect(state.relink).toHaveBeenCalledOnce();
+    });
+    expect(state.relink.mock.calls[0]![0]).toBe(workspace.workspaceId);
+    expect(state.relink.mock.calls[0]![1]).toMatchObject({ backend: 'node', path: elsewhere });
+    expect(state.connect).not.toHaveBeenCalled();
+    expect(state.createNodeWorkspace).not.toHaveBeenCalled();
   });
 
   it('should remove a lost folder from Tau while the file service is in error and restart it', async () => {

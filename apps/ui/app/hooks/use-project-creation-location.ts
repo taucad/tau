@@ -29,6 +29,7 @@ import {
   workspaceIdentityConflictCopy,
 } from '@taucad/ui-core/filesystem/workspace-errors';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useRootStatuses } from '#components/filesystem/folder-status.js';
 
 export type HomeLocationOption = {
   readonly location: HomeProjectCreationLocation;
@@ -105,6 +106,9 @@ const loadingState: ProjectCreationLocationState = {
   canCreate: false,
 };
 
+/** The Home fallback's notice shows once per page load, however many composers mount (B9). */
+let hasShownUnavailableFallback = false;
+
 const isAbortError = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
 
@@ -146,6 +150,14 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   const generationRef = useRef(0);
   const selectedRef = useRef<ProjectCreationLocation | undefined>(undefined);
   const loadRef = useRef<(restorePreference: boolean) => Promise<void>>(async () => undefined);
+  /* The chosen folder is not available, so creation falls back to Home without saving that (R4); the stored choice
+   * applies again when the folder is back. */
+  const rootStatuses = useRootStatuses(fileManager.fileManagerRef);
+  const rootStatusesRef = useRef(rootStatuses);
+  const isFallbackRef = useRef(false);
+  useEffect(() => {
+    rootStatusesRef.current = rootStatuses;
+  }, [rootStatuses]);
 
   const grantWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
@@ -243,6 +255,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   const select = useCallback(
     (value: ProjectCreationLocation): void => {
       selectedRef.current = value;
+      isFallbackRef.current = false;
       setState((current) => {
         if (current.phase !== 'ready' || !current.hasWebAccessCapability) {
           return current;
@@ -269,7 +282,18 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
       const [workspaces, preferred] = await Promise.all([
         listWorkspaces(),
         restorePreference
-          ? getProjectCreationLocation({ webAccessSupported: true }).then(({ location }) => location)
+          ? getProjectCreationLocation({ webAccessSupported: true, rootStatuses: rootStatusesRef.current }).then(
+              ({ location, repaired }) => {
+                isFallbackRef.current = repaired === 'workspace-unavailable';
+                if (isFallbackRef.current && !hasShownUnavailableFallback) {
+                  hasShownUnavailableFallback = true;
+                  toast.info(
+                    'Your chosen folder can’t be found right now, so new projects go to Home. Tau uses that folder again when it is back.',
+                  );
+                }
+                return location;
+              },
+            )
           : Promise.resolve(selectedRef.current ?? homeProjectCreationLocation),
       ]);
       const workspaceOptions = await Promise.all(
@@ -326,6 +350,16 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   }, [projectManager, telemetry]);
 
   const refresh = useCallback(async (): Promise<void> => loadRef.current(false), []);
+
+  /* While creation fell back to Home, a changed root status may mean the chosen folder is back: read the choice again,
+   * unless the person picked another location meanwhile. */
+  useEffect(() => {
+    if (!isFallbackRef.current || selectedRef.current?.kind !== 'home') {
+      return;
+    }
+    selectedRef.current = undefined;
+    void loadRef.current(true);
+  }, [rootStatuses]);
 
   useEffect(() => {
     mountedRef.current = true;

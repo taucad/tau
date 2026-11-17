@@ -7,14 +7,24 @@ import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/setti
 import { WorkspaceDirectoryPanel } from '@taucad/files-ui/components/filesystem/workspace-directory-panel';
 import {
   checkHandlePermission,
+  createNodeWorkspace,
   getWorkspace,
   listProjectsForWorkspace,
   listWorkspaces,
+  relinkWorkspace,
   removeWorkspace,
   requestHandlePermission,
   subscribeProjectRootConfigurationChanges,
+  syncNodeWorkspaceMarker,
 } from '@taucad/files-ui/filesystem/handle-store';
-import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
+import type {
+  RelinkPorts,
+  RelinkRefusalReason,
+  RelinkResult,
+  RelinkTarget,
+  Workspace,
+} from '@taucad/files-ui/filesystem/handle-store';
+import { workspaceMarkerPath } from '@taucad/types';
 import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
 import {
   isWorkspaceIdentityConflictError,
@@ -49,6 +59,31 @@ type DisplayedRow = WorkspaceRow & { readonly reason: string | undefined };
 /** Where the project library lists an unfinished operation that can be discarded (U7). */
 const projectRecoveryHref = '/projects#project-recovery';
 
+/** A question Locate asked before it changes anything (D2 step 5), and the pick it is about. */
+type RelinkQuestion = {
+  readonly workspace: Workspace;
+  readonly target: RelinkTarget;
+  readonly result: Extract<RelinkResult, { status: 'confirm' | 'confirm-different' | 'suggest-subfolder' }>;
+};
+
+/** Why Locate refused a folder, in the row's words. */
+const relinkRefusalCopy: Readonly<Record<RelinkRefusalReason, string>> = {
+  'unknown-workspace': 'This workspace is no longer in Tau.',
+  'backend-mismatch': 'This workspace can’t be moved to that kind of folder.',
+  home: 'That folder is Tau’s Home folder, or inside it. Choose the folder that moved.',
+  'data-directory': 'That folder holds Tau’s own data. Choose the folder that moved.',
+  'workspace-overlap': 'That folder is, holds or sits inside another workspace. Choose the folder that moved.',
+  'handle-owned-by-another-workspace': 'That folder is already another workspace in Tau.',
+  'marker-owned-by-another-workspace': 'That folder belongs to another workspace in Tau.',
+};
+
+/** Node folders whose marker this page has written or confirmed this session, so admission writes it once. */
+const anchoredMarkers = new Set<string>();
+
+/** The folder a desktop path names, by either separator. */
+const childPath = (parent: string, name: string): string =>
+  `${parent.replace(/[/\\]+$/u, '')}${parent.includes('\\') && !parent.includes('/') ? '\\' : '/'}${name}`;
+
 /** Workspace connections shared by Settings and desktop Manage locations. */
 export function WorkspaceConnections({
   onWorkspacesChange,
@@ -66,10 +101,11 @@ export function WorkspaceConnections({
   /** The workspace whose change an unfinished project operation refused (U7). */
   const [recoveryRefusal, setRecoveryRefusal] = useState<string>();
   const [isNotFoundOpen, setIsNotFoundOpen] = useState(false);
+  const [relinkQuestion, setRelinkQuestion] = useState<RelinkQuestion>();
   const telemetry = useWorkspaceTelemetry();
   const projectManager = useProjectManager();
   const { workspaceConnection } = projectManager;
-  const { workspace, fileManagerRef } = useFileManager();
+  const { workspace, fileManagerRef, scopedStorage, writeFiles } = useFileManager();
   const rootStatuses = useRootStatuses(fileManagerRef);
 
   const reloadRows = useCallback(async (): Promise<void> => {
@@ -149,44 +185,6 @@ export function WorkspaceConnections({
       setBusyWorkspaceId(undefined);
     }
   }, [projectManager, reloadRows, telemetry]);
-
-  const handleConnectChange = useCallback(
-    async (workspaceId: string) => {
-      const picker = webAccessDirectoryPicker();
-      if (!picker) {
-        return;
-      }
-      setBusyWorkspaceId(workspaceId);
-      try {
-        await projectManager.assertWorkspaceMutationAllowed(workspaceId);
-        const handle = await picker.pick({ id: `tau-workspace-${workspaceId}`, mode: 'readwrite' });
-        if (handle === undefined) {
-          telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
-          return;
-        }
-        await workspace.replaceWorkspaceHandle(workspaceId, handle);
-        await projectManager.refreshWorkspaceCatalog();
-        telemetry.workspaceConnected({ workspaceId });
-        await reloadRows();
-        toast.success(`Updated workspace folder to "${handle.name}"`);
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
-          return;
-        }
-        telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown', error });
-        toast.error(
-          isWorkspaceIdentityConflictError(error)
-            ? workspaceIdentityConflictCopy
-            : 'Failed to change workspace folder.',
-        );
-        throw error;
-      } finally {
-        setBusyWorkspaceId(undefined);
-      }
-    },
-    [projectManager, reloadRows, telemetry, workspace],
-  );
 
   const handleGrantAccess = useCallback(
     async (workspaceId: string) => {
@@ -345,6 +343,225 @@ export function WorkspaceConnections({
     [clearNotices, refreshAfterFolderChange, removeOne],
   );
 
+  /**
+   * Anchor a node workspace's identity in its folder (D2 step 8), through the file service: the folder's `.tau` is
+   * mounted for the write and released after. Best-effort; a read-only folder is skipped.
+   */
+  const anchorNodeMarker = useCallback(
+    async (target: Workspace): Promise<void> => {
+      const { path } = target;
+      if (path === undefined || anchoredMarkers.has(`${target.workspaceId}:${path}:${target.slug}`)) {
+        return;
+      }
+      anchoredMarkers.add(`${target.workspaceId}:${path}:${target.slug}`);
+      const prefix = `/.tau-workspace-marker/${target.workspaceId}`;
+      const scope = { backend: 'node', path } as const;
+      let mounted = false;
+      try {
+        await workspace.mount(prefix, { backend: 'node', path, providerBasePath: '.tau', class: 'authority-metadata' });
+        mounted = true;
+        await syncNodeWorkspaceMarker(target, {
+          read: async () =>
+            scopedStorage.readFile(workspaceMarkerPath, { encoding: 'utf8', scope }).catch(() => undefined),
+          write: async (content) => {
+            await writeFiles({
+              [`${prefix}/${workspaceMarkerPath.split('/').at(-1)!}`]: { content: new TextEncoder().encode(content) },
+            });
+          },
+        });
+      } catch (error) {
+        console.warn('The workspace marker was not written; Locate will ask before relinking this folder', error);
+      } finally {
+        if (mounted) {
+          workspace.unmount(prefix);
+        }
+      }
+    },
+    [scopedStorage, workspace, writeFiles],
+  );
+
+  /** Open the picker for Locate: on desktop at the folder's old place, on the web for this workspace's handle. */
+  const pickRelinkTarget = useCallback(
+    async (target: Workspace, defaultPath?: string): Promise<RelinkTarget | undefined> => {
+      if (target.path === undefined) {
+        const handle = await webAccessDirectoryPicker()?.pick({
+          id: `tau-workspace-${target.workspaceId}`,
+          mode: 'readwrite',
+        });
+        return handle === undefined ? undefined : { backend: 'webaccess', handle };
+      }
+      const bridge = desktopBridge();
+      if (bridge?.directories === undefined) {
+        throw new Error('Workspace management is unavailable. Restart Tau and try again.');
+      }
+      const grantedBefore = await bridge.directories.list();
+      const path = await bridge.dialog.selectDirectory({
+        id: `tau-locate-${target.workspaceId}`,
+        defaultPath: defaultPath ?? target.path,
+      });
+      return path === undefined ? undefined : { backend: 'node', path, wasGranted: grantedBefore.includes(path) };
+    },
+    [],
+  );
+
+  const relinkPorts = useMemo((): RelinkPorts => {
+    const directories = isDesktopTarget() ? desktopBridge()?.directories : undefined;
+    return {
+      readEvidence: projectManager.readFolderEvidence,
+      ...(directories === undefined
+        ? {}
+        : {
+            revokeGrant: async (path: string): Promise<void> => {
+              await directories.disconnect(path);
+            },
+          }),
+    };
+  }, [projectManager.readFolderEvidence]);
+
+  /** Release the grant a Locate pick made, unless the folder held one before (D2 step 1). Best-effort. */
+  const releasePick = useCallback(
+    async (pick: RelinkTarget): Promise<void> => {
+      if (pick.backend !== 'node' || pick.wasGranted || relinkPorts.revokeGrant === undefined) {
+        return;
+      }
+      try {
+        await relinkPorts.revokeGrant(pick.path);
+      } catch (error) {
+        console.warn('Could not release the folder Locate was given', error);
+      }
+    },
+    [relinkPorts],
+  );
+
+  /** Run Locate on a pick and act on its answer: done, a question, or a refusal (D2). */
+  const runRelink = useCallback(
+    async (target: Workspace, pick: RelinkTarget, confirmed: boolean): Promise<void> => {
+      const result = await relinkWorkspace(target.workspaceId, pick, { ...relinkPorts, confirmed });
+      switch (result.status) {
+        case 'relinked': {
+          telemetry.workspaceConnected({ workspaceId: target.workspaceId });
+          const unmatched =
+            result.unmatched.length === 0
+              ? ''
+              : ` ${result.unmatched.length} project${result.unmatched.length === 1 ? ' was' : 's were'} not in this folder and stay listed until you remove them.`;
+          setMessage(`Relinked "${target.name}" to its new place.${unmatched}`);
+          await refreshAfterFolderChange(target);
+          await anchorNodeMarker(result.workspace);
+          return;
+        }
+        case 'refused': {
+          setErrorMessage(relinkRefusalCopy[result.reason]);
+          return;
+        }
+        default: {
+          setRelinkQuestion({ workspace: target, target: pick, result });
+        }
+      }
+    },
+    [anchorNodeMarker, refreshAfterFolderChange, relinkPorts, telemetry],
+  );
+
+  /**
+   * **Locate…** (D2): pick the folder's new place and relink this workspace to it, with its projects. Reconnect on a
+   * disconnected row and the web's Change folder are the same command, so neither adds a workspace (U2).
+   */
+  const handleLocate = useCallback(
+    async (target: Workspace): Promise<void> => {
+      setBusyWorkspaceId(target.workspaceId);
+      clearNotices();
+      setRelinkQuestion(undefined);
+      try {
+        if (!(await guardMutation(target))) {
+          return;
+        }
+        const pick = await pickRelinkTarget(target);
+        if (pick === undefined) {
+          telemetry.workspaceOpenFailed({ workspaceId: target.workspaceId, reason: 'aborted' });
+          return;
+        }
+        await runRelink(target, pick, false);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          telemetry.workspaceOpenFailed({ workspaceId: target.workspaceId, reason: 'aborted' });
+          return;
+        }
+        telemetry.workspaceOpenFailed({ workspaceId: target.workspaceId, reason: 'unknown', error });
+        setErrorMessage(
+          isWorkspaceIdentityConflictError(error)
+            ? workspaceIdentityConflictCopy
+            : error instanceof Error
+              ? error.message
+              : 'Could not relink the folder.',
+        );
+      } finally {
+        setBusyWorkspaceId(undefined);
+      }
+    },
+    [clearNotices, guardMutation, pickRelinkTarget, runRelink, telemetry],
+  );
+
+  /** Answer Locate's question: relink anyway, use the suggested subfolder, add the folder as a new workspace, or cancel. */
+  const answerRelinkQuestion = useCallback(
+    async (answer: 'relink' | 'subfolder' | 'add' | 'cancel'): Promise<void> => {
+      const question = relinkQuestion;
+      if (question === undefined) {
+        return;
+      }
+      setRelinkQuestion(undefined);
+      setBusyWorkspaceId(question.workspace.workspaceId);
+      try {
+        if (answer === 'cancel') {
+          await releasePick(question.target);
+          return;
+        }
+        if (answer === 'relink') {
+          await runRelink(question.workspace, question.target, true);
+          return;
+        }
+        if (answer === 'add') {
+          if (question.target.backend === 'webaccess') {
+            await projectManager.connectWorkspace(question.target.handle);
+          } else {
+            const added = await createNodeWorkspace(question.target.path);
+            await refreshAfterFolderChange(added);
+            await anchorNodeMarker(added);
+          }
+          await reloadRows();
+          return;
+        }
+        if (question.result.status !== 'suggest-subfolder') {
+          return;
+        }
+        const { name } = question.result;
+        if (question.target.backend === 'webaccess') {
+          const handle = await question.target.handle.getDirectoryHandle(name);
+          await runRelink(question.workspace, { backend: 'webaccess', handle }, false);
+          return;
+        }
+        /* Main grants only what its picker returns, so the subfolder is confirmed in the picker, opened at it. */
+        const subfolder = await pickRelinkTarget(question.workspace, childPath(question.target.path, name));
+        await releasePick(question.target);
+        if (subfolder !== undefined) {
+          await runRelink(question.workspace, subfolder, false);
+        }
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : 'Could not relink the folder.');
+      } finally {
+        setBusyWorkspaceId(undefined);
+      }
+    },
+    [
+      anchorNodeMarker,
+      pickRelinkTarget,
+      projectManager,
+      refreshAfterFolderChange,
+      releasePick,
+      relinkQuestion,
+      reloadRows,
+      runRelink,
+    ],
+  );
+
   const handleRetryFolder = useCallback(
     (target: Workspace): void => {
       fileManagerRef.send({ type: 'recheckRoots', storageRootKeys: [workspaceStorageRootKey(target)] });
@@ -485,6 +702,17 @@ export function WorkspaceConnections({
       };
     });
   }, [rootStatuses, rows]);
+  /* A desktop folder connected before markers existed gets one at its next successful admission (D2 step 8). */
+  useEffect(() => {
+    if (!isDesktopTarget()) {
+      return;
+    }
+    for (const row of displayedRows) {
+      if (row.status === 'connected' && row.workspace.path !== undefined) {
+        void anchorNodeMarker(row.workspace);
+      }
+    }
+  }, [anchorNodeMarker, displayedRows]);
   const notFoundRows = shouldGroupNotFound ? displayedRows.filter((row) => row.status === 'notFound') : [];
   const listedRows = shouldGroupNotFound ? displayedRows.filter((row) => row.status !== 'notFound') : displayedRows;
 
@@ -511,14 +739,15 @@ export function WorkspaceConnections({
         description={row.workspace.path}
         isBusy={isBusyRow}
         onConnect={
-          row.workspace.path === undefined
+          row.workspace.path === undefined || row.status === 'disconnected'
             ? async () => {
-                await handleConnectChange(row.workspace.workspaceId);
+                await handleLocate(row.workspace);
               }
-            : row.status === 'disconnected'
-              ? handleAddWorkspace
-              : undefined
+            : undefined
         }
+        onLocate={async () => {
+          await handleLocate(row.workspace);
+        }}
         onGrantAccess={async () => {
           await handleGrantAccess(row.workspace.workspaceId);
         }}
@@ -612,6 +841,36 @@ export function WorkspaceConnections({
           </div>
         ) : undefined}
       </SettingsGroup>
+      {relinkQuestion ? (
+        <div role='alertdialog' aria-label='Relink this folder?' className='flex flex-col gap-2 text-sm'>
+          <p>
+            {relinkQuestion.result.status === 'confirm'
+              ? `This folder contains ${relinkQuestion.result.matched} of the ${relinkQuestion.result.total} projects Tau knew in “${relinkQuestion.workspace.name}”. Relink anyway?`
+              : relinkQuestion.result.status === 'confirm-different'
+                ? `This looks like a different folder from “${relinkQuestion.workspace.name}”.`
+                : `The projects are in “${relinkQuestion.result.name}”. Use that folder?`}
+          </p>
+          <div className='flex flex-wrap gap-2'>
+            {relinkQuestion.result.status === 'suggest-subfolder' ? (
+              <Button size='sm' onClick={async () => answerRelinkQuestion('subfolder')}>
+                Use that folder
+              </Button>
+            ) : (
+              <Button size='sm' onClick={async () => answerRelinkQuestion('relink')}>
+                Relink anyway
+              </Button>
+            )}
+            {relinkQuestion.result.status === 'confirm-different' ? (
+              <Button size='sm' variant='outline' onClick={async () => answerRelinkQuestion('add')}>
+                Add as a new workspace
+              </Button>
+            ) : undefined}
+            <Button size='sm' variant='outline' onClick={async () => answerRelinkQuestion('cancel')}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : undefined}
       {errorMessage ? (
         <p role='alert' className='text-sm'>
           {errorMessage}

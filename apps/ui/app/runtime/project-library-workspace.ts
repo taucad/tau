@@ -22,7 +22,15 @@ import {
   repairWorkspaceBindings as repairStoredWorkspaceBindings,
   setProjectFileSystemConfig,
 } from '@taucad/files-ui/filesystem/handle-store';
-import type { Workspace, WorkspaceBindingRepairResult } from '@taucad/files-ui/filesystem/handle-store';
+import type {
+  FolderEvidence,
+  FolderProject,
+  RelinkTarget,
+  Workspace,
+  WorkspaceBindingRepairResult,
+} from '@taucad/files-ui/filesystem/handle-store';
+import type { ScopedStorageClient } from '@taucad/fs-client/file-system-client';
+import { parseWorkspaceMarker, workspaceMarkerPath } from '@taucad/types';
 import { deriveWorkspaceBindingRepairs, routeConfigFor } from '#runtime/project-library-storage.js';
 import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
 import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
@@ -33,6 +41,144 @@ export type ConnectedWorkspace = {
   readonly workspace: Workspace;
   readonly projectCount: number;
   readonly minted: boolean;
+};
+
+/** Read-only access to one picked folder, for the evidence Locate weighs (blueprint D2 step 3). */
+type FolderReader = {
+  /** The names of the non-dot child directories of `path` (`''` is the folder itself); none when unreadable. */
+  readonly directories: (path: string) => Promise<string[]>;
+  /** A file's text, or `undefined` when it is missing or unreadable. */
+  readonly readText: (path: string) => Promise<string | undefined>;
+};
+
+/** At most this many child folders are read for the picked-the-parent rule, so a huge parent stays bounded. */
+const maxEvidenceSubfolders = 64;
+
+/** A project's generated identity, `.tau/project.json` (`@taucad/project-core`'s `projectIdentityPath`). */
+const projectIdentityFile = '.tau/project.json';
+
+const parseProjectId = (text: string | undefined): string | undefined => {
+  if (text === undefined) {
+    return undefined;
+  }
+  try {
+    const record: unknown = JSON.parse(text);
+    return typeof record === 'object' &&
+      record !== null &&
+      'version' in record &&
+      record.version === 1 &&
+      'projectId' in record &&
+      typeof record.projectId === 'string'
+      ? record.projectId
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The projects one level inside `path`, and the child folders that hold none. */
+const readProjectsIn = async (
+  reader: FolderReader,
+  path: string,
+): Promise<{ readonly projects: FolderProject[]; readonly others: string[] }> => {
+  const names = await reader.directories(path);
+  const read = await Promise.all(
+    names.map(async (name) => ({
+      name,
+      projectId: parseProjectId(
+        await reader.readText(
+          path === '' ? `${name}/${projectIdentityFile}` : `${path}/${name}/${projectIdentityFile}`,
+        ),
+      ),
+    })),
+  );
+  return {
+    projects: read.flatMap(({ name, projectId }) => (projectId === undefined ? [] : [{ projectId, directory: name }])),
+    others: read.filter(({ projectId }) => projectId === undefined).map(({ name }) => name),
+  };
+};
+
+/**
+ * What a picked folder holds for Locate: its workspace marker, its projects, and the projects inside each child folder
+ * that is not one. Reads only.
+ */
+const readFolderEvidenceWith = async (reader: FolderReader): Promise<FolderEvidence> => {
+  const [markerText, top] = await Promise.all([reader.readText(workspaceMarkerPath), readProjectsIn(reader, '')]);
+  const subfolders = await Promise.all(
+    top.others.slice(0, maxEvidenceSubfolders).map(async (name) => {
+      const { projects } = await readProjectsIn(reader, name);
+      return { name, projects };
+    }),
+  );
+  return {
+    marker: markerText === undefined ? undefined : parseWorkspaceMarker(markerText),
+    projects: top.projects,
+    subfolders: subfolders.filter((subfolder) => subfolder.projects.length > 0),
+  };
+};
+
+/** A desktop folder, read through the file service's scoped reads: the folder is not a configured root yet. */
+const scopedFolderReader = (scopedStorage: ScopedStorageClient, path: string): FolderReader => {
+  const scope = { backend: 'node', path } as const;
+  return {
+    directories: async (directory) => {
+      try {
+        const nodes = await scopedStorage.readShallowDirectory(directory, { scope });
+        return nodes
+          .filter((node) => node.children !== undefined && !node.name.startsWith('.'))
+          .map((node) => node.name);
+      } catch {
+        return [];
+      }
+    },
+    readText: async (file) => {
+      try {
+        return await scopedStorage.readFile(file, { encoding: 'utf8', scope });
+      } catch {
+        return undefined;
+      }
+    },
+  };
+};
+
+/** A web folder, read through its handle on the page, where the permission it was picked with holds. */
+const handleFolderReader = (root: FileSystemDirectoryHandle): FolderReader => {
+  const directoryAt = async (path: string): Promise<FileSystemDirectoryHandle> => {
+    let directory = root;
+    for (const segment of path.split('/').filter(Boolean)) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each segment opens inside the one before it.
+      directory = await directory.getDirectoryHandle(segment);
+    }
+    return directory;
+  };
+  return {
+    directories: async (path) => {
+      try {
+        const names: string[] = [];
+        const directory = await directoryAt(path);
+        for await (const [name, entry] of directory.entries()) {
+          if (entry.kind === 'directory' && !name.startsWith('.')) {
+            names.push(name);
+          }
+        }
+        return names;
+      } catch {
+        return [];
+      }
+    },
+    readText: async (path) => {
+      const segments = path.split('/');
+      const fileName = segments.pop()!;
+      try {
+        const directory = await directoryAt(segments.join('/'));
+        const handle = await directory.getFileHandle(fileName);
+        const file = await handle.getFile();
+        return await file.text();
+      } catch {
+        return undefined;
+      }
+    },
+  };
 };
 
 /** The telemetry of one workspace connection, filled in as its services run. @public */
@@ -227,6 +373,21 @@ export class WorkspaceCommands {
     await fileManager.workspace.syncProjectRoots();
     this.#host.invalidateListing();
     this.#host.invalidateProject(projectId);
+  };
+
+  /**
+   * Read what a folder picked for Locate holds (blueprint D2 step 3): its marker, its projects, and the projects in
+   * each child folder. Reads only; the folder is not admitted as a root.
+   *
+   * @param target - The picked folder.
+   * @returns The evidence `relinkWorkspace` weighs.
+   */
+  public readonly readFolderEvidence = async (target: RelinkTarget): Promise<FolderEvidence> => {
+    if (target.backend === 'webaccess') {
+      return readFolderEvidenceWith(handleFolderReader(target.handle));
+    }
+    const { scopedStorage } = await this.#host.facade();
+    return readFolderEvidenceWith(scopedFolderReader(scopedStorage, target.path));
   };
 
   /**

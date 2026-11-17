@@ -382,7 +382,7 @@ contextBridge.exposeInMainWorld('tau', {
     },
   },
   dialog: {
-    selectDirectory: async (options?: { id?: string }): Promise<string | undefined> =>
+    selectDirectory: async (options?: { id?: string; defaultPath?: string }): Promise<string | undefined> =>
       (await ipcRenderer.invoke('tau:select-directory', options)) as string | undefined,
     selectImportFolder: async (): Promise<{ grant: string; name: string } | undefined> =>
       (await ipcRenderer.invoke(selectImportFolderIpcChannel)) as { grant: string; name: string } | undefined,

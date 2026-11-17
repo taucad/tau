@@ -836,6 +836,27 @@ describe('desktop main compute owner', () => {
   );
 
   it(
+    'should open the folder picker at the nearest existing ancestor of a default path that is gone (T-R4.5)',
+    async () => {
+      await bootstrap();
+      const parent = join(state.userData, 'Projects');
+      await mkdir(parent, { recursive: true });
+      dialog.showOpenDialog.mockClear();
+      dialog.showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] });
+
+      await state.handlers.get('tau:select-directory')!(
+        { senderFrame: {} },
+        { id: 'tau-locate-wsp_tau', defaultPath: join(parent, 'Moved Away', 'Workshop') },
+      );
+
+      expect(dialog.showOpenDialog).toHaveBeenCalledOnce();
+      const request = dialog.showOpenDialog.mock.calls[0]!.at(-1) as { defaultPath?: string };
+      expect(request.defaultPath).toBe(parent);
+    },
+    bootMilliseconds,
+  );
+
+  it(
     "should refuse a picked folder that holds Tau's own data and leave the grants unchanged",
     async () => {
       await bootstrap();

@@ -1019,6 +1019,360 @@ export async function createNodeWorkspace(hostPath: string, options?: { name?: s
   );
 }
 
+// ============ Locate (blueprint D2) ============
+
+/** One project the file service found in a folder: its manifest id and the immediate child directory holding it. @public */
+export type FolderProject = { readonly projectId: string; readonly directory: string };
+
+/** What Locate reads from a picked folder before it decides anything (D2 steps 3 and 8). @public */
+export type FolderEvidence = {
+  /** The folder's `.tau/workspace.json`, when it has a valid one. */
+  readonly marker: WorkspaceMarker | undefined;
+  /** Every project manifest one level down, duplicates of one id included. */
+  readonly projects: readonly FolderProject[];
+  /** Immediate subfolders that are not projects, with the projects one level inside each (the picked-the-parent rule). */
+  readonly subfolders: ReadonlyArray<{ readonly name: string; readonly projects: readonly FolderProject[] }>;
+};
+
+/**
+ * Where Locate points a workspace. A desktop pick is a path main granted the moment it was picked; `wasGranted` says
+ * whether it held a grant before, so a refused or cancelled pick releases only the grant the pick itself made.
+ *
+ * @public
+ */
+export type RelinkTarget =
+  | { readonly backend: 'node'; readonly path: string; readonly wasGranted: boolean }
+  | { readonly backend: 'webaccess'; readonly handle: FileSystemDirectoryHandle };
+
+/** What Locate reads and revokes through, so the store itself never reads a folder or calls main. @public */
+export type RelinkPorts = {
+  readonly readEvidence: (target: RelinkTarget) => Promise<FolderEvidence>;
+  /** Revoke one desktop folder grant (main's `directories.disconnect`); absent on the web. */
+  readonly revokeGrant?: (path: string) => Promise<void>;
+};
+
+/** Locate's ports, and `confirmed` once the person answered a question it asked. @public */
+export type RelinkOptions = RelinkPorts & { readonly confirmed?: boolean };
+
+/** Why Locate refused a folder. @public */
+export type RelinkRefusalReason =
+  | 'unknown-workspace'
+  | 'backend-mismatch'
+  | 'home'
+  | 'data-directory'
+  | 'workspace-overlap'
+  | 'handle-owned-by-another-workspace'
+  | 'marker-owned-by-another-workspace';
+
+/** Locate's answer: done, a question for the person, or a refusal. Only `relinked` changed anything. @public */
+export type RelinkResult =
+  | {
+      readonly status: 'relinked';
+      readonly workspace: Workspace;
+      readonly matched: number;
+      /** Bound projects not found in the folder; they keep their binding. */
+      readonly unmatched: readonly string[];
+    }
+  | { readonly status: 'confirm'; readonly matched: number; readonly total: number }
+  | { readonly status: 'confirm-different' }
+  | { readonly status: 'suggest-subfolder'; readonly name: string }
+  | { readonly status: 'refused'; readonly reason: RelinkRefusalReason };
+
+/** A project binding Locate may move, and the directory it moves to. */
+type RelinkBinding = Extract<ProjectFileSystemConfig, { backend: 'node' | 'webaccess' }>;
+
+/**
+ * Match each bound project to the folder's manifests by project id (D2 step 4). Two directories with one id resolve to
+ * the one keeping the old directory name; with neither, the project stays unmatched for the person to choose.
+ */
+function matchBoundProjects(
+  bound: readonly RelinkBinding[],
+  found: readonly FolderProject[],
+): { matched: Array<{ readonly binding: RelinkBinding; readonly directory: string }>; unmatched: string[] } {
+  const matched: Array<{ readonly binding: RelinkBinding; readonly directory: string }> = [];
+  const unmatched: string[] = [];
+  for (const binding of bound) {
+    const candidates = found.filter((project) => project.projectId === binding.projectId);
+    const chosen =
+      candidates.length === 1
+        ? candidates[0]
+        : candidates.find((candidate) => candidate.directory === binding.providerBasePath);
+    if (chosen === undefined) {
+      unmatched.push(binding.projectId);
+    } else {
+      matched.push({ binding, directory: chosen.directory });
+    }
+  }
+  return { matched, unmatched };
+}
+
+/** The bindings that belong to a workspace: `node` rows on its path, or `webaccess` rows with its id. */
+const boundTo = (workspace: Workspace, configs: readonly ProjectFileSystemConfig[]): RelinkBinding[] => {
+  const path = workspace.path === undefined ? undefined : normalizeHostPath(workspace.path);
+  return configs.filter(
+    (config): config is RelinkBinding =>
+      (config.backend === 'webaccess' && config.workspaceId === workspace.workspaceId) ||
+      (config.backend === 'node' &&
+        path !== undefined &&
+        config.path !== undefined &&
+        normalizeHostPath(config.path) === path),
+  );
+};
+
+/**
+ * Refuse a node target that is Home or inside it, inside Tau's data directory, or overlaps another workspace (D2 step 2).
+ * The data directory is Home's parent (`userData`), whose `filesystem-authority` the node host refuses to admit.
+ */
+function nodeRelinkRefusal(path: string, others: readonly Workspace[]): RelinkRefusalReason | undefined {
+  const homeRoot = desktopBridge()?.nodeFs.homeRoot;
+  const home = homeRoot === undefined ? undefined : normalizeHostPath(homeRoot);
+  if (home !== undefined) {
+    if (isHostPathWithin(home, path)) {
+      return 'home';
+    }
+    const dataDirectory = normalizeHostPath(home.slice(0, home.length - hostPathName(home).length));
+    if (isHostPathWithin(dataDirectory, path) || isHostPathWithin(path, dataDirectory)) {
+      return 'data-directory';
+    }
+  }
+  try {
+    assertNoWorkspaceOverlap(path, others);
+  } catch (error) {
+    if (error instanceof WorkspaceOverlapError) {
+      return error.overlaps === 'home' ? 'home' : 'workspace-overlap';
+    }
+    throw error;
+  }
+  return undefined;
+}
+
+/**
+ * Release the grant a refused Locate pick made, unless the folder held one before the pick (D2 step 1).
+ * Best-effort: a spare grant is harmless and the folder list shows it.
+ */
+async function releaseRelinkPick(target: RelinkTarget, ports: Pick<RelinkPorts, 'revokeGrant'>): Promise<void> {
+  if (target.backend !== 'node' || target.wasGranted || ports.revokeGrant === undefined) {
+    return;
+  }
+  try {
+    await ports.revokeGrant(target.path);
+  } catch (error) {
+    console.warn('Could not release the folder Locate was given', error);
+  }
+}
+
+/**
+ * **Locate…** (blueprint D2): point a workspace whose folder moved at its new place and re-bind its projects, keeping
+ * its id, so the creation-location preference and URLs keep working.
+ *
+ * It refuses a target that overlaps Home, Tau's data or another workspace, or whose marker names another workspace, and
+ * then releases the grant the pick made. With weak evidence it asks first and writes nothing: some projects matched
+ * (`confirm`), none matched (`confirm-different`), or one subfolder holds them all (`suggest-subfolder`). A marker
+ * naming this workspace, or every bound project matched, relinks at once; a second call with `confirmed` commits after
+ * a question. The commit is one transaction over the workspace row and its matched bindings; the old desktop grant is
+ * revoked only after it, so a crash between the two leaves a spare grant rather than a record without one.
+ *
+ * @param workspaceId - The workspace to relink.
+ * @param target - The folder the person picked.
+ * @param options - How the folder is read and a grant revoked, and `confirmed` once the person answered a question.
+ * @returns What happened.
+ */
+export async function relinkWorkspace(
+  workspaceId: string,
+  target: RelinkTarget,
+  options: RelinkOptions,
+): Promise<RelinkResult> {
+  const decided = await withStorageWrite(async () =>
+    withWorkspaceMintLock(async () => withDb(async (db) => decideRelink(db, { workspaceId, target, options }))),
+  );
+  if (decided.status === 'refused') {
+    await releaseRelinkPick(target, options);
+    return decided;
+  }
+  if (decided.status !== 'committed') {
+    return decided;
+  }
+  publishProjectRootConfigurationChange();
+  const { result, previousPath, marker } = decided;
+  if (target.backend === 'webaccess') {
+    await syncWorkspaceMarker(target.handle, marker, result.workspace);
+  } else if (
+    previousPath !== undefined &&
+    previousPath !== result.workspace.path &&
+    options.revokeGrant !== undefined
+  ) {
+    try {
+      await options.revokeGrant(previousPath);
+    } catch (error) {
+      console.warn('Relinked; the old folder grant stays until it is removed', error);
+    }
+  }
+  return result;
+}
+
+type RelinkDecision =
+  | Exclude<RelinkResult, { status: 'relinked' }>
+  | {
+      readonly status: 'committed';
+      readonly result: Extract<RelinkResult, { status: 'relinked' }>;
+      readonly previousPath: string | undefined;
+      readonly marker: WorkspaceMarker | undefined;
+    };
+
+/** Judge a Locate target against the stored rows and the folder's evidence, and commit when it is clear (D2 2-6). */
+async function decideRelink(
+  db: IDBDatabase,
+  request: { readonly workspaceId: string; readonly target: RelinkTarget; readonly options: RelinkOptions },
+): Promise<RelinkDecision> {
+  const { workspaceId, target, options } = request;
+  const existing = await readAllWorkspaces(db);
+  const workspace = existing.find((candidate) => candidate.workspaceId === workspaceId);
+  if (workspace === undefined) {
+    return { status: 'refused', reason: 'unknown-workspace' };
+  }
+  if ((target.backend === 'node') !== (workspace.path !== undefined)) {
+    return { status: 'refused', reason: 'backend-mismatch' };
+  }
+  const others = existing.filter((candidate) => candidate.workspaceId !== workspaceId);
+  const path = target.backend === 'node' ? normalizeHostPath(target.path) : undefined;
+  if (target.backend === 'webaccess') {
+    if ((await findSameEntryWorkspaceId(await readAllHandles(db), target.handle, workspaceId)) !== undefined) {
+      return { status: 'refused', reason: 'handle-owned-by-another-workspace' };
+    }
+  } else {
+    const refusal = nodeRelinkRefusal(normalizeHostPath(target.path), others);
+    if (refusal !== undefined) {
+      return { status: 'refused', reason: refusal };
+    }
+  }
+
+  const evidence = await options.readEvidence(target);
+  if (evidence.marker !== undefined && evidence.marker.workspaceId !== workspaceId) {
+    return { status: 'refused', reason: 'marker-owned-by-another-workspace' };
+  }
+  const bound = boundTo(workspace, await readAllProjectFileSystemConfigs(db));
+  const { matched, unmatched } = matchBoundProjects(bound, evidence.projects);
+  const isMarked = evidence.marker?.workspaceId === workspaceId;
+  if (!isMarked && options.confirmed !== true && matched.length < bound.length) {
+    if (matched.length === 0) {
+      const holding = evidence.subfolders.filter(
+        (subfolder) => matchBoundProjects(bound, subfolder.projects).matched.length === bound.length,
+      );
+      if (holding.length === 1) {
+        return { status: 'suggest-subfolder', name: holding[0]!.name };
+      }
+      if (evidence.projects.length > 0) {
+        return { status: 'confirm-different' };
+      }
+    }
+    return { status: 'confirm', matched: matched.length, total: bound.length };
+  }
+
+  const folderName = target.backend === 'webaccess' ? target.handle.name : hostPathName(normalizeHostPath(target.path));
+  const relinked: Workspace = {
+    ...workspace,
+    ...(path === undefined ? {} : { path }),
+    slug: allocateWorkspaceSlug(folderName, others),
+    lastConnectedAt: Date.now(),
+  };
+  await commitRelink(db, { workspace: relinked, matched, target });
+  return {
+    status: 'committed',
+    result: { status: 'relinked', workspace: relinked, matched: matched.length, unmatched },
+    previousPath: workspace.path,
+    marker: evidence.marker,
+  };
+}
+
+/**
+ * One transaction over the workspace row, its handle on the web, and every matched binding (D2 step 6). A write that
+ * throws aborts the transaction, so nothing changes.
+ */
+async function commitRelink(
+  db: IDBDatabase,
+  change: {
+    readonly workspace: Workspace;
+    readonly matched: ReadonlyArray<{ readonly binding: RelinkBinding; readonly directory: string }>;
+    readonly target: RelinkTarget;
+  },
+): Promise<void> {
+  const { workspace, matched, target } = change;
+  const stores =
+    target.backend === 'webaccess'
+      ? [workspacesStoreName, handlesStoreName, configsStoreName]
+      : [workspacesStoreName, configsStoreName];
+  const tx = db.transaction(stores, 'readwrite');
+  const done = waitForTransaction(tx);
+  try {
+    tx.objectStore(workspacesStoreName).put(workspace);
+    if (target.backend === 'webaccess') {
+      tx.objectStore(handlesStoreName).put(target.handle, workspace.workspaceId);
+    }
+    const configs = tx.objectStore(configsStoreName);
+    for (const { binding, directory } of matched) {
+      configs.put(
+        binding.backend === 'node'
+          ? { ...binding, path: workspace.path, providerBasePath: directory }
+          : { ...binding, providerBasePath: directory },
+      );
+    }
+  } catch (error) {
+    abortActiveTransaction(tx);
+    await done.catch(() => undefined);
+    throw error;
+  }
+  await done;
+}
+
+/** Read and write `.tau/workspace.json` in a node folder, through the file service. @public */
+export type WorkspaceMarkerFiles = {
+  /** The marker's text, or `undefined` when there is none or it cannot be read. */
+  readonly read: () => Promise<string | undefined>;
+  readonly write: (content: string) => Promise<void>;
+};
+
+/**
+ * Anchor a node workspace's identity on disk (D2 step 8), so Locate can recognise the folder after a move. Written on
+ * connect, on relink and at a folder's next successful admission. Best-effort: a read-only folder is skipped, and a
+ * marker naming another workspace is left alone (Locate refuses that folder; it is not this function's to overwrite).
+ *
+ * @param workspace - The node workspace.
+ * @param files - The folder's marker, read and written through the file service.
+ * @returns What happened.
+ */
+export async function syncNodeWorkspaceMarker(
+  workspace: Workspace,
+  files: WorkspaceMarkerFiles,
+): Promise<'written' | 'unchanged' | 'skipped' | 'conflict'> {
+  let existing: WorkspaceMarker | undefined;
+  try {
+    const text = await files.read();
+    existing = text === undefined ? undefined : parseWorkspaceMarker(text);
+  } catch {
+    existing = undefined;
+  }
+  if (existing !== undefined && existing.workspaceId !== workspace.workspaceId) {
+    return 'conflict';
+  }
+  if (existing?.slug === workspace.slug) {
+    return 'unchanged';
+  }
+  try {
+    await files.write(
+      serializeWorkspaceMarker({
+        $schema: workspaceMarkerSchemaUrl,
+        workspaceId: workspace.workspaceId,
+        slug: workspace.slug,
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+      }),
+    );
+    return 'written';
+  } catch (error) {
+    console.warn(`Could not write ${workspaceMarkerPath} — workspace identity is not anchored on disk`, error);
+    return 'skipped';
+  }
+}
+
 async function readHandle(db: IDBDatabase, workspaceId: string): Promise<FileSystemDirectoryHandle | undefined> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(handlesStoreName, 'readonly');

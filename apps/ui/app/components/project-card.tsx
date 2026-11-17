@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef } from 'react';
 import { Box, Eye } from 'lucide-react';
 import type { To } from 'react-router';
 import { Link } from 'react-router';
+import { createIsometricCaptureCamera } from '@taucad/agent-tools/capture';
 import type { CadPreviewGraphicsOptions } from '#components/cad-preview.js';
 import { warmProjectWorkspace } from '#lib/project-workspace-warmup.js';
 import { Button } from '@taucad/ui/components/button';
@@ -177,8 +178,11 @@ export function ProjectCardMedia({
   );
 }
 
-/** The field of view a project card's preview opens with; its `CadPreviewProvider` seeds it. */
-export const projectCardVerticalFieldOfView = 45;
+/**
+ * The field of view a project card's preview opens with; its `CadPreviewProvider` seeds it. It is the card thumbnail's,
+ * so the preview frames the model where the thumbnail drew it.
+ */
+export const projectCardVerticalFieldOfView = createIsometricCaptureCamera().projection.verticalFieldOfView;
 
 export function ProjectCardCadPreview(): React.JSX.Element {
   return (

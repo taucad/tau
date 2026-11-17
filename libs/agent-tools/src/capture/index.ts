@@ -5,6 +5,7 @@ export {
   type CaptureExportOptions,
   type CaptureExportOptionsInput,
   describeCaptureSection,
+  createIsometricCaptureCamera,
   planarMultiAngleNotice,
   resolveCaptureSectionKeep,
 } from '#capture/capture-views.js';

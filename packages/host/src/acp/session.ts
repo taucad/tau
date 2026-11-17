@@ -740,7 +740,10 @@ export type AcpLoginLaunch = {
   readonly args: readonly string[];
   /** The adapter's own environment, plus the browser-session variables. */
   readonly env: NodeJS.ProcessEnv;
-  /** `file` and `args` quoted for the host's shell, shown before the user presses Enter. */
+  /**
+   * The command the login card shows, shown before the user presses Enter: the bare login command for a CLI on
+   * `PATH`, the quoted absolute path for one found outside it (D10). `file` is what runs either way.
+   */
   readonly commandLine: string;
 };
 
@@ -788,11 +791,15 @@ export const acpLoginLaunch = (
       env[name] = base[name];
     }
   }
+  const platform = options.platform ?? process.platform;
+  /* The card names the CLI by where discovery found it; a file found anew names where it was found. */
+  const executableSource = file === adapter.executablePath ? adapter.executableSource : resolved.executableSource;
+  const shown = cliLoginCommandOf({ ...resolved, executableSource }, { platform, execPath: process.execPath });
   return {
     file,
     args: adapter.loginArgs,
     env,
-    commandLine: shellCommandLine(file, adapter.loginArgs, options.platform ?? process.platform),
+    commandLine: shown ?? shellCommandLine(file, adapter.loginArgs, platform),
   };
 };
 

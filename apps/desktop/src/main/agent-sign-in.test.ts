@@ -68,7 +68,7 @@ const fakePty = () => {
     resize: vi.fn(),
     kill: vi.fn(),
     print: (chunk: string) => data?.(chunk),
-    exit: (exitCode: number) => exit?.({ exitCode }),
+    exit: (exitCode: number, signal?: number) => exit?.(signal === undefined ? { exitCode } : { exitCode, signal }),
   } satisfies AgentSignInPty & Record<string, unknown>;
   return pty;
 };
@@ -273,6 +273,31 @@ describe('agent sign-in relay', () => {
 
     expect(pty.kill).toHaveBeenCalled();
     expect(relay.sessions()).toBe(0);
+  });
+
+  it('should report a CLI a signal ended by its signal, never as exit 0', async () => {
+    const { ask, pty, ports, log } = setup();
+    ask({ requestId: 'sign-in-1', agentId: 'acme' });
+    ports[0]?.send({ type: 'start', size: { columns: 80, rows: 24 } });
+    await settle();
+
+    pty.exit(0, 15);
+
+    expect(ports[0]?.posted.at(-1)).toEqual({ type: 'exited', exitCode: null, signal: '15' });
+    expect(log).toHaveBeenCalledWith('info', 'agent-sign-in.exited', { agentId: 'acme', exitCode: null, signal: '15' });
+  });
+
+  it('should log a CLI Tau stopped as stopped, not as an exit', async () => {
+    const { ask, pty, ports, log } = setup();
+    ask({ requestId: 'sign-in-1', agentId: 'acme' });
+    ports[0]?.send({ type: 'start', size: { columns: 80, rows: 24 } });
+    await settle();
+
+    ports[0]?.emit('close');
+    pty.exit(0, 1);
+
+    expect(log).toHaveBeenCalledWith('info', 'agent-sign-in.stopped', { agentId: 'acme' });
+    expect(log.mock.calls.some(([, event]) => event === 'agent-sign-in.exited')).toBe(false);
   });
 
   it("should stop the CLI when the page's port closes", async () => {

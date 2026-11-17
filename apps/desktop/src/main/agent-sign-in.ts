@@ -223,9 +223,22 @@ export const registerAgentSignIn = (options: AgentSignInOptions): AgentSignIn =>
       }
     });
     pty.onExit(({ exitCode, signal }) => {
-      log('info', 'agent-sign-in.exited', { agentId: session.agentId, exitCode });
+      if (session.ended) {
+        /* Tau stopped it (tab closed, window gone, quit): not an exit the person's sign-in reached. */
+        log('info', 'agent-sign-in.stopped', { agentId: session.agentId });
+        return;
+      }
       session.pty = undefined;
-      end(session, { type: 'exited', exitCode, signal: signal ? String(signal) : null });
+      /* A signal is never an exit 0, whatever code node-pty pairs with it: only a real exit 0 lets the chat carry on. */
+      const exited: AgentSignInHostFrame = signal
+        ? { type: 'exited', exitCode: null, signal: String(signal) }
+        : { type: 'exited', exitCode, signal: null };
+      log('info', 'agent-sign-in.exited', {
+        agentId: session.agentId,
+        exitCode: exited.exitCode,
+        signal: exited.signal,
+      });
+      end(session, exited);
     });
   };
 

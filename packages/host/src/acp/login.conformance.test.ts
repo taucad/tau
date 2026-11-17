@@ -243,8 +243,23 @@ describe.each([...acpAgentProfiles, syntheticProfile])('sign-in launch for $id',
 
     expect(launch?.file).toBe(executablePath);
     expect(launch?.args).toEqual(profile.loginArgs);
-    expect(launch?.commandLine).toBe(`'${executablePath}' ${profile.loginArgs.join(' ')}`);
   });
+
+  it.each(['path', 'fallback'] as const)(
+    'should show the command the card shows when the CLI came from %s',
+    (executableSource) => {
+      const adapter = adapterOf(profile, { executablePath, executableSource });
+      const card = loginOf(adapter, [], posixHost).authMethods[0]?.terminalCommand;
+
+      const launch = acpLoginLaunch(adapter, { environment, platform: 'darwin', fileSystem: onlyThat });
+
+      expect(launch?.file).toBe(executablePath);
+      expect(launch?.commandLine).toBe(card);
+      expect(launch?.commandLine).toBe(
+        executableSource === 'path' ? profile.loginCommand : `'${executablePath}' ${profile.loginArgs.join(' ')}`,
+      );
+    },
+  );
 
   it("should give the CLI the adapter's environment, its config directory included, and nothing of Tau's", () => {
     const launch = acpLoginLaunch(adapterOf(profile, { executablePath, executableSource: 'path' }), {

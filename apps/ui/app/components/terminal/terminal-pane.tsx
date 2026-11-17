@@ -12,7 +12,7 @@
 
 import { Heading } from '@taucad/ui/components/heading';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { SquareTerminal, X } from 'lucide-react';
+import { SquareTerminal } from 'lucide-react';
 import { terminalAccessSchema, terminalLimits } from '@taucad/types/desktop-terminal';
 import type {
   DesktopTerminalBridge,
@@ -47,16 +47,6 @@ import {
   terminalViewOptions,
 } from '#components/terminal/terminal-view-options.js';
 import type { TerminalRendererLoader } from '#components/terminal/terminal-view-options.js';
-import type { DesktopAgentSignInBridge } from '@taucad/types/desktop-agent-sign-in';
-import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
-import { AgentSignInTab } from '#components/terminal/agent-sign-in-tab.js';
-import {
-  desktopAgentSignInBridge,
-  dismissAgentSignIn,
-  selectTerminalTab,
-  terminalTabId,
-  useAgentSignInTabs,
-} from '#components/terminal/agent-sign-in-tabs.js';
 
 type AccessRequest = Readonly<{ requestId: string; access: TerminalAccess; expiresAt: string }>;
 
@@ -726,99 +716,8 @@ export function TerminalPane({
 }
 
 /**
- * The Terminal pane with any external-agent sign-in tabs beside the person's own shell.
- *
- * The shell keeps its place in the tree whether or not a sign-in tab is open, so opening one never restarts the shell.
- * A sign-in tab runs whether or not the shell is available: it is the agent's own CLI, not the contained shell.
- *
- * @param props - The shell's availability, the preload's sign-in bridge and, for tests, a renderer loader.
- * @returns The pane.
- * @public
- */
-export function TerminalTabs({
-  availability,
-  signInBridge,
-  loadRenderer = loadTerminalRenderer,
-}: {
-  readonly availability: TerminalAvailability;
-  readonly signInBridge: DesktopAgentSignInBridge | undefined;
-  readonly loadRenderer?: TerminalRendererLoader;
-}): React.JSX.Element {
-  const tabs = useAgentSignInTabs();
-  const agentIds = signInBridge === undefined ? [] : tabs.agentIds;
-  const selected = agentIds.includes(tabs.selected) ? tabs.selected : terminalTabId;
-  return (
-    <div className='flex size-full flex-col'>
-      {agentIds.length > 0 ? (
-        <div role='tablist' aria-label='Terminal tabs' className='flex shrink-0 flex-wrap gap-1 border-b px-2 py-1'>
-          <Button
-            role='tab'
-            size='xs'
-            variant={selected === terminalTabId ? 'secondary' : 'ghost'}
-            aria-selected={selected === terminalTabId}
-            onClick={() => {
-              selectTerminalTab(terminalTabId);
-            }}
-          >
-            Terminal
-          </Button>
-          {agentIds.map((agentId) => {
-            const name = externalAgentDisplayName(agentId);
-            return (
-              <span key={agentId} className='flex items-center'>
-                <Button
-                  role='tab'
-                  size='xs'
-                  variant={selected === agentId ? 'secondary' : 'ghost'}
-                  aria-selected={selected === agentId}
-                  onClick={() => {
-                    selectTerminalTab(agentId);
-                  }}
-                >
-                  {`Sign in to ${name}`}
-                </Button>
-                <Button
-                  size='icon-xs'
-                  variant='ghost'
-                  aria-label={`Close sign-in to ${name}`}
-                  onClick={() => {
-                    dismissAgentSignIn(agentId);
-                  }}
-                >
-                  <X aria-hidden />
-                </Button>
-              </span>
-            );
-          })}
-        </div>
-      ) : null}
-      <div className='relative min-h-0 flex-1'>
-        <div className='size-full' hidden={selected !== terminalTabId}>
-          <TerminalPane availability={availability} loadRenderer={loadRenderer} />
-        </div>
-        {signInBridge === undefined
-          ? null
-          : agentIds.map((agentId) => (
-              <div key={agentId} role='tabpanel' className='size-full' hidden={selected !== agentId}>
-                <AgentSignInTab
-                  agentId={agentId}
-                  bridge={signInBridge}
-                  loadRenderer={loadRenderer}
-                  onClose={() => {
-                    dismissAgentSignIn(agentId);
-                  }}
-                />
-              </div>
-            ))}
-      </div>
-    </div>
-  );
-}
-
-/**
  * The Terminal pane for the current project, gated by the shared predicate. The Workbench catalog and the narrow
- * layout both mount this. Closing the pane or leaving the project ends its session without asking, and closing the
- * pane closes its sign-in tabs' CLIs too.
+ * layout both mount this. Closing the pane or leaving the project ends its session without asking.
  *
  * @param props - The workbench profile; a shared or public view omits the Terminal.
  * @returns The pane.
@@ -830,10 +729,5 @@ export function ProjectTerminalPane({
   readonly profile?: 'editor' | 'shared';
 }): React.JSX.Element {
   const { projectId } = useProject();
-  return (
-    <TerminalTabs
-      availability={useTerminalAvailability(projectId, profile)}
-      signInBridge={profile === 'editor' ? desktopAgentSignInBridge() : undefined}
-    />
-  );
+  return <TerminalPane availability={useTerminalAvailability(projectId, profile)} />;
 }

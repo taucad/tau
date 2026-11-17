@@ -156,9 +156,9 @@ INCORRECT:
 Run a sign-in only in the desktop's sign-in tab, and only the profile's own:
 
 - The page names an agent id and nothing else. Main finds the adapter in its own discovery and starts it with `acpLoginLaunch`: the located `executablePath` (located again, rule 4), the profile's `loginArgs` and the adapter's own environment (`acpAdapterEnvironment`, so `configEnv` such as `CLAUDE_CONFIG_DIR` applies). Never a shell, a renderer-supplied string or a command an adapter advertised.
-- Show the command filled in; start it only on the user's Enter or click.
+- Open each sign-in as its own workbench tab beside the Terminal, one per agent; never inside the user's shell. Show the command filled in exactly as the card shows it (bare on `PATH`, the quoted path for a fallback, D10); start it only on the user's Enter or click.
 - Tau code never parses, logs, stores or forwards the tab's input or output beyond drawing it; the vendor's page opens in the default browser, never in a Tau window.
-- One running sign-in per agent; stop it when its tab, window or the app closes. The tab ends when the CLI exits, and the next turn clears the sign-in refusal; add no polling.
+- One running sign-in per agent; stop it when its tab, window or the app closes. The tab ends when the CLI exits and reports the exit code alone: a real exit 0 retries the refused turn once, as **Try again** would; a non-zero exit or a signal leaves the card with how it ended. Key the offer on the host that refused the turn, not on the composer. Add no polling.
 - A surface with no local Terminal (a browser, a remote host) keeps the command to copy.
 
 **Why**: The user completes the vendor's own flow in a process Tau starts but never reads, which keeps sign-in inside the vendor's terms (`docs/research/claude-code-acp-terms-review.md`, Finding 2) and lands the login where the agent reads it.

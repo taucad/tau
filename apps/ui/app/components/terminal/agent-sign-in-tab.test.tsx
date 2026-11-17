@@ -7,10 +7,13 @@ import type {
   DesktopAgentSignInBridge,
   DesktopAgentSignInSession,
 } from '@taucad/types/desktop-agent-sign-in';
-import type { DesktopTerminalBridge } from '@taucad/types/desktop-terminal';
 import { AgentSignInTab } from '#components/terminal/agent-sign-in-tab.js';
-import { dismissAgentSignIn, requestAgentSignIn } from '#components/terminal/agent-sign-in-tabs.js';
-import { TerminalTabs } from '#components/terminal/terminal-pane.js';
+import {
+  requestAgentSignIn,
+  subscribeAgentSignIns,
+  takeAgentSignInSuccess,
+  useAgentSignInOutcome,
+} from '#components/terminal/agent-sign-ins.js';
 import type { TerminalRendererLoader } from '#components/terminal/terminal-view-options.js';
 import type { TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 
@@ -91,7 +94,8 @@ const openTab = async () => {
 };
 
 afterEach(() => {
-  dismissAgentSignIn('acme');
+  /* A fresh request forgets how the last sign-in ended. */
+  requestAgentSignIn('acme');
 });
 
 describe('AgentSignInTab', () => {
@@ -139,15 +143,57 @@ describe('AgentSignInTab', () => {
     expect(view.writes.at(-1)).toBe('Signed in.\r\n');
   });
 
-  it('should end when the CLI exits and say to send the message again', async () => {
+  it('should end when the CLI exits 0, say Tau carries on, and report the exit alone', async () => {
     const { view, emit, onClose } = await openTab();
     view.type('\r');
 
     emit({ type: 'exited', exitCode: 0, signal: null });
 
-    expect(screen.getByRole('status')).toHaveTextContent('The sign-in ended with exit code 0. Send your message again');
+    expect(screen.getByRole('status')).toHaveTextContent('Signed in. Tau continues where acme stopped.');
+    expect(takeAgentSignInSuccess('acme')).toBe(true);
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('should show the exit status of a failed sign-in and report it for the card', async () => {
+    const { view, emit } = await openTab();
+    view.type('\r');
+    const changes = vi.fn();
+    const unsubscribe = subscribeAgentSignIns(changes);
+
+    emit({ type: 'exited', exitCode: 1, signal: null });
+    unsubscribe();
+
+    expect(screen.getByRole('status')).toHaveTextContent('The sign-in ended with exit code 1.');
+    expect(changes).toHaveBeenCalled();
+    expect(takeAgentSignInSuccess('acme')).toBe(false);
+    function Outcome(): React.JSX.Element {
+      const outcome = useAgentSignInOutcome('acme');
+      return <p data-testid='outcome'>{typeof outcome === 'object' ? String(outcome.exitCode) : String(outcome)}</p>;
+    }
+    render(<Outcome />);
+    expect(screen.getByTestId('outcome')).toHaveTextContent('1');
+  });
+
+  it('should never count a CLI a signal stopped as signed in', async () => {
+    const { view, emit } = await openTab();
+    view.type('\r');
+
+    emit({ type: 'exited', exitCode: null, signal: '15' });
+
+    expect(screen.getByRole('status')).toHaveTextContent('The sign-in ended before it finished.');
+    expect(takeAgentSignInSuccess('acme')).toBe(false);
+  });
+
+  it('should report nothing when the tab closes before the CLI ran', async () => {
+    const { unmount } = await openTab();
+    const changes = vi.fn();
+    const unsubscribe = subscribeAgentSignIns(changes);
+
+    unmount();
+    unsubscribe();
+
+    expect(changes).not.toHaveBeenCalled();
   });
 
   it("should show main's refusal", async () => {
@@ -182,72 +228,5 @@ describe('AgentSignInTab', () => {
     signIn.emit({ type: 'ready', commandLine: 'acme \u001B]8;;evil\u0007login' });
 
     expect(view.writes.join('')).toContain('$ acme ?]8;;evil?login');
-  });
-});
-
-describe('TerminalTabs', () => {
-  const unavailable = { status: 'unavailable', message: 'No shell.', recovery: 'None.' } as const;
-
-  it('should show no tabs until a sign-in is asked for', () => {
-    const signIn = createBridge();
-    const { loadRenderer } = createView();
-    render(<TerminalTabs availability={unavailable} signInBridge={signIn.bridge} loadRenderer={loadRenderer} />);
-
-    expect(screen.queryByRole('tablist')).toBeNull();
-  });
-
-  it("should open a sign-in tab beside the shell without restarting the person's shell", async () => {
-    const signIn = createBridge();
-    const { loadRenderer } = createView();
-    const terminalOpen = vi.fn(() => ({
-      input: vi.fn(),
-      resize: vi.fn(),
-      ack: vi.fn(),
-      requestAccess: vi.fn(),
-      decideAccess: vi.fn(),
-      close: vi.fn(),
-    }));
-    const availability = {
-      status: 'available',
-      projectRoot: '/projects/bracket',
-      bridge: { open: terminalOpen } as unknown as DesktopTerminalBridge,
-    } as const;
-    render(<TerminalTabs availability={availability} signInBridge={signIn.bridge} loadRenderer={loadRenderer} />);
-    await act(async () => undefined);
-    expect(terminalOpen).toHaveBeenCalledOnce();
-
-    act(() => {
-      requestAgentSignIn('acme');
-    });
-    await act(async () => undefined);
-
-    expect(screen.getByRole('tab', { name: 'Sign in to acme' })).toHaveAttribute('aria-selected', 'true');
-    expect(signIn.open).toHaveBeenCalledExactlyOnceWith('acme', expect.any(Function));
-    expect(terminalOpen).toHaveBeenCalledOnce();
-  });
-
-  it('should close the tab, and with it the CLI, from its close button', async () => {
-    const signIn = createBridge();
-    const { loadRenderer } = createView();
-    render(<TerminalTabs availability={unavailable} signInBridge={signIn.bridge} loadRenderer={loadRenderer} />);
-    act(() => {
-      requestAgentSignIn('acme');
-    });
-    await act(async () => undefined);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Close sign-in to acme' }));
-
-    expect(signIn.session.close).toHaveBeenCalled();
-    expect(screen.queryByRole('tablist')).toBeNull();
-  });
-
-  it('should offer no sign-in tab where this page cannot start one', () => {
-    const { loadRenderer } = createView();
-    render(<TerminalTabs availability={unavailable} signInBridge={undefined} loadRenderer={loadRenderer} />);
-    act(() => {
-      requestAgentSignIn('acme');
-    });
-
-    expect(screen.queryByRole('tablist')).toBeNull();
   });
 });

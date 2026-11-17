@@ -1,11 +1,11 @@
 /**
- * One external agent's sign-in, in a tab of the Terminal pane (ACP agent policy rule 10).
+ * One external agent's sign-in, in its own workbench tab (ACP agent policy rule 10).
  *
  * The tab shows the agent's own sign-in command filled in, and runs it only when the person presses Enter or Run. Main
  * chose what runs from its own discovery; this tab only names the agent. From then on the tab is a plain terminal onto
  * that one CLI: keystrokes go to it and its output is drawn, and nothing here reads, matches or keeps either beyond the
  * renderer's in-memory scrollback, which goes when the tab closes. A link the CLI prints opens in the person's default
- * browser on Ctrl/Cmd+click, never inside Tau. The tab ends when the CLI exits.
+ * browser on Ctrl/Cmd+click, never inside Tau. The tab ends when the CLI exits, and tells the chat the exit code alone.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -17,6 +17,7 @@ import type {
 } from '@taucad/types/desktop-agent-sign-in';
 import { Button } from '@taucad/ui/components/button';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
+import { reportAgentSignInExit } from '#components/terminal/agent-sign-ins.js';
 import type { TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 import { outputSlices } from '#components/terminal/terminal-output-text.js';
 import {
@@ -106,6 +107,8 @@ export function AgentSignInTab({
         }
         case 'exited': {
           session = undefined;
+          /* The exit code is all the chat hears: it carries on after an exit 0 and says how anything else ended. */
+          reportAgentSignInExit(agentId, frame.exitCode ?? undefined);
           setState({ phase: 'ended', exitCode: frame.exitCode });
           break;
         }
@@ -212,7 +215,9 @@ export function AgentSignInTab({
         <div role='status' className='flex flex-wrap items-center gap-2 border-t bg-card p-3 text-sm'>
           <span className='min-w-0 flex-1'>
             {state.phase === 'ended'
-              ? `The sign-in ended${state.exitCode === null ? '' : ` with exit code ${String(state.exitCode)}`}. Send your message again to use ${name}.`
+              ? state.exitCode === 0
+                ? `Signed in. Tau continues where ${name} stopped.`
+                : `The sign-in ended${state.exitCode === null ? ' before it finished' : ` with exit code ${String(state.exitCode)}`}.`
               : state.message}
           </span>
           <Button size='sm' variant='outline' onClick={onClose}>

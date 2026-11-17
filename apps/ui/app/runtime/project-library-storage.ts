@@ -47,10 +47,14 @@ import {
   pinHomeStorageBackend,
   requestHomeStoragePersistence,
   setProjectFileSystemConfig,
-} from '#filesystem/handle-store.js';
-import type { ProjectFileSystemConfig, WorkspaceBindingRepair, WorkspaceEntry } from '#filesystem/handle-store.js';
-import { directoryPicker } from '#constants/browser.constants.js';
-import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import type {
+  ProjectFileSystemConfig,
+  WorkspaceBindingRepair,
+  WorkspaceEntry,
+} from '@taucad/files-ui/filesystem/handle-store';
+import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
+import { nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { metaConfig } from '#constants/meta.constants.js';
 import type { ChatStorage } from '#types/storage.types.js';
 import type {

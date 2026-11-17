@@ -267,7 +267,7 @@ vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => ({
   ProjectManifestIssueBanner: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
+vi.mock('#routes/w.$workspace.$project/workspace-frame.js', () => ({ WorkspaceOpening: () => null }));
 /* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
 vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
 
@@ -279,7 +279,7 @@ await Promise.all([
   vi.importActual('#routes/w.$workspace.$project/chat-file-tree.js'),
 ]);
 
-const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-context.js');
+const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-provider.js');
 const { ChatInterfaceMobile } = await import('#routes/w.$workspace.$project/chat-interface-mobile.js');
 
 const renderShell = (): void => {

@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { Workspace, WorkspaceEntry } from '#filesystem/handle-store.js';
+import type { Workspace, WorkspaceEntry } from '@taucad/files-ui/filesystem/handle-store';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import FilesRoute from '#routes/files/route.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -76,7 +76,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   }),
 }));
 
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   checkHandlePermission: vi.fn(async () => 'granted'),
   getWorkspace: mockGetWorkspace,
   listWorkspaces: vi.fn(async () => [workspace]),
@@ -94,7 +94,7 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { error: vi.fn(), info: vi.fn(), success: mockToastSuccess },
 }));
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: true,
   directoryPicker: () => ({
     available: true,

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat class uses the SDK's own `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructor omits the `public` keyword to mirror the AI SDK's published shape. */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadChatSdk } from '#services/chat-sdk-loader.js';
 import { startEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
@@ -153,7 +154,7 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   },
 }));
 
-vi.mock('@taucad/chat-ui/hooks/resize-image.actor', () => ({
+vi.mock('#hooks/attachment-image.actor.js', () => ({
   resizeImageActor: fromSafeAsync<
     { type: 'imageResized'; resized: string },
     { image: string; preserveOriginal: boolean }
@@ -379,6 +380,12 @@ afterEach(() => {
   unloadEnvironment = undefined;
 });
 
+/* PL1: the chat's AI SDK loads once per page; once it has, a session builds its `Chat` at acquire, as these cases
+ * read it. The deferred path before that load is `services/deferred-chat.test.ts`. */
+beforeAll(async () => {
+  await loadChatSdk();
+});
+
 describe('ChatComposerProvider', () => {
   it('should expose a draftActorRef via useChatComposer', () => {
     const { result } = renderHook(() => useChatComposer(), {
@@ -566,7 +573,7 @@ describe('ChatComposerProvider', () => {
       await waitFor(() => {
         expect(harness.toastError).toHaveBeenCalledOnce();
       });
-      expect(harness.toastError).toHaveBeenCalledWith('Failed to process image', expect.any(Object));
+      expect(harness.toastError).toHaveBeenCalledWith("Couldn't attach this image", expect.any(Object));
     });
 
     it('should unsubscribe the toast listener on unmount', async () => {
@@ -1650,7 +1657,7 @@ describe('ActiveChatProvider', () => {
       await waitFor(() => {
         expect(harness.toastError).toHaveBeenCalledOnce();
       });
-      expect(harness.toastError).toHaveBeenCalledWith('Failed to process image', expect.any(Object));
+      expect(harness.toastError).toHaveBeenCalledWith("Couldn't attach this image", expect.any(Object));
     });
 
     // Rewritten (P40): the resized image is stored through the session's real store actor, into the chat's record directory.

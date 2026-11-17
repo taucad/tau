@@ -303,6 +303,48 @@ describe('ViewerStage', () => {
       expect(screen.queryByRole('status')).not.toBeInTheDocument();
     });
 
+    it('should draw a failure with an action as one alert holding what failed, what it means and the action', () => {
+      const onRetry = vi.fn();
+      const { region } = renderStage({
+        status: {
+          kind: 'failed',
+          summary: 'Couldn’t download model files',
+          message: 'Your files are open; the model needs the rest of them to render.',
+          action: (
+            <button type='button' onClick={onRetry}>
+              Try again
+            </button>
+          ),
+        },
+      });
+
+      const alert = screen.getByRole('alert');
+      expect(alert).toHaveTextContent('Couldn’t download model files');
+      expect(alert).toHaveTextContent('Your files are open; the model needs the rest of them to render.');
+      expect(region).toContainElement(alert);
+      expect(region).toContainElement(screen.getByTestId('canvas'));
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+      expect(onRetry).toHaveBeenCalledOnce();
+    });
+
+    it('should keep the canvas region busy while the host waits for what it will draw (A15e)', () => {
+      const { region, rerender, graphicsRef } = renderStage({
+        isWaiting: true,
+      });
+      expect(region).toHaveAttribute('aria-busy', 'true');
+
+      rerender(
+        <KeyboardProvider>
+          <TooltipProvider>
+            <GraphicsProvider graphicsRef={graphicsRef}>
+              <Stage graphicsRef={graphicsRef} isWaiting={false} />
+            </GraphicsProvider>
+          </TooltipProvider>
+        </KeyboardProvider>,
+      );
+      expect(region).not.toHaveAttribute('aria-busy');
+    });
+
     it('should draw the host status content in the status slot', () => {
       renderStage({ statusExtra: <p>Upgrade to keep building</p> });
 

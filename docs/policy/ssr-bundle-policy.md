@@ -3,7 +3,7 @@ title: 'SSR bundle policy (`apps/ui`)'
 description: Avoid pulling client-only CAD/kernel/Three.js graphs into the Netlify SSR function bundle.
 status: active
 created: '2026-05-06'
-updated: '2026-10-26'
+updated: '2026-11-16'
 related:
   - docs/research/ssr-bundle-audit.md
   - docs/research/netlify-production-performance-audit.md
@@ -26,6 +26,7 @@ The UI SSR bundle size directly drives Netlify Function cold-start latency. Keep
 ## Enforcement
 
 - Nx target **`pnpm nx run ui:size`** (after `ui:build`) — see `apps/ui/scripts/check-ssr-bundle-budget.mts`. Ratchets `build/server` + `index.js` as the bundle shrinks.
+- Nx target **`pnpm nx run ui:check-server-output`** (and `docs:check-server-output`) — see `apps/ui/scripts/check-server-output.mts`. No server output of the web, desktop, `tau serve` or docs build holds a `.wasm` file, a worker bundle or a file also in its `client/assets`. Construct workers in browser-only code (`new Worker(new URL(…, import.meta.url))`, which Vite bundles for the client only, or a `.client` module); a `?worker` import reachable from the server graph emits the worker bundle into `build/server`. Both targets run in CI's build lane.
 - Code review: any new `from '@taucad/runtime'` value import in `apps/ui/app/machines/` or `apps/ui/app/hooks/` requires an explicit SSR justification or refactor.
 - Production import/preload graph checks and browser request capture must prove zero editor-only requests before a code pane is admitted, including hover, idle, service workers and hidden mobile tabs. Follow [language contribution policy](language-contribution-policy.md).
 

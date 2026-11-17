@@ -239,6 +239,12 @@ const settingsCatalog = [
         ],
       },
       {
+        id: 'viewer-orbit-style',
+        label: 'Orbit',
+        description: 'Keep the view upright, or turn it freely over the top',
+        keywords: ['orbit', 'turntable', 'tumble', 'trackball', 'roll', 'rotate', 'upright', 'navigation'],
+      },
+      {
         id: 'viewer-zoom-to-cursor',
         label: 'Zoom to cursor',
         description: 'Zoom toward the pointer instead of the view centre',

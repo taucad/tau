@@ -11,7 +11,8 @@ import { usePublishCloudProjectPreview } from '#hooks/use-publish-cloud-project-
 import { useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
-import { SessionProjectProvider, useProject } from '#hooks/use-project.js';
+import { SessionProjectProvider } from '#hooks/project-provider.js';
+import { useProject } from '#hooks/use-project.js';
 import { SessionFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project and

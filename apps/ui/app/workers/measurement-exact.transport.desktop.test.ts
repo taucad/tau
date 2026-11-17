@@ -7,7 +7,7 @@ import type { MessagePort } from 'node:worker_threads';
 import { runExactRequest } from './measurement-exact.transport.desktop.js';
 
 const connect = vi.hoisted(() => vi.fn());
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   desktopBridge: () => ({ exactMeasurement: { connect } }),
 }));
 

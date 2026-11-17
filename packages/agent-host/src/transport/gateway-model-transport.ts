@@ -1367,7 +1367,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     if (
       request.providerKind === 'vertexai' &&
       request.reasoning?.effort !== undefined &&
-      !['low', 'medium', 'high'].includes(request.reasoning.effort)
+      !['low', 'medium', 'high', 'xhigh'].includes(request.reasoning.effort)
     ) {
       throw new GatewayModelTransportError({
         code: 'INVALID_REQUEST',

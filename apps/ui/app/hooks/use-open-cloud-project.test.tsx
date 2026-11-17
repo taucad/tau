@@ -47,7 +47,7 @@ const { mockCreateProject, mockToastInfo, useProjectsOptions, mockGetConfig } = 
   mockToastInfo: vi.fn<(message: string, options: { action: { label: string; onClick: () => void } }) => void>(),
   useProjectsOptions: [] as unknown[],
 }));
-vi.mock('#filesystem/handle-store.js', () => ({ getProjectFileSystemConfig: mockGetConfig }));
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({ getProjectFileSystemConfig: mockGetConfig }));
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: (options: unknown) => {
     useProjectsOptions.push(options);

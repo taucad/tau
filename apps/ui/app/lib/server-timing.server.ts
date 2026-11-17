@@ -1,3 +1,4 @@
+import { createContext, RouterContextProvider } from 'react-router';
 import type { ModelCatalogCacheState, ModelCatalogStateReporter } from '#lib/model-catalog.server.js';
 
 /**
@@ -71,26 +72,30 @@ export const createInstanceMark = (now: Clock = defaultClock): (() => ServerTimi
 const takeInstanceMark = createInstanceMark();
 
 /**
- * Entries a loader recorded for one request, keyed by the request's load context: the one object React Router hands
- * both to the loaders and to the entry's `handleRequest`. The loader's own `Request` is a copy, so it cannot be the key.
+ * Entries the loaders recorded for one request, on its router context: the one object React Router hands the
+ * middleware, the loaders and the entry's `handleRequest`. The root middleware starts it ({@link beginServerTiming}).
  */
-const loaderEntries = new WeakMap<WeakKey, ServerTimingEntry[]>();
+// `false`, not `undefined`: React Router reads an undefined default as none and throws on an unset context.
+const serverTimingContext = createContext<ServerTimingEntry[] | false>(false);
 
-/** React Router types a loader's context as `any`; one that is not an object cannot carry entries. */
-const contextKey = (loadContext: unknown): WeakKey | undefined =>
-  typeof loadContext === 'object' && loadContext !== null ? loadContext : undefined;
+/**
+ * The request's record. A context React Router did not build for middleware (the SPA builds' prerender, a test's plain
+ * object) carries none, and its entries are dropped.
+ */
+const entriesOf = (context: unknown): ServerTimingEntry[] | undefined =>
+  (context instanceof RouterContextProvider && context.get(serverTimingContext)) || undefined;
+
+/**
+ * Start the request's Server-Timing record; the root middleware calls it before the loaders run.
+ *
+ * @param context - The request's router context.
+ */
+export const beginServerTiming = (context: Readonly<RouterContextProvider>): void => {
+  context.set(serverTimingContext, []);
+};
 
 const record = (loadContext: unknown, entry: ServerTimingEntry): void => {
-  const key = contextKey(loadContext);
-  if (key === undefined) {
-    return;
-  }
-  const entries = loaderEntries.get(key);
-  if (entries) {
-    entries.push(entry);
-    return;
-  }
-  loaderEntries.set(key, [entry]);
+  entriesOf(loadContext)?.push(entry);
 };
 
 /**
@@ -131,7 +136,7 @@ export type DocumentTiming = {
 /**
  * Start timing a document at the top of the entry's `handleRequest`.
  *
- * @param loadContext - The entry's load context, where the loaders recorded their entries.
+ * @param loadContext - The entry's router context, where the loaders recorded their entries.
  * @param now - The clock; tests inject one.
  * @param instanceMark - The process's cold-instance mark; tests inject one.
  * @returns The document's timing.
@@ -142,11 +147,7 @@ export const startDocumentTiming = (
   instanceMark: () => ServerTimingEntry = takeInstanceMark,
 ): DocumentTiming => {
   const start = now();
-  const key = contextKey(loadContext);
-  const before = [instanceMark(), ...(key === undefined ? [] : (loaderEntries.get(key) ?? []))];
-  if (key !== undefined) {
-    loaderEntries.delete(key);
-  }
+  const before = [instanceMark(), ...(entriesOf(loadContext) ?? [])];
   return {
     withoutRender: () => formatServerTiming(before),
     atReady: (option) =>

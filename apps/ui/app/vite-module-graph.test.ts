@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { build } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 // oxlint-disable-next-line no-restricted-imports -- this test exercises the application-owned Vite plugin directly.
-import { createUiSourceAliasPlugin } from '../vite.config.js';
+import { createUiSourceAliasPlugin, uiBuildTarget } from '../vite.config.js';
 
 const roots: string[] = [];
 const require = createRequire(import.meta.url);
@@ -247,6 +247,87 @@ describe('web module graph', () => {
                 ? "export const value = 'desktop';"
                 : null;
             },
+          },
+          createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'web' }),
+        ],
+      }),
+    ).rejects.toThrow(/Desktop-only implementation in web bundle/u);
+  });
+});
+
+describe('build target seam', () => {
+  const buildTargetFixture = async (target: 'web' | 'desktop'): Promise<string> => {
+    const cacheRoot = path.resolve('node_modules/.cache/tau-ui-module-graph');
+    await mkdir(cacheRoot, { recursive: true });
+    const root = await mkdtemp(path.join(cacheRoot, `build-target-${target}-`));
+    roots.push(root);
+    const entry = path.join(root, 'entry.js');
+    await writeFile(
+      entry,
+      [
+        "import { isDesktopTarget } from '@taucad/ui-core/lib/build-target';",
+        "export const host = isDesktopTarget ? 'desktop-only-branch' : 'web-only-branch';",
+      ].join('\n'),
+    );
+    const { define, resolve } = uiBuildTarget(target);
+    await build({
+      configFile: false,
+      root,
+      logLevel: 'silent',
+      define,
+      resolve,
+      plugins: [createUiSourceAliasPlugin({ emitModuleGraph: true, target })],
+      build: { lib: { entry, formats: ['es'] }, minify: true },
+    });
+    const files = await readdir(path.join(root, 'dist'));
+    const code = await Promise.all(
+      files.filter((file) => file.endsWith('.js')).map(async (file) => readFile(path.join(root, 'dist', file), 'utf8')),
+    );
+    return code.join('\n');
+  };
+
+  it('resolves the web variant and folds the desktop branch away for the web target', async () => {
+    const code = await buildTargetFixture('web');
+    expect(code).toContain('web-only-branch');
+    expect(code).not.toContain('desktop-only-branch');
+  }, 60_000);
+
+  it('resolves the desktop variant through the tau-desktop condition for the desktop target', async () => {
+    const code = await buildTargetFixture('desktop');
+    expect(code).toContain('desktop-only-branch');
+    expect(code).not.toContain('web-only-branch');
+  }, 60_000);
+
+  it('sets the app define and the library condition from the same target', () => {
+    expect(uiBuildTarget('web').define).toStrictEqual({ 'import.meta.env.TAU_TARGET': '"web"' });
+    expect(uiBuildTarget('web').resolve.conditions).not.toContain('tau-desktop');
+    expect(uiBuildTarget('web').ssrResolve.conditions).not.toContain('tau-desktop');
+    expect(uiBuildTarget('desktop').define).toStrictEqual({ 'import.meta.env.TAU_TARGET': '"desktop"' });
+    expect(uiBuildTarget('desktop').resolve.conditions).toContain('tau-desktop');
+    expect(uiBuildTarget('desktop').ssrResolve.conditions).toContain('tau-desktop');
+  });
+
+  it('rejects a library desktop variant reached by the web bundle', async () => {
+    const cacheRoot = path.resolve('node_modules/.cache/tau-ui-module-graph');
+    await mkdir(cacheRoot, { recursive: true });
+    const root = await mkdtemp(path.join(cacheRoot, 'fixture-'));
+    roots.push(root);
+    await writeFile(
+      path.join(root, 'entry.js'),
+      "import { isDesktopTarget } from 'virtual:desktop'; document.body.dataset.value = String(isDesktopTarget);",
+    );
+    await writeFile(path.join(root, 'index.html'), '<script type="module" src="/entry.js"></script>');
+    const libraryVariant = '\0apps/libs/ui-core/src/lib/build-target.desktop.ts';
+    await expect(
+      build({
+        configFile: false,
+        root,
+        logLevel: 'silent',
+        plugins: [
+          {
+            name: 'library-desktop-variant-fixture',
+            resolveId: (id) => (id === 'virtual:desktop' ? libraryVariant : null),
+            load: (id) => (id === libraryVariant ? "export const isDesktopTarget = 'desktop';" : null),
           },
           createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'web' }),
         ],

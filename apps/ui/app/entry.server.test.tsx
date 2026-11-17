@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createStaticHandler } from 'react-router';
-import type { AppLoadContext, EntryContext } from 'react-router';
+import { createStaticHandler, RouterContextProvider } from 'react-router';
+import type { EntryContext } from 'react-router';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { describe, it, expect, vi } from 'vitest';
 
@@ -9,6 +9,7 @@ import handleRequest, { handleError } from '#entry.server.js';
 import { claimSsrErrors, queueSsrError, reportSsrError } from '#lib/sentry.server.js';
 import type * as SentryServer from '#lib/sentry.server.js';
 import { canonicalProductionUrl } from '#lib/canonical-url.js';
+import { rootMiddleware } from '#lib/root-middleware.server.js';
 import { resolveContentSecurityPolicyEnvironment } from '#lib/content-security-policy.server.js';
 import { contentSecurityPolicyHeaders } from '#scripts/write-content-security-policy-headers.mts';
 
@@ -28,7 +29,16 @@ const contextMatching = (...routeIds: string[]): EntryContext =>
   }) as unknown as EntryContext;
 
 const entryContext = contextMatching('root', 'routes/_index');
-const loadContext = {} as unknown as AppLoadContext;
+const loadContext = new RouterContextProvider();
+
+/** A document as React Router serves it: the entry inside the root middleware, which sets the every-response headers. */
+const serveDocument = async (request: Request, status: number, context: EntryContext): Promise<Response> => {
+  const routerContext = new RouterContextProvider();
+  return rootMiddleware(
+    { request, url: new URL(request.url), params: {}, pattern: '/*', context: routerContext },
+    async () => handleRequest(request, status, new Headers(), context, routerContext),
+  ) as Promise<Response>;
+};
 
 describe('entry.server handleRequest', () => {
   it.each([
@@ -67,7 +77,7 @@ describe('entry.server handleRequest', () => {
         future: mock<EntryContext['future']>(),
       });
       context.routeModules = { root: { default: () => <p>Workspace fixture</p> } };
-      const response = await handleRequest(request, status, new Headers(), context, mock<AppLoadContext>());
+      const response = await serveDocument(request, status, context);
       // Drain the real React stream before assertions, including on a failing regression.
       const body = await response.text();
       const netlifyConfig = readFileSync(resolve(import.meta.dirname, '../netlify.toml'), 'utf8');
@@ -91,8 +101,7 @@ describe('entry.server handleRequest', () => {
 
   it('should apply cross-origin isolation headers to the response (HEAD path)', async () => {
     const request = new Request('https://tau.example/', { method: 'HEAD' });
-    const responseHeaders = new Headers();
-    const response = await handleRequest(request, 200, responseHeaders, entryContext, loadContext);
+    const response = await serveDocument(request, 200, entryContext);
     expect(response).toBeInstanceOf(Response);
     expect(response.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
     expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
@@ -119,15 +128,6 @@ describe('entry.server handleRequest', () => {
       loadContext,
     );
     expect(production.get('Document-Policy')).toBeNull();
-  });
-
-  it('should mutate the supplied responseHeaders instance with COI headers', async () => {
-    const request = new Request('https://tau.example/', { method: 'HEAD' });
-    const responseHeaders = new Headers();
-    await handleRequest(request, 200, responseHeaders, entryContext, loadContext);
-    expect(responseHeaders.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
-    expect(responseHeaders.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
-    expect(responseHeaders.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
   });
 
   it('should make every document revalidate, so a deploy is never answered with the replaced build (TAU-UI-6)', async () => {

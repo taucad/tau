@@ -1199,6 +1199,119 @@ describe('FileContentService', () => {
     });
   });
 
+  /* STO-25, I7: a page told out of band that a file's bytes landed reads it afresh and never shows the earlier read. */
+  describe('rereadOutcome', () => {
+    const text = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
+
+    it('should replace an outcome read before with one read now', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(text('old'));
+      await service.resolve('lib/gear.ts');
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(text('new'));
+
+      expectTextContent(await service.rereadOutcome('lib/gear.ts'), text('new'));
+      expectTextContent(service.peekOutcome('lib/gear.ts'), text('new'));
+    });
+
+    it('should keep a read begun earlier from publishing over it', async () => {
+      const stale = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+      vi.mocked(proxy.readFile).mockReturnValueOnce(stale.promise);
+      /* A direct read, begun before the landing was known. */
+      const earlier = service.resolve('lib/gear.ts', { forceText: true });
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(text('new'));
+
+      expectTextContent(await service.rereadOutcome('lib/gear.ts'), text('new'));
+      stale.resolve(text('old'));
+      await earlier;
+      expectTextContent(service.peekOutcome('lib/gear.ts'), text('new'));
+    });
+
+    /* Two fresh reads on one path settle on one answer instead of superseding each other for ever. */
+    it('should settle on a later read begun before it settled, without reading again', async () => {
+      const first = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+      vi.mocked(proxy.readFile).mockReturnValueOnce(first.promise);
+      const one = service.rereadOutcome('lib/gear.ts');
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(text('newer'));
+      const two = service.rereadOutcome('lib/gear.ts');
+      first.resolve(text('new'));
+
+      expectTextContent(await one, text('newer'));
+      expectTextContent(await two, text('newer'));
+      expect(proxy.readFile).toHaveBeenCalledTimes(2);
+    });
+
+    it('should read again itself when a later read begun meanwhile never settles', async () => {
+      vi.useFakeTimers();
+      try {
+        const first = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+        vi.mocked(proxy.readFile).mockReturnValueOnce(first.promise);
+        const reread = service.rereadOutcome('lib/gear.ts');
+        /* Something begins a generation and never reads (an invalidation with nobody reading). */
+        service.observeContent('lib/gear.ts').invalidate();
+        vi.mocked(proxy.readFile).mockResolvedValueOnce(text('again'));
+        first.resolve(text('new'));
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expectTextContent(await reread, text('again'));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should answer a failed read with its error, never a value held from before', async () => {
+      vi.mocked(proxy.readFile).mockResolvedValueOnce(text('old'));
+      await service.resolve('lib/gear.ts');
+      vi.mocked(proxy.readFile).mockRejectedValueOnce(Object.assign(new Error('disk on fire'), { code: 'EIO' }));
+
+      const outcome = await service.rereadOutcome('lib/gear.ts');
+      expect(outcome.kind).toBe('error');
+    });
+
+    /* Bookkeeping for settled reads lives only as long as the outcome, or a reread still waiting on it. */
+    it('should forget a settled read when its outcome is pruned, and drop idle settle topics', async () => {
+      vi.useFakeTimers();
+      const harness = createHarness({ cacheOptions: { maxEntries: 1, maxTotalBytes: 1024, maxSingleFileBytes: 1024 } });
+      const bookkeeping = harness.service as unknown as {
+        settledReads: Map<string, number>;
+        settleTopics: Map<string, { size: number }>;
+      };
+      try {
+        vi.mocked(harness.proxy.readFile).mockResolvedValueOnce(text('a'));
+        await harness.service.rereadOutcome('a.ts');
+        expect(bookkeeping.settledReads.has('a.ts')).toBe(true);
+
+        /* A reread superseded by an invalidation that never reads waits, then reads again itself. */
+        const first = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+        vi.mocked(harness.proxy.readFile).mockReturnValueOnce(first.promise);
+        const reread = harness.service.rereadOutcome('b.ts');
+        harness.service.observeContent('b.ts').invalidate();
+        vi.mocked(harness.proxy.readFile).mockResolvedValueOnce(text('b'));
+        first.resolve(text('stale'));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(bookkeeping.settleTopics.get('b.ts')?.size).toBe(1);
+        await vi.advanceTimersByTimeAsync(1000);
+        await reread;
+
+        expect(bookkeeping.settleTopics.size).toBe(0);
+        expect(harness.service.peekOutcome('a.ts').kind).toBe('loading');
+        expect([...bookkeeping.settledReads.keys()]).toEqual(['b.ts']);
+
+        harness.service.dispose();
+        expect(bookkeeping.settledReads.size).toBe(0);
+        expect(bookkeeping.settleTopics.size).toBe(0);
+      } finally {
+        vi.useRealTimers();
+        harness.disposeChannel();
+      }
+    });
+
+    it('should hold a missing file as orphaned once read afresh', async () => {
+      vi.mocked(proxy.readFile).mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
+
+      expect(await service.rereadOutcome('lib/gone.ts')).toEqual({ kind: 'orphaned' });
+      expect(service.peekOutcome('lib/gone.ts')).toEqual({ kind: 'orphaned' });
+    });
+  });
+
   describe('discriminated resolve outcomes', () => {
     it('should produce binary outcome when content sniffs as binary', async () => {
       const binaryBytes = new Uint8Array(5 * 1024 * 1024);
@@ -2268,6 +2381,70 @@ describe('FileContentService', () => {
       } finally {
         recorded.unsubscribe();
       }
+    });
+
+    /*
+     * STO-25 SP2g: a tree write that replaces 2,000 files the page never read
+     * moved each aside, published its staged copy and dropped the backup, and
+     * each step minted an orphaned outcome for a path nothing held — 6,000
+     * outcome and orphan events on the page's thread, every replaced file
+     * reading as gone until its staged copy landed (I7).
+     */
+    it('should publish nothing for a file it neither holds nor watches when a revision write replaces it', async () => {
+      const outcomes = vi.fn();
+      const orphans = vi.fn();
+      service.onDidChangeOutcome(outcomes);
+      service.onDidChangeOrphaned(orphans);
+
+      emitFileChanged({
+        type: 'changeSet',
+        entries: [
+          { type: 'fileWritten', path: 'parts/.p.scad.tau-staged.1.tmp', backend: 'indexeddb' },
+          {
+            type: 'fileRenamed',
+            oldPath: 'parts/p.scad',
+            newPath: 'parts/.p.scad.tau-backup.1.tmp',
+            backend: 'indexeddb',
+          },
+          {
+            type: 'fileRenamed',
+            oldPath: 'parts/.p.scad.tau-staged.1.tmp',
+            newPath: 'parts/p.scad',
+            backend: 'indexeddb',
+          },
+          { type: 'fileDeleted', path: 'parts/.p.scad.tau-backup.1.tmp', backend: 'indexeddb' },
+          { type: 'fileDeleted', path: 'parts/gone.scad', backend: 'indexeddb' },
+        ],
+      });
+
+      expect(outcomes).not.toHaveBeenCalled();
+      expect(orphans).not.toHaveBeenCalled();
+      expect(service.isOrphaned('parts/p.scad')).toBe(false);
+      expect(proxy.readFile).not.toHaveBeenCalled();
+    });
+
+    it('should tell a retained path’s removal, and forget it once released', () => {
+      const orphans = vi.fn();
+      service.onDidChangeOrphaned(orphans);
+      const release = service.retain('kept.ts');
+
+      emitFileChanged({ type: 'fileDeleted', path: 'kept.ts', backend: 'indexeddb' });
+      expect(orphans).toHaveBeenCalledWith({ path: 'kept.ts', orphaned: true });
+      expect(service.peekOutcome('kept.ts')).toEqual({ kind: 'orphaned' });
+
+      release();
+      release();
+      orphans.mockClear();
+      emitFileChanged({ type: 'fileDeleted', path: 'other.ts', backend: 'indexeddb' });
+      expect(orphans).not.toHaveBeenCalled();
+    });
+
+    it('should still answer a file it never held as orphaned once it is gone', async () => {
+      emitFileChanged({ type: 'fileDeleted', path: 'gone.ts', backend: 'indexeddb' });
+      vi.mocked(proxy.readFile).mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+      const outcome = await service.resolve('gone.ts');
+      expect(outcome.kind).toBe('orphaned');
     });
 
     it('should refresh every cached entry under a directoryChanged prefix without dropping main.ts', async () => {

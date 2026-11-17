@@ -140,11 +140,35 @@ describe('settleReadiness', () => {
   it('never reads a failed write’s new tree as materialized (D10, I7)', () => {
     const writing = readinessOf(source({ applyingRoots: ['/projects/p'] }), false, 1);
     const failed = readinessOf(source({ treeWriteFailed: true }), false, 1);
-    expect(failed).toEqual({ state: 'treeReady', tree: 'live:h1:1' });
-    expect(settleReadiness(writing, failed)).toEqual({ state: 'treeReady', tree: 'live:h1:1' });
-    /* What it already showed stays shown. */
+    expect(failed).toEqual({ state: 'treeReady', tree: 'live:h1:1:failed' });
+    expect(settleReadiness(writing, failed)).toEqual(failed);
+  });
+
+  /*
+   * A failed write's end took away the rows it never landed, so what its tree had reached no longer stands: its
+   * readiness is about another tree, the partial one, and only a write running or landed may raise it again (I7).
+   */
+  it('lets a failed write’s readiness fall back, and keeps it there through the retry until the next write begins', () => {
     const entry = readinessOf(source({ applyingRoots: ['/projects/p'], entryClosureLanded: true }), false, 1);
-    expect(settleReadiness(entry, failed)).toBe(entry);
+    const failed = settleReadiness(entry, readinessOf(source({ treeWriteFailed: true }), false, 1));
+    expect(failed.state).toBe('treeReady');
+    /* The retry fast-forwards before its own write begins: the failed tree is still the one on disk. */
+    const retrying = settleReadiness(
+      failed,
+      readinessOf(
+        source({ treeWriteFailed: true, sync: { ...source().sync, state: 'pending', pullPhase: 'applying' } }),
+        false,
+        1,
+      ),
+    );
+    expect(retrying.state).toBe('treeReady');
+    expect(reachesReadiness(retrying.state, 'entryReady')).toBe(false);
+    /* The next write announces its tree: a new tree, read on its own. */
+    const next = settleReadiness(
+      retrying,
+      readinessOf(source({ applyingRoots: ['/projects/p'], entryClosureLanded: true }), false, 2),
+    );
+    expect(next).toEqual({ state: 'entryReady', tree: 'live:h1:2' });
   });
 
   it('moves forward within one tree', () => {

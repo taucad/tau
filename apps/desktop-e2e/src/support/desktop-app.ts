@@ -514,7 +514,11 @@ export const launchDesktopApp = async (options: {
   const packaged = desktopE2ECompletedArtifact || options.packaged === true;
   const packagedExecutable =
     options.packagedExecutable ??
-    // An installed app (a release channel's build, say) is chosen the same way a completed-artifact run chooses one.
+    /* An explicit package is chosen the same way a completed-artifact run chooses one. Point device runs at a
+     * staging development package (`TAU_DESKTOP_CHANNEL=staging pnpm nx run desktop:package-macos-unsigned`):
+     * it keeps `--inspect`, honours the `--user-data-dir` below and carries its own bundle id. A copy of a release
+     * keeps the installed app's profile and single-instance lock whatever `--user-data-dir` says, so the two can
+     * take each other down. */
     (desktopE2ECompletedArtifact || process.env['TAU_E2E_DESKTOP_EXECUTABLE'] !== undefined
       ? desktopE2EPackagedExecutable()
       : defaultPackagedExecutable);

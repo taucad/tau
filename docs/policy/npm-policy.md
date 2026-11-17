@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-10-29'
+updated: '2026-11-16'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -139,7 +139,7 @@ CORRECT:
   "dependencies": {
     "libcascade": "^3.0.0",
     "replicad": "npm:@taulabs/replicad@0.23.4-beta.2",
-    "replicad-opencascadejs": "npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0"
+    "replicad-opencascadejs": "npm:@taulabs/replicad-opencascadejs@0.23.0-beta.1"
   }
 }
 ```
@@ -288,7 +288,7 @@ CORRECT:
 
 ```typescript
 export { image, image as plugin } from '#image.plugin.js';
-export { imageTranscoder } from '#image.transcoder.js';
+export { renderTranscoder } from '#image.transcoder.js';
 ```
 
 INCORRECT:

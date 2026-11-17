@@ -49,7 +49,7 @@ vi.doMock('#components/printer/printer-preparation.js', () => ({
     },
   },
 }));
-vi.doMock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
+vi.doMock('@taucad/files-ui/filesystem/desktop-bridge', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ...desktopBridgeMock,
 }));

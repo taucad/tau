@@ -19,6 +19,11 @@
       "types": "./src/oxc-runtime-esm.vite-plugin.ts",
       "import": "./src/oxc-runtime-esm.vite-plugin.ts",
       "default": "./src/oxc-runtime-esm.vite-plugin.ts"
+    },
+    "./module-id-manifest": {
+      "types": "./src/module-id-manifest.vite-plugin.ts",
+      "import": "./src/module-id-manifest.vite-plugin.ts",
+      "default": "./src/module-id-manifest.vite-plugin.ts"
     }
   },
   "dependencies": {

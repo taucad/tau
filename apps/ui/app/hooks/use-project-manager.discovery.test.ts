@@ -26,7 +26,7 @@ import type {
 } from '@taucad/filesystem';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { Project } from '@taucad/types';
-import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
 import type { ProjectLibraryState } from '#types/project-library.types.js';
 import type { ProjectListing } from '#runtime/project-library-storage.js';
@@ -135,7 +135,7 @@ const mockApplyProjectFileSystemConfigChanges = vi.fn(
 );
 const mockListWorkspaces = vi.fn<() => Promise<Array<{ workspaceId: string }>>>();
 let projectRootConfigurationListener: (() => void) | undefined;
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   requestHomeStoragePersistence: vi.fn(async () => undefined),
   createWorkspace: vi.fn(),
   createNodeWorkspace: vi.fn(),
@@ -185,7 +185,7 @@ const announceBuildSkew = (): void => {
   }
 };
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: false,
   directoryPicker: () => ({ available: false, backend: 'webaccess', pick: async () => undefined }),
   webAccessDirectoryPicker: () => undefined,

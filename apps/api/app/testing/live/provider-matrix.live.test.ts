@@ -407,6 +407,29 @@ const describeModel = (modelId: string): void => {
         expect(snapshot.failure).toBeUndefined();
       });
 
+      const topLevel = Object.values(modelList)
+        .flatMap((rows) => Object.values(rows))
+        .find((entry) => entry.id === modelId)
+        ?.support?.reasoning?.levels.at(-1);
+      it.skipIf(topLevel === undefined || liveSessionModel(modelId).reasoning?.budgetTokens !== undefined)(
+        'should call a tool and answer at the highest reasoning level the row declares',
+        async () => {
+          const reasoning = { ...liveSessionModel(modelId).reasoning, effort: topLevel };
+          const snapshot = await liveThread({
+            modelId,
+            slug: `${modelId}-top-reasoning`,
+            prompts: [
+              `Call ${toolName.readFile} on main.ts, then reply with the exact marker that file exports and nothing else.`,
+            ],
+            reasoning,
+          });
+
+          expect(snapshot.state, `${JSON.stringify(reasoning)} was refused: ${refusal(snapshot)}`).toBe('completed');
+          expectPairedToolMessages(snapshot);
+          expect(finalText(snapshot)).toContain(markers.main);
+        },
+      );
+
       it('should call apply_parameter_operation with arguments the production schema accepts', async () => {
         const snapshot = await liveThread({
           modelId,

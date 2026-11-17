@@ -67,22 +67,31 @@ const ciTests = (proves: string): Oracle => ({
   proves,
 });
 
-/** The `ci.yml` lane that runs `cli-e2e:test:scenarios`, the CLI's end-to-end suites, when they are affected: every shard. */
+/**
+ * The `ci.yml` lane that runs `cli-e2e:test:scenarios`, the CLI's end-to-end suites, when they are affected: every
+ * shard. It runs in the merge queue only; a `main` push reuses the queue's verdict and skips it.
+ */
 const cliEndToEnd = (proves: string): Oracle => ({
   kind: 'job',
   workflow: 'ci.yml',
   job: 'CLI end-to-end (',
   match: 'prefix',
-  scope: 'main',
+  scope: 'any',
+  event: 'merge_group',
   proves,
 });
 
+/**
+ * The merge-queue `native-darwin` lane of `ci.yml` (Q-2), which runs `test:native-darwin` when it is affected. A `main`
+ * push reuses the queue's verdict and skips it, and `native-darwin.yml` itself runs only when called or dispatched.
+ */
 const nativeDarwin = (proves: string): Oracle => ({
   kind: 'job',
-  workflow: 'native-darwin.yml',
-  job: 'Native kernels on darwin-arm64',
+  workflow: 'ci.yml',
+  job: 'Native darwin / Native kernels on darwin-arm64',
   match: 'exact',
-  scope: 'main',
+  scope: 'any',
+  event: 'merge_group',
   proves,
 });
 

@@ -26,13 +26,21 @@ const composer = {
 vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => composer }));
 
 const composerModule = vi.hoisted(() => ({
-  resolve: undefined as undefined | (() => void),
+  /** Every held import: a fresh module graph (`vi.resetModules`) evaluates the mocked module again. */
+  resolvers: [] as Array<() => void>,
+  resolve(): void {
+    for (const resolve of this.resolvers.splice(0)) {
+      resolve();
+    }
+  },
   adopted: [] as EarlyChatInput[],
+  requests: 0,
 }));
 vi.mock('#components/chat/new-project-chat-composer.js', async () => {
+  composerModule.requests += 1;
   // The import the component under test awaits; held open so the pre-composer window is observable.
   await new Promise<void>((resolve) => {
-    composerModule.resolve = resolve;
+    composerModule.resolvers.push(resolve);
   });
   return {
     NewProjectChatComposer: ({ adoptedEarlyInput }: { readonly adoptedEarlyInput: EarlyChatInput }) => {
@@ -46,6 +54,16 @@ describe('Home chat composer', () => {
   beforeEach(() => {
     send.mockClear();
     composerModule.adopted.length = 0;
+  });
+
+  /* PL5: the rich composer's chunk is fetched when Home's module evaluates, beside hydration, not after it mounts. */
+  it("should request the rich composer when Home's module evaluates in a browser, before anything mounts", async () => {
+    vi.resetModules();
+    composerModule.requests = 0;
+    await import('#routes/_index/home-chat-composer.js');
+    await vi.waitFor(() => {
+      expect(composerModule.requests).toBe(1);
+    });
   });
 
   /* R2: the served composer has the rich one's shape — the box and its bar at rest, kernel pill included —
@@ -115,7 +133,9 @@ describe('Home chat composer', () => {
     expect(container.textContent).not.toContain('Rich composer');
     document.body.append(container);
     const input = within(container).getByRole<HTMLTextAreaElement>('textbox');
-    Object.assign(input, { tauEarlyDraft: { edited: false, composing: false } });
+    Object.assign(input, {
+      tauHandOff: { edited: false, composing: false, submitQueued: false, acceptedAt: undefined },
+    });
     const onRecoverableError = vi.fn();
     const root = hydrateRoot(container, content, { onRecoverableError });
     try {
@@ -124,14 +144,16 @@ describe('Home chat composer', () => {
       });
       await act(async () => {
         input.value = 'A bracket for a 3 mm shaft';
-        Object.assign(input, { tauEarlyDraft: { edited: true, composing: false } });
+        Object.assign(input, {
+          tauHandOff: { edited: true, composing: false, submitQueued: false, acceptedAt: undefined },
+        });
         input.dispatchEvent(new InputEvent('input', { bubbles: true }));
       });
       expect(within(container).getByRole('textbox')).toBe(input);
       expect(input.value).toBe('A bracket for a 3 mm shaft');
 
       await act(async () => {
-        composerModule.resolve?.();
+        composerModule.resolve();
         await Promise.resolve();
       });
       await within(container).findByText('Rich composer');

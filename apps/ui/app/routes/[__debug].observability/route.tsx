@@ -18,12 +18,12 @@ import {
 
 export const meta: MetaFunction = () => [{ title: 'Observability harness · Tau' }];
 
-export const loader = ({ request }: LoaderFunctionArgs): { trigger: string | undefined; hasDsn: boolean } => {
+// React Router's shared type, not `Route.LoaderArgs`: typegen leaves this route out of builds without the harness.
+export const loader = ({ url }: LoaderFunctionArgs): { trigger: string | undefined; hasDsn: boolean } => {
   if (!isObservabilityHarnessEnabled()) {
     // oxlint-disable-next-line @typescript-eslint/only-throw-error -- React Router turns thrown responses into HTTP statuses.
     throw new Response('Not found', { status: 404 });
   }
-  const url = new URL(request.url);
   if (url.searchParams.get('trigger') === 'ssr-loader') {
     throw new Error('Observability harness SSR loader error');
   }

@@ -125,6 +125,26 @@
     "reason": "test fixture read from another project"
   },
   {
+    "file": "apps/ui/app/runtime/attachment-transcode-sources.test.ts",
+    "target": "packages/plugins/heif/src/fixtures/small.heic",
+    "reason": "test fixture read from another project: the heif package owns the HEIC fixtures its parity tests share"
+  },
+  {
+    "file": "apps/libs/chat-ui/src/components/chat-paste-handler.test.ts",
+    "target": "libs/utils/src/image-probe.fixtures/small.heic",
+    "reason": "test fixture read from another project: @taucad/utils owns the image-probe fixtures, and this test feeds the real HEIC bytes to intake"
+  },
+  {
+    "file": "apps/libs/chat-ui/src/utils/attachment-intake.test.ts",
+    "target": "libs/utils/src/image-probe.fixtures/small.heic",
+    "reason": "test fixture read from another project: @taucad/utils owns the image-probe fixtures, and this test feeds the real HEIC bytes to intake"
+  },
+  {
+    "file": "apps/ui/app/components/chat/chat-textarea-types.test.tsx",
+    "target": "libs/utils/src/image-probe.fixtures/small.heic",
+    "reason": "test fixture read from another project: @taucad/utils owns the image-probe fixtures, and this test feeds the real HEIC bytes to intake"
+  },
+  {
     "file": "apps/desktop-e2e/src/desktop-picogk-kinematics.spec.ts",
     "target": "libs/tau-examples/**",
     "reason": "reads a Tau example from tau-examples as a fixture or source"
@@ -503,6 +523,11 @@
     "file": "apps/ui-e2e/vitest.config.ts",
     "target": "libs/tau-examples/**",
     "reason": "reads a Tau example from tau-examples as a fixture or source"
+  },
+  {
+    "file": "apps/ui/app/lib/critical-graph.node.test.ts",
+    "target": ".oxlintrc.json",
+    "reason": "holds the options of tau-lint/no-static-heavy-import (G1) to the heavy list and the route classes' static graphs"
   },
   {
     "file": "apps/ui/app/routes/[__e2e].onshape-render-profile/ablation-transform.test.ts",

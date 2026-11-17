@@ -11,7 +11,7 @@ import { portableExecutionOf } from '@taucad/chat-ui/utils/chat-execution';
  */
 const build = vi.hoisted(() => ({ desktop: false }));
 
-vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   get isDesktopTarget() {
     return build.desktop;

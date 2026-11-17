@@ -6,6 +6,7 @@ import { brep } from '@taucad/brep';
 import { build123d } from '@taucad/build123d';
 import { esbuild } from '@taucad/esbuild';
 import { gltf } from '@taucad/gltf';
+import { heif } from '@taucad/heif';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
@@ -105,6 +106,9 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
           gltf(),
           brep(),
           image(),
+          /* HEIC/HEIF stills for the composer's conversions in this utility; libheif (LGPL-3.0) loads only for a HEIC
+           * source and its WASM file ships unpacked beside the ASAR (operator ruling O1). */
+          heif(),
           slicer(),
           assimp({
             preset: 'all',

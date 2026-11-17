@@ -5,7 +5,7 @@
  */
 import { QueryClientProvider } from '@tanstack/react-query';
 import { renderToString } from 'react-dom/server';
-import { MemoryRouter } from 'react-router';
+import { DataMemoryRouter } from '#test-utils/data-memory-router.js';
 import { expect, it, vi } from 'vitest';
 import type * as FocusRouteStateModule from '#machines/focus.route-state.js';
 import type * as ProjectHookModule from '#hooks/use-project.js';
@@ -16,6 +16,7 @@ import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { ProjectManagerProvider } from '#hooks/use-project-manager.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { ProjectRouteProviders, ProjectSessionsHost } from '#routes/w.$workspace.$project/project-route.js';
+import { WorkspaceFrame } from '#routes/w.$workspace.$project/workspace-frame.js';
 import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { createAppRuntime, selectRuntimeQueryClient } from '#runtime/app-runtime.js';
 
@@ -73,9 +74,9 @@ const renderProjectUrl = (shell: React.ReactNode): string => {
           <UnloadProvider>
             <ChatSessionStoreProvider>
               <SessionsProvider>
-                <MemoryRouter initialEntries={['/w/ws/alpha?chat=c1']}>
+                <DataMemoryRouter initialEntries={['/w/ws/alpha?chat=c1']}>
                   <ProjectSessionsHost>{shell}</ProjectSessionsHost>
-                </MemoryRouter>
+                </DataMemoryRouter>
               </SessionsProvider>
             </ChatSessionStoreProvider>
           </UnloadProvider>
@@ -86,19 +87,25 @@ const renderProjectUrl = (shell: React.ReactNode): string => {
 };
 
 /* A11 (D24, U3's server half): the shell is outside the worker gate, so the server renders it with the route's
- * `resolving` content (the workspace's placeholder) in its outlet. */
+ * `resolving` content (the workspace's placeholder) in its outlet. A15b2: the shell hosts the workspace frame (`Page`)
+ * and the route draws none of its own, so the server HTML holds exactly one. */
 it('should render the app shell and the resolving content in the server HTML of a project URL', () => {
   const html = renderProjectUrl(
     <nav data-testid='app-shell'>
-      <ProjectRouteProviders>
-        <p>outlet</p>
-      </ProjectRouteProviders>
+      <WorkspaceFrame>
+        <ProjectRouteProviders>
+          <p>outlet</p>
+        </ProjectRouteProviders>
+      </WorkspaceFrame>
     </nav>,
   );
   /* No DOM on the server: the shell's own markup, from its opening tag to its close. */
   const shell = /<nav data-testid="app-shell">([\s\S]*)<\/nav>/u.exec(html)?.[1];
   expect(shell, 'U3: the server HTML lacks the app shell').toBeDefined();
-  expect(shell).toContain('data-testid="workspace-skeleton"');
+  expect(shell).toContain('data-slot="workspace-frame"');
+  expect(shell).toContain('data-slot="workspace-lane"');
+  expect(shell?.match(/data-slot="workspace-frame"/gu)).toHaveLength(1);
+  expect(shell).toContain('data-testid="workspace-opening"');
   expect(seen.projectHook).toBe(0);
 });
 
@@ -111,11 +118,11 @@ it('should derive resolving for a project URL on the server and call no project 
           <UnloadProvider>
             <ChatSessionStoreProvider>
               <SessionsProvider>
-                <MemoryRouter initialEntries={['/w/ws/alpha?chat=c1']}>
+                <DataMemoryRouter initialEntries={['/w/ws/alpha?chat=c1']}>
                   <ProjectSessionsHost>
                     <p>editor</p>
                   </ProjectSessionsHost>
-                </MemoryRouter>
+                </DataMemoryRouter>
               </SessionsProvider>
             </ChatSessionStoreProvider>
           </UnloadProvider>

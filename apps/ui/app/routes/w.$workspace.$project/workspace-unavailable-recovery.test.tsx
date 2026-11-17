@@ -46,7 +46,7 @@ vi.mock('@taucad/files-ui/components/filesystem/workspace-directory-panel', () =
   ),
 }));
 
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getWorkspace: vi.fn(),
   listWorkspaces: vi.fn(async () => []),
   requestHandlePermission: vi.fn(),
@@ -79,7 +79,7 @@ vi.mock('@taucad/ui/components/sonner', () => ({
   toast: { error: mockToastError, success: mockToastSuccess },
 }));
 
-vi.mock('#constants/browser.constants.js', () => ({
+vi.mock('@taucad/files-ui/constants/browser.constants', () => ({
   isFileSystemAccessSupported: true,
   directoryPicker: () => ({
     available: true,

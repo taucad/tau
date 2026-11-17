@@ -23,7 +23,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => false }));
 /* The build target as the stubbed env names it, read at each call, so the placement helpers follow `stubEnv`. */
-vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   get isDesktopTarget() {
     return import.meta.env.TAU_TARGET === 'desktop';

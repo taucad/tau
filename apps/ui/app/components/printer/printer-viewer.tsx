@@ -40,7 +40,7 @@ import { printerPreparation } from '#components/printer/printer-preparation.js';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { MaterialSwatch } from '@taucad/viewer/cad/material-swatch';
 import { printerAccent } from '#components/printer/printer-colors.constants.js';
-import type { PrinterFileKind } from '#components/printer/printer-file.js';
+import type { PrinterFileKind } from '#components/printer/printer-file-kind.js';
 import { derivePrinterGeometry } from '#components/printer/printer-geometry.js';
 import { resolvePrinterManifest } from '#components/printer/printer-manifest.fixture.js';
 import {

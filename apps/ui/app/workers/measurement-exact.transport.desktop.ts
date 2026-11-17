@@ -1,4 +1,4 @@
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import type { MinimumDistanceResult } from 'geospec/assertion-client';
 import { exactResponseFromNative } from './measurement-exact.response.js';
 import type { ExactRequest, ExactResponse } from './measurement-exact.worker.js';

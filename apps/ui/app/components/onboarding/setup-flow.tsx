@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router';
-import type { GizmoStyleId, GoalId, LanguageId, MousePresetId, ToolId } from '@taucad/preferences';
+import type { GizmoStyleId, GoalId, LanguageId, MousePresetId, OrbitStyleId, ToolId } from '@taucad/preferences';
 import { resetLeaf } from '@taucad/preferences';
 import { Button } from '@taucad/ui/components/button';
 import { Heading } from '@taucad/ui/components/heading';
@@ -189,6 +189,9 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
       answer('viewer', () => writeViewer({ controls: { preset } }));
       telemetry.presetSelected(preset, profile);
     },
+    orbitStyle: (orbitStyle: OrbitStyleId) => {
+      answer('viewer', () => writeViewer({ controls: { orbitStyle } }));
+    },
     gizmo: (choice: GizmoChoiceId) => {
       if (choice === 'none') {
         telemetry.gizmoHidden();
@@ -289,6 +292,7 @@ export function SetupFlow({ entry, initialStep, onReplayTour, onOpenFolder }: Se
                   viewer={viewer}
                   onPresetChange={answers.preset}
                   onGizmoChange={answers.gizmo}
+                  onOrbitStyleChange={answers.orbitStyle}
                 />
               ) : null}
               {current === 'how' ? (

@@ -16,12 +16,16 @@ import { navigation, sourceUrl, discordUrl } from '#www/content.js';
 import { wordmark } from '#www/wordmark.js';
 import { bootEntry } from '#www/entry.js';
 import { randomUuid } from '@taucad/utils/id';
-import type { LinksFunction } from 'react-router';
+import type { LinksFunction, MiddlewareFunction } from 'react-router';
 import type { SiteConfiguration } from '#app/config.server.js';
 import { siteConfiguration } from '#app/config.server.js';
 import type { Route } from './+types/root.js';
 import siteCss from '#www/site.css?inline';
 import { appHref } from '#www/environment.js';
+import { rootMiddleware } from '#app/middleware.server.js';
+
+/** C1: the headers every response carries, documents and `.data` alike. */
+export const middleware: Array<MiddlewareFunction<Response>> = [rootMiddleware];
 
 export function loader(): SiteConfiguration & { nonce: string } {
   return { ...siteConfiguration(), nonce: randomUuid() };

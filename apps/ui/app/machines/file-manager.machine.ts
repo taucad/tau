@@ -7,7 +7,7 @@ import type * as FileSystemBridgeModule from '@taucad/fs-bridge';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
 import { fromComputeStoreChannel } from '@taucad/runtime/host';
 import { safeDispose } from '@taucad/utils/dispose';
-import FileManagerWorker from '#machines/file-manager.worker.js?worker';
+import { createFileManagerWorker } from '#machines/file-manager-worker.js';
 import { reportWorkerFailures } from '#lib/worker-error-reporting.js';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import {
@@ -17,10 +17,10 @@ import {
   checkHandlePermission,
   getHomeStorageBackend,
   getProjectRootConfigs,
-} from '#filesystem/handle-store.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
-import { fileManagerWorkerName } from '#machines/file-manager-worker-name.js';
-import type { WorkspaceRootSkip } from '#filesystem/handle-store.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { fileManagerWorkerName } from '@taucad/files-ui/machines/file-manager-worker-name';
+import type { WorkspaceRootSkip } from '@taucad/files-ui/filesystem/handle-store';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import type { ProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
@@ -290,7 +290,7 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     if (!worker) {
       const homeBackend = await getHomeStorageBackend();
       worker = reportWorkerFailures(
-        new FileManagerWorker({ name: fileManagerWorkerName(homeBackend) }),
+        createFileManagerWorker({ name: fileManagerWorkerName(homeBackend) }),
         'file-manager',
       );
       // A node-backed Home needs its provider host before the worker can mount

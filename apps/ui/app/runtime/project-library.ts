@@ -43,15 +43,15 @@ import type {
   WorkspaceConnectionServices,
   WorkspaceConnectionState,
 } from '#hooks/workspace-connection.machine.js';
-import type { DirectoryPick } from '#constants/browser.constants.js';
+import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
 import {
   checkHandlePermission,
   createNodeWorkspace,
   createWorkspace,
   isNodeWorkspace,
   subscribeProjectRootConfigurationChanges,
-} from '#filesystem/handle-store.js';
-import type { Workspace } from '#filesystem/handle-store.js';
+} from '@taucad/files-ui/filesystem/handle-store';
+import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import { createLibraryDiscovery, selectEpochCurrent } from '#machines/library-discovery.machine.js';
@@ -88,7 +88,7 @@ import type { LibraryRecords } from '#runtime/project-library-observations.js';
 import { ProjectCommands } from '#runtime/project-library-commands.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
 import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
-import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 
 /** What the library takes from the runtime's composition. @public */
 export type ProjectLibraryOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'> &

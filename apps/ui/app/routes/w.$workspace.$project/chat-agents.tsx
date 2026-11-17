@@ -114,7 +114,8 @@ export const ChatAgents = ({
 
 /** Durable + live project-wide projection. It never acquires or owns a chat run. */
 export function AgentsPanelBody(props: AgentsPanelBodyProps): React.JSX.Element {
-  const availability = useProjectAvailability();
+  /* A projection of the chats: it opens on their records (SP2h), not on the whole apply. */
+  const availability = useProjectAvailability('chats');
   return availability === 'ready' ? (
     <AgentsPanelBodyContent {...props} />
   ) : (

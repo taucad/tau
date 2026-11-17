@@ -71,7 +71,7 @@ const productPanelByDimension = {
   'conversions (import side)': 'Conversions: Source → Target',
   'entry and import formats': 'Entry Formats by Kernel',
   'export formats': 'Exports by Format (daily)',
-  'callers (editor, agent, geospec, quicklook, host, converter, capture, viewer)': 'Caller Mix',
+  'callers (editor, agent, geospec, quicklook, host, converter, capture, viewer, attachment)': 'Caller Mix',
   'hosts, platform, OS': 'Hosts',
   transport: 'Attempts by Transport (daily)',
   operations: 'Operation Mix (daily)',

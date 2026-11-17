@@ -1,4 +1,5 @@
 import {
+  isGraphicsContextUnavailableError,
   probeWebGpuSupport,
   resolveGraphicsBackendPreference,
   webGpuFallbackReason,
@@ -32,8 +33,16 @@ export const isWebGpuCanvasLossFailure = (backend: ResolvedGraphicsBackend): boo
   backend === 'webgpu' && webGpuFallbackReason() === 'canvas-loss';
 
 /**
+ * The failure of the showcase start that found no WebGL 2 context. A browser that gives none (hardware acceleration
+ * off, a blocklisted GPU) gives none for the rest of the page, so later starts reject with it at once instead of
+ * opening another canvas.
+ */
+let contextUnavailable: Error | undefined;
+
+/**
  * Start a showcase renderer, and when its WebGPU canvas could not present ({@link isWebGpuCanvasLossFailure}), start
- * it once more with the backend resolved again.
+ * it once more with the backend resolved again. Once a start found no WebGL 2 context
+ * (`GraphicsContextUnavailableError`), every later start on the page rejects with that failure without starting.
  *
  * @param start - Builds a renderer on a canvas of its own making, awaits it, and releases it when it fails.
  * @returns What `start` returned for the start that succeeded.
@@ -41,13 +50,31 @@ export const isWebGpuCanvasLossFailure = (backend: ResolvedGraphicsBackend): boo
 export const startShowcaseRenderer = async <Started>(
   start: (backend: ResolvedGraphicsBackend) => Promise<Started>,
 ): Promise<Started> => {
+  if (contextUnavailable !== undefined) {
+    throw contextUnavailable;
+  }
+  const remembered = async (backend: ResolvedGraphicsBackend): Promise<Started> => {
+    try {
+      return await start(backend);
+    } catch (error) {
+      if (isGraphicsContextUnavailableError(error)) {
+        contextUnavailable = error;
+      }
+      throw error;
+    }
+  };
   const backend = await resolveShowcaseBackend();
   try {
-    return await start(backend);
+    return await remembered(backend);
   } catch (error) {
     if (!isWebGpuCanvasLossFailure(backend)) {
       throw error;
     }
   }
-  return start(await resolveShowcaseBackend());
+  return remembered(await resolveShowcaseBackend());
+};
+
+/** Forget a remembered missing WebGL 2 context, so a test starts from a fresh page. */
+export const resetShowcaseContextAvailability = (): void => {
+  contextUnavailable = undefined;
 };

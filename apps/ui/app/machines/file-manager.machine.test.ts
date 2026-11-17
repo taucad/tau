@@ -44,8 +44,8 @@ const workerTestState = vi.hoisted(() => {
   return { instances, rootedProxyDisposals, proxyDeaths };
 });
 
-vi.mock('#machines/file-manager.worker.js?worker', () => ({
-  default: class MockWorker {
+vi.mock('#machines/file-manager-worker.js', () => {
+  class MockWorker {
     public terminate = vi.fn();
     public postMessage = vi.fn();
     public addEventListener = vi.fn((type: string, handler: (event: Event) => void) => {
@@ -68,8 +68,9 @@ vi.mock('#machines/file-manager.worker.js?worker', () => ({
       }
       return true;
     }
-  },
-}));
+  }
+  return { createFileManagerWorker: (options: { name: string }) => new MockWorker(options) };
+});
 
 const mockMount = vi.fn<(prefix: string, backend: string, options?: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();
@@ -170,14 +171,14 @@ const mockGetHomeStorageBackend = vi.fn<() => Promise<'indexeddb' | 'opfs' | 'no
 
 const mockNodeFsConnect = vi.fn(async () => new MessageChannel().port1);
 let mockDesktopBridge: unknown;
-vi.mock('#filesystem/desktop-bridge.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
   isDesktopTarget: true,
   desktopBridge: () => mockDesktopBridge,
   hostPathName: (path: string) => path,
   nodeHomeRoot: () => '/userData/home',
 }));
 
-vi.mock('#filesystem/handle-store.js', () => ({
+vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
   getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getWorkspace: async (...args: unknown[]) => mockGetWorkspace(...(args as [string])),

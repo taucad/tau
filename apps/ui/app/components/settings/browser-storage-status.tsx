@@ -1,5 +1,5 @@
 import { SettingsRow } from '#components/settings/settings-item.js';
-import type { PersistentStorageStatus } from '#filesystem/handle-store.js';
+import type { PersistentStorageStatus } from '@taucad/files-ui/filesystem/handle-store';
 
 const statusCopy: Record<PersistentStorageStatus, { title: string; description: string }> = {
   'best-effort': {

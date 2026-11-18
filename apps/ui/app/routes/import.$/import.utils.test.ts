@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { describeGitHubImport, handOverHostGrants, resolveGitHubImportTarget } from '#routes/import.$/import.utils.js';
+import { cadmpegKernel } from '@taucad/cadmpeg';
+import {
+  describeGitHubImport,
+  findMainFile,
+  handOverHostGrants,
+  importFileAcceptString,
+  isMainFileCandidate,
+  nativeCadExtensions,
+  resolveGitHubImportTarget,
+} from '#routes/import.$/import.utils.js';
 
 describe('resolveGitHubImportTarget', () => {
   it('reads owner, repo, ref, and main file out of the URL', () => {
@@ -111,5 +120,24 @@ describe('handOverHostGrants', () => {
     expect(handOverHostGrants({ accepted: false, incoming: ['file-b'], held, release })).toBe(false);
     expect(held).toStrictEqual(['folder-a']);
     expect(release).toHaveBeenCalledExactlyOnceWith(['file-b']);
+  });
+});
+
+describe('native CAD files', () => {
+  it('accepts exactly the extensions the cadmpeg kernel opens', () => {
+    expect(nativeCadExtensions).toStrictEqual(cadmpegKernel().extensions.map((extension) => `.${extension}`));
+    for (const extension of nativeCadExtensions) {
+      expect(importFileAcceptString.split(',')).toContain(extension);
+    }
+  });
+
+  it('lets a native CAD file be the main file, whatever its case', () => {
+    expect(isMainFileCandidate('parts/BRACKET.SLDPRT')).toBe(true);
+    expect(isMainFileCandidate('notes.md')).toBe(false);
+    expect(findMainFile(['notes.md', 'parts/BRACKET.SLDPRT'])).toBe('parts/BRACKET.SLDPRT');
+  });
+
+  it('prefers a kernel source over a native CAD file', () => {
+    expect(findMainFile(['bracket.sldprt', 'bracket.scad'])).toBe('bracket.scad');
   });
 });

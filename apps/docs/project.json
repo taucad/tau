@@ -55,7 +55,8 @@
       "dependsOn": ["build"],
       "options": {
         "command": "node apps/docs/scripts/verify-deploy.mts"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/pnpm-lock.yaml"]
     },
     "verify-browser": {
       "executor": "nx:run-commands",

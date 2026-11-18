@@ -22,6 +22,14 @@
  * file and target (either may be a glob) with a reason. An unlisted read and an
  * entry that matches no read both fail.
  *
+ * An allowlist entry records why a read stays cross-root; it does not make Nx
+ * select the reader. So every read, listed or not, must also be covered: by a
+ * graph edge from the reader to the owner of what it reads, or by a
+ * `{workspaceRoot}` fileset in the inputs of the target that runs it (Nx 22
+ * marks a project touched when a changed file matches such a fileset in any of
+ * its targets). `checkCoverage` states the rule and its exemptions, and the
+ * failure names the input or implicit dependency to add.
+ *
  * Usage: pnpm nx run scripts:validate-cross-root-reads
  */
 import { execFileSync } from 'node:child_process';
@@ -31,6 +39,7 @@ import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { createProjectGraphAsync } from '@nx/devkit';
+import type { ProjectGraph } from '@nx/devkit';
 import ts from 'typescript';
 
 /** A workspace project: its Nx name and its workspace-relative root. */
@@ -64,6 +73,11 @@ export type AllowlistEntry = {
   /** Workspace-relative resolved target, or a glob of them. */
   readonly target: string;
   readonly reason: string;
+  /**
+   * Why no CI task needs selecting for this read: the reading file is an operator script that no Nx
+   * target names. Accepted only for runtime reads by a non-test file; see `checkCoverage`.
+   */
+  readonly unscheduled?: string;
 };
 
 /** The result of checking reads against the allowlist. */
@@ -795,6 +809,400 @@ export const checkAllowlist = (
   stale: allowlist.filter((entry) => !reads.some((read) => entryMatches(entry, read))),
 });
 
+/** The parts of an Nx target this check reads. */
+export type TargetConfig = {
+  readonly inputs?: readonly unknown[];
+  readonly dependsOn?: readonly unknown[];
+  readonly options?: unknown;
+};
+
+/** A project with the targets and named inputs Nx resolved for it. */
+export type GraphProject = ProjectRoot & {
+  readonly targets: Readonly<Record<string, TargetConfig>>;
+  readonly namedInputs?: Readonly<Record<string, readonly unknown[]>>;
+};
+
+/** What the coverage check needs from the workspace. */
+export type CoverageContext = {
+  readonly projects: readonly GraphProject[];
+  /** Each project's direct graph dependencies, by project name. */
+  readonly dependencies: Readonly<Record<string, readonly string[]>>;
+  /** `nx.json`'s `namedInputs`. */
+  readonly namedInputs: Readonly<Record<string, readonly unknown[]>>;
+  /** Workspace-relative paths of the files git tracks. */
+  readonly tracked: readonly string[];
+};
+
+/** A cross-root read that neither a graph edge nor a declared input covers. */
+export type UncoveredRead = {
+  readonly read: CrossRootRead;
+  /** The files the read depends on that select nothing: tracked files, directory entries or the untracked target. */
+  readonly files: readonly string[];
+  /** The targets taken to run the reading file. */
+  readonly runningTargets: readonly string[];
+  /** What to add, as one instruction. */
+  readonly fix: string;
+};
+
+/** The read kinds that compile or load a module, rather than read a file's bytes. */
+const moduleKinds = new Set([
+  'import',
+  'import type',
+  'export',
+  'export type',
+  'import()',
+  'require',
+  'require.resolve',
+]);
+
+/** Read kinds that resolve a path without reading what is there. */
+const pathOnlyKinds = new Set(['fs.realpath', 'fs.realpathSync']);
+
+/** Is a path an installed dependency, a local checkout or environment file, or outside the workspace? */
+const isNotWorkspaceSource = (path: string): boolean =>
+  path.startsWith('../') ||
+  path.startsWith('repos/') ||
+  path.split('/').includes('node_modules') ||
+  posix.basename(path).startsWith('.env');
+
+/** Does the file run as, or for, a test: a test file, a file in a test-support directory or in an e2e project? */
+const isTestFile = (path: string, projectRoot: string): boolean =>
+  /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(path) ||
+  /(?:^|\/)(?:test|tests|testing|e2e|__tests__|support)\//u.test(path.slice(projectRoot.length)) ||
+  projectRoot.endsWith('-e2e');
+
+/**
+ * The `{workspaceRoot}` filesets a target's inputs list, following named inputs. These are the
+ * patterns Nx 22's `getImplicitlyTouchedProjects` matches a changed file against; a negated pattern,
+ * a `^` input and a `{projectRoot}` fileset select nothing outside the project.
+ */
+const workspaceFilesets = (
+  inputs: readonly unknown[] | undefined,
+  named: Readonly<Record<string, readonly unknown[]>>,
+  seen: ReadonlySet<string> = new Set(),
+): string[] =>
+  (inputs ?? []).flatMap((input): string[] => {
+    const fileset =
+      typeof input === 'string'
+        ? input
+        : typeof input === 'object' && input !== null && 'fileset' in input && typeof input.fileset === 'string'
+          ? input.fileset
+          : undefined;
+    if (fileset === undefined) {
+      return [];
+    }
+    if (fileset.startsWith('{workspaceRoot}/')) {
+      return [fileset.slice('{workspaceRoot}/'.length)];
+    }
+    const namedInput = named[fileset];
+    return namedInput && !seen.has(fileset) ? workspaceFilesets(namedInput, named, new Set([...seen, fileset])) : [];
+  });
+
+/** Does a target's options name a path, workspace- or project-relative? */
+const targetMentions = (target: TargetConfig, path: string, projectRoot: string): boolean => {
+  const text = JSON.stringify(target.options ?? {});
+  const relative = posix.relative(projectRoot, path);
+  return text.includes(path) || (!relative.startsWith('../') && relative !== '' && text.includes(relative));
+};
+
+/** Does a target build `owner` first: a `dependsOn` naming it, an `nx run <owner>:…` command or a `dependentTasksOutputFiles` input? */
+const buildsFirst = (target: TargetConfig, owner: string): boolean =>
+  (target.dependsOn ?? []).some((entry) => {
+    if (typeof entry === 'string') {
+      return entry.startsWith(`${owner}:`);
+    }
+    const { projects } = (typeof entry === 'object' && entry !== null ? entry : {}) as { projects?: unknown };
+    return projects === owner || (Array.isArray(projects) && projects.includes(owner));
+  }) ||
+  JSON.stringify(target.options ?? {}).includes(`nx run ${owner}:`) ||
+  (target.inputs ?? []).some(
+    (input) => typeof input === 'object' && input !== null && 'dependentTasksOutputFiles' in input,
+  );
+
+/** Every project a project reaches through the graph. */
+const reachable = (
+  start: string,
+  dependencies: Readonly<Record<string, readonly string[]>>,
+  cache: Map<string, ReadonlySet<string>>,
+): ReadonlySet<string> => {
+  const cached = cache.get(start);
+  if (cached) {
+    return cached;
+  }
+  const seen = new Set<string>();
+  const pending = [start];
+  for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
+    for (const next of dependencies[current] ?? []) {
+      if (!seen.has(next)) {
+        seen.add(next);
+        pending.push(next);
+      }
+    }
+  }
+  cache.set(start, seen);
+  return seen;
+};
+
+/** What a read depends on, in tracked files. */
+type ReadFiles =
+  | { readonly type: 'file'; readonly path: string }
+  /** A directory listing: one tracked file stands for each entry, its manifest when it has one. */
+  | { readonly type: 'directory'; readonly path: string; readonly entries: readonly string[] }
+  | { readonly type: 'untracked'; readonly path: string };
+
+/** The tracked file a module specifier loads: TypeScript resolves `x.js` to `x.ts`, and an extensionless one to `x.ts` or `x/index.ts`. */
+const moduleCandidates = (target: string): string[] => {
+  const swapped = /\.(?:[cm]?js|jsx)$/u.test(target)
+    ? ['.ts', '.tsx', '.mts', '.cts'].map((extension) => target.replace(/\.(?:[cm]?js|jsx)$/u, extension))
+    : [];
+  const extensionless = ['.ts', '.tsx', '.js', '.mjs'].flatMap((extension) => [
+    `${target}${extension}`,
+    `${target}/index${extension}`,
+  ]);
+  return [target, ...swapped, ...extensionless];
+};
+
+const filesOfRead = (
+  read: CrossRootRead,
+  tracked: ReadonlySet<string>,
+  sortedTracked: readonly string[],
+): ReadFiles => {
+  const candidates = moduleKinds.has(read.kind) ? moduleCandidates(read.target) : [read.target];
+  const file = candidates.find((candidate) => tracked.has(candidate));
+  if (file !== undefined) {
+    return { type: 'file', path: file };
+  }
+  const prefix = `${read.target}/`;
+  const directories = new Map<string, string>();
+  const files: string[] = [];
+  for (const path of sortedTracked) {
+    if (!path.startsWith(prefix)) {
+      continue;
+    }
+    const rest = path.slice(prefix.length);
+    const slash = rest.indexOf('/');
+    if (slash === -1) {
+      files.push(path);
+      continue;
+    }
+    const entry = rest.slice(0, slash);
+    const current = directories.get(entry);
+    if (current === undefined || (path === `${prefix}${entry}/package.json` && current !== path)) {
+      directories.set(entry, path);
+    }
+  }
+  // A listing that holds directories is read for them (projects, examples); a file beside them is noise.
+  const entries = directories.size > 0 ? [...directories.values()] : files;
+  return entries.length > 0
+    ? { type: 'directory', path: read.target, entries }
+    : { type: 'untracked', path: read.target };
+};
+
+/** Does a fileset name a directory's entries by a wildcard, so that adding or removing one selects the reader? */
+const watchesListing = (pattern: string, directory: string): boolean => {
+  if (!pattern.startsWith(`${directory}/`)) {
+    return false;
+  }
+  const [segment = ''] = pattern.slice(directory.length + 1).split('/');
+  return /[*?{]/u.test(segment);
+};
+
+/** The fileset a directory listing needs: its entries' shared manifest, or its files' shared extension. */
+const listingPattern = (directory: string, entries: readonly string[]): string => {
+  const tails = new Set(
+    entries.map((entry) =>
+      entry
+        .slice(directory.length + 1)
+        .split('/')
+        .slice(1)
+        .join('/'),
+    ),
+  );
+  if (tails.size === 1 && tails.has('package.json')) {
+    return `${directory}/*/package.json`;
+  }
+  const extensions = new Set(entries.map((entry) => posix.extname(entry)));
+  return tails.size === 1 && tails.has('') && extensions.size === 1
+    ? `${directory}/*${[...extensions][0] ?? ''}`
+    : `${directory}/**/*`;
+};
+
+/** The targets that run a file: those naming it, else the test targets for a test file, else every target. */
+const runningTargets = (
+  read: CrossRootRead,
+  reader: GraphProject,
+): { readonly running: ReadonlyArray<readonly [string, TargetConfig]>; readonly named: boolean } => {
+  const targets = Object.entries(reader.targets);
+  const naming = targets.filter(([, target]) => targetMentions(target, read.file, reader.root));
+  if (naming.length > 0) {
+    return { running: naming, named: true };
+  }
+  if (isTestFile(read.file, reader.root)) {
+    // Test configurations name globs and helpers rarely, so any test target may run a test file.
+    const tests = targets.filter(([name]) => /^(?:test|e2e)(?::|$)/u.test(name));
+    if (tests.length > 0) {
+      return { running: tests, named: false };
+    }
+  }
+  return { running: targets, named: false };
+};
+
+/** The one target to name in a fix: the type check for a module read, else the first running target, `test` first. */
+const fixTarget = (
+  read: CrossRootRead,
+  running: ReadonlyArray<readonly [string, TargetConfig]>,
+  named: boolean,
+): string => {
+  const names = running.map(([name]) => name);
+  if (moduleKinds.has(read.kind) && names.includes('typecheck')) {
+    return 'typecheck';
+  }
+  return !named && names.includes('test') ? 'test' : (names[0] ?? 'test');
+};
+
+/**
+ * Finds the cross-root reads whose reader Nx would not select as affected, or re-hash, when what the
+ * read depends on changes. A read is covered by any of:
+ *
+ * - a graph edge: the reading project depends, directly or not, on the project that owns the file;
+ * - a declared input: a target that runs the reading file lists a `{workspaceRoot}` fileset matching
+ *   it (Nx 22 selects a project when a changed file matches such a fileset in any of its targets);
+ *   a directory listing needs a fileset that names its entries by a wildcard, or one per entry;
+ * - for an untracked target (build output), a fileset matching its path, or a running target that
+ *   builds its owner first (`dependsOn`, `nx run <owner>:…`, `dependentTasksOutputFiles`);
+ * - an allowlist entry's `unscheduled` reason, only for a runtime read by a file that no target of
+ *   its project names and that is not a test file: an operator script no CI task runs.
+ *
+ * Exempt: `nx.json` (every project's hash includes it), the workspace root directory itself,
+ * `realpath`, installed dependencies, local `.env` files, untracked files outside every project and
+ * paths outside the workspace. The targets that run a file are those whose options name it; for a
+ * test file, those naming its directory, else its `test*` and `e2e*` targets; else every target.
+ * A module read is also run by `typecheck`.
+ *
+ * @param reads - The cross-root reads found.
+ * @param context - The project graph, `nx.json`'s named inputs and the tracked files.
+ * @param allowlist - The allowlist, for its `unscheduled` entries.
+ * @returns The reads that nothing covers, with the fix for each.
+ */
+export const checkCoverage = (
+  reads: readonly CrossRootRead[],
+  context: CoverageContext,
+  allowlist: readonly AllowlistEntry[] = [],
+): UncoveredRead[] => {
+  const workspace: Workspace = {
+    context,
+    projects: new Map(context.projects.map((project) => [project.name, project])),
+    sorted: sortDeepestFirst(context.projects),
+    tracked: new Set(context.tracked),
+    sortedTracked: context.tracked.toSorted(),
+    closures: new Map(),
+  };
+  return reads.flatMap((read) => {
+    const reader = workspace.projects.get(read.project.name);
+    const exempt = read.target === 'nx.json' || read.target === '.' || pathOnlyKinds.has(read.kind);
+    if (!reader || exempt || isNotWorkspaceSource(read.target)) {
+      return [];
+    }
+    const uncovered = coverageOf(read, reader, workspace);
+    return uncovered && !isUnscheduled(read, reader, allowlist) ? [uncovered] : [];
+  });
+};
+
+/** The coverage check's indexes over the workspace. */
+type Workspace = {
+  readonly context: CoverageContext;
+  readonly projects: ReadonlyMap<string, GraphProject>;
+  readonly sorted: readonly ProjectRoot[];
+  readonly tracked: ReadonlySet<string>;
+  readonly sortedTracked: readonly string[];
+  readonly closures: Map<string, ReadonlySet<string>>;
+};
+
+/** Does an `unscheduled` allowlist entry excuse the read: a runtime read by a script no target names? */
+const isUnscheduled = (read: CrossRootRead, reader: GraphProject, allowlist: readonly AllowlistEntry[]): boolean =>
+  !runningTargets(read, reader).named &&
+  !isTestFile(read.file, reader.root) &&
+  !moduleKinds.has(read.kind) &&
+  allowlist.some((entry) => entry.unscheduled !== undefined && entryMatches(entry, read));
+
+/** The read as uncovered, with its fix, or undefined when an edge or a declared input covers it. */
+const coverageOf = (read: CrossRootRead, reader: GraphProject, workspace: Workspace): UncoveredRead | undefined => {
+  const named = { ...workspace.context.namedInputs, ...reader.namedInputs };
+  const { running: baseRunning, named: isNamed } = runningTargets(read, reader);
+  const typecheck = moduleKinds.has(read.kind)
+    ? Object.entries(reader.targets).filter(
+        ([name]) => name === 'typecheck' && !baseRunning.some(([other]) => other === name),
+      )
+    : [];
+  const running = [...baseRunning, ...typecheck];
+  const runningNames = running.map(([name]) => name);
+  const patterns = running.flatMap(([, target]) => workspaceFilesets(target.inputs, named));
+  const deps = reachable(reader.name, workspace.context.dependencies, workspace.closures);
+  const owned = (path: string): string | undefined => ownerOf(path, workspace.sorted)?.name;
+  const declared = (path: string): boolean => patterns.some((pattern) => matches(path, pattern));
+  const selects = (path: string): boolean => {
+    const owner = owned(path);
+    return (owner !== undefined && (owner === reader.name || deps.has(owner))) || declared(path);
+  };
+  const where = `${reader.name}:${fixTarget(read, running, isNamed)}`;
+  const files = filesOfRead(read, workspace.tracked, workspace.sortedTracked);
+  const uncovered = (open: readonly string[], fix: string): UncoveredRead | undefined =>
+    open.length > 0 ? { read, files: open, runningTargets: runningNames, fix } : undefined;
+
+  if (files.type === 'untracked') {
+    const owner = owned(files.path);
+    const built =
+      owner === undefined ||
+      deps.has(owner) ||
+      declared(files.path) ||
+      running.some(([, config]) => buildsFirst(config, owner));
+    return built
+      ? undefined
+      : uncovered(
+          [files.path],
+          `add { "projects": ["${owner}"], "target": "<the target that writes ${files.path}>" } to the dependsOn of ${where}`,
+        );
+  }
+  if (files.type === 'directory') {
+    const listed = patterns.some((pattern) => watchesListing(pattern, files.path));
+    return uncovered(
+      listed ? [] : files.entries.filter((entry) => !selects(entry)),
+      `add "{workspaceRoot}/${listingPattern(files.path, files.entries)}" (narrowed to the entries it reads) to the inputs of ${where}`,
+    );
+  }
+  const owner = owned(files.path);
+  const edge = owner === undefined ? '' : `, or add "${owner}" to the implicitDependencies of ${reader.name}`;
+  return uncovered(
+    selects(files.path) ? [] : [files.path],
+    `add "{workspaceRoot}/${files.path}" to the inputs of ${where}${edge}`,
+  );
+};
+
+/**
+ * Formats the coverage failure: one line per uncovered read, then what to add.
+ *
+ * @param uncovered - The uncovered reads.
+ * @returns The report lines.
+ */
+export const formatCoverage = (uncovered: readonly UncoveredRead[]): string[] => {
+  const lines = uncovered.flatMap(({ read, files, runningTargets: running, fix }) => {
+    const shown = files.slice(0, 3).join(', ') + (files.length > 3 ? ` (+${String(files.length - 3)} more)` : '');
+    return [
+      `${read.file}:${String(read.line)}: ${read.kind} reads ${read.target}, but a change to ${shown} does not select ${read.project.name} (run by ${running.join(', ')})`,
+      `  fix: ${fix}`,
+    ];
+  });
+  if (uncovered.length > 0) {
+    lines.push(
+      '',
+      "Nx 22 selects a project as affected only through a graph edge or a {workspaceRoot} fileset in its targets' inputs,",
+      'and caches a target by its inputs. Each read above has neither, so a change to the read file alone skips the reader.',
+      'An allowlist entry records why a read stays cross-root; it does not select the reader.',
+    );
+  }
+  return lines;
+};
+
 /**
  * Parses and checks the shape of the allowlist file's JSON.
  *
@@ -808,11 +1216,17 @@ export const parseAllowlist = (json: string): AllowlistEntry[] => {
   }
   return value.map((entry: unknown, index) => {
     const record = (typeof entry === 'object' && entry !== null ? entry : {}) as Record<string, unknown>;
-    const { file, target, reason } = record;
+    const { file, target, reason, unscheduled } = record;
     if (typeof file !== 'string' || typeof target !== 'string' || typeof reason !== 'string' || reason.trim() === '') {
       throw new TypeError(`Allowlist entry ${String(index)} needs a string file, target and non-empty reason.`);
     }
-    return { file, target, reason };
+    if (unscheduled === undefined) {
+      return { file, target, reason };
+    }
+    if (typeof unscheduled !== 'string' || unscheduled.trim() === '') {
+      throw new TypeError(`Allowlist entry ${String(index)} has an empty unscheduled reason.`);
+    }
+    return { file, target, reason, unscheduled };
   });
 };
 
@@ -878,21 +1292,57 @@ export const trackedPaths = (workspaceRoot: string): string[] =>
     .split('\0')
     .filter((path) => path !== '');
 
+/**
+ * The coverage context from a project graph and `nx.json`.
+ *
+ * @param graph - The Nx project graph.
+ * @param nxJson - `nx.json`'s text.
+ * @param tracked - The tracked files.
+ * @returns The context `checkCoverage` reads.
+ */
+export const coverageContext = (
+  graph: Pick<ProjectGraph, 'nodes' | 'dependencies'>,
+  nxJson: string,
+  tracked: readonly string[],
+): CoverageContext => {
+  const { namedInputs = {} } = JSON.parse(nxJson) as { namedInputs?: Record<string, readonly unknown[]> };
+  return {
+    projects: Object.entries(graph.nodes).map(([name, node]) => ({
+      name,
+      root: node.data.root,
+      targets: (node.data.targets ?? {}) as Readonly<Record<string, TargetConfig>>,
+      namedInputs: node.data.namedInputs as Readonly<Record<string, readonly unknown[]>> | undefined,
+    })),
+    dependencies: Object.fromEntries(
+      Object.entries(graph.dependencies).map(([name, edges]) => [name, edges.map(({ target }) => target)]),
+    ),
+    namedInputs,
+    tracked,
+  };
+};
+
 const main = async (): Promise<void> => {
   const workspaceRoot = resolve(import.meta.dirname, '../..');
   const graph = await createProjectGraphAsync();
   const projects = Object.entries(graph.nodes).map(([name, node]) => ({ name, root: node.data.root }));
-  const files = loadSourceFiles(workspaceRoot, trackedPaths(workspaceRoot));
+  const tracked = trackedPaths(workspaceRoot);
+  const files = loadSourceFiles(workspaceRoot, tracked);
   const reads = findCrossRootReads(files, projects);
-  const check = checkAllowlist(reads, loadAllowlist(workspaceRoot));
+  const allowlist = loadAllowlist(workspaceRoot);
+  const check = checkAllowlist(reads, allowlist);
+  const uncovered = checkCoverage(
+    reads,
+    coverageContext(graph, readFileSync(resolve(workspaceRoot, 'nx.json'), 'utf8'), tracked),
+    allowlist,
+  );
 
-  if (check.unlisted.length > 0 || check.stale.length > 0) {
-    console.error(formatAllowlistCheck(check, allowlistRelativePath).join('\n'));
+  if (check.unlisted.length > 0 || check.stale.length > 0 || uncovered.length > 0) {
+    console.error([...formatAllowlistCheck(check, allowlistRelativePath), ...formatCoverage(uncovered)].join('\n'));
     process.exit(1);
   }
 
   console.log(
-    `✓ ${String(files.length)} files in ${String(projects.length)} projects: ${String(reads.length)} cross-root reads, all allowlisted`,
+    `✓ ${String(files.length)} files in ${String(projects.length)} projects: ${String(reads.length)} cross-root reads, all allowlisted, each selected by a graph edge or a declared input`,
   );
 };
 

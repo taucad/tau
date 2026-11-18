@@ -226,7 +226,8 @@
             "TAU_DESKTOP_CHANNEL": "staging"
           }
         }
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "package-macos-release": {
       "executor": "nx:run-commands",
@@ -256,7 +257,8 @@
         "staging-notarized": {
           "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
         }
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "package-macos-unsigned": {
       "executor": "nx:run-commands",
@@ -278,7 +280,8 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --unsigned"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "package-linux": {
       "executor": "nx:run-commands",
@@ -429,7 +432,8 @@
             "TAU_DESKTOP_CHANNEL": "staging"
           }
         }
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "package-macos-release-intel": {
       "executor": "nx:run-commands",
@@ -454,7 +458,8 @@
         "staging-notarized": {
           "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
         }
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "package-macos-unsigned-intel": {
       "executor": "nx:run-commands",
@@ -471,7 +476,8 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --unsigned"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/apps/www/content/legal/open-source.md"]
     },
     "render-dmg-background": {
       "executor": "nx:run-commands",

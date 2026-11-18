@@ -641,7 +641,15 @@
       }
     },
     "test": {
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"]
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ]
     },
     "formal:wide": {
       "executor": "nx:run-commands",

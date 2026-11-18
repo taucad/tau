@@ -77,7 +77,12 @@
       "options": {
         "cwd": "{workspaceRoot}/packages/plugins/build123d",
         "command": "../../../node_modules/.bin/vitest run src/build123d-closure.native.integration.test.ts src/build123d.native.integration.test.ts src/build123d.native-sandbox.integration.test.ts"
-      }
+      },
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/libs/tau-examples/src/kernels/build123d/{v8-engine-brep,planetary-gear-system}/main.py"
+      ]
     },
     "test-python": {
       "executor": "nx:run-commands",
@@ -115,7 +120,12 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/benchmark-native.mts"
-      }
+      },
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/libs/tau-examples/src/kernels/build123d/v8-engine-brep/main.py"
+      ]
     }
   }
 }

@@ -90,6 +90,14 @@
       "options": {
         "command": "node --import @oxc-node/core/register packages/host/scripts/qualify-x1c.mts"
       }
+    },
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/libs/tau-examples/src/kernels/replicad/bench-vise/**/*"
+      ]
     }
   }
 }

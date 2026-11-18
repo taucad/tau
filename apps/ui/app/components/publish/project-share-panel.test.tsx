@@ -303,7 +303,7 @@ describe('ProjectSharePanel', () => {
     expect(portableContextDispose).toHaveBeenCalledOnce();
   });
 
-  it('should leave sign-in to the hosted link rather than asking under the direct link (D95)', async () => {
+  it('should leave sign-in to the web link rather than asking under the direct link (D95)', async () => {
     renderPanel(
       <ProjectSharePanel projectId='proj_direct' projectName='Direct' entryPath='main.ts' collectSnapshot={vi.fn()} />,
     );
@@ -669,7 +669,7 @@ describe('ProjectSharePanel', () => {
     renderPanel(<ProjectSharePanel projectId='proj_signed_out' projectName='Demo' entryPath='main.ts' />);
 
     expect(await screen.findByText('Sign in to persist this project with Tau.')).toBeInTheDocument();
-    expect(screen.getByText(/keeps this hosted share available over time/i)).toBeInTheDocument();
+    expect(screen.getByText(/keeps this web link available over time/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
       '/auth/sign-in?redirectTo=%2F%3Fworkbench%3Dshare%26shareProvider%3Dtau',
@@ -694,7 +694,7 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_offline' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText('Tau-hosted sharing is unavailable right now.')).toBeInTheDocument();
+    expect(await screen.findByText('Web links are unavailable right now.')).toBeInTheDocument();
     expect(screen.getByText('Check your connection and try again.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });

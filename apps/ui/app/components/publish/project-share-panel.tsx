@@ -100,7 +100,7 @@ const shareMethodDescriptors = shareProviderRegistry.descriptors.filter(
  * A method named by the link (a GitHub return, a sign-in return) or chosen in
  * this panel wins; otherwise the one this person chose last time (R8), as long
  * as the panel still offers it; otherwise a direct link. A panel that cannot
- * collect a snapshot offers only the hosted link.
+ * collect a snapshot offers only the web link.
  *
  * @param chosen - The method named by the link or picked in this panel.
  * @param remembered - The stored preference, unvalidated.
@@ -680,12 +680,12 @@ type TauShareOptions = {
 };
 
 /**
- * The Tau-hosted link: the project's own `publish.machine` and its publication envelope.
+ * The Tau web link: the project's own `publish.machine` and its publication envelope.
  *
  * Its state lives with the panel rather than in the method's body, so a draft survives choosing another method and
  * coming back, as it did before the pane moved into `@taucad/workbench-panes`.
  *
- * @param options - The project, whether the hosted method is the one shown, and the sign-in link.
+ * @param options - The project, whether the web-link method is the one shown, and the sign-in link.
  * @returns What the pane draws for the method.
  */
 function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
@@ -923,9 +923,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
         <SharePaneFrame
           isDisabled={busy || visibilityMutating}
           description={
-            signInRequired
-              ? 'Sign in to persist this project with Tau.'
-              : 'Tau-hosted sharing is unavailable right now.'
+            signInRequired ? 'Sign in to persist this project with Tau.' : 'Web links are unavailable right now.'
           }
         >
           <div className='flex flex-col gap-4'>
@@ -938,7 +936,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
               )}
             >
               {signInRequired
-                ? 'A Tau account keeps this hosted share available over time.'
+                ? 'A Tau account keeps this web link available over time.'
                 : 'Check your connection and try again.'}
             </div>
             <div className='flex justify-end'>
@@ -1166,7 +1164,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
 
 /**
  * The Share pane's source over this project: the direct link and GitHub Gist when a snapshot can be collected, and
- * the Tau-hosted link, with the method choice remembered in a cookie (R8).
+ * the Tau web link, with the method choice remembered in a cookie (R8).
  *
  * @param properties - The project and how to collect its snapshot.
  * @returns The source.

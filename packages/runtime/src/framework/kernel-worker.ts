@@ -906,6 +906,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Entries whose dependencies the bundler facade resolved, so a discovery can tell the kernel's resolve was the bundler's. */
   private readonly bundlerResolvedEntries = new Set<string>();
 
+  /** The script globals each cached bundle was built with, by entry, as a canonical key. */
+  private readonly bundleGlobalsKeys = new Map<string, string>();
+
   /** Every built-in module name registered with the bundlers, for the per-entry banner scope (`bundleModuleScope`). */
   private readonly registeredModuleNames = new Set<string>();
 
@@ -6337,14 +6340,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         result.dependencies.some((dep) => changedPaths.includes(dep)) ||
         result.unresolvedPaths.some((dep) => changedPaths.includes(dep))
       ) {
-        const superseded = this.supersededBundleCode.get(entryPath);
-        if (superseded !== undefined && superseded !== result.code) {
-          this.clearBundlerExecutionCaches(superseded);
-        }
-        this.supersededBundleCode.set(entryPath, result.code);
-        this.bundleResultCache.delete(entryPath);
+        this.supersedeBundle(entryPath, result);
       }
     }
+  }
+
+  /**
+   * Retire an entry's cached bundle, keeping its executed module until the next bundle shows
+   * whether the code changed (N10).
+   *
+   * @param entryPath - The entry.
+   * @param result - Its cached bundle.
+   */
+  private supersedeBundle(entryPath: string, result: BundleResult): void {
+    const superseded = this.supersededBundleCode.get(entryPath);
+    if (superseded !== undefined && superseded !== result.code) {
+      this.clearBundlerExecutionCaches(superseded);
+    }
+    this.supersededBundleCode.set(entryPath, result.code);
+    this.bundleResultCache.delete(entryPath);
+    this.bundleGlobalsKeys.delete(entryPath);
   }
 
   private clearBundlerExecutionCaches(code?: string): void {
@@ -7689,7 +7704,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return undefined;
     }
     // The bundle its describe and evaluate are about to read; built here when resolve did not.
-    const bundle = this.bundleResultCache.get(entryPath) ?? (await runtime.bundler.bundle(entryPath));
+    const bundle =
+      this.cachedBundleFor(entryPath, this.bundleGlobalsFor(entryPath)) ?? (await runtime.bundler.bundle(entryPath));
     if (!bundle.success) {
       return undefined;
     }
@@ -7890,11 +7906,42 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @returns a bundler interface that delegates to extension-specific bundler implementations
    */
+  /**
+   * The script globals an entry's bundle binds now: the selected kernel's modules, sorted, or
+   * `undefined` (every registered module) before the entry has a kernel.
+   *
+   * @param entryPath - The entry to bundle.
+   * @returns The module names, or `undefined`.
+   */
+  private bundleGlobalsFor(entryPath: string): readonly string[] | undefined {
+    const scope = this.bundleModuleScope(entryPath);
+    return scope ? [...this.registeredModuleNames].filter((name) => scope(name)).toSorted() : undefined;
+  }
+
+  /**
+   * The cached bundle for an entry, only when it was built with the same script globals. A bundle
+   * built for another kernel selection is retired, so its banner never runs without this kernel's
+   * globals.
+   *
+   * @param entryPath - The entry.
+   * @param globals - The globals the bundle must bind.
+   * @returns The cached bundle, or `undefined` to bundle again.
+   */
+  private cachedBundleFor(entryPath: string, globals: readonly string[] | undefined): BundleResult | undefined {
+    const cached = this.bundleResultCache.get(entryPath);
+    if (cached === undefined || this.bundleGlobalsKeys.get(entryPath) === canonicalJson(globals ?? null)) {
+      return cached;
+    }
+    this.supersedeBundle(entryPath, cached);
+    return undefined;
+  }
+
   private createBundlerFacade(signal: AbortSignal): KernelBundler {
     const facade: KernelBundler = {
       bundle: async (entryPath: string): Promise<BundleResult> => {
         signal.throwIfAborted();
-        const cached = this.bundleResultCache.get(entryPath);
+        const globals = this.bundleGlobalsFor(entryPath);
+        const cached = this.cachedBundleFor(entryPath, globals);
         if (cached) {
           return cached;
         }
@@ -7907,8 +7954,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         const extension = KernelWorker.getFileExtension(entryPath);
         const bundler = await this.ensureBundlerForExtension(extension);
 
-        const scope = this.bundleModuleScope(entryPath);
-        const globals = scope ? [...this.registeredModuleNames].filter((name) => scope(name)).toSorted() : undefined;
         const bundleResult = await bundler.definition.bundle(
           { entryPath, ...(globals === undefined ? {} : { globals }) },
           { signal },
@@ -7917,6 +7962,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         signal.throwIfAborted();
         bundleSpan.end(bundler.id === undefined ? undefined : { 'bundler.id': bundler.id });
         this.bundleResultCache.set(entryPath, bundleResult);
+        this.bundleGlobalsKeys.set(entryPath, canonicalJson(globals ?? null));
         const superseded = this.supersededBundleCode.get(entryPath);
         if (superseded !== undefined) {
           this.supersededBundleCode.delete(entryPath);
@@ -7928,7 +7974,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
       resolveDependencies: async (entryPath: string): Promise<GetDependenciesResult> => {
         this.bundlerResolvedEntries.add(entryPath);
-        const cached = this.bundleResultCache.get(entryPath);
+        const cached = this.cachedBundleFor(entryPath, this.bundleGlobalsFor(entryPath));
         if (cached) {
           return {
             resolved: cached.dependencies,

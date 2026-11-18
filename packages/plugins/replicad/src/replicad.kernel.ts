@@ -79,6 +79,7 @@ import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
 import { installNativeUserBreak } from '#utils/native-user-break.js';
 import { createLiveTier, installOperationTier } from '#live-tier/live-tier.js';
 import { createReplicadMeshMemo } from '#utils/mesh-memo.js';
+import { meterOperations, tierBuildReport } from '#utils/operation-cost.js';
 import type { ReplicadMeshMemo } from '#utils/mesh-memo.js';
 import { createToleranceLadder } from '#utils/tolerance-ladder.js';
 import type { ToleranceLadder } from '#utils/tolerance-ladder.js';
@@ -733,10 +734,12 @@ export const replicadKernel = defineKernel({
         return tracedStep(tracer, 'replicad.scene-table-hit', () => {
           const delivered = aliasBuiltModel(revisited);
           tierBuiltHandles.add(delivered.handle);
-          return delivered;
+          return { ...delivered, build: { reused: true } };
         });
       }
 
+      // R18: times the operations the tier computes, for the build report.
+      const meter = documentTier ? meterOperations(documentTier.operations.cache) : undefined;
       const buildGeometry = named('Object.createGeometry', async () => {
         const executeResult = await runtime.execute(bundleResult.code);
         if (!executeResult.success) {
@@ -749,9 +752,10 @@ export const replicadKernel = defineKernel({
             phase: 'computingGeometry',
             stage: 'brep',
           });
-          const endBuild = documentTier
-            ? installOperationTier(context.replicadLibrary, documentTier.operations)
-            : undefined;
+          const endBuild =
+            documentTier && meter
+              ? installOperationTier(context.replicadLibrary, { ...documentTier.operations, cache: meter.cache })
+              : undefined;
           let outcome: 'delivered' | 'failed' = 'failed';
           try {
             const result = await context.libraryTrace.runInScope({
@@ -856,7 +860,7 @@ export const replicadKernel = defineKernel({
         tierBuiltHandles.add(built.handle);
       }
       documentTier?.scenes.admit(bundleResult.code, parameters, aliasBuiltModel(built));
-      return built;
+      return documentTier ? { ...built, build: tierBuildReport(documentTier.operations, meter) } : built;
     } catch (error) {
       if (error instanceof ReplicadBuildError) {
         throw error;
@@ -988,9 +992,14 @@ export const replicadKernel = defineKernel({
           gltfSpan.end();
         }
       });
+      const memo = meshMemo?.stats();
       return {
         content: gltfBlob,
-        tessellation: rendered.tessellation,
+        // R18: the parts whose mesh the memo kept, beside the cost of the mesh.
+        tessellation:
+          memo === undefined
+            ? rendered.tessellation
+            : { ...rendered.tessellation, meshes: { reused: memo.hits, computed: memo.misses } },
         issues: mechanismIssues,
       };
     } catch (error) {

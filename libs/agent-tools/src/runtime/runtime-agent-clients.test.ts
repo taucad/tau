@@ -251,6 +251,60 @@ describe('createRuntimeAgentClients', () => {
     });
   });
 
+  it('should report what the build reused and cost, and the meshes the kernel kept (R18)', async () => {
+    const build = {
+      reused: false,
+      elapsed: 7735,
+      operations: { reused: 412, computed: 108 },
+      costliest: [{ operation: 'Shape.fillet', elapsed: 2100, calls: 12 }],
+    };
+    const tessellation: TessellationReport = {
+      triangles: 12,
+      vertices: 8,
+      elapsed: 3,
+      meshes: { reused: 1, computed: 1 },
+    };
+    const clients = clientsFor(
+      runtimeFixture({
+        evaluate: () => ({ ...evaluation(), build }),
+        render: () => rendering({ mimeType: 'model/gltf-binary', content: glb(), tessellation }),
+      }),
+    );
+
+    await expect(clients.kernelClient.evaluateModel({ targetFile: 'main.ts' })).resolves.toMatchObject({
+      success: true,
+      status: 'ready',
+      build,
+      tessellation,
+    });
+  });
+
+  it('should report the build of an evaluation that failed', async () => {
+    const clients = clientsFor(
+      runtimeFixture({
+        evaluate: () => ({
+          success: false,
+          id: 'evaluation-1',
+          transient: false,
+          issues: [],
+          build: { reused: false, elapsed: 40 },
+        }),
+      }),
+    );
+
+    await expect(clients.kernelClient.evaluateModel({ targetFile: 'main.ts' })).resolves.toMatchObject({
+      success: true,
+      status: 'error',
+      build: { reused: false, elapsed: 40 },
+    });
+  });
+
+  it('omits the build report from a runtime that reports none', async () => {
+    const clients = clientsFor(runtimeFixture());
+
+    expect(await clients.kernelClient.evaluateModel({ targetFile: 'main.ts' })).not.toHaveProperty('build');
+  });
+
   it('omits the mesh cost when the kernel reports none', async () => {
     const clients = clientsFor(runtimeFixture());
 

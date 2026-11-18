@@ -685,6 +685,8 @@ export const createRuntimeAgentClients = (
           status: ready ? 'ready' : 'error',
           kernelIssues: issues,
           ...(sourceRevision === undefined ? {} : { sourceRevision }),
+          // R18: what the build cost and reused, so an agent sees which code is expensive to edit.
+          ...(evaluation.build === undefined ? {} : { build: evaluation.build }),
           ...offered,
           ...(tessellation === undefined ? {} : { tessellation }),
           ...(summary === undefined ? {} : { summary }),

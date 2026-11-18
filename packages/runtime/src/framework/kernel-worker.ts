@@ -6,6 +6,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { admitKernelOptions } from '#framework/kernel-option-admission.js';
+import { buildReportOf } from '#framework/kernel-build-report.js';
 import { tessellationSpanAttributes } from '#framework/tessellation-span-attributes.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
 import type { FileExtension, FileStat, MediaType, OnWorkerLog } from '@taucad/types';
@@ -704,6 +705,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** The evaluation currently entering its terminal kernel hook. */
   private activeEvaluationSlot: EvaluationSlot | undefined;
+  /** Runs of the kernel's `evaluate`, so an evaluation can tell whether a build ran for it. */
+  private kernelEvaluations = 0;
   private nextEvaluationId = 0;
   /** Latest admitted evaluation, whether or not its display projection succeeded. */
   private retainedEvaluation: EvaluationSlot | undefined;
@@ -1870,6 +1873,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           } else {
             const manifest = described.data;
             const parametersWithDefaults = mergeParameterDefaults({}, parameters, legacyProjection.schema);
+            const buildStarted = performance.now();
+            const evaluationsBefore = this.kernelEvaluations;
             const { artifact } = await this.materializeRender(
               {
                 file,
@@ -1882,6 +1887,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               { dependencyContext, owner },
             );
             const { result } = artifact;
+            const build = buildReportOf(
+              this.kernelEvaluations !== evaluationsBefore,
+              artifact.evaluationSlot?.kernelBuild,
+              performance.now() - buildStarted,
+            );
             evaluation = result.success
               ? {
                   id: evaluationId,
@@ -1897,6 +1907,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                     ...this.getDocumentEvaluateOptionsOffer(owner),
                     issues: result.issues,
                     sourceRevision: sourceRevisionForArtifact(artifact, described.sourceRevision),
+                    build,
                   },
                 }
               : {
@@ -1909,6 +1920,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                     transient,
                     issues: result.issues,
                     sourceRevision: sourceRevisionForArtifact(artifact, described.sourceRevision),
+                    build,
                   },
                 };
           }
@@ -4075,6 +4087,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           );
         }
         let result: EvaluateResult;
+        this.kernelEvaluations++;
         try {
           result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime(), evaluationSlot);
           if (result.success) {

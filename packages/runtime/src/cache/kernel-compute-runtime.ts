@@ -103,6 +103,8 @@ type ScopeState = {
   readonly discovery: ComputeDiscoveryContext;
   readonly resident: ResidentCacheBinding;
   readonly pending: Map<ActionDigest, PendingEntry>;
+  /** Set for a transient frame's scope, which never publishes. */
+  readonly hold: string | undefined;
   outcome: 'open' | 'delivered' | 'failed' | 'cancelled';
   receipt: ComputeScopeReceipt | undefined;
   settle: ((settlement: ComputeScopeSettlement) => void) | undefined;
@@ -631,7 +633,17 @@ const adaptSession = (options: {
 
 /** One worker's compute facet, resolved once from its transport binding. @internal */
 export type ComputeCapabilityHost = {
-  readonly capability: (signal: AbortSignal, operationId?: string) => KernelComputeCapability;
+  /**
+   * The compute facet of one operation.
+   *
+   * `hold` names a transient frame: its best-effort results queue but never publish unless
+   * `releaseHeld` later names the same frame, and its scopes are abandoned (R4).
+   */
+  readonly capability: (
+    signal: AbortSignal,
+    operationId?: string,
+    options?: { readonly hold?: string },
+  ) => KernelComputeCapability;
   /**
    * Permit the publication tail of every closed scope.
    *
@@ -645,6 +657,11 @@ export type ComputeCapabilityHost = {
    * It stays first in the queue and runs again at the next idle.
    */
   readonly interruptPublication: () => void;
+  /**
+   * A committed state adopted a transient frame's results: its queued publications may now run
+   * at the next permit, once each, even though the frame itself was superseded.
+   */
+  readonly releaseHeld: (hold: string) => void;
   /** The worker's operation lane drained: run eligible deferred publications. */
   readonly notifyIdle: () => void;
   /** Await every settled receipt within a budget, then abandon the rest (U11, U36). */
@@ -668,6 +685,7 @@ const offHost: ComputeCapabilityHost = {
   capability: () => ({ status: 'off' }),
   permitPublication: noOperation,
   interruptPublication: noOperation,
+  releaseHeld: noOperation,
   notifyIdle: noOperation,
   drain: noAsyncOperation,
   dispose: noAsyncOperation,
@@ -759,10 +777,16 @@ export const createComputeCapabilityHost = (input: {
 
   /** Which operation each capability signal belongs to, for settlement telemetry. */
   const operations = new WeakMap<AbortSignal, string>();
+  /** Which transient frame each capability signal computes for, if any (R4). */
+  const holds = new WeakMap<AbortSignal, string>();
   type DeferredPublication = {
     readonly task: ComputePublicationTask;
     readonly operationId: string;
     permitted: boolean;
+    /** A transient frame's result: never permitted while held. */
+    hold: string | undefined;
+    /** Released by a committed state, so its superseded frame's abort no longer cancels it. */
+    released: boolean;
     startedAt: number | undefined;
   };
   /** Best-effort publications waiting for delivery and idle, oldest first (D1). */
@@ -802,6 +826,8 @@ export const createComputeCapabilityHost = (input: {
       task,
       operationId: (task.signal && operations.get(task.signal)) ?? 'unobserved',
       permitted: false,
+      hold: task.signal && holds.get(task.signal),
+      released: false,
       startedAt: undefined,
     };
     // Results of one action stay queued side by side: a repeated evaluation may reuse the first
@@ -809,8 +835,10 @@ export const createComputeCapabilityHost = (input: {
     deferred.push(entry);
     const active = running?.entry;
     while (deferred.length > maxDeferredPublications) {
-      // A full queue drops the oldest disposable work; it never backpressures a render.
-      const oldest = deferred.find((queued) => queued !== active);
+      // A full queue drops the oldest disposable work, held transient results first; it never backpressures a render.
+      const oldest =
+        deferred.find((queued) => queued !== active && queued.hold !== undefined) ??
+        deferred.find((queued) => queued !== active);
       if (!oldest) {
         break;
       }
@@ -907,10 +935,10 @@ export const createComputeCapabilityHost = (input: {
   const permitDeferred = (): void => {
     // oxlint-disable-next-line unicorn/no-useless-spread -- settleDeferred mutates the queue.
     for (const entry of [...deferred]) {
-      if (entry.permitted) {
+      if (entry.permitted || entry.hold !== undefined) {
         continue;
       }
-      if (entry.task.signal?.aborted) {
+      if (!entry.released && entry.task.signal?.aborted) {
         // Superseded or cancelled before its result was delivered: it never publishes (D24).
         settleDeferred(entry, 'dropped', 'cancelled');
         continue;
@@ -922,6 +950,15 @@ export const createComputeCapabilityHost = (input: {
 
   const interruptPublication = (): void => {
     running?.controller.abort('interrupted');
+  };
+
+  const releaseHeld = (hold: string): void => {
+    for (const entry of deferred) {
+      if (entry.hold === hold) {
+        entry.hold = undefined;
+        entry.released = true;
+      }
+    }
   };
 
   let servicePromise: Promise<ComputeReuseService> | undefined;
@@ -1088,6 +1125,11 @@ export const createComputeCapabilityHost = (input: {
       settleOnce(scope, emptySettlement('abandoned', scope.outcome));
       return;
     }
+    if (scope.hold !== undefined) {
+      // A transient frame never publishes (R4).
+      settleOnce(scope, emptySettlement('abandoned', 'transient'));
+      return;
+    }
     scope.running = true;
     const run = async (): Promise<void> => {
       try {
@@ -1114,9 +1156,10 @@ export const createComputeCapabilityHost = (input: {
       readonly signal: AbortSignal;
       readonly operationId: string;
       readonly generationPromise: Promise<ComputeGeneration>;
+      readonly hold: string | undefined;
     },
   ): ComputeReuseScope => {
-    const { signal, operationId, generationPromise } = context;
+    const { signal, operationId, generationPromise, hold } = context;
     const generation = currentGeneration;
     const scope: ScopeState = {
       operationId,
@@ -1131,6 +1174,7 @@ export const createComputeCapabilityHost = (input: {
       },
       resident: open.resident,
       pending: new Map(),
+      hold,
       outcome: 'open',
       receipt: undefined,
       settle: undefined,
@@ -1310,7 +1354,9 @@ export const createComputeCapabilityHost = (input: {
   };
 
   return {
-    capability: (signal, operationId = 'unobserved') => {
+    capability: (signal, observedOperationId, options) => {
+      const operationId = observedOperationId ?? 'unobserved';
+      const hold = options?.hold;
       return {
         status: 'on',
         mode,
@@ -1333,6 +1379,11 @@ export const createComputeCapabilityHost = (input: {
             await publishBeforeLookup(digest);
             const evaluationSignal = evaluation.signal ?? signal;
             operations.set(evaluationSignal, operationId);
+            if (hold === undefined) {
+              holds.delete(evaluationSignal);
+            } else {
+              holds.set(evaluationSignal, hold);
+            }
             return await service.evaluate({
               ...evaluation,
               codec: {
@@ -1358,12 +1409,13 @@ export const createComputeCapabilityHost = (input: {
           const generationPromise = captureGeneration();
           /* A scope may not warm immediately; keep the original rejection for its later consumer. */
           void Promise.allSettled([generationPromise]);
-          return openScope(open, { signal, operationId, generationPromise });
+          return openScope(open, { signal, operationId, generationPromise, hold });
         },
       };
     },
     permitPublication,
     interruptPublication,
+    releaseHeld,
     notifyIdle: pump,
     drain,
     dispose: async () => {

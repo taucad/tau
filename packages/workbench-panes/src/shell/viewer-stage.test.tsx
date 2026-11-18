@@ -1,5 +1,6 @@
 import { createCallbackLogic } from 'xstate';
 import type { CanvasHostCommand } from '@taucad/viewer/machines/canvas.machine';
+import { hardwareRenderTier } from '@taucad/viewer/graphics/three/render-tier';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
@@ -117,6 +118,7 @@ describe('ViewerStage', () => {
         canvasOf()?.send({
           type: 'hostCreated',
           backend: 'webgpu',
+          tier: hardwareRenderTier('webgpu'),
           surface: { width: 800, height: 600, pixelRatio: 1 },
           domElement: document.createElement('canvas'),
           host: createCallbackLogic<CanvasHostCommand, undefined>(() => undefined),

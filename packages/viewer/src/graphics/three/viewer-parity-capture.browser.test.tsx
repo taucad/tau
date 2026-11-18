@@ -27,7 +27,7 @@ import { graphicsMachine } from '#machines/graphics.machine.js';
 import type * as threeContextModule from '#graphics/three/three-context.jsx';
 import type { ThreeProvider } from '#graphics/three/three-context.jsx';
 import type * as rendererModule from '#graphics/three/renderer.js';
-import type * as softwareRasterizerModule from '#graphics/three/utils/software-rasterizer.js';
+import { rendererUsesSoftwareRasterizer } from '#graphics/three/utils/software-rasterizer.js';
 import { getGraphicsCameraState } from '#graphics/graphics-camera.js';
 import { defaultPostProcessingSettings } from '#graphics/three/post-processing-settings.js';
 import { defaultViewerEnvironment, ViewerEnvironmentProvider } from '#environment/viewer-environment.jsx';
@@ -48,16 +48,12 @@ declare module 'vitest' {
 
 /*
  * I2: THE ONLY ALTERATION OF THE PRODUCTION VIEWER PIPELINE, software profile only. On a software adapter (SwiftShader
- * in CI) `rendererUsesSoftwareRasterizer` is true, which disables GTAO, FXAA and speculative camera preparation
- * (post-processing.tsx) and drops the environment cubemap from 512 to 64 (react/lights.tsx). Mocking it false makes
- * the software GPU run the hardware pipeline: AO on, FXAA on, 512 environment. The hardware profile (a real GPU,
- * charter D7) keeps the production gate, and the capture refuses a frame that gate calls software.
+ * in CI) the render tier turns off GTAO, FXAA and speculative camera preparation (post-processing.tsx) and drops the
+ * environment cubemap from 512 to 64 (react/lights.tsx). The tier's test-only override (`renderTierOverride`) makes the
+ * software GPU run the hardware features: AO on, FXAA on, 512 environment. The hardware profile (a real GPU, charter
+ * D7) keeps the production tier, and the capture refuses a frame that tier calls software.
  */
-vi.mock('#graphics/three/utils/software-rasterizer.js', async (importOriginal) =>
-  inject('webGpuProfile') === 'software'
-    ? { rendererUsesSoftwareRasterizer: (): boolean => false }
-    : importOriginal<typeof softwareRasterizerModule>(),
-);
+const renderTierOverride = inject('webGpuProfile') === 'software' ? ({ features: 'hardware' } as const) : undefined;
 
 let state: RootState | undefined;
 let frames = 0;
@@ -233,7 +229,9 @@ it.each(cases)('should capture the viewer frame of %s on %s with ao=%s', async (
   });
   render(
     <div role='application' aria-label='CAD canvas' style={{ width, height, position: 'relative' }}>
-      <ViewerEnvironmentProvider value={{ ...defaultViewerEnvironment, colorScheme: 'dark', graphicsBackend: backend }}>
+      <ViewerEnvironmentProvider
+        value={{ ...defaultViewerEnvironment, colorScheme: 'dark', graphicsBackend: backend, renderTierOverride }}
+      >
         <KeyboardProvider>
           <GraphicsProvider graphicsRef={actor}>
             <CadViewer
@@ -279,10 +277,7 @@ it.each(cases)('should capture the viewer frame of %s on %s with ao=%s', async (
     // A WebGPU capture that fell back to WebGL2 is not a WebGPU reference.
     expect(isWebGpuBackend, 'WebGPU capture fell back to WebGL2').toBe(true);
   }
-  // The production gate's own answer, whatever the software profile mocks.
-  const { rendererUsesSoftwareRasterizer } = await vi.importActual<typeof softwareRasterizerModule>(
-    '#graphics/three/utils/software-rasterizer.js',
-  );
+  // The adapter's own answer, whatever the override runs.
   const softwareAdapter = rendererUsesSoftwareRasterizer(renderer);
   if (webGpuProfile === 'hardware') {
     expect(softwareAdapter, 'the hardware profile rendered on a software adapter').toBe(false);
@@ -332,7 +327,8 @@ it.each(cases)('should capture the viewer frame of %s on %s with ao=%s', async (
         isWebGPUBackend: isWebGpuBackend,
         profile: webGpuProfile,
         softwareAdapter,
-        softwareRasterizerGate: webGpuProfile === 'software' ? 'mocked false (I2)' : 'production',
+        softwareRasterizerGate:
+          webGpuProfile === 'software' ? 'render tier override: hardware features (I2)' : 'production',
         userAgent: navigator.userAgent,
       },
       undefined,

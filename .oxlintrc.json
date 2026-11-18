@@ -120,6 +120,7 @@
     "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
     "tau-lint/no-impl-in-index": "error",
+    "tau-lint/no-test-bridge-redeclaration": "error",
     "tau-lint/plugin-capability-filename": "error",
     "tau-lint/no-authored-pointer-cursor": "error",
     "tau-lint/no-inline-actor-selector": "error",

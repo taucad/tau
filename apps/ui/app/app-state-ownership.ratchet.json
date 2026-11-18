@@ -33,6 +33,7 @@
       "apps/libs/files-ui/src/machines/library-access.machine.ts",
       "apps/libs/files-ui/src/machines/library-discovery.machine.ts",
       "apps/libs/files-ui/src/machines/library-recovery.machine.ts",
+      "apps/ui/app/lib/frame-hint-draft.ts",
       "apps/ui/app/lib/frame-hint.ts",
       "apps/ui/app/machines/focus.machine.ts",
       "apps/ui/app/machines/focus.route-state.ts",

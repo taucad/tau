@@ -52,6 +52,9 @@ export const searchParameterName = {
   /* Diagnostics */
   // Per-page graphics backend override, e.g. `webgl` or `webgpu`.
   graphicsBackend: 'graphicsBackend',
+  // Test-only render tier override (`hardware` runs the hardware features on a software GPU); read only in an
+  // undeployed debug build.
+  renderTier: 'renderTier',
 
   /* Returns from an external flow */
   // Consume-once billing action id returned from Checkout.

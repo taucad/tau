@@ -22,6 +22,7 @@ import { graphicsMachine, selectGraphicsViewportGizmoLocked } from '#machines/gr
 import type { ViewportGizmoAdapterEvent, ViewportGizmoAdapterLogic } from '#machines/viewport-gizmo-gesture.machine.js';
 import type { GraphicsCameraRef } from '#machines/graphics.machine.js';
 import { asCameraActor } from '#graphics/graphics-camera.js';
+import { hardwareRenderTier } from '#graphics/three/render-tier.js';
 
 type CameraUpdateHandler = (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
 
@@ -126,6 +127,7 @@ const createHarness = (seed?: Partial<CameraOwnedSettings>): Harness => {
       graphics.getSnapshot().context.canvas?.ref.send({
         type: 'hostCreated',
         backend: 'webgl',
+        tier: hardwareRenderTier('webgl'),
         surface: { width: 800, height: 600, pixelRatio: 1 },
         domElement: document.createElement('canvas'),
         host: createCallbackLogic(() => undefined),

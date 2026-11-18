@@ -855,6 +855,20 @@ describe('createProjectHost', () => {
     expect(await second.launcher.host.claim('chat-lock')).not.toHaveProperty('refused');
   }, 30_000);
 
+  /* M1 Mac: a read that reaches a closed host (a quiescence observer, a late tool callback) reopened the chat's writer
+   * after the close had dropped it, and nothing ever closed it again. */
+  it('should not reopen a chat writer for a read after the host closed', async () => {
+    const options = await desktopProjectHostOptions();
+    const first = createProjectHost(options);
+    expect(await first.launcher.host.claim('chat-late-read')).not.toHaveProperty('refused');
+    await first.close();
+    await first.launcher.host.readEvents({ chatId: 'chat-late-read', cursor: 0, limit: 10 }).catch(() => undefined);
+
+    const second = createProjectHost(options);
+    cleanups.push(async () => second.close());
+    expect(await second.launcher.host.claim('chat-late-read')).not.toHaveProperty('refused');
+  }, 30_000);
+
   /* W6.r1 Low (library-API §11): a Node watch that ends with its channel is closed, not reset. */
   it('should close, not reset, a parameter watch whose authority channel closed', async () => {
     const options = await desktopProjectHostOptions();

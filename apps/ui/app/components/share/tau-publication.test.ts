@@ -11,8 +11,8 @@ import {
   publicationMeta as meta,
 } from '#components/share/tau-publication.js';
 import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
-import type { PublicationLockReason } from '#components/share/publication-lock-screen.js';
-import { parsePublicationRecord } from '#components/share/parsed-publication.js';
+import type { PublicationLockReason } from '@taucad/publish-ui/components/share/publication-lock-screen';
+import { parsePublicationRecord } from '@taucad/publish-ui/components/share/parsed-publication';
 import { getEnvironment } from '#environment.config.js';
 import type { Environment } from '#environment.config.js';
 import type * as EnvironmentConfigModule from '#environment.config.js';
@@ -45,7 +45,7 @@ vi.mock('#environment.config.js', async (importOriginal) => {
 });
 
 const useViewPingMock = vi.hoisted(() => vi.fn());
-vi.mock('#components/share/use-view-ping.js', () => ({ useViewPing: useViewPingMock }));
+vi.mock('@taucad/publish-ui/components/share/use-view-ping', () => ({ useViewPing: useViewPingMock }));
 // eslint-disable-next-line @typescript-eslint/naming-convention -- mock mirrors the module's exported component.
 vi.mock('@taucad/ui/components/client-only', () => ({ ClientOnly: () => null }));
 

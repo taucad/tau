@@ -26,7 +26,11 @@ import {
   vec3,
   vec4,
 } from 'three/tsl';
-import { ao } from 'three/addons/tsl/display/GTAONode.js';
+// Tau's temporary copy of three r184's GTAO node with the smooth falloff. After the next three upgrade, delete it,
+// use three's own node (`ao()` from three/addons/tsl/display/GTAONode.js) and retune the AO profile against it
+// (Tau Brain research/three-upgrade-tech-debt.md § 2).
+import { gtao } from '#graphics/three/gtao-node.js';
+import type { GtaoNode } from '#graphics/three/gtao-node.js';
 import { aoTexel, encodeAoNormal, loadAoNormal } from '#graphics/three/ao-normal.js';
 import { createAoDenoise } from '#graphics/three/ao-denoise.js';
 import {
@@ -47,7 +51,7 @@ import {
   Vector2,
   Vector3,
 } from 'three';
-import type { Camera, Texture, ToneMapping, WebGLRenderTarget, Scene } from 'three';
+import type { Camera, ToneMapping, WebGLRenderTarget, Scene } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import type { ThreeCamera } from '@taucad/three/camera';
@@ -70,7 +74,7 @@ type PostProcessingPipelineResources = Readonly<{
   renderEdges: () => void;
   prepareSurfaceReuse?: (width: number, height: number) => void;
   disposeSurfaceReuse?: () => void;
-  aoNode?: ReturnType<typeof ao>;
+  aoNode?: GtaoNode;
   denoiseNode?: ReturnType<typeof createAoDenoise>;
   denoiseInput?: ReturnType<typeof rtt>;
   depthRestore: QuadMesh;
@@ -92,9 +96,10 @@ type LinearFrame = {
   depthPrepared: boolean;
 };
 
-// Preserve the tuned GTAO depth acceptance while making both values derive from one screen-space contract.
+// GTAO's sample falloff and the denoise depth acceptance both scale with the one screen-space radius.
 const {
-  thicknessRatio: gtaoThicknessToRadiusRatio,
+  falloffEndRatio: gtaoFalloffEndRatio,
+  falloffRange: gtaoFalloffRange,
   denoiseDepthTolerance: aoDenoiseDepthTolerance,
   samples: gtaoSamples,
   resolutionScale: aoResolutionScale,
@@ -124,7 +129,6 @@ const updateGtaoSpatialScale = ({
     });
     if (resource.aoNode) {
       resource.aoNode.radius.value = radius;
-      resource.aoNode.thickness.value = radius * gtaoThicknessToRadiusRatio;
       if (resource.denoiseNode) {
         resource.denoiseNode.depthPhi.value = radius * aoDenoiseDepthTolerance;
       }
@@ -164,23 +168,6 @@ const disposeOwnedRtt = (input: ReturnType<typeof rtt> | undefined): void => {
   input.renderTarget?.dispose();
   owned._quadMesh.material.dispose();
   input.dispose();
-};
-
-/**
- * Release the per-instance noise texture omitted by Three r184's GTAONode.dispose.
- * @param node - Owned AO estimator, if this graph includes AO.
- */
-const disposeAoNode = (node: ReturnType<typeof ao> | undefined): void => {
-  if (!node) {
-    return;
-  }
-  // Upstream now releases this texture. Keep borrowed depth/normal inputs alive.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Exact installed GTAONode source is fingerprinted in the adjacent test.
-  const owned = node as typeof node & {
-    _noiseNode: { value: Texture };
-  };
-  owned._noiseNode.value.dispose();
-  node.dispose();
 };
 
 const createLinearFrame = (renderer: WebGPURenderer, toneMapping: ToneMapping): LinearFrame => {
@@ -228,10 +215,7 @@ const disposeLinearFrame = (frame: LinearFrame, renderer: WebGPURenderer): void 
 };
 
 /** Reacquire camera-dependent inputs once per composition, including same-frame preparation and capture. */
-const updatePerComposition = (
-  quad: QuadMesh,
-  nodes: ReadonlyArray<ReturnType<typeof pass> | ReturnType<typeof ao>>,
-): void => {
+const updatePerComposition = (quad: QuadMesh, nodes: ReadonlyArray<ReturnType<typeof pass> | GtaoNode>): void => {
   const composition = { value: 0 };
   for (const node of nodes) {
     const update = node.updateBefore.bind(node);
@@ -352,7 +336,7 @@ const createPipelineResources = ({
     }
   };
   let frame: LinearFrame | undefined;
-  let aoNode: ReturnType<typeof ao> | undefined;
+  let aoNode: GtaoNode | undefined;
   let denoiseNode: ReturnType<typeof createAoDenoise> | undefined;
   let denoiseInput: ReturnType<typeof rtt> | undefined;
   let outputQuad: QuadMesh | undefined;
@@ -429,8 +413,10 @@ const createPipelineResources = ({
     const displayMode = uniform(0);
     const compositeStage = uniform(0);
     if (!withAo) {
-      const toneMapped = (uv: Node<'vec2'>): Node<'vec4'> =>
-        renderOutput(scenePassColor.sample(uv), toneMapping, LinearSRGBColorSpace) as Node<'vec4'>;
+      const toneMapped = (uv: Node<'vec2'>): Node<'vec4'> => {
+        const encoded: Node = renderOutput(scenePassColor.sample(uv), toneMapping, LinearSRGBColorSpace);
+        return encoded as Node<'vec4'>;
+      };
       outputQuad = createOutputQuad(
         antialias ? createViewportFxaa(scenePassColor, toneMapped) : toneMapped(screenUV),
         frame.sharedDepth ? undefined : depthRestoreMaterial,
@@ -462,7 +448,7 @@ const createPipelineResources = ({
     );
     const loadDepth = (uv: Node): Node<'float'> => scenePassDepth.load(aoTexel(scenePassDepth, uv)).r;
 
-    // GTAONode rejects forward depth >= 1 as background. Pair 1-depth with
+    // GTAO rejects forward depth >= 1 as background. Pair 1-depth with
     // forward projection matrices; changing only the samples corrupts positions.
     const logDepth = gpuRenderer.logarithmicDepthBuffer
       ? createLogDepthAoAdapter(camera, sample(loadDepth))
@@ -472,13 +458,17 @@ const createPipelineResources = ({
     const aoDepth =
       logDepth?.forwardDepth ??
       sample((uv) => (gpuRenderer.reversedDepthBuffer ? loadDepth(uv).oneMinus() : loadDepth(uv)));
-    aoNode = ao(logDepth?.gtaoDepth ?? aoDepth, scenePassNormal, aoCamera.camera as Camera);
+    aoNode = gtao(logDepth?.gtaoDepth ?? aoDepth, scenePassNormal, aoCamera.camera as Camera);
     aoNode.resolutionScale = aoResolutionScale;
     // Temporal direction rotation shimmers under `frameloop='demand'` because the
     // viewport never accumulates frame-to-frame.
     aoNode.useTemporalFiltering = false;
     aoNode.samples.value = gtaoSamples;
     aoNode.distanceFallOff.value = defaultPostProcessingSettings.gtaoDistanceFalloff;
+    // Tau's GTAO node replaces three's hard thickness slab with XeGTAO's smooth 3D-distance falloff; both
+    // values are multiples of the radius uniform, so they stay fixed while the radius follows the camera.
+    aoNode.falloffEnd.value = gtaoFalloffEndRatio;
+    aoNode.falloffRange.value = gtaoFalloffRange;
 
     const aoTexture = aoNode.getTextureNode();
     // GTAO is a stochastic estimate, not a finished visibility image. FXAA cannot
@@ -591,7 +581,7 @@ const createPipelineResources = ({
     depthRestoreMaterial?.dispose();
     (outputQuad?.material as NodeMaterial | undefined)?.dispose();
     disposeOwnedRtt(denoiseInput);
-    disposeAoNode(aoNode);
+    aoNode?.dispose();
     retireTransmissionCopy(scenePass.renderTarget);
     scenePass.dispose();
     throw error;
@@ -607,7 +597,7 @@ const disposePipelineResources = (
     resource.disposeSurfaceReuse?.();
     (resource.outputQuad.material as NodeMaterial).dispose();
     disposeOwnedRtt(resource.denoiseInput);
-    disposeAoNode(resource.aoNode);
+    resource.aoNode?.dispose();
     resource.depthRestoreMaterial.dispose();
     retireTransmissionCopy(resource.scenePass.renderTarget);
     resource.scenePass.dispose();

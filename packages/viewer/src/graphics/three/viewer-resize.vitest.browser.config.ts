@@ -48,6 +48,7 @@ export default defineConfig({
       'src/graphics/three/transmission-retirement.browser.test.ts',
       'src/graphics/three/post-processing-antialias.browser.test.tsx',
       'src/graphics/three/ao-denoise.browser.test.ts',
+      'src/graphics/three/gtao-falloff.browser.test.ts',
       'src/graphics/three/ao-normal.browser.test.ts',
       'src/graphics/three/materials/infinite-grid-material.browser.test.ts',
       'src/graphics/three/fxaa.browser.test.ts',

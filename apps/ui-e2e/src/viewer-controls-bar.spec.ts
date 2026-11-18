@@ -30,11 +30,6 @@ type ViewerBridge = {
   projectWorldPoint(point: Point): { x: number; y: number; visible: boolean };
 };
 
-type ViewerBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: ViewerBridge;
-  __TAU_SECTION_VIEW_TEST_BRIDGES__?: ViewerBridge[];
-};
-
 type BarLayout = Readonly<{
   viewer: Box;
   bar: Box;
@@ -57,7 +52,7 @@ async function callBridge<Name extends keyof ViewerBridge>(
 ): Promise<ReturnType<ViewerBridge[Name]>> {
   return target.evaluate(
     ({ method, values }) => {
-      const bridge = (globalThis as unknown as ViewerBridgeWindow).__TAU_SECTION_VIEW_TEST__ as unknown as
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__ as unknown as
         | Record<string, (...values: unknown[]) => unknown>
         | undefined;
       if (!bridge) {
@@ -332,11 +327,9 @@ describe('Viewer controls bar', () => {
     await target.expectVisible(sourceFile, 30_000);
     await target.click(sourceFile);
     await target.expectCount(selectors.getByTestId('chat-viewer-layout'), 2, 60_000);
-    await target.waitFor(
-      () => (globalThis as unknown as ViewerBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__?.length === 2,
-      undefined,
-      { timeout: 60_000 },
-    );
+    await target.waitFor(() => globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.length === 2, undefined, {
+      timeout: 60_000,
+    });
     await target.expectGeometryFramed();
 
     await hoverViewer(1);

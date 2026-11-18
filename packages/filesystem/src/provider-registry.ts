@@ -193,10 +193,24 @@ export class ProviderRegistry {
     if (this._createNodeFsPort === undefined) {
       return undefined;
     }
-    this._nodeFsChannel ??= this._openNodeFsChannel(this._createNodeFsPort);
+    return new NodeFsImportSources(await this._nodeFsChannelFrom(this._createNodeFsPort));
+  }
+
+  /**
+   * The node transport's channel, opened once and shared by every node provider.
+   * Only a failed open drops the memo, so the next resolution asks the shell for
+   * a fresh port. A request that fails on an open channel leaves it memoized: the
+   * channel stays live for the providers bound to it, and a channel that closes
+   * drops itself through its close listener.
+   *
+   * @param createPort - The host's port factory.
+   * @returns The open channel.
+   */
+  private async _nodeFsChannelFrom(createPort: () => Promise<NodeFsPort>): Promise<NodeFsChannel> {
+    this._nodeFsChannel ??= this._openNodeFsChannel(createPort);
     const opening = this._nodeFsChannel;
     try {
-      return new NodeFsImportSources(await opening);
+      return await opening;
     } catch (error) {
       if (this._nodeFsChannel === opening) {
         this._nodeFsChannel = undefined;
@@ -282,20 +296,12 @@ export class ProviderRegistry {
         if (this._createNodeFsPort === undefined) {
           throw new Error('This host has no node filesystem transport; a node storage root is unreachable.');
         }
-        this._nodeFsChannel ??= this._openNodeFsChannel(this._createNodeFsPort);
-        const opening = this._nodeFsChannel;
-        try {
-          const channel = await opening;
-          // The host may run in another process or on another machine: whether files
-          // keep a mode is its disk's answer, never this worker's platform.
-          const { fileModes } = await channel.describeHost();
-          return new NodeFsProviderClient(channel, scope.path, { fileModes });
-        } catch (error) {
-          if (this._nodeFsChannel === opening) {
-            this._nodeFsChannel = undefined;
-          }
-          throw error;
-        }
+        const channel = await this._nodeFsChannelFrom(this._createNodeFsPort);
+        // The host may run in another process or on another machine: whether files
+        // keep a mode is its disk's answer, never this worker's platform. A failed
+        // ask keeps the channel; the next resolution asks it again.
+        const { fileModes } = await channel.describeHost();
+        return new NodeFsProviderClient(channel, scope.path, { fileModes });
       }
       default: {
         throw new Error(`Unknown backend: ${(scope as { backend: string }).backend}`);

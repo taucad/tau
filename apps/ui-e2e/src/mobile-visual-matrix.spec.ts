@@ -1072,12 +1072,7 @@ test('reselects same-file saved views through All after reload without changing 
     // oxlint-disable-next-line no-await-in-loop -- capture the rendered camera, not only the authored record.
     cameras.push(
       // oxlint-disable-next-line no-await-in-loop -- capture each selected live camera before switching away.
-      await target.evaluate(
-        () =>
-          (
-            globalThis as { __TAU_SECTION_VIEW_TEST__?: { getCamera(): { position: number[] } } }
-          ).__TAU_SECTION_VIEW_TEST__!.getCamera().position,
-      ),
+      await target.evaluate(() => [...globalThis.__TAU_SECTION_VIEW_TEST__!.getCamera().position]),
     );
     // oxlint-disable-next-line no-await-in-loop -- capture the selected geometry before All overlays the stage.
     await target.screenshot(undefined, `mobile-matrix-saved-view-${id}.png`);

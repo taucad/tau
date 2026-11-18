@@ -37,3 +37,5 @@ export { mapZupMillimetersToYupMeters, readCoordinateEvidence } from '#coordinat
 
 export { installHandleLedger, summarizeLeaks } from '#oc-handle-ledger.utils.js';
 export type { HandleLedger, HandleLedgerEntry } from '#oc-handle-ledger.utils.js';
+export { assertPluginContractSurface } from '#plugin-contract-testing.utils.js';
+export type { PluginContractSurfaceInput } from '#plugin-contract-testing.utils.js';

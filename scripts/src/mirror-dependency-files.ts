@@ -8,6 +8,13 @@
  * `https://dependencies.taucad.dev` and `tau-prod-dependencies` behind `https://dependencies.tau.new`. The write itself
  * is `.github/actions/dependency-files-publish`, run by `.github/workflows/dependency-files-publish.yml`.
  *
+ * A second source mirrors what a publisher attached to a GitHub Release: `--release taucad/cadmpeg-ts@<version>` reads
+ * `GET /repos/taucad/cadmpeg-ts/releases/tags/v<version>` and pins each `<id>_bg.wasm.gz` engine asset by the
+ * `digest` and `size` GitHub states for it (`releasePins`). The release must be published, hold exactly
+ * {@link cadmpegEngineCount} engines, and stay within {@link cadmpegEngineCaps}; the tag name is
+ * `cadmpeg-engines-<version>`, so the tag is `dependency@cadmpeg-engines-<version>-<key>` and a tag run recovers the
+ * version from it (`release-of`). No other repository is admitted.
+ *
  * `fetch` downloads every file of the given name from its pinned URLs, in order, and keeps the first download whose bytes
  * match the pinned integrity (sha256, sha384 or sha512) and byte length; a file no URL serves refuses the whole run. Each
  * verified file is written as `<out>/<sha256 hex>`, and `<out>/plan.tsv` lists `<sha256>\t<byteLength>\t<label>` rows.
@@ -20,13 +27,18 @@
  *
  * Usage: node scripts/src/mirror-dependency-files.ts <command> …
  *   fetch --manifest <tau-plugin.json> --name <file name> --tag-name <name> --out <dir> [--tag <tag>]
+ *   fetch --release taucad/cadmpeg-ts@<version> --out <dir> [--tag <tag>]
  *                                         `key=` and `tag=` lines for $GITHUB_OUTPUT
+ *   release-of --tag <dependency@cadmpeg-engines-<version>-<key>>
+ *                                         `release=taucad/cadmpeg-ts@<version>` for $GITHUB_OUTPUT
  *   check --plan <plan.tsv> --base <url>  prove `<url>blobs/sha256/<hex>` serves every planned blob
+ * Environment: GITHUB_TOKEN, optional; sent as a bearer token to the GitHub API only, never to a download URL.
  * Exit codes: 0 success; 1 a refusal or failed check; 2 usage.
  */
 import { createHash } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
 /** One dependency file a manifest pins by URL. */
@@ -45,7 +57,21 @@ export type RetryPolicy = { readonly attempts: number; readonly wait: (attempt: 
 
 const sriPattern = /^(?<algorithm>sha256|sha384|sha512)-(?<digest>[A-Za-z\d+/]+={0,2})$/u;
 const hex64 = /^[\da-f]{64}$/u;
-const tagNamePattern = /^[a-z\d]+(?:-[a-z\d]+)*$/u;
+// A tag name may carry a version (`cadmpeg-engines-0.1.0-beta.2`), so dots separate segments as hyphens do.
+const tagNamePattern = /^[a-z\d]+(?:[.-][a-z\d]+)*$/u;
+
+/** The one repository whose release assets the second source mirrors. */
+export const cadmpegRepository = 'taucad/cadmpeg-ts';
+
+/** How many `<id>_bg.wasm.gz` engines one `cadmpeg-ts` release attaches (charter D15: all of them). */
+export const cadmpegEngineCount = 13;
+
+/** The byte ceilings a release's engines must stay within: about 1.5 times the largest and the sum measured today. */
+export const cadmpegEngineCaps = { file: 16 * 1024 * 1024, total: 100 * 1024 * 1024 } as const;
+
+const engineAssetPattern = /^[a-z\d]+_bg\.wasm\.gz$/u;
+const versionPattern = /^\d+\.\d+\.\d+(?:-[a-z\d]+(?:\.[a-z\d]+)*)?$/u;
+const assetDigestPattern = /^sha256:(?<hex>[\da-f]{64})$/u;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -114,6 +140,139 @@ export const urlPins = (manifest: unknown, name: string): UrlPin[] => {
     throw new Error(`The manifest pins no dependency file named ${name} by URL.`);
   }
   return pins;
+};
+
+/**
+ * Parse a `--release` selector.
+ * @param selector - `taucad/cadmpeg-ts@<version>`.
+ * @returns The version.
+ * @throws When the repository is not `taucad/cadmpeg-ts` or the version is not a lowercase semantic version.
+ */
+export const parseRelease = (selector: string): string => {
+  const at = selector.lastIndexOf('@');
+  const repository = at === -1 ? selector : selector.slice(0, at);
+  const version = at === -1 ? '' : selector.slice(at + 1);
+  if (repository !== cadmpegRepository) {
+    throw new Error(`Only ${cadmpegRepository} releases are mirrored, not ${JSON.stringify(repository)}.`);
+  }
+  if (!versionPattern.test(version)) {
+    throw new Error(`${JSON.stringify(version)} is not a ${cadmpegRepository} version such as 0.1.0-beta.2.`);
+  }
+  return version;
+};
+
+/**
+ * The tag name a `cadmpeg-ts` version's engines publish under, before the key.
+ * @param version - The `cadmpeg-ts` version.
+ * @returns `cadmpeg-engines-<version>`.
+ */
+export const releaseTagName = (version: string): string => `cadmpeg-engines-${version}`;
+
+/**
+ * Recover the release a `dependency@cadmpeg-engines-<version>-<key>` tag publishes. The key itself is checked by
+ * `fetch --tag`, which recomputes it from the downloaded bytes.
+ * @param tag - The tag.
+ * @returns `taucad/cadmpeg-ts@<version>`.
+ * @throws When the tag is not of that form or its version is not one.
+ */
+export const releaseOfTag = (tag: string): string => {
+  const groups = /^dependency@cadmpeg-engines-(?<version>.+)-[\da-f]{16}$/u.exec(tag)?.groups;
+  if (groups === undefined) {
+    throw new Error(`${tag} is not a dependency@cadmpeg-engines-<version>-<16 hex> tag.`);
+  }
+  const release = `${cadmpegRepository}@${groups['version']!}`;
+  parseRelease(release);
+  return release;
+};
+
+// One release asset's pin, undefined unless it is named `<id>_bg.wasm.gz`; refused unless GitHub states its sha256
+// digest and size, it is downloaded from this release, and it is within the per-engine cap.
+const engineAssetPin = (asset: unknown, version: string, prefix: string): UrlPin | undefined => {
+  const name: unknown = isRecord(asset) ? asset['name'] : undefined;
+  if (!isRecord(asset) || typeof name !== 'string' || !engineAssetPattern.test(name)) {
+    return undefined;
+  }
+  const label = `cadmpeg-ts/${name}@${version}`;
+  const { size, digest, state } = asset;
+  const url: unknown = asset['browser_download_url'];
+  const hex = typeof digest === 'string' ? assetDigestPattern.exec(digest)?.groups?.['hex'] : undefined;
+  if (state !== 'uploaded' || hex === undefined || !Number.isSafeInteger(size) || Number(size) <= 0) {
+    throw new Error(`${label} is not an uploaded asset with a sha256 digest and a byte length.`);
+  }
+  if (url !== `${prefix}${name}`) {
+    throw new Error(`${label} is not downloaded from ${prefix}${name}.`);
+  }
+  if (Number(size) > cadmpegEngineCaps.file) {
+    throw new Error(
+      `${label} is ${String(size)} bytes, over the ${String(cadmpegEngineCaps.file)}-byte cap per engine.`,
+    );
+  }
+  const integrity = `sha256-${Buffer.from(hex, 'hex').toString('base64')}`;
+  return { label, integrity, byteLength: Number(size), urls: [url] };
+};
+
+/**
+ * The engine pins of one published `cadmpeg-ts` release, from the GitHub Releases API: every asset named
+ * `<id>_bg.wasm.gz`, pinned by the sha256 GitHub computed on upload. Other assets are ignored.
+ * @param release - The parsed body of `GET /repos/taucad/cadmpeg-ts/releases/tags/v<version>`.
+ * @param version - The version the release must be.
+ * @returns The pins, labelled `cadmpeg-ts/<asset name>@<version>`, in asset name order.
+ * @throws When the release is a draft, unpublished or another version; an engine asset is not uploaded, has no sha256
+ * digest, is over the per-file cap or is not downloaded from this release; the count is not
+ * {@link cadmpegEngineCount}; or the engines together exceed the total cap.
+ */
+export const releasePins = (release: unknown, version: string): UrlPin[] => {
+  const tag = `v${version}`;
+  if (!isRecord(release) || release['tag_name'] !== tag) {
+    throw new Error(`The release is not ${cadmpegRepository} ${tag}.`);
+  }
+  if (release['draft'] !== false || typeof release['published_at'] !== 'string') {
+    throw new Error(`${cadmpegRepository} ${tag} is a draft or unpublished; only a published release is mirrored.`);
+  }
+  const prefix = `https://github.com/${cadmpegRepository}/releases/download/${tag}/`;
+  const assets: unknown = release['assets'];
+  const pins: UrlPin[] = [];
+  let total = 0;
+  for (const asset of Array.isArray(assets) ? assets : []) {
+    const pin = engineAssetPin(asset, version, prefix);
+    if (pin !== undefined) {
+      total += pin.byteLength;
+      pins.push(pin);
+    }
+  }
+  if (pins.length !== cadmpegEngineCount) {
+    throw new Error(
+      `${cadmpegRepository} ${tag} attaches ${String(pins.length)} engines (<id>_bg.wasm.gz), not ${String(cadmpegEngineCount)}.`,
+    );
+  }
+  if (total > cadmpegEngineCaps.total) {
+    throw new Error(
+      `${cadmpegRepository} ${tag} engines total ${String(total)} bytes, over the ${String(cadmpegEngineCaps.total)}-byte cap.`,
+    );
+  }
+  return pins.toSorted((left, right) => left.label.localeCompare(right.label));
+};
+
+// Read one release from the GitHub API; the token, when given, goes to api.github.com only.
+const fetchRelease = async (version: string, transport: typeof fetch, token: string | undefined): Promise<unknown> => {
+  const url = `https://api.github.com/repos/${cadmpegRepository}/releases/tags/v${version}`;
+  const headers: Record<string, string> = {
+    accept: 'application/vnd.github+json',
+    'x-github-api-version': '2022-11-28',
+  };
+  if (token) {
+    headers['authorization'] = `Bearer ${token}`;
+  }
+  let response: Response;
+  try {
+    response = await transport(url, { headers, redirect: 'error' });
+  } catch (error) {
+    throw new Error(`${url} could not be fetched: ${describeError(error)}`, { cause: error });
+  }
+  if (response.status !== 200) {
+    throw new Error(`${url} answered HTTP ${String(response.status)}; a draft or missing release is not mirrored.`);
+  }
+  return response.json();
 };
 
 /**
@@ -327,7 +486,7 @@ export const checkServed = async (options: {
 export type Io = { readonly out: (line: string) => void; readonly err: (line: string) => void };
 
 const usage =
-  'Usage: node scripts/src/mirror-dependency-files.ts fetch --manifest <tau-plugin.json> --name <file name> --tag-name <name> --out <dir> [--tag <tag>] | check --plan <plan.tsv> --base <url>';
+  'Usage: node scripts/src/mirror-dependency-files.ts fetch --manifest <tau-plugin.json> --name <file name> --tag-name <name> --out <dir> [--tag <tag>] | fetch --release taucad/cadmpeg-ts@<version> --out <dir> [--tag <tag>] | release-of --tag <tag> | check --plan <plan.tsv> --base <url>';
 
 const flags = (args: readonly string[], names: readonly string[], optional: readonly string[] = []) => {
   const values = new Map<string, string>();
@@ -342,6 +501,38 @@ const flags = (args: readonly string[], names: readonly string[], optional: read
   return names.every((name) => values.has(name)) ? values : undefined;
 };
 
+// The flags of one command; `fetch` takes either the manifest source or the release source, never both.
+const commandFlags = (command: string | undefined, args: readonly string[], fromRelease: boolean) => {
+  if (command === 'fetch') {
+    return fromRelease
+      ? flags(args, ['release', 'out'], ['tag'])
+      : flags(args, ['manifest', 'name', 'tag-name', 'out'], ['tag']);
+  }
+  if (command === 'check') {
+    return flags(args, ['plan', 'base']);
+  }
+  return command === 'release-of' ? flags(args, ['tag']) : undefined;
+};
+
+// The pins `fetch` downloads and the tag name they publish under, from a manifest or a release.
+const selectPins = async (
+  options: ReadonlyMap<string, string>,
+  fromRelease: boolean,
+  api: { readonly transport: typeof fetch; readonly token: string | undefined },
+): Promise<{ readonly pins: UrlPin[]; readonly tagName: string }> => {
+  if (fromRelease) {
+    const version = parseRelease(options.get('release')!);
+    return {
+      pins: releasePins(await fetchRelease(version, api.transport, api.token), version),
+      tagName: releaseTagName(version),
+    };
+  }
+  return {
+    pins: urlPins(JSON.parse(await readFile(options.get('manifest')!, 'utf8')), options.get('name')!),
+    tagName: options.get('tag-name')!,
+  };
+};
+
 /**
  * Run one command.
  * @param argv - The arguments after the script path.
@@ -349,25 +540,23 @@ const flags = (args: readonly string[], names: readonly string[], optional: read
  * @param network - The `fetch` to use and how it retries; by default the global `fetch` with three attempts.
  * @param network.transport - The `fetch` to use.
  * @param network.retry - The retry policy.
+ * @param network.token - The GitHub API token for `--release`; by default `GITHUB_TOKEN`.
  * @returns The exit code.
  */
 export const run = async (
   argv: readonly string[],
   io: Io,
-  network?: { readonly transport: typeof fetch; readonly retry: RetryPolicy },
+  network?: { readonly transport: typeof fetch; readonly retry: RetryPolicy; readonly token?: string },
 ): Promise<number> => {
   const [command, ...args] = argv;
   const { transport, retry } = network ?? { transport: fetch, retry: defaultRetry };
-  const options =
-    command === 'fetch'
-      ? flags(args, ['manifest', 'name', 'tag-name', 'out'], ['tag'])
-      : command === 'check'
-        ? flags(args, ['plan', 'base'])
-        : undefined;
+  const token = network === undefined ? process.env['GITHUB_TOKEN'] : network.token;
+  const fromRelease = command === 'fetch' && args.includes('--release');
+  const options = commandFlags(command, args, fromRelease);
   const base = options?.get('base');
   if (
     options === undefined ||
-    (command === 'fetch' && !tagNamePattern.test(options.get('tag-name')!)) ||
+    (command === 'fetch' && !fromRelease && !tagNamePattern.test(options.get('tag-name')!)) ||
     (base !== undefined && !/^https:\/\/[^/]+\/$/u.test(base))
   ) {
     io.err(usage);
@@ -385,7 +574,11 @@ export const run = async (
       io.out(`Every planned blob (${String(rows.length)}) is served with its digest at ${value('base')}blobs/sha256/.`);
       return 0;
     }
-    const pins = urlPins(JSON.parse(await readFile(value('manifest'), 'utf8')), value('name'));
+    if (command === 'release-of') {
+      io.out(`release=${releaseOfTag(value('tag'))}`);
+      return 0;
+    }
+    const { pins, tagName } = await selectPins(options, fromRelease, { transport, token });
     await mkdir(value('out'), { recursive: true });
     const rows: PlanRow[] = [];
     for (const pin of pins) {
@@ -395,7 +588,7 @@ export const run = async (
       rows.push(row);
     }
     const key = blobsKey(rows.map((row) => row.sha256));
-    const tag = `dependency@${value('tag-name')}-${key}`;
+    const tag = `dependency@${tagName}-${key}`;
     if (options.has('tag') && value('tag') !== tag) {
       io.err(`The tag ${value('tag')} does not name these bytes; they are ${tag}. Nothing is published.`);
       return 1;

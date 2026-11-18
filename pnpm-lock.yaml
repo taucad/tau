@@ -6600,6 +6600,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
       '@taucad/slicer':
         specifier: workspace:*
         version: link:../slicer
@@ -6712,6 +6715,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -6771,6 +6777,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -6787,6 +6796,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
@@ -6845,6 +6857,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
@@ -7243,6 +7258,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
       vitest-mock-extended:
         specifier: 'catalog:'
         version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)

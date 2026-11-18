@@ -90,6 +90,13 @@ export type GlbInputExtensions =
  */
 export type GlbInput = GlbResources & {
   nodes: GlbNode[];
+  /**
+   * The primitives come from a producer that guarantees finite attribute values and unit tangents. The writer then
+   * skips scanning NORMAL, TEXCOORD and TANGENT values; it still computes POSITION bounds and checks vector lengths,
+   * index range, element counts, placements, materials and resources. A non-finite value marked trusted is written
+   * instead of refused.
+   */
+  trustedGeometry?: boolean;
   extras?: JSONObject;
   extensions?: GlbInputExtensions;
   extensionsUsed?: string[];
@@ -441,6 +448,7 @@ function buildGltf(input: GlbInput): GltfLayout {
   const floatValidation = new Map<ArrayBufferLike, Map<string, ReturnType<typeof computeMinMax> | undefined>>();
   const validatedPrimitives = new Set<GlbPrimitive>();
   const validatedTangents = new Set<number>();
+  const trusted = input.trustedGeometry === true;
 
   function isNumberArray(value: unknown): value is number[] {
     if (!Array.isArray(value)) {
@@ -513,7 +521,7 @@ function buildGltf(input: GlbInput): GltfLayout {
       return undefined;
     }
     const bounds = position ? computeMinMax(data) : undefined;
-    if (!position && data.some((value) => !Number.isFinite(value))) {
+    if (!position && !trusted && data.some((value) => !Number.isFinite(value))) {
       throw new TypeError('Attribute must contain finite components');
     }
     cache.set(key, bounds);
@@ -694,7 +702,7 @@ function buildGltf(input: GlbInput): GltfLayout {
         throw new TypeError('TANGENT requires matching NORMAL attributes');
       }
       const tangentView = addBufferView(primitive.tangents, targetArrayBuffer, '4:false');
-      if (!validatedTangents.has(tangentView)) {
+      if (!trusted && !validatedTangents.has(tangentView)) {
         for (let index = 0; index < primitive.tangents.length; index += 4) {
           const [x, y, z, w] = primitive.tangents.subarray(index, index + 4);
           if (

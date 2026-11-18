@@ -4,7 +4,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import type { KernelIssue } from '@taucad/runtime/types';
-import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
+import { convertReplicadGeometriesToGltf, createReplicadPackFacts } from '#utils/replicad-to-gltf.js';
 import type { GeometryReplicad } from '#replicad.types.js';
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
 
@@ -728,5 +728,62 @@ describe('convertReplicadGeometriesToGltf', () => {
         convertReplicadGeometriesToGltf({ geometries: [createSimpleGeometry()], format: 'glb' }),
       ).not.toThrow();
     });
+  });
+});
+
+describe('convertReplicadGeometriesToGltf with kept pack facts (N6)', () => {
+  /** A closed, outward-wound tetrahedron: drawn one-sided. */
+  const tetrahedron = (): GeometryReplicad =>
+    createSimpleGeometry({
+      faces: {
+        vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]),
+        triangles: new Uint32Array([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
+        faceGroups: [
+          { start: 0, count: 6, faceId: 7 },
+          { start: 6, count: 6, faceId: 9 },
+        ],
+      },
+    });
+  const doubleSided = (glb: Uint8Array<ArrayBuffer>): unknown =>
+    (readGlbJsonAndBin(glb).json as unknown as { materials: Array<{ doubleSided?: boolean }> }).materials[0]!
+      .doubleSided;
+
+  it('should pack the same bytes with kept facts as without, in every output frame', () => {
+    const geometry = tetrahedron();
+    const packFacts = createReplicadPackFacts();
+    const frames = [{}, { coordinateSystem: 'z-up', unit: { length: 'millimeter' } }] as const;
+
+    for (const frame of frames) {
+      const reference = convertReplicadGeometriesToGltf({ geometries: [geometry], ...frame });
+      expect(convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts, ...frame })).toEqual(reference);
+      expect(convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts, ...frame })).toEqual(reference);
+    }
+    expect(doubleSided(convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts }))).toBe(false);
+    expect(packFacts.get(geometry.faces)?.closed.size).toBe(frames.length);
+  });
+
+  it('should read the kept facts of a mesh instead of deriving them again', () => {
+    const geometry = tetrahedron();
+    const packFacts = createReplicadPackFacts();
+    convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts });
+    const facts = packFacts.get(geometry.faces)!;
+    // A planted closedness shows the pack reads the kept fact: the closed solid is now drawn double sided.
+    for (const frame of facts.closed.keys()) {
+      facts.closed.set(frame, false);
+    }
+
+    expect(doubleSided(convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts }))).toBe(true);
+    expect(doubleSided(convertReplicadGeometriesToGltf({ geometries: [geometry] }))).toBe(false);
+  });
+
+  it('should key facts by the mesh, so a copy of its arrays derives its own', () => {
+    const geometry = tetrahedron();
+    const packFacts = createReplicadPackFacts();
+    convertReplicadGeometriesToGltf({ geometries: [geometry], packFacts });
+    const copy = { ...geometry, faces: { ...geometry.faces } };
+
+    convertReplicadGeometriesToGltf({ geometries: [copy], packFacts });
+    expect(packFacts.get(copy.faces)).not.toBe(packFacts.get(geometry.faces));
   });
 });

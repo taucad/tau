@@ -969,6 +969,7 @@ export const replicadKernel = defineKernel({
             images: handle.images,
             textures: handle.textures,
             samplers: handle.samplers,
+            packFacts: meshMemo?.packFacts,
             geometries: includeEdges
               ? shapes3d
               : shapes3d.map((geometry) => ({

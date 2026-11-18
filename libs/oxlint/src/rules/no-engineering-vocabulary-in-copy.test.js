@@ -24,6 +24,7 @@ describe('no-engineering-vocabulary-in-copy', () => {
         { name: 'Tau agent is a product word', code: "toast.info('Tau agent saved this');" },
         { name: 'a restore row', code: "toast.success('Restored “Add vent slots”');" },
         { name: 'opens is not ops', code: "toast.info('Opens in History');" },
+        { name: 'the cloud is the product word', code: "toast.success('Backed up to the cloud');" },
         { name: 'dynamic message', code: 'toast.error(message);' },
         { name: 'bare toast with a dynamic message', code: 'toast(message);' },
         { name: 'dynamic description', code: "toast.error('Could not switch', { description: reason });" },
@@ -36,6 +37,11 @@ describe('no-engineering-vocabulary-in-copy', () => {
         },
       ],
       invalid: [
+        {
+          name: 'Tau Cloud in product copy (UX Rule 13)',
+          code: "toast.error('Couldn’t back up to Tau Cloud');",
+          errors: [{ messageId: 'violation', data: { word: 'Tau Cloud' } }],
+        },
         {
           name: 'head in any case (C8)',
           code: "toast.info('Moved the head of main');",

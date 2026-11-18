@@ -34,7 +34,7 @@
       "executor": "nx:run-commands",
       "cache": true,
       "metadata": {
-        "description": "Server-output gate (React Router 8 migration RR0, ruling RD8), with the web UI's script: fails when build/server holds a .wasm file, a worker bundle or a file also in build/client/assets. The site is ssr: false, so React Router 7 deletes build/server after prerendering and the check passes on its absence. CI's build lane runs it whenever this site is affected."
+        "description": "Server-output gate (React Router 8 migration RR0, ruling RD8), with the web UI's script: fails when build/server is present. The site is ssr: false: React Router 8 leaves build/server after prerendering, the site's buildEnd removes it, and the check passes only on its absence. CI's build lane runs it whenever this site is affected."
       },
       "dependsOn": ["build"],
       "inputs": [

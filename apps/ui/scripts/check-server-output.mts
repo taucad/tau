@@ -22,8 +22,8 @@
  *
  * Each build is named with its kind:
  * - `--server <build>`: an `ssr: true` build (the web UI). Its `server/` must exist.
- * - `--spa <build>`: an `ssr: false` build (desktop, `tau serve`, docs). React Router 7 deletes its `server/` after
- *   prerendering, so an absent directory passes; one that is present is checked like any other.
+ * - `--spa <build>`: an `ssr: false` build (desktop, `tau serve`, docs). React Router 8 leaves its `server/` behind and
+ *   the build's own `buildEnd` removes it (blueprint RR8), so nothing ships one: a `server/` that is present fails.
  * Either kind fails when its `client/` directory is missing, so a build that never ran cannot pass by matching
  * nothing.
  *
@@ -235,6 +235,9 @@ export const checkBuildOutput = (build: BuildOutput, externals: readonly string[
   if (!existsSync(serverDirectory)) {
     return build.kind === 'server' ? [`${serverDirectory} is missing from an ssr: true build`] : [];
   }
+  if (build.kind === 'spa') {
+    return [`${serverDirectory} is left by an ssr: false build: its React Router config's buildEnd removes it (RR8)`];
+  }
   const clientAssetsDirectory = join(clientDirectory, 'assets');
   const serverFiles = listFiles(serverDirectory);
   const clientAssetFiles = existsSync(clientAssetsDirectory) ? listFiles(clientAssetsDirectory) : [];
@@ -243,8 +246,7 @@ export const checkBuildOutput = (build: BuildOutput, externals: readonly string[
     ...findServerOutputViolations({ serverFiles, clientAssetFiles }),
     ...findUnresolvedAssetUrls({ serverFiles, clientAssetFiles, readServerFile }),
   ];
-  const missingExternals =
-    build.kind === 'server' ? findMissingExternalImports({ externals, serverFiles, readServerFile }) : [];
+  const missingExternals = findMissingExternalImports({ externals, serverFiles, readServerFile });
   return [
     ...violations.map(({ file, rule }) => `${join(serverDirectory, file)}: ${ruleText[rule]}`),
     ...missingExternals.map(

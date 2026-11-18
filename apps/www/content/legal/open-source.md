@@ -57,7 +57,7 @@ HEIC images are HEVC-coded. This notice concerns copyright only; it grants no pa
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 913 packages, with the license each declares.
+The web and desktop apps include the following 915 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -176,7 +176,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@lhncbc/ucum-lhc](https://github.com/lhncbc/ucum-lhc) | 7.1.10 | SEE LICENSE IN LICENSE.md |
 | [@marijn/find-cluster-break](https://code.haverbeke.berlin/marijn/find-cluster-break) | 1.0.4 | MIT |
 | @mediapipe/tasks-vision | 0.10.17 | Apache-2.0 |
-| [@mjackson/node-fetch-server](https://github.com/mjackson/remix-the-web) | 0.2.0 | MIT |
 | [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk) | 1.32.1 | MIT |
 | [@monogrid/gainmap-js](https://github.com/MONOGRID/gainmap-js) | 3.4.0 | MIT |
 | [@msgpack/msgpack](https://github.com/msgpack/msgpack-javascript) | 3.1.3 | ISC |
@@ -268,10 +267,12 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@radix-ui/react-use-size](https://github.com/radix-ui/primitives) | 1.1.5 | MIT |
 | [@radix-ui/react-visually-hidden](https://github.com/radix-ui/primitives) | 1.2.13 | MIT |
 | [@radix-ui/rect](https://github.com/radix-ui/primitives) | 1.1.3 | MIT |
-| [@react-router/express](https://github.com/remix-run/react-router) | 7.18.5 | MIT |
-| [@react-router/node](https://github.com/remix-run/react-router) | 7.18.5 | MIT |
+| [@react-router/express](https://github.com/remix-run/react-router) | 8.5.1 | MIT |
+| [@react-router/node](https://github.com/remix-run/react-router) | 8.5.1 | MIT |
 | [@react-three/drei](https://github.com/pmndrs/drei) | 10.7.9 | MIT |
 | [@reduxjs/toolkit](https://github.com/reduxjs/redux-toolkit) | 2.13.0 | MIT |
+| [@remix-run/node-fetch-server](https://github.com/remix-run/remix) | 0.14.2 | MIT |
+| [@remix-run/route-pattern](https://github.com/remix-run/remix) | 0.22.1 | MIT |
 | [@resvg/resvg-wasm](https://github.com/yisibl/resvg-js) | 2.6.2 | MPL-2.0 |
 | [@rjsf/core](https://github.com/rjsf-team/react-jsonschema-form) | 6.11.0 | Apache-2.0 |
 | [@rjsf/utils](https://github.com/rjsf-team/react-jsonschema-form) | 6.11.0 | Apache-2.0 |
@@ -313,8 +314,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
 | [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
 | [@taulabs/replicad](https://github.com/taucad/replicad) | 1.2.0-beta.1 | MIT |
-| [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.1 | MIT |
-| [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 3.0.0-beta.2 | MIT |
+| [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.2 | MIT |
+| [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 3.0.0-beta.3 | MIT |
 | [@tiptap/core](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tiptap/extension-bubble-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tiptap/extension-floating-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
@@ -408,6 +409,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [builder-util-runtime](https://github.com/electron-userland/electron-builder) | 9.7.0 | MIT |
 | [bundle-name](https://github.com/sindresorhus/bundle-name) | 4.1.1 | MIT |
 | [bytes](https://github.com/visionmedia/bytes.js) | 3.1.2 | MIT |
+| [cadmpeg-ts](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.1 | Apache-2.0 |
+| [cadmpeg-ts-{platform}](https://github.com/taucad/cadmpeg-ts) | 0.1.0-beta.1 | Apache-2.0 |
 | [call-bind](https://github.com/ljharb/call-bind) | 1.0.9 | MIT |
 | [call-bind-apply-helpers](https://github.com/ljharb/call-bind-apply-helpers) | 1.0.2 | MIT |
 | [call-bound](https://github.com/ljharb/call-bound) | 1.0.4 | MIT |
@@ -446,7 +449,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [convert-source-map](https://github.com/thlorenz/convert-source-map) | 2.0.0 | MIT |
 | [convert-to-spaces](https://github.com/vadimdemedes/convert-to-spaces) | 2.0.1 | MIT |
 | [cookie](https://github.com/jshttp/cookie) | 0.7.2 | MIT |
-| [cookie](https://github.com/jshttp/cookie) | 1.1.1 | MIT |
+| [cookie-es](https://github.com/unjs/cookie-es) | 3.1.1 | MIT |
 | [cookie-signature](https://github.com/visionmedia/node-cookie-signature) | 1.2.2 | MIT |
 | [core-util-is](https://github.com/isaacs/core-util-is) | 1.0.3 | MIT |
 | [cors](https://github.com/expressjs/cors) | 2.8.6 | MIT |
@@ -800,7 +803,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [react-remove-scroll](https://github.com/theKashey/react-remove-scroll) | 2.7.2 | MIT |
 | [react-remove-scroll-bar](https://github.com/theKashey/react-remove-scroll-bar) | 2.3.8 | MIT |
 | [react-resizable-panels](https://github.com/bvaughn/react-resizable-panels) | 3.0.6 | MIT |
-| [react-router](https://github.com/remix-run/react-router) | 7.18.5 | MIT |
+| [react-router](https://github.com/remix-run/react-router) | 8.5.1 | MIT |
 | [react-style-singleton](https://github.com/theKashey/react-style-singleton) | 2.2.3 | MIT |
 | [react-virtuoso](https://github.com/petyosi/react-virtuoso) | 4.18.16 | MIT |
 | [readable-stream](https://github.com/nodejs/readable-stream) | 2.3.8 | MIT |
@@ -839,7 +842,6 @@ Their copyright notices and full license texts ship inside each package and are 
 | [semver](https://github.com/npm/node-semver) | 7.8.5 | ISC |
 | [send](https://github.com/pillarjs/send) | 1.2.1 | MIT |
 | [serve-static](https://github.com/expressjs/serve-static) | 2.2.1 | MIT |
-| [set-cookie-parser](https://github.com/nfriedly/set-cookie-parser) | 2.7.2 | MIT |
 | [set-cookie-parser](https://github.com/nfriedly/set-cookie-parser) | 3.1.3 | MIT |
 | [set-function-length](https://github.com/ljharb/set-function-length) | 1.2.2 | MIT |
 | [setimmediate](https://github.com/YuzuJS/setImmediate) | 1.0.5 | MIT |

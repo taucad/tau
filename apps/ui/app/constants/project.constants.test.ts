@@ -140,7 +140,7 @@ describe('createInitialProject', () => {
       type: 'module',
       dependencies: {
         replicad: 'npm:@taulabs/replicad@1.2.0-beta.1',
-        'replicad-opencascadejs': 'npm:@taulabs/replicad-opencascadejs@0.23.0-beta.1',
+        'replicad-opencascadejs': 'npm:@taulabs/replicad-opencascadejs@0.23.0-beta.2',
       },
     });
   });

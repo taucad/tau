@@ -748,7 +748,7 @@ export class ProjectCommands {
     if (chats.length === 0) {
       return { lost: () => false, release: () => undefined };
     }
-    const { leaseSettledChatLogs } = await import('#runtime/project-library-chat-logs.js');
+    const { leaseSettledChatLogs } = await import('@taucad/files-ui/runtime/project-library-chat-logs');
     return leaseSettledChatLogs({
       projectId,
       chats,

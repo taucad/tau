@@ -31,13 +31,13 @@ import {
   workspaceConnectionEventTypes,
   workspaceConnectionIgnoredEvents,
   workspaceConnectionMachine,
-} from '#hooks/workspace-connection.machine.js';
+} from '#machines/workspace-connection.machine.js';
 import type {
   PreparedWorkspaceCatalog,
   RegisteredWorkspace,
   WorkspaceConnectionEvent,
   WorkspaceConnectionServices,
-} from '#hooks/workspace-connection.machine.js';
+} from '#machines/workspace-connection.machine.js';
 
 const workspace: RegisteredWorkspace = {
   workspace: { workspaceId: 'wsp_1', name: 'Parts', slug: 'parts', lastConnectedAt: 0, path: '/home/person/parts' },
@@ -86,6 +86,7 @@ const services: WorkspaceConnectionServices = {
   registerWorkspace: async () => workspace,
   mountWorkspace: async () => undefined,
   prepareWorkspaceCatalog: async () => catalog,
+  reportFault: () => undefined,
 };
 const events: readonly WorkspaceConnectionEvent[] = Object.values(samples).flat();
 

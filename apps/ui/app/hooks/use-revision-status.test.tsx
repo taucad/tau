@@ -20,11 +20,8 @@ import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceF
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { createCheckoutRoutes, createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import type {
-  RevisionToast,
-  WorkerProjectRevisions,
-  WorkerRevisionResponse,
-} from '#machines/file-manager.worker.revisions.js';
+import type { WorkerProjectRevisions } from '#machines/file-manager.worker.revisions.js';
+import type { RevisionToast, WorkerRevisionResponse } from '@taucad/revisions-ui/types/revision-worker-protocol';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { startEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';

@@ -40,6 +40,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/bambu',
   '@taucad/brep',
   '@taucad/build123d',
+  '@taucad/cadmpeg',
   '@taucad/carvera',
   '@taucad/converter',
   '@taucad/desktop-services-host',
@@ -101,6 +102,8 @@ export const desktopExternalizedDependencies = [
   /* Resolves its vendored seccomp/srt-win helpers relative to its own module file. */
   '@anthropic-ai/sandbox-runtime',
   '@taulabs/openrscad-engine',
+  /* Its `node` condition loads a NAPI `.node` addon from its optional platform package. */
+  'cadmpeg-ts',
   'electron-updater',
   'esbuild',
   'geospec-engine',

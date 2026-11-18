@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { IpcMainEvent, MessagePortMain } from 'electron';
 import { desktopAgentSignInChannels } from '@taucad/types/desktop-agent-sign-in';
 import type { AgentSignInHostFrame } from '@taucad/types/desktop-agent-sign-in';
+import { terminalLimits } from '@taucad/types/desktop-terminal';
 
 import { registerAgentSignIn } from '#main/agent-sign-in.js';
 import type {
@@ -197,6 +198,33 @@ describe('agent sign-in relay', () => {
     expect(logged).not.toContain('vendor.example');
     expect(logged).not.toContain('secret-value');
     expect(logged).not.toContain('typed-secret');
+  });
+
+  it('should never split an emoji that straddles the output bound', async () => {
+    const { ask, pty, ports } = setup();
+    ask({ requestId: 'sign-in-1', agentId: 'acme' });
+    ports[0]?.send({ type: 'start', size: { columns: 80, rows: 24 } });
+    await settle();
+
+    pty.print(`${'a'.repeat(terminalLimits.outputCharacters - 1)}😀`);
+
+    const pieces = ports[0]?.posted.filter((frame) => frame.type === 'output').map((frame) => frame.data) ?? [];
+    expect(pieces).toEqual(['a'.repeat(terminalLimits.outputCharacters - 1), '😀']);
+  });
+
+  it('should ignore a resize after the terminal has already closed', async () => {
+    const { ask, pty, ports } = setup();
+    ask({ requestId: 'sign-in-1', agentId: 'acme' });
+    ports[0]?.send({ type: 'start', size: { columns: 80, rows: 24 } });
+    await settle();
+    pty.resize.mockImplementation(() => {
+      throw new Error('ioctl(2) failed, EBADF');
+    });
+
+    expect(() => {
+      ports[0]?.send({ type: 'resize', size: { columns: 100, rows: 30 } });
+    }).not.toThrow();
+    expect(ports[0]?.closed).toBe(false);
   });
 
   it('should end the tab when the CLI exits and allow a new sign-in afterwards', async () => {

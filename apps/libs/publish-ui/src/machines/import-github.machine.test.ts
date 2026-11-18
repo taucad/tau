@@ -1,34 +1,34 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor, createCallbackLogic } from 'xstate';
 import { importGitHubMachine } from '#machines/import-github.machine.js';
+import type { ImportGitHubClient } from '#machines/import-github.machine.js';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
-vi.mock('#lib/github-api.js', () => ({
-  getGitHubClient: vi.fn(() => ({
-    getRepository: vi.fn(async () => ({
-      avatarUrl: 'https://avatar.url',
-      description: 'Test repo',
-      stars: 10,
-      forks: 5,
-      watchers: 3,
-      license: 'MIT',
-      defaultBranch: 'main',
-      isPrivate: false,
-      lastUpdated: '2024-01-01',
-    })),
-    listBranches: vi.fn(async () => ({
-      branches: [{ name: 'main', sha: 'abc', updatedAt: 1000 }],
-      hasMore: false,
-      endCursor: undefined,
-    })),
-    listFiles: vi.fn(async () => [{ path: 'main.ts', size: 100 }]),
-    getArchiveUrl: vi.fn(
-      ({ owner, repo }: { owner: string; repo: string }) =>
-        `http://localhost:4000/v1/repositories/archive?provider=github&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&ref=main`,
-    ),
-    getAuthHeaders: vi.fn(() => ({ 'User-Agent': 'test' })),
+/* The client the route hands in; each test provides the actors that would call it. */
+const githubClient: ImportGitHubClient = {
+  getRepository: vi.fn(async () => ({
+    avatarUrl: 'https://avatar.url',
+    description: 'Test repo',
+    stars: 10,
+    forks: 5,
+    watchers: 3,
+    license: 'MIT',
+    defaultBranch: 'main',
+    isPrivate: false,
+    lastUpdated: '2024-01-01',
   })),
-}));
+  listBranches: vi.fn(async () => ({
+    branches: [{ name: 'main', sha: 'abc', updatedAt: 1000 }],
+    hasMore: false,
+    endCursor: undefined,
+  })),
+  listFiles: vi.fn(async () => [{ path: 'main.ts', size: 100 }]),
+  getArchiveUrl: vi.fn(
+    ({ owner, repo }: { owner: string; repo: string }) =>
+      `http://localhost:4000/v1/repositories/archive?provider=github&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&ref=main`,
+  ),
+  getAuthHeaders: vi.fn(() => ({ 'User-Agent': 'test' })),
+};
 
 vi.mock('jszip', () => ({
   default: {
@@ -125,6 +125,7 @@ function createTestActor(options?: {
 
   return createActor(machine, {
     input: {
+      githubClient,
       owner: options?.owner,
       repo: options?.repo,
       ref: options?.ref,

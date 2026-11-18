@@ -23,7 +23,7 @@
   "sources": {
     "apps/libs/chat-ui/src/components/chat-message-queue-view.tsx": "a9293c32f2cd43071ad44214c879c3d9d30af67491f1c23730998a18cb62a13f",
     "apps/libs/chat-ui/src/db/chat-message-queue-store.ts": "ab89825172dbc3da1a4acf792f7ef8591e2eefda49a3a89fe26c58a01116f6cb",
-    "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "d0aaa1aeced2cddbc2fdfdd888cf5963066ceab60958058aa54edb3aa26b06ff",
+    "apps/ui/app/chat-clients/_internal/use-turn-admission.ts": "0079e102fe7587abb33331ee2f4c976a68e949d7ef1699357f0ba20a0eaab5f6",
     "apps/ui/app/chat-clients/chat-turn-host.tsx": "1cfde5c689d6e05840b10b4ecaa1412e2b1750d40c1935814c5f7205cfe66231",
     "apps/ui/app/chat-clients/use-cad-chat-client.ts": "99d8efe4866b3d8ebc23c988055b8d8ab0a1dc20f0a0bbb0951ab89530c9f9f7",
     "apps/ui/app/components/chat/chat-message-queue.tsx": "f8d1d4376c45e58a148138389b595e7d2f3d53d8d3ada3b108c3b4f11a32bfd0",
@@ -34,7 +34,7 @@
     "apps/ui/app/services/chat-session-store.ts": "d03302ff6571d3c8e1962bebf806f422a5a876aa78b9fa1bf99f64669c9ded10"
   },
   "specs": {
-    "MessageQueue.tla": "b2469e1ed04f3d37dfac8f4f75c64477bbd0d914846cd3b3f6f896289b41da75",
+    "MessageQueue.tla": "b1f66b464407ab600d201c8aa3f855c56b6e614d708103662685cc629f33d8fa",
     "QueuePlacement.tla": "b4c85bb439e54faeef87790711cc1da9f5a3e21be4f589c58b83069f15f86c47"
   },
   "tables": {

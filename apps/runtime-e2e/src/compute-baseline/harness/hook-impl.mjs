@@ -19,63 +19,28 @@ const replaceOnce = (code, from, to, url) => {
   return parts.join(to);
 };
 const patches = {
-  '/replicad-compute-reuse.ts': (code, url) => {
-    // Off arm: the real kernel option already produced `enabled: false`; this keeps the
-    // harness's own `--arm bypass` switch working without a second mechanism.
-    code = replaceOnce(
-      code,
-      'if (!options.enabled || typeof property !== "string"',
-      'if (!options.enabled || globalThis.__laneB?.semanticDisabled || typeof property !== "string"',
-      url,
-    );
-    code = replaceOnce(
-      code,
-      'const restore = (bytes) => options.library.deserializeShape(text.decode(bytes));',
-      'const restore = (bytes) => globalThis.__laneB.time("brep.restore", () => options.library.deserializeShape(text.decode(bytes)), bytes.byteLength);',
-      url,
-    );
-    // W1: the byte session is gone; residency lives in the adapter, so the lookup and
-    // record counters (and the poison seam) attach to the resident map instead.
-    code = replaceOnce(
-      code,
-      'const cached = touch(digest);',
-      'const cached = globalThis.__laneB ? globalThis.__laneB.time("session.lookup", () => { const p = globalThis.__laneB; if (p.poisonBytes) { p.state.poisonedLookups += 1; p.state.lookups.hit += 1; p.state.lookups.cache += 1; return p.poisonBytes; } const v = touch(digest); if (v) { p.state.lookups.hit += 1; p.state.lookups.cache += 1; } else { p.state.lookups.miss += 1; } return v; }, 0) : touch(digest);',
-      url,
-    );
-    // Publication serializes inline into the resident tier's `keep`, which also runs for
-    // imported entries and recency refreshes; only this call site is a recorded result.
-    code = replaceOnce(
-      code,
-      'keep(digest, utf8.encode(shape.serialize()), descriptor);',
-      '{ const bytes = globalThis.__laneB ? globalThis.__laneB.time("brep.serialize", () => utf8.encode(shape.serialize())) : utf8.encode(shape.serialize()); keep(digest, bytes, descriptor); if (globalThis.__laneB) { const p = globalThis.__laneB; p.note("session.record", 0, bytes.byteLength); if (p.captureRecordedBrep && !p.capturedBrep) { p.state.capturedBrep = bytes; } p.state.records.staged += 1; p.state.records.bytes += bytes.byteLength; } }',
-      url,
-    );
-    code = replaceOnce(
-      code,
-      'const result = input.compute();',
-      'const result = globalThis.__laneB ? globalThis.__laneB.time("native.solve", input.compute) : input.compute();',
-      url,
-    );
-    code = replaceOnce(
-      code,
-      'async run(scope, operation) {',
-      'async run(scope, operation) { if (globalThis.__laneB) { const originalWarm = scope.warm.bind(scope); const originalAnnounce = scope.announce.bind(scope); scope = new Proxy(scope, { get(target, property, receiver) { if (property === "warm") return (input) => globalThis.__laneB.time("session.warm", async () => { const result = await originalWarm(input); if (result.status === "imported") globalThis.__laneB.note("session.prepared.entries", 0, result.imported.length); return result; }); if (property === "announce") return (input) => { const result = originalAnnounce(input); globalThis.__laneB.note("session.admitted", 0, result.admitted.length); return result; }; return Reflect.get(target, property, receiver); } }); globalThis.__laneB.note("session.open", 0); }',
-      url,
-    );
-    return code;
-  },
   '/replicad.kernel.ts': (code, url) => {
     // Arm selection goes through the kernel's own `computeReuse` option (run-arm.mts), not a source patch.
+    // The live tier installs its operation cache through this facade for each build; the probe instruments
+    // `setOperationCache` on it (operation counts, native solves, BRep capture, the poison arm). The tier's
+    // hit, miss and store counts are read from the `replicad.run-main` span, not patched in.
     code = replaceOnce(
       code,
-      'library: computeReuse?.library ?? replicadLibrary,',
-      'library: globalThis.__laneB.wrapLibrary(computeReuse?.library ?? replicadLibrary),',
+      'const replicadLibrary = { ...replicadModule };',
+      'const replicadLibrary = globalThis.__laneB.liveTierLibrary({ ...replicadModule });',
+      url,
+    );
+    // The library user code receives, for the identity tracer and the BRep digest observers.
+    code = replaceOnce(
+      code,
+      'createKernelLibraryTracer({\n\t\t\t\tlibrary: replicadLibrary,',
+      'createKernelLibraryTracer({\n\t\t\t\tlibrary: globalThis.__laneB.wrapLibrary(replicadLibrary),',
       url,
     );
     code = replaceOnce(
       code,
-      'const shapes = context.computeReuse ? context.computeReuse.unwrap(traced) : traced;',
-      'const shapes = globalThis.__laneB.unwrapResult(context.computeReuse ? context.computeReuse.unwrap(traced) : traced);',
+      'const shapes = context.libraryTrace.unwrap(mainResult.value);',
+      'const shapes = globalThis.__laneB.unwrapResult(context.libraryTrace.unwrap(mainResult.value));',
       url,
     );
     return code;

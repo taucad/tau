@@ -2,6 +2,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { openrscad } from '@taucad/openrscad';
 import { assimp } from '@taucad/assimp';
 import { brep } from '@taucad/brep';
+import { cadmpeg } from '@taucad/cadmpeg';
 import { esbuild } from '@taucad/esbuild';
 import { gltf } from '@taucad/gltf';
 import { heif } from '@taucad/heif';
@@ -70,6 +71,7 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     smlib(),
     gltf(),
     brep(),
+    cadmpeg(),
     image(),
     // HEIC/HEIF stills to JPEG, PNG and WebP (operator ruling O1); libheif loads only for a HEIC source.
     heif(),

@@ -627,12 +627,14 @@
   {
     "file": "apps/www/scripts/export-story-assets.ts",
     "target": "libs/tau-examples/**",
-    "reason": "reads a Tau example from tau-examples as a fixture or source"
+    "reason": "reads a Tau example from tau-examples as a fixture or source",
+    "unscheduled": "Run by hand with WWW_RENDER_TOOLS to regenerate the frozen gearbox assets; no Nx target runs it. planetary-gearbox:test (manifest.test.ts) checks the assets against this example and declares it as an input."
   },
   {
     "file": "apps/www/scripts/export-variant-assets.ts",
     "target": "libs/tau-examples/**",
-    "reason": "reads a Tau example from tau-examples as a fixture or source"
+    "reason": "reads a Tau example from tau-examples as a fixture or source",
+    "unscheduled": "Run by hand with WWW_RENDER_TOOLS to regenerate the frozen gearbox assets; no Nx target runs it. planetary-gearbox:test (manifest.test.ts) checks the assets against this example and declares it as an input."
   },
   {
     "file": "apps/www/scripts/metal-hero-entry.ts",
@@ -732,12 +734,14 @@
   {
     "file": "libs/telemetry/scripts/runtime-registry.mts",
     "target": "packages/jobs-solvers/src",
-    "reason": "enumerates or probes sibling project directories"
+    "reason": "enumerates or probes sibling project directories",
+    "unscheduled": "Imported by the operator generator telemetry:generate-runtime-vocabulary, which CI does not run, and by scripts:test (telemetry-runtime-vocabulary.test.ts, telemetry-usage-coverage.test.ts), whose inputs must keep matching these files."
   },
   {
     "file": "libs/telemetry/scripts/runtime-registry.mts",
     "target": "packages/plugins",
-    "reason": "enumerates or probes sibling project directories"
+    "reason": "enumerates or probes sibling project directories",
+    "unscheduled": "Imported by the operator generator telemetry:generate-runtime-vocabulary, which CI does not run, and by scripts:test (telemetry-runtime-vocabulary.test.ts, telemetry-usage-coverage.test.ts), whose inputs must keep matching these files."
   },
   {
     "file": "libs/types/src/schemas/project-manifest.schema.test.ts",
@@ -852,7 +856,8 @@
   {
     "file": "scripts/spikes/native-deps/fetch-payloads.mts",
     "target": "apps/desktop/resources/python/manifest.json",
-    "reason": "reads another project's configuration it checks"
+    "reason": "reads another project's configuration it checks",
+    "unscheduled": "Run by the spike-wave0-macos workflow's `spike fetch-payloads` step, not by an Nx target."
   },
   {
     "file": "scripts/spikes/native-deps/linux/s11/fixtures-check.ts",
@@ -1068,6 +1073,11 @@
     "file": "scripts/src/validate-brain-evidence.ts",
     "target": "repos/**",
     "reason": "reads the optional external checkout under repos/, outside the Nx graph"
+  },
+  {
+    "file": "scripts/src/validate-cross-root-reads{,.test}.ts",
+    "target": "nx.json",
+    "reason": "reads nx.json's named inputs to resolve the filesets each target declares"
   },
   {
     "file": "scripts/src/validate-quickstart-budget.ts",

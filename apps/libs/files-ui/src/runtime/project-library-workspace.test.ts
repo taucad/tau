@@ -7,15 +7,10 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
-import { workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
+import { workspaceConnectionMachine } from '#machines/workspace-connection.machine.js';
 import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
 
-vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  reportAppRuntimeFault: () => undefined,
-}));
-
-vi.mock('@taucad/files-ui/constants/browser.constants', async (importOriginal) => ({
+vi.mock('#constants/browser.constants.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   directoryPicker: () => ({ available: true, backend: 'webaccess', pick: async () => undefined }),
 }));
@@ -48,6 +43,7 @@ const commandsOver = () => {
       ),
       mountWorkspace: vi.fn(),
       prepareWorkspaceCatalog: vi.fn(),
+      reportFault: () => undefined,
     },
   });
   workspaceConnection.subscribe({ error: () => undefined });

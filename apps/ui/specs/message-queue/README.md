@@ -87,3 +87,5 @@ The target additionally checks unique queue membership, persistence of prepared 
 Run the owner's pinned PR checks with `JAVA_HOME=/opt/homebrew/opt/openjdk pnpm nx formal:tla ui`. The initial weak model preceded implementation; this strengthened model was added after the delivery barrier and replay protocol were refined. Keep that evidence order distinct from the red-first executable runtime tests.
 
 Explicit reorder atomically moves one pending identity before another (or to the end), only while no delivery or steering command is prepared. It changes the saved sequence but preserves command identity, payload and terminal authorization. FIFO is evaluated against this user-selected order. Store tests cover stale targets, concurrent submissions, failed writes, replayed moves and reopening.
+
+DC-10 revisions-ui slice 2 re-pinned the drift after `use-turn-admission.ts` began importing the revision client registry from `@taucad/revisions-ui`; no action changed.

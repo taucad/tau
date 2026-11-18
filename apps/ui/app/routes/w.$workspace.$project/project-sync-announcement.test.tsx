@@ -246,7 +246,7 @@ describe('model wait reporting', () => {
     mocks.project = 'preparing';
     mocks.firstView = 'preparing';
     const view = render(<ProjectSyncAnnouncement />);
-    expect(view.container).toHaveTextContent('Preparing project files');
+    expect(view.container).toHaveTextContent('Preparing files');
   });
 
   /* STO-25 SP6 review: `first_view` is what this route shows, not the root's own readiness. */

@@ -181,7 +181,7 @@ describe('ci.yml merge-queue fail-fast (MQ-7)', () => {
 
   it('should fail a matrix lane fast in the merge queue only, so its first failed row ends it', () => {
     const matrixLanes = requiredLanes.filter((lane) => ci.jobs[lane]?.strategy?.matrix !== undefined);
-    expect(matrixLanes.toSorted()).toEqual(['affected-lane', 'cli-e2e', 'e2e-queue', 'formal']);
+    expect(matrixLanes.toSorted()).toEqual(['affected-lane', 'cli-e2e', 'e2e-queue', 'formal', 'pkgcheck']);
     for (const lane of matrixLanes) {
       expect(ci.jobs[lane]?.strategy?.['fail-fast'], lane).toBe(expression("github.event_name != 'merge_group'"));
     }

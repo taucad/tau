@@ -4,7 +4,16 @@ import { resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
-import { deal, parseDurations, parseProjects, run, weightOf } from '#test-shard-dealer.js';
+import {
+  deal,
+  dealUnits,
+  parseDurations,
+  parseProjects,
+  run,
+  shardCount,
+  unitsFromGraph,
+  weightOf,
+} from '#test-shard-dealer.js';
 import type { DurationTable } from '#test-shard-dealer.js';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -111,7 +120,8 @@ describe('deal', () => {
 
 describe('parseDurations', () => {
   it('accepts the checked-in snapshot and its project names are real projects', () => {
-    for (const project of Object.keys(snapshot.seconds)) {
+    // A `project:test:shard-<k>` unit is a split-by-file part; test-shards-union.test.ts checks those.
+    for (const project of Object.keys(snapshot.seconds).filter((unit) => !unit.includes(':'))) {
       expect(broad).toContain(project);
     }
     expect(snapshot.defaultSeconds).toBeGreaterThan(0);
@@ -146,6 +156,191 @@ describe('parseProjects', () => {
 
   it('rejects duplicates', () => {
     expect(() => parseProjects(['ui', 'ui'])).toThrow(/duplicates/u);
+  });
+});
+
+/** A task graph file as `nx … --graph=<file>` writes it: each task's project and target, and its dependencies. */
+const taskGraph = (dependencies: Record<string, readonly string[]>): unknown => ({
+  tasks: {
+    tasks: Object.fromEntries(
+      [...new Set([...Object.keys(dependencies), ...Object.values(dependencies).flat()])].map((id) => {
+        const [project, ...target] = id.split(':');
+        return [id, { target: { project, target: target.join(':') } }];
+      }),
+    ),
+    dependencies,
+  },
+});
+
+// The build lane's shape: `ui`'s payload check depends on the desktop build, which `desktop` also owns.
+const buildGraph = taskGraph({
+  'ui:build': [],
+  'ui:build:desktop': [],
+  'ui:check-desktop-payload': ['ui:build:desktop', 'desktop:build'],
+  'desktop:build': ['desktop:typecheck', 'ui:build:desktop'],
+  'desktop:typecheck': [],
+  'docs:build': [],
+  'cli:build': ['runtime:build'],
+  'runtime:build': [],
+  'host:build': ['runtime:build'],
+});
+const buildTargets = ['build', 'check-desktop-payload'];
+const buildSeconds = table(
+  {
+    'ui:build': 130,
+    'ui:build:desktop': 75,
+    'desktop:typecheck': 70,
+    'desktop:build': 15,
+    'docs:build': 60,
+    'cli:build': 50,
+    'runtime:build': 40,
+    'host:build': 30,
+  },
+  2,
+);
+const buildProjects = ['ui', 'desktop', 'docs', 'cli', 'runtime', 'host'];
+
+describe('dealUnits', () => {
+  const seconds = (task: string): number => weightOf(task, buildSeconds);
+
+  it('deals disjoint units exactly as the plain deal does', () => {
+    const units = broad.map((project) => ({ name: project, tasks: [project] }));
+    for (const shards of [1, 2, 3, 4]) {
+      expect(dealUnits(units, shards, (task) => weightOf(task, snapshot)).dealt).toEqual(deal(broad, shards, snapshot));
+    }
+  });
+
+  it('keeps a unit with the shard that already runs the tasks it depends on (C5: every project in one shard)', () => {
+    const units = unitsFromGraph(buildGraph, buildProjects, buildTargets);
+    const { dealt, loads } = dealUnits(units, 2, seconds);
+    expectPartition(buildProjects, dealt);
+    // `desktop` adds nothing to the shard whose `ui` already builds it, so the desktop chain is built once.
+    expect(dealt.find((shard) => shard.includes('ui'))).toContain('desktop');
+    expect(loads).toEqual([292, 180]);
+  });
+
+  it('counts a shared dependency once per shard that runs it', () => {
+    const { loads } = dealUnits(
+      [
+        { name: 'a', tasks: ['shared', 'a'] },
+        { name: 'b', tasks: ['shared', 'b'] },
+      ],
+      2,
+      (task) => ({ shared: 100, a: 10, b: 10 })[task] ?? 0,
+    );
+    // Together: 120 on one shard beats 110 and 110 apart only when it does not lengthen the longest shard.
+    expect(loads).toEqual([110, 110]);
+  });
+
+  it('is independent of input order', () => {
+    const units = unitsFromGraph(buildGraph, buildProjects, buildTargets);
+    expect(dealUnits(units.toReversed(), 2, seconds).dealt).toEqual(dealUnits(units, 2, seconds).dealt);
+  });
+});
+
+describe('unitsFromGraph', () => {
+  it('gives each project its own lane tasks and everything they depend on', () => {
+    const units = unitsFromGraph(buildGraph, ['ui', 'cli'], buildTargets);
+    expect(units).toEqual([
+      {
+        name: 'ui',
+        tasks: ['desktop:build', 'desktop:typecheck', 'ui:build', 'ui:build:desktop', 'ui:check-desktop-payload'],
+      },
+      { name: 'cli', tasks: ['cli:build', 'runtime:build'] },
+    ]);
+  });
+
+  it('refuses a project without a lane task and a file without a task graph', () => {
+    expect(() => unitsFromGraph(buildGraph, ['ghost'], buildTargets)).toThrow(/no build, check-desktop-payload task/u);
+    expect(() => unitsFromGraph({ graph: {} }, ['ui'], buildTargets)).toThrow(/no task graph/u);
+  });
+});
+
+describe('shardCount', () => {
+  it.each([
+    [0, 1],
+    [599, 1],
+    [600, 1],
+    [601, 2],
+    [1800, 3],
+    [5000, 4],
+  ])('gives %d s %d shards at 600 s a shard, at most four', (seconds, shards) => {
+    expect(shardCount(seconds, 4, 600)).toBe(shards);
+  });
+});
+
+describe('run with a graph', () => {
+  const files = new Map([
+    ['graph.json', JSON.stringify(buildGraph)],
+    ['build.json', JSON.stringify(buildSeconds)],
+  ]);
+  const read = (path: string): string => files.get(path) ?? '';
+  const args = (shard: string): string[] => [
+    '--shard',
+    shard,
+    '--shards',
+    '2',
+    '--durations',
+    'build.json',
+    '--graph',
+    'graph.json',
+    '--targets',
+    buildTargets.join(','),
+  ];
+
+  it('prints each shard, and the shards together are every project once (C5)', () => {
+    const outputs = ['1', '2'].map((shard) => run(args(shard), JSON.stringify(buildProjects), read));
+    expect(outputs.map(({ code }) => code)).toEqual([0, 0]);
+    expectPartition(
+      buildProjects,
+      outputs.map(({ output }) => output.split(',')),
+    );
+  });
+
+  it('prints the whole deal as a matrix with an automatic shard count', () => {
+    const matrix = run(
+      [
+        '--shard',
+        'all',
+        '--shards',
+        'auto',
+        '--max-shards',
+        '4',
+        '--shard-seconds',
+        '300',
+        '--durations',
+        'build.json',
+      ],
+      JSON.stringify(['ui', 'docs', 'cli']),
+      (path) => (path === 'build.json' ? JSON.stringify(table({ ui: 400, docs: 150, cli: 100 })) : ''),
+    );
+    expect(matrix).toEqual({
+      code: 0,
+      output: JSON.stringify([
+        { shard: 1, shards: 3, projects: 'ui' },
+        { shard: 2, shards: 3, projects: 'docs' },
+        { shard: 3, shards: 3, projects: 'cli' },
+      ]),
+    });
+    expect(run(['--shard', 'all', '--shards', 'auto', '--max-shards', '4', '--shard-seconds', '300'], '[]')).toEqual({
+      code: 0,
+      output: '[]',
+    });
+  });
+
+  it.each([
+    [['--shard', 'all', '--shards', 'auto']],
+    [['--shard', '5', '--shards', 'auto', '--max-shards', '4', '--shard-seconds', '1']],
+    [['--shard', '1', '--max-shards', '4']],
+    [['--shard', '1', '--graph', 'graph.json']],
+    [['--shard', '1', '--targets', 'build']],
+    [['--shard', '1', '--shard', '2']],
+  ])('refuses usage %j', (bad) => {
+    expect(run(bad, '[]', read).code).toBe(2);
+  });
+
+  it('fails on a project the graph does not hold', () => {
+    expect(run(args('1'), '["ghost"]', read).code).toBe(1);
   });
 });
 
@@ -217,14 +412,38 @@ describe('ci.yml', () => {
     expect(lanes).toMatch(/node scripts\/src\/test-shard-dealer\.ts --shard "\$\{LANE#test-\}" --shards 3/u);
   });
 
-  it('deals the package-check lanes with this script and their own snapshot', () => {
-    expect(lanes).toMatch(
-      /node scripts\/src\/test-shard-dealer\.ts --shard "\$\{LANE#pkgcheck-\}" --shards 3 \\\n\s+--durations scripts\/src\/pkgcheck-shard-durations\.json/u,
+  it('deals the package checks in the plan with this script and their own snapshot, as many shards as they need', () => {
+    const plan = ci.jobs['plan']?.steps?.find((step) => step.name === 'Compute affected lanes')?.run;
+    expect(plan).toMatch(
+      /node scripts\/src\/test-shard-dealer\.ts --shard all --shards auto \\\n\s+--max-shards 4 --shard-seconds 600 --durations scripts\/src\/pkgcheck-shard-durations\.json/u,
     );
     const matrix = (ci.jobs['affected-lane'] as { strategy?: { matrix?: { lane?: string[] } } } | undefined)?.strategy
       ?.matrix?.lane;
-    expect(matrix).toEqual(expect.arrayContaining(['pkgcheck-1', 'pkgcheck-2', 'pkgcheck-3']));
-    expect(matrix).not.toContain('pkgcheck');
+    expect(matrix?.filter((lane) => lane.startsWith('pkgcheck'))).toEqual([]);
+  });
+
+  it('deals lint, typecheck and build over two shards each from the lane graph and its own snapshot', () => {
+    const matrix = (ci.jobs['affected-lane'] as { strategy?: { matrix?: { lane?: string[] } } } | undefined)?.strategy
+      ?.matrix?.lane;
+    expect(matrix).toEqual([
+      'lint-1',
+      'lint-2',
+      'typecheck-1',
+      'typecheck-2',
+      'build-1',
+      'build-2',
+      'test-1',
+      'test-2',
+      'test-3',
+    ]);
+    expect(lanes).toMatch(
+      /node scripts\/src\/test-shard-dealer\.ts --shard "\$\{LANE##\*-\}" --shards 2 \\\n\s+--durations "scripts\/src\/\$kind-shard-durations\.json" --graph "\$graph" --targets "\$targets"/u,
+    );
+    for (const kind of ['lint', 'typecheck', 'build']) {
+      expect(() =>
+        parseDurations(JSON.parse(readFileSync(resolve(import.meta.dirname, `${kind}-shard-durations.json`), 'utf8'))),
+      ).not.toThrow();
+    }
   });
 
   it('names only real projects in the package-check snapshot', () => {

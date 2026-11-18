@@ -1,6 +1,7 @@
 import type { LinksFunction, MetaFunction, MiddlewareFunction, ShouldRevalidateFunction } from 'react-router';
 import type { ReactNode } from 'react';
 import { rootMiddleware } from '#lib/root-middleware.server.js';
+import { staleBuildMiddleware } from '#lib/stale-build-navigation.js';
 import { getClientEnvironment } from '#environment.config.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isOfflineShellPath } from '#lib/static-paths.js';
@@ -47,6 +48,13 @@ export const meta: MetaFunction = () => [
 
 /** C1: the `www.` redirect, Server-Timing and the headers every response carries, documents, `.data` and resources. */
 export const middleware: Array<MiddlewareFunction<Response>> = [rootMiddleware];
+
+/**
+ * RR9 (TAU-UI-S): once the server names another build, a client navigation to another page loads it as a document,
+ * into the live build. The root route module is never split (`splitRouteModules` leaves the root whole), so this
+ * loads with the root's own chunk, never as a chunk of its own outside the patched route-module loader.
+ */
+export const clientMiddleware: Route.ClientMiddlewareFunction[] = [staleBuildMiddleware];
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders require type inference
 export async function loader({ url, context }: Route.LoaderArgs) {

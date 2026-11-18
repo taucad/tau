@@ -79,10 +79,11 @@ export default {
    * `buildEnd` is the only hook that runs after prerendering, so it is where
    * the Home shell is moved off `/`'s static path to the file the marketing edge
    * function rewrites to (progressive loading PL4, `scripts/place-static-shells.ts`),
-   * and where the offline shell worker is generated from the emitted `/usage`
-   * document and the Vite build manifest (B5 R3), and where the warm manifest is
-   * written from the Vite build manifest and the module-id manifest (progressive
-   * loading PL8, `scripts/write-warm-manifest.ts`). The desktop and daemon configs
+   * where the warm manifest is written from the Vite build manifest and the
+   * module-id manifest (progressive loading PL8, `scripts/write-warm-manifest.ts`),
+   * and where the web app's one service worker is built, its precache list generated
+   * from the route-class registry and the emitted shell documents (progressive
+   * loading PL7, `scripts/build-service-worker.ts`). The desktop and daemon configs
    * are separate files and never run this: both already boot from a packaged SPA
    * index fallback.
    */
@@ -103,16 +104,19 @@ export default {
         .map(([id, files]) => `${id} ${String(files.length)} files`)
         .join(', ')}`,
     );
-    if (!tauCloudEnabled) {
-      return;
-    }
-    const { generateOfflineShell } = await import('./scripts/generate-offline-shell');
-    const { listOfflineShellPaths } = await import('./app/lib/static-paths');
-    await generateOfflineShell({
-      clientDirectory: `${reactRouterConfig.buildDirectory}/client`,
-      workerSourcePath: `${reactRouterConfig.appDirectory}/offline/offline-shell-worker.ts`,
-      documentPaths: listOfflineShellPaths(),
+    const { buildServiceWorker } = await import('./scripts/build-service-worker');
+    const { workerRouteClasses } = await import('./app/lib/route-classes');
+    const worker = await buildServiceWorker({
+      buildDirectory: reactRouterConfig.buildDirectory,
+      workerSourcePath: `${reactRouterConfig.appDirectory}/offline/service-worker.ts`,
+      // `/usage` is a cloud route: a self-host build neither prerenders nor precaches it.
+      classes: workerRouteClasses().filter(
+        (workerClass) => tauCloudEnabled || workerClass.routeClass.id !== 'offline-shell',
+      ),
     });
+    console.log(
+      `Service worker: ${String(worker.entries.length)} precache entries, ${String(Math.round(worker.bytes / 1024))} KiB`,
+    );
   },
   prerender: {
     async paths() {

@@ -14,7 +14,9 @@ import { matchPath } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { metaConfig } from '#constants/meta.constants.js';
 import {
+  appStartUrl,
   classesOwningRoute,
+  homeAppEntry,
   edgeShellClasses,
   routeClassOfRouteId,
   isStaticShellPath,
@@ -29,6 +31,7 @@ import {
   shellSkewCookie,
   staticShellClasses,
   staticShellFor,
+  workerRouteClasses,
 } from '#lib/route-classes.js';
 import { skewProtectionCookie, skewProtectionCookieName } from '#lib/skew-protection.server.js';
 import { listSitemapPaths, listStaticPrerenderPaths } from '#lib/static-paths.js';
@@ -36,6 +39,7 @@ import { listSitemapPaths, listStaticPrerenderPaths } from '#lib/static-paths.js
 import {
   homeShellDocument,
   config as marketingEdge,
+  selectDelivery,
   shellSkewCookie as marketingShellSkewCookie,
 } from '../../netlify/edge-functions/marketing.js';
 import { config as marketingEventsEdge } from '../../netlify/edge-functions/marketing-events.js';
@@ -412,5 +416,47 @@ describe('routeClassOfRouteId (RR7)', () => {
     { routeId: 'routes/not-a-route', classId: undefined },
   ])('should name $routeId as $classId, a file route by its name without the extension', ({ routeId, classId }) => {
     expect(routeClassOfRouteId(routeId)?.id).toBe(classId);
+  });
+});
+
+describe('the service worker’s classes (PL7)', () => {
+  it('should answer the two static shells cache-first and the usage page network-first, from their built files', () => {
+    expect(
+      workerRouteClasses().map(({ routeClass, delivery, document }) => [routeClass.id, delivery, document]),
+    ).toStrictEqual([
+      ['project', 'cache-first', '/w/__shell/__shell/index.html'],
+      ['home', 'cache-first', homeShellDocument],
+      ['offline-shell', 'network-first', '/usage/index.html'],
+    ]);
+    expect(listStaticPrerenderPaths()).toContain('/usage');
+  });
+
+  it('should match exactly the URLs Netlify serves each shell for', () => {
+    const [project, home] = workerRouteClasses();
+    for (const path of ['/w/home/bracket-v2', '/w/home/bracket-v2/', '/w/a/b.data', '/w/a/b/preview', '/w/a', '/']) {
+      expect(project?.matches(path), path).toBe(staticShellFor(path)?.id === 'project');
+    }
+    expect(home?.matches('/')).toBe(true);
+    expect(home?.matches('/projects')).toBe(false);
+  });
+
+  /* The worker answers `/` with the Home shell exactly when the marketing edge function would. */
+  it.each([
+    ['/', undefined],
+    ['/', 'app'],
+    ['/', 'website'],
+    ['/?website', 'app'],
+    ['/?website=1', undefined],
+    ['/?utm_source=x&ref=hn', undefined],
+    ['/?utm_source=x', 'app'],
+    ['/?app', undefined],
+    ['/?code=abc&state=x', undefined],
+    [appStartUrl, undefined],
+    [appStartUrl, 'website'],
+  ])('should agree with the marketing edge function on whether %s with tau-entry %s is Home', (href, tauEntry) => {
+    const url = new URL(href, 'https://tau.new');
+    const request = new Request(url, { headers: tauEntry === undefined ? {} : { cookie: `tau-entry=${tauEntry}` } });
+    const delivery = selectDelivery(request, url, 'https://marketing.example');
+    expect(homeAppEntry(url.searchParams, tauEntry)).toBe(delivery.kind !== 'marketing');
   });
 });

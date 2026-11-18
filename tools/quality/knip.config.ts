@@ -327,7 +327,9 @@ const config: KnipConfig = {
         'app/routes/**/*.tsx',
         'app/types/**/*.d.ts',
         'vite-environment.d.ts',
-        'app/offline/offline-shell-env.d.ts',
+        'app/offline/service-worker-env.d.ts',
+        // Built into `service-worker.js` by `scripts/build-service-worker.ts`; no page imports it.
+        'app/offline/service-worker.ts',
         // Netlify bundles every edge function in this directory; `config` names its paths.
         'netlify/edge-functions/*.ts',
         // `apps/ui/project.json` runs every calibration script with a workspace-root path.

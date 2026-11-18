@@ -611,14 +611,14 @@ export default defineConfig(({ command, mode }) => {
             ),
           }),
       /*
-       * Offline shell seam (B5 R3). Only this config defines it, so only the
-       * web bundle registers the service worker: `desktop/vite.config.ts` and
-       * `serve/vite.config.ts` have their own `define` blocks and their own
-       * `react-router.config.ts` without the `buildEnd` that generates the
-       * worker, and both already boot offline from an SPA index fallback.
+       * Service worker seam (progressive loading PL7). Only this config defines
+       * it, so only the web bundle registers the worker: `desktop/vite.config.ts`
+       * and `serve/vite.config.ts` have their own `define` blocks and their own
+       * `react-router.config.ts` without the `buildEnd` that builds the worker,
+       * and both already boot offline from an SPA index fallback.
        */
       // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
-      ...(isTest ? {} : { 'import.meta.env.TAU_OFFLINE_SHELL': '"enabled"' }),
+      ...(isTest ? {} : { 'import.meta.env.TAU_SERVICE_WORKER': '"enabled"' }),
       /*
        * This bundle is served by the web host, never by a `tau serve` daemon
        * (`serve/vite.config.ts`), so its origin has no agent descriptor. The
@@ -774,8 +774,8 @@ export default defineConfig(({ command, mode }) => {
       },
       target: 'es2022',
       /*
-       * The offline shell allowlist is generated from this manifest
-       * (`scripts/generate-offline-shell.ts`), so hashed filenames are never
+       * The service worker's precache list is generated from this manifest
+       * (`scripts/build-service-worker.ts`), so hashed filenames are never
        * hand-maintained. It only lists public build outputs.
        */
       manifest: true,

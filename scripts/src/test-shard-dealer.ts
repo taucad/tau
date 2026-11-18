@@ -10,6 +10,10 @@
  * This replaced the test-file-count weights, which had turned the shards into a fixed routing table
  * (tau-brain `research/ci-decomposition-blueprint.md` F2 and Part 4; charter W2).
  *
+ * A project that declares `test:shard-<n>` targets enters the `test-<n>` lanes' list as its `<project>:test:shard-<n>`
+ * tasks in place of its name (`ui`: six tasks of its Vitest suite, CI throughput review ST-1), and the snapshot weighs
+ * each task on its own, so one slow suite no longer sets a lane's floor.
+ *
  * The names are opaque, so other sharded lanes deal with it too, each from its own snapshot through `--durations`:
  * the `pkgcheck-<n>` lanes deal the affected projects with a package check by measured `pkgcheck` seconds
  * (`pkgcheck-shard-durations.json`), and the `Viewer references` shards of `viewer-parity.yml` deal the parity

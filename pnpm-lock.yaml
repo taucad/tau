@@ -4028,6 +4028,9 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../../packages/filesystem
+      '@taucad/revisions':
+        specifier: workspace:*
+        version: link:../../../packages/revisions
       '@taucad/share':
         specifier: workspace:*
         version: link:../share

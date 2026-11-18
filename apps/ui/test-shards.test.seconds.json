@@ -551,7 +551,6 @@
     "app/machines/focus.machine.test.ts": 0.7,
     "app/machines/focus.machine.totality.test.ts": 0.4,
     "app/machines/focus.route-state.test.ts": 0.3,
-    "app/machines/import-github.machine.test.ts": 0.6,
     "app/machines/kernel-secondary-entry-failure.integration.test.ts": 2.1,
     "app/machines/kernel.integration.test.ts": 11.4,
     "app/machines/library-access.machine.test.ts": 0.7,

@@ -961,10 +961,13 @@ describe('startHostDaemon', () => {
       }),
     );
     machineRuntimeSpy.mockClear();
+    /* T19: the store's refused admissions reach the daemon's runtime telemetry. */
+    const onAdmissionRefusal = vi.fn();
     const daemon = startHostDaemon({
       relayUrl: new URL('http://127.0.0.1:1'),
       runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
       agent: { ...agentOptions, machines: { providers: [fixtureMachine(), fixtureSerialMachine()] } },
+      machineTelemetry: { onAdmissionRefusal },
       onEvent: (event) => events.push(event),
     });
     await daemon.ready;
@@ -1008,6 +1011,8 @@ describe('startHostDaemon', () => {
       throw new Error('The daemon offered its tools no machines facet.');
     }
     await expect(agentFacet.list({})).resolves.toMatchObject({ entries: [] });
+    /* Admitted calls report nothing. */
+    expect(onAdmissionRefusal).not.toHaveBeenCalled();
     const person = { kind: 'user', id: 'person', label: 'Person' } as const;
     await expect(agentFacet.setTesting({ machineId: 'any', enabled: true, requestedBy: person })).rejects.toThrow(
       'ROUTE_DENIED',
@@ -1028,6 +1033,11 @@ describe('startHostDaemon', () => {
         approvedBy: person,
       }),
     ).rejects.toThrow('ROUTE_DENIED');
+    /* Each refused admission is reported once, with its closed code and the session's actor kind only. */
+    expect(onAdmissionRefusal.mock.calls).toEqual([
+      [{ code: 'ROUTE_DENIED', actor: 'agent' }],
+      [{ code: 'ROUTE_DENIED', actor: 'agent' }],
+    ]);
     /* The agent's session lives only as long as its channel. */
     const revokedBefore = revokedSessions.length;
     const closable = (facet: typeof agentFacet): facet is typeof agentFacet & Readonly<{ close(): void }> =>

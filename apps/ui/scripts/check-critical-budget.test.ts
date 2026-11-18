@@ -5,12 +5,13 @@ import {
   buildVariantOf,
   compareWithBudget,
   findEarlyKernelPreloads,
+  findSplitRouteModules,
   findWarmManifestProblems,
   measureClass,
   preloadHrefs,
 } from '#scripts/check-critical-budget.mts';
 import { rootKeys, staticClosure } from '#scripts/interactive-closure.ts';
-import type { ClassBudget, ClassMeasure } from '#scripts/check-critical-budget.mts';
+import type { ClassBudget, ClassMeasure, RouterManifest } from '#scripts/check-critical-budget.mts';
 
 const manifest = {
   'app/entry.client.tsx': { file: 'assets/entry.client-a.js', imports: ['_react-b.js'] },
@@ -254,6 +255,41 @@ describe('findWarmManifestProblems (PL8)', () => {
     ]);
     expect(findWarmManifestProblems({ warm: undefined, closures, manifest, moduleIds })).toEqual([
       expect.stringMatching(/__shell\/warm\.json is missing/u),
+    ]);
+  });
+});
+
+describe('findSplitRouteModules (React Router 8 migration B8, RR6)', () => {
+  const manifest = (routes: RouterManifest['routes']): RouterManifest => ({
+    entry: { module: '/assets/entry.client-a.js', imports: [] },
+    routes,
+  });
+
+  it('should pass a manifest whose routes load one module each, as today', () => {
+    expect(
+      findSplitRouteModules(
+        manifest({
+          root: { module: '/assets/root-a.js' },
+          'routes/import.$': { module: '/assets/route-b.js', imports: ['/assets/chunk-c.js'] },
+        }),
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it('should name every split module, which loads outside the patched stale-build fallback', () => {
+    expect(
+      findSplitRouteModules(
+        manifest({
+          'routes/import.$': {
+            module: '/assets/route-b.js',
+            clientLoaderModule: '/assets/route-b-client-loader.js',
+          },
+          'routes/projects_': { module: '/assets/route-d.js', hydrateFallbackModule: '/assets/route-d-fallback.js' },
+        }),
+      ),
+    ).toStrictEqual([
+      'routes/import.$ splits clientLoaderModule /assets/route-b-client-loader.js',
+      'routes/projects_ splits hydrateFallbackModule /assets/route-d-fallback.js',
     ]);
   });
 });

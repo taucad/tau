@@ -267,6 +267,72 @@ describe('createNodeHostTelemetry', () => {
     expect(posts()[0]?.headers?.['authorization']).toBe('Bearer secret-token');
   });
 
+  it('T19: should report a later operation once a host whose first read was signed out signs in', async () => {
+    const { telemetry, posts, setIdentity } = harness({ route: 'desktop', rendererConsent: () => 'granted' });
+    telemetry.startIdentityBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    telemetry.record(toRuntimeEntry(observation(), telemetry.context('host')));
+    await vi.advanceTimersByTimeAsync(reporterBounds.interval * 2);
+    expect(posts()).toEqual([]);
+
+    setIdentity(signedIn);
+    telemetry.record(toRuntimeEntry(observation(), telemetry.context('host')));
+    await vi.advanceTimersByTimeAsync(reporterBounds.interval * 2);
+
+    /* The signed-out operation was dropped; the later one is sent, with the bearer. */
+    expect(
+      posts()
+        .flatMap(({ body }) => body.entries)
+        .filter(({ name }) => name === 'runtime.operation'),
+    ).toHaveLength(1);
+    expect(posts()[0]?.headers?.['authorization']).toBe('Bearer secret-token');
+  });
+
+  it('T19: should send an entry recorded right after sign-in when shutdown follows at once', async () => {
+    let answer: (identity: TauIdentity) => void = () => undefined;
+    let reads = 0;
+    const readIdentity = vi.fn(async (): Promise<TauIdentity> => {
+      reads += 1;
+      if (reads === 1) {
+        return { kind: 'signed-out' };
+      }
+      if (reads > 2) {
+        return signedIn;
+      }
+      /* The re-read the record starts answers only after shutdown began. */
+      return new Promise<TauIdentity>((resolve) => {
+        answer = resolve;
+      });
+    });
+    const { telemetry, posts } = harness({ route: 'desktop', rendererConsent: () => 'granted', readIdentity });
+    telemetry.startIdentityBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+
+    telemetry.record(toRuntimeEntry(observation(), telemetry.context('host')));
+    const done = telemetry.shutdown();
+    answer(signedIn);
+    await vi.advanceTimersByTimeAsync(nodeShutdownWait);
+    await done;
+
+    expect(
+      posts()
+        .flatMap(({ body }) => body.entries)
+        .filter(({ name }) => name === 'runtime.operation'),
+    ).toHaveLength(1);
+  });
+
+  it('T19: should not re-read identity for a signed-out host whose consent is denied', async () => {
+    const readIdentity = vi.fn(async (): Promise<TauIdentity> => ({ kind: 'signed-out' }));
+    const { telemetry, fetch } = harness({ route: 'desktop', rendererConsent: () => 'denied', readIdentity });
+    telemetry.startIdentityBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    telemetry.record(toRuntimeEntry(observation(), telemetry.context('host')));
+    await vi.advanceTimersByTimeAsync(reporterBounds.interval * 2);
+
+    expect(readIdentity).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('should read the renderer consent on desktop: denied denies', () => {
     const { telemetry } = harness({ route: 'desktop', cloudBuild: true, rendererConsent: () => 'denied' });
 

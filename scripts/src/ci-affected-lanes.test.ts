@@ -583,9 +583,11 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     expect(nativeHosts.jobs['linux']?.if).toBe(
       expression("!cancelled() && (inputs.intel != '' || needs.plan.outputs.linux == 'true')"),
     );
-    expect(nativeHosts.jobs['linux']?.env?.['NATIVE_LINUX']).toBe(
-      expression('inputs.native-linux || needs.plan.outputs.native-linux'),
-    );
+    // The `test:native-linux` rows, one job per project (ST-3), from the same selection.
+    expect(nativeHosts.jobs['native-linux-rows']?.if).toBe(nativeHosts.jobs['linux']?.if);
+    expect(
+      nativeHosts.jobs['native-linux-rows']?.steps?.find((step) => step.env?.['NATIVE_LINUX'])?.env?.['NATIVE_LINUX'],
+    ).toBe(expression('inputs.native-linux || needs.plan.outputs.native-linux'));
     // The Intel row joins the queue when ci.yml's plan selects it (Q-3).
     expect(nativeHosts.jobs['intel']?.if).toBe(
       expression("!cancelled() && (inputs.intel == 'true' || needs.plan.outputs.intel == 'true')"),

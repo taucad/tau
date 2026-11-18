@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- the fixtures are GitHub REST release fields */
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -5,7 +6,18 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { blobsKey, checkServed, fetchPinned, parsePlan, run, urlPins } from '#mirror-dependency-files.js';
+import {
+  blobsKey,
+  cadmpegEngineCaps,
+  checkServed,
+  fetchPinned,
+  parsePlan,
+  parseRelease,
+  releaseOfTag,
+  releasePins,
+  run,
+  urlPins,
+} from '#mirror-dependency-files.js';
 import type { PlanRow, RetryPolicy } from '#mirror-dependency-files.js';
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
@@ -45,6 +57,57 @@ const manifest = (
     ],
   },
 });
+
+// A published cadmpeg-ts release as `GET /repos/taucad/cadmpeg-ts/releases/tags/v<version>` returns it.
+const version = '0.1.0-beta.2';
+const engineIds = [
+  'catia',
+  'creo',
+  'f3d',
+  'fcstd',
+  'iges',
+  'inventor',
+  'nx',
+  'pvz',
+  'rhino',
+  'sat',
+  'sldprt',
+  'step',
+  'usd',
+];
+const engineBytes = new Map(engineIds.map((id) => [id, encode(`gzip of the ${id} engine`)]));
+const download = (name: string, tag = `v${version}`) =>
+  `https://github.com/taucad/cadmpeg-ts/releases/download/${tag}/${name}`;
+const asset = (id: string, overrides: Readonly<Record<string, unknown>> = {}) => {
+  const bytes = engineBytes.get(id) ?? encode(id);
+  const name = `${id}_bg.wasm.gz`;
+  return {
+    name,
+    state: 'uploaded',
+    size: bytes.byteLength,
+    digest: `sha256:${hex(bytes)}`,
+    browser_download_url: download(name),
+    ...overrides,
+  };
+};
+const release = (overrides: Readonly<Record<string, unknown>> = {}) => ({
+  tag_name: `v${version}`,
+  draft: false,
+  prerelease: false,
+  published_at: '2026-11-18T04:15:09Z',
+  assets: [
+    ...engineIds.map((id) => asset(id)),
+    {
+      name: 'engines.sha256',
+      state: 'uploaded',
+      size: 10,
+      digest: `sha256:${'0'.repeat(64)}`,
+      browser_download_url: download('engines.sha256'),
+    },
+  ],
+  ...overrides,
+});
+const releaseApi = `https://api.github.com/repos/taucad/cadmpeg-ts/releases/tags/v${version}`;
 
 const noWait: RetryPolicy = { attempts: 2, wait: async () => undefined };
 const serve =
@@ -108,6 +171,96 @@ describe('mirror-dependency-files', () => {
       );
       expect(() => urlPins(manifest(file(darwin, ['http://insecure.test/x'])), 'dotnet')).toThrow('https URLs');
       expect(() => urlPins(manifest(file(darwin, [])), 'dotnet')).toThrow('https URLs');
+    });
+  });
+
+  describe('releasePins', () => {
+    it('pins every engine asset by its GitHub sha256 digest and size, in name order, ignoring other assets', () => {
+      const pins = releasePins(release(), version);
+
+      expect(pins).toHaveLength(13);
+      expect(pins[0]).toEqual({
+        label: `cadmpeg-ts/catia_bg.wasm.gz@${version}`,
+        integrity: sri('sha256', engineBytes.get('catia')!),
+        byteLength: engineBytes.get('catia')!.byteLength,
+        urls: [download('catia_bg.wasm.gz')],
+      });
+      expect(pins.map((pin) => pin.label).toSorted()).toEqual(pins.map((pin) => pin.label));
+    });
+
+    it('refuses a draft, an unpublished release or another version', () => {
+      expect(() => releasePins(release({ draft: true }), version)).toThrow('is a draft or unpublished');
+      expect(() => releasePins(release({ published_at: null }), version)).toThrow('is a draft or unpublished');
+      expect(() => releasePins(release({ tag_name: 'v0.1.0-beta.1' }), version)).toThrow(
+        `The release is not taucad/cadmpeg-ts v${version}.`,
+      );
+      expect(() => releasePins([], version)).toThrow('The release is not');
+    });
+
+    it('refuses any engine count but 13', () => {
+      const twelve = release({ assets: engineIds.slice(1).map((id) => asset(id)) });
+      const fourteen = release({ assets: [...engineIds, 'extra'].map((id) => asset(id)) });
+      expect(() => releasePins(twelve, version)).toThrow('attaches 12 engines (<id>_bg.wasm.gz), not 13.');
+      expect(() => releasePins(fourteen, version)).toThrow('attaches 14 engines');
+      expect(() => releasePins(release({ assets: [] }), version)).toThrow('attaches 0 engines');
+    });
+
+    it('refuses an engine without an uploaded state, a sha256 digest or a byte length', () => {
+      const withEngine = (overrides: Readonly<Record<string, unknown>>) =>
+        release({ assets: engineIds.map((id) => (id === 'sldprt' ? asset(id, overrides) : asset(id))) });
+      const refusal = `cadmpeg-ts/sldprt_bg.wasm.gz@${version} is not an uploaded asset with a sha256 digest`;
+      expect(() => releasePins(withEngine({ state: 'starter' }), version)).toThrow(refusal);
+      expect(() => releasePins(withEngine({ digest: null }), version)).toThrow(refusal);
+      expect(() => releasePins(withEngine({ digest: `sha512:${'a'.repeat(128)}` }), version)).toThrow(refusal);
+      expect(() => releasePins(withEngine({ size: 0 }), version)).toThrow(refusal);
+    });
+
+    it('refuses an engine downloaded from anywhere but this release', () => {
+      const elsewhere = release({
+        assets: engineIds.map((id) =>
+          id === 'step' ? asset(id, { browser_download_url: download('step_bg.wasm.gz', 'v0.1.0') }) : asset(id),
+        ),
+      });
+      expect(() => releasePins(elsewhere, version)).toThrow(
+        `cadmpeg-ts/step_bg.wasm.gz@${version} is not downloaded from ${download('step_bg.wasm.gz')}.`,
+      );
+    });
+
+    it('refuses an engine over the per-file cap and engines over the total cap', () => {
+      const big = release({
+        assets: engineIds.map((id) => (id === 'nx' ? asset(id, { size: cadmpegEngineCaps.file + 1 }) : asset(id))),
+      });
+      expect(() => releasePins(big, version)).toThrow('over the 16777216-byte cap per engine');
+
+      const heavy = release({ assets: engineIds.map((id) => asset(id, { size: cadmpegEngineCaps.file })) });
+      expect(() => releasePins(heavy, version)).toThrow('over the 104857600-byte cap.');
+    });
+  });
+
+  describe('parseRelease and releaseOfTag', () => {
+    it('admits only taucad/cadmpeg-ts at a lowercase semantic version', () => {
+      expect(parseRelease(`taucad/cadmpeg-ts@${version}`)).toBe(version);
+      expect(parseRelease('taucad/cadmpeg-ts@1.2.3')).toBe('1.2.3');
+      expect(() => parseRelease(`taucad/other@${version}`)).toThrow(
+        'Only taucad/cadmpeg-ts releases are mirrored, not "taucad/other".',
+      );
+      expect(() => parseRelease(`evil/cadmpeg-ts@${version}`)).toThrow('Only taucad/cadmpeg-ts releases');
+      expect(() => parseRelease('taucad/cadmpeg-ts')).toThrow('"" is not a taucad/cadmpeg-ts version');
+      expect(() => parseRelease('taucad/cadmpeg-ts@v1.2.3')).toThrow('is not a taucad/cadmpeg-ts version');
+      expect(() => parseRelease('taucad/cadmpeg-ts@1.2.3/../x')).toThrow('is not a taucad/cadmpeg-ts version');
+    });
+
+    it('recovers the release from a tag by stripping the prefix and the key', () => {
+      expect(releaseOfTag(`dependency@cadmpeg-engines-${version}-0123456789abcdef`)).toBe(
+        `taucad/cadmpeg-ts@${version}`,
+      );
+      expect(() => releaseOfTag(`dependency@cadmpeg-engines-${version}`)).toThrow(
+        'is not a dependency@cadmpeg-engines-',
+      );
+      expect(() => releaseOfTag('dependency@dotnet-runtime-0123456789abcdef')).toThrow('is not a dependency@cadmpeg');
+      expect(() => releaseOfTag('dependency@cadmpeg-engines-latest-0123456789abcdef')).toThrow(
+        '"latest" is not a taucad/cadmpeg-ts version',
+      );
     });
   });
 
@@ -336,6 +489,130 @@ describe('mirror-dependency-files', () => {
       expect(missing.diagnostics[0]).toContain('answered HTTP 404');
     });
 
+    describe('--release', () => {
+      const engineRoutes = () =>
+        new Map<string, Uint8Array<ArrayBuffer> | number>(
+          engineIds.map((id) => [download(`${id}_bg.wasm.gz`), engineBytes.get(id)!]),
+        );
+      const releaseKey = blobsKey([...engineBytes.values()].map((bytes) => hex(bytes)));
+      const releaseTag = `dependency@cadmpeg-engines-${version}-${releaseKey}`;
+      const releaseTransport =
+        (body: unknown, routes = engineRoutes(), seen: Array<{ url: string; init?: RequestInit }> = []): typeof fetch =>
+        async (input, init) => {
+          const url = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+          seen.push({ url, init });
+          if (url === releaseApi) {
+            return typeof body === 'number' ? new Response(undefined, { status: body }) : Response.json(body);
+          }
+          return serve(routes)(input, init);
+        };
+
+      it('fetches every engine, plans them under their sha256 and names the versioned tag', async () => {
+        const out = await temporary();
+        const result = io();
+        const seen: Array<{ url: string; init?: RequestInit }> = [];
+        const code = await run(['fetch', '--release', `taucad/cadmpeg-ts@${version}`, '--out', out], result.io, {
+          transport: releaseTransport(release(), engineRoutes(), seen),
+          retry: noWait,
+          token: 'token-value',
+        });
+
+        expect(code).toBe(0);
+        expect(result.out).toEqual([`key=${releaseKey}`, `tag=${releaseTag}`]);
+        const plan = parsePlan(await readFile(join(out, 'plan.tsv'), 'utf8'));
+        expect(plan).toHaveLength(13);
+        expect(plan[0]).toEqual({
+          sha256: hex(engineBytes.get('catia')!),
+          byteLength: engineBytes.get('catia')!.byteLength,
+          label: `cadmpeg-ts/catia_bg.wasm.gz@${version}`,
+        });
+        // The token reaches the API only, never a download URL.
+        const authorized = seen.filter(({ init }) => new Headers(init?.headers).has('authorization'));
+        expect(authorized.map(({ url }) => url)).toEqual([releaseApi]);
+      });
+
+      it('accepts its own tag and refuses one whose key does not name the bytes', async () => {
+        const accepted = io();
+        expect(
+          await run(
+            ['fetch', '--release', `taucad/cadmpeg-ts@${version}`, '--out', await temporary(), '--tag', releaseTag],
+            accepted.io,
+            { transport: releaseTransport(release()), retry: noWait },
+          ),
+        ).toBe(0);
+
+        const refused = io();
+        const wrong = `dependency@cadmpeg-engines-${version}-0000000000000000`;
+        expect(
+          await run(
+            ['fetch', '--release', `taucad/cadmpeg-ts@${version}`, '--out', await temporary(), '--tag', wrong],
+            refused.io,
+            { transport: releaseTransport(release()), retry: noWait },
+          ),
+        ).toBe(1);
+        expect(refused.out).toEqual([]);
+        expect(refused.diagnostics.at(-1)).toBe(
+          `The tag ${wrong} does not name these bytes; they are ${releaseTag}. Nothing is published.`,
+        );
+      });
+
+      it('refuses an engine whose bytes do not match the digest GitHub states, writing no plan', async () => {
+        const out = await temporary();
+        const result = io();
+        const routes = engineRoutes();
+        routes.set(download('sldprt_bg.wasm.gz'), encode('x'.repeat(engineBytes.get('sldprt')!.byteLength)));
+        expect(
+          await run(['fetch', '--release', `taucad/cadmpeg-ts@${version}`, '--out', out], result.io, {
+            transport: releaseTransport(release(), routes),
+            retry: noWait,
+          }),
+        ).toBe(1);
+        expect(result.diagnostics.at(-1)).toContain(`cadmpeg-ts/sldprt_bg.wasm.gz@${version}: no pinned URL serves`);
+        expect(await readdir(out)).not.toContain('plan.tsv');
+      });
+
+      it('refuses a missing or draft release and another repository before any download', async () => {
+        const missing = io();
+        expect(
+          await run(['fetch', '--release', `taucad/cadmpeg-ts@${version}`, '--out', await temporary()], missing.io, {
+            transport: releaseTransport(404),
+            retry: noWait,
+          }),
+        ).toBe(1);
+        expect(missing.diagnostics.at(-1)).toBe(
+          `${releaseApi} answered HTTP 404; a draft or missing release is not mirrored.`,
+        );
+
+        const draft = io();
+        expect(
+          await run(['fetch', '--release', `taucad/cadmpeg-ts@${version}`, '--out', await temporary()], draft.io, {
+            transport: releaseTransport(release({ draft: true })),
+            retry: noWait,
+          }),
+        ).toBe(1);
+        expect(draft.diagnostics.at(-1)).toContain('is a draft or unpublished');
+
+        const seen: Array<{ url: string }> = [];
+        const other = io();
+        expect(
+          await run(['fetch', '--release', `taucad/tau@${version}`, '--out', await temporary()], other.io, {
+            transport: releaseTransport(release(), engineRoutes(), seen),
+            retry: noWait,
+          }),
+        ).toBe(1);
+        expect(other.diagnostics.at(-1)).toBe('Only taucad/cadmpeg-ts releases are mirrored, not "taucad/tau".');
+        expect(seen).toEqual([]);
+      });
+
+      it('recovers the release from a tag', async () => {
+        const result = io();
+        expect(await run(['release-of', '--tag', releaseTag], result.io)).toBe(0);
+        expect(result.out).toEqual([`release=taucad/cadmpeg-ts@${version}`]);
+        const refused = io();
+        expect(await run(['release-of', '--tag', 'dependency@dotnet-runtime-0123456789abcdef'], refused.io)).toBe(1);
+      });
+    });
+
     it('rejects usage errors', async () => {
       const result = io();
       expect(await run(['fetch', '--manifest', 'x'], result.io)).toBe(2);
@@ -344,6 +621,11 @@ describe('mirror-dependency-files', () => {
         await run(['fetch', '--manifest', 'x', '--name', 'n', '--tag-name', 'Bad_Name', '--out', 'o'], result.io),
       ).toBe(2);
       expect(await run(['publish'], result.io)).toBe(2);
+      expect(await run(['fetch', '--release', `taucad/cadmpeg-ts@${version}`], result.io)).toBe(2);
+      expect(
+        await run(['fetch', '--release', `taucad/cadmpeg-ts@${version}`, '--manifest', 'x', '--out', 'o'], result.io),
+      ).toBe(2);
+      expect(await run(['release-of'], result.io)).toBe(2);
     });
   });
 });

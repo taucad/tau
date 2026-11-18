@@ -3,6 +3,13 @@
 # fetch them from `TAU_DEPENDENCY_MIRROR`. Today that is the PicoGK `dotnet` runtime archives from
 # `builds.dotnet.microsoft.com`, pinned by the sha256 of the bytes whose sha512 Microsoft publishes.
 #
+# A second source mirrors a `cadmpeg-ts` release: dispatched on `main` with `cadmpeg-version`, the `tag` job
+# reads `taucad/cadmpeg-ts` release `v<version>` instead of the manifest, pins its 13 `<id>_bg.wasm.gz`
+# engine assets by the sha256 and size GitHub states for each (bounded per file and in total), and names
+# them `dependency@cadmpeg-engines-<version>-<key>`. A tag run reads no pin from its commit: it recovers
+# the version from the tag and refuses unless the release's bytes still have the tag's key. The two
+# sources are exclusive: a dispatch with `cadmpeg-version` never touches the `dotnet` files.
+#
 # On a `main` push that changes `packages/plugins/picogk/tau-plugin.json`, or dispatched on `main`, the `tag` job downloads every `dotnet` file `packages/plugins/picogk/tau-plugin.json`
 # pins, refuses unless each matches its pinned integrity and byte length, and names the bytes with a key: the
 # first 16 hex of the SHA-256 of their sorted SHA-256 hexes (`scripts/src/mirror-dependency-files.ts`). It
@@ -11,10 +18,11 @@
 # tag's push runs the publish jobs below. The key names bytes, not pins, so re-pinning the same archives by
 # sha256 keeps the tag and a later dispatch does nothing.
 #
-# On a `dependency@dotnet-runtime-*` tag (created only by the release bot or release-managers: the
-# release-tags ruleset) the tagged commit's pins are downloaded again, refused unless they match and the tag
-# names their bytes, and each file is written once under `blobs/sha256/<hex>` with `If-None-Match: *` and
-# immutable caching, first to staging and then to production:
+# On a `dependency@dotnet-runtime-*` or `dependency@cadmpeg-engines-*` tag (created only by the release bot
+# or release-managers: the release-tags ruleset) the pins are downloaded again (the tagged commit's manifest,
+# or the release the tag names), refused unless they match and the tag names their bytes, and each file is
+# written once under `blobs/sha256/<hex>` with `If-None-Match: *` and immutable caching, first to staging
+# and then to production:
 #   - `publish-staging`, environment `dependencies-staging` (no reviewer): bucket
 #     `tau-staging-au-dependencies`, read back from `https://dependencies.taucad.dev`.
 #   - `publish-production`, environment `dependencies` (no reviewer since approvals audit R4): bucket
@@ -23,23 +31,29 @@
 # refused; it counts as present only when its bytes, read back through the bucket, hash to its key. Both
 # environments admit `dependency@*` tags and no branch or pull request.
 name: Dependency files publish
-run-name: ${{ github.ref_name }}
+run-name: ${{ inputs.cadmpeg-version && format('cadmpeg-engines {0}', inputs.cadmpeg-version) || github.ref_name }}
 
 on:
   push:
     # A pin change on main runs the producer unattended (operator choice 2026-11-16T00:48Z, approvals audit R5);
     # path filters do not apply to the tag push.
     branches: [main]
-    tags: ['dependency@dotnet-runtime-*']
+    tags: ['dependency@dotnet-runtime-*', 'dependency@cadmpeg-engines-*']
     paths:
       - packages/plugins/picogk/tau-plugin.json
   workflow_dispatch:
+    inputs:
+      cadmpeg-version:
+        description: 'Mirror this taucad/cadmpeg-ts release (such as 0.1.0-beta.2) instead of the dotnet runtime files'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: dependency-files-publish-${{ github.ref }}
+  group: dependency-files-publish-${{ github.ref }}-${{ inputs.cadmpeg-version }}
   cancel-in-progress: false
 
 env:
@@ -67,10 +81,18 @@ jobs:
           node-version: '24.20.0'
       - name: Download and verify every pinned file
         id: key
+        env:
+          CADMPEG_VERSION: ${{ inputs.cadmpeg-version }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          node scripts/src/mirror-dependency-files.ts fetch --manifest "$MANIFEST" --name "$FILE_NAME" \
-            --tag-name "$TAG_NAME" --out "$RUNNER_TEMP/dependency-files" | tee -a "$GITHUB_OUTPUT"
+          if [ -n "$CADMPEG_VERSION" ]; then
+            node scripts/src/mirror-dependency-files.ts fetch --release "taucad/cadmpeg-ts@$CADMPEG_VERSION" \
+              --out "$RUNNER_TEMP/dependency-files" | tee -a "$GITHUB_OUTPUT"
+          else
+            node scripts/src/mirror-dependency-files.ts fetch --manifest "$MANIFEST" --name "$FILE_NAME" \
+              --tag-name "$TAG_NAME" --out "$RUNNER_TEMP/dependency-files" | tee -a "$GITHUB_OUTPUT"
+          fi
       - name: Decide whether a publish is needed
         id: decide
         env:
@@ -87,7 +109,7 @@ jobs:
             message="Both dependency hosts already serve every blob with its digest; $TAG is not created."
             needed=false
           else
-            message="$TAG is created; staging publishes at once, and production after a reviewer approves the dependencies environment."
+            message="$TAG is created; its run publishes to staging, then to production once staging serves every blob."
             needed=true
           fi
           echo "needed=$needed" >> "$GITHUB_OUTPUT"
@@ -113,15 +135,16 @@ jobs:
         run: |
           set -euo pipefail
           gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
-          printf -- '- tagged `%s` at `%s`; a reviewer of the `dependencies` environment approves `Publish to production` in its run.\n' \
+          printf -- '- tagged `%s` at `%s`; its run publishes to staging and then, with no reviewer, to production.\n' \
             "$TAG" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
 
-  # ---- Publish, on a dependency@dotnet-runtime-* tag -----------------------------------------------
+  # ---- Publish, on a dependency@dotnet-runtime-* or dependency@cadmpeg-engines-* tag ---------------
 
-  # One step implementation, two environments. Staging publishes at once; production waits for a
-  # reviewer of `dependencies` and for staging, so a file reaches production only once staging serves it.
+  # One step implementation, two environments, neither with a reviewer (tau-cloud `dependencies.tf`,
+  # `reviewed = false`). Production waits for staging, so a file reaches production only once staging
+  # serves it. A cadmpeg-engines tag selects the release source; any other tag the manifest source.
   publish-staging:
-    if: startsWith(github.ref, 'refs/tags/dependency@dotnet-runtime-')
+    if: startsWith(github.ref, 'refs/tags/dependency@dotnet-runtime-') || startsWith(github.ref, 'refs/tags/dependency@cadmpeg-engines-')
     name: Publish to staging
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -135,6 +158,7 @@ jobs:
       - uses: ./.github/actions/dependency-files-publish
         with:
           environment: staging
+          source: ${{ startsWith(github.ref, 'refs/tags/dependency@cadmpeg-engines-') && 'release' || 'manifest' }}
           manifest: ${{ env.MANIFEST }}
           name: ${{ env.FILE_NAME }}
           tag-name: ${{ env.TAG_NAME }}
@@ -158,6 +182,7 @@ jobs:
       - uses: ./.github/actions/dependency-files-publish
         with:
           environment: production
+          source: ${{ startsWith(github.ref, 'refs/tags/dependency@cadmpeg-engines-') && 'release' || 'manifest' }}
           manifest: ${{ env.MANIFEST }}
           name: ${{ env.FILE_NAME }}
           tag-name: ${{ env.TAG_NAME }}

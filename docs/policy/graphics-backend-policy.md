@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-11-02'
+updated: '2026-11-17'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -122,6 +122,8 @@ Send measurement and overlay pointer events to their owning XState machine. Use 
 ### 12. Validate behavior, not only graph shape
 
 Shader graph snapshots and source fingerprints are supplementary. Pair them with focused runtime assertions. For user-visible parity, use the backend e2e harness and remote-canvas screenshots with deterministic pixel characteristics. Where a headless adapter cannot present frames, read an offscreen render target back through the renderer so the backend still yields pixel evidence; keep presented-canvas screenshots wherever the canvas does present.
+
+The render tier (`@taucad/viewer/graphics/three/render-tier`) drops ambient occlusion, FXAA and speculative camera preparation on a software rasterizer, and shrinks the environment cubemap. A test that asserts one of those passes declares it: it runs under the tier's test-only override with the features it asserts (`HardwareComposition` in `packages/viewer/src/test/hardware-composition.test-utils.tsx` for the composition) and asserts the tier the canvas resolved, so it never passes or fails on whichever adapter it got. Override only what the row asserts: SwiftShader filters a hardware-size environment for minutes. Frame-time claims are hardware claims and run on a real GPU.
 
 Test backend construction, WebGPU initialization, reversed-depth transparent ordering, alpha/depth state, clone ownership, cross-renderer material isolation, demand-frame invalidation, cache eviction, clipping-aware picking, and gesture cancellation.
 

@@ -13,11 +13,6 @@ type ViewerWindow = typeof globalThis & {
     getState(unitId: string): State | undefined;
     getComponentWorldMatrix(unitId: string, componentId: string): number[] | undefined;
   };
-  __TAU_SECTION_VIEW_TEST__?: {
-    getViewportCanvas(): HTMLCanvasElement;
-    getModelComponents(): ReadonlyArray<{ id: string; name: string }>;
-    getRendererIdentity(): Readonly<{ api: 'webgl' | 'webgpu'; name: string; frame: number }>;
-  };
   __TAU_PICOVOXEL_BUFFER_TEST__?: { read(context: WebGL2RenderingContext): BufferCounts };
 };
 
@@ -127,7 +122,7 @@ async function reset(): Promise<void> {
 async function buffers(): Promise<BufferCounts> {
   return target.evaluate(() => {
     const global = globalThis as ViewerWindow;
-    const context = global.__TAU_SECTION_VIEW_TEST__?.getViewportCanvas().getContext('webgl2');
+    const context = globalThis.__TAU_SECTION_VIEW_TEST__?.getViewportCanvas().getContext('webgl2');
     if (!context || !global.__TAU_PICOVOXEL_BUFFER_TEST__) {
       throw new Error('Viewport buffer probe missing.');
     }
@@ -186,17 +181,13 @@ test('should play, pause and reset the shipped PicoVoxel stage without remeshing
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
   await target.expectGeometryFramed();
   await target.expectGraphicsBackend('webgl');
-  const renderer = await target.evaluate(() =>
-    (globalThis as ViewerWindow).__TAU_SECTION_VIEW_TEST__?.getRendererIdentity(),
-  );
+  const renderer = await target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getRendererIdentity());
   expect(renderer?.api).toBe('webgl');
   await expect.poll(state, { timeout: 120_000 }).toMatchObject({ coordinates: { turn: 0 } });
   await target.keyboardPress('Control+m');
   await target.expectVisible(selectors.getByTestId('kinematics-pane'), 30_000);
   await target.expectValue(field('turn'), '0');
-  const components = await target.evaluate(() =>
-    (globalThis as ViewerWindow).__TAU_SECTION_VIEW_TEST__?.getModelComponents(),
-  );
+  const components = await target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getModelComponents());
   expect(components).toEqual(names.map((name, index) => ({ id: component(index), name })));
   expectAsBuilt(await matrices());
   await target.click(selectors.getByRole('button', { name: 'Followers of Handwheel' }));
@@ -328,10 +319,9 @@ export const mechanism = {
   await target.keyboardPress('ControlOrMeta+v');
   await target.keyboardPress('Escape');
   await expect
-    .poll(
-      async () => target.evaluate(() => (globalThis as ViewerWindow).__TAU_SECTION_VIEW_TEST__?.getModelComponents()),
-      { timeout: 120_000 },
-    )
+    .poll(async () => target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getModelComponents()), {
+      timeout: 120_000,
+    })
     .toEqual([{ id: component(0), name: 'Body' }]);
   await target.expectGeometryFramed();
   await activateKinematics();

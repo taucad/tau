@@ -27,6 +27,7 @@ import type { AcpAdapter } from '#acp/registry.js';
 import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 import { protocolVersion } from '#acp/session.js';
 import { grokPermissionConfigId, grokPlanningConfigId } from '#acp/grok-controls.js';
+import { grokNoAutoFallback } from '#acp/acp-modes.js';
 
 const adapter: AcpAdapter = {
   id: 'fake',
@@ -129,7 +130,7 @@ const openGrok = async (harness: Harness): Promise<void> => {
 };
 
 describe('acpSession', () => {
-  it('should apply isolated Grok controls, acknowledge planning, and downgrade permissions on the next turn', async () => {
+  it('should apply isolated Grok controls, keep Build planning, and downgrade permissions on the next turn', async () => {
     const harness = start({
       opening: { ...input().opening, adapter: { ...adapter, id: 'grok' } },
       lend: { ...lent, configuration: { [grokPermissionConfigId]: 'always-approve', [grokPlanningConfigId]: 'plan' } },
@@ -147,9 +148,10 @@ describe('acpSession', () => {
       });
       harness.answer({ sessionId: 'acp-1', configOptions: [] });
       harness.fakes.sendBack('lentTurn', { type: 'lentReady' });
+      /* PR5: a stale Plan selection is never applied; Grok stays in Build. */
       expect(harness.lastCall()).toMatchObject({
         method: 'session/set_mode',
-        params: { sessionId: 'acp-1', modeId: 'plan' },
+        params: { sessionId: 'acp-1', modeId: 'default' },
       });
       expect(harness.commands('connection').some((event) => event['method'] === 'session/prompt')).toBe(false);
       harness.answer({});
@@ -186,12 +188,9 @@ describe('acpSession', () => {
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Assert Grok wire field names.
         params: { yolo_mode: false, auto_mode: false, permission_mode: 'ask' },
       });
-      expect(harness.actor.getSnapshot().context.configOptions).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ id: grokPermissionConfigId, currentValue: 'ask' }),
-          expect.objectContaining({ id: grokPlanningConfigId, currentValue: 'plan' }),
-        ]),
-      );
+      expect(harness.actor.getSnapshot().context.configOptions).toEqual([
+        expect.objectContaining({ id: grokPermissionConfigId, currentValue: 'ask' }),
+      ]);
     } finally {
       harness.actor.stop();
     }
@@ -258,9 +257,12 @@ describe('acpSession', () => {
     }
   });
 
-  it('should refuse unverified Grok Auto without starting a model prompt', async () => {
+  it('should fall back from unverified Grok Auto to always-approve and still prompt (PR5 amendment)', async () => {
     const harness = start({
-      opening: { ...input().opening, adapter: { ...adapter, id: 'grok' } },
+      opening: {
+        ...input().opening,
+        adapter: { ...adapter, id: 'grok', defaultModePreference: ['auto', grokNoAutoFallback] },
+      },
       lend: { ...lent, configuration: { [grokPermissionConfigId]: 'auto' } },
     });
     try {
@@ -268,10 +270,11 @@ describe('acpSession', () => {
       harness.answer({ protocolVersion, agentCapabilities: {}, _meta: { grokShell: true, agentVersion: '1.0.52' } });
       harness.answer({ sessionId: 'acp-1' });
       harness.fakes.sendBack('lentTurn', { type: 'lentReady' });
-      expect(harness.commands('connection').some((event) => event['method'] === 'session/prompt')).toBe(false);
-      expect(harness.actor.getSnapshot().context['outcome']).toMatchObject({
-        ok: false,
-        failure: { code: 'EXTERNAL_AGENT_UNAVAILABLE' },
+      harness.answer({});
+      expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
+      expect(harness.commands('connection').findLast((event) => event.type === 'notify')).toMatchObject({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Assert Grok wire field names.
+        params: { permission_mode: grokNoAutoFallback },
       });
     } finally {
       harness.actor.stop();
@@ -376,6 +379,187 @@ describe('acpSession', () => {
       harness.actor.stop();
       harness.parent.stop();
     }
+  });
+
+  describe('default permission mode (PR5)', () => {
+    const claudeLike: AcpAdapter = { ...adapter, id: 'claude', defaultModePreference: ['auto', 'acceptEdits'] };
+    const allModes = ['auto', 'default', 'acceptEdits', 'plan', 'dontAsk', 'bypassPermissions'];
+    const modeSelect = (currentValue: string, values: readonly string[] = allModes) => ({
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      type: 'select',
+      currentValue,
+      options: values.map((value) => ({ value, name: `${value} name`, description: `${value} description` })),
+    });
+    const models = (currentValue: string) => ({
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select',
+      currentValue,
+      options: [
+        { value: 'opus', name: 'Opus' },
+        { value: 'haiku', name: 'Haiku' },
+      ],
+    });
+    const modeCalls = (harness: Harness) =>
+      harness
+        .commands('connection')
+        .filter((event) => event['method'] === 'session/set_config_option')
+        .map((event) => event['params'] as { configId: string; value: string })
+        .filter((params) => params.configId === 'mode')
+        .map((params) => params.value);
+    /* Open with these options and lend the first turn. */
+    const openWith = async (harness: Harness, options: readonly unknown[]): Promise<void> => {
+      await flush();
+      harness.answer({ protocolVersion, agentCapabilities: {} });
+      harness.answer({ sessionId: 'acp-1', configOptions: options });
+      harness.fakes.sendBack('lentTurn', { type: 'lentReady' });
+    };
+    /* Finish the prompted turn and lend the next one. */
+    const nextTurn = (harness: Harness, next: AcpLend): void => {
+      harness.answer({ stopReason: 'end_turn' });
+      harness.fakes.sendBack('lentTurn', { type: 'flushed', title: undefined, failure: undefined });
+      harness.fakes.sendBack('lentTurn', { type: 'recorded', failure: undefined });
+      harness.actor.send({ type: 'lend', lend: next });
+      harness.fakes.sendBack('lentTurn', { type: 'lentReady' });
+    };
+    const presentedValues = (harness: Harness): unknown =>
+      (
+        harness.actor.getSnapshot().context.presentation.configOptions as ReadonlyArray<{
+          id: string;
+          options?: ReadonlyArray<{ value: string }>;
+        }>
+      )
+        .find((option) => option.id === 'mode')
+        ?.options?.map((option) => option.value);
+
+    it('should start a new chat in auto, before the prompt, with plan off the menu', async () => {
+      const harness = start({ opening: { ...input().opening, adapter: claudeLike } });
+      try {
+        await openWith(harness, [modeSelect('default'), models('opus')]);
+        expect(harness.lastCall()).toMatchObject({
+          method: 'session/set_config_option',
+          params: { configId: 'mode', value: 'auto' },
+        });
+        harness.answer({ configOptions: [modeSelect('auto'), models('opus')] });
+        expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
+        expect(presentedValues(harness)).toEqual(['auto', 'default', 'acceptEdits', 'dontAsk', 'bypassPermissions']);
+        expect(harness.actor.getSnapshot().context.defaultModeId).toBe('auto');
+      } finally {
+        harness.actor.stop();
+      }
+    });
+
+    it('should start in acceptEdits on a model without auto, and never in bypass', async () => {
+      const harness = start({ opening: { ...input().opening, adapter: claudeLike } });
+      try {
+        await openWith(harness, [
+          modeSelect(
+            'bypassPermissions',
+            allModes.filter((mode) => mode !== 'auto'),
+          ),
+          models('haiku'),
+        ]);
+        expect(modeCalls(harness)).toEqual(['acceptEdits']);
+      } finally {
+        harness.actor.stop();
+      }
+    });
+
+    it("should keep the person's pick, and through a model switch", async () => {
+      const harness = start({
+        opening: { ...input().opening, adapter: claudeLike },
+        lend: { ...lent, configuration: { mode: 'default' } },
+      });
+      try {
+        await openWith(harness, [modeSelect('default'), models('opus')]);
+        expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
+        expect(harness.actor.getSnapshot().context.defaultModeId).toBeNull();
+        nextTurn(harness, { ...lent, requestId: 'run-2:0', model: 'haiku', configuration: { mode: 'default' } });
+        expect(harness.lastCall()).toMatchObject({ params: { configId: 'model', value: 'haiku' } });
+        harness.answer({
+          configOptions: [
+            modeSelect(
+              'default',
+              allModes.filter((mode) => mode !== 'auto'),
+            ),
+            models('haiku'),
+          ],
+        });
+        expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
+        expect(modeCalls(harness)).toEqual([]);
+      } finally {
+        harness.actor.stop();
+      }
+    });
+
+    it("should keep the person's pick on a turn that names no mode", async () => {
+      const harness = start({
+        opening: { ...input().opening, adapter: claudeLike },
+        lend: { ...lent, configuration: { mode: 'default' } },
+      });
+      try {
+        await openWith(harness, [modeSelect('default'), models('opus')]);
+        expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
+        nextTurn(harness, { ...lent, requestId: 'run-2:0' });
+        expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
+        expect(modeCalls(harness)).toEqual([]);
+        expect(harness.actor.getSnapshot().context.defaultModeId).toBeNull();
+      } finally {
+        harness.actor.stop();
+      }
+    });
+
+    it('should move a defaulted chat to acceptEdits when a model loses auto, and back to auto when it returns', async () => {
+      const harness = start({ opening: { ...input().opening, adapter: claudeLike } });
+      try {
+        await openWith(harness, [modeSelect('default'), models('opus')]);
+        harness.answer({ configOptions: [modeSelect('auto'), models('opus')] });
+        /* The composer echoes the confirmed `auto` back; the adapter clamps it to `default` on Haiku. */
+        nextTurn(harness, { ...lent, requestId: 'run-2:0', model: 'haiku', configuration: { mode: 'auto' } });
+        harness.answer({
+          configOptions: [
+            modeSelect(
+              'default',
+              allModes.filter((mode) => mode !== 'auto'),
+            ),
+            models('haiku'),
+          ],
+        });
+        expect(harness.lastCall()).toMatchObject({ params: { configId: 'mode', value: 'acceptEdits' } });
+        harness.answer({
+          configOptions: [
+            modeSelect(
+              'acceptEdits',
+              allModes.filter((mode) => mode !== 'auto'),
+            ),
+            models('haiku'),
+          ],
+        });
+        expect(harness.lastCall()).toMatchObject({ method: 'session/prompt' });
+        nextTurn(harness, { ...lent, requestId: 'run-3:0', model: 'opus', configuration: { mode: 'acceptEdits' } });
+        harness.answer({ configOptions: [modeSelect('acceptEdits'), models('opus')] });
+        expect(harness.lastCall()).toMatchObject({ params: { configId: 'mode', value: 'auto' } });
+        expect(modeCalls(harness)).toEqual(['auto', 'acceptEdits', 'auto']);
+      } finally {
+        harness.actor.stop();
+      }
+    });
+
+    it('should keep a pre-PR5 chat in its recorded mode', async () => {
+      const harness = start({
+        opening: { ...input().opening, adapter: claudeLike },
+        lend: { ...lent, configuration: { mode: 'default' }, record: { acpSessionId: 'acp-1' } },
+      });
+      try {
+        await openWith(harness, [modeSelect('default'), models('opus')]);
+        expect(modeCalls(harness)).toEqual([]);
+      } finally {
+        harness.actor.stop();
+      }
+    });
   });
 
   it('should probe an idle model and queue a turn until the option update settles', async () => {

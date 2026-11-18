@@ -21,6 +21,7 @@ GET /billing/payment-actions | v1 | AuthGuard | required | BillingController.lis
 GET /billing/payment-actions/:actionId | v1 | AuthGuard | required | BillingController.getPaymentAction
 GET /billing/reload-consent | v1 | AuthGuard | required | BillingController.getReloadConsent
 GET /billing/usage | v1 | AuthGuard | required | BillingController.getUsage
+GET /deployment | v1 | AuthGuard | public | DeploymentController.deployment
 GET /email/deliverability | v1 | AuthGuard | required | EmailDeliverabilityController.getOwnDeliverability
 GET /git/:repo/info/refs | v1 | AuthGuard | required | GitController.infoRefs
 GET /git/lfs/:handle | v1 | AuthGuard | required | GitProxyController.relayGet
@@ -97,7 +98,7 @@ POST /github/connections/start | v1 | AuthGuard | required | GithubController.st
 POST /github/gists/mutate | v1 | AuthGuard | required | GithubGistController.mutate
 POST /github/gists/use | v1 | AuthGuard | required | GithubGistController.use
 POST /internal/storage/receipts | v1 | - | required | StorageReceiptsController.receive
-POST /invitations/:token | v1 | AuthGuard | required | InvitationsController.accept
+POST /invitations/accept | v1 | AuthGuard | required | InvitationsController.accept
 POST /jobs | v1 | AuthGuard,AuthGuard | required | JobsController.submit
 POST /jobs/:jobId/attempts/finish | v1 | AuthGuard | public | JobsController.finishAttempt
 POST /jobs/:jobId/attempts/heartbeat | v1 | AuthGuard | public | JobsController.heartbeatAttempt

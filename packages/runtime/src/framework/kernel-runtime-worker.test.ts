@@ -3786,7 +3786,7 @@ describe('KernelRuntimeWorker idle publication (D1, D3)', () => {
     }
   });
 
-  it('should wait for a queued edit and skip the superseded snapshot without touching its disposed handle', async () => {
+  it('should wait for a queued edit and still snapshot the replaced build, whose handle it holds until then (R1)', async () => {
     const serializeHandle = vi.fn(({ handle }: { handle: unknown }) => ({ label: handleLabel(handle) }));
     const reuse = createSnapshotReuse();
     await seedTestFileSystem({ 'model.mock': '' });
@@ -3807,19 +3807,18 @@ describe('KernelRuntimeWorker idle publication (D1, D3)', () => {
         evaluated.push(event);
       };
       // The delivery permits the first build's publication, but the next edit is admitted before
-      // the worker is idle; the first build's handle is gone by the time it could run.
+      // the worker is idle; the worker holds the first build's handle until its snapshot is taken.
       worker.permitComputePublication();
       worker.handleUpdateDocument({ documentId: 'edited-document', intent: 2, parameters: { width: 2 } });
       await vi.waitFor(() => {
         expect(evaluated).toHaveLength(1);
       });
-      expect(serializeHandle).not.toHaveBeenCalled();
 
       worker.permitComputePublication();
       await vi.waitFor(() => {
-        expect(reuse.encodes).toEqual([{ label: 'live-2' }]);
+        expect(reuse.encodes).toEqual([{ label: 'live-1' }, { label: 'live-2' }]);
       });
-      expect(serializeHandle.mock.calls.map(([input]) => handleLabel(input.handle))).toEqual(['live-2']);
+      expect(serializeHandle.mock.calls.map(([input]) => handleLabel(input.handle))).toEqual(['live-1', 'live-2']);
     } finally {
       await worker.cleanup();
     }

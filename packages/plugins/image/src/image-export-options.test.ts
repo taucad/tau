@@ -369,16 +369,19 @@ describe('imageEdgeSchemas', () => {
       const ao = {
         radiusPixels: 9.6,
         intensity: 0.75,
-        distanceFalloff: 1,
-        thicknessRatio: 1 / 0.09,
+        distanceFalloff: 0.5,
+        falloffEndRatio: 22,
+        falloffRange: 0.8,
         denoiseDepthTolerance: 0.1,
         samples: 16,
         resolutionScale: 0.5,
       };
       expect(imageEdgeSchemas.png.parse({ ao }).ao).toEqual(ao);
       for (const invalid of [
-        { thicknessRatio: 0.09 },
-        { thicknessRatio: 101 },
+        { falloffEndRatio: 0.09 },
+        { falloffEndRatio: 101 },
+        { falloffRange: 0 },
+        { falloffRange: 1.5 },
         { denoiseDepthTolerance: 0.009 },
         { denoiseDepthTolerance: 10.5 },
         { samples: 0 },

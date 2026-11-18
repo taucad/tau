@@ -6,6 +6,7 @@ import marketing, {
   prefersAppEntry,
   resolveMarketingUrl,
   rewriteLocation,
+  rootDataPaths,
   shellSkewCookie,
 } from './edge-functions/marketing.js';
 /* oxlint-enable eslint/no-restricted-imports */
@@ -56,11 +57,35 @@ describe('resolveMarketingUrl', () => {
 
   it('should route marketing data while preserving app data ownership', () => {
     expect(resolve('/pricing.data?_routes=www-page&code=secret')).toBe(`${origin}/pricing.data?_routes=www-page`);
-    expect(resolve('/_root.data?_routes=www-home')).toBe(`${origin}/_root.data?_routes=www-home`);
-    expect(resolve('/_root.data')).toBeUndefined();
-    expect(resolve('/_root.data?_routes=root,routes/home')).toBeUndefined();
     expect(resolve('/vision.data?_routes=www-vision')).toBe(`${origin}/vision.data?_routes=www-vision`);
     expect(resolve('/sitemap-marketing.xml')).toBe(`${origin}/sitemap.xml`);
+  });
+
+  /* React Router 7 names the root data request `/_root.data`; trailing-slash-aware data requests (React Router 8's
+   * default) name it `/_.data`. A tab of either build may be open, so both stay accepted (RR4). */
+  it.each(['/_root.data', '/_.data'])(
+    'should route marketing Home data at %s, by its name, and app data to the app',
+    (path) => {
+      expect(rootDataPaths).toContain(path);
+      expect(resolve(`${path}?_routes=www-home`)).toBe(`${origin}${path}?_routes=www-home`);
+      expect(resolve(`${path}?_routes=www-home&code=secret`)).toBe(`${origin}${path}?_routes=www-home`);
+      expect(resolve(path)).toBeUndefined();
+      expect(resolve(`${path}?_routes=root,routes/_index`)).toBeUndefined();
+      expect(resolve(`${path}?_routes=www-home,routes/_index`)).toBeUndefined();
+      expect(resolve(`${path}?_routes=www-home`, 'POST')).toBeUndefined();
+    },
+  );
+
+  it('should route the trailing-slash data requests of marketing pages by their prefix', () => {
+    expect(resolve('/pricing/_.data?_routes=www-pricing')).toBe(`${origin}/pricing/_.data?_routes=www-pricing`);
+    expect(resolve('/legal/privacy/_.data?_routes=www-legal-privacy&ref=hn')).toBe(
+      `${origin}/legal/privacy/_.data?_routes=www-legal-privacy`,
+    );
+    expect(resolve('/blog/_.data?_routes=www-blog')).toBe(`${origin}/blog/_.data?_routes=www-blog`);
+    // App data, with or without a trailing slash, stays on the app.
+    for (const path of ['/projects/_.data', '/w/home/_.data', '/pricingx/_.data', '/settings/_.data']) {
+      expect(resolve(`${path}?_routes=root`)).toBeUndefined();
+    }
   });
 
   it('should serve the agent page from the marketing origin, leaving the other LLM indexes to the docs redirects', () => {
@@ -104,6 +129,14 @@ describe('config', () => {
     expect(config.path).toContain('/legal/*');
     expect(config.path).toContain('/vision');
     expect(config.path).toContain('/llms.txt');
+  });
+
+  it("should register both names of the root data request, and each marketing page's trailing-slash data request", () => {
+    expect(config.path).toContain('/_root.data');
+    expect(config.path).toContain('/_.data');
+    // `<prefix>/_.data` is under `<prefix>/*`, `<prefix>.data` is listed itself.
+    expect(config.path).toContain('/pricing/*');
+    expect(config.path).toContain('/pricing.data');
   });
 });
 
@@ -580,6 +613,12 @@ describe('Home shell selection at / (PL4)', () => {
       { href: 'https://tau.new/_root.data?_routes=root,routes/_index', cookie: 'tau-entry=app' },
       'function',
     ],
+    ['Home data by its trailing-slash name', { href: 'https://tau.new/_.data', cookie: 'tau-entry=app' }, 'function'],
+    [
+      'Home data for its routes by its trailing-slash name',
+      { href: 'https://tau.new/_.data?_routes=root,routes/_index', cookie: 'tau-entry=app' },
+      'function',
+    ],
     // The preference, where marketing answers: exactly as before.
     ['the website escape', { href: 'https://tau.new/?website', cookie: 'tau-entry=app' }, 'marketing'],
     [
@@ -591,6 +630,22 @@ describe('Home shell selection at / (PL4)', () => {
     [
       'marketing Home data',
       { href: 'https://tau.new/_root.data?_routes=www-home', cookie: 'tau-entry=app' },
+      'marketing',
+    ],
+    [
+      'marketing Home data by its trailing-slash name',
+      { href: 'https://tau.new/_.data?_routes=www-home', cookie: 'tau-entry=app' },
+      'marketing',
+    ],
+    ['no cookie, marketing Home data', { href: 'https://tau.new/_root.data?_routes=www-home' }, 'marketing'],
+    [
+      'no cookie, marketing Home data by its trailing-slash name',
+      { href: 'https://tau.new/_.data?_routes=www-home' },
+      'marketing',
+    ],
+    [
+      "no cookie, a marketing page's trailing-slash data",
+      { href: 'https://tau.new/pricing/_.data?_routes=www-pricing' },
       'marketing',
     ],
     // No preference, another preference or an ambiguous one: exactly as before.
@@ -610,6 +665,7 @@ describe('Home shell selection at / (PL4)', () => {
     ['no cookie, POST', { href: 'https://tau.new/', method: 'POST' }, 'function'],
     ['no cookie, no marketing deploy', { href: 'https://tau.new/', origin: undefined }, 'function'],
     ['no cookie, Home data', { href: 'https://tau.new/_root.data' }, 'function'],
+    ['no cookie, Home data by its trailing-slash name', { href: 'https://tau.new/_.data' }, 'function'],
   ])('should answer %s with the %s document', async (_shape, shape, expected) => {
     const { served, requests } = await serve(shape);
     expect(served).toBe(expected);

@@ -325,6 +325,14 @@
       "owner": "desktop updater"
     },
     {
+      "id": "B20",
+      "bound": "Desktop first-window reveal (15 s): a window whose first page has not painted is shown as it is, so a load that never finishes still leaves a visible window and its menu (B17)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout(reveal, windowRevealMilliseconds)",
+      "class": "Presentation",
+      "owner": "desktop boot"
+    },
+    {
       "id": "C1",
       "bound": "Leader heartbeat (M2 leading)",
       "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
@@ -475,6 +483,22 @@
       "token": "restartWindow",
       "class": "Liveness",
       "owner": "W6"
+    },
+    {
+      "id": "FS-START-DEADLINE",
+      "bound": "File service start deadline (20 s, fileManagerStartDeadlineMilliseconds): connecting the worker and initializing its services each end in the error state with code START_DEADLINE when it passes",
+      "site": "apps/ui/app/machines/file-manager.machine.ts",
+      "token": "startDeadline",
+      "class": "Liveness",
+      "owner": "desktop resilient startup WP2 (B31)"
+    },
+    {
+      "id": "FS-TRANSIENT-RETRY",
+      "bound": "One automatic retry of a transient root-mount start failure after 1 s; a second failure waits for the person",
+      "site": "apps/ui/app/machines/file-manager.machine.ts",
+      "token": "transientRetry",
+      "class": "Backoff",
+      "owner": "desktop resilient startup WP2 (D3)"
     },
     {
       "id": "E5",
@@ -657,10 +681,18 @@
     {
       "id": "E31",
       "bound": "Gateway attempt lookup (resolveInvocation), 10 s, then `unavailable` (RA-Q5)",
-      "site": "packages/agent-host/src/transport/tau-cloud-gateway-model-transport.ts",
+      "site": "packages/agent-host/src/transport/gateway-model-transport.ts",
       "token": "attemptLookupTimeout",
       "class": "External edge",
       "owner": "W11"
+    },
+    {
+      "id": "E41",
+      "bound": "Deployment answer at a run's admission or reopening (ModelDeployment.resolve), 10 s or the run's Stop, then `unknown`: the run ends DEPLOYMENT_UNKNOWN before any call (I1)",
+      "site": "packages/agent-host/src/transport/gateway-model-transport.ts",
+      "token": "deploymentAnswerTimeout",
+      "class": "External edge",
+      "owner": "unified-model-transport W3"
     },
     {
       "id": "N1",
@@ -733,6 +765,14 @@
       "token": "input.deadlineMilliseconds",
       "class": "External edge",
       "owner": "W8"
+    },
+    {
+      "id": "W30-LEASE",
+      "bound": "Chat-log lease wait for each chat's leadership lock, 5 s by default (chatLogLeaseWaitMilliseconds): a session that just closed releases its locks in that time; on expiry the lease is refused with the chat another process leads, so the delete it guards does not run",
+      "site": "packages/agent-host/src/browser.ts",
+      "token": "AbortSignal.timeout(waitMilliseconds)",
+      "class": "Liveness",
+      "owner": "W30 project lifecycle"
     },
     {
       "id": "D13",
@@ -1290,6 +1330,30 @@
       "token": "retry = setTimeout(() => {",
       "class": "Backoff",
       "owner": "filesystem capability W9 (D13)"
+    },
+    {
+      "id": "SHELL-PS-MODULE-CACHE-SCHEDULE",
+      "bound": "Windows PowerShell module analysis cache build scheduler: starts after 10 s of shell idleness (idleDelay), at most two failed attempts per session; the timer is unref'd and cleared on dispose",
+      "site": "libs/shell-service/src/shell/shell-module-cache.ts",
+      "token": "state.timer = setTimeout(run, startDelay)",
+      "class": "Backoff",
+      "owner": "windows-shell-sandbox L5"
+    },
+    {
+      "id": "SHELL-PS-MODULE-CACHE-BUILD",
+      "bound": "Windows PowerShell module analysis cache build deadline: 600 s (moduleCacheMilliseconds) for the sandboxed build launch; on expiry the launch is aborted and no cache is published",
+      "site": "libs/shell-service/src/shell/shell-service.ts",
+      "token": "AbortSignal.timeout(milliseconds)",
+      "class": "External edge",
+      "owner": "windows-shell-sandbox L5"
+    },
+    {
+      "id": "SHELL-WINDOWS-SETUP-PROGRAM",
+      "bound": "Windows shell sandbox setup programs: whoami 10 s; the elevated helper setup through one UAC prompt 10 min (the person may take time to answer the prompt); on expiry setup reports failed",
+      "site": "apps/libs/desktop-services-host/src/services-host-shell.ts",
+      "token": "timeout: timeoutMilliseconds",
+      "class": "External edge",
+      "owner": "windows-shell-sandbox L5"
     }
   ]
 }

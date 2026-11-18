@@ -44,10 +44,8 @@ export type ArmSpec = {
 
 /**
  * Every qualified arm. `off` is the corrected uninstrumented baseline: the
- * runner reaches it through the loader hook's `semanticDisabled` stub session,
- * because the shipped kernel has no supported switch (see
- * `packages/plugins/replicad/src/replicad.kernel.ts:486` -- recorded as a W1
- * collision, not fixed here).
+ * runner passes the kernel's `computeReuse: false` (the shipped default), so no
+ * operation adapter is constructed; every other arm passes `computeReuse: true`.
  */
 export const arms: readonly ArmSpec[] = [
   {

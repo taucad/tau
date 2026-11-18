@@ -27,6 +27,7 @@ import type { WatchEvent } from '@taucad/filesystem';
 
 import { createServicesHost, refusedRuntimePortMessage } from '#services-host.impl.js';
 import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort } from '#services-host.impl.js';
+import { recordingTelemetryApi } from '#runtime-telemetry.fixture.js';
 
 /**
  * Every `createProjectHostActor` call the utility makes, and every project host
@@ -361,6 +362,41 @@ describe('createServicesHost — admitted spelling before canonicalisation', () 
       expect(options.allowRoot(`${alias}-evil`)).toBe(false);
     } finally {
       unsettled.mockRestore();
+      host.dispose();
+      await unlink(alias);
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('createServicesHost — admitted spelling after canonicalisation', () => {
+  it('should refuse a published link retargeted after its realpath settled', async () => {
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-retarget-')));
+    const granted = join(sandbox, 'granted');
+    const elsewhere = join(sandbox, 'elsewhere');
+    const alias = join(sandbox, 'alias');
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+    await Promise.all([mkdir(granted), mkdir(elsewhere)]);
+    await symlink(granted, alias, linkType);
+    const serve = vi.fn<NonNullable<ServicesHostOptions['serve']>>(() => ({
+      run: vi.fn(),
+      close: async () => undefined,
+    }));
+    const { host } = hostHarness({ serve });
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [alias] }));
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+      const [, options] = serve.mock.calls[0]!;
+      await vi.waitFor(() => {
+        expect(options.allowRoot(granted)).toBe(true);
+      });
+      expect(options.allowRoot(alias)).toBe(true);
+
+      await unlink(alias);
+      await symlink(elsewhere, alias, linkType);
+      expect(options.allowRoot(alias)).toBe(false);
+    } finally {
       host.dispose();
       await unlink(alias);
       await rm(sandbox, { recursive: true, force: true });
@@ -2031,6 +2067,62 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     host.handleMessage(frame({ type: 'telemetryConsent', consent: 'yes' }));
     expect(options.syncTelemetryConsent?.()).toBe('unknown');
   });
+
+  /* T19: the agent's `prepare_kernel` is main's preparation, and each one it settles is one `prepare` entry. */
+  it.each([
+    ['granted', 'granted', 1],
+    ['denied', 'denied', 0],
+    ['unknown, as main has not relayed it', undefined, 0],
+  ] as const)(
+    "should report each preparation the agent settles while the renderer's consent is %s",
+    async (_why, consent, reported) => {
+      const telemetrySandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-telemetry-'));
+      workspaces.push(telemetrySandbox);
+      const api = recordingTelemetryApi(join(telemetrySandbox, 'config'));
+      const blocked = {
+        status: 'blocked',
+        kernel: 'build123d',
+        reason: 'offline-miss',
+        message: 'No network at /home/a/.tau',
+      } as const;
+      const prepare = vi.fn(async () => blocked);
+      const { host, workspaceRoot } = await configuredHost(
+        {},
+        { nativeKernels: { prepare, preparable: [] }, runtimeTelemetry: api.runtimeTelemetry },
+      );
+      host.handleMessage(frame({ type: 'authToken', token: 'bearer-1', principal: 'user_1' }));
+      if (consent !== undefined) {
+        host.handleMessage(frame({ type: 'telemetryConsent', consent }));
+      }
+      connect(host, workspaceRoot);
+      await vi.waitFor(() => {
+        expect(projectHostCalls).toHaveLength(1);
+      });
+      const { prepareKernel } = projectHostCalls[0]!.host();
+
+      /* The agent's answer is main's, whatever is reported. */
+      await expect(
+        prepareKernel?.({ kernel: 'build123d' }, { signal: new AbortController().signal, onProgress: () => undefined }),
+      ).resolves.toEqual(blocked);
+      expect(prepare).toHaveBeenCalledOnce();
+      await host.quiesce();
+
+      expect(api.operations()).toHaveLength(reported);
+      if (reported === 0) {
+        expect(api.posts()).toEqual([]);
+      } else {
+        expect(api.operations()[0]!.detail).toMatchObject({
+          operation: 'prepare',
+          outcome: 'refused',
+          code: 'offline-miss',
+          route: 'desktop',
+          caller: 'host',
+        });
+        expect(JSON.stringify(api.posts())).not.toMatch(/build123d|\/home\/a|user_1|bearer-1/u);
+      }
+    },
+    20_000,
+  );
 
   /* W6.r1 round 3: the funded transport names the same account, read per invocation. */
   it("should give the funded transport the signed-in session's user id as its principal", async () => {

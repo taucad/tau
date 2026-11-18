@@ -7,9 +7,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Project } from '@taucad/types';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
-import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
+import type { PendingProjectOperation } from '@taucad/files-ui/types/pending-project-operation.types';
 import type { EditorState } from '@taucad/ui-core/types/editor.types';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 
 const projectOneId = 'proj_one';
 const projectTwoId = 'proj_two';
@@ -571,5 +571,35 @@ describe('IndexedDbStorageProvider', () => {
       await expect(provider.trashProject('proj_missing', 1)).resolves.toBeUndefined();
       await expect(provider.restoreProject('proj_missing')).resolves.toBeUndefined();
     });
+  });
+});
+
+describe('IndexedDbStorageProvider open deadline (B31)', () => {
+  it('should reject an open that fires no event at 5 000 ms with DatabaseOpenTimeoutError, and open again on the next read', async () => {
+    const original = globalThis.indexedDB;
+    const open = vi.fn(() => new EventTarget());
+    vi.useFakeTimers();
+    try {
+      globalThis.indexedDB = { open } as unknown as IDBFactory;
+      const provider = new IndexedDbStorageProvider();
+
+      const first = expect(provider.getAppUiPreferences()).rejects.toMatchObject({
+        name: 'DatabaseOpenTimeoutError',
+      });
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(open).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await first;
+
+      const second = expect(provider.getAppUiPreferences()).rejects.toMatchObject({
+        name: 'DatabaseOpenTimeoutError',
+      });
+      expect(open).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(5000);
+      await second;
+    } finally {
+      vi.useRealTimers();
+      globalThis.indexedDB = original;
+    }
   });
 });

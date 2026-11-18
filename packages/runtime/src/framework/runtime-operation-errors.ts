@@ -12,7 +12,7 @@ export class RenderAbortedError extends Error {
   }
 }
 
-/** Identify cooperative cancellation across worker realms. @internal */
+/** Identify cooperative cancellation across worker realms. @internal @public */
 export const isRenderAbortedError = (error: unknown): error is RenderAbortedError =>
   typeof error === 'object' &&
   error !== null &&

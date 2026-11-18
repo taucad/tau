@@ -14,7 +14,7 @@ import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
 import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
 import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
-import { importDiskMachine } from '#machines/import-disk.machine.js';
+import { importDiskMachine } from '@taucad/publish-ui/machines/import-disk.machine';
 import { ImportChannelError, createFromStagedImport, openImportSession } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
 import type { ImportSession } from '@taucad/ui-core/machines/import-staging';
@@ -52,7 +52,7 @@ import { inspect } from '#machines/inspector.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { isExcludedImportPath } from '@taucad/ui-core/utils/file-reader.utils';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
@@ -323,7 +323,7 @@ export default function ImportRoute(): React.JSX.Element {
       routeActiveRef.current = false;
     };
   }, [holdHostGrants]);
-  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ includeDeleted: true });
+  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ scope: 'all' });
   const presentLocationError = useProjectCreationLocationError();
   const [linkedSelection, setLinkedSelection] = useState<GithubRepositorySelection>();
   const [linkedMainFile, setLinkedMainFile] = useState('');
@@ -519,6 +519,7 @@ export default function ImportRoute(): React.JSX.Element {
           const session = await importSession();
           return session.plan(source, signal === undefined ? undefined : { signal });
         },
+        pickMainFile: findMainFile,
       },
       inspect,
     },

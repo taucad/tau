@@ -23,16 +23,11 @@ type ViewerBridge = {
   getSectionCapCompleteness():
     | { status: 'complete'; admittedSourceCount: number; exactSourceCount: number; perLoopSourceCount: number }
     | undefined;
-  getMeasureState(): { isMeasureActive: boolean; currentStart: Point | undefined };
+  getMeasureState(): { isMeasureActive: boolean; currentStart: Point | undefined; mode: 'auto' | 'point' };
   getViewSettings(): { enableGrid: boolean } | undefined;
   getCamera(): { requestedFov: number; projection: 'orthographic' | 'perspective' };
   setCamera(camera: { position: Point; target?: Point; fov?: number }): void;
   projectWorldPoint(point: Point): { x: number; y: number; visible: boolean };
-};
-
-type ViewerBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: ViewerBridge;
-  __TAU_SECTION_VIEW_TEST_BRIDGES__?: ViewerBridge[];
 };
 
 type BarLayout = Readonly<{
@@ -57,7 +52,7 @@ async function callBridge<Name extends keyof ViewerBridge>(
 ): Promise<ReturnType<ViewerBridge[Name]>> {
   return target.evaluate(
     ({ method, values }) => {
-      const bridge = (globalThis as unknown as ViewerBridgeWindow).__TAU_SECTION_VIEW_TEST__ as unknown as
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__ as unknown as
         | Record<string, (...values: unknown[]) => unknown>
         | undefined;
       if (!bridge) {
@@ -225,7 +220,21 @@ describe('Viewer controls bar', () => {
     const { isActive } = await callBridge('getSectionState');
     expect(isActive, 'Section should keep running beside Measure').toBe(true);
 
-    // A half-placed measurement. The open cut's handles would sit in the way of the click, so none is open.
+    /* A half-placed measurement is a point-to-point one: in Auto a click picks a whole feature and measures it at once
+     * (`measure-tool.spec.ts`, "measures a whole edge from one Auto selection"), so the person chooses Points first.
+     * The open cut's handles would sit in the way of the click, so none is open. */
+    await target.click(selectors.getByRole('button', { name: /^Targets:/u }));
+    const measurementMode = selectors.getByRole('combobox', { name: 'Measurement mode', exact: true });
+    await target.focus(measurementMode);
+    await target.type(measurementMode, 'Points');
+    await target.keyboardPress('Tab');
+    await target.click(selectors.getByRole('button', { name: /^Targets:/u }));
+    await expect
+      .poll(async () => {
+        const { mode } = await callBridge('getMeasureState');
+        return mode;
+      })
+      .toBe('point');
     await callBridge('selectSectionCut', undefined);
     await clickWorldPoint(leftCubeTopPoint);
     await expect.poll(readMeasurementStart).toBeDefined();
@@ -318,11 +327,9 @@ describe('Viewer controls bar', () => {
     await target.expectVisible(sourceFile, 30_000);
     await target.click(sourceFile);
     await target.expectCount(selectors.getByTestId('chat-viewer-layout'), 2, 60_000);
-    await target.waitFor(
-      () => (globalThis as unknown as ViewerBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__?.length === 2,
-      undefined,
-      { timeout: 60_000 },
-    );
+    await target.waitFor(() => globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__?.length === 2, undefined, {
+      timeout: 60_000,
+    });
     await target.expectGeometryFramed();
 
     await hoverViewer(1);

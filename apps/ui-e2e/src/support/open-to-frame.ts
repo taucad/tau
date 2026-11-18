@@ -80,7 +80,7 @@ type PageTimeline = Readonly<{
   marksEpochMilliseconds: number | undefined;
   longTaskCount: number;
   workerNames: readonly string[];
-  renderer: Readonly<{ api: 'webgl' | 'webgpu'; name: string; frame: number }> | undefined;
+  renderer: Readonly<{ api: 'webgl' | 'webgpu' | 'unknown'; name: string; frame: number }> | undefined;
 }>;
 
 type FrameWitness = Readonly<{
@@ -328,15 +328,7 @@ const instrument = (activeKernel: string): void => {
   };
   const poll = (): void => {
     state.rafTicks += 1;
-    const bridge = (
-      globalThis as {
-        __TAU_SECTION_VIEW_TEST__?: {
-          getModelComponents(): readonly unknown[];
-          isGeometryFramed(): boolean;
-          getGraphicsBackend(): string;
-        };
-      }
-    ).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (bridge) {
       stamp('bridgeReady');
       try {
@@ -378,8 +370,7 @@ const readPageTimeline = async (page: Page): Promise<PageTimeline> =>
       }
     ).__TAU_OPEN_TO_FRAME__;
     const elapsed = state ? performance.now() - state.start : 0;
-    const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getRendererIdentity(): PageTimeline['renderer'] } })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     return {
       backend: state?.backend,
       crossOriginIsolated: globalThis.crossOriginIsolated,
@@ -467,7 +458,13 @@ const tagsFor = (
   build: process.env['TAU_MEASUREMENT_BUILD'] === 'development' ? 'development' : 'production',
   wasmVariant: observed.engine ?? `${kernelId}:unobserved`,
   adapter: {
-    api: page?.renderer?.api ?? (page?.backend === 'webgpu' ? 'webgpu' : 'webgl'),
+    // A renderer that names no API (`unknown`) is reported by the backend the bridge answered.
+    api:
+      page?.renderer && page.renderer.api !== 'unknown'
+        ? page.renderer.api
+        : page?.backend === 'webgpu'
+          ? 'webgpu'
+          : 'webgl',
     angle: rendererAngle(launchArguments),
     name: page?.renderer?.name ?? '',
     implementation: classifyWebGpuAdapter({
@@ -586,11 +583,7 @@ const warmProfile = async (userData: string, picked: string, slug: string) => {
       () => {
         const framed = (globalThis as { __TAU_OPEN_TO_FRAME__?: { marks: Record<string, number> } })
           .__TAU_OPEN_TO_FRAME__?.marks['geometryFramed'];
-        const components = (
-          globalThis as {
-            __TAU_SECTION_VIEW_TEST__?: { getModelComponents(): readonly unknown[] };
-          }
-        ).__TAU_SECTION_VIEW_TEST__?.getModelComponents();
+        const components = globalThis.__TAU_SECTION_VIEW_TEST__?.getModelComponents();
         return framed !== undefined && (components?.length ?? 0) > 0;
       },
       undefined,
@@ -749,15 +742,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
       );
       at('geometryFramed');
       const bridgeState = await page.evaluate(() => {
-        const bridge = (
-          globalThis as {
-            __TAU_SECTION_VIEW_TEST__?: {
-              getModelComponents(): ReadonlyArray<{ id: string }>;
-              getRenderedModelComponentState(id: string): { visibleMeshCount: number };
-              getRendererIdentity(): { frame: number };
-            };
-          }
-        ).__TAU_SECTION_VIEW_TEST__;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
         const componentIds = bridge?.getModelComponents().map(({ id }) => id) ?? [];
         return {
           componentIds,
@@ -769,35 +754,18 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
         };
       });
       if (bridgeState.componentIds.length > 0 && bridgeState.visibleMeshes > 0 && bridgeState.rendererFrame > 0) {
-        const canvas = await page.evaluateHandle(() =>
-          (
-            globalThis as { __TAU_SECTION_VIEW_TEST__?: { getViewportCanvas(): HTMLCanvasElement } }
-          ).__TAU_SECTION_VIEW_TEST__?.getViewportCanvas(),
-        );
+        const canvas = await page.evaluateHandle(() => globalThis.__TAU_SECTION_VIEW_TEST__?.getViewportCanvas());
         const screenshot = join(outputDirectory, `open-to-frame-${host}-${kernelId}-${iteration}-pixel.png`);
         const pixels = await canvas.asElement()?.screenshot({ path: screenshot, animations: 'disabled' });
         await canvas.dispose();
         if (pixels && pixels.length > 0) {
           at('pixelCaptureUpperBound');
           await page.evaluate(() =>
-            (
-              globalThis as {
-                __TAU_SECTION_VIEW_TEST__?: {
-                  setPresentation(presentation: { surfaces: boolean; lines: boolean }): void;
-                };
-              }
-            ).__TAU_SECTION_VIEW_TEST__?.setPresentation({ surfaces: false, lines: false }),
+            globalThis.__TAU_SECTION_VIEW_TEST__?.setPresentation({ surfaces: false, lines: false }),
           );
           await page.waitForFunction(
             ({ previousFrame, componentIds }) => {
-              const bridge = (
-                globalThis as {
-                  __TAU_SECTION_VIEW_TEST__?: {
-                    getRendererIdentity(): { frame: number };
-                    getRenderedModelComponentState(id: string): { visibleMeshCount: number };
-                  };
-                }
-              ).__TAU_SECTION_VIEW_TEST__;
+              const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
               return (
                 bridge !== undefined &&
                 bridge.getRendererIdentity().frame > previousFrame &&
@@ -808,9 +776,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
             { timeout: 10_000 },
           );
           const blankCanvas = await page.evaluateHandle(() =>
-            (
-              globalThis as { __TAU_SECTION_VIEW_TEST__?: { getViewportCanvas(): HTMLCanvasElement } }
-            ).__TAU_SECTION_VIEW_TEST__?.getViewportCanvas(),
+            globalThis.__TAU_SECTION_VIEW_TEST__?.getViewportCanvas(),
           );
           const blankPixels = await blankCanvas.asElement()?.screenshot({ animations: 'disabled' });
           await blankCanvas.dispose();

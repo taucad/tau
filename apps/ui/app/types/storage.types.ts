@@ -2,7 +2,7 @@ import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { PartialDeep } from 'type-fest';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 
 export type CommitCancelledDraftRestoreInput = {
   messages: Chat['messages'];
@@ -129,6 +129,11 @@ export type ChatStorage = {
   getChatRecordsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<ChatRecord[]>;
   getAllChats(options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]>;
+  /**
+   * This device's own log of a chat (`events.jsonl`) as it is now, empty when it has none. A headless reader's bytes
+   * (W30): nothing is opened, locked or kept, so a caller that must trust them holds the chat's lease while it reads.
+   */
+  readChatLog(chatId: string, projectId: string): Promise<Uint8Array<ArrayBuffer>>;
   deleteChat(chatId: string): Promise<void>;
   /** Irreversibly remove an archived chat from discovery, retaining its sync tombstone. */
   purgeChat(chatId: string): Promise<void>;

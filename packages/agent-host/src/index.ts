@@ -72,6 +72,8 @@ export type {
   RunEntry,
 } from '#log/chat-ledger.js';
 export { followChat, readFolded } from '#log/follow-chat.js';
+export { unsettledLogRun } from '#log/unsettled-run.js';
+export type { UnsettledLogRun } from '#log/unsettled-run.js';
 export type { ChatRead, FoldedRead } from '#log/follow-chat.js';
 /* The seam's owner half, shared by the daemon launcher and the browser worker. The wire vocabulary itself ships
  * from `@taucad/agent-host/wire`. */
@@ -167,6 +169,9 @@ export type {
   ModelInvocationBinding,
   ModelStreamRequest,
   ModelTransport,
+  ModelDeployment,
+  DeploymentModeAnswer,
+  RunBillingMode,
   InvocationFunding,
   InvocationResolutionRequest,
   TurnAttemptKey,
@@ -210,6 +215,7 @@ export type {
 export type { CommandKey, CreateTauAgentHostOptions, TauAgentHost, TauAgentTurnRequest } from '#host/tau-agent-host.js';
 export type {
   CachedSystemPromptOptions,
+  GatewayBillingOptions,
   GatewayModelErrorCode,
   GatewayModelTransportOptions,
 } from '#transport/gateway-model-transport.js';

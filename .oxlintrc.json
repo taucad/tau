@@ -120,6 +120,7 @@
     "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
     "tau-lint/no-impl-in-index": "error",
+    "tau-lint/no-test-bridge-redeclaration": "error",
     "tau-lint/plugin-capability-filename": "error",
     "tau-lint/no-authored-pointer-cursor": "error",
     "tau-lint/no-inline-actor-selector": "error",
@@ -1563,11 +1564,7 @@
     },
     {
       // Current publish/import inversions. -- W9
-      "files": [
-        "apps/ui/app/lib/github-api.ts",
-        "apps/ui/app/machines/import-disk.machine.test.ts",
-        "apps/ui/app/machines/import-disk.machine.ts"
-      ],
+      "files": ["apps/ui/app/lib/github-api.ts"],
       "rules": { "no-restricted-imports": "off" }
     },
     {

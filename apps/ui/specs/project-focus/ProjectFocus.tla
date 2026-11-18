@@ -150,6 +150,8 @@
 \* that cannot be measured is swallowed there and retried by the layout's own render), so `ModuleLoaded` and the
 \* module party are unchanged and a link's warm-up still yields `ModuleAtStart = "loaded"`. The live sessions
 \* re-export the layout warm-up. No action or verdict changes.
+\* DC-10 files-ui slice 5 (2026-11-17): `project-route-intent.tsx` takes `project-url.utils` from `@taucad/files-ui`;
+\* only the import moved. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

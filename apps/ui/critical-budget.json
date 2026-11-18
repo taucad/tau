@@ -18,8 +18,8 @@
       },
       "home": {
         "brotliBytes": 1230036,
-        "requests": 225,
-        "largestChunkBrotliBytes": 138201,
+        "requests": 226,
+        "largestChunkBrotliBytes": 140852,
         "knownHeavy": {}
       }
     },
@@ -33,7 +33,7 @@
       "home": {
         "brotliBytes": 1252118,
         "requests": 236,
-        "largestChunkBrotliBytes": 138270,
+        "largestChunkBrotliBytes": 140921,
         "knownHeavy": {}
       }
     }

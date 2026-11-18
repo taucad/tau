@@ -22,6 +22,7 @@ const ownerState = vi.hoisted(() => ({
     | {
         agent?: { compute?: unknown; computeControl?: unknown };
         systemSkillBundles?: readonly unknown[];
+        machineTelemetry?: { onOperation?: unknown; onAdmissionRefusal?: unknown };
       },
   closed: undefined as undefined | PromiseWithResolvers<{ cause: 'requested' }>,
   workers: [] as WorkerThreads.Worker[],
@@ -102,6 +103,8 @@ describe('tau serve compute owner', () => {
     expect(ownerState.daemonOptions?.systemSkillBundles).not.toEqual([]);
     expect(JSON.stringify(ownerState.daemonOptions?.systemSkillBundles?.[0])).toContain('"path":"SKILL.md"');
     expect(ownerState.daemonOptions!.agent!.compute).toEqual({ mode: 'off' });
+    /* T19: a self-hosted serve reports nothing, so its machine store is handed no reporter. */
+    expect(ownerState.daemonOptions?.machineTelemetry).toBeUndefined();
     expect(ownerState.workers).toHaveLength(0);
     ownerState.closed!.resolve({ cause: 'requested' });
     await offRun;
@@ -149,5 +152,42 @@ describe('tau serve compute owner', () => {
       process.exitCode = undefined;
     }
     expect(ownerState.workers[1]!.threadId).toBe(-1);
+  });
+
+  it('T19: hands the cloud host its machine operation and admission reporters', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'tau-serve-cloud-workspace-'));
+    const configDirectory = await mkdtemp(join(tmpdir(), 'tau-serve-cloud-config-'));
+    vi.stubEnv('TAU_CONFIG_DIR', configDirectory);
+    vi.stubEnv('TAU_CLOUD_HOST', '1');
+    disposers.push(async () => {
+      vi.unstubAllEnvs();
+      await rm(workspace, { recursive: true, force: true });
+      await rm(configDirectory, { recursive: true, force: true });
+    });
+    ownerState.daemonOptions = undefined;
+
+    const { serveCommand } = await import('#commands/serve.js');
+    const running = runCommand(serveCommand, {
+      rawArgs: [
+        '--trust-projects',
+        '--agent-port=0',
+        `--workspace=${workspace}`,
+        '--compute-mode=off',
+        '--relay=http://127.0.0.1:1',
+      ],
+    });
+    await vi.waitFor(() => {
+      expect(capturedDaemonOptions()?.agent).toBeDefined();
+    });
+
+    const { machineTelemetry } = capturedDaemonOptions()!;
+    expect(machineTelemetry?.onOperation).toBeTypeOf('function');
+    expect(machineTelemetry?.onAdmissionRefusal).toBeTypeOf('function');
+    /* A reporter never throws into the store's admission. */
+    expect(() => {
+      (machineTelemetry!.onAdmissionRefusal as (refusal: unknown) => void)({ code: 'ROUTE_DENIED', actor: 'agent' });
+    }).not.toThrow();
+    ownerState.closed!.resolve({ cause: 'requested' });
+    await running;
   });
 });

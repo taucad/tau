@@ -207,6 +207,7 @@ const pendingApiReference: ReadonlySet<string> = new Set([
   'isPluginFactory',
   'isPluginInstance',
   'isRecordObject',
+  'isRenderAbortedError',
   'isSafeRelativePath',
   'isWebAssemblyException',
   'joinRelativePath',

@@ -6,6 +6,8 @@
  */
 import { posix, win32 } from 'node:path';
 
+import { powerShellModuleCacheVariable } from '@taucad/sandbox/shell/identity';
+
 import { shellGitEnvironment, shellGitReadEnvironment, shellGitWriteEnvironment } from '#shell/shell-git-view.js';
 import type { ShellGitView } from '#shell/shell-git-view.js';
 import type { TerminalGitAccess } from '#shell/shell-grant.js';
@@ -37,6 +39,11 @@ export type ShellEnvironmentOptions = Readonly<{
   terminalGit?: TerminalGitAccess | undefined;
   /** The launch's read-only git view (blueprint E1), which git in the shell then reads instead of finding none. */
   git?: ShellGitView | undefined;
+  /**
+   * On Windows, the PowerShell module analysis cache file the launch reads ({@link powerShellModuleCacheVariable}): the
+   * read-only cache Tau built once for this shell, or, for the one launch that builds it, where that launch writes it.
+   */
+  powerShellModuleCache?: string | undefined;
 }>;
 
 const posixSystemBins = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
@@ -58,19 +65,47 @@ export const shellEnvironment = (options: ShellEnvironmentOptions): Readonly<Rec
     const systemRoot = host['SystemRoot'] ?? String.raw`C:\Windows`;
     const system32 = win32.join(systemRoot, 'System32');
     const shellHome = win32.dirname(options.executablePath);
+    const windowsPowerShellHome = win32.join(system32, 'WindowsPowerShell', 'v1.0');
+    const windowsPowerShellModules = win32.join(windowsPowerShellHome, 'Modules');
+    /*
+     * `PSModulePath`: the shell's own modules first. PowerShell 7 then gets Windows PowerShell's. Windows PowerShell 5.1
+     * (its home compared without case, as Windows compares paths) gets the machine's
+     * `%ProgramFiles%\WindowsPowerShell\Modules` after its own (WIN-X64 job 133853031159, T02-ps51). 5.1's command
+     * auto-discovery stops at the first module folder it cannot list, and 5.1 inserts the machine folder *before* its
+     * home unless the variable already names it. One folder the sandbox may not read (an administrator-only module, such
+     * as the runner image's `ImageHelpers`) then hid `Microsoft.PowerShell.Utility`, and with it `Measure-Object` and
+     * `Write-Output`. Named after the home, the machine folder keeps its modules available and can no longer hide the
+     * built-in ones; a module behind such a folder still imports by name. PowerShell 7's order is unchanged: its rows
+     * pass in the same run.
+     */
+    const isWindowsPowerShell = shellHome.toLowerCase() === windowsPowerShellHome.toLowerCase();
+    const programFiles =
+      host['ProgramW6432'] ?? host['ProgramFiles'] ?? win32.join(win32.parse(systemRoot).root, 'Program Files');
+    const moduleFolders = isWindowsPowerShell
+      ? [win32.join(shellHome, 'Modules'), win32.join(programFiles, 'WindowsPowerShell', 'Modules')]
+      : [win32.join(shellHome, 'Modules'), windowsPowerShellModules];
     return {
       SystemRoot: systemRoot,
       windir: systemRoot,
       ComSpec: win32.join(system32, 'cmd.exe'),
       PATHEXT: '.COM;.EXE;.BAT;.CMD',
       PATH: [...options.toolchainBins, shellHome, system32, systemRoot, win32.join(system32, 'Wbem')].join(';'),
-      PSModulePath: [
-        win32.join(shellHome, 'Modules'),
-        win32.join(system32, 'WindowsPowerShell', 'v1.0', 'Modules'),
-      ].join(';'),
+      PSModulePath: moduleFolders.join(';'),
+      /* The private home stands in for the profile the sandbox account is started without. */
       USERPROFILE: options.home,
+      /*
+       * Per-user application data inside the private home, gone with it. Tools that find their settings and caches
+       * through these variables (npm's `%APPDATA%\npm` prefix, for one) otherwise find none and fail, or write beside
+       * the working directory; with them they write into the launch's own roots. PowerShell itself reads its module
+       * analysis cache from `PSModuleAnalysisCachePath`, set below, not from these.
+       */
+      APPDATA: win32.join(options.home, 'AppData', 'Roaming'),
+      LOCALAPPDATA: win32.join(options.home, 'AppData', 'Local'),
       TEMP: options.temporary,
       TMP: options.temporary,
+      ...(options.powerShellModuleCache === undefined
+        ? {}
+        : { [powerShellModuleCacheVariable]: options.powerShellModuleCache }),
       ...plain('USERNAME'),
     };
   }

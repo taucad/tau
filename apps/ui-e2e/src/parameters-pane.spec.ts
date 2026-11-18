@@ -217,6 +217,40 @@ const expectHoverTreatment = async (button: Locator, reference: ButtonVisualStat
     .toEqual({ hasBackground: true, color: reference.color, isRounded: true });
 };
 
+/**
+ * Scroll a section's parameter rows from the top until `row` is mounted, as a person scrolls to it. A form with more
+ * than 20 rows is a virtual list since 7f2e4042b (2026-09-30), so a row below the fold is not in the page until then.
+ *
+ * @param body - The section's `[data-slot="parameters"]` body.
+ * @param row - The row's control.
+ */
+const revealParameter = async (body: Locator, row: Locator): Promise<void> => {
+  const rows = body.getByCss('[data-virtuoso-scroller]').first();
+  await target.expectVisible(rows, 60_000);
+  for (let step = 0; step < 80; step += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each step scrolls, then looks for the row it mounted.
+    if (await target.isVisible(row)) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one scroll step at a time, as a person scrolls.
+    await target.evaluateLocator(
+      rows,
+      (list, isFirst) => {
+        let scroller = list instanceof HTMLElement ? list : undefined;
+        while (scroller && scroller.scrollHeight <= scroller.clientHeight + 1) {
+          scroller = scroller.parentElement ?? undefined;
+        }
+        if (!scroller) {
+          throw new Error('The parameter rows had no scroll container.');
+        }
+        scroller.scrollTop = isFirst ? 0 : scroller.scrollTop + Math.max(48, scroller.clientHeight * 0.5);
+      },
+      step === 0,
+    );
+  }
+  await target.expectVisible(row);
+};
+
 const fieldUnit = async (input: Locator, surface?: target.TargetSurface): Promise<string> =>
   target.evaluateLocator(
     input,
@@ -763,7 +797,9 @@ test('keeps rounded file disclosures accessible and reorderable through Paneview
   const reset = selectors.getByRole('button', { name: 'Reset parameters' }).first();
   await target.expectVisible(reset, 15_000);
 
-  const close = selectors.getByRole('button', { name: `Close ${secondaryPath}` });
+  /* The tab's close glyph is the hover reference: a pointer target only, never a focusable button inside `role="tab"`
+   * (`dockview-tab.tsx`, #743), so it is found by Dockview's action class rather than by a role. */
+  const close = selectors.getByCss(`.dv-tab[aria-label="${secondaryPath}"] .dv-default-tab-action`);
   await target.hover(close);
   const lightClose = await readButtonVisualState(close);
   expect(lightClose.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
@@ -784,7 +820,7 @@ test('keeps rounded file disclosures accessible and reorderable through Paneview
   await target.expectVisible(secondaryBody);
   await target.expectVisible(selectors.getByLabelText('Parameter: Corner Radius'), 60_000);
   const stressInput = selectors.getByLabelText('Input for Stress Value 96');
-  await target.expectVisible(stressInput, 60_000);
+  await revealParameter(secondaryBody, stressInput);
   expect(await fieldUnit(stressInput)).toBe('');
   await target.expectCount(selectors.getByRole('button', { name: 'Inferred unit for Stress Value 96' }), 0);
   const canvas = selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first();
@@ -814,7 +850,8 @@ test('keeps rounded file disclosures accessible and reorderable through Paneview
     observer.observe(untouchedRow, { attributes: true, characterData: true, childList: true, subtree: true });
     return document.querySelectorAll('[aria-label^="Parameter:"]').length;
   });
-  expect(untouchedRowCount).toBeGreaterThanOrEqual(104);
+  // The stress form's 104 rows are a virtual list since 7f2e4042b: only the rows near the fold are in the page.
+  expect(untouchedRowCount).toBeLessThan(104);
   await target.fill(stressInput, '');
   await target.type(stressInput, '123456789');
   await target.keyboardPress('Enter');
@@ -832,7 +869,14 @@ test('keeps rounded file disclosures accessible and reorderable through Paneview
     return state.__TAU_PARAMETER_STRESS__?.mutationCount ?? Number.POSITIVE_INFINITY;
   });
   expect(untouchedRowMutations).toBe(0);
-  await target.expectVisible(selectors.getByText(/parameter stress preview failure/iu), 60_000);
+  /* Since #374 a failed build is a collapsed count in the viewer bar; its message is in the Issues list it opens. */
+  const issues = selectors.getByRole('button', { name: /^Build failed\. Issues:/u });
+  await target.expectVisible(issues, 60_000);
+  await target.click(issues);
+  await target.expectVisible(
+    selectors.getByRole('region', { name: 'Issues', exact: true }).getByText(/parameter stress preview failure/iu),
+  );
+  await target.click(issues);
   await target.expectVisible(canvas);
   await expect
     .poll(async () => target.evaluateLocator(canvas, (element) => (element as HTMLCanvasElement).toDataURL()))

@@ -43,18 +43,18 @@ export const meterOperations = (inner: OperationCache): OperationMeter => {
   return {
     cache: {
       operation(request) {
+        // The library hands every call a request of its own, so its `compute` is replaced in place: copying the
+        // request on every call, reused ones included, costs an edit tens of milliseconds (I7).
         const { op, compute } = request;
-        return inner.operation({
-          ...request,
-          compute() {
-            const started = performance.now();
-            try {
-              return compute();
-            } finally {
-              record(op, performance.now() - started);
-            }
-          },
-        });
+        request.compute = () => {
+          const started = performance.now();
+          try {
+            return compute();
+          } finally {
+            record(op, performance.now() - started);
+          }
+        };
+        return inner.operation(request);
       },
       step: (request) => inner.step(request),
       elements: (...input) => {

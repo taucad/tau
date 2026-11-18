@@ -67,7 +67,15 @@ export const startPlatformUpdateController = (
   let status = 'Checking for updates…';
   const publish = (phase: DesktopUpdateSnapshot['phase'], detail: string): void => {
     status = detail;
-    snapshot = { ...snapshot, revision: snapshot.revision + 1, phase, detail };
+    /* The renderer owns the notice's copy; `status` keeps main's wording, raw errors included, for the log. Only an
+       update APT already installed is worded here, since the renderer cannot tell it from a downloaded one. */
+    const { detail: _previous, ...rest } = snapshot;
+    snapshot = {
+      ...rest,
+      revision: snapshot.revision + 1,
+      phase,
+      ...(phase === 'ready' && backend.systemManaged ? { detail } : {}),
+    };
     options.onState?.(snapshot);
   };
   const restartWhenReady = (wanted: boolean): void => {
@@ -178,7 +186,7 @@ export const startPlatformUpdateController = (
     publish(
       'ready',
       backend.systemManaged
-        ? 'APT installed a newer version. Save and restart to use it; this session keeps its original files.'
+        ? 'APT installed a newer Tau. Restart to start using it; Tau saves your work first.'
         : 'Saves your work, then restarts to install. Quitting normally leaves the update for later.',
     );
   };

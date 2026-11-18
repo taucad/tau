@@ -65,8 +65,10 @@ describe('desktop update control', () => {
         <DesktopUpdateControl bridge={source.bridge} />
       </SidebarProvider>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Move Tau to Applications' }));
-    expect(await screen.findByText(/Move Tau to Applications to receive updates/u)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Move Tau to update' }));
+    // The renderer words the notice; main's own detail for this phase is ignored.
+    expect(await screen.findByText(/Moving it to Applications restarts Tau/u)).toBeInTheDocument();
+    expect(screen.queryByText(/read-only location/u)).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'Move to Applications' }));
     await waitFor(() => {
       expect(source.bridge.download).toHaveBeenCalledOnce();
@@ -82,7 +84,7 @@ describe('desktop update control', () => {
     );
     await act(async () => undefined);
     source.emit({ ...ready, phase: 'system-managed', revision: 3, requestId: 1 });
-    expect(await screen.findByText('Your administrator manages updates through APT.')).toBeInTheDocument();
+    expect(await screen.findByText(/Tau updates through APT on this computer/u)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart now' })).not.toBeInTheDocument();
   });
   it('should remain absent in the browser', () => {
@@ -97,7 +99,7 @@ describe('desktop update control', () => {
         <DesktopUpdateControl bridge={source.bridge} />
       </SidebarProvider>,
     );
-    await screen.findByRole('button', { name: 'Downloading an update' });
+    await screen.findByRole('button', { name: 'Downloading update' });
     screen.getByRole('textbox', { name: 'Model draft' }).focus();
     source.emit(ready);
     expect(screen.getByRole('textbox', { name: 'Model draft' })).toHaveFocus();
@@ -108,9 +110,9 @@ describe('desktop update control', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Restart now' }));
     expect(source.bridge.install).toHaveBeenCalledOnce();
     source.emit({ ...ready, revision: 3, phase: 'saving' });
-    expect(screen.getByRole('button', { name: 'Please wait…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
     source.emit({ ...ready, revision: 4, phase: 'restart-blocked' });
-    expect(screen.getByRole('button', { name: 'Retry restart' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled();
     view.unmount();
     expect(source.unsubscribe).toHaveBeenCalledOnce();
   });
@@ -226,7 +228,7 @@ describe('desktop update control', () => {
         <DesktopUpdateControl bridge={source.bridge} />
       </SidebarProvider>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Downloading an update' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Downloading update' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Restart when ready' }));
     await waitFor(() => {
       expect(source.bridge.install).toHaveBeenCalledOnce();
@@ -234,21 +236,22 @@ describe('desktop update control', () => {
     expect(source.bridge.check).not.toHaveBeenCalled();
     source.emit({ ...downloading, revision: 2, installWhenReady: true, detail: 'Downloading Tau 1.0.75…' });
     expect(await screen.findByText(/restart as soon as the download finishes/u)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restarts when ready' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Restart when ready' })).not.toBeInTheDocument();
   });
-  it('should send a retry from a failed update as the request to install it', async () => {
+  it('should retry a failed update as a check, never as consent to restart', async () => {
     const source = fixture(Promise.resolve({ ...ready, phase: 'error', revision: 1 }));
     render(
       <SidebarProvider>
         <DesktopUpdateControl bridge={source.bridge} />
       </SidebarProvider>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Update interrupted' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Couldn’t update' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
     await waitFor(() => {
-      expect(source.bridge.install).toHaveBeenCalledOnce();
+      expect(source.bridge.check).toHaveBeenCalledOnce();
     });
-    expect(source.bridge.check).not.toHaveBeenCalled();
+    expect(source.bridge.install).not.toHaveBeenCalled();
   });
   it('should offer a download rather than a restart on manual platforms', async () => {
     const source = fixture(Promise.resolve({ ...ready, phase: 'available' }));

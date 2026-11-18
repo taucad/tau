@@ -34,6 +34,7 @@ import type { DeletionReceipt, TauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 import { holdCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
 import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 
 /** What this account may do with a project on Tau Cloud (D27). @public */
 export type ProjectRole = 'owner' | 'write' | 'read';
@@ -697,8 +698,14 @@ export const useTauCloudEligibility = (): TauCloudEligibility => {
   return { auth, isResolved, canSyncFiles };
 };
 
-/* The Tau Cloud opens this document is running, by project (STO-25 SP6); each answers whether it connected. */
-const cloudOpensInFlight = new Map<string, Promise<boolean>>();
+/*
+ * The Tau Cloud opens this document is running, by project (STO-25 SP6): the client each runs on, and whether it
+ * connected. An open stands for its own client only: one on a client since replaced is no answer for the new one.
+ */
+const cloudOpensInFlight = new Map<
+  string,
+  Readonly<{ client: RevisionClient | undefined; connected: Promise<boolean> }>
+>();
 
 /** What {@link continueCloudOpen} continues. @public */
 export type CloudOpenContinuation = Readonly<{
@@ -721,6 +728,8 @@ const runCloudOpen = async (input: CloudOpenContinuation): Promise<boolean> => {
     }
     const owed = (): boolean =>
       signal?.aborted !== true &&
+      /* The route's own check, shared by every caller: a gesture's assertion does not outlive a deletion. */
+      getCloudDeletionState(projectId) === undefined &&
       getRevisionSessionUser()?.id === account &&
       tauCloudIntent.get(projectId) === 'open' &&
       canOpenCloudProject(projectId);
@@ -787,14 +796,18 @@ export const continueCloudOpen = async (input: CloudOpenContinuation): Promise<b
       break;
     }
     // oxlint-disable-next-line no-await-in-loop -- each newer open in flight is waited for in turn.
-    if (await running) {
+    if ((await running.connected) && peekRevisionClient(projectId) === running.client) {
       return false;
     }
+    if (cloudOpensInFlight.get(projectId) === running) {
+      /* Settled but not yet forgotten: it is no answer for this call either way. */
+      break;
+    }
   }
-  const own = runCloudOpen(input);
+  const own = { client: peekRevisionClient(projectId), connected: runCloudOpen(input) };
   cloudOpensInFlight.set(projectId, own);
   try {
-    return await own;
+    return await own.connected;
   } finally {
     if (cloudOpensInFlight.get(projectId) === own) {
       cloudOpensInFlight.delete(projectId);

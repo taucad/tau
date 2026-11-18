@@ -19,7 +19,7 @@ const projectId = 'prj_continue000000000000000';
 const worker = { name: 'shared-worker' } as unknown as Worker;
 
 /** The project's client as the open's hold reads it: a projection a row moves. */
-const adoptClient = () => {
+const adoptClient = (on: Worker = worker) => {
   const listeners = new Set<() => void>();
   let status: RevisionStatusProjection | undefined;
   const client = {
@@ -31,7 +31,7 @@ const adoptClient = () => {
       };
     },
   } as unknown as RevisionClient;
-  revisionClientTestApi.adopt(projectId, worker, client);
+  revisionClientTestApi.adopt(projectId, on, client);
   return {
     move: (sync: Partial<RevisionStatusProjection['sync']>) => {
       status = {
@@ -52,6 +52,7 @@ beforeEach(() => {
 
 afterEach(() => {
   tauCloudIntent.set(projectId, undefined);
+  localStorage.clear();
   setRevisionSessionUser(undefined);
   revisionClientTestApi.reset();
   cloudOpenContinuationTestApi.reset();
@@ -95,5 +96,42 @@ describe('continueCloudOpen (STO-25 SP6)', () => {
       await continueCloudOpen({ projectId, account: 'usr_ada', connect, asserted: true, signal: ended.signal }),
     ).toBe(false);
     expect(connect).not.toHaveBeenCalled();
+  });
+
+  /* Review of d158d3e7 (LOW): every caller shares the deletion check the route makes, the gesture's included. */
+  it('connects nothing for a project being deleted from Tau Cloud, even when the gesture asserted it active', async () => {
+    adoptClient();
+    localStorage.setItem(
+      'tau:cloud-project-deletions:usr_ada',
+      JSON.stringify([{ id: projectId, name: 'Kept', state: 'deleting' }]),
+    );
+    const connect = vi.fn(async () => undefined);
+    expect(await continueCloudOpen({ projectId, account: 'usr_ada', connect, asserted: true })).toBe(false);
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  /* Review of d158d3e7 (LOW): an open in flight stands for its own client only. */
+  it('runs its own open when the project’s client was replaced under the open it waited for', async () => {
+    const first = adoptClient();
+    const connectFirst = vi.fn(async () => {
+      first.move({ pullPhase: 'fetching' });
+    });
+    const opening = continueCloudOpen({ projectId, account: 'usr_ada', connect: connectFirst, asserted: true });
+    await vi.waitFor(() => {
+      expect(connectFirst).toHaveBeenCalledOnce();
+    });
+    const waiting = continueCloudOpen({
+      projectId,
+      account: 'usr_ada',
+      asserted: true,
+      connect: async () => {
+        second.move({ hasAppliedRemote: true });
+      },
+    });
+    /* The file manager's worker was replaced: the project has a new client, and the first open's hold lets go. */
+    const second = adoptClient({ name: 'replacement-worker' } as unknown as Worker);
+    first.move({ pullPhase: 'fetching' });
+    expect(await opening).toBe(true);
+    expect(await waiting).toBe(true);
   });
 });

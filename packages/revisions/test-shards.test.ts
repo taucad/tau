@@ -2,13 +2,15 @@ import { globSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { TestSpecification, Vitest } from 'vitest/node';
+/* oxlint-disable eslint/no-restricted-imports -- The shard sequencer lives beside the Vitest configuration, outside the src/ import map. */
 import {
   DurationShardSequencer,
   dealFiles,
   isTypeTest,
   parseShardSeconds,
   shardSeconds,
-} from './test-shards.test.sequencer.js';
+} from './test-shards.test-utils.js';
+/* oxlint-enable eslint/no-restricted-imports */
 
 /*
  * The CI test shards of `revisions:test` (CI structural decomposition ST-3): `revisions:test:shard-<n>` must together

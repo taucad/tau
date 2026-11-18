@@ -1,5 +1,7 @@
 import { defineConfig, mergeConfig } from 'vitest/config';
-import { DurationShardSequencer } from './test-shards.test.sequencer.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vitest configuration lives outside the src/ import map.
+import { DurationShardSequencer } from './test-shards.test-utils.js';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vitest configuration lives outside the src/ import map.
 import vitestConfig from './vitest.config.js';
 
 /**

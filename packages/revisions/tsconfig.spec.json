@@ -11,7 +11,7 @@
   "include": [
     "vitest.config.ts",
     "test-shards.test.config.ts",
-    "test-shards.test.sequencer.ts",
+    "test-shards.test-utils.ts",
     "test-shards.test.ts",
     "vitest.setup.ts",
     "tsdown.config.ts",

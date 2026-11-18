@@ -1,5 +1,5 @@
 {
-  "$comment": "Uncached seconds per revisions test file for the CI test shards (test-shards.test.sequencer.ts): each file's seconds in one uncached `vitest run --reporter=json` of the whole suite on a 4-core Linux host at its default worker count (2026-11-18, 410 s). A file not listed weighs defaultSeconds, the median file. Only the ratios matter: they balance the shards. Refresh when a listed file's seconds move by more than a quarter or a file over 30 s is added.",
+  "$comment": "Uncached seconds per revisions test file for the CI test shards (test-shards.test-utils.ts): each file's seconds in one uncached `vitest run --reporter=json` of the whole suite on a 4-core Linux host at its default worker count (2026-11-18, 410 s). A file not listed weighs defaultSeconds, the median file. Only the ratios matter: they balance the shards. Refresh when a listed file's seconds move by more than a quarter or a file over 30 s is added.",
   "measuredAt": "2026-11-18",
   "defaultSeconds": 1,
   "seconds": {

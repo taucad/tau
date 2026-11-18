@@ -557,8 +557,9 @@ const revisionRegistry = createWorkerRevisionRegistry({
     pushRecorders.delete(projectId);
     projectOpenTimers.delete(projectId);
   },
-  /* STO-25: `first_view` at the applied checkout, `fully_fetched` once its
-   * background large-object fill has written the last placeholder. */
+  /* STO-25: `first_view` when the first view opens (the entry closure and the
+   * chats landed), sent once the open's cache is known; `fully_fetched` once
+   * its background large-object fill has written the last placeholder. */
   observeStatus: (projectId, status) => {
     const timer = projectOpenTimers.get(projectId);
     if (timer !== undefined) {

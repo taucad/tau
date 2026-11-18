@@ -433,9 +433,13 @@ function useModelWaitReporting(): void {
   ]);
 }
 
-/** One live announcement per focused project, rather than one competing announcement per pane. */
+/**
+ * One live announcement per focused project, rather than one competing announcement per pane. It speaks for the first
+ * view the panes show (the tree, the editor and the chats open on readiness during a Tau Cloud open, STO-25), so it
+ * goes quiet when they open rather than when the whole apply ends; a pane still waiting shows its own state.
+ */
 export function ProjectSyncAnnouncement(): React.JSX.Element {
-  const state = useProjectAvailability();
+  const state = useProjectAvailability('chats');
   const status = useRevisionStatus();
   useModelWaitReporting();
   return (

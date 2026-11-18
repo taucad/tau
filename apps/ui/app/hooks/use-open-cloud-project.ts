@@ -18,6 +18,10 @@ import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { withNamedLock } from '#lib/named-lock.js';
 import { getRevisionSessionUser } from '#lib/revision-actor.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
+import { isDesktopTarget } from '#lib/build-target.js';
+import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
+import { selectRuntimeRootFiles } from '#runtime/app-runtime.js';
+import type { AppRuntime } from '#runtime/app-runtime.js';
 import type { CreateProjectOptions } from '#runtime/project-library-commands.js';
 
 /**
@@ -50,6 +54,37 @@ export const cloudProjectStub = (entry: CloudProject): CreateProjectOptions => (
 });
 
 /**
+ * Start the project's revision client from the gesture, on the shared file-manager worker its session will use
+ * (STO-25 SP6), so the open's salt, `info/refs`, catalogue and indexes load beside the project route's code instead of
+ * after its session. The session's `revisions` child adopts the client. Best effort and never awaited: the session
+ * opens the client itself whatever happens here. The desktop's revisions are its host's, so nothing starts there.
+ *
+ * @param runtime - The app runtime, absent outside one.
+ * @param project - The project and its workspace slug.
+ */
+const startOpenEarly = (
+  runtime: AppRuntime | undefined,
+  project: Readonly<{ projectId: string; workspace: string }>,
+): void => {
+  const worker =
+    runtime === undefined || isDesktopTarget()
+      ? undefined
+      : selectRuntimeRootFiles(runtime).getSnapshot().context.worker;
+  if (worker === undefined) {
+    return;
+  }
+  // async-iife: bootstrap -- the session module loads beside the navigation; the route never waits on it.
+  void (async (): Promise<void> => {
+    try {
+      const { preconnectCloudOpen } = await import('#runtime/session-revisions.js');
+      preconnectCloudOpen({ ...project, worker });
+    } catch {
+      /* The session's own load reports a failed chunk. */
+    }
+  })();
+};
+
+/**
  * Open a Tau Cloud project on this device.
  *
  * Three things in one gesture, none of them new: the project is created locally
@@ -69,6 +104,7 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
   const { projects } = useProjects({ scope: 'all' });
   const { createProject, getProjects } = useProjectManager();
   const navigate = useNavigate();
+  const runtime = useOptionalAppRuntime();
 
   return useCallback(
     async (entry: CloudProject): Promise<void> => {
@@ -87,6 +123,7 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
         return;
       }
       if (held?.slugs !== undefined) {
+        startOpenEarly(runtime, { projectId: entry.id, workspace: held.slugs.workspaceSlug });
         await navigate(projectUrl(held.slugs));
         return;
       }
@@ -137,12 +174,13 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
           throw error;
         }
       });
-      /* The library owns the root file-manager worker, while the project route
-         owns a project-scoped worker. Carry the gesture across navigation so
-         the owning worker records and opens the remote; sending it here loses
-         the command when the project client replaces the root client. */
+      /* The intent carries the gesture across navigation: the project's own
+         session records and opens the remote. Its revision client is the one
+         per project on the shared worker, so starting it here (STO-25 SP6) is
+         the same client the session adopts, not a second root. */
+      startOpenEarly(runtime, { projectId: entry.id, workspace: created.slugs.workspaceSlug });
       await navigate(projectUrl(created.slugs));
     },
-    [createProject, getProjects, navigate, projects],
+    [createProject, getProjects, navigate, projects, runtime],
   );
 };

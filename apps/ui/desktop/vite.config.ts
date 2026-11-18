@@ -99,7 +99,8 @@ export default defineConfig({
   },
   // Workers build with this `resolve` too, so the file-manager worker resolves the desktop variant.
   resolve: { alias: [...uiResolveAlias], conditions: desktopTarget.resolve.conditions },
-  ssr: { ...uiSsrOptions, resolve: desktopTarget.ssrResolve },
+  // The server environment's own `resolve`, where the Environment API reads it (the web config's `uiSsrOptions`).
+  environments: { ssr: { resolve: { ...uiSsrOptions, ...desktopTarget.ssrResolve } } },
   // Mirrors `uiOptimizeDepsOptions` in the web config: smlibwasm resolves its WASM from import.meta.url.
   optimizeDeps: { exclude: ['@classcad/smlibwasm'] },
   server: {

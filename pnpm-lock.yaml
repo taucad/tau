@@ -195,6 +195,9 @@ catalogs:
     '@nestjs/testing':
       specifier: ^11.1.27
       version: 11.2.7
+    '@netlify/vite-plugin-react-router':
+      specifier: 4.0.0
+      version: 4.0.0
     '@nx/devkit':
       specifier: 22.7.12
       version: 22.7.12
@@ -1478,8 +1481,8 @@ importers:
         specifier: 'catalog:'
         version: 11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.2.7(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))
       '@netlify/vite-plugin-react-router':
-        specifier: ^3.1.1
-        version: 3.1.1(react-router@7.18.5(patch_hash=7a0912d874e66dda449c9d5b83d0ba9acf847db8ecae2be13cb246039973afe5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+        specifier: 'catalog:'
+        version: 4.0.0(react-router@7.18.5(patch_hash=7a0912d874e66dda449c9d5b83d0ba9acf847db8ecae2be13cb246039973afe5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       '@nx/devkit':
         specifier: 'catalog:'
         version: 22.7.12(nx@22.7.12(@swc-node/register@1.11.1(@swc/core@1.15.8(@swc/helpers@0.5.23))(@swc/types@0.1.28)(typescript@5.9.3))(@swc/core@1.15.8(@swc/helpers@0.5.23)))
@@ -5099,8 +5102,8 @@ importers:
         version: 11.0.5
     devDependencies:
       '@netlify/vite-plugin-react-router':
-        specifier: ^3.1.1
-        version: 3.1.1(react-router@7.18.5(patch_hash=7a0912d874e66dda449c9d5b83d0ba9acf847db8ecae2be13cb246039973afe5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
+        specifier: 'catalog:'
+        version: 4.0.0(react-router@7.18.5(patch_hash=7a0912d874e66dda449c9d5b83d0ba9acf847db8ecae2be13cb246039973afe5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       '@react-router/dev':
         specifier: 'catalog:'
         version: 7.18.5(@types/node@26.6.5)(babel-plugin-macros@3.1.0)(jiti@2.7.0)(less@4.5.1)(lightningcss@1.33.0)(react-router@7.18.5(patch_hash=7a0912d874e66dda449c9d5b83d0ba9acf847db8ecae2be13cb246039973afe5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(typescript@6.0.3)(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))(yaml@2.9.1)
@@ -11819,12 +11822,12 @@ packages:
     resolution: {integrity: sha512-PVvY1EEN9i2Er0LQoiyNG7i/BnwnttLuZqIkBnhL2Jrcj3P5N/NcGkv1i20MJ2ngNGSPQcT7tagDmF3V6BsdWg==}
     engines: {node: '>=22.12.0'}
 
-  '@netlify/vite-plugin-react-router@3.1.1':
-    resolution: {integrity: sha512-sh5rMCWzcalwgyuwoz4+eETHLpdrl+g+ilkEEDUpqXila+BHTeqIlU6SA+rpZ+uJbf2CCB73X2Yx1eMizDffJg==}
-    engines: {node: '>=20.6.1'}
+  '@netlify/vite-plugin-react-router@4.0.0':
+    resolution: {integrity: sha512-lwmeOwVm35yyM4w7piWPt+LAHnwt3IhpZfQ3MJGyFBk2kxh7ILBnFMMesoWc1hdj2owdsq0qhnX1wkpcrEjX3g==}
+    engines: {node: '>=22.22.0'}
     peerDependencies:
       react-router: '>=7.9.0'
-      vite: '>=5.0.0'
+      vite: '>=6.0.0'
 
   '@netlify/zip-it-and-ship-it@16.3.0':
     resolution: {integrity: sha512-y5O/GONXSkGN5pFAHxw2ckZdmAu3ej3CEXPHebNyQHbWILW+5F985ODShSqJcl/JtL4fUVta0XkqOYr/3nStUQ==}
@@ -32355,7 +32358,7 @@ snapshots:
 
   '@netlify/types@3.2.0': {}
 
-  '@netlify/vite-plugin-react-router@3.1.1(react-router@7.18.5(patch_hash=7a0912d874e66dda449c9d5b83d0ba9acf847db8ecae2be13cb246039973afe5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
+  '@netlify/vite-plugin-react-router@4.0.0(react-router@7.18.5(patch_hash=7a0912d874e66dda449c9d5b83d0ba9acf847db8ecae2be13cb246039973afe5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(vite@8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
       '@netlify/edge-functions': 3.0.8
       '@netlify/functions': 5.3.0
@@ -32365,7 +32368,7 @@ snapshots:
       tinyglobby: 0.2.17
       vite: 8.0.16(@types/node@24.0.15)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
 
-  '@netlify/vite-plugin-react-router@3.1.1(react-router@7.18.5(patch_hash=7a0912d874e66dda449c9d5b83d0ba9acf847db8ecae2be13cb246039973afe5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
+  '@netlify/vite-plugin-react-router@4.0.0(react-router@7.18.5(patch_hash=7a0912d874e66dda449c9d5b83d0ba9acf847db8ecae2be13cb246039973afe5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
       '@netlify/edge-functions': 3.0.8
       '@netlify/functions': 5.3.0

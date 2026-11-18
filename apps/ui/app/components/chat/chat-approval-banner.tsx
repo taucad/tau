@@ -9,7 +9,7 @@ import {
   takeAgentSignInSuccess,
   useAgentSignInOutcome,
 } from '#components/terminal/agent-sign-ins.js';
-import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
+import { useChatActions, useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { agentApprovalToolName, parseAgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
 import type { AgentHostApproval } from '@taucad/chat-ui/services/agent-host-event-projection';
@@ -244,29 +244,32 @@ const answerInterrupt = async ({
 };
 
 /**
- * A login card that carries on by itself once the agent's sign-in in Tau's tab exits 0.
+ * A login card that carries on by itself once the sign-in its chat asked for in Tau's tab exits 0. Another chat's
+ * card for the same agent does not: the success is bound to the chat that asked.
  *
  * The exit is taken once, so the turn is tried again exactly as *Try again* would, and only once: a retry that still
  * meets a logged-out agent draws this card again and waits for another sign-in. A failed sign-in leaves the card,
  * which says how it ended. Nothing here names an agent; the login names it.
  *
- * @param props - The login, and the action that opens its sign-in tab.
+ * @param props - The login, the card's chat, and the action that opens its sign-in tab.
  * @returns The affordance.
  */
 function AgentLoginCard({
   login,
+  chatId,
   onSignInInTerminal,
 }: {
   readonly login: NonNullable<AgentHostApproval['login']>;
+  readonly chatId: string;
   readonly onSignInInTerminal: (() => void) | undefined;
 }): React.JSX.Element {
   const { regenerate } = useChatActions();
-  const outcome = useAgentSignInOutcome(login.agentId);
+  const outcome = useAgentSignInOutcome(login.agentId, chatId);
   useEffect(() => {
-    if (outcome === 'succeeded' && takeAgentSignInSuccess(login.agentId)) {
+    if (outcome === 'succeeded' && takeAgentSignInSuccess(login.agentId, chatId)) {
       regenerate();
     }
-  }, [outcome, login.agentId, regenerate]);
+  }, [outcome, login.agentId, chatId, regenerate]);
   return (
     <ChatLoginAffordance
       login={login}
@@ -292,6 +295,7 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   const { respondToToolApproval } = useCadChatClient();
   const machines = useMachinesFacet();
   const workspace = useProjectWorkspace({ enableNoContext: true });
+  const { activeChatId } = useChatContext();
   const activeExecution = useChatSelector((state) => state.activeExecution);
   const attachedHostId = useChatSelector((state) => state.attachedHostId);
   const messages = useChatSelector((state) => state.messages);
@@ -314,10 +318,11 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
       <AgentLoginCard
         key={login.agentId}
         login={login}
+        chatId={activeChatId}
         onSignInInTerminal={
           signsInHere
             ? () => {
-                requestAgentSignIn(login.agentId);
+                requestAgentSignIn(login.agentId, activeChatId);
                 workspace.setWorkbenchOpen(true);
               }
             : undefined

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, waitFor } from 'xstate';
 import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
 import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
-import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
+import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#machines/workspace-connection.machine.js';
 
 const workspace: Workspace = {
   workspaceId: 'wsp_aaaaaaaaaaaaaaaaaaaaa',
@@ -17,14 +17,12 @@ Object.defineProperties(handle, {
 });
 const selection: DirectoryPick = { backend: 'webaccess', handle };
 
-const faults = vi.hoisted(() => ({ reported: [] as unknown[] }));
+const faults = { reported: [] as unknown[] };
 
-vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  reportAppRuntimeFault: (error: unknown) => {
-    faults.reported.push(error);
-  },
-}));
+/** The fault reporter the app injects: here it records what it was handed. */
+const reportFault = (error: unknown): void => {
+  faults.reported.push(error);
+};
 
 /** A webaccess pick whose folder name throws when the machine reads it: a defect no transition models. */
 const faultingSelection = (error: Error): DirectoryPick => {
@@ -46,6 +44,7 @@ describe('workspaceConnectionMachine', () => {
   it('returns to idle when folder selection is cancelled', () => {
     const actor = createActor(workspaceConnectionMachine, {
       input: {
+        reportFault,
         registerWorkspace: vi.fn(),
         mountWorkspace: vi.fn(),
         prepareWorkspaceCatalog: vi.fn(),
@@ -79,6 +78,7 @@ describe('workspaceConnectionMachine', () => {
     });
     const actor = createActor(workspaceConnectionMachine, {
       input: {
+        reportFault,
         registerWorkspace: async () => registration.promise,
         mountWorkspace: async () => mounting.promise,
         prepareWorkspaceCatalog: async () => discovery.promise,
@@ -144,6 +144,7 @@ describe('workspaceConnectionMachine', () => {
       .mockResolvedValueOnce(undefined);
     const actor = createActor(workspaceConnectionMachine, {
       input: {
+        reportFault,
         registerWorkspace: async () => ({ workspace, minted: true }),
         mountWorkspace,
         prepareWorkspaceCatalog: async () => ({
@@ -184,6 +185,7 @@ describe('workspaceConnectionMachine', () => {
     const mountWorkspace = vi.fn(async () => undefined);
     const actor = createActor(workspaceConnectionMachine, {
       input: {
+        reportFault,
         registerWorkspace,
         mountWorkspace,
         prepareWorkspaceCatalog: async () => ({
@@ -226,6 +228,7 @@ describe('workspaceConnectionMachine', () => {
       const second = new Error('second fault');
       const actor = createActor(workspaceConnectionMachine, {
         input: {
+          reportFault,
           registerWorkspace: vi.fn(
             async () =>
               new Promise<never>(() => {

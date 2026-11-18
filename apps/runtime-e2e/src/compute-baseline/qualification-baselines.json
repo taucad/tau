@@ -1,5 +1,5 @@
 {
-  "campaign": "2026-11-17 on main 4bb39c3d: seven-model campaign plus the retained-operand fixture run; bench-vise re-pinned on main 6c8deb84 after its example source changed (#2448); memory counts re-pinned on main 9906bb84 after #2503: a rested transient frame publishes nothing (R4) and the agent loop reuses its held build (R1)",
+  "campaign": "2026-11-17 on main 4bb39c3d: seven-model campaign plus the retained-operand fixture run; bench-vise re-pinned on main 6c8deb84 after its example source changed (#2448); memory counts re-pinned on main 9906bb84 after #2503: a rested transient frame publishes nothing (R4) and the agent loop reuses its held build (R1); memory counts re-pinned for all eight models on the live tier (#2522): a rebuilt step writes one store entry instead of two, because a build made with the tier refuses its byte-exact native snapshot (catalogue N7), and the comment-only matrix step runs no model (modelRuns 0) because the scene table answers its unchanged bundle and parameters (R16); reuse-off hashes and counts unchanged",
   "host": "Intel(R) Xeon(R) Processor @ 2.30GHz",
   "models": {
     "gridfinity-box": {
@@ -184,12 +184,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -199,7 +199,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -207,14 +207,14 @@
               "storeWrites": 0
             },
             {
-              "modelRuns": 1,
+              "modelRuns": 0,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -226,12 +226,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -248,7 +248,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -477,12 +477,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -492,7 +492,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -500,14 +500,14 @@
               "storeWrites": 0
             },
             {
-              "modelRuns": 1,
+              "modelRuns": 0,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -519,12 +519,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -541,7 +541,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -770,12 +770,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -785,7 +785,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -793,14 +793,14 @@
               "storeWrites": 0
             },
             {
-              "modelRuns": 1,
+              "modelRuns": 0,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -812,12 +812,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -834,7 +834,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1063,12 +1063,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1078,7 +1078,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1086,14 +1086,14 @@
               "storeWrites": 0
             },
             {
-              "modelRuns": 1,
+              "modelRuns": 0,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1105,12 +1105,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1127,7 +1127,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1356,12 +1356,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1371,7 +1371,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1379,14 +1379,14 @@
               "storeWrites": 0
             },
             {
-              "modelRuns": 1,
+              "modelRuns": 0,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1398,12 +1398,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1420,7 +1420,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1649,12 +1649,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1664,7 +1664,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1672,14 +1672,14 @@
               "storeWrites": 0
             },
             {
-              "modelRuns": 1,
+              "modelRuns": 0,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1691,12 +1691,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1713,7 +1713,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1941,12 +1941,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1956,7 +1956,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1964,14 +1964,14 @@
               "storeWrites": 0
             },
             {
-              "modelRuns": 1,
+              "modelRuns": 0,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -1983,12 +1983,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -2005,7 +2005,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -2234,12 +2234,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -2249,7 +2249,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -2257,14 +2257,14 @@
               "storeWrites": 0
             },
             {
-              "modelRuns": 1,
+              "modelRuns": 0,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -2276,12 +2276,12 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,
@@ -2298,7 +2298,7 @@
             {
               "modelRuns": 1,
               "tessellations": 1,
-              "storeWrites": 2
+              "storeWrites": 1
             },
             {
               "modelRuns": 0,

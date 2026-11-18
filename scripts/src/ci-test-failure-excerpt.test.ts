@@ -42,12 +42,9 @@ const prefix = '\u001B[1m\u001B[94mui:\u001B[39m\u001B[22m';
 
 describe('affected test lane failure output (F3)', () => {
   it('should stream the shard output into the log and affected-test.log', () => {
-    // A shard's projects and its split-by-file test groups stream into one log, and each runs after a failure.
     expect(lane).toContain(
-      'pnpm nx run-many -t test --projects "$projects" --parallel=1 --outputStyle=stream || status=1',
+      'pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/affected-test.log"',
     );
-    expect(lane).toContain('pnpm nx run-many -t "$target" --projects "$project" --outputStyle=stream || status=1');
-    expect(lane).toMatch(/exit "\$status"\n\s+\} 2>&1 \| tee "\$RUNNER_TEMP\/affected-test\.log"/u);
     expect(lane).not.toContain('--outputStyle=static');
   });
 

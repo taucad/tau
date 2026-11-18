@@ -1,17 +1,17 @@
 /**
  * Deal the affected projects with a `test` target across the CI test shards by measured duration.
  *
- * Each `test-<n>` lane of `ci.yml` pipes the same affected unit list (a JSON array: projects, and the `test:shard-<k>`
- * tasks of a project whose `test` is split by file, `tools/test-shards.plugin.ts`) into this script and runs only the
- * units it prints for its own shard. The deal is greedy longest-processing-time: units sorted by weight, heaviest
- * first, ties by name, each to the shard with the least load so far, ties to the lowest shard. Every lane computes
- * the same deal, so the shards partition the selected set exactly. Weights are the uncached `test` seconds in the
- * checked-in `test-shard-durations.json` snapshot; a unit the snapshot does not list weighs its `defaultSeconds`.
+ * Each `test-<n>` lane of `ci.yml` pipes the same affected project list (a JSON array from
+ * `nx show projects --affected --with-target test`) into this script and runs only the projects it prints for its
+ * own shard. The deal is greedy longest-processing-time: projects sorted by weight, heaviest first, ties by name,
+ * each to the shard with the least load so far, ties to the lowest shard. Every lane computes the same deal, so the
+ * shards partition the selected set exactly. Weights are the uncached `test` seconds in the checked-in
+ * `test-shard-durations.json` snapshot; a project the snapshot does not list weighs its `defaultSeconds`.
  * This replaced the test-file-count weights, which had turned the shards into a fixed routing table
  * (tau-brain `research/ci-decomposition-blueprint.md` F2 and Part 4; charter W2).
  *
  * The names are opaque, so other sharded lanes deal with it too, each from its own snapshot through `--durations`:
- * the `pkgcheck-<n>` jobs deal the affected projects with a package check by measured `pkgcheck` seconds
+ * the `pkgcheck-<n>` lanes deal the affected projects with a package check by measured `pkgcheck` seconds
  * (`pkgcheck-shard-durations.json`), and the `Viewer references` shards of `viewer-parity.yml` deal the parity
  * fixtures by measured capture seconds (`libs/tau-examples/fixtures/viewer-parity/capture-seconds.json`).
  *

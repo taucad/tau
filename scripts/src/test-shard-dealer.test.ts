@@ -71,15 +71,15 @@ describe('deal', () => {
     expect(dealAll(['ui'])).toEqual([['ui'], [], []]);
   });
 
-  it('separates cli, ui and the breadth on a broad landing and keeps the shards within one small project', () => {
+  it('puts ui alone on a broad landing and keeps the other shards within one small project', () => {
     const dealt = dealAll(broad);
     expectPartition(broad, dealt);
-    expect(dealt.map((shard) => shard[0])).toEqual(['cli', 'ui', 'host']);
-    expect(dealt[2]?.slice(0, 6)).toEqual(['host', 'ui-e2e', 'build123d', 'zoo', 'runtime', 'viewer']);
+    expect(dealt.map((shard) => shard[0])).toEqual(['ui', 'host', 'build123d']);
+    expect(dealt[0]).toEqual(['ui']);
     const loads = dealt.map((shard) => shard.reduce((sum, project) => sum + weightOf(project, snapshot), 0));
-    // File-count weights put cli, ui-e2e, runtime and desktop together (1,199 s); the duration deal tops out at 948 s.
-    expect(loads).toEqual([944, 941, 948]);
-    expect(Math.max(...loads) - Math.min(...loads)).toBeLessThanOrEqual(snapshot.defaultSeconds);
+    // The ui suite alone sets the floor; the breadth splits evenly beside it.
+    expect(loads).toEqual([952, 498, 500]);
+    expect(Math.abs((loads[1] ?? 0) - (loads[2] ?? 0))).toBeLessThanOrEqual(snapshot.defaultSeconds);
   });
 
   it('deals a skewed set heaviest first to the lightest shard', () => {
@@ -100,7 +100,7 @@ describe('deal', () => {
   it('weighs a project missing from the snapshot at the default', () => {
     expect(weightOf('brand-new-project', snapshot)).toBe(snapshot.defaultSeconds);
     expect(weightOf('constructor', snapshot)).toBe(snapshot.defaultSeconds);
-    expect(weightOf('cli', snapshot)).toBe(854);
+    expect(weightOf('cli', snapshot)).toBe(104);
     const dealt = dealAll(['brand-new-project', 'ui']);
     expect(dealt).toEqual([['ui'], ['brand-new-project'], []]);
   });
@@ -108,7 +108,7 @@ describe('deal', () => {
   it('ignores snapshot entries for renamed or deleted projects', () => {
     const dealt = dealAll(['ui-core', 'ui-e2e']);
     expectPartition(['ui-core', 'ui-e2e'], dealt);
-    expect(dealt).toEqual([['ui-e2e'], ['ui-core'], []]);
+    expect(dealt).toEqual([['ui-core'], ['ui-e2e'], []]);
   });
 
   it('honours another shard count', () => {
@@ -352,7 +352,7 @@ describe('run', () => {
     for (const { code } of outputs) {
       expect(code).toBe(0);
     }
-    expect(outputs[0]?.output.split(',')[0]).toBe('cli');
+    expect(outputs[0]?.output.split(',')[0]).toBe('ui');
     expectPartition(
       broad,
       outputs.map(({ output }) => output.split(',')),

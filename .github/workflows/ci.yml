@@ -604,7 +604,7 @@ jobs:
       # task graph, for the same targets as the step below, decides which entries it needs, so a
       # lane that runs neither task restores nothing (the kernel seeds are about 350 MB, the
       # wasi-sdk archive 125 MB); a shard reads its lane's whole affected graph, as the deal
-      # happens in the step below, which reads this same graph (one `nx affected` per job, ST-4).
+      # happens in the step below (which the lint, typecheck and build shards read too).
       # Keys digest the pins themselves (scripts/src/ci-pinned-downloads.ts). The consumers
       # re-verify every byte against its pin, and on a miss they download as before;
       # `ci-pinned-downloads.yml` saves the entries from `main`, whose cache scope pull requests
@@ -651,21 +651,20 @@ jobs:
       # refuse rather than skip when they are absent. The whole of `test` for that tag
       # runs in the `api` lane below, which has both; these lanes stay hermetic.
       #
-      # Every sharded lane deals from the graph the step above wrote, never from this file: one
-      # `nx affected -t <targets> --graph=<file>` holds the affected tasks and the project graph
-      # (each project's tags and targets) without running anything (X8). Each shard of a lane
-      # computes the same deal, so the shards partition the lane's projects, and the task each
-      # project owns runs in exactly one shard (scripts/src/test-shard-dealer.test.ts and
-      # scripts/src/affected-shard-union.test.ts). Lint, typecheck and build deal projects by
-      # measured task seconds with the tasks they depend on (`--graph`), so `ui` and the desktop
-      # build its payload check needs share a build shard instead of building it twice. A task
-      # another shard's project also depends on may run in both; Nx caches it.
+      # The lint, typecheck and build shards deal from the graph the step above wrote (one `nx affected` per job,
+      # ST-4), never from this file: it holds the lane's affected tasks and the project graph without running
+      # anything (X8). Each shard computes the same deal, so the shards partition the lane's projects and the task
+      # each project owns runs in exactly one shard (scripts/src/test-shard-dealer.test.ts and
+      # scripts/src/affected-shard-union.test.ts). They deal projects by measured task seconds with the tasks
+      # they depend on (`--graph`), so `ui` and the desktop build its payload check needs share a build shard
+      # instead of building it twice. A task another shard's project also depends on may run in both; Nx caches it.
       #
-      # The three test shards deal the affected projects with a `test` target by measured
-      # uncached test seconds (scripts/src/test-shard-dealer.ts and its duration snapshot). A
-      # project whose `test` is split by file (`tools/test-shards.plugin.ts`, `revisions`) is
-      # dealt as its `test:shard-<k>` tasks instead, each cached on its own files, so its suite
-      # spreads over the shards; together they run every file of its `test` once.
+      # The three test shards split the affected projects with a `test` target by
+      # measured uncached test seconds (scripts/src/test-shard-dealer.ts and its
+      # duration snapshot). The project list comes from the graph at run time,
+      # never from this file: one `nx affected -t test --graph=<file>` writes the affected
+      # `test` tasks and the project graph (each project's tags) without running
+      # anything, in place of an `nx show projects --affected` and an `nx graph` (X8).
       #
       # `--parallel=1`: ui:lint and ui:typecheck each peak near 9.5 GB, so any two of
       # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
@@ -720,45 +719,27 @@ jobs:
               # GeoSpec suites run here against the published `geospec-engine` prebuild for
               # this runner. `ci:quarantined` projects (runtime-e2e) run only in the nightly
               # workflow until their failing tests pass there: https://github.com/taucad/tau/issues/342
+              pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$RUNNER_TEMP/test-graph.json" > /dev/null
               # The task graph also holds the tasks `test` depends on (builds and the like),
               # so keep the `test` tasks, and drop an excluded tag again in case another
-              # project's `test` ever depends on one of theirs. A project with `test:shard-<k>`
-              # targets (`metadata.shardOf` is `test`) is dealt as those tasks.
-              units=$(jq -c '
+              # project's `test` ever depends on one of theirs.
+              projects=$(jq -c '
                 .graph.nodes as $nodes
                 | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
-                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))
-                | map(. as $project
-                    | [$nodes[$project].data.targets // {} | to_entries[]
-                        | select(.value.metadata.shardOf == "test") | "\($project):\(.key)"] as $parts
-                    | if $parts == [] then $project else $parts[] end)' "$graph")
+                | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
               # Every lane deals the same list heaviest first to the lightest shard by
               # duration, so the shards partition it and the slowest suites land apart.
-              shard=$(echo "$units" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3)
+              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3)
               if [ -z "$shard" ]; then
                 echo "No affected test projects in this shard."
                 exit 0
               fi
-              echo "Shard units: $shard"
-              projects=$(tr ',' '\n' <<< "$shard" | grep -v ':' | paste -sd, - || true)
-              parts=$(tr ',' '\n' <<< "$shard" | grep ':' || true)
+              echo "Shard projects: $shard"
               # Streamed, not `static`: Nx holds a static task's output until the task ends and then
               # prints only its first 64–128 KiB into a pipe, so a long suite lost its Vitest summary and
               # every failing test's name (F3; `ui:test` in queue runs 43990460984, 44048796415,
               # 44050273147 and 44062740359 stopped mid-run in both the job log and this file).
-              # Every unit runs even after one fails, so the summary below names each failing test.
-              {
-                status=0
-                if [ -n "$projects" ]; then
-                  pnpm nx run-many -t test --projects "$projects" --parallel=1 --outputStyle=stream || status=1
-                fi
-                for part in $parts; do
-                  project=${part%%:*}
-                  target=${part#*:}
-                  pnpm nx run-many -t "$target" --projects "$project" --outputStyle=stream || status=1
-                done
-                exit "$status"
-              } 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
+              pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
               ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
@@ -820,7 +801,7 @@ jobs:
       actions: 'read'
       pull-requests: 'read'
     strategy:
-      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         shard: ${{ fromJSON(needs.plan.outputs.pkgcheck-shards) }}
     steps:

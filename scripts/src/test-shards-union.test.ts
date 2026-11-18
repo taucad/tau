@@ -91,7 +91,8 @@ describe('test-shards plugin', () => {
     ]);
     expect(targets['test:shard-2']?.inputs).toContain('!{projectRoot}/a.test.ts');
     expect(targets['test:shard-1']?.cache).toBe(true);
-    expect(targets['test:shard-1']?.metadata?.['shardOf']).toBe('test');
+    // The affected test lanes deal a project's `test:shard-<n>` targets by that name (ST-1).
+    expect(Object.keys(targets).every((name) => /^test:shard-[1-9][0-9]*$/u.test(name))).toBe(true);
     expect(targets['test:shard-1']?.dependsOn).toEqual(['copy-assets', '^copy-assets']);
     expect(filesOf(targets['test:shard-2'])).toEqual(['b.test.ts', 'c.test.ts']);
   });

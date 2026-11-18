@@ -11,7 +11,7 @@ import { afterAll, describe, expect, it } from 'vitest';
  * research/ci-scaling-best-practice-review.md C5; research/ci-structural-decomposition-blueprint.md ST-3). Each lane's
  * own script runs against one task graph with `pnpm` stubbed, once per shard, and the Nx tasks the shards ask for
  * together must be every task of the lane, each asked for by exactly one shard: lint, typecheck and build over two
- * shards each, and the three test shards with `revisions` dealt as its `test:shard-<k>` parts.
+ * shards each. The test shards keep their own union proof (test-shard-dealer.test.ts).
  */
 
 const root = resolve(import.meta.dirname, '../..');
@@ -145,57 +145,5 @@ describe('affected lint, typecheck and build shards', () => {
       shards.map((calls) => calls.flatMap((call) => /--projects (\S+)/u.exec(call)?.[1]?.split(',') ?? [])),
       projects,
     );
-  });
-});
-
-describe('affected test shards', () => {
-  const revisionsParts = {
-    'test:shard-1': { metadata: { shardOf: 'test' } },
-    'test:shard-2': { metadata: { shardOf: 'test' } },
-    'test:shard-3': { metadata: { shardOf: 'test' } },
-  };
-  const nodes: Record<string, Node> = {
-    ui: { targets: { test: {} } },
-    cli: { targets: { test: {} } },
-    host: { targets: { test: {} } },
-    revisions: { targets: { test: {}, ...revisionsParts } },
-    viewer: { targets: { test: {} } },
-    api: { tags: ['scope:api'], targets: { test: {} } },
-  };
-  const graph = graphFile(nodes, {
-    'ui:test': ['ui:copy-assets'],
-    'ui:copy-assets': [],
-    'cli:test': [],
-    'host:test': [],
-    'revisions:test': [],
-    'viewer:test': [],
-    'api:test': [],
-  });
-
-  it('runs every test task once and each revisions part in place of revisions:test (C5)', () => {
-    const shards = [1, 2, 3].map((shard) => runShard(`test-${shard}`, graph).flatMap((call) => tasksOf(call)));
-    expectUnion(shards, [
-      'ui:test',
-      'cli:test',
-      'host:test',
-      'viewer:test',
-      'revisions:test:shard-1',
-      'revisions:test:shard-2',
-      'revisions:test:shard-3',
-    ]);
-  });
-
-  it('spreads the revisions parts over the shards when they are the heaviest units', () => {
-    const narrow = graphFile(nodes, {
-      'revisions:test': [],
-      'viewer:test': [],
-    });
-    const shards = [1, 2, 3].map((shard) => runShard(`test-${shard}`, narrow).flatMap((call) => tasksOf(call)));
-    expect(shards.map((shard) => shard.filter((task) => task.startsWith('revisions:')))).toEqual([
-      ['revisions:test:shard-1'],
-      ['revisions:test:shard-2'],
-      ['revisions:test:shard-3'],
-    ]);
-    expectUnion(shards, ['viewer:test', 'revisions:test:shard-1', 'revisions:test:shard-2', 'revisions:test:shard-3']);
   });
 });

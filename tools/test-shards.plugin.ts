@@ -11,8 +11,8 @@
  * itself and no file is ever left out.
  *
  * Each target has the `test` inputs less every other group's files, so an edit to one test file reruns only its own
- * group, and `metadata.shardOf: "test"` tells the affected test lanes of `ci.yml` to deal the groups in place of
- * `test` (tau-brain `research/ci-structural-decomposition-blueprint.md` ST-3). `test` itself still runs every file,
+ * group. The affected test lanes of `ci.yml` deal a project's `test:shard-<n>` targets, by that name, in place of
+ * its `test` (tau-brain `research/ci-structural-decomposition-blueprint.md` ST-1 and ST-3). `test` itself still runs every file,
  * locally and in the release gate. `scripts/src/test-shards-union.test.ts` proves the groups partition the files
  * Vitest collects.
  */
@@ -116,7 +116,6 @@ export const createShardTargets = (
             env: { [shardFilesVariable]: files.join(',') },
           },
           metadata: {
-            shardOf: 'test',
             description: `Run ${files.length} of the project's ${groups.flat().length} Vitest files (group ${index + 1} of ${groups.length})`,
           },
         },

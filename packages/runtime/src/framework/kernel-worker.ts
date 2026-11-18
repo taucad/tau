@@ -708,8 +708,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /**
    * How the terminal evaluate of the current document evaluation was answered: `retained` (the retained build) or
    * `built` (the kernel's `evaluate` ran). Still `undefined` after a successful evaluation: a stored build answered.
+   * One record per evaluation, so its answer is read after the evaluation's awaits.
    */
-  private buildOutcome: 'retained' | 'built' | undefined;
+  private buildRun: { outcome: 'retained' | 'built' | undefined } = { outcome: undefined };
   private nextEvaluationId = 0;
   /** Latest admitted evaluation, whether or not its display projection succeeded. */
   private retainedEvaluation: EvaluationSlot | undefined;
@@ -1877,7 +1878,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             const manifest = described.data;
             const parametersWithDefaults = mergeParameterDefaults({}, parameters, legacyProjection.schema);
             const buildStarted = performance.now();
-            this.buildOutcome = undefined;
+            const buildRun: { outcome: 'retained' | 'built' | undefined } = { outcome: undefined };
+            this.buildRun = buildRun;
             const { artifact } = await this.materializeRender(
               {
                 file,
@@ -1891,7 +1893,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             );
             const { result } = artifact;
             const build = buildReportOf(
-              this.buildOutcome === 'built',
+              buildRun.outcome === 'built',
               artifact.evaluationSlot?.kernelBuild,
               performance.now() - buildStarted,
             );
@@ -4054,7 +4056,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
         }
         if (sameBuild && (retained.hasHandle || retained.serializedNativeHandleSlot)) {
-          this.buildOutcome = 'retained';
+          this.buildRun.outcome = 'retained';
           evaluationSlot = retained;
           this.activeEvaluationSlot = retained;
           computeSpan.end();
@@ -4090,7 +4092,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           );
         }
         let result: EvaluateResult;
-        this.buildOutcome = 'built';
+        this.buildRun.outcome = 'built';
         try {
           result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime(), evaluationSlot);
           if (result.success) {

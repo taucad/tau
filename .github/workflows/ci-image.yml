@@ -1,0 +1,244 @@
+# The prebuilt Linux CI job image, `ghcr.io/taucad/tau-ci` (Brain research
+# ci-structural-decomposition-blueprint.md, ST-4): Node.js, pnpm, a pnpm store for one lockfile and the
+# sandbox tools that `setup-nx` and `setup-linux-sandbox` otherwise fetch in every job
+# (`tools/ci-image/Dockerfile`).
+#
+# - Key and tag: `lock-<lockfile sha256>-node<version>-linux-<arch>` (`tools/ci-image/image-key.sh`).
+# - Pin: jobs never read a tag. `tools/ci-image/image.lock.json` maps each key to the digest built for
+#   it; the `pin` job keeps one bot pull request (`ci-image/lock`) that records a new digest, and a
+#   job with no entry for its lockfile's key runs today's `setup-nx` path instead.
+# - Rebuilds: a push to `main` that changes an input of the image builds it when the key's recipe
+#   (`image-key.sh recipe`) is not the pinned one; the weekly schedule rebuilds without the layer
+#   cache for operating-system patches; a dispatch rebuilds on demand.
+# - Pull requests that change the image's own files build it and run its smoke check without pushing.
+# - Provenance: Buildx attaches an SBOM and a `mode=max` provenance attestation to every pushed image.
+#   Only `publish` can write packages; no secret reaches a build.
+name: CI image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - package.json
+      - tools/pnpm/**
+      - tools/ci-image/Dockerfile
+      - tools/ci-image/Dockerfile.dockerignore
+      - tools/ci-image/image-key.sh
+      - tools/ci-image/smoke.sh
+      - .github/actions/setup-nx/action.yml
+      - .github/workflows/ci-image.yml
+  pull_request:
+    paths:
+      - tools/ci-image/Dockerfile
+      - tools/ci-image/Dockerfile.dockerignore
+      - tools/ci-image/image-key.sh
+      - tools/ci-image/smoke.sh
+      - .github/workflows/ci-image.yml
+  schedule:
+    - cron: '37 1 * * 1' # Mondays 01:37 UTC: operating-system patches
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-image-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/taucad/tau-ci
+
+jobs:
+  # A pull request builds the image into the local daemon and checks it; nothing is pushed.
+  verify:
+    name: Build and check the image
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Compute the image key
+        id: key
+        run: echo "key=$(tools/ci-image/image-key.sh key)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        with:
+          cleanup: false
+
+      - name: Build the image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: tools/ci-image/Dockerfile
+          platforms: linux/amd64
+          build-args: CI_IMAGE_TAG=${{ steps.key.outputs.key }}
+          tags: ${{ env.IMAGE }}:${{ steps.key.outputs.key }}
+          load: true
+          push: false
+          cache-from: type=gha,scope=ci-image
+
+      - name: Check the image
+        run: tools/ci-image/smoke.sh "$IMAGE:${{ steps.key.outputs.key }}"
+
+  publish:
+    name: Build, attest and push the image
+    if: github.event_name != 'pull_request' && github.repository == 'taucad/tau'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io/taucad/tau-ci; this job only
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+      recipe: ${{ steps.key.outputs.recipe }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # A push rebuilds only when the key or another input of the image changed since the pinned
+      # digest was built; a root manifest edit that leaves `packageManager` alone builds nothing.
+      - name: Compute the image key
+        id: key
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          key=$(tools/ci-image/image-key.sh key)
+          recipe=$(tools/ci-image/image-key.sh recipe)
+          pinned=$(jq -r --arg key "$key" '.digests[$key].recipe // empty' tools/ci-image/image.lock.json)
+          build=true
+          if [ "$EVENT" = push ] && [ "$pinned" = "$recipe" ]; then
+            build=false
+            echo "The pinned image for $key was built from this recipe ($recipe); nothing to build."
+          fi
+          {
+            echo "key=$key"
+            echo "recipe=$recipe"
+            echo "build=$build"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        if: steps.key.outputs.build == 'true'
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        with:
+          cleanup: false
+
+      - name: Log in to GHCR
+        if: steps.key.outputs.build == 'true'
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # The schedule rebuilds every layer, so `apt-get upgrade` picks up the week's patches; pushes
+      # reuse the layer cache. The run-numbered tag keeps every pushed digest addressable.
+      - name: Build and push the image
+        id: build
+        if: steps.key.outputs.build == 'true'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: tools/ci-image/Dockerfile
+          platforms: linux/amd64
+          build-args: CI_IMAGE_TAG=${{ steps.key.outputs.key }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.key.outputs.key }}
+            ${{ env.IMAGE }}:${{ steps.key.outputs.key }}-run${{ github.run_id }}
+          push: true
+          sbom: true
+          provenance: mode=max
+          no-cache: ${{ github.event_name == 'schedule' }}
+          cache-from: type=gha,scope=ci-image
+          cache-to: type=gha,scope=ci-image,mode=max,ignore-error=true
+
+      - name: Check the pushed image
+        if: steps.key.outputs.build == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: tools/ci-image/smoke.sh "$IMAGE@$DIGEST"
+
+  # Records the checked digest in `tools/ci-image/image.lock.json` through one bot pull request, which
+  # goes through the merge queue like any change. Until it lands, jobs keep the previous pin or, for a
+  # new key, the `setup-nx` path.
+  pin:
+    name: Pin the image digest
+    needs: publish
+    if: needs.publish.outputs.digest != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          persist-credentials: false
+
+      # Entries for older lockfiles stay until five newer keys exist, so a pull request on an
+      # older base still finds its image.
+      - name: Open or update the pin pull request
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          KEY: ${{ needs.publish.outputs.key }}
+          RECIPE: ${{ needs.publish.outputs.recipe }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          BRANCH: ci-image/lock
+        run: |
+          set -euo pipefail
+          if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Not an image digest: $DIGEST"
+            exit 1
+          fi
+          lock=tools/ci-image/image.lock.json
+          jq --arg key "$KEY" --arg digest "$DIGEST" --arg recipe "$RECIPE" \
+            --arg built "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg run "$GITHUB_RUN_ID" '
+            .digests[$key] = {digest: $digest, recipe: $recipe, built: $built, run: $run}
+            | .digests |= (to_entries | sort_by(.value.built) | .[-5:] | from_entries)' "$lock" > "$RUNNER_TEMP/lock.json"
+          mv "$RUNNER_TEMP/lock.json" "$lock"
+          if git diff --quiet -- "$lock"; then
+            echo "The lock already pins $DIGEST for $KEY."
+            exit 0
+          fi
+          git config user.name "tau-release-bot[bot]"
+          git config user.email "tau-release-bot[bot]@users.noreply.github.com"
+          subject="ci(root): Pin the CI job image for ${KEY%%-node*}"
+          git commit -m "$subject" -m "$IMAGE@$DIGEST, built by run $GITHUB_RUN_ID from recipe $RECIPE." -- "$lock"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
+          {
+            echo "Pins \`$IMAGE@$DIGEST\` for \`$KEY\` in \`$lock\`."
+            echo
+            echo "Built and checked by [run $GITHUB_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) (SBOM and provenance attached)."
+            echo "Until this lands, jobs whose lockfile has no pinned image use the \`setup-nx\` path."
+            echo
+            echo "- Bot-managed: regenerated by \`ci-image.yml\` on every new digest. Do not push to \`$BRANCH\`."
+          } > "$RUNNER_TEMP/body.md"
+          number=$(gh pr list --base main --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$number" ]; then
+            gh pr create --base main --head "$BRANCH" --title "$subject" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr edit "$number" --title "$subject" --body-file "$RUNNER_TEMP/body.md"
+          fi

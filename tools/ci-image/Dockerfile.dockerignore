@@ -1,0 +1,12 @@
+# The CI image's build context (`tools/ci-image/Dockerfile`, built from the repository root): only what
+# `pnpm install --frozen-lockfile` reads. Patterns are relative to the root; later rules win.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!**/package.json
+!tools/pnpm
+**/node_modules/**
+**/dist/**
+repos/**
+.nx/**

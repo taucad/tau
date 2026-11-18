@@ -36,7 +36,7 @@ export function UpdateControl({
   readonly detail: string;
   readonly icon: React.ComponentType<{ readonly className?: string }>;
   readonly isFailed?: boolean;
-  /** Tints the row with the brand colour (a light wash, a half fill in dark mode) when an update is ready. */
+  /** Raises the row into a bordered card, matching the other sidebar notices, when an update is ready. */
   readonly isProminent?: boolean;
   readonly releasePage?: string;
   readonly action?: UpdateControlAction;
@@ -51,10 +51,10 @@ export function UpdateControl({
         <Popover open={isOpen} onOpenChange={onOpenChange}>
           <PopoverTrigger asChild>
             <SidebarMenuButton
+              // Always bordered, transparent when quiet, so the chevron keeps one column with a card's close button above.
               className={cn(
-                isProminent
-                  ? 'bg-primary/12! text-[oklch(0.45_var(--c-primary)_var(--hue-primary))]! dark:bg-primary/50! dark:text-primary-foreground! hover:bg-(image:--primary-action-glint) data-[state=open]:bg-(image:--primary-action-glint)'
-                  : 'data-[state=open]:bg-sidebar-accent',
+                'rounded-lg border data-[state=open]:bg-sidebar-accent',
+                isProminent ? 'border-sidebar-border bg-background' : 'border-transparent',
               )}
               aria-label={title}
             >

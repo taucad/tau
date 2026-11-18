@@ -55,15 +55,16 @@ export function SidebarNoticeCard({
   return (
     <section
       aria-labelledby={titleId}
-      className='relative flex items-center gap-3 rounded-lg border border-sidebar-border bg-background p-2 text-sidebar-foreground'
+      className='relative flex items-stretch gap-3 rounded-lg border border-sidebar-border bg-background p-(--notice-inset) text-sidebar-foreground [--notice-inset:0.25rem]'
     >
+      {/* Full height, its corners concentric with the card's: the card's radius less its border and inset. */}
       <div
         aria-hidden
-        className='flex size-10 shrink-0 items-center justify-center rounded-md bg-sidebar-accent text-foreground [&_svg]:size-5'
+        className='flex w-12 shrink-0 items-center justify-center rounded-[calc(var(--radius-lg)-var(--notice-inset)-1px)] bg-sidebar-accent text-foreground [&_svg]:size-5'
       >
         {icon}
       </div>
-      <div className='flex min-w-0 flex-1 flex-col items-start gap-1.5'>
+      <div className='flex min-w-0 flex-1 flex-col items-start gap-1.5 py-1'>
         <div className='min-w-0 pr-5'>
           <p id={titleId} className='text-sm leading-5 font-medium'>
             {title}
@@ -85,7 +86,9 @@ export function SidebarNoticeCard({
       <Button
         variant='ghost'
         size='icon-xs'
-        className='absolute top-1 right-1 text-muted-foreground'
+        /* Centred on the title line, and in one column with the update row's chevron below: the row's 1px border and
+           6px padding put its 16px chevron's centre 15px in, so this 24px button sits 2px inside the border. */
+        className='absolute top-1.5 right-0.5 text-muted-foreground'
         aria-label={dismissLabel}
         onClick={onDismiss}
       >

@@ -6,6 +6,7 @@
  * that one CLI: keystrokes go to it and its output is drawn, and nothing here reads, matches or keeps either beyond the
  * renderer's in-memory scrollback, which goes when the tab closes. A link the CLI prints opens in the person's default
  * browser on Ctrl/Cmd+click, never inside Tau. The tab ends when the CLI exits, and tells the chat the exit code alone.
+ * Asking for the sign-in again once it has ended starts a fresh attempt in the same tab.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -17,7 +18,11 @@ import type {
 } from '@taucad/types/desktop-agent-sign-in';
 import { Button } from '@taucad/ui/components/button';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
-import { reportAgentSignInExit } from '#components/terminal/agent-sign-ins.js';
+import {
+  reportAgentSignInExit,
+  reportAgentSignInRefused,
+  useAgentSignInAttempt,
+} from '#components/terminal/agent-sign-ins.js';
 import type { TerminalRendererView } from '#components/terminal/terminal-renderer.js';
 import { outputSlices } from '#components/terminal/terminal-output-text.js';
 import {
@@ -38,24 +43,37 @@ type TabState =
 // oxlint-disable-next-line no-control-regex -- matching control characters is the point: they are replaced.
 const printable = (text: string): string => text.replaceAll(/[\u0000-\u001F\u007F-\u009F]/gu, '?');
 
+type AgentSignInTabProperties = {
+  readonly agentId: string;
+  readonly bridge: DesktopAgentSignInBridge;
+  readonly onClose: () => void;
+  readonly loadRenderer?: TerminalRendererLoader;
+};
+
 /**
- * The sign-in tab's body.
+ * The sign-in tab's body: one attempt at a time, each a fresh session and renderer.
  *
  * @param props - The agent, the preload bridge, the tab's close action and, for tests, a renderer loader.
  * @returns The tab body.
  * @public
  */
-export function AgentSignInTab({
+export function AgentSignInTab(props: AgentSignInTabProperties): React.JSX.Element {
+  const attempt = useAgentSignInAttempt(props.agentId);
+  return <AgentSignInAttempt key={attempt} {...props} />;
+}
+
+/**
+ * One sign-in attempt: the filled-in command, then the CLI until it exits.
+ *
+ * @param props - The agent, the preload bridge, the tab's close action and, for tests, a renderer loader.
+ * @returns The attempt's body.
+ */
+function AgentSignInAttempt({
   agentId,
   bridge,
   onClose,
   loadRenderer = loadTerminalRenderer,
-}: {
-  readonly agentId: string;
-  readonly bridge: DesktopAgentSignInBridge;
-  readonly onClose: () => void;
-  readonly loadRenderer?: TerminalRendererLoader;
-}): React.JSX.Element {
+}: AgentSignInTabProperties): React.JSX.Element {
   const name = externalAgentDisplayName(agentId);
   const hostRef = useRef<HTMLDivElement>(null);
   const runRef = useRef<(() => void) | undefined>(undefined);
@@ -114,6 +132,7 @@ export function AgentSignInTab({
         }
         case 'refused': {
           session = undefined;
+          reportAgentSignInRefused(agentId);
           setState({ phase: 'refused', message: frame.message });
           break;
         }
@@ -144,6 +163,7 @@ export function AgentSignInTab({
       } catch {
         if (!disposed) {
           session?.close();
+          reportAgentSignInRefused(agentId);
           setState({ phase: 'refused', message: "The Terminal's renderer could not load." });
         }
         return;

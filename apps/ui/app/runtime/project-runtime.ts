@@ -53,7 +53,7 @@ import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor
 import { recordInteraction } from '#lib/kill-work-context.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import { noteManifestReconciled } from '#lib/manifest-reconciliation.js';
 import {
   createProjectManifestChangeObserver,

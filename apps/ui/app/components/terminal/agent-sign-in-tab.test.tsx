@@ -82,6 +82,8 @@ const createView = () => {
 const ready: AgentSignInHostFrame = { type: 'ready', commandLine: "'/Users/someone/.acme/bin/acme' account sign-in" };
 
 const openTab = async () => {
+  /* As a chat's login card asks for it: the chat is the one a success carries on. */
+  requestAgentSignIn('acme', 'chat-1');
   const signIn = createBridge();
   const { view, loadRenderer } = createView();
   const onClose = vi.fn();
@@ -95,7 +97,7 @@ const openTab = async () => {
 
 afterEach(() => {
   /* A fresh request forgets how the last sign-in ended. */
-  requestAgentSignIn('acme');
+  requestAgentSignIn('acme', 'chat-1');
 });
 
 describe('AgentSignInTab', () => {
@@ -152,7 +154,7 @@ describe('AgentSignInTab', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'Signed in. The chat that asked continues where acme stopped, as soon as it is open.',
     );
-    expect(takeAgentSignInSuccess('acme')).toBe(true);
+    expect(takeAgentSignInSuccess('acme', 'chat-1')).toBe(true);
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -168,9 +170,9 @@ describe('AgentSignInTab', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('The sign-in ended with exit code 1.');
     expect(changes).toHaveBeenCalled();
-    expect(takeAgentSignInSuccess('acme')).toBe(false);
+    expect(takeAgentSignInSuccess('acme', 'chat-1')).toBe(false);
     function Outcome(): React.JSX.Element {
-      const outcome = useAgentSignInOutcome('acme');
+      const outcome = useAgentSignInOutcome('acme', 'chat-1');
       return <p data-testid='outcome'>{typeof outcome === 'object' ? String(outcome.exitCode) : String(outcome)}</p>;
     }
     render(<Outcome />);
@@ -184,7 +186,7 @@ describe('AgentSignInTab', () => {
     emit({ type: 'exited', exitCode: null, signal: '15' });
 
     expect(screen.getByRole('status')).toHaveTextContent('The sign-in ended before it finished.');
-    expect(takeAgentSignInSuccess('acme')).toBe(false);
+    expect(takeAgentSignInSuccess('acme', 'chat-1')).toBe(false);
   });
 
   it('should report nothing when the tab closes before the CLI ran', async () => {
@@ -205,12 +207,12 @@ describe('AgentSignInTab', () => {
     unmount();
 
     function Outcome(): React.JSX.Element {
-      const outcome = useAgentSignInOutcome('acme');
+      const outcome = useAgentSignInOutcome('acme', 'chat-1');
       return <p data-testid='outcome'>{typeof outcome === 'object' ? String(outcome.exitCode) : String(outcome)}</p>;
     }
     render(<Outcome />);
     expect(screen.getByTestId('outcome')).toHaveTextContent('undefined');
-    expect(takeAgentSignInSuccess('acme')).toBe(false);
+    expect(takeAgentSignInSuccess('acme', 'chat-1')).toBe(false);
   });
 
   it('should report nothing more when the tab closes after the CLI exited', async () => {
@@ -224,7 +226,49 @@ describe('AgentSignInTab', () => {
     unsubscribe();
 
     expect(changes).not.toHaveBeenCalled();
-    expect(takeAgentSignInSuccess('acme')).toBe(true);
+    expect(takeAgentSignInSuccess('acme', 'chat-1')).toBe(true);
+  });
+
+  it('should start a fresh sign-in when asked again after one ended', async () => {
+    const { view, emit, open } = await openTab();
+    view.type('\r');
+    emit({ type: 'exited', exitCode: 1, signal: null });
+
+    act(() => {
+      requestAgentSignIn('acme', 'chat-1');
+    });
+    await act(async () => undefined);
+
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('status')).toBeNull();
+    emit(ready);
+    expect(screen.getByRole('button', { name: 'Run' })).toBeInTheDocument();
+  });
+
+  it('should start a fresh sign-in when asked again after main refused one', async () => {
+    const { emit, open } = await openTab();
+    emit({ type: 'refused', code: 'cli-not-found', message: 'The CLI is gone.' });
+
+    act(() => {
+      requestAgentSignIn('acme', 'chat-1');
+    });
+    await act(async () => undefined);
+
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('should only bring a running sign-in forward when asked again', async () => {
+    const { view, open, session } = await openTab();
+    view.type('\r');
+
+    act(() => {
+      requestAgentSignIn('acme', 'chat-2');
+    });
+    await act(async () => undefined);
+
+    expect(open).toHaveBeenCalledOnce();
+    expect(session.close).not.toHaveBeenCalled();
   });
 
   it("should show main's refusal", async () => {

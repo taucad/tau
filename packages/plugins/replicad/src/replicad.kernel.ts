@@ -76,6 +76,7 @@ import type { NativeHandleEntry } from '#interface-resolution.js';
 import type { GlbResources } from '@taucad/geometry-core';
 
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
+import { installNativeUserBreak } from '#utils/native-user-break.js';
 import { createLiveTier, installOperationTier } from '#live-tier/live-tier.js';
 import type { LiveTier } from '#live-tier/live-tier.js';
 
@@ -469,7 +470,7 @@ export const replicadKernel = defineKernel({
   builtinModuleNames: ['replicad', '@taucad/replicad/annotations'],
   builtinPackages: {
     replicad: replicadPackage,
-    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '0.23.0-beta.1' },
+    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '0.23.0-beta.2' },
   },
   name: 'ReplicadKernel',
   // 1.5.0: native-handle snapshots are binary BRep. The version keys every cached entry, so text
@@ -573,6 +574,9 @@ export const replicadKernel = defineKernel({
         } else {
           logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);
         }
+
+        // N1: long native booleans and meshing stop on the same abort word the exception proxy polls.
+        installNativeUserBreak(raw);
 
         // The creating kernel binds the library once (Q5): library-internal OC calls trace to it, which is
         // exact with one realm per client; every other kernel's wrapper sees only its kernel-direct calls.
@@ -761,10 +765,11 @@ export const replicadKernel = defineKernel({
             context.libraryTrace.emitSummary();
             context.tracingSummary?.flush();
             if (documentTier) {
-              const { hits, misses, opaque, failureHits, evicted, entries } = documentTier.operations.stats();
+              const { hits, misses, stored, opaque, failureHits, evicted, entries } = documentTier.operations.stats();
               mainSpan.end({
                 tierHits: hits,
                 tierMisses: misses,
+                tierStored: stored,
                 tierOpaque: opaque,
                 tierFailureHits: failureHits,
                 tierEvicted: evicted,

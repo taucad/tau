@@ -34,9 +34,11 @@ import type {
   TreeWriteWatch,
   WorkerProjectRevisions,
   WorkerRevisionRegistryOptions,
+} from '#machines/file-manager.worker.revisions.js';
+import type {
   WorkerRevisionRequest,
   WorkerRevisionResponse,
-} from '#machines/file-manager.worker.revisions.js';
+} from '@taucad/revisions-ui/types/revision-worker-protocol';
 import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { createFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';

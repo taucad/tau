@@ -20,8 +20,18 @@ import type {
   WorkerRevisionCommand,
   WorkerRevisionEvent,
   BranchCreated,
-} from '#machines/file-manager.worker.revisions.js';
-import type { RevisionSessionUser } from '#lib/revision-actor.js';
+} from '#types/revision-worker-protocol.js';
+
+/**
+ * The signed-in person, as much of them as a revision records.
+ *
+ * No account address: a revision's author travels with every push and export,
+ * so it is `<id>@users.noreply.tau.new` unless a linked forge supplies its own
+ * no-reply identity (D33).
+ *
+ * @public
+ */
+export type RevisionSessionUser = Readonly<{ id: string; name?: string }>;
 
 /**
  * Where a project's GitHub credential comes from (audit R6).

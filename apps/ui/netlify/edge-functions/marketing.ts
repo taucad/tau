@@ -50,9 +50,9 @@ const marketingPrefixes = [
 const marketingFiles = new Set(['/sitemap-marketing.xml', '/llms.txt']);
 
 /**
- * The root data request of `/`, by both of React Router's names: `/_root.data` before trailing-slash-aware data
- * requests (`future.v8_trailingSlashAwareDataRequests`, the React Router 8 default) and `/_.data` with them. Both stay
- * accepted while a tab of a build that sends the old name can still be open (blueprint B5, RR4).
+ * The root data request of `/`, by both of React Router's names: `/_root.data` from React Router 7 and `/_.data` from
+ * React Router 8's trailing-slash-aware data requests. Both stay accepted while a tab of a build that sends the old
+ * name can still be open (blueprint B5, RR4).
  */
 export const rootDataPaths: readonly string[] = ['/_root.data', '/_.data'];
 

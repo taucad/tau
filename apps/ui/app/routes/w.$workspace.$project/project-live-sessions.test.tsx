@@ -36,7 +36,7 @@ import { SessionsProvider, useLiveProjectIds } from '#hooks/use-sessions.js';
 import { UnloadProvider, useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { createSessionsActor, selectProjectSessionRuntime } from '#services/sessions-store.js';
 import type { SessionRuntimeOpener, SessionsObservable, SessionWiring } from '#services/sessions-store.js';
-import { revisionClients } from '#services/revision-client-registry.js';
+import { revisionClients } from '@taucad/revisions-ui/services/revision-client-registry';
 import { focusedProjectStandIn } from '#services/focused-project.fixture.js';
 import type { ProjectChoices } from '#runtime/choices.js';
 import { openSessionProjectRuntime, sessionProjectRuntimeOf } from '#runtime/project-runtime.session.js';
@@ -468,7 +468,7 @@ vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 
 vi.mock('#hooks/use-revision-status.js', async () => {
   const { useProject } = await import('#hooks/use-project.js');
-  const { revisionClients } = await import('#services/revision-client-registry.js');
+  const { revisionClients } = await import('@taucad/revisions-ui/services/revision-client-registry');
   return {
     /* The project's one client, in the real table the session's close reads it from (`peekRevisionClient`). */
     getRevisionClient: ({ projectId, worker }: { readonly projectId: string; readonly worker: Worker }) => {

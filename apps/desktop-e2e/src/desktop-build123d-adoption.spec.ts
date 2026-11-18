@@ -366,16 +366,7 @@ test.skipIf(!enabled)(
       expect(await row.locator('[data-model-part-button]').getAttribute('aria-pressed')).toBe('true');
       const visibility = async () =>
         page.evaluate((components) => {
-          const bridges =
-            (
-              globalThis as typeof globalThis & {
-                __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                  getRenderedModelComponentState(id: string): {
-                    visibleMeshCount: number;
-                  };
-                }>;
-              }
-            ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+          const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
           return bridges.map((bridge) => ({
             left: bridge.getRenderedModelComponentState(components.leftHousing).visibleMeshCount,
             right: bridge.getRenderedModelComponentState(components.rightHousing).visibleMeshCount,
@@ -433,16 +424,7 @@ test.skipIf(!enabled)(
       await expect
         .poll(async () =>
           page.evaluate((ids) => {
-            const bridges =
-              (
-                globalThis as typeof globalThis & {
-                  __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                    getRenderedModelComponentState(id: string): {
-                      visibleMeshCount: number;
-                    };
-                  }>;
-                }
-              ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+            const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
             return bridges.some((bridge) =>
               ids.every((id) => bridge.getRenderedModelComponentState(id).visibleMeshCount > 0),
             );
@@ -555,14 +537,7 @@ test.skipIf(!enabled)(
               };
             }
           ).__TAU_KINEMATICS_TEST__;
-          const sceneBridge = (
-            globalThis as typeof globalThis & {
-              __TAU_SECTION_VIEW_TEST__?: {
-                getRenderedModelComponentSurfaceBounds(id: string): { min: number[]; max: number[] } | undefined;
-                getRenderedModelComponentSurfacePoints(id: string): Array<readonly [number, number, number]>;
-              };
-            }
-          ).__TAU_SECTION_VIEW_TEST__;
+          const sceneBridge = globalThis.__TAU_SECTION_VIEW_TEST__;
           const surfaceCenter = (id: string) => {
             const bounds = sceneBridge?.getRenderedModelComponentSurfaceBounds(`occurrence:path/0/${id}`);
             return bounds?.min.map((minimum, index) => (minimum + bounds.max[index]!) / 2);
@@ -680,17 +655,7 @@ test.skipIf(!enabled)(
       await page.keyboard.press('Control+a');
       await expectVisible(page.getByText('Weight · 0 of 34 parts known', { exact: true }), 60_000);
       const planetaryParts = await page.evaluate(() => {
-        const bridges =
-          (
-            globalThis as typeof globalThis & {
-              __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                getModelComponents(): Array<{ id: string; name: string }>;
-                getRenderedModelComponentState(id: string): {
-                  meshCount: number;
-                };
-              }>;
-            }
-          ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+        const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
         return bridges
           .map((bridge) =>
             bridge.getModelComponents().filter((part) => bridge.getRenderedModelComponentState(part.id).meshCount > 0),

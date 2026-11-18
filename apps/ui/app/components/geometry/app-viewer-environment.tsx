@@ -10,6 +10,7 @@ import {
   parseGraphicsBackendQueryOverride,
   resolveViewerGraphicsBackendPreference,
 } from '@taucad/ui-core/utils/graphics-backend-override';
+import { parseRenderTierQueryOverride, renderTierOverrideAllowed } from '#components/geometry/render-tier-override.js';
 
 const SectionViewTestBridge = React.lazy(async () => {
   const module = await import('#components/geometry/debug/section-view-test-bridge.js');
@@ -19,13 +20,16 @@ const SectionViewTestBridge = React.lazy(async () => {
 /**
  * Map the app's theme, accent colour and feature flags onto the viewer's environment, so every
  * `@taucad/viewer` component below draws with the workspace's look and switches. The `?graphicsBackend=` override
- * is read from the router location so a client-side navigation that adds or changes it switches the backend.
+ * is read from the router location so a client-side navigation that adds or changes it switches the backend. The
+ * test-only `?renderTier=` override applies in an undeployed debug build only.
  */
 export function AppViewerEnvironment({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const { theme, isHighContrast } = useTheme();
   const { serialized } = useColor();
   const flags = useFeatureFlags();
-  const backendOverride = parseGraphicsBackendQueryOverride(useLocation().search);
+  const { search } = useLocation();
+  const backendOverride = parseGraphicsBackendQueryOverride(search);
+  const renderTierFeatures = parseRenderTierQueryOverride(search, renderTierOverrideAllowed)?.features;
 
   const environment = useMemo(
     (): ViewerEnvironment => ({
@@ -39,6 +43,7 @@ export function AppViewerEnvironment({ children }: { readonly children: ReactNod
         webGpuShaderStacks: flags.webGpuShaderStacks,
       },
       debugStageBridge: SectionViewTestBridge,
+      renderTierOverride: renderTierFeatures ? { features: renderTierFeatures } : undefined,
     }),
     [
       backendOverride,
@@ -47,6 +52,7 @@ export function AppViewerEnvironment({ children }: { readonly children: ReactNod
       flags.webGpuInspector,
       flags.webGpuShaderStacks,
       isHighContrast,
+      renderTierFeatures,
       serialized.hex,
       theme,
     ],

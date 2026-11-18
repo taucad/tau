@@ -75,15 +75,7 @@ const cardOf = (page: Page, name: string): Locator =>
  * bridge with a viewer canvas in scope is that scope's viewer.
  */
 const isAnyViewerFramed = async (page: Page): Promise<boolean> =>
-  page.evaluate(() =>
-    (
-      (
-        globalThis as typeof globalThis & {
-          __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{ isGeometryFramed(): boolean }>;
-        }
-      ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? []
-    ).some((bridge) => bridge.isGeometryFramed()),
-  );
+  page.evaluate(() => (globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? []).some((bridge) => bridge.isGeometryFramed()));
 
 /**
  * Wait for a framed viewer canvas inside `scope`, or for the runtime alert the

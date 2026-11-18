@@ -29,6 +29,7 @@ import {
   resolveGridClipPolicy,
   selectCanvasAwaitingFrame,
   selectCanvasBackend,
+  selectPresentedRenderTier,
 } from '#machines/canvas.machine.js';
 import type { CanvasEvent, CanvasHostCommand, CanvasInput, CanvasSurface } from '#machines/canvas.machine.js';
 import {
@@ -36,12 +37,14 @@ import {
   infiniteGridPresentationPlaneByUpDirection,
 } from '#graphics/three/utils/infinite-grid-frame.js';
 import { webglContextMachine } from '#machines/webgl-context.machine.js';
+import { hardwareRenderTier } from '#graphics/three/render-tier.js';
 
 const surface: CanvasSurface = { width: 800, height: 600, pixelRatio: 2 };
 const idleHost = createCallbackLogic<CanvasHostCommand, undefined>(() => undefined);
 const hostCreated = (host = idleHost, at: CanvasSurface = surface): CanvasEvent => ({
   type: 'hostCreated',
   backend: 'webgl',
+  tier: hardwareRenderTier('webgl'),
   surface: at,
   domElement: document.createElement('canvas'),
   host,
@@ -283,6 +286,20 @@ describe('canvas lifecycle', () => {
     canvas.send(hostCreated(createCanvasHostLogic({ root: loop.root, isRetired: () => true })));
     loop.domElement.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
     expect(canvas.getSnapshot().value).toBe('ready');
+    canvas.stop();
+  });
+
+  it('should report its render tier only once its first frame is on screen, and none after its renderer fails', () => {
+    const canvas = startCanvas();
+    const created = hostCreated();
+    canvas.send(created);
+    expect(selectPresentedRenderTier(canvas.getSnapshot())).toBeUndefined();
+    canvas.send({ type: 'framePresented' });
+    const { tier } = created as Extract<CanvasEvent, { type: 'hostCreated' }>;
+    expect(selectPresentedRenderTier(canvas.getSnapshot())).toBe(tier);
+    // A WebGPU device the browser destroyed after the first frame: the canvas remounts on WebGL as a new incarnation.
+    canvas.send({ type: 'rendererFailed', failure: { kind: 'webgpu-initialization', message: 'destroyed' } });
+    expect(selectPresentedRenderTier(canvas.getSnapshot())).toBeUndefined();
     canvas.stop();
   });
 

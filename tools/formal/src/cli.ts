@@ -8,6 +8,7 @@ import { describeOutcome, findExpectedFiles, knownFailures, specProjectRoots } f
 import type { SetupTool } from '#setup.js';
 import { validateCapturedLogs } from '#logs.js';
 import { setup } from '#setup.js';
+import { parseShard } from '#shard.js';
 import type { FormalContext } from '#toolchain.js';
 import { defaultContext, locateTools, toolchainId } from '#toolchain.js';
 
@@ -37,6 +38,7 @@ const main = async (argv: readonly string[]): Promise<number> => {
       from: { type: 'string' },
       tier: { type: 'string' },
       family: { type: 'string' },
+      shard: { type: 'string' },
       'without-check': { type: 'boolean' },
     },
   });
@@ -60,14 +62,16 @@ const main = async (argv: readonly string[]): Promise<number> => {
     }
     case 'check': {
       const [projectRoot] = positionals;
-      if (!projectRoot) {
-        out('usage: formal check --tier pr|nightly|lean [--family <family>] <projectRoot>');
+      const shard = values.shard === undefined ? undefined : parseShard(values.shard);
+      if (!projectRoot || (values.shard !== undefined && shard === undefined)) {
+        out('usage: formal check --tier pr|nightly|lean [--family <family>] [--shard <k>/<n>] <projectRoot>');
         return 2;
       }
       return checkProject(context, {
         tier: (values.tier ?? 'pr') as Tier | 'lean',
         projectRoot: path.resolve(context.root, projectRoot),
         ...(values.family === undefined ? {} : { family: values.family }),
+        ...(shard === undefined ? {} : { shard }),
       });
     }
     case 'known': {

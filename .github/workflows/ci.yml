@@ -844,7 +844,9 @@ jobs:
   # its own 120-minute budget. The seed source is the queue commit's sha, so each landing explores a fresh
   # seed and a re-run of the same commit replays it. A pull request leaves the lane to the queue, a push to
   # `main` reuses the queue verdict, and the release gate (RG-1) runs every project with a seed of its own.
-  # The required check waits for it (CI throughput review, Q-4 step 2).
+  # The required check waits for it (CI throughput review, Q-4 step 2). It passes the read token alone, never
+  # `secrets: inherit`; the called jobs run in `nx-cache-write`, whose write token replaces it, so the queue
+  # reuses an unchanged project's cached `formal:nightly:check` shards (CI throughput review, formal speed).
   formal-nightly:
     name: Formal nightly
     needs: [plan]
@@ -857,6 +859,8 @@ jobs:
       ref: ${{ github.sha }}
       projects: ${{ needs.plan.outputs.formal-nightly-projects }}
       seed: ${{ github.sha }}
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
   # The end-to-end ratchet (operator ruling 2026-11-15): every end-to-end suite that passed five consecutive
   # e2e-nightly runs (two before 2026-11-17, MQ-3) leaves the nightly for good and runs here, in the merge queue (and on a push to `main` the

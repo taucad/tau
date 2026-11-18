@@ -945,6 +945,11 @@
     "reason": "reads workspace-root configuration or inventory"
   },
   {
+    "file": "scripts/src/formal-nightly-workflow.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
     "file": "scripts/src/formal-plugin-target.test.ts",
     "target": "tools/formal.plugin.js",
     "reason": "imports another project's source by relative path instead of its package"

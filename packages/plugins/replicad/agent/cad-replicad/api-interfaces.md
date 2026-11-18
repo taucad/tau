@@ -1,6 +1,6 @@
 # replicad — Interfaces
 
-21 top-level symbols. Signatures are verbatim typescript.
+25 top-level symbols. Signatures are verbatim typescript.
 
 BooleanOperationOptions: export declare interface BooleanOperationOptions
 
@@ -305,6 +305,81 @@ MeshShapeMesh: export declare interface MeshShapeMesh
   vertProperties: number[]
 
   numProp: number
+
+// A host cache
+// Remarks: The library calls `operation` only for calls made by user code: calls made while an operation runs (internal composition) go straight to the implementation, except inside a user callback that the library invokes (a sweep factory), where user code is routed again. Calls the cache makes itself go through the routing too; wrap them in `bypassOperationCache`.
+OperationCache: export declare interface OperationCache
+
+  // OperationCache.operation (method)
+  operation<T>(request: OperationRequest<T>): T;
+
+  // OperationCache.step (method)
+  step<T>(request: OperationStep<T>): T;
+
+  // Topological elements that user code took from `owner` (the `edges`, `faces`, `wires` and `solids` getters, a finder's `find`)
+  // OperationCache.elements (method)
+  elements(owner: object, kind: string, elements: readonly object[], ordinals: () => readonly number[] | undefined): void;
+
+// One public operation, described lazily
+OperationRequest: export declare interface OperationRequest<T>
+
+  // `Class.method`, `set:Class.property` or the exported function name
+  readonly op: string
+
+  readonly effect: OperationEffect
+
+  // `this` of a method
+  readonly receiver: object | undefined
+
+  // The arguments as passed
+  // Remarks: Do not identify a finder instance (`EdgeFinder`, `FaceFinder`, `CornerFinder`) by its object identity: its clause methods mutate it without being routed, so the same object can select differently from one call to the next. Describe it by its clauses, or let the operation's step key the selection.
+  readonly args: readonly unknown[]
+
+  // Positions of finder arguments among `args`
+  readonly finderArgs?: readonly number[]
+
+  // The result is a mutable builder (a pen from `draw()`)
+  readonly returnsBuilder?: boolean
+
+  // The operation's errors are a deterministic function of its inputs (it calls no user code that the inputs do not describe), so a cache may reuse a failure
+  readonly deterministicErrors?: boolean
+
+  // For a builder (pen, sketcher) the cache has not seen
+  readonly freshState?: () => readonly unknown[] | undefined
+
+  // Runs the operation
+  // OperationRequest.compute (method)
+  compute(): T;
+
+  // Deletes what the operation would have deleted
+  // OperationRequest.consume (method)
+  consume?(): void;
+
+// The part of an operation that depends on a callback the cache could not describe up front (a sweep factory, a finder predicate)
+OperationStep: export declare interface OperationStep<T>
+
+  readonly op: string
+
+  readonly receiver: object | undefined
+
+  // See {@link OperationRequest.deterministicErrors}
+  readonly deterministicErrors?: boolean
+
+  // The inputs known after the callback ran (selected element ordinals and radii, the factory's sketch), or `undefined` if they cannot be described (a selected element is not part of the receiver)
+  // OperationStep.values (method)
+  values(): readonly unknown[] | undefined;
+
+  // OperationStep.compute (method)
+  compute(): T;
+
+  // OperationStep.consume (method)
+  consume?(): void;
+
+PlaneConfig: export declare interface PlaneConfig
+
+  plane?: PlaneName | Plane
+
+  origin?: Point | number
 
 PlaneFace: export declare interface PlaneFace
 

@@ -60,7 +60,7 @@ describe('ui:test shards', () => {
     for (const [index, name] of shardTargets.entries()) {
       expect(targets[name]?.options).toEqual({
         cwd: '{projectRoot}',
-        command: `../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=${index + 1}/${count}`,
+        command: `vitest run --config test-shards.test.config.ts --shard=${index + 1}/${count}`,
       });
     }
   });

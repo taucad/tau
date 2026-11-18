@@ -23,7 +23,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config src/graphics/svg/svg-viewer.vitest.browser.config.ts"
+        "command": "vitest run --config src/graphics/svg/svg-viewer.vitest.browser.config.ts"
       }
     },
     "test:e2e:gltf-batches": {
@@ -34,7 +34,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/utils/gltf-batches.vitest.browser.config.ts"
+        "command": "vitest run --config src/graphics/three/utils/gltf-batches.vitest.browser.config.ts"
       }
     },
     "test:e2e:viewer-resize": {
@@ -45,7 +45,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-resize.vitest.browser.config.ts"
+        "command": "vitest run --config src/graphics/three/viewer-resize.vitest.browser.config.ts"
       }
     },
     "capture:viewer-parity": {
@@ -56,7 +56,7 @@
       "cache": false,
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config src/graphics/three/viewer-parity-capture.vitest.browser.config.ts"
+        "command": "vitest run --config src/graphics/three/viewer-parity-capture.vitest.browser.config.ts"
       }
     },
     "test": {

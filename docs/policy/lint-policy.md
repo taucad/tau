@@ -25,7 +25,7 @@ This project uses a **hybrid linting** setup where **oxlint** runs first as a fa
 
 ### How it works
 
-1. `pnpm nx lint <project>` chains oxlint and ESLint through `nx.json` `targetDefaults`. `--files=<path>` is relative to the selected project root and passes the same selection to both tools; oxlint receives the workspace-root `.oxlintrc.json` explicitly.
+1. `pnpm nx lint <project>` chains oxlint and ESLint through `nx.json` `targetDefaults`. `--files=<path>` is relative to the selected project root and passes the same selection to both tools; oxlint finds the workspace-root `.oxlintrc.json` by searching up from the project root, so the command carries no shell variable and starts under cmd.exe as well as a POSIX shell.
 2. `.oxlintrc.json` owns native and JavaScript-plugin rules. `eslint.config.mjs` explicitly configures the remaining ESLint rules; it does not load `eslint-plugin-oxlint` or automatically disable overlapping rules.
 3. In VS Code, the Oxc extension provides real-time oxlint diagnostics, formatting via oxfmt, and the ESLint extension handles residual rules. Both support fix-on-save.
 4. CI (`pnpm nx affected -t lint`) chains both tools transparently via the Nx lint target.

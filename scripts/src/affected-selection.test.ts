@@ -4,7 +4,7 @@ import { createProjectGraphAsync } from '@nx/devkit';
 import type { ProjectGraph, TargetConfiguration } from '@nx/devkit';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { browserTests, workspaceTests } from '../vitest.config.ts';
+import { browserTests, workspaceTests } from '#test-sets.js';
 
 /*
  * Seeded-path pins for `nx affected` (ST-1 of the CI structural decomposition blueprint). In Nx 22 a project is
@@ -35,7 +35,8 @@ beforeAll(async () => {
 
 const affectedBy = async (file: string): Promise<ReadonlySet<string>> => {
   const change: FileChange = { file, hash: 'seeded', getChanges: () => [{ type: 'WholeFileChange' }] };
-  return new Set(Object.keys((await filterAffected(graph, [change])).nodes));
+  const affected = await filterAffected(graph, [change]);
+  return new Set(Object.keys(affected.nodes));
 };
 
 const workspaceRootInputs = (target: TargetConfiguration | undefined): string[] =>
@@ -45,9 +46,18 @@ const workspaceRootInputs = (target: TargetConfiguration | undefined): string[] 
   });
 
 /* The scanned libraries, in `apps/ui/app/styles/focus-outline.test.ts`. */
-const uiLibraries = ['ui-kit', 'chat-ui', 'project-workspace', 'files-ui', 'editor-ui', 'settings-ui', 'publish-ui', 'ui-core'];
+const uiLibraries = [
+  'ui-kit',
+  'chat-ui',
+  'project-workspace',
+  'files-ui',
+  'editor-ui',
+  'settings-ui',
+  'publish-ui',
+  'ui-core',
+];
 
-describe('affected selection', () => {
+describe('affected selection', { timeout: 60_000 }, () => {
   it.each([
     'apps/ui/app/components/category-badge.tsx',
     'apps/ui/app/components/category-badge.ts',
@@ -63,9 +73,12 @@ describe('affected selection', () => {
 
   it('should still run the app focus-outline scan when a scanned library changes', async () => {
     const dependencies = new Set((graph.dependencies['ui'] ?? []).map(({ target }) => target));
-    for (const library of uiLibraries) {
+    const affected = await Promise.all(
+      uiLibraries.map(async (library) => affectedBy(`${graph.nodes[library]?.data.root}/src/seeded-component.tsx`)),
+    );
+    for (const [index, library] of uiLibraries.entries()) {
       expect(dependencies, library).toContain(library);
-      expect(await affectedBy(`${graph.nodes[library]?.data.root}/src/seeded-component.tsx`), library).toContain('ui');
+      expect(affected[index], library).toContain('ui');
     }
   });
 

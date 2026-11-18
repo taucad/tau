@@ -169,7 +169,7 @@
         "cwd": "{projectRoot}",
         "command": "../node_modules/.bin/vitest run",
         "env": {
-          "TAU_SCRIPTS_BROWSER_TESTS": "true"
+          "TAU_SCRIPTS_TEST_SET": "browser"
         }
       }
     },

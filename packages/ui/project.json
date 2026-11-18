@@ -6,11 +6,7 @@
   "tags": ["scope:shared", "type:package"],
   "targets": {
     "test": {
-      "inputs": [
-        "default",
-        "^production",
-        "reactEventLayer"
-      ]
+      "inputs": ["default", "^production", "reactEventLayer"]
     },
     "typecheck": {
       "inputs": ["default", "^production", "reactEventLayer"]

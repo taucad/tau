@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier and its byte budget, the native user break and build epochs — measured 26.99 kB brotlied on 2026-11-18, after build epochs with releaseHandle, the tier's entry-cost estimate and byte budget, and scoped STEP export ownership (E12)",
+    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier and its byte budget, the native user break, build epochs and the mesh memo — measured 29.2 kB brotlied on 2026-11-18, after merging build epochs (E12) with the mesh memo, box memo and tolerance ladder",
     "path": ["dist/**/*.mjs"],
-    "limit": "27.5 kB"
+    "limit": "29.5 kB"
   },
   {
     "name": "font + sourcemap payload — measured 1.43 MB on 2026-08-23",

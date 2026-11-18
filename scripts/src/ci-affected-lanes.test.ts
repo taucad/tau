@@ -518,15 +518,14 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
     expect(affectedPlanOutputs()).toContain(job);
   });
 
-  it('should pass the affected test:native-linux projects and the Intel row to the native host rows', () => {
+  it('should pass the affected test:native-linux projects and the Linux hosts alone to the native host rows', () => {
     expect(ci.jobs['native-hosts']?.with).toEqual({
+      hosts: 'linux',
       'native-linux': expression('needs.plan.outputs.native-linux'),
-      intel: expression('needs.plan.outputs.native-intel'),
     });
-    // The Intel row runs when a tag:ci:native-hosts project (Build123d, PicoGK, the CLI) is affected (Q-3).
-    expect(ci.jobs['plan']?.outputs?.['native-intel']).toBe(expression('steps.plan.outputs.native-intel'));
-    expect(planScript).toContain('native_intel=$(flag native-hosts)');
-    expect(planScript).toContain('echo "native-intel=$native_intel"');
+    // The darwin-x64 rows run at the desktop candidate gate, never in the merge queue (INTEL-1).
+    expect(ci.jobs['plan']?.outputs).not.toHaveProperty('native-intel');
+    expect(planScript).not.toContain('native-intel');
     expect(ci.jobs['plan']?.outputs?.['native-linux']).toBe(expression('steps.plan.outputs.native-linux'));
     expect(planScript).toContain(`native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")`);
     // The Linux rows run when a native host project or a native-linux project is affected.
@@ -661,23 +660,25 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
 
   it('should skip the native-hosts plan when ci.yml calls it and take the rows from ci.yml', () => {
     expect(nativeHosts.on?.workflow_call?.inputs?.['native-linux']?.type).toBe('string');
-    expect(nativeHosts.on?.workflow_call?.inputs?.['intel']?.type).toBe('string');
-    // `inputs.intel` is set only on a call, so it tells a call from the nightly and a dispatch.
-    expect(nativeHosts.jobs['plan']?.if).toBe("inputs.intel == ''");
+    expect(nativeHosts.on?.workflow_call?.inputs?.['hosts']?.type).toBe('string');
+    expect(nativeHosts.on?.workflow_call?.inputs?.['ref']?.type).toBe('string');
+    expect(nativeHosts.on?.workflow_call?.inputs).not.toHaveProperty('intel');
+    // `inputs.hosts` is set only on a call, so it tells a call from a dispatch.
+    expect(nativeHosts.jobs['plan']?.if).toBe("inputs.hosts == ''");
     expect(nativeHosts.jobs['linux']?.if).toBe(
-      expression("!cancelled() && (inputs.intel != '' || needs.plan.outputs.linux == 'true')"),
+      expression("!cancelled() && (inputs.hosts == 'linux' || needs.plan.outputs.linux == 'true')"),
     );
     // The `test:native-linux` rows, one job per project (ST-3), from the same selection.
     expect(nativeHosts.jobs['native-linux-rows']?.if).toBe(nativeHosts.jobs['linux']?.if);
     expect(
       nativeHosts.jobs['native-linux-rows']?.steps?.find((step) => step.env?.['NATIVE_LINUX'])?.env?.['NATIVE_LINUX'],
     ).toBe(expression('inputs.native-linux || needs.plan.outputs.native-linux'));
-    // The Intel row joins the queue when ci.yml's plan selects it (Q-3).
+    // The Intel rows run only for the desktop candidate gate's call (`hosts: intel`) and a dispatch (INTEL-1).
     expect(nativeHosts.jobs['intel']?.if).toBe(
-      expression("!cancelled() && (inputs.intel == 'true' || needs.plan.outputs.intel == 'true')"),
+      expression("!cancelled() && (inputs.hosts == 'intel' || needs.plan.outputs.intel == 'true')"),
     );
     // A called run gets its own group, so a newer push never replaces a `main` run's rows.
-    expect(nativeHosts.concurrency?.group).toContain("inputs.intel != '' && github.run_id");
+    expect(nativeHosts.concurrency?.group).toContain("inputs.hosts != '' && github.run_id");
   });
 });
 
@@ -1606,11 +1607,11 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
     const hub = plan('merge_group', { affected: everything, files: ['packages/core/src/index.ts'] });
     expect(hub.status, hub.stderr).toBe(0);
     expect(hub.outputs['native-hosts']).toBe('false');
-    expect(hub.outputs['native-intel']).toBe('false');
+    expect(hub.outputs).not.toHaveProperty('native-intel');
     expect(hub.outputs['native-linux']).toBe('');
     const own = plan('merge_group', { affected: everything, files: ['packages/plugins/picogk/src/index.ts'] });
     expect(own.status, own.stderr).toBe(0);
-    expect(own.outputs['native-intel']).toBe('true');
+    expect(own.outputs['native-hosts']).toBe('true');
     // A project the row depends on outside a hub selects it; the same project reached only through a hub does not.
     const dependencies = { cli: ['host', 'build123d'], host: ['sandbox'], build123d: ['core'] };
     const direct = plan('merge_group', { affected: everything, files: ['packages/core/src/index.ts'], dependencies });
@@ -1621,7 +1622,7 @@ describe('plan lane selection', { timeout: 30_000 }, () => {
     // A lockfile change applies no merge-queue rule.
     const lockfile = plan('merge_group', { affected: everything, files: ['pnpm-lock.yaml'] });
     expect(lockfile.stdout).toContain('The entry changes pnpm-lock.yaml: no merge-queue rule applies.');
-    expect(lockfile.outputs['native-intel']).toBe('true');
+    expect(lockfile.outputs['native-hosts']).toBe('true');
   });
 
   it('should not select the shell lane for a file beside the fixture paths', () => {

@@ -401,26 +401,31 @@ describe('replicad live tier', () => {
 
     /** Digests of the native-handle snapshots the build cache writes while each step settles. */
     const snapshotsOf = async (arm: Arm, steps: ReadonlyArray<{ parameters: ParameterSet; comment: string }>) => {
-      type Fs = { readFile: (path: string) => Uint8Array<ArrayBuffer> };
+      type BinaryBrepData = { getPtr(): number; getSize(): number };
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- OCCT embind mirrors the C++ method name.
+      type BinaryBrep = { Write: (shape: unknown, withTriangles: boolean, withNormals: boolean) => BinaryBrepData };
       const written: string[][] = [];
       let current: string[] = [];
       const restore: Array<() => void> = [];
       const watch = (): void => {
-        // The realm's OpenCASCADE instance exists once the first build ran; snapshots are written through its MEMFS.
-        const fs = (replicad.getOC() as unknown as { FS: Fs }).FS;
+        // The realm's OpenCASCADE instance exists once the first build ran; snapshots are written through its binary
+        // BRep writer.
+        const oc = replicad.getOC() as unknown as { ReplicadBinaryBrep: BinaryBrep; wasmMemory: WebAssembly.Memory };
         if (restore.length > 0) {
           return;
         }
-        const { readFile } = fs;
-        fs.readFile = (path: string) => {
-          const bytes = readFile.call(fs, path);
-          if (path.includes('tau_replicad_native_handle')) {
-            current.push(sha(bytes));
-          }
-          return bytes;
+        const writer = oc.ReplicadBinaryBrep;
+        const { Write: write } = writer;
+        const spy: BinaryBrep['Write'] = (shape, withTriangles, withNormals) => {
+          const data = write.call(writer, shape, withTriangles, withNormals);
+          const pointer = data.getPtr();
+          current.push(sha(new Uint8Array(oc.wasmMemory.buffer).slice(pointer, pointer + data.getSize())));
+          return data;
         };
+        // Embind's dispatcher looks its overload table up on the method it is called through, so the spy carries it.
+        writer.Write = Object.assign(spy, write);
         restore.push(() => {
-          fs.readFile = readFile;
+          writer.Write = write;
         });
       };
       const opened = session({ source: retainedOperand, arm, cached: true });

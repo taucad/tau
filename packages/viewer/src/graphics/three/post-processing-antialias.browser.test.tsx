@@ -34,6 +34,7 @@ import { SceneOverlay, useOverlayDepthRestorer } from '#graphics/three/scene-ove
 import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.jsx';
 import { graphicsMachine, selectGraphicsFramed } from '#machines/graphics.machine.js';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
+import { expectHardwareComposition, HardwareComposition } from '#test/hardware-composition.test-utils.jsx';
 import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
 import { resolveSectionPieces } from '#graphics/section-cuts.js';
 import { writeSectionClip } from '#graphics/three/materials/section-clip.js';
@@ -297,20 +298,22 @@ eachWithHardwareClaims(
     try {
       render(
         <div style={{ width, height }}>
-          <GraphicsProvider graphicsRef={actor}>
-            <ThreeCanvasInstance
-              graphicsBackend={backend}
-              upDirection='y'
-              postProcessingSettings={{ intensity: 0, gtaoIntensity: 0 }}
-              onRetry={() => undefined}
-            >
-              <mesh>
-                <planeGeometry args={[4, 4]} />
-                <meshBasicMaterial map={texture} />
-              </mesh>
-              <Probe />
-            </ThreeCanvasInstance>
-          </GraphicsProvider>
+          <HardwareComposition>
+            <GraphicsProvider graphicsRef={actor}>
+              <ThreeCanvasInstance
+                graphicsBackend={backend}
+                upDirection='y'
+                postProcessingSettings={{ intensity: 0, gtaoIntensity: 0 }}
+                onRetry={() => undefined}
+              >
+                <mesh>
+                  <planeGeometry args={[4, 4]} />
+                  <meshBasicMaterial map={texture} />
+                </mesh>
+                <Probe />
+              </ThreeCanvasInstance>
+            </GraphicsProvider>
+          </HardwareComposition>
         </div>,
       );
       await vi.waitFor(
@@ -329,6 +332,7 @@ eachWithHardwareClaims(
         { timeout: 45_000 },
       );
       expect(isViewportWebGpu(state!.gl)).toBe(execution !== 'webgl');
+      expectHardwareComposition(state!.gl);
       if (isViewportWebGpu(state!.gl)) {
         expect(state!.gl.backend).toBeInstanceOf(execution === 'webgpu' ? WebGPUBackend : WebGLBackend);
       }
@@ -454,32 +458,34 @@ it.each(
   try {
     render(
       <div style={{ width: 384, height: 384 }}>
-        <GraphicsProvider graphicsRef={actor}>
-          <ThreeCanvasInstance
-            graphicsBackend={backend}
-            upDirection='y'
-            postProcessingSettings={{
-              displayMode: 'ao',
-              radiusCssPixels: 24,
-            }}
-            onRetry={() => undefined}
-          >
-            <mesh>
-              <planeGeometry args={[4, 4]} />
-              <meshStandardMaterial />
-            </mesh>
-            <mesh
-              position={[0, 0.5, 0.2]}
-              ref={(mesh) => {
-                movingWall = mesh ?? undefined;
+        <HardwareComposition>
+          <GraphicsProvider graphicsRef={actor}>
+            <ThreeCanvasInstance
+              graphicsBackend={backend}
+              upDirection='y'
+              postProcessingSettings={{
+                displayMode: 'ao',
+                radiusCssPixels: 24,
               }}
+              onRetry={() => undefined}
             >
-              <boxGeometry args={[3, 1, 0.4]} />
-              <meshStandardMaterial />
-            </mesh>
-            <Probe />
-          </ThreeCanvasInstance>
-        </GraphicsProvider>
+              <mesh>
+                <planeGeometry args={[4, 4]} />
+                <meshStandardMaterial />
+              </mesh>
+              <mesh
+                position={[0, 0.5, 0.2]}
+                ref={(mesh) => {
+                  movingWall = mesh ?? undefined;
+                }}
+              >
+                <boxGeometry args={[3, 1, 0.4]} />
+                <meshStandardMaterial />
+              </mesh>
+              <Probe />
+            </ThreeCanvasInstance>
+          </GraphicsProvider>
+        </HardwareComposition>
       </div>,
     );
     await vi.waitFor(
@@ -503,6 +509,7 @@ it.each(
     retired = true;
     await pending;
     const { width, height } = state!.gl.domElement;
+    expectHardwareComposition(state!.gl);
     const measureContact = (image: Uint8ClampedArray): { noise: number; contact: number; residuals: number[] } => {
       const rowNoise: number[] = [];
       const rowMeans: number[] = [];

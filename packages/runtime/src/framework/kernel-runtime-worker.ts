@@ -519,6 +519,10 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
   }
 
+  protected override kernelStoresNativeHandleForOwner(owner: OperationOwner): boolean {
+    return this.getKernelForOwner(owner)?.definition.serializeHandle !== undefined;
+  }
+
   protected override kernelHasMeshPhaseForOwner(owner: OperationOwner): boolean {
     return this.getKernelForOwner(owner)?.definition.render !== undefined;
   }

@@ -23,7 +23,12 @@ import type {
   RuntimeChildNativeKernels,
 } from '@taucad/host';
 import type { HostSystemSkillBundle } from '@taucad/host/agent-tools';
-import { preparationReporter, reportingPrepareKernel } from '@taucad/host/telemetry';
+import {
+  admissionRefusalReporter,
+  machineOperationReporter,
+  preparationReporter,
+  reportingPrepareKernel,
+} from '@taucad/host/telemetry';
 import type { PreparationReport } from '@taucad/host/telemetry';
 import { nativeDeploymentReportSchema } from '@taucad/native-process-core/store';
 import type { NativeDeploymentReport, NativePreparation } from '@taucad/native-process-core/store';
@@ -1187,6 +1192,11 @@ export const serveCommand = defineCommand({
               observeRuntimeClient: (client, caller) => runtimeTelemetry.observe(client, caller),
               /* PR-7 (AR-W6-02): sync attempts under the same rule as the runtime reporter. */
               syncTelemetryConsent: () => runtimeTelemetry.status().consent,
+              /* T19: `--machines` operations and refused admissions, as `tau mcp --machines` reports them. */
+              machineTelemetry: {
+                onOperation: machineOperationReporter(runtimeTelemetry),
+                onAdmissionRefusal: admissionRefusalReporter(runtimeTelemetry),
+              },
             }),
         ...(observeChats === undefined ? {} : { observeChats }),
         onEvent,

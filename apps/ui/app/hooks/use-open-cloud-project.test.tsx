@@ -59,17 +59,6 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ createProject: mockCreateProject, getProjects: async () => [] }),
 }));
 
-/* STO-25 SP6: the shared file-manager worker the project's session will use, and the gesture's early open. */
-const { sharedWorker, mockPreconnect } = vi.hoisted(() => ({
-  sharedWorker: { name: 'shared-worker' } as unknown as Worker,
-  mockPreconnect: vi.fn(),
-}));
-vi.mock('#runtime/app-runtime-provider.js', () => ({ useOptionalAppRuntime: () => ({}) }));
-vi.mock('#runtime/app-runtime.js', () => ({
-  selectRuntimeRootFiles: () => ({ getSnapshot: () => ({ context: { worker: sharedWorker } }) }),
-}));
-vi.mock('#runtime/session-revisions.js', () => ({ preconnectCloudOpen: mockPreconnect }));
-
 const { cloudProjectStub, useOpenCloudProject } = await import('#hooks/use-open-cloud-project.js');
 
 const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
@@ -119,20 +108,6 @@ describe('useOpenCloudProject', () => {
     expect(result.current.location.search).toBe('');
     expect(tauCloudIntent.get(entry.id)).toBe('open');
     expect(result.current.location.state).toBeNull();
-  });
-
-  /* SP3-local 674f6460 gap 3: the open's salt, info/refs and catalogue waited ~0.6 s for the route's session. */
-  it('should start the open on the shared worker from the gesture, ahead of the route', async () => {
-    mockPreconnect.mockReset();
-    const entry: CloudProject = { id: 'proj_bbbbbbbbbbbbbbbbbbbbb', name: 'Bracket Beta', role: 'owner' };
-    const { result } = renderOpen();
-
-    await act(async () => result.current.open(entry));
-
-    await waitFor(() => {
-      expect(mockPreconnect).toHaveBeenCalledWith({ projectId: entry.id, workspace: 'home', worker: sharedWorker });
-    });
-    expect(mockPreconnect).toHaveBeenCalledOnce();
   });
 
   it.each(['present', 'unreadable'])('keeps a %s partial stub pending after creation fails', async (state) => {

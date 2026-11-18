@@ -87,6 +87,11 @@ export type RevisionClient = Readonly<{
    * reconnects. Absent on a host-served client, whose polls have no socket cap.
    */
   focus?: (focused: boolean) => void;
+  /**
+   * Say that this project's Tau Cloud open shows its first view on screen, for the open's telemetry (STO-25). A port
+   * frame, queued until the client opens. Absent on a host-served client, whose open the page does not time.
+   */
+  firstViewShown?: () => void;
   subscribe: (listener: () => void) => () => void;
   /** Every settled revision signal this project's root published. */
   subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => () => void;

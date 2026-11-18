@@ -40,7 +40,7 @@ import { createCallbackLogic } from 'xstate';
 import { randomUuid } from '@taucad/utils/id';
 import type { ActorRefFrom, CallbackActorLogic, EventObject } from 'xstate';
 import type { CheckoutRootConfig } from '@taucad/filesystem';
-import type { RevisionStatusProjection, RevisionUserActor } from '@taucad/revisions';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { CheckoutCutsOutcome } from '@taucad/revisions/revision-effects';
 import { deviceId } from '@taucad/ui-core/lib/device-id';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
@@ -56,7 +56,6 @@ import {
   subscribeRevisionSessionUser,
 } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
-import type { WorkerRevisionCommand } from '#machines/file-manager.worker.revisions.js';
 import {
   isOwingEditorText,
   isRecordingEditorConflict,
@@ -385,109 +384,6 @@ const mountCheckoutRoutes = (
   })();
 };
 
-/**
- * The `setActor` frame the client records as: the person (or their pseudonym) in this workspace, with the linked
- * forge's identity beside them for the author line alone (D33, I3).
- *
- * @param input - The project, the workspace, who is signed in, the workspace's anonymity and the account's salt.
- * @returns The actor and its frame.
- */
-const actorFrame = (
-  input: Readonly<{
-    projectId: string;
-    workspace: string;
-    user: RevisionSessionUser | undefined;
-    anonymous: boolean;
-    salt: string | undefined;
-  }>,
-): Readonly<{ actor: RevisionUserActor; frame: Extract<WorkerRevisionCommand, { command: 'setActor' }> }> => {
-  const { projectId, workspace, user, anonymous, salt } = input;
-  const actor = revisionUserActor({ workspace, user, anonymous, salt });
-  const commitAuthor = githubProjectBinding.get(projectId)?.author;
-  return { actor, frame: { command: 'setActor', actor, ...(commitAuthor === undefined ? {} : { commitAuthor }) } };
-};
-
-/** How long a client a gesture opened waits for its session before it is closed. Milliseconds. @public */
-export const preconnectAdoptionMilliseconds = 60_000;
-
-/* Clients a Tau Cloud open's gesture opened ahead of its session, until a session's `revisions` child adopts them. */
-const preconnected = new Map<string, Readonly<{ client: RevisionClient; timer: ReturnType<typeof setTimeout> }>>();
-
-/**
- * Open a Tau Cloud project's revision client from the *Open* gesture, before its route and session load (STO-25 SP6).
- *
- * The open's network work (the account's salt, the root's repository setup in the worker, `info/refs`, the catalogue
- * and the indexes) then runs beside the project route's code instead of after it: the session's `revisions` child
- * started it about 0.6 s after the click. The client is opened as that child opens it (D36): the device id and the
- * actor are queued, and the session user's credential work is settled before the connection starts the root. The
- * session's child adopts the same client (`getRevisionClient` keeps one per project and worker) and says everything
- * again; one never adopted within {@link preconnectAdoptionMilliseconds} is closed. Never throws: the session opens
- * the client itself whatever happens here.
- *
- * @param input - The project, its workspace slug and the shared file-manager worker the project's session will use.
- * @public
- */
-export const preconnectCloudOpen = (
-  input: Readonly<{ projectId: string; workspace: string; worker: Worker }>,
-): void => {
-  const { projectId, workspace, worker } = input;
-  const user = getRevisionSessionUser();
-  if (user === undefined || preconnected.has(projectId)) {
-    return;
-  }
-  try {
-    requestRevisionSalt({ workspace, userId: user.id });
-    const client = getRevisionClient({ projectId, worker });
-    if (client.status() !== undefined) {
-      /* Already open: a session holds it. */
-      return;
-    }
-    const timer = setTimeout(() => {
-      if (preconnected.get(projectId)?.client === client) {
-        preconnected.delete(projectId);
-        client.close();
-      }
-    }, preconnectAdoptionMilliseconds);
-    preconnected.set(projectId, { client, timer });
-    client.send({ command: 'setDeviceId', deviceId: deviceId() });
-    client.send(
-      actorFrame({
-        projectId,
-        workspace,
-        user,
-        anonymous: getAnonymousRevisions(workspace),
-        salt: getRevisionSalt({ workspace, userId: user.id }),
-      }).frame,
-    );
-    // async-iife: bootstrap -- the open follows the credential work, as the session's own connect does (D36).
-    void (async (): Promise<void> => {
-      try {
-        await client.setUser(user);
-      } catch {
-        /* The session's own `setUser` says it again. */
-      }
-      if (preconnected.get(projectId)?.client === client) {
-        client.open();
-      }
-    })();
-  } catch (error) {
-    console.warn('[revisions] the open could not start ahead of its session', error);
-  }
-};
-
-/**
- * A session's `revisions` child takes the project's client: a client the gesture opened ahead of it is its own now.
- *
- * @param projectId - The project.
- */
-const adoptPreconnected = (projectId: string): void => {
-  const held = preconnected.get(projectId);
-  if (held !== undefined) {
-    clearTimeout(held.timer);
-    preconnected.delete(projectId);
-  }
-};
-
 /** The sync facet as a chat shows it (R11): `pending`/`queued`/`failed` all hold something the remote has not taken. */
 const chatSyncOf = (sync: RevisionStatusProjection['sync']): ChatSyncState =>
   sync.state === 'conflicted'
@@ -560,9 +456,15 @@ export const sessionRevisionsCallback =
         return;
       }
       actorSentFor = { user, anonymous, salt };
-      const { actor, frame } = actorFrame({ projectId, workspace, user, anonymous, salt });
+      const actor = revisionUserActor({ workspace, user, anonymous, salt });
       recordsAs = actor.id;
-      client.send(frame);
+      /* The linked forge's identity goes beside the person, for the author line alone (D33, I3). */
+      const commitAuthor = githubProjectBinding.get(projectId)?.author;
+      client.send({
+        command: 'setActor',
+        actor,
+        ...(commitAuthor === undefined ? {} : { commitAuthor }),
+      });
       /*
        * A7e: the project's editor records and replays its owed text as this person, in this workspace. Published
        * after the actor is sent: the change wakes the owed close cut, which must be cut as this person.
@@ -847,8 +749,6 @@ export const sessionRevisionsCallback =
         return;
       }
       const current = client;
-      /* A client the *Open* gesture opened ahead of this session is this child's from here (STO-25 SP6). */
-      adoptPreconnected(projectId);
       followTree();
       /* Which device this document is (W13, W17): the id lives in `localStorage`, which the worker cannot read. */
       current.send({ command: 'setDeviceId', deviceId: deviceId() });

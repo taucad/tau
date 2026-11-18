@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => {
     /* The availability of the surfaces the first view opens (tree, editor, chats); `undefined` follows `project`. */
     firstView: undefined as ProjectAvailability | undefined,
     surfaces: [] as Array<string | undefined>,
+    cloudOpenPending: false,
+    firstViewShown: vi.fn(),
     facet: undefined as LargeObjectsFacet | undefined,
     status: { projectId: 'project-0', checkoutId: 'checkout-1', readiness: 'filled' as ProjectReadiness },
     remote: facetOf({ phase: 'connected', reason: undefined, error: undefined }),
@@ -36,9 +38,10 @@ vi.mock('#hooks/use-project-availability.js', () => ({
     return surface === undefined ? mocks.project : (mocks.firstView ?? mocks.project);
   },
   useModelAvailability: () => mocks.model,
+  useCloudOpenPending: () => mocks.cloudOpenPending,
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({
-  useRevisionClient: () => ({ send: vi.fn() }),
+  useRevisionClient: () => ({ send: vi.fn(), firstViewShown: mocks.firstViewShown }),
   useRevisionCommands: () => ({ connectRemote: vi.fn(), syncNow: vi.fn() }),
   useRevisionStatus: () => ({ ...mocks.status, remote: mocks.remote, sync: mocks.sync, largeObjects: mocks.facet }),
 }));
@@ -78,6 +81,8 @@ describe('model wait reporting', () => {
     mocks.project = 'ready';
     mocks.firstView = undefined;
     mocks.surfaces = [];
+    mocks.cloudOpenPending = false;
+    mocks.firstViewShown.mockClear();
     mocks.facet = undefined;
     mocks.remote = { phase: 'connected', reason: undefined, error: undefined };
     mocks.sync = { state: 'idle', reason: undefined, error: undefined };
@@ -242,5 +247,22 @@ describe('model wait reporting', () => {
     mocks.firstView = 'preparing';
     const view = render(<ProjectSyncAnnouncement />);
     expect(view.container).toHaveTextContent('Preparing project files');
+  });
+
+  /* STO-25 SP6 review: `first_view` is what this route shows, not the root's own readiness. */
+  it('tells the revision host when a Tau Cloud open shows its first view, and not before', () => {
+    mocks.cloudOpenPending = true;
+    mocks.project = 'preparing';
+    mocks.firstView = 'preparing';
+    const view = render(<ProjectSyncAnnouncement />);
+    expect(mocks.firstViewShown).not.toHaveBeenCalled();
+    mocks.firstView = 'ready';
+    view.rerender(<ProjectSyncAnnouncement />);
+    expect(mocks.firstViewShown).toHaveBeenCalled();
+  });
+
+  it('tells it nothing for a project with no Tau Cloud open owed', () => {
+    render(<ProjectSyncAnnouncement />);
+    expect(mocks.firstViewShown).not.toHaveBeenCalled();
   });
 });

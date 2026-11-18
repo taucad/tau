@@ -557,14 +557,19 @@ const revisionRegistry = createWorkerRevisionRegistry({
     pushRecorders.delete(projectId);
     projectOpenTimers.delete(projectId);
   },
-  /* STO-25: `first_view` when the first view opens (the entry closure and the
-   * chats landed), sent once the open's cache is known; `fully_fetched` once
-   * its background large-object fill has written the last placeholder. */
+  /* STO-25: the applied checkout stands for `first_view` when the page has not
+   * said it showed one earlier, and is where the open's cache is known;
+   * `fully_fetched` once its background large-object fill has written the last
+   * placeholder. */
   observeStatus: (projectId, status) => {
     const timer = projectOpenTimers.get(projectId);
     if (timer !== undefined) {
       markProjectOpen(timer, status);
     }
+  },
+  /* STO-25: the page says when a Tau Cloud open's route shows its first view; that is `first_view`. */
+  firstViewShown: (projectId) => {
+    projectOpenTimers.get(projectId)?.firstView();
   },
   /* The revision layer owns the pointers: its views read placeholders as they are (slice a). */
   filesystem: (root) => fileService.createRootedFileSystem(root, undefined, { placeholders: 'raw' }),

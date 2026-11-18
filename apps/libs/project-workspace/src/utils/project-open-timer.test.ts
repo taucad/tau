@@ -1,12 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import type { RevisionStatusProjection } from '@taucad/revisions';
-import {
-  createProjectOpenTimer,
-  isHostedCheckoutApplied,
-  isHostedFirstView,
-  markProjectOpen,
-} from '#utils/project-open-timer.js';
+import { createProjectOpenTimer, isHostedCheckoutApplied, markProjectOpen } from '#utils/project-open-timer.js';
 import type { ProjectOpenMark } from '#utils/project-open-timer.js';
 
 type OpenStatus = Pick<RevisionStatusProjection, 'remote' | 'sync' | 'readiness'>;
@@ -188,33 +183,6 @@ describe('isHostedCheckoutApplied', () => {
   });
 });
 
-describe('isHostedFirstView', () => {
-  const applying = { hasAppliedRemote: false } as const;
-
-  it('should hold once the entry closure has landed and the chats have, while the open applies', () => {
-    expect(isHostedFirstView(status({ ...applying, readiness: 'entryReady', chats: 'ready' }))).toBe(true);
-    expect(isHostedFirstView(status({ ...applying, readiness: 'materialized', chats: 'disabled' }))).toBe(true);
-  });
-
-  it('should not hold for the tree alone, chats still arriving, or readiness not published (I7)', () => {
-    expect(isHostedFirstView(status({ ...applying, readiness: 'treeReady', chats: 'ready' }))).toBe(false);
-    expect(isHostedFirstView(status({ ...applying, readiness: 'entryReady', chats: 'loading' }))).toBe(false);
-    expect(isHostedFirstView(status({ ...applying, readiness: 'entryReady' }))).toBe(false);
-    expect(isHostedFirstView(status({ ...applying, chats: 'ready' }))).toBe(false);
-  });
-
-  it('should not hold for a failed or refused open, or a remote that is not Tau Cloud', () => {
-    const landed = { ...applying, readiness: 'entryReady', chats: 'ready' } as const;
-    expect(isHostedFirstView(status({ ...landed, state: 'failed' }))).toBe(false);
-    expect(isHostedFirstView(status({ ...landed, remotePhase: 'reconnectRequired' }))).toBe(false);
-    expect(isHostedFirstView(status({ ...landed, kind: 'git' }))).toBe(false);
-  });
-
-  it('should hold at the applied checkout whatever readiness says, as before', () => {
-    expect(isHostedFirstView(status({ hasAppliedRemote: true }))).toBe(true);
-  });
-});
-
 /* Open the UI, model waits: the view opens at the checkout, and the large objects finish after it. */
 describe('markProjectOpen', () => {
   const downloading = {
@@ -266,11 +234,13 @@ describe('markProjectOpen', () => {
     ]);
   });
 
-  it('marks first view when the first view opens, sent once the cache of the open is known', () => {
+  /* STO-25 SP6: during a Tau Cloud open the page says when its route shows the first view; the root's own word
+   * that its entry closure landed is not that, since the route may not have rendered a pane yet. */
+  it('marks first view when the page shows it, sent once the cache of the open is known', () => {
     const { marks, advance, timer } = harness();
-    markProjectOpen(timer, status({ hasAppliedRemote: false, readiness: 'treeReady', chats: 'ready' }));
-    advance(300);
     markProjectOpen(timer, status({ hasAppliedRemote: false, readiness: 'entryReady', chats: 'ready' }));
+    advance(300);
+    timer.firstView();
     expect(marks).toStrictEqual([]);
     advance(11_000);
     markProjectOpen(timer, {
@@ -283,15 +253,33 @@ describe('markProjectOpen', () => {
     expect(marks.at(-1)).toStrictEqual({ phase: 'fully_fetched', cache: 'cold', durationMilliseconds: 31_300 });
   });
 
-  it('sends a first view as warm at the applied checkout when nothing was fetched', () => {
+  it('never marks first view from the root alone before its checkout is applied', () => {
+    const { marks, advance, timer } = harness();
+    markProjectOpen(timer, status({ hasAppliedRemote: false, readiness: 'entryReady', chats: 'ready' }));
+    advance(700);
+    markProjectOpen(timer, status({ hasAppliedRemote: true, readiness: 'filled' }));
+    expect(marks).toStrictEqual([
+      { phase: 'first_view', cache: 'warm', durationMilliseconds: 700 },
+      { phase: 'fully_fetched', cache: 'warm', durationMilliseconds: 700 },
+    ]);
+  });
+
+  it('sends a page-shown first view as warm at the applied checkout when nothing was fetched', () => {
     const { marks, advance, timer } = harness();
     advance(300);
-    markProjectOpen(timer, status({ hasAppliedRemote: false, readiness: 'entryReady', chats: 'disabled' }));
+    timer.firstView();
     advance(700);
     markProjectOpen(timer, status({ hasAppliedRemote: true, readiness: 'filled' }));
     expect(marks).toStrictEqual([
       { phase: 'first_view', cache: 'warm', durationMilliseconds: 300 },
       { phase: 'fully_fetched', cache: 'warm', durationMilliseconds: 1000 },
     ]);
+  });
+
+  it('sends no first view for an open that fails before its cache is known', () => {
+    const { marks, timer } = harness();
+    timer.firstView();
+    markProjectOpen(timer, status({ hasAppliedRemote: false, state: 'failed' }));
+    expect(marks).toStrictEqual([]);
   });
 });

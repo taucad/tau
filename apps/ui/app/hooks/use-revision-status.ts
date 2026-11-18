@@ -1279,6 +1279,9 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
         open().postMessage({ command: 'focus', focused: next } satisfies WorkerRevisionRequest);
       }
     },
+    firstViewShown: () => {
+      post({ command: 'firstViewShown' });
+    },
     subscribe: (listener) => listeners.subscribe(listener),
     subscribeEvents: (listener) => {
       const unsubscribe = events.subscribe(listener);

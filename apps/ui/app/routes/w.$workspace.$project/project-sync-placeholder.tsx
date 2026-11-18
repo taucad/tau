@@ -15,6 +15,7 @@ import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-sta
 import { useProject } from '#hooks/use-project.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import {
+  useCloudOpenPending,
   useFileCheckSlow,
   useLargeObjects,
   useModelAvailability,
@@ -436,12 +437,21 @@ function useModelWaitReporting(): void {
 /**
  * One live announcement per focused project, rather than one competing announcement per pane. It speaks for the first
  * view the panes show (the tree, the editor and the chats open on readiness during a Tau Cloud open, STO-25), so it
- * goes quiet when they open rather than when the whole apply ends; a pane still waiting shows its own state.
+ * goes quiet when they open rather than when the whole apply ends; a pane still waiting shows its own state. That
+ * moment is also the open's `first_view` (STO-25), which it tells the project's revision host.
  */
 export function ProjectSyncAnnouncement(): React.JSX.Element {
   const state = useProjectAvailability('chats');
   const status = useRevisionStatus();
+  const client = useRevisionClient();
+  const isCloudOpenPending = useCloudOpenPending();
   useModelWaitReporting();
+  /* STO-25: a Tau Cloud open's `first_view` is when this route shows its first view, which this tab alone knows. */
+  useEffect(() => {
+    if (isCloudOpenPending && state === 'ready') {
+      client?.firstViewShown?.();
+    }
+  }, [client, isCloudOpenPending, state]);
   return (
     <div className='sr-only' role='status' aria-live='polite' aria-atomic='true'>
       {state === 'ready' ? '' : projectFilesCopy(state, status).join('. ')}

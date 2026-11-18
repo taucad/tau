@@ -1,4 +1,3 @@
-import { reachesReadiness } from '@taucad/revisions';
 import type { LfsTransport, RevisionStatusProjection } from '@taucad/revisions';
 
 /** Which moment of an open a mark times (STO-25). @public */
@@ -27,9 +26,10 @@ export type ProjectOpenTimer = Readonly<{
    */
   fetchedFromNetwork: (transport?: LfsTransport) => void;
   /**
-   * The project's first view is on screen (its file tree, editor and chats open); the first call counts. The mark is
-   * timed now and sent once the open's cache is known: at once when a network fetch is already known, otherwise at
-   * the next `fetchedFromNetwork`, `cacheKnown` or `fullyFetched`.
+   * The project's first view is on screen; the first call counts. During a Tau Cloud open the page says so when its
+   * route shows the tree, editor and composer; otherwise the applied checkout stands for it. The mark is timed now and
+   * sent once the open's cache is known: at once when a network fetch is already known, otherwise at the next
+   * `fetchedFromNetwork`, `cacheKnown` or `fullyFetched`.
    */
   firstView: () => void;
   /** Whether the open fetched from the network is known (its checkout is applied): a first view held for it is sent. */
@@ -41,16 +41,22 @@ export type ProjectOpenTimer = Readonly<{
 /**
  * Time one hosted project's open, from its revision root opening (STO-25).
  *
- * `first_view` is the project's first view on screen (its file tree, editor
- * and chats open), timed then; `fully_fetched` is every large object local, so
- * the viewer can render, and is sent when the background fill completes.
- * `cache` is cold when any large object of the open came from the network.
- * During a Tau Cloud open the first view shows while the apply still writes,
- * before the open can know whether it fetched, so its mark waits for that word
- * (a fetch, or the applied checkout) and keeps the time it was shown. A fill
- * that fails, or a root released before its fill completes, sends no
- * `fully_fetched`; a root released before its cache is known sends no
- * `first_view` either.
+ * `first_view` is the project's first view on screen, timed then: during a Tau
+ * Cloud open, the moment the page's route shows the file tree, editor and
+ * composer (the page says so); otherwise, or when the page never says, the
+ * applied checkout (the repository checked out, the definition before STO-25
+ * SP6). `fully_fetched` is every large object local, so the viewer can render,
+ * and is sent when the background fill completes. `cache` is cold when any
+ * large object of the open came from the network. During a Tau Cloud open the
+ * first view shows while the apply still writes, before the open can know
+ * whether it fetched, so its mark waits for that word (a fetch, or the applied
+ * checkout) and keeps the time it was shown.
+ *
+ * Opens that send nothing: a fill that fails, or a root released before its
+ * fill completes, sends no `fully_fetched`. An open that fails or is released
+ * after its first view showed but before its cache is known sends no
+ * `first_view` either: the wire's `cache` is `cold` or `warm` only, and an
+ * unknown cache must not be reported as either.
  *
  * @param options - The clock, and where each mark goes.
  * @returns The timer.
@@ -123,42 +129,12 @@ export const isHostedCheckoutApplied = (status: Pick<RevisionStatusProjection, '
   status.remote.kind === 'tau' && status.sync.hasAppliedRemote === true;
 
 /**
- * Whether a status shows a Tau Cloud project's first view on screen: the page opens its file tree, editor and chats
- * (the composer) once the open's write has landed the entry closure and the chats' records have landed (D10, SP2h),
- * as the page's first-view surfaces read the same projection. An applied checkout is a first view too. A failed or
- * refused open, and a readiness not yet published, are none (I7).
- *
- * @param status - A status the project's root published.
- * @returns Whether the first view is on screen.
- * @public
- */
-export const isHostedFirstView = (status: Pick<RevisionStatusProjection, 'remote' | 'sync' | 'readiness'>): boolean => {
-  if (isHostedCheckoutApplied(status)) {
-    return true;
-  }
-  const { remote, sync } = status;
-  const failed =
-    sync.state === 'failed' ||
-    sync.state === 'queued' ||
-    sync.state === 'conflicted' ||
-    remote.phase === 'reconnectRequired' ||
-    remote.phase === 'failed';
-  return (
-    remote.kind === 'tau' &&
-    !failed &&
-    sync.pullPhase === 'applying' &&
-    reachesReadiness(status.readiness, 'entryReady') &&
-    (sync.chats === 'ready' || sync.chats === 'disabled')
-  );
-};
-
-/**
  * Mark an open's boundaries from one status its root published.
  *
- * `first_view` is the first view on screen ({@link isHostedFirstView}), sent once the open's cache is known. The
- * large objects are filled after the apply ("open the UI, model waits"), and the status carries `largeObjects` until
- * the last placeholder is written — published before the checkout reads as applied — so the applied checkout is
- * where the cache is known, and an applied checkout without it is `fully_fetched`. A checkout that opened with
+ * The applied checkout is a first view when the page has not said one showed earlier ({@link ProjectOpenTimer}'s
+ * `firstView`), and it is where the cache is known: the large objects are filled after the apply ("open the UI,
+ * model waits"), and the status carries `largeObjects` until the last placeholder is written — published before the
+ * checkout reads as applied — so an applied checkout without it is `fully_fetched`. A checkout that opened with
  * objects still to download is a cold open.
  *
  * @param timer - The project's open timer.
@@ -167,17 +143,15 @@ export const isHostedFirstView = (status: Pick<RevisionStatusProjection, 'remote
  */
 export const markProjectOpen = (
   timer: ProjectOpenTimer,
-  status: Pick<RevisionStatusProjection, 'remote' | 'sync' | 'largeObjects' | 'readiness'>,
+  status: Pick<RevisionStatusProjection, 'remote' | 'sync' | 'largeObjects'>,
 ): void => {
   if (status.largeObjects !== undefined) {
     timer.fetchedFromNetwork();
   }
-  if (isHostedFirstView(status)) {
-    timer.firstView();
-  }
   if (!isHostedCheckoutApplied(status)) {
     return;
   }
+  timer.firstView();
   timer.cacheKnown();
   if (status.largeObjects === undefined) {
     timer.fullyFetched();

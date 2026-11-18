@@ -319,14 +319,16 @@ const runOf = async (chatId: string, view: ChatView): Promise<HostRunSnapshot | 
  * @example <caption>A Node launcher over one workspace</caption>
  * ```typescript
  * import { createGatewayModelTransport } from '@taucad/agent-host';
- * import type { ToolRegistry } from '@taucad/agent-host';
+ * import type { DeploymentModeAnswer, ToolRegistry } from '@taucad/agent-host';
  * import { createAgentLauncher } from '@taucad/agent-host/launcher';
  * import { createNodeChatStore } from '@taucad/agent-host/node';
  *
  * declare const toolRegistry: ToolRegistry;
+ * // The API's deployment answer for the gateway's origin (`GET /v1/deployment`), fetched and cached by the host.
+ * declare const deployment: (signal: AbortSignal) => Promise<DeploymentModeAnswer>;
  * const launcher = createAgentLauncher({
  *   chats: createNodeChatStore({ workspaceRoot: process.cwd() }),
- *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/' }),
+ *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/', billing: { deployment } }),
  *   credential: () => ({ mode: 'session' }),
  *   systemPrompt: 'You are Tau.',
  *   toolRegistry,

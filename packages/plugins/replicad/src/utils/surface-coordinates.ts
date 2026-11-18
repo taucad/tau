@@ -5,6 +5,19 @@ import type { GeometryReplicad } from '#replicad.types.js';
 import type { Meshable } from '#utils/tessellation-instancing.js';
 
 /**
+ * Whether a material makes {@link addSurfaceCoordinates} add surface coordinates: only texture sampling and
+ * anisotropic tangent frames need them.
+ * @param material - The authored material, if any.
+ * @returns True when the mesh gets UVs and tangents for it.
+ */
+export function needsSurfaceCoordinates(material: GlbMaterial | undefined): material is GlbMaterial {
+  return (
+    material !== undefined &&
+    (Boolean(material.extensions?.KHR_materials_anisotropy) || JSON.stringify(material).includes('Texture'))
+  );
+}
+
+/**
  * Preserve OCCT's seam-split surface coordinates in the native extractor's vertex order.
  * @param shape - Native BRep whose triangulation produced the mesh.
  * @param mesh - Tessellated faces to enrich with UVs and tangent frames.
@@ -15,11 +28,7 @@ export function addSurfaceCoordinates(
   mesh: GeometryReplicad['faces'],
   { material, prototype = false }: { material?: GlbMaterial; prototype?: boolean },
 ): void {
-  if (mesh.texCoords !== undefined || material === undefined) {
-    return;
-  }
-  // UVs are only needed by texture sampling and anisotropic tangent frames.
-  if (!material.extensions?.KHR_materials_anisotropy && !JSON.stringify(material).includes('Texture')) {
+  if (mesh.texCoords !== undefined || !needsSurfaceCoordinates(material)) {
     return;
   }
   const oc = getOC();

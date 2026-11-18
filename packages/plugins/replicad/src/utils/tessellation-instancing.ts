@@ -71,8 +71,6 @@ export type ReplicadTessellationInstance = {
   material?: GlbMaterial;
   locationMatrix: ReplicadShapeIdentityInfo['locationMatrix'];
   determinant: number;
-  faceIds?: number[];
-  edgeIds?: number[];
 };
 
 type ReplicadInstancingOc = OpenCascadeInstance & {
@@ -624,47 +622,10 @@ function transformTriangles(triangles: Uint32Array, determinant: number): Uint32
   return transformed;
 }
 
-function applyFaceIds(
-  groups: GeometryReplicad['faces']['faceGroups'],
-  ids: number[] | undefined,
-): GeometryReplicad['faces']['faceGroups'] {
-  if (!ids) {
-    return groups.map((group) => ({ ...group }));
-  }
-
-  if (ids.length !== groups.length) {
-    throw new Error(
-      `Replicad tessellation instancing face ID count mismatch: expected ${groups.length}, received ${ids.length}`,
-    );
-  }
-
-  return groups.map((group, index) => ({
-    ...group,
-    faceId: ids[index]!,
-  }));
-}
-
-function applyEdgeIds(
-  groups: GeometryReplicad['edges']['edgeGroups'],
-  ids: number[] | undefined,
-): GeometryReplicad['edges']['edgeGroups'] {
-  if (!ids) {
-    return groups.map((group) => ({ ...group }));
-  }
-
-  if (ids.length !== groups.length) {
-    throw new Error(
-      `Replicad tessellation instancing edge ID count mismatch: expected ${groups.length}, received ${ids.length}`,
-    );
-  }
-
-  return groups.map((group, index) => ({
-    ...group,
-    edgeId: ids[index]!,
-  }));
-}
-
 /**
+ * One instance of a prototype: the prototype's mesh at the instance's placement. Face and edge groups are the
+ * prototype's own (shared, never written downstream): the glTF packer numbers groups by index, so an instance needs no
+ * labels of its own (catalogue N5).
  */
 export function transformReplicadGeometryInstance({
   prototype,
@@ -684,11 +645,11 @@ export function transformReplicadGeometryInstance({
       vertices: transformTriplets(prototype.faces.vertices, instance.locationMatrix, transformPoint),
       normals: transformNormals(prototype.faces.normals, instance.locationMatrix),
       triangles: transformTriangles(prototype.faces.triangles, instance.determinant),
-      faceGroups: applyFaceIds(prototype.faces.faceGroups, instance.faceIds),
+      faceGroups: prototype.faces.faceGroups,
     },
     edges: {
       lines: transformTriplets(prototype.edges.lines, instance.locationMatrix, transformPoint),
-      edgeGroups: applyEdgeIds(prototype.edges.edgeGroups, instance.edgeIds),
+      edgeGroups: prototype.edges.edgeGroups,
     },
   };
 }

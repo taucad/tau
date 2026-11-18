@@ -137,7 +137,7 @@ describe('ci.yml affected-only lanes', () => {
       expect.arrayContaining(['api', 'billing', 'cli-e2e', 'size', 'formal', 'browser', 'geospec-examples']),
     );
     expect(testJobs.map(({ name }) => name)).toEqual(
-      expect.arrayContaining(['affected-lane', 'api', 'billing-e2e', 'cli-e2e']),
+      expect.arrayContaining(['affected-lane', 'api-shard', 'billing-e2e', 'cli-e2e']),
     );
   });
 
@@ -354,7 +354,7 @@ describe('ci.yml affected-only lanes', () => {
     );
     expect(affectedJobs.map(([name]) => name).sort()).toEqual([
       'affected-lane',
-      'api',
+      'api-shard',
       'formal',
       'geospec-examples',
       'plan',
@@ -423,14 +423,24 @@ describe('ci.yml affected-only lanes', () => {
   });
 
   it('should run the API suites of the affected scope:api projects one at a time', () => {
-    const lane = ci.jobs['api'];
+    const lane = ci.jobs['api-shard'];
     const steps = lane?.steps ?? [];
     const suites = steps.filter((step) => /\bnx\s+(?:run-many|affected)\s+-t\s+test(?:\s|$)/u.test(step.run ?? ''));
     // One step runs `test`, selected by `nx affected` over the tag: never every API suite with `run-many`.
     // `nx affected` ignores `--projects`; excluding every project but the tag is what narrows it.
     expect(suites.map((step) => step.run?.trim())).toEqual([
-      "pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1",
+      `pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1 -- --shard=${expression('matrix.shard')}/2 --passWithNoTests`,
     ]);
+    // Two shards, each with its own services, and the required check passes only when both did (ST-3).
+    expect(lane?.strategy?.matrix?.['shard']).toEqual([1, 2]);
+    expect(lane?.if).toBe(
+      expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true'"),
+    );
+    const required = ci.jobs['api'];
+    expect(required?.name).toBe('API tests (Postgres + MinIO)');
+    expect(required?.needs).toEqual(['plan', 'api-shard']);
+    expect(required?.steps?.map((step) => step.run)).toEqual(['test "$SHARDS_RESULT" = success']);
+    expect(required?.steps?.[0]?.env?.['SHARDS_RESULT']).toBe(expression('needs.api-shard.result'));
     // `nx affected` needs the base `nx-set-shas` finds: two commits in a queue run, full history otherwise.
     const checkout = steps.find((step) => step.name === 'Checkout');
     expect(checkout?.with?.['fetch-depth']).toBe(expression("github.event_name == 'merge_group' && 2 || 0"));

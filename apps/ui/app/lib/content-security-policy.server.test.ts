@@ -159,7 +159,8 @@ describe('write-content-security-policy-headers', () => {
     expect(commands).toHaveLength(4);
     for (const command of commands) {
       expect(command).toContain(
-        'pnpm nx build ui && node scripts/write-content-security-policy-headers.mts build/client',
+        // The deploy builds fresh and stamps its release before anything reads the build (ST-9).
+        'pnpm nx build ui --skip-nx-cache && node scripts/stamp-build-release.mts build && node scripts/write-content-security-policy-headers.mts build/client',
       );
     }
   });

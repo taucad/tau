@@ -64,12 +64,6 @@
           "env": "TAU_CLOUD_ENABLED"
         },
         {
-          "env": "COMMIT_REF"
-        },
-        {
-          "env": "GITHUB_SHA"
-        },
-        {
           "env": "TAU_DESKTOP_RELEASED"
         },
         {
@@ -77,6 +71,9 @@
         },
         {
           "env": "NETLIFY"
+        },
+        {
+          "env": "NETLIFY_LOCAL"
         },
         {
           "env": "CONTEXT"

@@ -53,6 +53,7 @@ import { recordInteraction } from '#lib/kill-work-context.js';
 import { recordMemoryBreadcrumb } from '#lib/memory-kill-signal.js';
 import { canOpenCloudProject, isCloudProjectPending, tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { noteManifestReconciled } from '#lib/manifest-reconciliation.js';
 import {
   createProjectManifestChangeObserver,
   ensureFocusedChatForProject,
@@ -715,6 +716,10 @@ export const createManifestObservationLogic = (
           report: (issue) => {
             project.send({ type: 'manifestIssueObserved', issue });
           },
+          /* STO-25: a model surface renders from the first view once this is the manifest the tree write landed. */
+          onReconciled: (bytes) => {
+            noteManifestReconciled(projectId, bytes);
+          },
         });
         const observation = new ObservationService({
           resource: 'tau.json',
@@ -744,6 +749,8 @@ export const createManifestObservationLogic = (
             unsubscribe();
             observer.dispose();
             lease.release();
+            /* Nothing follows the manifest now: what it was found to be no longer stands. */
+            noteManifestReconciled(projectId, undefined);
           },
         };
       };

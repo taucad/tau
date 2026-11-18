@@ -23,7 +23,7 @@ import {
   selectLibraryIsLoading,
   selectLibraryWorkspaceConnection,
 } from '#runtime/project-library.js';
-import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
+import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
 import type { TestRootFiles } from '#runtime/project-library.fixture.js';
 import type { ChatStorage } from '#types/storage.types.js';
@@ -47,7 +47,7 @@ vi.mock('#db/chat-file-storage.js', () => ({
 }));
 
 /* A read owner that admits every read at once: no observation runs in these rows. */
-vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/runtime/project-library-observations', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createMetadataReadOwner: (source: ChatStorage) => ({
     connect: () => () => undefined,
@@ -83,7 +83,7 @@ type ChatPorts = Pick<ChatStorage, 'getChat' | 'patchChat'>;
 const facadeNamed = (
   name: string,
   { chats, syncProjectRoots }: Readonly<{ chats?: Partial<ChatPorts>; syncProjectRoots?: () => Promise<void> }> = {},
-): ProjectLibraryFileManager => {
+): ProjectLibraryFacade => {
   const recordFiles = {
     readFile: notCalled,
     writeFile: notCalled,
@@ -104,11 +104,11 @@ const facadeNamed = (
       throw new Error('not called in this test');
     },
     workspace: { syncProjectRoots: syncProjectRoots ?? notCalled },
-  } as unknown as ProjectLibraryFileManager;
+  } as unknown as ProjectLibraryFacade;
 };
 
 /** The same parts in a new object, as the facade republishes when only its change channel moved. */
-const republished = (fileManager: ProjectLibraryFileManager): ProjectLibraryFileManager => ({ ...fileManager });
+const republished = (fileManager: ProjectLibraryFacade): ProjectLibraryFacade => ({ ...fileManager });
 
 const libraries: ProjectLibrary[] = [];
 /** A library over `rootFiles`, or over none yet: the runtime builds the facade after the library. */
@@ -122,7 +122,7 @@ const createLibrary = (
 };
 
 /** A library over a facade a row replaces. */
-const libraryOver = (first: ProjectLibraryFileManager): Readonly<{ library: ProjectLibrary; root: TestRootFiles }> => {
+const libraryOver = (first: ProjectLibraryFacade): Readonly<{ library: ProjectLibrary; root: TestRootFiles }> => {
   const root = testRootFiles(first);
   return { library: createLibrary(new QueryClient(), () => root), root };
 };

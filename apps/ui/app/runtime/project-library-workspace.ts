@@ -22,8 +22,8 @@ import {
   setProjectFileSystemConfig,
 } from '@taucad/files-ui/filesystem/handle-store';
 import type { Workspace, WorkspaceBindingRepairResult } from '@taucad/files-ui/filesystem/handle-store';
-import { deriveWorkspaceBindingRepairs, routeConfigFor } from '#runtime/project-library-storage.js';
-import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
+import { deriveWorkspaceBindingRepairs, routeConfigFor } from '@taucad/files-ui/runtime/project-library-storage';
+import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 import type { Actor, SnapshotFrom } from 'xstate';
 
@@ -54,7 +54,7 @@ type ConnectionSnapshot = SnapshotFrom<typeof workspaceConnectionMachine>;
 export type WorkspaceCommandsHost = Readonly<{
   workspaceConnection: Actor<typeof workspaceConnectionMachine>;
   /** The root file facade, once there is one. */
-  facade: () => Promise<ProjectLibraryFileManager>;
+  facade: () => Promise<ProjectLibraryFacade>;
   readiedWorker: () => Promise<Remote<ObjectStoreWorker>>;
   whenDiscoveryReady: () => Promise<void>;
   discover: () => Promise<ProjectDiscoveryResult>;

@@ -938,7 +938,9 @@ describe('the entry closure of a tree write (D10)', () => {
         return checkout.applyBatch!(entries, batchOptions);
       },
     });
-    const brackets: Array<Readonly<{ purpose: string; closure?: readonly string[] }> | undefined> = [];
+    const brackets: Array<
+      Readonly<{ purpose: string; closure?: readonly string[]; manifest?: Uint8Array<ArrayBuffer> }> | undefined
+    > = [];
 
     const outcomes: unknown[] = [];
     await materializer(watched, undefined, (_place, _paths, bracket) => {
@@ -967,10 +969,33 @@ describe('the entry closure of a tree write (D10)', () => {
       arriving: true,
     });
     expect(expected.find((entry) => entry.path === 'old.scad')?.arriving).toBe(false);
-    expect(brackets).toEqual([{ purpose: 'tree', closure: ['tau.json', 'zz/main.scad'] }]);
+    /* With the closure, the `tau.json` bytes it lands: the host names which manifest the first view is (STO-25). */
+    expect(brackets).toStrictEqual([{ purpose: 'tree', closure: ['tau.json', 'zz/main.scad'], manifest }]);
     /* The closure lands in the first changeset, before the tree's other files. */
     expect(events.slice(2, 4).toSorted()).toEqual(['tau.json', 'zz/main.scad']);
     expect(events.slice(-2)).toEqual(['end', 'release']);
+  });
+
+  it('should name the files a tree write removes, so a read of one waits until it is gone (I7)', async () => {
+    const context = await project({ 'gone.scad': 'old\n', 'tau.json': '{}\n' });
+    const before = new ImmutableRevisionTree([
+      ['gone.scad', 'old\n'],
+      ['tau.json', '{}\n'],
+    ]);
+    const target = new ImmutableRevisionTree([
+      ['main.scad', 'cube(1);\n'],
+      ['tau.json', '{}\n'],
+    ]);
+    let removing: readonly string[] | undefined;
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      expectEntries: (_entries: readonly ExpectedEntry[], options?: Readonly<{ removing?: readonly string[] }>) => {
+        removing = options?.removing;
+      },
+      endExpectation: () => undefined,
+    });
+    await materializer(watched, undefined, () => () => undefined)(liveCheckout, target, { before, purpose: 'tree' });
+    expect(removing).toEqual(['gone.scad']);
   });
 
   it('should land the closure first across created and replaced files', async () => {
@@ -1079,9 +1104,11 @@ describe('the entry closure of a tree write (D10)', () => {
         throw new Error('host bracket failed');
       })(liveCheckout, target, { before: new ImmutableRevisionTree([]), purpose: 'tree' }),
     ).rejects.toThrow('host bracket failed');
-    expect(endExpectation).toHaveBeenCalledTimes(1);
-    /* A failed write's entries no longer answer: what it did not land is what is on disk (I7). */
-    expect(endExpectation).toHaveBeenLastCalledWith({ failed: true });
+    /*
+     * A failed write's entries no longer answer, and what it still owed refuses (I7) until the checkout is whole
+     * again: here it changed nothing, so the expectation ends at once after.
+     */
+    expect(endExpectation.mock.calls).toStrictEqual([[{ failed: true }], []]);
 
     /* An aborted write releases its bracket as failed, so its tree is never read as written. */
     const outcomes: unknown[] = [];
@@ -1100,7 +1127,8 @@ describe('the entry closure of a tree write (D10)', () => {
     ).rejects.toThrow();
     /* It tore the checkout and the recovery put the prior files back, so it left the checkout whole: neither is told failed (L5). */
     expect(outcomes).toEqual([{ failed: false }, { failed: false }]);
-    expect(endExpectation).toHaveBeenCalledTimes(3);
+    /* The failed write's end, the rollback's own, and the end that lets the whole checkout answer again. */
+    expect(endExpectation.mock.calls.slice(2)).toStrictEqual([[{ failed: true }], [{ failed: false }], []]);
 
     /* One that fails before any byte lands leaves the checkout whole: it is not told failed, and nothing recovers. */
     outcomes.length = 0;

@@ -80,14 +80,15 @@ import {
   rememberChatPlacement,
   replayOutcomeOf,
   scanDiscovery,
-} from '#runtime/project-library-storage.js';
-import type { DiscoveryScan, ProjectLibraryFileManager, ProjectListing } from '#runtime/project-library-storage.js';
+} from '@taucad/files-ui/runtime/project-library-storage';
+import type { DiscoveryScan, ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
+import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 import {
   createDiscoveryObservation,
   createMetadataObservation,
   createMetadataReadOwner,
-} from '#runtime/project-library-observations.js';
-import type { LibraryRecords } from '#runtime/project-library-observations.js';
+} from '@taucad/files-ui/runtime/project-library-observations';
+import type { LibraryRecords } from '@taucad/files-ui/runtime/project-library-observations';
 import { ProjectCommands } from '#runtime/project-library-commands.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
 import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
@@ -143,7 +144,7 @@ export type ProjectLibraryChatPorts = Readonly<{
 }>;
 
 /** The root file facade as the library reads it: its value now, and its changes (A4b). @public */
-export type ProjectLibraryRootFiles = ProjectLibraryObservable<ProjectLibraryFileManager>;
+export type ProjectLibraryRootFiles = ProjectLibraryObservable<ProjectLibraryFacade>;
 
 /** The route's answer about one project's access (`getProjectRouteAccess`). @public */
 export type ProjectRouteAccess = Exclude<AccessAnswer, Readonly<{ status: 'error' }>>;
@@ -279,14 +280,14 @@ export class ProjectLibrary {
 
   readonly #rootFiles: () => ProjectLibraryRootFiles | undefined;
   /** The root facade's current value, once the library follows it. */
-  #fileManager: ProjectLibraryFileManager | undefined;
+  #fileManager: ProjectLibraryFacade | undefined;
   #unfollowRootFiles: (() => void) | undefined;
   #stopped = false;
   readonly #bound = Promise.withResolvers<void>();
   /** Counts record replacements, so a read can tell the records it ran on were replaced while it ran. */
   #replacements = 0;
   /** The chat store and its read owner over the facade's record client. */
-  #records: LibraryRecords | undefined;
+  #records: LibraryRecords<ChatStorage> | undefined;
   readonly #changed = new Topic<void>({ name: 'project-library' });
   readonly #filesChanged = new Topic<void>({ name: 'project-library-files' });
   readonly #bindingChanged = new Topic<void>({ name: 'project-library-binding' });
@@ -1056,7 +1057,7 @@ export class ProjectLibrary {
    * Adopt the facade's value: a change of the record client builds the chat store and its read owner again, and a
    * change of what the observations read rebuilds them.
    */
-  #adopt(fileManager: ProjectLibraryFileManager): void {
+  #adopt(fileManager: ProjectLibraryFacade): void {
     const previous = this.#fileManager;
     if (previous === fileManager) {
       return;
@@ -1435,13 +1436,13 @@ export class ProjectLibrary {
   }
 
   /** The root facade, once there is one: a call made earlier waits, and reads the one current then. */
-  async #facade(): Promise<ProjectLibraryFileManager> {
+  async #facade(): Promise<ProjectLibraryFacade> {
     this.followRootFiles();
     await this.#bound.promise;
     return this.#fileManager!;
   }
 
-  async #currentRecords(): Promise<LibraryRecords> {
+  async #currentRecords(): Promise<LibraryRecords<ChatStorage>> {
     this.followRootFiles();
     await this.#bound.promise;
     return this.#records!;
@@ -1452,7 +1453,7 @@ export class ProjectLibrary {
    * records it ran on were replaced (a new root worker) is asked once more of the records that serve next: the chat
    * store would otherwise keep a session whose history never loaded. Only reads are asked again.
    */
-  async #read<T>(call: (records: LibraryRecords) => Promise<T>): Promise<T> {
+  async #read<T>(call: (records: LibraryRecords<ChatStorage>) => Promise<T>): Promise<T> {
     const records = await this.#currentRecords();
     const replacements = this.#replacements;
     try {

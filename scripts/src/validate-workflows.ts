@@ -43,6 +43,7 @@ export const workflowPaths = [
   '.github/workflows/desktop-tooling.yml',
   '.github/workflows/runtime-observability-calibration.yml',
   '.github/workflows/desktop-packaged.yml',
+  '.github/workflows/release-gate.yml',
 ] as const;
 
 export type WorkflowFile = { readonly path: string; readonly text: string };

@@ -120,13 +120,13 @@
     "apps/libs/files-ui/src/machines/library-access.machine.ts": "1227083a7798d63266441263049a45181d356931c98e5bee0a409cbc869cb539",
     "apps/libs/files-ui/src/machines/library-discovery.machine.ts": "6a5cd1451c900aa184f254e719421363ef49b13834acf7f53f7bceea486b00fd",
     "apps/libs/files-ui/src/machines/library-recovery.machine.ts": "e7f87499e1b51743a3e54a058b8aee5d870a7ddf46c8e8eaf87926318996adea",
-    "apps/ui/app/hooks/use-project-manager.tsx": "8f0e2814e9b8aa81eaa6979b0140cafa3d380c9fa890ebe64fbbc41853ddee96",
-    "apps/ui/app/runtime/project-library-commands.ts": "6544f0db03aec686def5365a5333c695dd8f8a7832a389307af97ec9d433f20b",
-    "apps/ui/app/runtime/project-library-workspace.ts": "f240eba37a406cd97d56f5f5b1b022915b07f5ed124dc2438e26870968188c12",
-    "apps/ui/app/runtime/project-library.ts": "c64fa5b6106712b22b9839d5664ea84cf5442bb63e5eb794df836523637ba5b7"
+    "apps/ui/app/hooks/use-project-manager.tsx": "fd5a2953ef62095f80a3ba462926d92e88e42047eafbfe0c78e71a965e7971bb",
+    "apps/ui/app/runtime/project-library-commands.ts": "8c19d1e02a2ed1e5b4894bbde66e711c6bc8e42ac8fdce13b7f837830dad3b01",
+    "apps/ui/app/runtime/project-library-workspace.ts": "a962c8905fc867227f4acd0557861e45d787c4d2d2a6a0a8f7c0a00a8651adc1",
+    "apps/ui/app/runtime/project-library.ts": "6556607288243089a7b5ead73ea4edccb3a7ac286a6e0ed5c9b3317f4f4837e3"
   },
   "specs": {
-    "LibraryCatalog.tla": "f67f684cd716907e6c3d410f87574e424d5d840b6051067f941c13acb1e817a6"
+    "LibraryCatalog.tla": "b93e8468f61028b1101a1e82335e22f0c7ee3f8b6e865ac363b407349c9dcdae"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",

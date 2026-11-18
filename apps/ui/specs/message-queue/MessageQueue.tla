@@ -161,6 +161,9 @@
 \* the record holds that text and nothing more;
 \* otherwise it is cancelled and never sent. A send still enters the queue only through the composer's submit, so
 \* admission, delivery, persistence and the queue barrier are unchanged, and no action or verdict changes.
+\* External-agent sign-in: the store answers which host a chat is attached to (a read of the observation it already
+\* keeps), so a login card can offer the sign-in where that host refused the turn, and an exit-0 sign-in retries the
+\* refused turn through the existing regenerate gesture. No action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -532,7 +532,7 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
            * Each object is checked against its id: the index and the trailer vouch for the pack, not the transfer. A
            * whole entry was hashed as it was inflated; a delta's target is hashed here.
            */
-          const hashed = copied.oid ?? (await compute.sha1(frameObject(copied.type, copied.data)));
+          const hashed = copied.hashedOid ?? (await compute.sha1(frameObject(copied.type, copied.data)));
           if (hashed !== oid) {
             throw new TypeError(`A Range read of ${name} answered other bytes for ${oid}.`);
           }

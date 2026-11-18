@@ -131,7 +131,7 @@ export type PackReaderOptions = Readonly<{
  * to copy verbatim, and the id its bytes hash to, for the reader to compare
  * with the id it asked for (a delta's is not hashed by the read).
  */
-export type CopiedObject = StoredObject & Readonly<{ compressed?: Uint8Array<ArrayBuffer>; oid?: string }>;
+export type CopiedObject = StoredObject & Readonly<{ compressed?: Uint8Array<ArrayBuffer>; hashedOid?: string }>;
 
 /** One pack's objects, read entry by entry. */
 export type PackReader = Readonly<{
@@ -336,7 +336,7 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
       if (keepCompressed && typeof compute.inflateObject === 'function') {
         /* Inflated and hashed in one call: the object crosses back once, with the id its bytes are. */
         const { data, oid } = await inflateObject(kinds[kind]!, compressed, declared);
-        return { type: kinds[kind]!, data, compressed, oid };
+        return { type: kinds[kind]!, data, compressed, hashedOid: oid };
       }
       /* A compute without `inflateObject` inflates here, and the reader hashes what it answers. */
       const data = await inflateExactly(compressed, declared);

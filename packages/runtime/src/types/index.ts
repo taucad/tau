@@ -165,6 +165,7 @@ export type {
   RealmHold,
   RealmHoldInput,
   RealmResources,
+  KernelExecuteOptions,
 } from '#types/runtime-kernel.types.js';
 export type {
   Artifact,

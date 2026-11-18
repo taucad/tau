@@ -40,63 +40,139 @@ export const blobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFormat):
   return held[format];
 };
 
-/** Bytes the JS hasher takes per run before it yields: a few milliseconds of work, never a stall. */
-const hashRunBytes = 1024 * 1024;
-/** Bytes copied per run into the buffer WebCrypto digests, before a yield. */
+/** Work between two turns of the event loop: a read or a render queued behind hashing waits no longer than this. */
+const hashBudgetMilliseconds = 8;
+/** Bytes the JS hasher takes per run, between budget checks: about a millisecond of work. */
+const hashRunBytes = 256 * 1024;
+/** Bytes copied per run into the buffer WebCrypto digests, between budget checks. */
 const copyRunBytes = 8 * 1024 * 1024;
-
-/* A turn of the event loop: a read or a render waiting behind a hash runs here. */
-const yieldTurn = async (): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, 0);
-  });
+/** A file at most this large is hashed in place by the JS hasher: cheaper than a hop to WebCrypto. */
+const inPlaceBytes = 64 * 1024;
 
 /**
- * One blob's object id without holding the thread (STO-25): WebCrypto's digest
- * where the realm has it, which runs off the JavaScript thread, else the JS
- * hasher a megabyte at a time with a turn of the event loop between runs.
- * Answered and recorded in the same memo as {@link blobOid}, so a later cut of
- * the same bytes hashes nothing.
+ * Turns hashing has given the event loop so far, for a harness to report.
  *
- * @param content - The tree's own bytes for one file.
- * @param format - The object format.
- * @param subtle - The WebCrypto digest to use, or `false` for the JS hasher; the realm's own when absent.
- * @returns The blob id.
  * @internal
  */
-export const blobOidYielding = async (
-  content: Uint8Array<ArrayBuffer>,
-  format: ObjectFormat,
-  subtle: Pick<SubtleCrypto, 'digest'> | false = (globalThis as { crypto?: Crypto }).crypto?.subtle ?? false,
-): Promise<string> => {
-  const held = blobOids.get(content)?.[format];
-  if (held !== undefined) {
-    return held;
+export const hashingTurns = { count: 0 };
+
+/*
+ * A turn of the event loop that no timer clamp delays: `scheduler.yield`
+ * where the realm has it, else one message through a fresh channel.
+ */
+const yieldTurn = async (): Promise<void> => {
+  hashingTurns.count += 1;
+  const { scheduler } = globalThis as { scheduler?: { yield?: () => Promise<void> } };
+  if (typeof scheduler?.yield === 'function') {
+    return scheduler.yield();
   }
-  const header = textEncoder.encode(`blob ${String(content.length)}\0`);
-  let oid: string;
-  if (subtle === false) {
+  return new Promise((resolve) => {
+    const { port1, port2 } = new MessageChannel();
+    port1.addEventListener('message', () => {
+      port1.close();
+      resolve();
+    });
+    port1.start();
+    port2.postMessage(undefined);
+  });
+};
+
+/**
+ * Blob ids for many files without holding the thread (STO-25): small files in
+ * place, large ones through WebCrypto's digest (off the JavaScript thread)
+ * where the realm has it, else the JS hasher a run at a time, and a turn of
+ * the event loop only once a few milliseconds of work have passed since the
+ * last one, never per file. A memoised id costs nothing. A digest WebCrypto
+ * refuses is taken by the JS hasher. Every id lands in the same memo as
+ * {@link blobOid}, so a later cut of the same bytes hashes nothing.
+ *
+ * @internal
+ */
+export type BlobHashing = Readonly<{
+  /**
+   * One blob's id, pacing against the work this hashing has done since its last turn.
+   *
+   * @param content - The tree's own bytes for one file.
+   * @param format - The object format.
+   * @returns The blob id.
+   */
+  blobOid: (content: Uint8Array<ArrayBuffer>, format: ObjectFormat) => Promise<string>;
+}>;
+
+/**
+ * Start a run of paced blob hashing.
+ *
+ * @param subtle - The WebCrypto digest to use, or `false` for the JS hasher alone; the realm's own when absent.
+ * @returns The hashing, its budget starting now.
+ * @internal
+ */
+export const createBlobHashing = (
+  subtle: Pick<SubtleCrypto, 'digest'> | false = (globalThis as { crypto?: Crypto }).crypto?.subtle ?? false,
+): BlobHashing => {
+  let since = performance.now();
+  /* A turn once the budget is spent: the clock restarts after it. */
+  const pace = async (): Promise<void> => {
+    if (performance.now() - since < hashBudgetMilliseconds) {
+      return;
+    }
+    await yieldTurn();
+    since = performance.now();
+  };
+  const inJs = async (header: Uint8Array<ArrayBuffer>, content: Uint8Array<ArrayBuffer>, format: ObjectFormat) => {
     const hasher = createDigest(format);
     hasher.update(header);
     for (let offset = 0; offset < content.length; offset += hashRunBytes) {
       hasher.update(content.subarray(offset, offset + hashRunBytes));
-      // oxlint-disable-next-line no-await-in-loop -- a turn between runs is the point.
-      await yieldTurn();
+      // oxlint-disable-next-line no-await-in-loop -- a turn when the budget is spent is the point.
+      await pace();
     }
-    oid = bytesToHex(hasher.finish());
-  } else {
-    /* One buffer for the digest, filled a few megabytes at a time: a large file's copy is no stall either. */
+    return bytesToHex(hasher.finish());
+  };
+  const inWebCrypto = async (
+    digester: Pick<SubtleCrypto, 'digest'>,
+    header: Uint8Array<ArrayBuffer>,
+    blob: Readonly<{ content: Uint8Array<ArrayBuffer>; format: ObjectFormat }>,
+  ): Promise<string> => {
+    const { content, format } = blob;
+    /* One buffer for the digest, filled a run at a time: a large file's copy is no stall either. */
     const framed = new Uint8Array(new ArrayBuffer(header.length + content.length));
     framed.set(header);
     for (let offset = 0; offset < content.length; offset += copyRunBytes) {
       framed.set(content.subarray(offset, offset + copyRunBytes), header.length + offset);
-      // oxlint-disable-next-line no-await-in-loop -- a turn between runs is the point.
-      await yieldTurn();
+      // oxlint-disable-next-line no-await-in-loop -- a turn when the budget is spent is the point.
+      await pace();
     }
-    oid = bytesToHex(new Uint8Array(await subtle.digest(format === 'sha1' ? 'SHA-1' : 'SHA-256', framed)));
-  }
-  recordBlobOid(content, format, oid);
-  return oid;
+    const digested = await digester.digest(format === 'sha1' ? 'SHA-1' : 'SHA-256', framed);
+    /* The digest ran off this thread, and its answer came on a later task: the budget starts again. */
+    since = performance.now();
+    return bytesToHex(new Uint8Array(digested));
+  };
+  const hash = async (content: Uint8Array<ArrayBuffer>, format: ObjectFormat): Promise<string> => {
+    const held = blobOids.get(content)?.[format];
+    if (held !== undefined) {
+      return held;
+    }
+    let oid: string;
+    if (content.length <= inPlaceBytes) {
+      oid = blobOid(content, format);
+      await pace();
+      return oid;
+    }
+    const header = textEncoder.encode(`blob ${String(content.length)}\0`);
+    if (subtle === false) {
+      oid = await inJs(header, content, format);
+    } else {
+      try {
+        oid = await inWebCrypto(subtle, header, { content, format });
+      } catch {
+        /* A realm that refuses the digest still answers: a rollback never waits on WebCrypto. */
+        oid = await inJs(header, content, format);
+      }
+    }
+    recordBlobOid(content, format, oid);
+    return oid;
+  };
+  return Object.freeze({ blobOid: hash });
 };
 
 /**

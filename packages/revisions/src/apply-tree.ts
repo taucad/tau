@@ -23,7 +23,7 @@ import { revisionTreeFiles } from '#algorithms/revision-tree.js';
 import { lfsPointerFor, maximumPointerBytes, readLfsPointer } from '#lfs.js';
 import type { LfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
-import { blobOidYielding } from '#tree-id-memo.js';
+import { createBlobHashing } from '#tree-id-memo.js';
 import { declaredPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { isAttributesPath } from '#workspace-config.js';
 import type { AttributesReading } from '#workspace-config.js';
@@ -160,12 +160,13 @@ export type DeferredRevisionTree = Readonly<{
   read: (paths: readonly string[], signal?: AbortSignal) => Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>>;
 }>;
 
-/* Whether bytes are the blob a deferred file names: its id, in the format the id is written in. */
 /**
  * The paths whose bytes are the blob each names (by the format its id is
  * written in), one file at a time and never holding the thread: the
- * file-manager worker that runs a write also answers reads (STO-25). Each id
- * is memoised on the bytes, so a later cut of the same capture hashes nothing.
+ * file-manager worker that runs a write also answers reads (STO-25). One
+ * paced hashing covers the whole batch, so many small files cost their
+ * hashing and a turn every few milliseconds, not a turn each. Each id is
+ * memoised on the bytes, so a later cut of the same capture hashes nothing.
  *
  * @param candidates - Each path, the bytes it holds and the blob id it should be.
  * @returns The paths that are.
@@ -174,9 +175,10 @@ const blobsAmong = async (
   candidates: Iterable<readonly [path: string, content: Uint8Array<ArrayBuffer>, oid: string]>,
 ): Promise<Set<string>> => {
   const matching = new Set<string>();
+  const hashing = createBlobHashing();
   for (const [path, content, oid] of candidates) {
     // oxlint-disable-next-line no-await-in-loop -- one file's digest at a time bounds what is in flight.
-    if ((await blobOidYielding(content, oid.length === 64 ? 'sha256' : 'sha1')) === oid) {
+    if ((await hashing.blobOid(content, oid.length === 64 ? 'sha256' : 'sha1')) === oid) {
       matching.add(path);
     }
   }

@@ -150,7 +150,8 @@ const sha256Block = ({ state, schedule }: BlockWork, view: DataView, offset: num
  * An incremental digest in one object format: bytes go in as they come and
  * the digest comes out once, the same bytes {@link digest} answers for their
  * concatenation. What lets a caller hash a large file a run at a time and
- * yield between runs.
+ * yield between runs. It finishes once: `update` or `finish` after `finish`
+ * throws.
  *
  * @internal
  */
@@ -180,7 +181,15 @@ export const createDigest = (format: ObjectFormat): IncrementalDigest => {
   const pendingView = new DataView(pending.buffer);
   let pendingLength = 0;
   let total = 0;
+  let finished = false;
+  /* A digest is one message: once it has answered, its state is the answer's, and more input would be a different message. */
+  const open = (): void => {
+    if (finished) {
+      throw new TypeError('This digest has already finished; start another one.');
+    }
+  };
   const update = (input: Uint8Array<ArrayBuffer>): void => {
+    open();
     total += input.length;
     let offset = 0;
     if (pendingLength > 0) {
@@ -202,6 +211,8 @@ export const createDigest = (format: ObjectFormat): IncrementalDigest => {
     pendingLength = input.length - offset;
   };
   const finish = (): Uint8Array<ArrayBuffer> => {
+    open();
+    finished = true;
     /* Merkle–Damgård padding: `0x80`, zeroes, then the big-endian bit length. */
     const tail = padded(pending.slice(0, pendingLength));
     const bitLength = BigInt(total) * 8n;

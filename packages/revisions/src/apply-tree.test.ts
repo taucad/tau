@@ -41,7 +41,7 @@ import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/proj
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createApplyTreeEffects, readDeferredRevisionTree } from '#apply-tree.js';
 import type { DeferredRevisionTree } from '#apply-tree.js';
-import { blobOid, blobOidYielding } from '#tree-id-memo.js';
+import { blobOid, createBlobHashing, hashingTurns } from '#tree-id-memo.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
@@ -1853,33 +1853,67 @@ describe('hashing a deferred file without holding the thread (STO-25)', () => {
       .update(content)
       .digest('hex');
 
-  it('should hash with the JS hasher a megabyte at a time, letting the event loop in, to git’s own id', async () => {
-    const content = sample(3 * 1024 * 1024 + 7);
+  it('should hash a large file with the JS hasher in runs, letting a queued read in, to git’s own id', async () => {
+    const content = sample(24 * 1024 * 1024 + 7);
     let served = false;
-    /* A read queued behind the hash: it runs at the hash's first turn, not after the whole file. */
+    /* A read queued behind the hash: it runs at one of the hash's turns, not after the whole file. */
     setTimeout(() => {
       served = true;
     }, 0);
-    const hashing = blobOidYielding(content, 'sha1', false);
+    const turns = hashingTurns.count;
+    const hashing = createBlobHashing(false).blobOid(content, 'sha1');
     expect(served).toBe(false);
     const oid = await hashing;
     expect(served).toBe(true);
+    expect(hashingTurns.count).toBeGreaterThan(turns);
     expect(oid).toBe(gitBlobId('sha1', content));
-    await expect(blobOidYielding(sample(70_001), 'sha256', false)).resolves.toBe(gitBlobId('sha256', sample(70_001)));
+    const other = sample(70_001);
+    await expect(createBlobHashing(false).blobOid(other, 'sha256')).resolves.toBe(gitBlobId('sha256', other));
   });
 
-  it('should take WebCrypto’s digest where the realm has it, memoised for the next cut', async () => {
+  it('should hash many small files on one budget, not a turn each', async () => {
+    const hashing = createBlobHashing(false);
+    const small = Array.from({ length: 6000 }, (_, index) => {
+      const content = sample(2048);
+      content[0] = index % 256;
+      content[1] = Math.floor(index / 256);
+      return content;
+    });
+    const turns = hashingTurns.count;
+    const oids = [];
+    for (const content of small) {
+      // oxlint-disable-next-line no-await-in-loop -- the batch is paced as the write paces it.
+      oids.push(await hashing.blobOid(content, 'sha1'));
+    }
+    expect(hashingTurns.count - turns).toBeLessThan(small.length / 20);
+    expect(oids[5999]).toBe(gitBlobId('sha1', small[5999]!));
+    /* A memoised id costs no turn at all. */
+    const again = hashingTurns.count;
+    await Promise.all(small.map(async (content) => hashing.blobOid(content, 'sha1')));
+    expect(hashingTurns.count).toBe(again);
+  });
+
+  it('should take WebCrypto’s digest for a large file, memoised for the next cut, and the JS hasher if it refuses', async () => {
     const content = sample(2 * 1024 * 1024);
     const digest = vi.fn(async (algorithm: AlgorithmIdentifier, data: BufferSource) =>
       crypto.subtle.digest(algorithm, data),
     );
-    const oid = await blobOidYielding(content, 'sha1', { digest });
+    const oid = await createBlobHashing({ digest }).blobOid(content, 'sha1');
     expect(oid).toBe(gitBlobId('sha1', content));
     expect(digest).toHaveBeenCalledTimes(1);
     /* The same bytes again, or a cut asking synchronously, hash nothing. */
-    await expect(blobOidYielding(content, 'sha1', { digest })).resolves.toBe(oid);
+    await expect(createBlobHashing({ digest }).blobOid(content, 'sha1')).resolves.toBe(oid);
     expect(blobOid(content, 'sha1')).toBe(oid);
     expect(digest).toHaveBeenCalledTimes(1);
+    /* A digest WebCrypto refuses is answered all the same: a rollback never waits on it. */
+    const refused = sample(1024 * 1024 + 3);
+    const refusing = vi.fn(async (): Promise<ArrayBuffer> => {
+      throw new DOMException('refused', 'OperationError');
+    });
+    await expect(createBlobHashing({ digest: refusing }).blobOid(refused, 'sha256')).resolves.toBe(
+      gitBlobId('sha256', refused),
+    );
+    expect(refusing).toHaveBeenCalledTimes(1);
   });
 });
 

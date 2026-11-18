@@ -14,7 +14,8 @@
  * bracket opening (`onApplyingTree`), `tau.json` landed, the entry file
  * landed, and the write's end, plus the bracket-to-closure interval, how
  * long the store's tree reads took, and the longest the event loop went
- * without a turn while the write ran (`longestBlock`).
+ * without a turn while the write ran (`longestBlock`) and how many turns the
+ * write's hashing gave the event loop (`hashingTurns`).
  *
  * Run from `packages/revisions`:
  * `node --import @oxc-node/core/register src/test/open-apply-bench.ts --store=<bare repo> --sizes=<file> --runs=3`
@@ -35,6 +36,7 @@ import type { RevisionPort } from '#revision-port.js';
 import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionFileSystem } from '#revision-effects.js';
 import { testIdentity } from '#test/identity.js';
+import { hashingTurns } from '#tree-id-memo.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 
 const argument = (name: string, fallback: string): string => {
@@ -59,7 +61,15 @@ const sizes = new Map(
 const median = (samples: readonly number[]): number =>
   Math.round([...samples].toSorted((left, right) => left - right)[Math.floor(samples.length / 2)]!);
 
-type Marks = { bracket?: number; manifest?: number; entry?: number; end?: number; reads: number; stall?: number };
+type Marks = {
+  bracket?: number;
+  manifest?: number;
+  entry?: number;
+  end?: number;
+  reads: number;
+  stall?: number;
+  turns?: number;
+};
 
 const once = async (): Promise<Marks> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-open-apply-bench-'));
@@ -139,6 +149,7 @@ const once = async (): Promise<Marks> => {
     /* The longest the event loop went without a turn while the write ran: the longest synchronous block. */
     const loop = monitorEventLoopDelay({ resolution: 5 });
     loop.enable();
+    const turns = hashingTurns.count;
     started = performance.now();
     await new Promise<void>((resolve, reject) => {
       const running = createActor(actors.sync.fastForward as Parameters<typeof createActor>[0], {
@@ -163,6 +174,7 @@ const once = async (): Promise<Marks> => {
     marks.end = performance.now() - started;
     loop.disable();
     marks.stall = loop.max / 1e6;
+    marks.turns = hashingTurns.count - turns;
     return marks;
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -185,6 +197,7 @@ for (let run = 0; run < runs; run += 1) {
       end: Math.round(marks.end ?? Number.NaN),
       treeReads: Math.round(marks.reads),
       longestBlock: Math.round(marks.stall ?? Number.NaN),
+      hashingTurns: marks.turns,
     }),
   );
 }
@@ -198,6 +211,7 @@ console.log(
     end: of((marks) => marks.end),
     treeReads: of((marks) => marks.reads),
     longestBlock: of((marks) => marks.stall),
+    hashingTurns: of((marks) => marks.turns),
   }),
 );
 /* A finished open leaves its fill retrying against a remote this harness does not have. */

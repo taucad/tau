@@ -20,6 +20,7 @@ import { evaluatePose, resolveMechanismComponents, sampleAnimation } from '@tauc
 import { offersFor, replicadKernel } from '#replicad.kernel.js';
 import { normalizeRenderShapes } from '#utils/render-output.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
+import type { TopoDS_Shape } from 'replicad-opencascadejs';
 import {
   assertRenderingSuccess,
   createMockKernelRuntime,
@@ -4761,6 +4762,53 @@ describe('serializeNativeHandle', () => {
     } finally {
       entry?.shape.delete();
       shape.delete();
+    }
+  }, 30_000);
+
+  it('should snapshot a displayed shape without changing it, in the bytes of a shape never meshed (E10)', async () => {
+    const replicad = await import('replicad');
+    const oc = replicad.getOC();
+    /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
+    const triangulatedFaces = (shape: { wrapped: TopoDS_Shape }): number => {
+      let count = 0;
+      const explorer = new oc.TopExp_Explorer(shape.wrapped, oc.TopAbs_ShapeEnum.TopAbs_FACE);
+      try {
+        while (explorer.More()) {
+          const location = new oc.TopLoc_Location();
+          const triangulation = oc.BRep_Tool.Triangulation(oc.TopoDS.Face(explorer.Current()), location, 0);
+          // The binding returns null for a face without a triangulation.
+          // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- typed non-null, null at runtime
+          if (triangulation !== null && !triangulation.isNull()) {
+            count++;
+          }
+          location.delete();
+          explorer.Next();
+        }
+      } finally {
+        explorer.delete();
+      }
+      return count;
+    };
+    /* oxlint-enable new-cap */
+    const displayed = replicad.makeCylinder(10, 20).fillet(2);
+    const fresh = replicad.makeCylinder(10, 20).fillet(2);
+    try {
+      displayed.mesh({ tolerance: 0.1, angularTolerance: 0.3 });
+      const meshedFaces = triangulatedFaces(displayed);
+      expect(meshedFaces).toBe(displayed.faces.length);
+
+      const ofDisplayed = await serializeHandle(normalizeRenderShapes({ shape: displayed }));
+      const ofFresh = await serializeHandle(normalizeRenderShapes({ shape: fresh }));
+      const [snapshotOfDisplayed] = ofDisplayed.shapes;
+      const [snapshotOfFresh] = ofFresh.shapes;
+
+      // The displayed shape keeps its display mesh: the snapshot reads it and cleans nothing in place.
+      expect(triangulatedFaces(displayed)).toBe(meshedFaces);
+      expect(triangulatedFaces(fresh)).toBe(0);
+      expect(snapshotOfDisplayed).toStrictEqual(snapshotOfFresh);
+    } finally {
+      displayed.delete();
+      fresh.delete();
     }
   }, 30_000);
 

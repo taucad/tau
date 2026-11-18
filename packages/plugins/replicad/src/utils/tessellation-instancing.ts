@@ -336,16 +336,34 @@ function vectorialDeterminant(matrix: ReplicadShapeOccurrenceInfo['locationMatri
 }
 
 /**
- * Creates a reader of occurrence identity for one render. Partners are found by hashing each shape at the identity
- * location (`TShape` only; the hasher ignores orientation) and confirming with `IsPartner` against the first shape seen
- * with that hash, so a hash collision gets its own key. No BRep is serialized. The reader holds the shapes it has seen
- * as partner representatives, so drop it before those shapes are deleted.
+ * Partner keys of native shapes: equal exactly when two shapes share a `TShape`. Each shape is hashed at the identity
+ * location (`TShape` only; the hasher ignores orientation) and confirmed with `IsPartner` against the representatives
+ * seen with that hash, so a hash collision gets its own key. No BRep is serialized.
+ */
+export type ReplicadPartnerTable = {
+  /** The partner key of a non-null handle. */
+  keyOf(handle: TopoDS_Shape): string;
+  /** Forgets a partner, deleting its representative when the table owns it. */
+  forget(key: string): void;
+  /** Forgets every partner. */
+  dispose(): void;
+};
+
+/**
+ * Creates a partner table. A borrowing table keeps the shapes it was shown as representatives, so drop it before those
+ * shapes are deleted. An owning table keeps its own alias of each representative (the same `TShape` at the identity
+ * location), so a key stays valid across renders: the `TShape` cannot be freed and its address reused while the table
+ * holds it.
  *
  * @param openCascade - The OpenCascade instance whose Replicad identity bindings to use.
- * @returns A reader whose partner keys are equal exactly when two shapes share a `TShape`.
+ * @param options - `owned`: keep an alias of each representative instead of borrowing the shape.
+ * @returns The table.
  * @throws When the Replicad identity bindings are missing.
  */
-export function createReplicadOccurrenceReader(openCascade: OpenCascadeInstance): ReplicadOccurrenceReader {
+export function createReplicadPartnerTable(
+  openCascade: OpenCascadeInstance,
+  { owned }: { owned: boolean },
+): ReplicadPartnerTable {
   const { ReplicadShapeHasher: hasher, ReplicadShapeIdentity: identity } = asInstancingBindings(openCascade);
   if (!hasher) {
     throw new Error('Replicad tessellation instancing bindings are unavailable: ReplicadShapeHasher is missing');
@@ -354,34 +372,82 @@ export function createReplicadOccurrenceReader(openCascade: OpenCascadeInstance)
     throw new Error('Replicad tessellation instancing bindings are unavailable: ReplicadShapeIdentity is missing');
   }
 
-  const representatives = new Map<number, TopoDS_Shape[]>();
+  type Representative = { readonly key: string; readonly shape: TopoDS_Shape };
+  const buckets = new Map<number, { serial: number; representatives: Representative[] }>();
+  const hashOfKey = new Map<string, number>();
 
-  const partnerKey = (handle: TopoDS_Shape): string => {
-    const identityLocation = new openCascade.TopLoc_Location();
-    let hash: number;
-    try {
-      const located = handle.Located(identityLocation, false);
+  return {
+    keyOf(handle) {
+      const identityLocation = new openCascade.TopLoc_Location();
+      let located: TopoDS_Shape | undefined;
+      let hash: number;
       try {
+        located = handle.Located(identityLocation, false);
         hash = hasher.HashCode(located, partnerHashUpperBound);
+      } catch (error) {
+        located?.delete();
+        throw error;
       } finally {
-        located.delete();
+        identityLocation.delete();
       }
-    } finally {
-      identityLocation.delete();
-    }
 
-    let bucket = representatives.get(hash);
-    if (!bucket) {
-      bucket = [];
-      representatives.set(hash, bucket);
-    }
-    let slot = bucket.findIndex((representative) => identity.IsPartner(representative, handle));
-    if (slot === -1) {
-      slot = bucket.push(handle) - 1;
-    }
-    return `${hash.toString(16)}.${String(slot)}`;
+      let bucket = buckets.get(hash);
+      if (!bucket) {
+        bucket = { serial: 0, representatives: [] };
+        buckets.set(hash, bucket);
+      }
+      const found = bucket.representatives.find((representative) => identity.IsPartner(representative.shape, handle));
+      if (found) {
+        located.delete();
+        return found.key;
+      }
+      const key = `${hash.toString(16)}.${String(bucket.serial++)}`;
+      if (owned) {
+        bucket.representatives.push({ key, shape: located });
+      } else {
+        located.delete();
+        bucket.representatives.push({ key, shape: handle });
+      }
+      hashOfKey.set(key, hash);
+      return key;
+    },
+    forget(key) {
+      const hash = hashOfKey.get(key);
+      if (hash === undefined) {
+        return;
+      }
+      hashOfKey.delete(key);
+      const bucket = buckets.get(hash)!;
+      const index = bucket.representatives.findIndex((representative) => representative.key === key);
+      const [removed] = bucket.representatives.splice(index, 1);
+      if (owned) {
+        removed?.shape.delete();
+      }
+      if (bucket.representatives.length === 0) {
+        buckets.delete(hash);
+      }
+    },
+    dispose() {
+      for (const key of hashOfKey.keys()) {
+        this.forget(key);
+      }
+    },
   };
+}
 
+/**
+ * Creates a reader of occurrence identity. Without a partner table it borrows the shapes it reads as partner
+ * representatives for one render, so drop it before those shapes are deleted.
+ *
+ * @param openCascade - The OpenCascade instance whose Replicad identity bindings to use.
+ * @param partners - The partner table keys come from; by default a borrowing table of this reader's own.
+ * @returns A reader whose partner keys are equal exactly when two shapes share a `TShape`.
+ * @throws When the Replicad identity bindings are missing.
+ */
+export function createReplicadOccurrenceReader(
+  openCascade: OpenCascadeInstance,
+  partners: ReplicadPartnerTable = createReplicadPartnerTable(openCascade, { owned: false }),
+): ReplicadOccurrenceReader {
   return (shape) => {
     const handle = shapeHandle(shape) as TopoDS_Shape;
     if (handle.IsNull()) {
@@ -390,7 +456,7 @@ export function createReplicadOccurrenceReader(openCascade: OpenCascadeInstance)
 
     const locationMatrix = readLocationMatrix(handle);
     return {
-      partnerKey: partnerKey(handle),
+      partnerKey: partners.keyOf(handle),
       orientation: orientationName(openCascade, handle.Orientation()),
       locationMatrix,
       determinant: vectorialDeterminant(locationMatrix),

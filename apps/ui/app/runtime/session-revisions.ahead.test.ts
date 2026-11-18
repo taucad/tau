@@ -93,6 +93,11 @@ const createClient = (log: string[]) => {
       answer.resolve();
       answer = Promise.withResolvers<void>();
     },
+    /** Publish a projection with `patch` over the harness's (the apply's roots, readiness, …). */
+    publishStatus: (patch: Partial<RevisionStatusProjection>) => {
+      status = { ...revisionStatusHarness.status, projectId, ...patch };
+      listeners.emit();
+    },
     publish: (remote: Partial<RevisionStatusProjection['remote']>) => {
       const moved: RevisionStatusProjection['remote'] = { ...revisionStatusHarness.status.remote, ...remote };
       status = { ...revisionStatusHarness.status, projectId, remote: moved };
@@ -138,10 +143,13 @@ const createPorts = (initial: Readonly<{ user?: RevisionSessionUser; cloudOpen?:
 };
 
 /** The project's session `revisions` child, over the same stores, on the shared worker. */
-const startSessionChild = (ports: SessionRevisionsAheadPorts): (() => void) => {
+const startSessionChild = (ports: SessionRevisionsAheadPorts, treeService?: unknown): (() => void) => {
   const fileManagerRef = {
     send: () => undefined,
-    getSnapshot: () => ({ context: { worker, rootDirectory: `/projects/${projectId}` }, matches: () => true }),
+    getSnapshot: () => ({
+      context: { worker, treeService, rootDirectory: `/projects/${projectId}` },
+      matches: () => true,
+    }),
     subscribe: () => ({ unsubscribe: () => undefined }),
   } as unknown as ActorRefFrom<typeof fileManagerMachine>;
   const sessionPorts: SessionRevisionsPorts = {
@@ -289,6 +297,71 @@ describe('an open ahead of its session (STO-25 SP6)', () => {
     expect(log).not.toContain('close');
     second();
     expect(log).toStrictEqual(['setCredential:withdrawn', 'close']);
+  });
+
+  /*
+   * Review of d158d3e7 (I7): with the open started at the click, the root may already be applying the checkout when
+   * the session's tree first exists. Its re-reads are held from the start, it re-reads what it listed through the hold
+   * at the entry closure, and it lists what the apply touched once the apply ends: a partial directory is never the
+   * tree's last word.
+   */
+  it('holds a session tree created mid-apply from its start, and re-reads it at the entry closure and at the end', async () => {
+    const log: string[] = [];
+    const { client, answerUser, publishStatus } = createClient(log);
+    revisionClientTestApi.adopt(projectId, worker, client);
+    const store = createPorts({ user: ada, cloudOpen: true });
+    stops.push(openRevisionsAheadOfSession(store.ports)({ projectId, workspace, worker }));
+    answerUser();
+    await settle();
+    const root = `/projects/${projectId}`;
+    publishStatus({ applyingRoots: [root], checkoutRoot: root, readiness: 'treeReady' });
+    const tree = {
+      pauseRefreshes: () => {
+        log.push('tree:pause');
+        return () => {
+          log.push('tree:resume');
+        };
+      },
+      refreshListedThroughHold: () => {
+        log.push('tree:read-through');
+      },
+    };
+    log.length = 0;
+    stops.push(startSessionChild(store.ports, tree));
+    /* Held before the session says anything to the client. */
+    expect(log[0]).toBe('tree:pause');
+    publishStatus({ applyingRoots: [root], checkoutRoot: root, readiness: 'entryReady' });
+    expect(log.filter((entry) => entry.startsWith('tree:'))).toStrictEqual(['tree:pause', 'tree:read-through']);
+    publishStatus({ applyingRoots: [], checkoutRoot: root, readiness: 'materialized' });
+    expect(log.filter((entry) => entry.startsWith('tree:'))).toStrictEqual([
+      'tree:pause',
+      'tree:read-through',
+      'tree:resume',
+    ]);
+  });
+
+  it('re-reads a session tree created after the entry closure landed, while the apply still writes', async () => {
+    const log: string[] = [];
+    const { client, answerUser, publishStatus } = createClient(log);
+    revisionClientTestApi.adopt(projectId, worker, client);
+    const store = createPorts({ user: ada, cloudOpen: true });
+    stops.push(openRevisionsAheadOfSession(store.ports)({ projectId, workspace, worker }));
+    answerUser();
+    await settle();
+    const root = `/projects/${projectId}`;
+    publishStatus({ applyingRoots: [root], checkoutRoot: root, readiness: 'entryReady' });
+    const tree = {
+      pauseRefreshes: () => {
+        log.push('tree:pause');
+        return () => undefined;
+      },
+      refreshListedThroughHold: () => {
+        log.push('tree:read-through');
+      },
+    };
+    log.length = 0;
+    stops.push(startSessionChild(store.ports, tree));
+    expect(log.slice(0, 2)).toStrictEqual(['tree:pause', 'tree:read-through']);
   });
 
   describe('LOW: the connection is bound to the account it was opened for', () => {

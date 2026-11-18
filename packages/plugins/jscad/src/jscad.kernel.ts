@@ -355,6 +355,8 @@ export const jscadKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: jscadDetectPattern,
   builtinModuleNames: ['@jscad/modeling'],
+  // Resolves through the bundler and reads model sources only as bundle output.
+  sourceIdentity: 'bundle',
   builtinPackages: { '@jscad/modeling': modelingPackage },
   name: 'JscadKernel',
   version: '1.2.0',

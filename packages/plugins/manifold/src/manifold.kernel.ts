@@ -748,6 +748,8 @@ export const manifoldKernel = defineKernel({
   extensions: ['ts', 'js'],
   detectImport: manifoldDetectPattern,
   builtinModuleNames: ['manifold-3d', 'manifold-3d/manifoldCAD'],
+  // Resolves through the bundler and reads model sources only as bundle output.
+  sourceIdentity: 'bundle',
   builtinPackages: { 'manifold-3d': manifoldPackage },
   name: 'ManifoldKernel',
   version: '1.3.0',

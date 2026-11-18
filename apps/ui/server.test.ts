@@ -85,6 +85,7 @@ vi.mock('node:zlib', async (importOriginal) => {
 
 const buildServerEntry = resolve(import.meta.dirname, 'build/server/index.js');
 const buildClientAssets = resolve(import.meta.dirname, 'build/client/assets');
+const buildClient = resolve(import.meta.dirname, 'build/client');
 const requiredHeaders = {
   'cross-origin-opener-policy': 'same-origin',
   'cross-origin-embedder-policy': 'require-corp',
@@ -167,6 +168,25 @@ describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
       });
     });
   });
+
+  /* PL7: a new build's worker, the kill switch's included, must reach a visitor on their next page load. */
+  it.runIf(existsSync(resolve(buildClient, 'service-worker.js')))(
+    'should serve the service worker for the browser never to store',
+    async () => {
+      const responses = await Promise.all(
+        ['identity', 'br'].map(async (encoding) =>
+          fetch(baseUrl + '/service-worker.js', { headers: { 'Accept-Encoding': encoding } }),
+        ),
+      );
+      await Promise.all(responses.map(async (response) => response.arrayBuffer()));
+      for (const response of responses) {
+        expect(response.status).toBe(200);
+        expect(response.headers.get('Content-Type')).toMatch(/javascript/u);
+        expect(response.headers.get('Cache-Control')).toBe('no-cache, no-store, must-revalidate');
+        expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
+      }
+    },
+  );
 
   it.each(['gzip', 'br'])('should compress SSR HTML with accepted %s encoding', async (encoding) => {
     const response = await fetch(baseUrl + '/projects/new', { headers: { 'Accept-Encoding': encoding } });

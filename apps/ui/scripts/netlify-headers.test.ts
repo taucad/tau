@@ -51,6 +51,13 @@ describe('UI hosting headers (audit R17)', () => {
     }
   });
 
+  /* PL7: a new deploy's worker, the kill switch's included, must reach a visitor on their next page load. */
+  it('should never let the browser or the CDN store the service worker', () => {
+    expect(valuesFor('/service-worker.js', 'Cache-Control')).toEqual(['no-cache, no-store, must-revalidate']);
+    expect(valuesFor('/service-worker.js', 'CDN-Cache-Control')).toEqual(['no-store']);
+    expect(valuesFor('/service-worker.js', 'Netlify-CDN-Cache-Control')).toEqual(['no-store']);
+  });
+
   it('should serve the prerendered web app manifest as a manifest', () => {
     expect(valuesFor('/manifest.webmanifest', 'Content-Type')).toEqual(['application/manifest+json']);
   });

@@ -1887,6 +1887,17 @@ export class ChatSessionStore {
     return this.#observed.get(chatId)?.status ?? 'unknown';
   }
 
+  /**
+   * The host whose log this chat is attached to now: where its runs ran and its refusals came from, whatever the
+   * composer is set to since. `undefined` while unattached or attached to this page's own host.
+   *
+   * @public
+   */
+  public getAttachedHostId(chatId: string): TauAgentHostId | undefined {
+    const observed = this.#observed.get(chatId);
+    return observed?.status === 'attached' ? observed.placement?.hostId : undefined;
+  }
+
   /** Exact usage can be read only after both the host log and foreign segments reached this projection. */
   public historicalUsageReady(chatId: string, projectId: string): boolean {
     const projection = this.#projectionContext(chatId);

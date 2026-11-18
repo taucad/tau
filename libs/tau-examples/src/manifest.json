@@ -1590,6 +1590,17 @@
     ]
   },
   {
+    "kind": "test-fixture",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "worm-mechanism-fixture",
+    "mainFile": "main.ts",
+    "files": [
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
     "kind": "model",
     "geometry": "3d",
     "kernel": "smlib",

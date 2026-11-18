@@ -1,6 +1,6 @@
 import '#test/browser.css';
 import { cleanup, render } from '@testing-library/react';
-import { useFrame } from '@react-three/fiber';
+import { addTail, useFrame } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { useRef } from 'react';
 import type { Mesh } from 'three';
@@ -101,12 +101,23 @@ describe('viewer resize demand-frame continuation', () => {
       },
       { timeout: 45_000 },
     );
+    // The contract is that the demand loop keeps running until the animation stops invalidating, so wait
+    // for the loop to go idle after the resized frame, not for a wall-clock window: on a software
+    // rasterizer each presented frame stalls the compositor for hundreds of milliseconds. A lost
+    // continuation idles the loop after the first resized frame and fails below at once.
+    const idleAfterResize = new Promise<void>((resolve) => {
+      const remove = addTail(() => {
+        if (renderedWidth === targetWidth) {
+          remove();
+          resolve();
+        }
+      });
+    });
     targetWidth = 640;
     view.getByTestId('animated-viewer').style.width = `${targetWidth}px`;
 
-    await vi.waitFor(() => {
-      expect(renderedAngle).toBe(0.8);
-    });
+    await idleAfterResize;
+    expect(renderedAngle).toBe(0.8);
     expect(renderedWidth).toBe(targetWidth);
     expect(animationSteps).toBe(8);
   });

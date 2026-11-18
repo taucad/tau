@@ -174,6 +174,42 @@ export function registerKernelModule(
   });
 }
 
+/** Stands in for a worker's module-registry scope in bundle code that outlives the worker. */
+const portableRegistryScope = 'tau-registry-scope';
+
+/**
+ * Bundle code with this worker's module-registry scope replaced by a placeholder, for storing.
+ *
+ * Built-in imports in bundled code read `<scope>:<name>` from the module registry, and the scope
+ * is random per kernel worker. Code kept in a durable handle snapshot must not name the worker
+ * that stored it: store this form, and run it through {@link bindKernelModuleCode} after restoring.
+ *
+ * @param code - Bundled code from `runtime.bundler.bundle`.
+ * @param bundler - The bundler service of the worker the code was bundled in.
+ * @returns The code with no worker-specific scope.
+ * @public
+ */
+export function portableKernelModuleCode(
+  code: string,
+  bundler: Pick<KernelServices['bundler'], 'registryScope'>,
+): string {
+  const { registryScope } = bundler;
+  return registryScope === undefined ? code : code.replaceAll(`${registryScope}:`, `${portableRegistryScope}:`);
+}
+
+/**
+ * Bind code made portable by {@link portableKernelModuleCode} to this worker's module registry.
+ *
+ * @param code - Portable bundle code, or code bundled in this worker (returned unchanged).
+ * @param bundler - The bundler service of the worker that will run the code.
+ * @returns Code whose built-in imports read this worker's registry.
+ * @public
+ */
+export function bindKernelModuleCode(code: string, bundler: Pick<KernelServices['bundler'], 'registryScope'>): string {
+  const { registryScope } = bundler;
+  return registryScope === undefined ? code : code.replaceAll(`${portableRegistryScope}:`, `${registryScope}:`);
+}
+
 /**
  * Drop every built-in module a kernel worker registered under `registryScope`.
  * @param registryScope - The worker's scope, as carried by its bundler facade.

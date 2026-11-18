@@ -15,22 +15,24 @@ import { createExportFile } from '@taucad/runtime/types';
 import type { KernelIssue, TessellationReport } from '@taucad/runtime/types';
 import {
   asBuffer,
-  jsonSchemaFromJson,
-  defineKernel,
-  isRecordObject,
-  extractDefaultParameters,
-  registerKernelModule,
-  toVmEntryPath,
-  enrichIssueLocation,
-  createKernelError,
-  createKernelSuccess,
-  createKernelParameterDeclaration,
+  bindKernelModuleCode,
   createFrameClassifier,
-  parseStackTrace,
-  resolveSourcePath,
-  deriveLocationFromFrames,
+  createKernelError,
   createKernelLibraryTracer,
+  createKernelParameterDeclaration,
+  createKernelSuccess,
+  defineKernel,
   defineLibraryTracePolicy,
+  deriveLocationFromFrames,
+  enrichIssueLocation,
+  extractDefaultParameters,
+  isRecordObject,
+  jsonSchemaFromJson,
+  parseStackTrace,
+  portableKernelModuleCode,
+  registerKernelModule,
+  resolveSourcePath,
+  toVmEntryPath,
 } from '@taucad/runtime/kernel';
 import type { KernelLibraryTraceHandle, KernelLibraryTraceMode, KernelServices } from '@taucad/runtime/kernel';
 
@@ -968,14 +970,22 @@ export const manifoldKernel = defineKernel({
     await exclusive(cleanupManifoldRuntime);
   },
 
-  serializeHandle({ handle }) {
-    return { glb: new Uint8Array(handle.glb), ...(handle.program ? { program: { ...handle.program } } : {}) };
+  // The stored program names no worker: its built-in imports are rebound to the restoring worker.
+  serializeHandle({ handle }, services) {
+    return {
+      glb: new Uint8Array(handle.glb),
+      ...(handle.program
+        ? { program: { ...handle.program, code: portableKernelModuleCode(handle.program.code, services.bundler) } }
+        : {}),
+    };
   },
 
-  deserializeHandle({ serialized }): ManifoldHandle {
+  deserializeHandle({ serialized }, services): ManifoldHandle {
     return {
       glb: new Uint8Array(serialized.glb),
-      ...(serialized.program ? { program: { ...serialized.program } } : {}),
+      ...(serialized.program
+        ? { program: { ...serialized.program, code: bindKernelModuleCode(serialized.program.code, services.bundler) } }
+        : {}),
     };
   },
 });

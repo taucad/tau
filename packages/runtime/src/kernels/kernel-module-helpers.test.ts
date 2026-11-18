@@ -12,6 +12,8 @@ import {
   enrichIssueLocation,
   loadBinaryFile,
   toBuiltinModulePackage,
+  portableKernelModuleCode,
+  bindKernelModuleCode,
 } from '#kernels/kernel-module-helpers.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 import type { BuiltinModule, KernelBundler } from '#types/runtime-bundler-service.types.js';
@@ -93,6 +95,19 @@ describe('createKernelModuleShim', () => {
 
     expect(code).toContain('const __kernel_export_0 = __mod["class"];');
     expect(code).toContain('export { __kernel_export_0 as class };');
+  });
+});
+
+describe('portable kernel module code', () => {
+  it('stores bundle code without the worker scope and binds it to another worker', () => {
+    const code = 'const replicad = globalThis.__KERNEL_MODULES__.get("worker-a:replicad");';
+    const portable = portableKernelModuleCode(code, { registryScope: 'worker-a' });
+
+    expect(portable).not.toContain('worker-a');
+    expect(bindKernelModuleCode(portable, { registryScope: 'worker-b' })).toBe(
+      'const replicad = globalThis.__KERNEL_MODULES__.get("worker-b:replicad");',
+    );
+    expect(bindKernelModuleCode(code, { registryScope: 'worker-a' })).toBe(code);
   });
 });
 

@@ -3441,6 +3441,9 @@ importers:
       '@taucad/brep':
         specifier: workspace:*
         version: link:../../../packages/plugins/brep
+      '@taucad/cadmpeg':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/cadmpeg
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../../packages/plugins/gltf

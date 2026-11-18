@@ -14,6 +14,16 @@ describe('formatConfigurations', () => {
     }
   });
 
+  it('should name the native CAD formats nominatively, as Name (EXT)', () => {
+    const native = ['sldprt', 'catpart', 'ipt', 'iam', 'f3d', 'f3z', 'fcstd', '3dm', 'sat', 'sab', 'smt', 'smb', 'pvz'];
+    for (const extension of native) {
+      expect(formatConfigurations[extension as keyof typeof formatConfigurations].name, extension).toMatch(
+        new RegExp(`^[^()]+ \\(${extension.toUpperCase()}\\)$`, 'u'),
+      );
+    }
+    expect(formatConfigurations.sldprt.name).toBe('SolidWorks Part (SLDPRT)');
+  });
+
   it('should name the EDA kernel export formats', () => {
     expect(formatConfigurations.csv.name).toBe('Comma-Separated Values (CSV)');
     expect(formatConfigurations.txt.name).toBe('Plain Text (TXT)');

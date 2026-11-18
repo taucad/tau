@@ -32,9 +32,42 @@ export const supportedKernelExtensions = [
 ];
 
 /**
- * All file extensions accepted for import (kernel files + common project files).
+ * Native CAD files the project runtime opens through `@taucad/cadmpeg`. The import route runs no runtime, so this
+ * mirrors the kernel's extensions; `import.utils.test.ts` holds the two lists equal.
  */
-export const importAcceptedExtensions = [...supportedKernelExtensions, '.json', '.txt', '.md', '.js', '.jsx'];
+export const nativeCadExtensions = [
+  '.sldprt',
+  '.catpart',
+  '.ipt',
+  '.iam',
+  '.f3d',
+  '.f3z',
+  '.fcstd',
+  '.3dm',
+  '.sat',
+  '.sab',
+  '.smt',
+  '.smb',
+  '.pvz',
+];
+
+/**
+ * Extensions a project's main file may have: a kernel source, or a native CAD file the project opens as a model.
+ */
+export const mainFileExtensions = [...supportedKernelExtensions, ...nativeCadExtensions];
+
+/**
+ * Whether a path can be a project's main file. Native CAD files are often named in capitals (`PART.SLDPRT`).
+ */
+export const isMainFileCandidate = (path: string): boolean => {
+  const lowerPath = path.toLowerCase();
+  return mainFileExtensions.some((extension) => lowerPath.endsWith(extension));
+};
+
+/**
+ * All file extensions accepted for import (kernel files, native CAD files and common project files).
+ */
+export const importAcceptedExtensions = [...mainFileExtensions, '.json', '.txt', '.md', '.js', '.jsx'];
 
 /**
  * File accept string for HTML file input elements.
@@ -183,9 +216,9 @@ export function findMainFile(filePaths: string[]): string | undefined {
     }
   }
 
-  // Then, try to find any file with a supported kernel extension
-  for (const extension of supportedKernelExtensions) {
-    const match = filePaths.find((name) => name.endsWith(extension));
+  // Then, try to find any file with a supported kernel extension, then a native CAD file
+  for (const extension of mainFileExtensions) {
+    const match = filePaths.find((name) => name.toLowerCase().endsWith(extension));
     if (match) {
       return match;
     }

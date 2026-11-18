@@ -3,5 +3,10 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/oxlint",
   "projectType": "library",
-  "tags": ["scope:shared", "type:tool"]
+  "tags": ["scope:shared", "type:tool"],
+  "targets": {
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "{workspaceRoot}/packages/runtime/package.json"]
+    }
+  }
 }

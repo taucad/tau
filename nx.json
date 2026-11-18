@@ -150,7 +150,19 @@
       "options": {
         "command": "node tools/formal/src/cli.ts check --tier nightly {projectRoot}"
       },
-      "cache": false
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/specs/**/*",
+        "!{projectRoot}/specs/lean/**/*",
+        "{projectRoot}/src/**/*.json",
+        "{workspaceRoot}/tools/formal/src/**/*",
+        "{workspaceRoot}/tools/formal/toolchain.lock",
+        "{workspaceRoot}/tools/formal/run-seconds.json",
+        {
+          "runtime": "node tools/formal/src/cli.ts toolchain-id"
+        }
+      ],
+      "outputs": ["{workspaceRoot}/out/reports/formal/{projectRoot}/nightly"]
     },
     "formal:logs": {
       "executor": "nx:run-commands",

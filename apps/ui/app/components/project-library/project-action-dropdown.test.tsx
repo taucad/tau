@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 import type * as NativeFileManager from '#hooks/use-native-file-manager.js';
 
 let rowRuns = 0;

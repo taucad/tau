@@ -191,6 +191,14 @@
         "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts --resources apps/desktop/resources/store-guard/linux-x64"
       }
     },
+    "prepare-windows-sandbox": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/windows-sandbox/win32-x64"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-windows-sandbox.mts --resources apps/desktop/resources/windows-sandbox/win32-x64"
+      }
+    },
     "test-git-payload": {
       "executor": "nx:run-commands",
       "options": {
@@ -310,7 +318,8 @@
           "target": "check-desktop-payload"
         },
         "prepare-build123d-python-windows",
-        "prepare-git-windows"
+        "prepare-git-windows",
+        "prepare-windows-sandbox"
       ],
       "outputs": ["{projectRoot}/package-out"],
       "options": {

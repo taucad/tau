@@ -72,7 +72,7 @@
     "@taucad/api-testing": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "dotenv": "catalog:",
-    "postgres": "^3.4.9",
+    "postgres": "4.1.1",
     "reflect-metadata": "^0.2.2",
     "vitest": "catalog:",
     "vitest-mock-extended": "catalog:",

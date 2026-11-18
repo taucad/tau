@@ -27,9 +27,9 @@ export const tauInlineScriptHashes = {
   /** `buildFrameHintScript()` (`#lib/frame-hint`), in every document's `<head>`. */
   frameHint: "'sha256-c1yuMu36JC6Rjm5i9FWflnZafwYOl3izf/jvtkgs8WE='",
   /** The hand-off recorder served in a `HandOffSlot` of the `project-composer` surface. */
-  handOffProjectComposer: "'sha256-+bLXHT7VLtwGFhehuQLoMS5kF3SXXENeAwOLwKe62bo='",
+  handOffProjectComposer: "'sha256-UnytY8O/9bxanXxwZ+FqTIo4jqFCdVdbnpLdumdSNI4='",
   /** The hand-off recorder served after Home's early chat input (`earlyInputScript`). */
-  earlyChatInput: "'sha256-HPzTcKn1SRXgeELXr30KKtpjlRrQY34FaORrVr5iSd0='",
+  earlyChatInput: "'sha256-E/o7vNr1pNazhJwlaeU3OfcLb4bccko9gTeF1Ktx0kw='",
   /** The new-project page's name-field focus script (`focusProjectNameScript`). */
   focusProjectName: "'sha256-krFFxd6XBrbV2JhsS5gQwSQO5RrhqFDZXtxHkLZLXyc='",
   /** The web boot watchdog (`buildBootWatchdogScript`, `#lib/boot-watchdog`), in every web document's `<body>`. */

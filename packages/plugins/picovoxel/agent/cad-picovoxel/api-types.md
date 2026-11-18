@@ -1,6 +1,6 @@
 # picovoxel — Types
 
-36 top-level symbols. Signatures are verbatim typescript.
+39 top-level symbols. Signatures are verbatim typescript.
 
 AllocatedCounts: Omit<MemoryUsage, 'total'>
 
@@ -104,6 +104,12 @@ MetadataType: 'string' | 'float' | 'vector' | 'unknown'
 
 MetadataValue: string | number | Vec3
 
+// How park frames are compressed
+PagerCodec: 'lz4' | 'none'
+
+// How park and restore use the thread pool
+PagerMode: 'serial' | 'pooled' | 'pipelined'
+
 // The `code` of a {@link PicoError}
 PicoErrorCode: 'PICO_INVALID_HANDLE' | 'PICO_WASM_INIT_FAILED' | 'PICO_OUT_OF_MEMORY' | 'PICO_DISPOSED' | 'PICO_CALL_FAILED' | 'PICO_INVALID_ARGUMENT' | 'PICO_SESSION_MISMATCH' | 'PICO_ALLOC_FAILED' | 'PICO_RESERVED_METADATA' | 'PICO_VDB_NO_COMPATIBLE_FIELD' | 'PICO_LANE_LOOSENED' | 'PICO_LANE_EXPORT' | 'PICO_NOT_IMPLEMENTED'
 
@@ -119,6 +125,9 @@ SliceAxis: 'x' | 'y' | 'z'
 
 // Slice modes are pure post-processing over the native narrow-band floats
 SliceMode: 'sdf' | 'bw' | 'antialiased'
+
+// Receives one chunk of a streamed STL
+StlChunkSink: (chunk: Uint8Array) => void
 
 StlUnit: 'auto' | 'mm' | 'cm' | 'm' | 'ft' | 'in'
 

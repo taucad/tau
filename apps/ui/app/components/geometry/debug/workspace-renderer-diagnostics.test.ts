@@ -19,7 +19,7 @@ it('should report the WebGL2 backend of a node renderer and actual buffer', () =
     drawingBuffer: { width: 5120, height: 2880 },
     cssSize: { width: 2560, height: 1440 },
     pixelRatio: 2,
-    frame: 12,
+    frame: 30,
   });
   canvas.width = 2560;
   canvas.height = 1440;
@@ -29,4 +29,14 @@ it('should report the WebGL2 backend of a node renderer and actual buffer', () =
 it('should distinguish native WebGPU from the forced node WebGL2 backend', () => {
   const renderer = new WebGPURenderer({ canvas: document.createElement('canvas') });
   expect(getWorkspaceRendererIdentity(renderer)).toMatchObject({ api: 'webgpu', effectiveBackend: 'webgpu-native' });
+});
+
+it('should count draws, not the node renderer animation loop, as frames', () => {
+  const renderer = new WebGPURenderer({ canvas: document.createElement('canvas') });
+  const before = getWorkspaceRendererIdentity(renderer).frame;
+  // Three's internal animation loop advances `info.frame` every display refresh, drawn or not.
+  Object.assign(renderer.info, { frame: renderer.info.frame + 60 });
+  expect(getWorkspaceRendererIdentity(renderer).frame).toBe(before);
+  Object.assign(renderer.info.render, { calls: renderer.info.render.calls + 1 });
+  expect(getWorkspaceRendererIdentity(renderer).frame).toBe(before + 1);
 });

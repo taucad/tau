@@ -7,9 +7,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Project } from '@taucad/types';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
-import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
+import type { PendingProjectOperation } from '@taucad/files-ui/types/pending-project-operation.types';
 import type { EditorState } from '@taucad/ui-core/types/editor.types';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 
 const projectOneId = 'proj_one';
 const projectTwoId = 'proj_two';

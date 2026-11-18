@@ -127,15 +127,35 @@
       }
     },
     "test": {
+      "metadata": {
+        "description": "Suites that read only scripts, its dependencies and the workspace files listed here: the workflows and actions they pin, the Grafana rules, the agent skills and policies, the repository catalog and the root manifests. Suites that read other projects or the Nx graph are in validate-workspace-tests (scripts/vitest.config.ts)."
+      },
       "inputs": [
         "default",
         "^production",
-        "{workspaceRoot}/packages/plugins/*/README.md",
-        "{workspaceRoot}/packages/core/*/README.md",
-        "{workspaceRoot}/packages/plugins/*/src/index.ts",
-        "{workspaceRoot}/packages/core/*/src/index.ts",
-        "{workspaceRoot}/**/*"
+        "{workspaceRoot}/.github/**/*",
+        "{workspaceRoot}/infra/grafana/**/*",
+        "{workspaceRoot}/.agents/skills/**/*",
+        "{workspaceRoot}/AGENTS.md",
+        "{workspaceRoot}/docs/policy/**/*",
+        "{workspaceRoot}/tools/repositories/**/*",
+        "{workspaceRoot}/package.json",
+        "{workspaceRoot}/pnpm-workspace.yaml"
       ]
+    },
+    "validate-workspace-tests": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The scripts suites that read other projects' files, the Nx project graph or sibling directories (workspaceTests in scripts/vitest.config.ts). Uncached and without workspace-root inputs, so it selects nothing; scripts:validate runs it in Validate workspace on every landing."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../node_modules/.bin/vitest run",
+        "env": {
+          "TAU_SCRIPTS_TEST_SET": "workspace"
+        }
+      }
     },
     "test:e2e:queue": {
       "executor": "nx:noop",
@@ -154,7 +174,7 @@
         "cwd": "{projectRoot}",
         "command": "../node_modules/.bin/vitest run",
         "env": {
-          "TAU_SCRIPTS_BROWSER_TESTS": "true"
+          "TAU_SCRIPTS_TEST_SET": "browser"
         }
       }
     },

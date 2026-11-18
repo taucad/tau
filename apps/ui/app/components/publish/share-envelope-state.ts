@@ -1,4 +1,4 @@
-import type { ProjectCloudState } from '#types/project-library.types.js';
+import type { ProjectCloudState } from '@taucad/files-ui/types/project-library.types';
 
 /**
  * Why the Share panel's envelope read failed, from its HTTP status (W30, #2304). Only a failed request or a server

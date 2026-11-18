@@ -26,8 +26,10 @@ export function SidebarNotices({ children }: { readonly children: React.ReactNod
  * Every notice is composed from the same three parts, so the stack reads as one family and lines up by construction:
  * - SidebarNotice, the bordered shell with a 4px inset;
  * - SidebarNoticeTile, the accent tile, its corners concentric with the shell's (the shell's radius less inset and border);
- * - SidebarNoticeCorner, the shell's top-right 24px slot, one inset from the top and the right, which holds the card's
- *   close button and the update row's chevron alike, so the two always share a column.
+ * - SidebarNoticeHeader and SidebarNoticeCorner: the header row starts at the shell's inner edge, and the corner is its
+ *   top-right 24px slot, so the card's close button and the update's chevron share one position wherever the header
+ *   sits in its notice;
+ * - SidebarNoticeActions, the action row, right-aligned on the same inner edge in every notice.
  */
 
 /** The shell every notice uses. Children are laid out by the notice; the corner slot is absolutely placed. */
@@ -78,7 +80,21 @@ export function SidebarNoticeTile({
   );
 }
 
-/** The shell's top-right slot: equally inset from the top and the right, holding a 16px glyph centred in 24px. */
+/** A notice's header row: the positioning context for {@link SidebarNoticeCorner}, starting at the shell's inner edge. */
+export function SidebarNoticeHeader({
+  className,
+  children,
+}: {
+  readonly className?: string;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  return <div className={cn('relative', className)}>{children}</div>;
+}
+
+/**
+ * The header's top-right slot, holding a 16px glyph centred in 24px. The header starts one inset inside the shell's
+ * border, so the slot sits equally far from the shell's top (when the header is first) and right edges.
+ */
 export function SidebarNoticeCorner({
   className,
   children,
@@ -89,12 +105,25 @@ export function SidebarNoticeCorner({
   return (
     <div
       className={cn(
-        'absolute top-(--notice-inset) right-(--notice-inset) flex size-6 items-center justify-center text-muted-foreground [&_svg]:size-4',
+        'absolute top-0 right-0 flex size-6 items-center justify-center text-muted-foreground [&_svg]:size-4',
         className,
       )}
     >
       {children}
     </div>
+  );
+}
+
+/** A notice's action row: right-aligned on the shell's inner edge. A secondary link takes `mr-auto` to sit left. */
+export function SidebarNoticeActions({
+  className,
+  children,
+}: {
+  readonly className?: string;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <div className={cn('flex w-full flex-wrap items-center justify-end gap-x-2 gap-y-1', className)}>{children}</div>
   );
 }
 
@@ -131,40 +160,45 @@ export function SidebarNoticeCard({
 }): React.JSX.Element {
   const titleId = useId();
   return (
-    <SidebarNotice labelledBy={titleId} className='flex items-center gap-3'>
-      {/* A fixed square that sets the card's height: a two-line title and the action (70px) fit beside it, so the tile
+    <SidebarNotice labelledBy={titleId}>
+      <SidebarNoticeHeader className='flex items-center gap-3'>
+        {/* A fixed square that sets the card's height: a two-line title and the action (70px) fit beside it, so the tile
           spans the card without its width depending on how the title wraps. */}
-      <SidebarNoticeTile className='size-18 [&_svg]:size-6'>{icon}</SidebarNoticeTile>
-      <div className='flex min-w-0 flex-1 flex-col items-start gap-1.5 pr-6'>
-        <div className='max-w-full min-w-0'>
-          <p id={titleId} className={cn(sidebarNoticeTitle, 'whitespace-normal')}>
-            {title}
-          </p>
-          {detail ? <p className='text-xs leading-4 text-muted-foreground'>{detail}</p> : undefined}
+        <SidebarNoticeTile className='size-18 [&_svg]:size-6'>{icon}</SidebarNoticeTile>
+        <div className='flex min-w-0 flex-1 flex-col items-start gap-1.5'>
+          {/* Only the title keeps clear of the close button; the action runs under it to the shared right edge. */}
+          <div className='max-w-full min-w-0 pr-6'>
+            <p id={titleId} className={cn(sidebarNoticeTitle, 'whitespace-normal')}>
+              {title}
+            </p>
+            {detail ? <p className='text-xs leading-4 text-muted-foreground'>{detail}</p> : undefined}
+          </div>
+          <SidebarNoticeActions>
+            <Button asChild size='xs' variant='outline'>
+              <a
+                href={action.href}
+                target={action.opensInNewTab ? '_blank' : undefined}
+                rel={action.opensInNewTab ? 'noopener noreferrer' : undefined}
+                onClick={action.onClick}
+              >
+                {action.label}
+                {action.opensInNewTab ? <ArrowUpRight className='size-3' aria-hidden /> : undefined}
+              </a>
+            </Button>
+          </SidebarNoticeActions>
         </div>
-        <Button asChild size='xs' variant='outline'>
-          <a
-            href={action.href}
-            target={action.opensInNewTab ? '_blank' : undefined}
-            rel={action.opensInNewTab ? 'noopener noreferrer' : undefined}
-            onClick={action.onClick}
+        <SidebarNoticeCorner>
+          <Button
+            variant='ghost'
+            size='icon-xs'
+            className='text-muted-foreground'
+            aria-label={dismissLabel}
+            onClick={onDismiss}
           >
-            {action.label}
-            {action.opensInNewTab ? <ArrowUpRight className='size-3' aria-hidden /> : undefined}
-          </a>
-        </Button>
-      </div>
-      <SidebarNoticeCorner>
-        <Button
-          variant='ghost'
-          size='icon-xs'
-          className='text-muted-foreground'
-          aria-label={dismissLabel}
-          onClick={onDismiss}
-        >
-          <X className='size-4' />
-        </Button>
-      </SidebarNoticeCorner>
+            <X className='size-4' />
+          </Button>
+        </SidebarNoticeCorner>
+      </SidebarNoticeHeader>
     </SidebarNotice>
   );
 }

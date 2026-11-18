@@ -57,15 +57,14 @@ const inPlaceBytes = 64 * 1024;
 export const hashingTurns = { count: 0 };
 
 /*
- * A turn of the event loop that no timer clamp delays: `scheduler.yield`
- * where the realm has it, else one message through a fresh channel.
+ * A turn of the event loop that no timer clamp delays: one message through a
+ * fresh channel. Not `scheduler.yield`: its continuation runs ahead of tasks of
+ * the same priority, so in a worker the file-manager's queued reads (ordinary
+ * posted messages) would wait out the whole batch. A posted message queues
+ * behind them, so they are served before hashing resumes.
  */
 const yieldTurn = async (): Promise<void> => {
   hashingTurns.count += 1;
-  const { scheduler } = globalThis as { scheduler?: { yield?: () => Promise<void> } };
-  if (typeof scheduler?.yield === 'function') {
-    return scheduler.yield();
-  }
   return new Promise((resolve) => {
     const { port1, port2 } = new MessageChannel();
     port1.addEventListener('message', () => {

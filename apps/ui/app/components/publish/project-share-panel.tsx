@@ -5,7 +5,7 @@ import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router';
-import { Check, Link2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Check, Globe, Link2, RefreshCw, ShieldCheck } from 'lucide-react';
 import { sharePasswordLimits } from '@taucad/share/artifact';
 import { formatShareUrl } from '@taucad/share/locator';
 import type { ShareLocator } from '@taucad/share/locator';
@@ -123,7 +123,7 @@ const resolveShareMethod = (
 };
 
 const DirectIcon: ShareMethodIcon = Link2;
-const TauIcon: ShareMethodIcon = ({ className }) => <SvgIcon id='tau' className={className} aria-hidden />;
+const WebIcon: ShareMethodIcon = Globe;
 const GithubIcon: ShareMethodIcon = ({ className }) => <SvgIcon id='github' className={className} aria-hidden />;
 
 const noUnits = (): readonly WorkbenchUnit[] => [];
@@ -909,7 +909,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
         <SharePaneFrame isDisabled={busy} description='This project has no copy in Tau Cloud.'>
           <div className='flex flex-col gap-4'>
             <div className='rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground'>
-              Its Tau Cloud copy was deleted, so it has no hosted link. Share it with a Direct link or a GitHub Gist, or
+              Its Tau Cloud copy was deleted, so it has no web link. Share it with a Direct link or a GitHub Gist, or
               duplicate the project to publish a new copy.
             </div>
           </div>
@@ -1228,7 +1228,7 @@ export function useProjectShareSource(properties: Omit<ProjectSharePanelProps, '
             kind: 'custom',
             id: 'tau',
             label: descriptor.label,
-            icon: TauIcon,
+            icon: WebIcon,
             render: renderTau,
           },
         ];

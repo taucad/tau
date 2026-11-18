@@ -4,7 +4,7 @@ import type { ShareProvider, ShareProviderDescriptor } from '#provider.js';
 /** Tau persisted publication provider metadata. @public */
 export const tauShareProviderDescriptor = {
   id: 'tau',
-  label: 'Hosted link',
+  label: 'Web link',
   capabilities: ['project.publish', 'project.resolve'],
   connection: { id: 'tau', scopes: [] },
 } as const satisfies ShareProviderDescriptor;

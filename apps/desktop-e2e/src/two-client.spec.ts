@@ -385,9 +385,9 @@ const openHostedShare = async (client: PageClient): Promise<void> => {
   await page.getByRole('button', { name: 'Share', exact: true }).first().click({ timeout: 120_000 });
   await page.getByRole('region', { name: 'Share project' }).first().waitFor({ state: 'visible', timeout: 60_000 });
   const method = page.getByRole('button', { name: /^Share with /u }).first();
-  if ((await method.getAttribute('aria-label')) !== 'Share with Hosted link') {
+  if ((await method.getAttribute('aria-label')) !== 'Share with Web link') {
     await method.click();
-    await page.getByText('Hosted link', { exact: true }).last().click();
+    await page.getByText('Web link', { exact: true }).last().click();
   }
   await page
     .getByRole('combobox', { name: /Version name/iu })

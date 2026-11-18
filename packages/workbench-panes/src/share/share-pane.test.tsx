@@ -215,7 +215,7 @@ describe('SharePane', () => {
         {
           kind: 'custom',
           id: 'tau',
-          label: 'Hosted link',
+          label: 'Web link',
           icon: Link2,
           render: () => (
             <SharePaneFrame description='Publish a snapshot.'>
@@ -228,19 +228,19 @@ describe('SharePane', () => {
     });
 
     await userEvent.click(screen.getByRole('button', { name: 'Share with Direct link' }));
-    await userEvent.click(screen.getByRole('option', { name: 'Hosted link' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Web link' }));
 
     expect(onMethodChange).toHaveBeenCalledWith('tau');
     expect(screen.getByText('Hosted body')).toBeInTheDocument();
     expect(screen.getByText('Publish a snapshot.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Share with Hosted link' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Share with Web link' })).toBeInTheDocument();
   });
 
   it('should show the method the host keeps, and the first one when that is not offered', () => {
     const tau = {
       kind: 'custom',
       id: 'tau',
-      label: 'Hosted link',
+      label: 'Web link',
       icon: Link2,
       render: () => <p>Hosted body</p>,
     } as const;
@@ -263,7 +263,7 @@ describe('SharePane', () => {
     const tau = {
       kind: 'custom',
       id: 'tau',
-      label: 'Hosted link',
+      label: 'Web link',
       icon: Link2,
       render: () => <p>Hosted body</p>,
     } as const;
@@ -278,7 +278,7 @@ describe('SharePane', () => {
     const tau = {
       kind: 'custom',
       id: 'tau',
-      label: 'Hosted link',
+      label: 'Web link',
       icon: Link2,
       render: () => <p>Hosted body</p>,
     } as const;

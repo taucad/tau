@@ -60,7 +60,7 @@ vi.mock('#lib/share-providers.js', async (importOriginal) => {
     shareProviderRegistry: {
       descriptors: [
         { id: 'direct', label: 'Direct link', capabilities: ['project.publish', 'project.resolve'] },
-        { id: 'tau', label: 'Hosted link', capabilities: ['project.publish', 'project.resolve'] },
+        { id: 'tau', label: 'Web link', capabilities: ['project.publish', 'project.resolve'] },
         { id: 'github-gist', label: 'GitHub Gist', capabilities: ['project.publish', 'project.resolve'] },
         { id: 'github', label: 'GitHub repository', capabilities: ['project.resolve'] },
       ],
@@ -248,10 +248,10 @@ describe('ProjectSharePanel', () => {
     await userEvent.click(trigger);
 
     const directOption = screen.getByRole('option', { name: 'Direct link' });
-    const tauOption = screen.getByRole('option', { name: 'Hosted link' });
+    const webOption = screen.getByRole('option', { name: 'Web link' });
     const gistOption = screen.getByRole('option', { name: 'GitHub Gist' });
     expect(directOption.querySelector('.lucide-link-2')).not.toBeNull();
-    expect(tauOption.querySelector('use')).toHaveAttribute('href', '#tau');
+    expect(webOption.querySelector('.lucide-globe')).not.toBeNull();
     expect(gistOption.querySelector('use')).toHaveAttribute('href', '#github');
     expect(screen.queryByRole('option', { name: 'GitHub repository' })).not.toBeInTheDocument();
 

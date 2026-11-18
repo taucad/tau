@@ -90,7 +90,7 @@ const spyOnBindings = (): (() => Counts) => {
   return () => Object.fromEntries(Object.entries(spies).map(([name, spy]) => [name, spy.mock.calls.length]));
 };
 
-type Measured = { render: Counts; glb: Counts; stl: Counts; step: Counts };
+type Measured = { render: Counts; glb: Counts; stl: Counts; step: Counts; coldGlb: Counts };
 
 /** Explicit tolerances, so the mesh of each copy does not change with the model's size. */
 const coarse = { linearTolerance: 0.1, angularTolerance: 10 };
@@ -134,7 +134,14 @@ const measureCylinders = async (
     const step = await counted(async () => {
       await expectExported(document.export('step'));
     });
-    return { render, glb, stl, step };
+    // A GLB at tolerances no render used: nothing is kept, so it meshes as the render did (N14).
+    const coldGlb = await counted(async () => {
+      const cold = { ...tessellation, linearTolerance: tessellation.linearTolerance * 3 };
+      await expectExported(
+        document.export('glb', { options: { tessellation: cold }, content: { includeEdges: true } }),
+      );
+    });
+    return { render, glb, stl, step, coldGlb };
   } finally {
     document.close();
   }
@@ -213,6 +220,12 @@ describe('Replicad kernel call counts', () => {
       large: { ...meshed, ...occurrences(6) },
     });
     expect({ small: small.glb, large: large.glb }).toEqual({ small: keptOccurrences(2), large: keptOccurrences(6) });
+    // A GLB at tolerances no render used meshes once per prototype, as the render did; its only extra call is the
+    // partner check against the representative the memo already keeps.
+    expect({ small: small.coldGlb, large: large.coldGlb }).toEqual({
+      small: { ...small.render, 'ReplicadShapeIdentity.IsPartner': 2 },
+      large: { ...large.render, 'ReplicadShapeIdentity.IsPartner': 6 },
+    });
   });
 
   it('should export STL with no per-element binding call and STEP with only the identity reads', () => {

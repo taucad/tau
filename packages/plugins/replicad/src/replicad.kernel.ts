@@ -80,6 +80,7 @@ import { installNativeUserBreak } from '#utils/native-user-break.js';
 import { createLiveTier, installOperationTier } from '#live-tier/live-tier.js';
 import { createReplicadMeshMemo } from '#utils/mesh-memo.js';
 import { meterOperations, tierBuildReport } from '#utils/operation-cost.js';
+import type { OperationMeter } from '#utils/operation-cost.js';
 import type { ReplicadMeshMemo } from '#utils/mesh-memo.js';
 import { createToleranceLadder } from '#utils/tolerance-ladder.js';
 import type { ToleranceLadder } from '#utils/tolerance-ladder.js';
@@ -738,8 +739,8 @@ export const replicadKernel = defineKernel({
         });
       }
 
-      // R18: times the operations the tier computes, for the build report.
-      const meter = documentTier ? meterOperations(documentTier.operations.cache) : undefined;
+      // R18: the meter of the run that delivered the build; each run of user code gets its own.
+      let meter: OperationMeter | undefined;
       const buildGeometry = named('Object.createGeometry', async () => {
         const executeResult = await runtime.execute(bundleResult.code);
         if (!executeResult.success) {
@@ -752,6 +753,7 @@ export const replicadKernel = defineKernel({
             phase: 'computingGeometry',
             stage: 'brep',
           });
+          meter = documentTier ? meterOperations(documentTier.operations.cache) : undefined;
           const endBuild =
             documentTier && meter
               ? installOperationTier(context.replicadLibrary, { ...documentTier.operations, cache: meter.cache })
@@ -1063,12 +1065,13 @@ export const replicadKernel = defineKernel({
               });
               const { linearTolerance, angularTolerance } = requested;
               // N14: with the live tier, the export composes the part meshes a render or an earlier export kept at
-              // these exact tolerances; with reuse off every export meshes, as before (I2).
+              // these exact tolerances; what it meshes goes to the memo's one-generation export slot, not the display
+              // memo. With reuse off every export meshes, as before (I2).
               const meshMemo =
                 runtime.compute.status === 'on' && context.liveTier
                   ? (context.meshMemo ??= createReplicadMeshMemo({ openCascade: context.openCascade }))
                   : undefined;
-              meshMemo?.beginRender();
+              meshMemo?.beginExport();
               const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
                 render(namedShapes, {
                   tessellation: { linearTolerance, angularTolerance },
@@ -1079,7 +1082,7 @@ export const replicadKernel = defineKernel({
                   meshMemo,
                 }),
               ).finally(() => {
-                meshMemo?.endRender();
+                meshMemo?.endExport();
               });
               const temporaryShapes = renderedShapes.filter(
                 (shape): shape is GeometryReplicad => shape.format === 'replicad',

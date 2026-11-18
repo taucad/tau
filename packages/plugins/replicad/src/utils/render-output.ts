@@ -395,8 +395,9 @@ function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptio
     tessellation: options.tessellation,
     material: shapeConfig.material,
   });
-  const kept = meshMemo.lookup(info, key);
-  if (kept && (kept.edges !== undefined || !options.collectBrepEdges)) {
+  // A kept mesh without edges cannot serve a render that collects them: that is a miss, meshed again.
+  const kept = meshMemo.lookup(info, key, (mesh) => mesh.edges !== undefined || !options.collectBrepEdges);
+  if (kept) {
     return geometryFromMemo(shapeConfig, kept, options.collectBrepEdges);
   }
   const geometry = meshShape(shapeConfig, options);
@@ -655,11 +656,13 @@ function renderPrototypeGroup(options: PrototypeGroupOptions): Array<[MeshableCo
       meshMemoKey({ mode: 'instanced', info: instance.info, tessellation, material: instance.config.material }),
     ),
   ].join(';');
-  const kept = meshMemo.lookupGroup(prototype, key);
-  if (
-    kept?.length === group.instances.length &&
-    (!collectBrepEdges || kept.every((mesh) => mesh.edges !== undefined))
-  ) {
+  const kept = meshMemo.lookupGroup(
+    prototype,
+    key,
+    group.instances.length,
+    (meshes) => !collectBrepEdges || meshes.every((mesh) => mesh.edges !== undefined),
+  );
+  if (kept) {
     return group.instances.map((instance, index) => [
       instance.config,
       geometryFromMemo(instance.config, kept[index]!, collectBrepEdges),

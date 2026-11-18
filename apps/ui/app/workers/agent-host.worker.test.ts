@@ -8,7 +8,8 @@ type PageChannel = ReturnType<typeof connectAgentWorkerChannel<AgentHostWorkerPr
 /* Records evaluations of the host implementation, the module a `provide` needs. */
 const implementation = vi.hoisted(() => ({ evaluations: 0 }));
 
-/* Long enough for a load started at the connection to have evaluated (the mock evaluates within a few ticks). */
+/* A lower bound, not a guarantee: long enough for a load started at the connection to have evaluated (the mock
+   evaluates within a few ticks), so a regression to loading at connect turns the zero check red on a normal run. */
 const settle = async (): Promise<void> => {
   await new Promise((resolve) => {
     setTimeout(resolve, 50);
@@ -70,7 +71,7 @@ describe('agent-host worker', () => {
     });
   });
 
-  it('answers its capabilities while the implementation import has not settled', async () => {
+  it('does not make capabilities wait on the implementation load', async () => {
     vi.doMock('#workers/agent-host.impl.js', async () => {
       implementation.evaluations += 1;
       return new Promise<never>(() => {

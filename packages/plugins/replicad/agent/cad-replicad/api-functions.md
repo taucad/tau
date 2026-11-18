@@ -1,6 +1,6 @@
 # replicad — Functions
 
-125 top-level symbols. Signatures are verbatim typescript.
+129 top-level symbols. Signatures are verbatim typescript.
 
 // asDir (function)
 export declare function asDir(direction: Direction): gp_Dir;
@@ -8,16 +8,12 @@ export declare function asDir(direction: Direction): gp_Dir;
 // asPnt (function)
 export declare function asPnt(coords: Point): gp_Pnt;
 
-// complexExtrude (function)
-export declare function complexExtrude(wire: Wire, center: Point, normal: Point, profileShape: ExtrusionProfile | undefined, shellMode: true): [Shape3D, Wire, Wire];
-export declare function complexExtrude(wire: Wire, center: Point, normal: Point, profileShape?: ExtrusionProfile, shellMode?: false): Shape3D;
+// Runs `fn` as library-internal work
+// bypassOperationCache (function)
+export declare function bypassOperationCache<T>(fn: () => T): T;
 
 // createAssembly (function)
 export declare function createAssembly(shapes?: ShapeConfig[]): AssemblyExporter;
-
-// Deserializes a drawing from a string
-// deserializeDrawing (function)
-export declare function deserializeDrawing(data: string): Drawing;
 
 // deserializeShape (function)
 export declare function deserializeShape(data: string): AnyShape;
@@ -25,63 +21,9 @@ export declare function deserializeShape(data: string): AnyShape;
 // downcast (function)
 export declare function downcast(shape: TopoDS_Shape): GenericTopo;
 
-// Creates a drawing pen to programatically draw in 2D
-// draw (function)
-export declare function draw(initialPoint?: Point2D): DrawingPen;
-
-// Creates the `Drawing` of a circle
-// Remarks: The circle is centered on [0, 0]
-// drawCircle (function)
-export declare function drawCircle(radius: number): Drawing;
-
-// Creates the `Drawing` of an ellipse
-// Remarks: The ellipse is centered on [0, 0], with axes aligned with the coordinates.
-// drawEllipse (function)
-export declare function drawEllipse(majorRadius: number, minorRadius: number): Drawing;
-
-// Creates the `Drawing` out of a face
-// drawFaceOutline (function)
-export declare function drawFaceOutline(face: Face): Drawing;
-
-// Creates the `Drawing` of an polygon in a defined plane
-// Remarks: The sides of the polygon can be arcs of circle with a defined sagitta. The radius defines the out radius of the polygon without sagitta
-// drawPolysides (function)
-export declare function drawPolysides(radius: number, sidesCount: number, sagitta?: number): Drawing;
-
-// Creates the `Drawing` of a projection of a shape on a plane
-// Remarks: The projection is done by projecting the edges of the shape on the plane.
-// drawProjection (function)
-export declare function drawProjection(shape: AnyShape, projectionCamera?: ProjectionPlane | ProjectionCamera): {
-    visible: Drawing;
-    hidden: Drawing;
-};
-
-// Creates the `Drawing` of a rectangle with (optional) rounded corners
-// Remarks: The rectangle is centered on [0, 0]
-// drawRoundedRectangle (function)
-export declare function drawRoundedRectangle(width: number, height: number, r?: number | {
-    rx?: number;
-    ry?: number;
-}): Drawing;
-
-// Creates the `Drawing` of a circle as one single curve
-// Remarks: The circle is centered on [0, 0]
-// drawSingleCircle (function)
-export declare function drawSingleCircle(radius: number): Drawing;
-
-// Creates the `Drawing` of an ellipse as one single curve
-// Remarks: The ellipse is centered on [0, 0], with axes aligned with the coordinates.
-// drawSingleEllipse (function)
-export declare function drawSingleEllipse(majorRadius: number, minorRadius: number): Drawing;
-
-// Creates the `Drawing` of a text, in a defined font size and a font familiy (which will be the default)
-// drawText (function)
-export declare function drawText(text: string, { startX, startY, fontSize, fontFamily }?: {
-    startX?: number | undefined;
-    startY?: number | undefined;
-    fontSize?: number | undefined;
-    fontFamily?: string | undefined;
-}): Drawing;
+// Positions of `elements` in the enumeration of `kind` sub shapes of `owner` (the order of `iterTopo`, which the `edges` and `faces` getters use), or `undefined` if one of them is not a sub shape of `owner`
+// elementOrdinals (function)
+export declare function elementOrdinals(owner: TopoDS_Shape, kind: "edge" | "face" | "wire" | "solid" | "vertex", elements: readonly TopoDS_Shape[]): number[] | undefined;
 
 // exportSTEP (function)
 export declare function exportSTEP(shapes?: ShapeConfig[], { unit, modelUnit }?: {
@@ -89,9 +31,9 @@ export declare function exportSTEP(shapes?: ShapeConfig[], { unit, modelUnit }?:
     modelUnit?: SupportedUnit;
 }): Blob;
 
-// genericSweep (function)
-export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [Shape3D, Wire, Wire];
-export declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;
+// The installed operation cache, if any
+// getOperationCache (function)
+export declare function getOperationCache(): OperationCache | undefined;
 
 // getSingleFace (function)
 export declare function getSingleFace(f: SingleFace, shape: AnyShape): Face;
@@ -109,9 +51,6 @@ export declare function importSTL(STLBlob: Blob): Promise< AnyShape>;
 // Remarks: Unlike `importSTL` which converts through OpenCascade's BRep representation, this function directly creates a MeshShape from the triangle data, which is faster and preserves the original mesh. Supports both binary and ASCII STL formats.
 // importSTLAsMesh (function)
 export declare function importSTLAsMesh(stlBlob: Blob): Promise<MeshShape>;
-
-// intersect2D (function)
-export declare function intersect2D(first: Shape2D, second: Shape2D): Blueprint | Blueprints | CompoundBlueprint | null;
 
 // isPoint (function)
 export declare function isPoint(p: unknown): p is Point;
@@ -147,17 +86,6 @@ export declare function makePlane(plane?: PlaneName, origin?: Point | number): P
 
 // makePln (function)
 export declare function makePln(origin: Point, dir: Direction): gp_Pln;
-
-// makeProjectedEdges (function)
-export declare function makeProjectedEdges(shape: AnyShape, camera: ProjectionCamera, withHiddenLines?: boolean): {
-    visible: Edge[];
-    hidden: Edge[];
-};
-
-// Welds faces and shells into a single shell and then makes a solid
-// makeSolid (function)
-export declare function makeSolid(facesOrShells: Array<Face | Shell>): Solid;
-//   facesOrShells: An array of faces and shells to be welded
 
 // Measure the area of a shape
 // measureArea (function)
@@ -196,39 +124,13 @@ export declare function rotate(shape: TopoDS_Shape, angle: number, position?: Po
 // scale (function)
 export declare function scale(shape: TopoDS_Shape, center: Point, scale: number): TopoDS_Shape;
 
-// Creates the `Sketches` of a text, in a defined font size and a font familiy (which will be the default)
-// sketchText (function)
-export declare function sketchText(text: string, textConfig?: {
-    startX?: number;
-    startY?: number;
-    fontSize?: number;
-    fontFamily?: "string";
-}, planeConfig?: {
-    plane?: PlaneName | Plane;
-    origin?: Point | number;
-}): Sketches;
-
-// Creates the `Blueprints` of a text, in a defined font size and a font familiy (which will be the default)
-// textBlueprints (function)
-export declare function textBlueprints(text: string, { startX, startY, fontSize, fontFamily }?: {
-    startX?: number | undefined;
-    startY?: number | undefined;
-    fontSize?: number | undefined;
-    fontFamily?: string | undefined;
-}): Blueprints;
+// Installs an operation cache, or removes it with `undefined`, and returns the one installed before
+// Remarks: Routing is installed on the prototypes of the routed classes when a cache is installed and removed when it is: with no cache, every member is the original function. Replacing one cache with another keeps the routing.
+// setOperationCache (function)
+export declare function setOperationCache(cache: OperationCache | undefined): OperationCache | undefined;
 
 // translate (function)
 export declare function translate(shape: TopoDS_Shape, vector: Point): TopoDS_Shape;
-
-// twistExtrude (function)
-export declare function twistExtrude(wire: Wire, angleDegrees: number, center: Point, normal: Point, profileShape?: ExtrusionProfile, shellMode?: false): Shape3D;
-export declare function twistExtrude(wire: Wire, angleDegrees: number, center: Point, normal: Point, profileShape: ExtrusionProfile | undefined, shellMode: true): [Shape3D, Wire, Wire];
-
-// Welds faces and shells into a single shell
-// weldShellsAndFaces (function)
-export declare function weldShellsAndFaces(facesOrShells: Array<Face | Shell>, ignoreType?: boolean): Shell;
-//   facesOrShells: An array of faces and shells to be welded
-//   ignoreType: If true, the function will not check if the result is a shell
 
 // addHolesInFace (function)
 export declare function addHolesInFace(face: Face, holes: Wire[]): Face;
@@ -280,6 +182,10 @@ export declare function combineFinderFilters<Type, T, R = number>(filters: {
 }[]): [(v: Type) => R | null, () => void];
 //   filters: An array of objects containing a filter and its radius
 
+// complexExtrude (function)
+declare function complexExtrude(wire: Wire, center: Point, normal: Point, profileShape: ExtrusionProfile | undefined, shellMode: true): [Shape3D, Wire, Wire];
+declare function complexExtrude(wire: Wire, center: Point, normal: Point, profileShape?: ExtrusionProfile, shellMode?: false): Shape3D;
+
 // compoundShapes (function)
 export declare function compoundShapes(shapeArray: AnyShape[]): AnyShape;
 
@@ -291,6 +197,28 @@ export declare function cut2D(first: Shape2D, second: Shape2D): Blueprint | Blue
 
 // cutBlueprints (function)
 export declare function cutBlueprints(first: Blueprint, second: Blueprint): null | Blueprint | Blueprints;
+
+// Deserializes a drawing from a string
+// deserializeDrawing (function)
+declare function deserializeDrawing(data: string): Drawing;
+
+// Creates a drawing pen to programatically draw in 2D
+// draw (function)
+declare function draw(initialPoint?: Point2D): DrawingPen;
+
+// Creates the `Drawing` of a circle
+// Remarks: The circle is centered on [0, 0]
+// drawCircle (function)
+declare function drawCircle(radius: number): Drawing;
+
+// Creates the `Drawing` of an ellipse
+// Remarks: The ellipse is centered on [0, 0], with axes aligned with the coordinates.
+// drawEllipse (function)
+declare function drawEllipse(majorRadius: number, minorRadius: number): Drawing;
+
+// Creates the `Drawing` out of a face
+// drawFaceOutline (function)
+declare function drawFaceOutline(face: Face): Drawing;
 
 // Creates the `Drawing` of parametric function
 // Remarks: The drawing will be a spline approximating the function. Note that the degree should be at maximum 3 if you need to export the drawing as an SVG.
@@ -309,10 +237,50 @@ export declare function drawPointsInterpolation(points: Point2D[], approximation
     closeShape?: boolean;
 }): Drawing;
 
+// Creates the `Drawing` of an polygon in a defined plane
+// Remarks: The sides of the polygon can be arcs of circle with a defined sagitta. The radius defines the out radius of the polygon without sagitta
+// drawPolysides (function)
+declare function drawPolysides(radius: number, sidesCount: number, sagitta?: number): Drawing;
+
+// Creates the `Drawing` of a projection of a shape on a plane
+// Remarks: The projection is done by projecting the edges of the shape on the plane.
+// drawProjection (function)
+declare function drawProjection(shape: AnyShape, projectionCamera?: ProjectionPlane | ProjectionCamera): {
+    visible: Drawing;
+    hidden: Drawing;
+};
+
 // drawRectangle (function)
-export declare function drawRectangle(width: number, height: number, r?: number | {
+declare function drawRectangle(width: number, height: number, r?: number | {
     rx?: number;
     ry?: number;
+}): Drawing;
+
+// Creates the `Drawing` of a rectangle with (optional) rounded corners
+// Remarks: The rectangle is centered on [0, 0]
+// drawRoundedRectangle (function)
+declare function drawRoundedRectangle(width: number, height: number, r?: number | {
+    rx?: number;
+    ry?: number;
+}): Drawing;
+
+// Creates the `Drawing` of a circle as one single curve
+// Remarks: The circle is centered on [0, 0]
+// drawSingleCircle (function)
+declare function drawSingleCircle(radius: number): Drawing;
+
+// Creates the `Drawing` of an ellipse as one single curve
+// Remarks: The ellipse is centered on [0, 0], with axes aligned with the coordinates.
+// drawSingleEllipse (function)
+declare function drawSingleEllipse(majorRadius: number, minorRadius: number): Drawing;
+
+// Creates the `Drawing` of a text, in a defined font size and a font familiy (which will be the default)
+// drawText (function)
+declare function drawText(text: string, { startX, startY, fontSize, fontFamily }?: {
+    startX?: number | undefined;
+    startY?: number | undefined;
+    fontSize?: number | undefined;
+    fontFamily?: string | undefined;
 }): Drawing;
 
 // Creates a predicate selecting elements touching the shape's maximum Y bound
@@ -334,6 +302,10 @@ export declare function GCWithObject(obj: any): <Type extends Deletable>(value: 
 // GCWithScope (function)
 export declare function GCWithScope(): <Type extends Deletable>(value: Type) => Type;
 
+// genericSweep (function)
+declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode: true): [Shape3D, Wire, Wire];
+declare function genericSweep(wire: Wire, spine: Wire, sweepConfig: GenericSweepConfig, shellMode?: false): Shape3D;
+
 // getFont (function)
 export declare function getFont(fontFamily?: string): default_2.Font;
 
@@ -342,6 +314,9 @@ export declare function getManifold(): ManifoldToplevel;
 
 // getOC (function)
 export declare function getOC(): OpenCascadeInstance;
+
+// intersect2D (function)
+declare function intersect2D(first: Shape2D, second: Shape2D): Blueprint | Blueprints | CompoundBlueprint | null;
 
 // intersectBlueprints (function)
 export declare function intersectBlueprints(first: Blueprint, second: Blueprint): null | Blueprint | Blueprints;
@@ -431,6 +406,17 @@ export declare function makePlaneFromFace(face: PlaneFace, originOnSurface?: Poi
 
 // makePolygon (function)
 export declare function makePolygon(points: Point[]): Face;
+
+// makeProjectedEdges (function)
+declare function makeProjectedEdges(shape: AnyShape, camera: ProjectionCamera, withHiddenLines?: boolean): {
+    visible: Edge[];
+    hidden: Edge[];
+};
+
+// Welds faces and shells into a single shell and then makes a solid
+// makeSolid (function)
+declare function makeSolid(facesOrShells: Array<Face | Shell>): Solid;
+//   facesOrShells: An array of faces and shells to be welded
 
 // Creates a sphere with the given radius, centred on the origin
 // makeSphere (function)
@@ -522,8 +508,29 @@ export declare function sketchRoundedRectangle(width: number, height: number, r?
     ry?: number;
 }, planeConfig?: PlaneConfig): Sketch;
 
+// Creates the `Sketches` of a text, in a defined font size and a font familiy (which will be the default)
+// sketchText (function)
+declare function sketchText(text: string, textConfig?: {
+    startX?: number;
+    startY?: number;
+    fontSize?: number;
+    fontFamily?: "string";
+}, planeConfig?: {
+    plane?: PlaneName | Plane;
+    origin?: Point | number;
+}): Sketches;
+
 // supportExtrude (function)
 export declare function supportExtrude(wire: Wire, center: Point, normal: Point, support: TopoDS_Shape): Shape3D;
+
+// Creates the `Blueprints` of a text, in a defined font size and a font familiy (which will be the default)
+// textBlueprints (function)
+declare function textBlueprints(text: string, { startX, startY, fontSize, fontFamily }?: {
+    startX?: number | undefined;
+    startY?: number | undefined;
+    fontSize?: number | undefined;
+    fontFamily?: string | undefined;
+}): Blueprints;
 
 // Creates a predicate selecting elements touching the shape's maximum Z bound
 // topMost (function)
@@ -532,3 +539,13 @@ export declare function topMost(shape: AnyShape, tolerance?: number): ShapeExtre
 //   shape.fillet(2, (finder, shape) =>
 //     finder.when(topMost(shape)).parallelTo("XY")
 //   );
+
+// twistExtrude (function)
+declare function twistExtrude(wire: Wire, angleDegrees: number, center: Point, normal: Point, profileShape?: ExtrusionProfile, shellMode?: false): Shape3D;
+declare function twistExtrude(wire: Wire, angleDegrees: number, center: Point, normal: Point, profileShape: ExtrusionProfile | undefined, shellMode: true): [Shape3D, Wire, Wire];
+
+// Welds faces and shells into a single shell
+// weldShellsAndFaces (function)
+declare function weldShellsAndFaces(facesOrShells: Array<Face | Shell>, ignoreType?: boolean): Shell;
+//   facesOrShells: An array of faces and shells to be welded
+//   ignoreType: If true, the function will not check if the result is a shell

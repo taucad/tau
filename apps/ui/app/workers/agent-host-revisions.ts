@@ -8,7 +8,7 @@ import type {
   WorkerRevisionRequest,
   WorkerRevisionResponse,
   WorkerRevisionResult,
-} from '#machines/file-manager.worker.revisions.js';
+} from '@taucad/revisions-ui/types/revision-worker-protocol';
 
 type RevisionStatus = Extract<WorkerRevisionResponse, { type: 'status' }>['status'];
 

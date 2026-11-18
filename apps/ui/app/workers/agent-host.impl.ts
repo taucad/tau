@@ -40,7 +40,8 @@ import type { FsLike } from '@taucad/runtime/filesystem';
 import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
-import { followChat } from '@taucad/agent-host';
+import { createDeploymentModeResolver } from '@taucad/utils/deployment-mode';
+import { createGatewayModelTransport, followChat } from '@taucad/agent-host';
 import type { ChatLedger, StorageDurabilityClass, ToolRegistry } from '@taucad/agent-host';
 import { connectTurnPlacementChannel } from '@taucad/agent-host/channel-client';
 import type { TurnPlacementChannel, TurnPlacementToolPort } from '@taucad/agent-host/channel-client';
@@ -49,7 +50,6 @@ import type { AgentLauncher, AgentLauncherOptions } from '@taucad/agent-host/lau
 import { createBrowserChatStore, createRootedLogObserver } from '@taucad/agent-host/browser';
 import type { BrowserChatStoreOptions } from '@taucad/agent-host/browser';
 import type { GatewayHostLabels } from '@taucad/agent-host/wire';
-import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import type { SkillResolver } from '#lib/skill-resolver.js';
@@ -150,6 +150,13 @@ const runsEnded =
       }
       return entry.lifecycle === 'paused' || entry.settlements.some((row) => row.attempt === entry.attempt);
     });
+
+/**
+ * The API's deployment answer, asked at each run's admission (D1): it, not the build, chooses whether a run carries the
+ * billing layer. One resolver per worker, so every project host shares its per-origin cache; `localStorage` when this
+ * scope has one, else memory.
+ */
+const deployment = createDeploymentModeResolver({ storage: () => globalThis.localStorage });
 
 /** How often the worker's agent channel sends `lk`, so the page's liveness bound can tell slow from dead (T9 E3). */
 const keepaliveInterval = 1000;
@@ -927,8 +934,6 @@ const composeProjectHost = async (
     /* The project every receipt from this worker attributes to: the id `GET /v1/projects` lists. */
     projectId: provide.authority.projectId,
     model: provide.model,
-    /* The funded (cloud) build checks an attempt's account against it (W11 GI-Q6); self-host ignores it. */
-    principal: () => provide.principal,
     /* A prompt or tool text change under another release is a `definitions` prefix break, not a mode change. */
     release: hostBuildOf(provide.release),
     hostLabels: browserHostLabels(provide.release),
@@ -974,7 +979,15 @@ const composeProjectHost = async (
       observeLog: createRootedLogObserver(projectRoot),
       visibility: worker.visibility,
     }),
-    modelTransport: createConfiguredGatewayModelTransport(gatewayOptions),
+    modelTransport: createGatewayModelTransport({
+      ...gatewayOptions,
+      billing: {
+        /* The page's API origin answers whether a run is funded; an unknown answer refuses the run (I1). */
+        deployment: async () => deployment.mode(provide.gatewayBaseUrl),
+        /* A funded run checks an attempt's account against the page's (W11 GI-Q6). */
+        principal: () => provide.principal,
+      },
+    }),
     /* The page's session cookie funds a browser turn; there is no pairing to lose. The page names its account. */
     credential: () => ({ mode: 'session', principal: provide.principal }),
     systemPrompt: provide.systemPrompt,

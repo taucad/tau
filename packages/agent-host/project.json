@@ -7,8 +7,26 @@
   "targets": {
     "formal:logs": {},
     "formal:nightly": {
+      "dependsOn": [{ "target": "formal:nightly:fresh" }],
       "options": {
-        "command": "vitest run --root packages/agent-host src/log/chat-ledger.differential.test.ts && node tools/formal/src/cli.ts nightly --without-check packages/agent-host && vitest run --root packages/agent-host src/host/chat-run.conformance.test.ts src/launchers/leadership/leadership.machine.conformance.test.ts",
+        "command": "node tools/formal/src/cli.ts nightly --without-check --without-mutants packages/agent-host && vitest run --root packages/agent-host src/host/chat-run.conformance.test.ts src/launchers/leadership/leadership.machine.conformance.test.ts",
+        "env": {
+          "FORMAL_FRESH_TRACES": "20000",
+          "FORMAL_SIMULATED": "out/test-results/formal/packages/agent-host/simulated"
+        }
+      }
+    },
+    "formal:nightly:fresh": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "parallel": true,
+        "commands": [
+          "FORMAL_FRESH_PART=1/4 vitest run --root packages/agent-host --no-cache src/log/chat-ledger.differential.test.ts",
+          "FORMAL_FRESH_PART=2/4 vitest run --root packages/agent-host --no-cache src/log/chat-ledger.differential.test.ts -t 'should write fresh-seed corpora'",
+          "FORMAL_FRESH_PART=3/4 vitest run --root packages/agent-host --no-cache src/log/chat-ledger.differential.test.ts -t 'should write fresh-seed corpora'",
+          "FORMAL_FRESH_PART=4/4 vitest run --root packages/agent-host --no-cache src/log/chat-ledger.differential.test.ts -t 'should write fresh-seed corpora'"
+        ],
         "env": {
           "FORMAL_FRESH_TRACES": "20000",
           "FORMAL_SIMULATED": "out/test-results/formal/packages/agent-host/simulated"
@@ -16,6 +34,7 @@
       }
     },
     "formal:nightly:check": {},
+    "formal:nightly:mutants": {},
     "build": {
       "executor": "nx:run-commands",
       "dependsOn": ["^build"],

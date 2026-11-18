@@ -65,6 +65,36 @@ export const rendererHangSignal = (duration: number): DesktopSignal | undefined 
         contexts: { hang: { milliseconds: Math.round(duration) } },
       };
 
+/**
+ * The event for a renderer hang that has not ended, sent when the hang rule offers its choice (B24). Same fingerprint
+ * as the ended one, so both land on one issue.
+ *
+ * @param duration - Milliseconds the window has been unresponsive so far.
+ * @returns The signal.
+ */
+export const rendererHangOngoingSignal = (duration: number): DesktopSignal => ({
+  message: 'Renderer unresponsive',
+  level: 'error',
+  fingerprint: ['desktop-renderer-hang'],
+  tags: { hang_seconds: String(Math.round(duration / 1000)), ongoing: 'true' },
+  contexts: { hang: { milliseconds: Math.round(duration) } },
+});
+
+/**
+ * The event for one step of the renderer reload policy (B11).
+ *
+ * @param step - What main did: `reload`, `home` or `stop`.
+ * @param reason - Electron's `render-process-gone` reason.
+ * @param count - Deaths within the last five minutes.
+ * @returns The signal.
+ */
+export const rendererReloadPolicySignal = (step: string, reason: string, count: number): DesktopSignal => ({
+  message: `Renderer reload policy: ${step}`,
+  level: 'error',
+  fingerprint: ['desktop-renderer-reload-policy', step],
+  tags: { step, reason, count: String(count) },
+});
+
 /** Chromium's `ERR_ABORTED`: a load replaced by another, not a failure. */
 const abortedLoad = -3;
 
@@ -367,3 +397,116 @@ export const storeQuarantinedSignal = (store: 'granted-roots'): DesktopSignal =>
   fingerprint: ['desktop-store-quarantined', store],
   tags: { store },
 });
+
+/**
+ * The event for a launch the ledger counted as unhealthy (D0, R12), sent by the launch after it.
+ *
+ * @param previous - The previous launch's furthest stage, how it ended and its mode.
+ * @param count - Consecutive unhealthy launches of this build, this one included.
+ * @returns The signal.
+ */
+export const bootUnhealthySignal = (
+  previous: { readonly stage: string; readonly ended?: string | undefined; readonly mode: string },
+  count: number,
+): DesktopSignal => ({
+  message: `Unhealthy launch: ${previous.stage}`,
+  level: 'error',
+  fingerprint: ['desktop-boot-unhealthy', previous.stage],
+  tags: { stage: previous.stage, ended: previous.ended ?? 'none', count: String(count), mode: previous.mode },
+});
+
+/**
+ * The event for a launch that started in safe mode (D0, R12).
+ *
+ * @param trigger - `requested` (the switch) or `unhealthy-launches` (the ledger's count).
+ * @param count - Consecutive unhealthy launches of this build.
+ * @returns The signal.
+ */
+export const safeModeSignal = (trigger: 'requested' | 'unhealthy-launches', count: number): DesktopSignal => ({
+  message: `Safe mode: ${trigger}`,
+  level: 'warning',
+  fingerprint: ['desktop-safe-mode', trigger],
+  tags: { trigger, count: String(count) },
+});
+
+/**
+ * The event for a recovery surface main showed (D0, R12).
+ *
+ * @param surface - The recovery window, or the native dialog under it.
+ * @param trigger - Why it was shown.
+ * @returns The signal.
+ */
+export const recoveryShownSignal = (surface: 'window' | 'dialog', trigger: string): DesktopSignal => ({
+  message: `Recovery shown: ${surface}`,
+  level: 'warning',
+  fingerprint: ['desktop-recovery-shown', surface, trigger],
+  tags: { surface, trigger },
+});
+
+/**
+ * The event for a reset main applied at startup (D0, R12): the store was moved into the quarantine folder, was not
+ * there, or could not be moved.
+ *
+ * @param store - The store.
+ * @param outcome - What happened to it.
+ * @returns The signal.
+ */
+export const storeResetSignal = (store: string, outcome: 'moved' | 'absent' | 'failed'): DesktopSignal => ({
+  message: `Store reset: ${store} ${outcome}`,
+  level: 'warning',
+  fingerprint: ['desktop-store-reset', store, outcome],
+  tags: { store, outcome },
+});
+
+/**
+ * The event for a GPU process that exited (B26).
+ *
+ * @param reason - Electron's exit reason.
+ * @param exitCode - Its exit code.
+ * @param safeMode - Whether this launch is in safe mode.
+ * @returns The signal.
+ */
+export const gpuProcessGoneSignal = (reason: string, exitCode: number, safeMode: boolean): DesktopSignal => {
+  const safeReason = /^[a-z-]{1,32}$/u.test(reason) ? reason : 'unknown';
+  return {
+    message: `GPU process gone: ${safeReason}`,
+    level: 'error',
+    fingerprint: ['desktop-gpu-process-gone', safeReason],
+    tags: { reason: safeReason, exit_code: String(exitCode), safe_mode: String(safeMode) },
+  };
+};
+
+/**
+ * The event for an update path blocked for a reason a person can act on (B25, B27), sent once for each launch.
+ *
+ * @param reason - `clock` or `installation-marker`.
+ * @param route - The platform the updater runs on.
+ * @returns The signal.
+ */
+export const updateBlockedSignal = (reason: 'clock' | 'installation-marker', route: string): DesktopSignal => ({
+  message: `Update blocked: ${reason}`,
+  level: 'warning',
+  fingerprint: ['desktop-update-blocked', reason],
+  tags: { reason, route },
+});
+
+/**
+ * The event for the guarded automatic install (decision N1): its countdown ran out and the install started, the person
+ * cancelled it, or its target already failed to take once and was skipped.
+ *
+ * @param outcome - What happened.
+ * @param targetVersion - The version it installs.
+ * @returns The signal.
+ */
+export const autoInstallSignal = (
+  outcome: 'started' | 'cancelled' | 'skipped-repeat',
+  targetVersion: string,
+): DesktopSignal => {
+  const target = /^[\w.+-]{1,64}$/u.test(targetVersion) ? targetVersion : 'unknown';
+  return {
+    message: `Automatic update install: ${outcome}`,
+    level: 'warning',
+    fingerprint: ['desktop-update-auto-install', outcome],
+    tags: { outcome, target_version: target },
+  };
+};

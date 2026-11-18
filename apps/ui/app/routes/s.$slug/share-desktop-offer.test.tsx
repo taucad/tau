@@ -19,7 +19,7 @@ vi.mock('#components/share/tau-publication.js', () => ({
   loadPublication: async () => ({}),
   publicationMeta: () => [],
 }));
-vi.mock('#components/share/github-gist-management.js', () => ({
+vi.mock('@taucad/publish-ui/components/share/github-gist-management', () => ({
   GithubGistManagement: () => null,
 }));
 const shareProvider = vi.hoisted(() => ({ pending: false }));

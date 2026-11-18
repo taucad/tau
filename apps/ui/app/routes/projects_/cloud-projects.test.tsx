@@ -3,7 +3,7 @@ import { createProjectFixture } from '@taucad/ui-core/lib/project.fixture';
 import { mock } from 'vitest-mock-extended';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 
 /**

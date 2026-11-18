@@ -7,7 +7,7 @@ import { desktopBridge, nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop
 import type { DesktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { getProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import { desktopWorkspaceRoot } from '#lib/agent-host-placement.js';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 
 type NativeDirectories = NonNullable<DesktopBridge['directories']>;
 

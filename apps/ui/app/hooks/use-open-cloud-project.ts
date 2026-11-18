@@ -11,7 +11,7 @@ import { useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
-import { projectLibraryUrl, projectUrl } from '#utils/project-url.utils.js';
+import { projectLibraryUrl, projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { toast } from '@taucad/ui/components/sonner';
 import { assertCloudProjectActive, CloudProjectUnavailableError } from '#hooks/use-cloud-projects.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';

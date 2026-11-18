@@ -14,7 +14,7 @@ import { requestRevisionReveal } from '@taucad/project-workspace/utils/revision-
 import { selectVisibleChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useRevisionCards, useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useChatActions, useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useProject } from '#hooks/use-project.js';

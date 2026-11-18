@@ -174,6 +174,8 @@ describe('electron-vite main externalization', () => {
   it('bundles workspace sources and keeps host/runtime imports external', async () => {
     const { isExternal, include } = await resolveProcessExternals();
     expect(include).toContain('geospec-engine');
+    /* Bundled, cadmpeg-ts's `node` entry resolves its NAPI addon beside a chunk and finds none. */
+    expect(include).toContain('cadmpeg-ts');
     /* Inlined into a main chunk, node-pty looks for `pty.node` beside the chunk and every Terminal is unavailable. */
     expect(include).toContain('node-pty');
     for (const id of [

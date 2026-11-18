@@ -28,7 +28,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
-import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#components/desktop/open-in-desktop.js';
+import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#lib/desktop-release.js';
 import { Loader } from '@taucad/ui/components/loader';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { SidebarTrigger } from '#components/ui/sidebar.js';
@@ -41,7 +41,7 @@ import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machine
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState } from '#types/project-route-state.types.js';
 import { WorkspaceOpening } from '#routes/w.$workspace.$project/workspace-frame.js';
-import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
+import type { PendingProjectRecoveryReason } from '@taucad/files-ui/types/pending-project-operation.types';
 
 /** Every verb a notice may offer. Closed on purpose: the table cannot invent an effect. @public */
 export type NoticeActionRun = 'reopen' | 'restore' | 'retry' | 'back' | 'projects' | 'trash-view' | 'desktop';

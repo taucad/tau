@@ -12,8 +12,8 @@ import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 // oxlint-disable-next-line import/extensions -- React Router generates this virtual route-type module.
 import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
-import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
-import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
+import { ImportGitHubError, importGitHubMachine } from '@taucad/publish-ui/machines/import-github.machine';
+import type { ImportArchiveEvents, ImportArchiveInput } from '@taucad/publish-ui/machines/import-github.machine';
 import { importDiskMachine } from '@taucad/publish-ui/machines/import-disk.machine';
 import { ImportChannelError, createFromStagedImport, openImportSession } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
@@ -36,14 +36,15 @@ import { SuggestedClones } from '#routes/import.$/suggested-clones.js';
 import { UploadCard } from '#routes/import.$/upload-card.js';
 import {
   describeGitHubImport,
-  parseGitHubUrl,
   normalizeGitHubUrl,
   resolveGitHubImportTarget,
   resolveImportRoute,
-  supportedKernelExtensions,
+  isMainFileCandidate,
   findMainFile,
   handOverHostGrants,
 } from '#routes/import.$/import.utils.js';
+import { parseGitHubUrl } from '@taucad/publish-ui/lib/github-url';
+import { getGitHubClient } from '#lib/github-api.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { ImportErrorView } from '#routes/import.$/import-error-view.js';
 import { ImportProcessingView } from '#routes/import.$/import-processing-view.js';
@@ -52,7 +53,7 @@ import { inspect } from '#machines/inspector.js';
 import { CopyButton } from '@taucad/ui/components/copy-button';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { isExcludedImportPath } from '@taucad/ui-core/utils/file-reader.utils';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
@@ -450,6 +451,7 @@ export default function ImportRoute(): React.JSX.Element {
     }),
     {
       input: {
+        githubClient: getGitHubClient(),
         owner,
         repo,
         ref,
@@ -580,12 +582,12 @@ export default function ImportRoute(): React.JSX.Element {
     () =>
       createStaticDataSource(
         linkedSelection?.files
-          .filter(({ path }) => supportedKernelExtensions.some((extension) => path.endsWith(extension)))
+          .filter(({ path }) => isMainFileCandidate(path))
           .map(({ path, size }) => ({ path, size })) ?? [],
       ),
     [linkedSelection],
   );
-  const linkedMainFileSupported = supportedKernelExtensions.some((extension) => linkedMainFile.endsWith(extension));
+  const linkedMainFileSupported = isMainFileCandidate(linkedMainFile);
   const linkedManifest = useMemo(
     () => (linkedSelection?.manifest === undefined ? undefined : readLinkedGithubManifest(linkedSelection.manifest)),
     [linkedSelection],
@@ -850,9 +852,7 @@ export default function ImportRoute(): React.JSX.Element {
   const reviewLinkedRepository = useCallback((selection: GithubRepositorySelection): void => {
     const manifest = selection.manifest === undefined ? undefined : readLinkedGithubManifest(selection.manifest);
     const paths = selection.files.map((file) => file.path);
-    const supportedPaths = paths.filter((path) =>
-      supportedKernelExtensions.some((extension) => path.endsWith(extension)),
-    );
+    const supportedPaths = paths.filter((path) => isMainFileCandidate(path));
     const manifestMain = manifest?.success === true ? manifest.data.assets.main?.entryPath : undefined;
     const unsupportedLargeBlob = selection.files.find((file) => file.size >= largeObjectThresholdBytes);
     setLinkedSelection(selection);

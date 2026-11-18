@@ -31,8 +31,8 @@ import type { Project } from '@taucad/types';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
-import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { PendingProjectOperation } from '@taucad/files-ui/types/pending-project-operation.types';
+import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 
 const fakeProject: Project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -291,7 +291,7 @@ const mockResumeResources = vi.fn<(operationId: string) => Promise<readonly Chat
 const mockCompletePending = vi.fn<(operationId: string) => Promise<void>>();
 const mockBeginPermanentDeleteProject = vi.fn<(projectId: string, storage: unknown) => Promise<string>>();
 const mockPrepareProjectCreation = vi.fn<(input: unknown) => Promise<PendingProjectOperation>>();
-vi.mock('#hooks/project-manager.machine.js', async () => {
+vi.mock('@taucad/files-ui/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({

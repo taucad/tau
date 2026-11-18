@@ -15,7 +15,7 @@
     "apps/ui/app/services",
     "apps/ui/app/lib/agent-host-placement.ts",
     "apps/ui/app/chat-clients",
-    "apps/ui/app/hooks/use-revision-status.ts",
+    "apps/libs/revisions-ui/src/hooks/use-revision-status.ts",
     "apps/ui/app/machines/file-manager.worker.revisions.ts",
     "apps/ui/app/machines/file-manager.machine.ts",
     "apps/ui/app/workers/agent-host-projects.ts",
@@ -234,7 +234,7 @@
     {
       "id": "B11",
       "bound": "GitHub credential renewal",
-      "site": "apps/ui/app/hooks/use-revision-status.ts",
+      "site": "apps/libs/revisions-ui/src/hooks/use-revision-status.ts",
       "token": "lease.timer = undefined",
       "class": "External edge",
       "owner": "W8"
@@ -330,6 +330,22 @@
       "site": "apps/desktop/src/main/main.ts",
       "token": "setTimeout(reveal, windowRevealMilliseconds)",
       "class": "Presentation",
+      "owner": "desktop boot"
+    },
+    {
+      "id": "B21",
+      "bound": "Desktop boot watchdog (R12): no shell-mounted 45 s after the window loaded offers the recovery window beside the app, and the 60 s launch deadline marks the boot-health record; suspend and resume restart both deadlines (boot-watchdog.ts bootDeadlines)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout: (callback, milliseconds) => setTimeout(callback, milliseconds),",
+      "class": "Liveness",
+      "owner": "desktop boot"
+    },
+    {
+      "id": "B22",
+      "bound": "Desktop renderer hang rule (B24, 30 s): a window unresponsive this long is reported while it lasts and the person is offered Wait, Reload or Restart in Safe Mode; Wait asks again after another 30 s, and a page that answers first closes the choice (diagnostics.ts rendererHangOfferMilliseconds)",
+      "site": "apps/desktop/src/main/main.ts",
+      "token": "setTimeout: (offerHangChoice, milliseconds) => setTimeout(offerHangChoice, milliseconds),",
+      "class": "Liveness",
       "owner": "desktop boot"
     },
     {
@@ -499,6 +515,14 @@
       "token": "transientRetry",
       "class": "Backoff",
       "owner": "desktop resilient startup WP2 (D3)"
+    },
+    {
+      "id": "FS-ROOT-RECHECK",
+      "bound": "Roots that are not found, need access or do not answer are probed again every 30 s while the page is visible, and on window focus; a probe only re-reads",
+      "site": "apps/ui/app/machines/file-manager.machine.ts",
+      "token": "rootRecheckIntervalMilliseconds",
+      "class": "Liveness",
+      "owner": "desktop resilient startup WP4 (B2, R4)"
     },
     {
       "id": "E5",
@@ -681,10 +705,18 @@
     {
       "id": "E31",
       "bound": "Gateway attempt lookup (resolveInvocation), 10 s, then `unavailable` (RA-Q5)",
-      "site": "packages/agent-host/src/transport/tau-cloud-gateway-model-transport.ts",
+      "site": "packages/agent-host/src/transport/gateway-model-transport.ts",
       "token": "attemptLookupTimeout",
       "class": "External edge",
       "owner": "W11"
+    },
+    {
+      "id": "E41",
+      "bound": "Deployment answer at a run's admission or reopening (ModelDeployment.resolve), 10 s or the run's Stop, then `unknown`: the run ends DEPLOYMENT_UNKNOWN before any call (I1)",
+      "site": "packages/agent-host/src/transport/gateway-model-transport.ts",
+      "token": "deploymentAnswerTimeout",
+      "class": "External edge",
+      "owner": "unified-model-transport W3"
     },
     {
       "id": "N1",
@@ -1322,6 +1354,30 @@
       "token": "retry = setTimeout(() => {",
       "class": "Backoff",
       "owner": "filesystem capability W9 (D13)"
+    },
+    {
+      "id": "SHELL-PS-MODULE-CACHE-SCHEDULE",
+      "bound": "Windows PowerShell module analysis cache build scheduler: starts after 10 s of shell idleness (idleDelay), at most two failed attempts per session; the timer is unref'd and cleared on dispose",
+      "site": "libs/shell-service/src/shell/shell-module-cache.ts",
+      "token": "state.timer = setTimeout(run, startDelay)",
+      "class": "Backoff",
+      "owner": "windows-shell-sandbox L5"
+    },
+    {
+      "id": "SHELL-PS-MODULE-CACHE-BUILD",
+      "bound": "Windows PowerShell module analysis cache build deadline: 600 s (moduleCacheMilliseconds) for the sandboxed build launch; on expiry the launch is aborted and no cache is published",
+      "site": "libs/shell-service/src/shell/shell-service.ts",
+      "token": "AbortSignal.timeout(milliseconds)",
+      "class": "External edge",
+      "owner": "windows-shell-sandbox L5"
+    },
+    {
+      "id": "SHELL-WINDOWS-SETUP-PROGRAM",
+      "bound": "Windows shell sandbox setup programs: whoami 10 s; the elevated helper setup through one UAC prompt 10 min (the person may take time to answer the prompt); on expiry setup reports failed",
+      "site": "apps/libs/desktop-services-host/src/services-host-shell.ts",
+      "token": "timeout: timeoutMilliseconds",
+      "class": "External edge",
+      "owner": "windows-shell-sandbox L5"
     }
   ]
 }

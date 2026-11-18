@@ -2,14 +2,14 @@ import { Fragment, useCallback, useEffect, useMemo, useState, useSyncExternalSto
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { Pencil, Square, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 import { useChats } from '#hooks/use-chats.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#components/ui/sidebar.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
-import { projectChatIdFromSearch, projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
+import { projectChatIdFromSearch, projectChatUrl, projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { compareChatsByRecency, getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import { StatusMark } from '#components/nav/status-mark.js';
 import { sidebarDisclosureButtonClass } from '#components/nav/sidebar-disclosure.styles.js';

@@ -31,14 +31,14 @@
   ],
   "sources": {
     "apps/ui/app/machines/focus.route-state.ts": "3f582022de3112525078d193584342975a6088657b870b9a85e9627fc8ffa32c",
-    "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": "2d4d0770d960d1c17d6d4d04f698804c8da44ae9f7e2cd271dd3d2d788621468",
-    "apps/ui/app/routes/w.$workspace.$project/project-route-intent.tsx": "62e8b4a95ed4340c251476e544d0d0a06b46a1041d4b16262bba1462c97415e9",
+    "apps/ui/app/routes/w.$workspace.$project/project-live-sessions.tsx": "8f4cd4a05b209cf4e70336a2b449141788d0e2224a6c8516136976e656c81c58",
+    "apps/ui/app/routes/w.$workspace.$project/project-route-intent.tsx": "df4e117b9f073ac4acff56939fd591e8a741368128f3f77102fd227a7b17d19b",
     "apps/ui/app/routes/w.$workspace.$project/project-route-state.ts": "9c260884f35da10b0ed3b6855cb6ac64aa5426bb858d8a37d74330fc4a8965bb",
     "apps/ui/app/routes/w.$workspace.$project/project-route.tsx": "024ca2128fc78ed260f34a028cb55d04a611eac9c574751e39922a6dd86ffcf3",
     "apps/ui/app/runtime/app-runtime-focus.ts": "b8a28e1fc22ece997867123b1adcc22df03eb031be6426d8a48f3c8d0ad138d5"
   },
   "specs": {
-    "ProjectFocus.tla": "20fe111ea21ae99f6fedf2f59df0a2a7818abb21f831fdfccb737fd9369fc0a4"
+    "ProjectFocus.tla": "f46fc5f318b5eb916bd25412861abf4e0da62be0f95f0b5b4f63a2e8e0d21d0f"
   },
   "tables": {
     "ProjectFocus.export.cfg": "0d395ff068d3d9f32ef207c69e40a50e8bb2eb4e9e6f053cf58e274b0103903f",

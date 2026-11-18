@@ -25,6 +25,12 @@
  * so a page opened from it must carry its own deploy's build id for the guard
  * to tell that a newer deploy replaced it.
  *
+ * A page fully loaded on the previous deploy, whose chunks the next deploy still
+ * serves (retention modelled), learns that the next deploy is live and then
+ * navigates: the root's client middleware (RR9) loads the destination as a
+ * document from the next deploy, a push as a push and a replace as a replace,
+ * where the router alone would have rendered it on the previous build.
+ *
  * Needs a built UI (`nx run ui:build`). `TAU_E2E_CHROMIUM_EXECUTABLE` points at
  * a Chromium other than Playwright's pinned revision.
  */
@@ -115,6 +121,8 @@ const importServerBuild = async (root: string): Promise<ServerBuild> =>
 type DeployServer = {
   readonly origin: string;
   readonly documents: Deploy[];
+  /** How many `/health/build` answers the next deploy gave. */
+  readonly buildChecks: () => number;
   readonly heldRequest: Promise<void>;
   deploy(): void;
   close(): Promise<void>;
@@ -123,9 +131,10 @@ type DeployServer = {
 const startDeployServer = async (
   builds: Readonly<Record<Deploy, ServerBuild>>,
   shells?: Readonly<Record<Deploy, string>>,
-  hold = true,
+  { hold = true, retain = false }: { readonly hold?: boolean; readonly retain?: boolean } = {},
 ): Promise<DeployServer> => {
   let live: Deploy = 'previous';
+  let buildChecks = 0;
   const documents: Deploy[] = [];
   const held: Array<() => void> = [];
   let markHeld: () => void = () => undefined;
@@ -150,7 +159,7 @@ const startDeployServer = async (
       markHeld();
       return;
     }
-    if (live === 'next' && !renderedByNext) {
+    if (live === 'next' && !renderedByNext && !retain) {
       sendDeletedAsset(response);
       return;
     }
@@ -161,6 +170,9 @@ const startDeployServer = async (
     if (request.headers['sec-fetch-dest'] === 'document') {
       documents.push(live);
       response.cookie(deployCookie, live, { path: '/' });
+    }
+    if (live === 'next' && request.path === '/health/build') {
+      buildChecks += 1;
     }
     if (shells !== undefined && request.method === 'GET' && projectUrl.test(request.path)) {
       response
@@ -181,6 +193,7 @@ const startDeployServer = async (
   return {
     origin: `http://127.0.0.1:${String(port)}`,
     documents,
+    buildChecks: () => buildChecks,
     heldRequest,
     deploy() {
       live = 'next';
@@ -264,11 +277,12 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
   const open = async (
     path = '/',
     hold = true,
+    retain = false,
   ): Promise<{ readonly page: Page; readonly live: DeployServer; readonly errors: string[] }> => {
     if (browser === undefined || builds === undefined || shells === undefined) {
       expect.fail('the builds and browser did not start');
     }
-    const live = await startDeployServer(builds, shells, hold);
+    const live = await startDeployServer(builds, shells, { hold, retain });
     server = live;
     context = await browser.newContext();
     const page = await context.newPage();
@@ -336,6 +350,64 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
     expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
     expect(live.documents).toStrictEqual(['previous', 'next']);
     expect(new URL(page.url()).pathname).toBe('/import/github.com/taucad/tau');
+  }, 120_000);
+
+  /** Deploy the next build and have the page ask the server, as a tab restored from the back/forward cache does. */
+  const deployAndTell = async (page: Page, live: DeployServer): Promise<void> => {
+    live.deploy();
+    await page.evaluate(() => {
+      globalThis.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    // `build-skew` takes the server's word after it named the next build three times (`serverConfirmations`).
+    await expect.poll(() => live.buildChecks(), { timeout: 30_000 }).toBeGreaterThanOrEqual(3);
+    await page.waitForTimeout(500);
+  };
+
+  /* React Router 8 migration RR9: once the server names another build, the root's client middleware turns a client
+   * navigation into a document load from the live deploy. The previous deploy's chunks are still served here, so
+   * without it the router would render the destination on the previous build. */
+  it('should load the next page from the new deploy once the server names it, as a push', async () => {
+    const { page, live } = await open('/', false, true);
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    const historyLength = await page.evaluate(() => globalThis.history.length);
+
+    // Any in-app link to another page that Home shows: `<Link>` calls the router's `navigate`.
+    const link = page.locator('a[href^="/"]:not([href="/"]):not([href^="//"]):visible').first();
+    const href = await link.getAttribute('href');
+
+    await deployAndTell(page, live);
+    await link.click();
+
+    expect(await settledState(page, nextBuildId)).toBe('reloaded into the next deploy');
+    await page.waitForLoadState('networkidle');
+    expect(new URL(page.url()).pathname).toBe(new URL(href ?? '', live.origin).pathname);
+    expect(live.documents).toStrictEqual(['previous', 'next']);
+    expect(await page.evaluate(() => globalThis.history.length)).toBe(historyLength + 1);
+  }, 120_000);
+
+  it('should load the next page from the new deploy once the server names it, keeping a replace', async () => {
+    const { page, live } = await open('/', false, true);
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    const historyLength = await page.evaluate(() => globalThis.history.length);
+
+    await deployAndTell(page, live);
+    // `useNavigate()(to, { replace: true })` calls this; the test reaches it through React Router's own global.
+    await page.evaluate(() => {
+      const router = (
+        globalThis as unknown as {
+          readonly __reactRouterDataRouter: {
+            navigate: (to: string, options: { readonly replace: boolean }) => Promise<void>;
+          };
+        }
+      ).__reactRouterDataRouter;
+      void router.navigate('/files?from=home', { replace: true });
+    });
+
+    expect(await settledState(page, nextBuildId)).toBe('reloaded into the next deploy');
+    await page.waitForLoadState('networkidle');
+    expect(new URL(page.url()).pathname + new URL(page.url()).search).toBe('/files?from=home');
+    expect(live.documents).toStrictEqual(['previous', 'next']);
+    expect(await page.evaluate(() => globalThis.history.length)).toBe(historyLength);
   }, 120_000);
 
   it('should offer the reload, never force it, once the user has worked on the page', async () => {

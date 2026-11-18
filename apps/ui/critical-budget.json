@@ -11,28 +11,28 @@
   "variants": {
     "self-host": {
       "project": {
-        "brotliBytes": 1928788,
-        "requests": 305,
+        "brotliBytes": 1937973,
+        "requests": 308,
         "largestChunkBrotliBytes": 167393,
         "knownHeavy": {}
       },
       "home": {
-        "brotliBytes": 1230036,
-        "requests": 225,
+        "brotliBytes": 1239607,
+        "requests": 228,
         "largestChunkBrotliBytes": 140852,
         "knownHeavy": {}
       }
     },
     "cloud": {
       "project": {
-        "brotliBytes": 1956998,
-        "requests": 314,
+        "brotliBytes": 1980576,
+        "requests": 319,
         "largestChunkBrotliBytes": 167319,
         "knownHeavy": {}
       },
       "home": {
-        "brotliBytes": 1252118,
-        "requests": 236,
+        "brotliBytes": 1272541,
+        "requests": 241,
         "largestChunkBrotliBytes": 140921,
         "knownHeavy": {}
       }

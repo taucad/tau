@@ -44,11 +44,11 @@ describe('extractTypescriptApi over replicad', () => {
   });
 
   it('emits one entry per exported name, with no duplicates', () => {
-    // 223 is what `checker.getExportsOfModule` reports for replicad 1.1's
-    // bundle; a syntactic count would add 17 bare `declare` statements that the
+    // 233 is what `checker.getExportsOfModule` reports for replicad 1.2's
+    // bundle; a syntactic count would add 16 bare `declare` statements that the
     // module never exports.
-    expect(corpus.entries).toHaveLength(223);
-    expect(new Set(corpus.entries.map((entry) => entry.name)).size).toBe(223);
+    expect(corpus.entries).toHaveLength(233);
+    expect(new Set(corpus.entries.map((entry) => entry.name)).size).toBe(233);
     expect(duplicateNames(corpus.entries)).toStrictEqual([]);
   });
 
@@ -65,7 +65,6 @@ describe('extractTypescriptApi over replicad', () => {
       'GenericTopo',
       'Offset2DConfig',
       'PhysicalProperties',
-      'PlaneConfig',
       'ShapeExtremumFilter',
       'SplineTangent',
       'StandardPlane',

@@ -933,3 +933,50 @@ describe('writeGlb single-copy layout', () => {
     expect({ json: sha256(new TextEncoder().encode(json)), bin: sha256(bin) }).toEqual(recorded[name]);
   });
 });
+
+describe('writeGlb with trusted geometry', () => {
+  const sceneOf = (
+    primitive: GlbInput['nodes'][number]['primitives'][number],
+    trustedGeometry?: boolean,
+  ): GlbInput => ({
+    nodes: [{ name: 'part', primitives: [primitive] }],
+    ...(trustedGeometry === undefined ? {} : { trustedGeometry }),
+  });
+
+  it('should write the same bytes as a validated write for valid geometry', () => {
+    const primitive = {
+      ...createTrianglePrimitive(),
+      tangents: new Float32Array([1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, -1]),
+    };
+
+    expect(writeGlb(sceneOf(primitive, true))).toEqual(writeGlb(sceneOf(primitive)));
+  });
+
+  it('should skip scanning attribute values a validated write refuses', () => {
+    const nonFiniteNormal = {
+      ...createTrianglePrimitive(),
+      normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, Number.NaN]),
+    };
+    const longTangent = {
+      ...createTrianglePrimitive(),
+      tangents: new Float32Array([2, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1]),
+    };
+
+    expect(() => writeGlb(sceneOf(nonFiniteNormal))).toThrow('Attribute must contain finite components');
+    expect(() => writeGlb(sceneOf(longTangent))).toThrow('TANGENT must contain unit XYZ vectors');
+    expect(() => writeGlb(sceneOf(nonFiniteNormal, true))).not.toThrow();
+    expect(() => writeGlb(sceneOf(longTangent, true))).not.toThrow();
+  });
+
+  it('should still validate index range, placements and vector completeness', () => {
+    const outOfRange = { ...createTrianglePrimitive(), indices: new Uint32Array([0, 1, 3]) };
+    const sheared = [1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
+    const incomplete = { ...createTrianglePrimitive(), positions: new Float32Array([0, 0, 0, 1]) };
+
+    expect(() => writeGlb(sceneOf(outOfRange, true))).toThrow('Index must be less than POSITION count');
+    expect(() =>
+      writeGlb({ nodes: [{ primitives: [createTrianglePrimitive()], matrix: sheared }], trustedGeometry: true }),
+    ).toThrow('without shear');
+    expect(() => writeGlb(sceneOf(incomplete, true))).toThrow('complete nonempty FLOAT vectors');
+  });
+});

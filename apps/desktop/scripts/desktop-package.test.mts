@@ -22,6 +22,7 @@ import {
   desktopGitPayloadRefusal,
   desktopPackageOmissions,
   desktopStoreGuardRefusal,
+  desktopWindowsSandboxRefusal,
   desktopPackagePlans,
   parseDesktopPackageArguments,
 } from './desktop-package-target.mjs';
@@ -232,6 +233,72 @@ console.log('✓ every payload a target leaves out is named');
 }
 console.log('✓ a Linux release refuses to assemble without the store guard');
 
+/* The Windows shell sandbox helper (Q15): the signed installer is built from the archive, so the archive refuses without
+ * the helper, its NOTICE, or a manifest that names this very helper. */
+{
+  assert.equal(windows.windowsSandbox, true);
+  assert.equal(linux.windowsSandbox, false);
+  const windowsSandboxRoot = String.raw`C:\r\windows-sandbox\win32-x64`;
+  const complete = {
+    executable: true,
+    notice: true,
+    manifestMatches: true,
+    windowsSandboxRoot,
+  };
+  assert.equal(desktopWindowsSandboxRefusal(windows, true, complete), undefined);
+  const absent = {
+    ...complete,
+    executable: false,
+    notice: false,
+    manifestMatches: false,
+  };
+  assert.equal(desktopWindowsSandboxRefusal(windows, false, absent), undefined);
+  assert.equal(desktopWindowsSandboxRefusal(linux, true, absent), undefined);
+  assert.equal(
+    desktopWindowsSandboxRefusal(windows, true, absent),
+    String.raw`A win32-x64 release package must ship the shell sandbox helper; at C:\r\windows-sandbox\win32-x64 tau-windows-sandbox.exe is missing, NOTICE is missing. Run desktop:prepare-windows-sandbox first.`,
+  );
+  assert.match(
+    desktopWindowsSandboxRefusal(windows, true, {
+      ...complete,
+      notice: false,
+    }) ?? '',
+    / NOTICE is missing\. /u,
+  );
+  assert.match(
+    desktopWindowsSandboxRefusal(windows, true, {
+      ...complete,
+      manifestMatches: false,
+    }) ?? '',
+    / manifest\.json does not name this helper's sha256\. /u,
+  );
+  assert.ok(
+    desktopPackageOmissions(windows, {
+      git: true,
+      gitResourceRoot: 'C:\\r',
+      windowsSandbox: false,
+      windowsSandboxRoot,
+    }).includes(
+      String.raw`Windows shell sandbox helper: none at C:\r\windows-sandbox\win32-x64; this package has no sandboxed shell or Terminal.`,
+    ),
+  );
+  assert.ok(
+    !desktopPackageOmissions(windows, {
+      git: true,
+      gitResourceRoot: 'C:\\r',
+      windowsSandbox: true,
+    }).some((line) => line.startsWith('Windows shell sandbox helper')),
+  );
+  assert.ok(
+    !desktopPackageOmissions(linux, {
+      git: true,
+      gitResourceRoot: '/r',
+      storeGuard: true,
+    }).some((line) => line.startsWith('Windows shell sandbox helper')),
+  );
+}
+console.log('✓ a Windows release refuses to assemble without the shell sandbox helper and its NOTICE');
+
 /* The Linux release guard: a distribution archive ships an executable git and git-lfs, as a macOS release does. */
 {
   const gitResourceRoot = '/r/git/linux-x64';
@@ -311,6 +378,7 @@ assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
   esbuild: '@esbuild/darwin-arm64',
   libassimp: 'libassimp-darwin-arm64',
   nanoraster: 'nanoraster-darwin-arm64',
+  cadmpeg: 'cadmpeg-ts-darwin-arm64',
   bundledOptionalDependencies: [
     '@img/sharp-libvips-darwin-arm64',
     '@img/sharp-darwin-arm64',
@@ -321,7 +389,13 @@ assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
 });
 for (const [target, packages] of Object.entries(runtimePlatformPackages)) {
   const [platform, arch] = target.split('-') as [string, string];
-  for (const name of [packages.openrscadEngine, packages.esbuild, packages.libassimp, packages.nanoraster]) {
+  for (const name of [
+    packages.openrscadEngine,
+    packages.esbuild,
+    packages.libassimp,
+    packages.nanoraster,
+    packages.cadmpeg,
+  ]) {
     if (name === undefined) {
       continue;
     }
@@ -348,6 +422,18 @@ for (const packages of Object.values(runtimePlatformPackages)) {
   }
 }
 assert.equal(runtimePlatformPackages['darwin-x64'].libassimp, undefined, 'Intel uses the staged Assimp WASM backend');
+const cadmpegManifest = JSON.parse(
+  readFileSync(
+    new URL('../../../packages/plugins/cadmpeg/node_modules/cadmpeg-ts/package.json', import.meta.url),
+    'utf8',
+  ),
+) as { optionalDependencies: Record<string, string> };
+for (const packages of Object.values(runtimePlatformPackages)) {
+  assert.ok(
+    cadmpegManifest.optionalDependencies[packages.cadmpeg],
+    `${packages.cadmpeg} must be published by the pinned engine`,
+  );
+}
 console.log('✓ each target stages its own native platform packages');
 
 /* Sandbox helpers: a target keeps only the one it executes, for its own architecture. */

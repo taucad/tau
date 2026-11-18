@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets and drawing STEP faces — measured 23.57 kB brotlied on 2026-11-17, after instancing detection reads partner keys instead of hashing BRep text",
+    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier, the mesh memo and kept pack facts — measured 27.98 kB brotlied on 2026-11-18, after the kept glTF pack facts (N6)",
     "path": ["dist/**/*.mjs"],
-    "limit": "24.5 kB"
+    "limit": "28 kB"
   },
   {
     "name": "font + sourcemap payload — measured 1.43 MB on 2026-08-23",

@@ -39,11 +39,16 @@ export const replicadOptionsSchema = z.object({
   withSourceMapping: z.boolean().optional().default(false),
   tessellationInstancing: z.boolean().optional().default(true),
   /**
-   * Per-operation compute reuse switch, off unless `true`. The adapter's results
-   * depend on cache history, so it stays off until the live operation tier replaces
-   * it; off installs no proxy and constructs no recipe.
+   * Live operation tier switch. Omitted, the tier runs whenever the runtime's
+   * compute reuse is on; `false` is a real off arm that installs no operation
+   * cache and builds no key.
    */
   computeReuse: z.boolean().optional(),
+  /**
+   * Snap a preset's display tolerance to a quantized ladder with hysteresis, so a pose drag stays on one tolerance
+   * and unchanged parts keep their meshes. It changes the tolerance and so the delivered mesh; off by default.
+   */
+  tessellationLadder: z.boolean().optional().default(false),
 });
 
 /**

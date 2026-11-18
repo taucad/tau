@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { storageLimitBytesByTier } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
-import { ProBadge } from '#components/tier-badge.js';
+import { ProBadge } from '@taucad/billing-ui/components/tier-badge';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 
 export function CommercialUpgradeLabel(): React.JSX.Element {

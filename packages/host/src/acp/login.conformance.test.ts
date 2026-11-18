@@ -15,8 +15,8 @@ import type { AuthMethod } from '@agentclientprotocol/sdk';
 import { describe, expect, it } from 'vitest';
 
 import { acpAgentProfiles } from '#acp/registry.js';
-import type { AcpAdapter, AcpAgentProfile } from '#acp/registry.js';
-import { loginOf } from '#acp/session.js';
+import type { AcpAdapter, AcpAgentProfile, ReviewedAcpAgentProfile } from '#acp/registry.js';
+import { acpLoginLaunch, loginOf } from '#acp/session.js';
 import type { AcpLoginHost } from '#acp/session.js';
 
 /** Where the packaged desktop keeps a module adapter: a path a shell would split. */
@@ -199,5 +199,93 @@ describe.each(profilesWithModule)('sign-in for module adapter $id', (profile) =>
       expect(method.terminalCommand ?? '').not.toContain('Helper');
       expect(method.terminalCommand ?? '').not.toContain('app.asar');
     }
+  });
+});
+
+/** An agent no vendor ships, so the sign-in launch is proven generic rather than per agent. */
+const syntheticProfile: ReviewedAcpAgentProfile = {
+  id: 'acme',
+  displayName: 'Acme Agent',
+  cli: 'acme',
+  args: ['acp'],
+  configEnv: ['ACME_HOME'],
+  minimumCliVersion: '1.0.0',
+  versionSample: 'acme 1.0.0',
+  fallbackExecutables: { darwin: [], linux: [], win32: [] },
+  installCommand: { posix: 'acme install', windows: 'acme install' },
+  updateCommand: { posix: 'acme update', windows: 'acme update' },
+  loginCommand: 'acme account sign-in',
+  loginArgs: ['account', 'sign-in'],
+  defaultModePreference: ['auto'],
+};
+
+describe.each([...acpAgentProfiles, syntheticProfile])('sign-in launch for $id', (profile) => {
+  const executablePath = `/Users/someone/Vendor Tools/bin/${profile.cli}`;
+  /** Only `executablePath` exists; nothing on the machine running the suite answers. */
+  const onlyThat = { isExecutableFile: (path: string) => path === executablePath, listDirectory: () => [] };
+  /* eslint-disable @typescript-eslint/naming-convention -- environment variable names are the platform's. */
+  const environment: NodeJS.ProcessEnv = {
+    PATH: '/usr/bin:/bin',
+    HOME: '/Users/someone',
+    USER: 'someone',
+    DISPLAY: ':0',
+    TAU_HOST_AGENT_TOKEN: 'never forwarded',
+    NODE_OPTIONS: '--require /tmp/hook.js',
+    ...Object.fromEntries(profile.configEnv.map((name) => [name, `/tmp/empty-${name}`])),
+  };
+  /* eslint-enable @typescript-eslint/naming-convention -- end of the environment. */
+
+  it('should start the found CLI with the profile login arguments, not a shell line', () => {
+    const launch = acpLoginLaunch(adapterOf(profile, { executablePath, executableSource: 'path' }), {
+      environment,
+      platform: 'darwin',
+      fileSystem: onlyThat,
+    });
+
+    expect(launch?.file).toBe(executablePath);
+    expect(launch?.args).toEqual(profile.loginArgs);
+  });
+
+  it.each(['path', 'fallback'] as const)(
+    'should show the command the card shows when the CLI came from %s',
+    (executableSource) => {
+      const adapter = adapterOf(profile, { executablePath, executableSource });
+      const card = loginOf(adapter, [], posixHost).authMethods[0]?.terminalCommand;
+
+      const launch = acpLoginLaunch(adapter, { environment, platform: 'darwin', fileSystem: onlyThat });
+
+      expect(launch?.file).toBe(executablePath);
+      expect(launch?.commandLine).toBe(card);
+      expect(launch?.commandLine).toBe(
+        executableSource === 'path' ? profile.loginCommand : `'${executablePath}' ${profile.loginArgs.join(' ')}`,
+      );
+    },
+  );
+
+  it("should give the CLI the adapter's environment, its config directory included, and nothing of Tau's", () => {
+    const launch = acpLoginLaunch(adapterOf(profile, { executablePath, executableSource: 'path' }), {
+      environment,
+      platform: 'darwin',
+      fileSystem: onlyThat,
+    });
+
+    for (const name of [...profile.configEnv, 'PATH', 'HOME', 'USER', 'DISPLAY']) {
+      expect(launch?.env[name], name).toBe(environment[name]);
+    }
+    expect(launch?.env).not.toHaveProperty('TAU_HOST_AGENT_TOKEN');
+    expect(launch?.env).not.toHaveProperty('NODE_OPTIONS');
+    expect(launch?.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
+  });
+
+  it('should refuse CLI_NOT_FOUND when the CLI it found is gone', () => {
+    const adapter = adapterOf(profile, { executablePath, executableSource: 'path' });
+
+    expect(() =>
+      acpLoginLaunch(adapter, {
+        environment,
+        platform: 'darwin',
+        fileSystem: { isExecutableFile: () => false, listDirectory: () => [] },
+      }),
+    ).toThrow(expect.objectContaining({ code: 'CLI_NOT_FOUND' }));
   });
 });

@@ -137,7 +137,8 @@ describe.each(['light', 'dark'])('Terminal pane screens (%s)', (theme) => {
   it('explains why the pane is unavailable on desktop', async () => {
     const container = mount({
       status: 'unavailable',
-      message: 'This project is stored in Tau, not in a folder on this computer, so the Terminal has nowhere to run.',
+      message:
+        'This project is in browser storage, not in a folder on this computer, so the Terminal has nowhere to run.',
       recovery: 'Open a project from a folder on this computer to use the Terminal.',
     });
     await audit(container);

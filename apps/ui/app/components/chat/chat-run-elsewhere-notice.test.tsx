@@ -37,7 +37,7 @@ describe('ChatRunElsewhereNotice', () => {
     render(<ChatRunElsewhereNotice />);
 
     const notice = screen.getByRole('status', {
-      name: 'Running on another device',
+      name: 'Running on your other device',
     });
     expect(notice).toHaveTextContent('You can send here once that reply finishes.');
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
@@ -48,7 +48,7 @@ describe('ChatRunElsewhereNotice', () => {
 
     render(<ChatRunElsewhereNotice />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('waiting for an answer on another of your devices');
+    expect(screen.getByRole('status')).toHaveTextContent('waiting for an answer on your other device');
   });
 
   it('should render nothing while no other device runs the chat', () => {

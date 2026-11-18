@@ -258,9 +258,9 @@ describe('isomorphic-git remote refusals (N1)', () => {
     {
       label: 'a free-tier push',
       status: 403,
-      body: '{"code":"GIT_SYNC_NOT_ENTITLED","message":"Syncing files to Tau Cloud is a paid plan feature."}',
+      body: '{"code":"GIT_SYNC_NOT_ENTITLED","message":"Syncing files to the cloud is a paid plan feature."}',
       code: 'REMOTE_NOT_ENTITLED',
-      message: 'Syncing files to Tau Cloud is a paid plan feature.',
+      message: 'Syncing files to the cloud is a paid plan feature.',
     },
     {
       label: 'an expired session',
@@ -279,16 +279,16 @@ describe('isomorphic-git remote refusals (N1)', () => {
     {
       label: 'a full store',
       status: 413,
-      body: '{"code":"GIT_QUOTA_EXCEEDED","message":"This project is over its storage plan."}',
+      body: '{"code":"GIT_QUOTA_EXCEEDED","message":"This project doesn’t fit in its backup."}',
       code: 'REMOTE_QUOTA_EXCEEDED',
-      message: 'This project is over its storage plan.',
+      message: 'This project doesn’t fit in its backup.',
     },
     {
       label: 'a busy server',
       status: 503,
       body: '',
       code: 'REMOTE_UNAVAILABLE',
-      message: 'This remote is busy; this project will try again.',
+      message: 'Your backup is busy. Tau will try again.',
     },
   ])('names $label as itself rather than an unreachable remote', async ({ status, body, code, message }) => {
     const { http } = refusingClient(status, body);

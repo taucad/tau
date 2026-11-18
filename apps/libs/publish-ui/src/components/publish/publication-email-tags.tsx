@@ -16,7 +16,7 @@ export function isPublicationEmailTag(value: string): boolean {
 
 export function getPublicationEmailTagsError(tags: readonly string[]): string | undefined {
   if (tags.length > maxPublicationAccessRecipients) {
-    return `Share with up to ${maxPublicationAccessRecipients.toString()} emails.`;
+    return `You can invite up to ${maxPublicationAccessRecipients.toString()} people.`;
   }
 
   const invalid = tags.find((tag) => !isPublicationEmailTag(tag));

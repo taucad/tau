@@ -138,7 +138,7 @@ describe('revisionWho', () => {
         git('user-maya'),
         shared(() => ({ kind: 'account', accountId: 'user-maya', name: 'Maya', viaDevice: true })),
       ).line,
-    ).toBe('Maya · made with git · by a cloud agent host');
+    ).toBe('Maya · made with git · by a cloud agent');
   });
 
   it('does not take a pushed commit’s address over the account that pushed it', () => {
@@ -215,13 +215,13 @@ describe('revisionWho', () => {
       name: 'Maya',
       viaDevice: true,
     });
-    expect(revisionWho(entry('tau-host'), shared(viaHost)).line).toBe('Maya · by a cloud agent host');
+    expect(revisionWho(entry('tau-host'), shared(viaHost)).line).toBe('Maya · by a cloud agent');
     expect(
       revisionWho(
         entry(pseudonym('anon:1')),
         shared(() => ({ kind: 'anonymous', viaDevice: true })),
       ).line,
-    ).toBe('Anonymous · by a cloud agent host');
+    ).toBe('Anonymous · by a cloud agent');
     expect(
       revisionWho(entry('tau-host'), {
         ...solo,

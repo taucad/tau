@@ -23,7 +23,7 @@ export type PushEntry = Readonly<{
   pusher: PushPusher;
   /** The owner's read of a push that brought an anonymous commit: the account is shown, marked as recorded anonymously. */
   anonymous?: true;
-  /** A host device pushed it on the account's behalf ("by a cloud agent host"). */
+  /** A host device pushed it on the account's behalf ("by a cloud agent"). */
   viaDevice: boolean;
   /** The commits the branches it moved now hold. */
   tips: readonly string[];

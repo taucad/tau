@@ -316,8 +316,8 @@ describe('ProjectLibrary', () => {
         const search = screen.getByRole('searchbox', { name: 'Search projects' });
         const trigger = screen.getByRole('button', { name: 'Actions for Hinge Delta' });
         await user.click(trigger);
-        await user.click(screen.getByRole('menuitem', { name: 'Delete from Tau Cloud…' }));
-        const dialog = await screen.findByRole('alertdialog', { name: 'Delete “Hinge Delta” from Tau Cloud?' });
+        await user.click(screen.getByRole('menuitem', { name: 'Delete cloud copy…' }));
+        const dialog = await screen.findByRole('alertdialog', { name: 'Delete the cloud copy of “Hinge Delta”?' });
         const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
         expect(cancel).toHaveFocus();
 
@@ -384,8 +384,8 @@ describe('ProjectLibrary', () => {
     it('should preserve local projects while reporting a failed cloud catalog', () => {
       cloudListing.isFailed = true;
       renderLibrary();
-      expect(screen.getByRole('alert')).toHaveTextContent('Tau Cloud projects not loaded');
-      expect(screen.getByRole('button', { name: 'Retry Tau Cloud' })).toBeEnabled();
+      expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t load cloud projects');
+      expect(screen.getByRole('button', { name: 'Try loading cloud projects again' })).toBeEnabled();
       expect(screen.getByRole('link', { name: 'Open Gearbox Alpha' })).toBeInTheDocument();
     });
 
@@ -400,7 +400,7 @@ describe('ProjectLibrary', () => {
         </TestRouter>,
       );
       expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
-      expect(screen.getByText('Loading Tau Cloud projects…')).toBeInTheDocument();
+      expect(screen.getByText('Loading cloud projects…')).toBeInTheDocument();
       cloudListing.isFetching = false;
       cloudListing.isFailed = true;
       view.rerender(
@@ -425,9 +425,9 @@ describe('ProjectLibrary', () => {
       expect(screen.getByRole('link', { name: 'Open Bracket Beta' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
       /* Both: the Tau Cloud glyph, once. */
-      expect(screen.getAllByText('Also on Tau Cloud')).toHaveLength(1);
-      expect(screen.queryByText('Backed up on Tau Cloud. This device does not have it yet.')).not.toBeInTheDocument();
-      expect(screen.queryByRole('heading', { name: 'From Tau Cloud' })).toBeNull();
+      expect(screen.getAllByText('Also in the cloud')).toHaveLength(1);
+      expect(screen.queryByText('Backed up in the cloud. This device does not have it yet.')).not.toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'From the cloud' })).toBeNull();
     });
 
     it('should mark each row local, both or Tau Cloud only', () => {
@@ -438,10 +438,10 @@ describe('ProjectLibrary', () => {
       ];
       renderLibrary();
 
-      expect(screen.getByRole('row', { name: /Gearbox Alpha/u })).toHaveTextContent('Also on Tau Cloud');
-      expect(screen.getByRole('row', { name: /Bracket Beta/u })).not.toHaveTextContent('Also on Tau Cloud');
+      expect(screen.getByRole('row', { name: /Gearbox Alpha/u })).toHaveTextContent('Also in the cloud');
+      expect(screen.getByRole('row', { name: /Bracket Beta/u })).not.toHaveTextContent('Also in the cloud');
       const cloudOnly = screen.getByRole('row', { name: /Hinge Delta/u });
-      expect(cloudOnly).toHaveTextContent('Tau Cloud');
+      expect(cloudOnly).toHaveTextContent('Cloud');
       expect(cloudOnly).not.toHaveTextContent('Backed up on');
       expect(within(cloudOnly).getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
     });
@@ -470,10 +470,10 @@ describe('ProjectLibrary', () => {
         expect(screen.getByRole('button', { name: 'Open Gearbox Alpha' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeDisabled();
       } else {
-        expect(screen.getByRole('button', { name: 'Deleting from Tau Cloud… Hinge Delta' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Deleting cloud copy… Hinge Delta' })).toBeDisabled();
       }
       expect(screen.getByRole('button', { name: 'Actions for Hinge Delta' })).toBeInTheDocument();
-      expect(screen.getAllByText('Deleting from Tau Cloud…').length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText('Deleting cloud copy…').length).toBeGreaterThanOrEqual(2);
       expect(mockOpenCloudProject).not.toHaveBeenCalled();
     });
 
@@ -538,7 +538,7 @@ describe('ProjectLibrary', () => {
 
       const card = screen.getByRole('row', { name: /Reference Jig/u });
       expect(card).toHaveTextContent('Can view');
-      expect(card).not.toHaveTextContent('This device does not have it yet.');
+      expect(card).not.toHaveTextContent('Not on this device yet.');
     });
 
     it('should show a Tau-Cloud-only project instead of the empty state when this device has none', () => {
@@ -802,9 +802,9 @@ describe('ProjectLibrary', () => {
       </TestRouter>,
     );
 
-    expect(screen.getByText('Projects could not be loaded')).toBeInTheDocument();
+    expect(screen.getByText('Couldn’t load projects')).toBeInTheDocument();
     expect(screen.queryByText('No projects yet')).not.toBeInTheDocument();
-    screen.getByRole('button', { name: 'Retry' }).click();
+    screen.getByRole('button', { name: 'Try again' }).click();
     expect(retry).toHaveBeenCalledOnce();
   });
 
@@ -890,7 +890,7 @@ describe('ProjectLibrary', () => {
       mockUseProjectsResult = { ...createUseProjectsResult(), projects: [], error: new Error('listing failed') };
       renderLibrary();
       expect(screen.queryByText('community builds')).not.toBeInTheDocument();
-      expect(screen.getByText('Projects could not be loaded')).toBeInTheDocument();
+      expect(screen.getByText('Couldn’t load projects')).toBeInTheDocument();
     });
   });
 
@@ -1308,12 +1308,12 @@ describe('ProjectLibrary', () => {
       const cloudStatuses = (): HTMLElement[] =>
         within(slot.header())
           .queryAllByRole('status')
-          .filter((status) => status.textContent.includes('Tau Cloud'));
+          .filter((status) => status.textContent.includes('cloud projects'));
       expect(cloudStatuses()).toHaveLength(1);
       cloudListing.isFetching = false;
       cloudListing.isFailed = true;
       slot.rerender();
-      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' }));
       cloudListing.isFailed = false;
       cloudListing.isFetching = true;
       slot.rerender();
@@ -1325,7 +1325,10 @@ describe('ProjectLibrary', () => {
       cloudListing.isFetching = true;
       const clock = { at: 0 };
       const { header } = renderSlot({ clock });
-      const retry = within(header()).getByRole('button', { name: /^Retry/u, hidden: true });
+      const retry = within(header()).getByRole('button', {
+        name: /^Try loading cloud projects again/u,
+        hidden: true,
+      });
       /* Pressed at 11 s, once the slow words and their Retry show. */
       clock.at = 11_000;
       await userEvent.click(retry);
@@ -1345,13 +1348,16 @@ describe('ProjectLibrary', () => {
       cloudListing.isFetching = true;
       const clock = { at: 0 };
       const slot = renderSlot({ clock });
-      const retry = within(slot.header()).getByRole('button', { name: /^Retry/u, hidden: true });
+      const retry = within(slot.header()).getByRole('button', {
+        name: /^Try loading cloud projects again/u,
+        hidden: true,
+      });
       clock.at = 11_000;
       await userEvent.click(retry);
       cloudListing.isFetching = false;
       cloudListing.isFailed = true;
       slot.rerender();
-      expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Tau Cloud projects not loaded');
+      expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Couldn’t load cloud projects');
       expect(retry).toBeInTheDocument();
       expect(retry).toHaveFocus();
     });
@@ -1368,10 +1374,12 @@ describe('ProjectLibrary', () => {
       const clock = { at: 0 };
       const slot = renderSlot({ clock });
       clock.at = 11_000;
-      await userEvent.click(within(slot.header()).getByRole('button', { name: /^Retry/u, hidden: true }));
+      await userEvent.click(
+        within(slot.header()).getByRole('button', { name: /^Try loading cloud projects again/u, hidden: true }),
+      );
       const announced = within(slot.header())
         .queryAllByRole('status')
-        .filter((status) => status.textContent.includes('Tau Cloud'));
+        .filter((status) => status.textContent.includes('cloud projects'));
       expect(announced).toHaveLength(1);
       const body = slot.header().querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
       expect(body?.style.getPropertyValue('--wait-slow-delay')).toBe('10000ms');
@@ -1388,7 +1396,7 @@ describe('ProjectLibrary', () => {
       cloudListing.isFailed = true;
       const clock = { at: 0 };
       const slot = renderSlot({ clock });
-      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      const retry = within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' });
       await userEvent.click(retry);
       cloudListing.isFailed = false;
       cloudListing.isFetching = true;
@@ -1409,7 +1417,7 @@ describe('ProjectLibrary', () => {
     it("C14: keeps the failure's Retry seen and focused through a refetch the person did not start", async () => {
       cloudListing.isFailed = true;
       const slot = renderSlot();
-      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      const retry = within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' });
       retry.focus();
       cloudListing.isFailed = false;
       cloudListing.isFetching = true;
@@ -1434,7 +1442,7 @@ describe('ProjectLibrary', () => {
       cloudListing.isPaused = false;
       cloudListing.isFetching = true;
       slot.rerender();
-      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      const retry = within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' });
       expect(retry).not.toHaveClass('wait-after-slow');
     });
 
@@ -1445,15 +1453,15 @@ describe('ProjectLibrary', () => {
       cloudListing.isFailed = false;
       cloudListing.isFetching = true;
       slot.rerender();
-      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      const retry = within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' });
       cloudListing.isFetching = false;
       cloudListing.isPaused = true;
       slot.rerender();
-      expect(within(slot.header()).queryByRole('button', { name: 'Retry Tau Cloud' })).toBe(retry);
+      expect(within(slot.header()).queryByRole('button', { name: 'Try loading cloud projects again' })).toBe(retry);
       cloudListing.isPaused = false;
       cloudListing.isFetching = true;
       slot.rerender();
-      expect(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' })).toBe(retry);
+      expect(within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' })).toBe(retry);
     });
 
     /* D21 round 12: the Trash view does not show Tau Cloud, so a failed listing offers no Retry there. */
@@ -1466,7 +1474,7 @@ describe('ProjectLibrary', () => {
           </TooltipProvider>
         </TestRouter>,
       );
-      expect(screen.queryByRole('button', { name: 'Retry Tau Cloud' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Try loading cloud projects again' })).toBeNull();
     });
 
     /* D21 round 5: a Retry over a failed refresh of listed projects is a wait the person sees and hears. */
@@ -1483,7 +1491,7 @@ describe('ProjectLibrary', () => {
           }),
       );
       const slot = renderSlot();
-      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' }));
       /* React-query keeps a refresh with data in error while it asks again. */
       cloudListing.isFetching = true;
       slot.rerender();
@@ -1491,14 +1499,14 @@ describe('ProjectLibrary', () => {
       expect(
         within(slot.header())
           .queryAllByRole('status')
-          .filter((status) => status.textContent.includes('Loading Tau Cloud projects')),
+          .filter((status) => status.textContent.includes('Loading cloud projects')),
       ).toHaveLength(1);
       cloudListing.isFetching = false;
       await act(async () => {
         answer();
       });
       slot.rerender();
-      expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Tau Cloud projects not loaded');
+      expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Couldn’t load cloud projects');
     });
 
     /* D21 round 5: a Retry's wait is announced by the slot's status region, present before the press. */
@@ -1514,13 +1522,15 @@ describe('ProjectLibrary', () => {
       const slot = renderSlot({ clock });
       const region = slot.header().querySelector('[data-slot="project-library-status"] > [role="status"]');
       clock.at = 11_000;
-      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud', hidden: true }));
+      await userEvent.click(
+        within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again', hidden: true }),
+      );
       expect(region).toBeInTheDocument();
-      expect(region).toHaveTextContent('Loading Tau Cloud projects');
+      expect(region).toHaveTextContent('Loading cloud projects');
       expect(
         within(slot.header())
           .queryAllByRole('status')
-          .filter((status) => status.textContent.includes('Tau Cloud')),
+          .filter((status) => status.textContent.includes('cloud projects')),
       ).toEqual([region]);
     });
 
@@ -1531,7 +1541,7 @@ describe('ProjectLibrary', () => {
       expect(
         within(slot.header())
           .queryAllByRole('status')
-          .filter((status) => status.textContent.includes('Loading Tau Cloud projects')),
+          .filter((status) => status.textContent.includes('Loading cloud projects')),
       ).toHaveLength(1);
     });
 
@@ -1546,7 +1556,7 @@ describe('ProjectLibrary', () => {
       cloudListing.isFailed = true;
       const clock = { at: 0 };
       const slot = renderSlot({ clock });
-      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      const retry = within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' });
       await userEvent.click(retry);
       cloudListing.isFailed = false;
       cloudListing.isFetching = true;
@@ -1564,7 +1574,7 @@ describe('ProjectLibrary', () => {
       expect(hold).toHaveClass('wait-hold');
       expect(hold?.style.getPropertyValue('--wait-hide-delay')).toBe('400ms');
       fireEvent.animationEnd(hold!);
-      expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Tau Cloud projects not loaded');
+      expect(within(slot.header()).getByRole('alert')).toHaveTextContent('Couldn’t load cloud projects');
       expect(retry).toBeInTheDocument();
     });
 
@@ -1587,7 +1597,7 @@ describe('ProjectLibrary', () => {
       );
       cloudListing.isFailed = true;
       const slot = renderSlot();
-      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' }));
       cloudListing.isFailed = false;
       cloudListing.isFetching = true;
       slot.rerender();
@@ -1596,7 +1606,7 @@ describe('ProjectLibrary', () => {
         globalThis.dispatchEvent(new Event('offline'));
       });
       expect(within(slot.header()).getByText('Offline. Showing projects on this device.')).toBeInTheDocument();
-      expect(within(slot.header()).queryByRole('button', { name: 'Retry Tau Cloud' })).toBeNull();
+      expect(within(slot.header()).queryByRole('button', { name: 'Try loading cloud projects again' })).toBeNull();
     });
 
     /* D21 round 8: a Tau Cloud wait that began under the local listing's wait shows its Retry with its slow words. */
@@ -1609,7 +1619,10 @@ describe('ProjectLibrary', () => {
       mockUseProjectsResult = createUseProjectsResult();
       slot.rerender();
       /* The indicator, mounted at 0 ms, shows its slow words at 10 s; the Retry, mounted at 3 s, 7 s after that. */
-      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud', hidden: true });
+      const retry = within(slot.header()).getByRole('button', {
+        name: 'Try loading cloud projects again',
+        hidden: true,
+      });
       expect(retry.style.getPropertyValue('--wait-slow-delay')).toBe('7000ms');
     });
 
@@ -1625,7 +1638,7 @@ describe('ProjectLibrary', () => {
       clock.at = 2200;
       mockUseProjectsResult = createUseProjectsResult();
       slot.rerender();
-      expect(slot.header()).toHaveTextContent('Loading Tau Cloud projects');
+      expect(slot.header()).toHaveTextContent('Loading cloud projects');
       const body = slot.header().querySelector<HTMLElement>('[data-slot="wait-indicator-body"]');
       expect(Number.parseFloat(body?.style.getPropertyValue('--wait-reveal-delay') ?? 'NaN')).toBe(600);
     });
@@ -1641,7 +1654,7 @@ describe('ProjectLibrary', () => {
       );
       cloudListing.isFailed = true;
       const slot = renderSlot();
-      const retry = within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' });
+      const retry = within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' });
       await userEvent.click(retry);
       cloudListing.isFailed = false;
       cloudListing.isFetching = true;
@@ -1655,7 +1668,7 @@ describe('ProjectLibrary', () => {
       cloudListing.isFailed = true;
       cloudListing.retry.mockImplementationOnce(async () => undefined);
       const slot = renderSlot();
-      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' }));
       cloudListing.isFailed = false;
       slot.rerender();
       cloudListing.isFetching = true;
@@ -1682,7 +1695,7 @@ describe('ProjectLibrary', () => {
       const slot = renderSlot({ isPhoneBar: true });
       const row = slot.header().querySelector('[data-slot="project-library-status"]')!.parentElement!;
       expect(row).not.toHaveClass('max-md:sr-only');
-      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Retry Tau Cloud' }));
+      await userEvent.click(within(slot.header()).getByRole('button', { name: 'Try loading cloud projects again' }));
       cloudListing.isFailed = false;
       cloudListing.isFetching = true;
       slot.rerender();
@@ -1722,7 +1735,7 @@ describe('ProjectLibrary', () => {
     it('C14: keeps the Tau Cloud wait inside the header slot, with no row above the grid', () => {
       cloudListing.isFetching = true;
       const header = renderLibrary();
-      expect(header).toHaveTextContent('Loading Tau Cloud projects');
+      expect(header).toHaveTextContent('Loading cloud projects');
       expect(regionsOutside(header)).toEqual([]);
     });
 
@@ -1730,9 +1743,9 @@ describe('ProjectLibrary', () => {
       cloudListing.isFailed = true;
       const header = renderLibrary();
       const alert = within(header).getByRole('alert');
-      expect(alert).toHaveTextContent('Tau Cloud projects not loaded');
+      expect(alert).toHaveTextContent('Couldn’t load cloud projects');
       expect(regionsOutside(header)).toEqual([]);
-      await userEvent.click(within(header).getByRole('button', { name: 'Retry Tau Cloud' }));
+      await userEvent.click(within(header).getByRole('button', { name: 'Try loading cloud projects again' }));
       expect(cloudListing.retry).toHaveBeenCalledOnce();
       /* The projects on this device stay. */
       expect(screen.getByRole('link', { name: 'Open Gearbox Alpha' })).toBeInTheDocument();

@@ -163,7 +163,7 @@ export function ChatHistoryGate({ children }: { readonly children: React.ReactNo
       >
         <p className='text-sm font-medium'>
           {chats === 'disabled'
-            ? 'Chat sync is off'
+            ? 'Chats aren’t included in this project’s backup'
             : chats === 'failed'
               ? 'Couldn’t load chat history'
               : 'Loading chat history'}

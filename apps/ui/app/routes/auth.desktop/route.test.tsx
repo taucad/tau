@@ -93,7 +93,7 @@ describe('AuthDesktopRoute', () => {
     vi.stubEnv('TAU_DESKTOP_RELEASED', 'false');
     render(<AuthDesktopRoute />);
 
-    await userEvent.click(screen.getByRole('button', { name: /connect to tau desktop/i }));
+    await userEvent.click(screen.getByRole('button', { name: /sign in to tau desktop/i }));
     await userEvent.click(await screen.findByRole('button', { name: 'Tau Desktop didn’t open' }));
 
     expect(screen.queryByRole('link', { name: 'Get Tau Desktop' })).not.toBeInTheDocument();
@@ -105,7 +105,7 @@ describe('AuthDesktopRoute', () => {
   it('mints nothing until the user confirms, even with a valid request', async () => {
     render(<AuthDesktopRoute />);
 
-    expect(screen.getByRole('button', { name: /connect to tau desktop/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign in to tau desktop/i })).toBeInTheDocument();
     await waitFor(() => {
       expect(mocks.authFetch).not.toHaveBeenCalled();
     });
@@ -124,7 +124,7 @@ describe('AuthDesktopRoute', () => {
   it('mints a one-time token and navigates to the app scheme on confirmation', async () => {
     render(<AuthDesktopRoute />);
 
-    await userEvent.click(screen.getByRole('button', { name: /connect to tau desktop/i }));
+    await userEvent.click(screen.getByRole('button', { name: /sign in to tau desktop/i }));
 
     await waitFor(() => {
       expect(assign).toHaveBeenCalledWith('tau://auth/callback?ott=ott-value&state=abcd1234efgh');
@@ -138,7 +138,7 @@ describe('AuthDesktopRoute', () => {
   it('offers a way out of opening, and re-offers the same unspent token', async () => {
     render(<AuthDesktopRoute />);
 
-    await userEvent.click(screen.getByRole('button', { name: /connect to tau desktop/i }));
+    await userEvent.click(screen.getByRole('button', { name: /sign in to tau desktop/i }));
     await userEvent.click(await screen.findByRole('button', { name: 'Tau Desktop didn’t open' }));
 
     expect(screen.getByText('Tau Desktop didn’t open')).toBeInTheDocument();
@@ -163,7 +163,7 @@ describe('AuthDesktopRoute', () => {
     render(<AuthDesktopRoute />);
 
     expect(screen.getByText('This sign-in link is not valid')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /connect to tau desktop/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sign in to tau desktop/i })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(mocks.authFetch).not.toHaveBeenCalled();
     });
@@ -180,7 +180,7 @@ describe('AuthDesktopRoute', () => {
     await waitFor(() => {
       expect(mocks.authFetch).not.toHaveBeenCalled();
     });
-    expect(screen.queryByRole('button', { name: /connect to tau desktop/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sign in to tau desktop/i })).not.toBeInTheDocument();
     expect(screen.getByText('Signing you in to Tau Desktop')).toBeInTheDocument();
   });
 
@@ -188,7 +188,7 @@ describe('AuthDesktopRoute', () => {
     mocks.authFetch.mockResolvedValue({ data: null, error: { status: 401 } });
 
     render(<AuthDesktopRoute />);
-    await userEvent.click(screen.getByRole('button', { name: /connect to tau desktop/i }));
+    await userEvent.click(screen.getByRole('button', { name: /sign in to tau desktop/i }));
 
     await waitFor(() => {
       expect(screen.getByText("We couldn't complete the sign-in")).toBeInTheDocument();

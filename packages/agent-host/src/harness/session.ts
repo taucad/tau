@@ -1898,7 +1898,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       const foreign = unresolved.find((attemptId) => isForeignInvocation(ledger.invocations[attemptId]!, principal));
       if (foreign !== undefined) {
         throw Object.assign(
-          new Error(`Another Tau account funded model request ${foreign}; sign in to that account to continue.`),
+          new Error(`Another account funded model request ${foreign}; sign in to that account to continue.`),
           { code: 'MODEL_ATTEMPT_OTHER_ACCOUNT' satisfies RefusalCode, details: { attemptId: foreign } },
         );
       }

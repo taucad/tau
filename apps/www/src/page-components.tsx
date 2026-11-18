@@ -223,7 +223,7 @@ const storyOverlays = () => {
         <div className='phone'>
           <img src='/_www/assets/hero-thumbnail.webp' width='720' height='720' alt='' loading='lazy' decoding='async' />
         </div>
-        <span className='tag'>Same project · synced through Tau Cloud</span>
+        <span className='tag'>Same project · synced through the cloud</span>
       </div>
     </>
   );

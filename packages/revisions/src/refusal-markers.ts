@@ -30,6 +30,45 @@ export const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
 export const quotaRefusalMarker = 'Tau: storage quota exceeded';
 
 /**
+ * The large-file batch's refusal sentence without the quota marker in front.
+ *
+ * The server may put {@link quotaRefusalMarker} in front of the batch's
+ * `message` (`Tau: storage quota exceeded — …`) so that a desktop which
+ * recognises the refusal by those words still files it as storage. This host
+ * already knows it is a storage refusal, so the marker is a key, never words
+ * a person reads.
+ *
+ * @param message - The sentence the remote sent, verbatim.
+ * @returns The sentence after the marker, or the message unchanged when it
+ *   does not open with one; an empty string when the marker was all it said.
+ * @internal
+ */
+export const withoutQuotaMarker = (message: string): string => {
+  const trimmed = message.trim();
+  return trimmed.startsWith(quotaRefusalMarker)
+    ? trimmed
+        .slice(quotaRefusalMarker.length)
+        .replace(/^\s*[—–:-]?\s*/u, '')
+        .trim()
+    : message;
+};
+
+/**
+ * What a hosted-remote refusal's machine-readable line says, when the line is one.
+ *
+ * The `pre-receive` hook may print `Tau-Code: <code>` before its sentences, with
+ * whatever data the page's sentence needs after the code. It is a key for this
+ * host, never words a person reads: a reader keeps it out of the refusal's
+ * message, and with no such line nothing changes.
+ *
+ * @param line - One `remote:` sideband line, without its `remote: ` prefix.
+ * @returns The code and its data, or `undefined` when the line is a sentence.
+ * @internal
+ */
+export const refusalCodeLineDetail = (line: string): string | undefined =>
+  /^Tau-Code:\s*(?<detail>\S.*)$/u.exec(line.trim())?.groups?.['detail']?.trim();
+
+/**
  * Whether a refusal the remote wrote is a storage answer: D20's repository
  * ceiling or the owner's plan quota (D17).
  *

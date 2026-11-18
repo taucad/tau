@@ -431,7 +431,7 @@ function ProjectNavigationItem({
       </Item>
       <Item disabled={!project.slugs} onSelect={openSyncDetails}>
         <Cloud aria-hidden />
-        View sync status
+        Open History
       </Item>
       <Separator />
       {row.glyph === 'none' ? null : (

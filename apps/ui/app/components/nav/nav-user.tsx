@@ -176,7 +176,7 @@ export function NavUser(): React.JSX.Element {
               : [
                   <DropdownMenuItem key='offline' disabled>
                     <WifiOff />
-                    Offline — online features unavailable
+                    You’re offline. Some features need a connection.
                   </DropdownMenuItem>,
                 ]),
             <NavBillingItem key='billing' />,
@@ -201,7 +201,7 @@ export function NavUser(): React.JSX.Element {
                 className='absolute top-1 left-5 size-1.5 rounded-full border border-sidebar bg-feature'
               />
             </TooltipTrigger>
-            <TooltipContent side='top'>Offline — reconnect to access online features</TooltipContent>
+            <TooltipContent side='top'>You’re offline. Some features need a connection.</TooltipContent>
           </Tooltip>
         )}
       </div>

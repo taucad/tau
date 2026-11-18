@@ -1192,7 +1192,10 @@ describe('queue-verdict action', () => {
   });
 });
 
-describe('plan lane selection', () => {
+// Each case runs ci.yml's real plan script (bash, jq and the fixture graph) in a child process. They take 1–2 s alone,
+// but `scripts:validate-workspace-tests` runs this file beside 28 others, and on a loaded runner one case passed
+// 5 s (PR #2581, job 134621798477). The budget covers that contention; it does not wait on any race.
+describe('plan lane selection', { timeout: 30_000 }, () => {
   /** A project of the fixture graph: its root, tags, target names and any target's configuration. */
   type Node = {
     readonly root: string;

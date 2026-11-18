@@ -10,8 +10,9 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true })));
 });
 
-const files = async (directory: string): Promise<string[]> =>
-  (await readdir(directory, { recursive: true, withFileTypes: true }))
+const files = async (directory: string): Promise<string[]> => {
+  const entries = await readdir(directory, { recursive: true, withFileTypes: true });
+  return entries
     .filter((entry) => entry.isFile())
     .map((entry) =>
       join(entry.parentPath, entry.name)
@@ -19,6 +20,7 @@ const files = async (directory: string): Promise<string[]> =>
         .replaceAll('\\', '/'),
     )
     .toSorted();
+};
 
 it('should leave the server bundle without maps and the aside copy with maps only', async () => {
   await mkdir(fixtureRoot, { recursive: true });

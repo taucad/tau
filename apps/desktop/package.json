@@ -61,7 +61,7 @@
     "@taucad/types": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
-    "cadmpeg-ts": "0.1.0-beta.0",
+    "cadmpeg-ts": "0.1.0-beta.1",
     "electron-updater": "catalog:",
     "esbuild": "catalog:",
     "fflate": "catalog:",

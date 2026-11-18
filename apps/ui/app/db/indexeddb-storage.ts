@@ -4,8 +4,8 @@ import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor
 import type {
   PendingPermanentDeleteProjectOperation,
   PendingProjectOperation,
-} from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+} from '@taucad/files-ui/types/pending-project-operation.types';
+import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import { announceCandidateConsent, withCandidateConsentLock } from '@taucad/ui-core/lib/geospec-candidate-consent';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '@taucad/utils/keyed-mutex';

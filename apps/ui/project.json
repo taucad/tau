@@ -643,6 +643,84 @@
     "test": {
       "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"]
     },
+    "test:shard-1": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "metadata": {
+        "description": "Shard 1 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=1/6"
+      }
+    },
+    "test:shard-2": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "metadata": {
+        "description": "Shard 2 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=2/6"
+      }
+    },
+    "test:shard-3": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "metadata": {
+        "description": "Shard 3 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=3/6"
+      }
+    },
+    "test:shard-4": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "metadata": {
+        "description": "Shard 4 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=4/6"
+      }
+    },
+    "test:shard-5": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "metadata": {
+        "description": "Shard 5 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=5/6"
+      }
+    },
+    "test:shard-6": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "metadata": {
+        "description": "Shard 6 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=6/6"
+      }
+    },
     "formal:wide": {
       "executor": "nx:run-commands",
       "cache": false,

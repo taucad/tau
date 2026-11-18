@@ -532,7 +532,7 @@ jobs:
           fi
 
   # The affected tasks run as parallel lanes on separate standard runners: two lint, two typecheck,
-  # two build and three test shards, and the package-check shards (`pkgcheck` below). One runner running
+  # two build and six test shards, and the package-check shards (`pkgcheck` below). One runner running
   # every task in turn took 1 h 40 min on a full graph (run 37221169741, 2026-10-04); the lanes bring
   # that down to the longest lane. Each lane keeps `--parallel=1`, which its own 16 GB runner still
   # needs (see `Run the lane's tasks`). Lint, typecheck and build each ended past 10 min at p90 as one
@@ -559,7 +559,8 @@ jobs:
     strategy:
       fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
-        lane: [lint-1, lint-2, typecheck-1, typecheck-2, build-1, build-2, test-1, test-2, test-3]
+        lane:
+          [lint-1, lint-2, typecheck-1, typecheck-2, build-1, build-2, test-1, test-2, test-3, test-4, test-5, test-6]
     env:
       # The build lanes' targets, in `nx affected` and the deal alike.
       BUILD_TARGETS: build size check-desktop-payload check-critical-budget check-static-shells check-server-output
@@ -659,12 +660,18 @@ jobs:
       # they depend on (`--graph`), so `ui` and the desktop build its payload check needs share a build shard
       # instead of building it twice. A task another shard's project also depends on may run in both; Nx caches it.
       #
-      # The three test shards split the affected projects with a `test` target by
+      # The six test shards split the affected projects with a `test` target by
       # measured uncached test seconds (scripts/src/test-shard-dealer.ts and its
       # duration snapshot). The project list comes from the graph at run time,
       # never from this file: one `nx affected -t test --graph=<file>` writes the affected
-      # `test` tasks and the project graph (each project's tags) without running
+      # `test` tasks and the project graph (each project's tags and targets) without running
       # anything, in place of an `nx show projects --affected` and an `nx graph` (X8).
+      # A project that declares `test:shard-<n>` targets is dealt as those tasks instead of
+      # its whole `test`: `ui:test`, about 950 s uncached, is six `ui:test:shard-<n>` tasks of
+      # about 160 s, so it no longer sets one lane's floor (CI throughput review ST-1,
+      # decomposition rows DC-9/DC-10). Each is cacheable and keyed on its own `--shard`; its
+      # Vitest config deals the files by measured seconds, and the six run every file once
+      # (apps/ui/test-shards.test.ts). Locally, `ui:test` still runs every file.
       #
       # `--parallel=1`: ui:lint and ui:typecheck each peak near 9.5 GB, so any two of
       # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
@@ -727,19 +734,41 @@ jobs:
                 .graph.nodes as $nodes
                 | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
                 | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
+              # A project with `test:shard-<n>` targets enters the deal as its `<project>:test:shard-<n>`
+              # tasks, every one of them, in place of the project; the rest enter as projects.
+              units=$(jq -c --argjson projects "$projects" '
+                .graph.nodes as $nodes
+                | [$projects[] as $project
+                   | ([$nodes[$project].data.targets // {} | keys[] | select(test("^test:shard-[1-9][0-9]*$"))]) as $shards
+                   | if ($shards | length) > 0 then $shards[] | "\($project):\(.)" else $project end]' "$RUNNER_TEMP/test-graph.json")
               # Every lane deals the same list heaviest first to the lightest shard by
               # duration, so the shards partition it and the slowest suites land apart.
-              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3)
+              # `--shards` is the number of `test-<n>` rows in the matrix above.
+              shard=$(echo "$units" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 6)
               if [ -z "$shard" ]; then
                 echo "No affected test projects in this shard."
                 exit 0
               fi
-              echo "Shard projects: $shard"
+              echo "Shard projects and tasks: $shard"
+              projects=$(echo "$shard" | tr ',' '\n' | grep -v ':' | paste -sd, - || true)
+              tasks=$(echo "$shard" | tr ',' '\n' | grep ':' || true)
+              : > "$RUNNER_TEMP/affected-test.log"
+              status=0
               # Streamed, not `static`: Nx holds a static task's output until the task ends and then
               # prints only its first 64–128 KiB into a pipe, so a long suite lost its Vitest summary and
               # every failing test's name (F3; `ui:test` in queue runs 43990460984, 44048796415,
               # 44050273147 and 44062740359 stopped mid-run in both the job log and this file).
-              pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
+              if [ -n "$projects" ]; then
+                pnpm nx run-many -t test --projects "$projects" --parallel=1 --outputStyle=stream 2>&1 | tee -a "$RUNNER_TEMP/affected-test.log" || status=1
+              fi
+              # A project's dealt shard tasks run in one `run-many`, and every project's run even when
+              # another failed, so a failed shard hides no other result.
+              for project in $(echo "$tasks" | cut -d: -f1 | sort -u); do
+                targets=$(echo "$tasks" | grep "^$project:" | cut -d: -f2- | paste -sd' ' -)
+                # shellcheck disable=SC2086 # one word per target
+                pnpm nx run-many -t $targets --projects "$project" --parallel=1 --outputStyle=stream 2>&1 | tee -a "$RUNNER_TEMP/affected-test.log" || status=1
+              done
+              exit "$status"
               ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
@@ -1973,8 +2002,14 @@ jobs:
         with:
           save-pnpm-store: 'true'
 
-  api:
-    name: API tests (Postgres + MinIO)
+  # The API lane, in two shards on standard runners, each with its own PostgreSQL, Redis and MinIO: as one job
+  # it ended at 10.2 / 12.2 min (p50 / p90, 60 green queue runs), past the 10 min lane budget (Brain
+  # research/ci-structural-decomposition-blueprint.md, ST-3). Each shard runs its Vitest `--shard` half of every
+  # affected API suite; shard 1 adds the git end-to-end tier (about 140 s) and shard 2 the server modes, billing
+  # composition, edit bench, live-harness guards, migration injection and session cookie cases (about 110 s).
+  # `API tests (Postgres + MinIO)` below is the required check: it passes only when both shards passed.
+  api-shard:
+    name: API tests (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
@@ -1985,6 +2020,10 @@ jobs:
       pull-requests: 'read'
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}
+    strategy:
+      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      matrix:
+        shard: [1, 2]
     steps:
       # Two commits in a queue run, full history otherwise (see `plan`): the suites step
       # selects its projects with `nx affected`.
@@ -2020,6 +2059,9 @@ jobs:
       # dependents' (`api` and `api-e2e` depend on every one), not every API suite.
       # `nx affected` ignores `--projects`, so the tag is selected by excluding every
       # project but it: `--exclude '*,!tag:scope:api'`.
+      # `--shard=<n>/2` reaches every suite's `vitest`, which sorts the suite's files by path hash and runs the
+      # n-th half, so the two shards run every file of every suite once (scripts/src/api-shard-union.test.ts).
+      # `--passWithNoTests` lets a suite with a single file run it in one shard and nothing in the other.
       # `--parallel=1`: the suites share this lane's one PostgreSQL, and concurrent suites
       # contend on it (DC-2 measured a 70,000-row purge suite going from 60 s to 120 s
       # beside two others); one at a time keeps each suite's timing its own. `DATABASE_URL`
@@ -2036,9 +2078,10 @@ jobs:
       - name: Run API suites (real PostgreSQL + MinIO)
         env:
           DATABASE_URL: postgresql://dev_user:dev_password@localhost:5432/tau_dev
-        run: pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1
+        run: pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1 -- --shard=${{ matrix.shard }}/2 --passWithNoTests
 
       - name: Qualify API development and production servers
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:server-modes
 
       # The Tau agent plane left the API at W3-CUT-2 (2026-09-02); the surviving
@@ -2047,14 +2090,17 @@ jobs:
       # agent-observability code, on the launcher's own disposable PostgreSQL 17.
       # postgres:17-alpine pinned by digest; the billing-e2e job's step says how to refresh it.
       - name: Pull the billing foundation PostgreSQL image
+        if: matrix.shard == 2
         run: |
           docker pull postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
           docker tag postgres@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac postgres:17-alpine
 
       - name: Run the API's billing composition contracts
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:billing-composition
 
       - name: Run deterministic file-edit qualification (edit bench)
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:models -- app/testing/edit-bench/edit-bench.test.ts
 
       # Hermetic guards on the live provider harness, which the credentialed live
@@ -2062,6 +2108,7 @@ jobs:
       # and a prompt a model refuses as a jailbreak never reaches a provider
       # (docs/research/grok-4-7-live-suite-refusal-blueprint.md).
       - name: Run the live-harness guards
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:models -- app/testing/live/live-assertions.test.ts app/testing/live/live-gateway.harness.test.ts
 
       # Testing policy §13 for the durable migration the release command applies:
@@ -2069,12 +2116,14 @@ jobs:
       # no-op. Lives under `app/testing/**`, so it runs through the same target as
       # the edit bench and needs the PostgreSQL this lane starts.
       - name: Run the durable-migration failure injection
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:models -- app/testing/git-storage-migration.integration.test.ts
 
       # Auth session cookie blueprint, harness H2: the cookie cache over the real
       # AuthModule, PostgreSQL and Redis (cases 2, 4, 5, 17 and 24). Lives under
       # `app/testing/**`, so it runs through `test:models` like the edit bench.
       - name: Run the session cookie cache cases on PostgreSQL
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:models -- app/testing/session-cache.billing.integration.test.ts
 
       # Charter S2, end to end: two real API processes over one MinIO and one
@@ -2083,14 +2132,28 @@ jobs:
       # boots either process.
       # Since DC1 the tier is two API processes and two tau-storage workers.
       - name: Run the git end-to-end tier (two API processes, two storage workers, one object store)
+        if: matrix.shard == 1
         run: pnpm nx run-many -t test:git
 
       # DC1 (review FR20): no API or storage log line of the tier may carry a grant,
       # a receipt signature or a presigned `X-Amz-Signature`/`X-Amz-Credential`.
       # The same checker runs over a captured staging sample.
       - name: Check the git tier's logs for signed tokens
-        if: ${{ !cancelled() && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
+        if: ${{ !cancelled() && matrix.shard == 1 && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
         run: cat out/test-results/api-e2e-git/*.log | node apps/api/scripts/check-storage-log-sample.mts /dev/stdin
+
+  # The required check `API tests (Postgres + MinIO)` (main ruleset), and the job `staging.yml` and the gate read:
+  # it passes only when both API shards passed, and is skipped exactly when they were.
+  api:
+    name: API tests (Postgres + MinIO)
+    runs-on: ubuntu-latest
+    needs: [plan, api-shard]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}
+    steps:
+      - name: Require both API shards
+        env:
+          SHARDS_RESULT: ${{ needs.api-shard.result }}
+        run: test "$SHARDS_RESULT" = success
 
   # Credential-free database and Stripe adapter contracts, including fork PRs. Runs when
   # `api-billing` or a project it depends on is affected, on pull requests, in the merge

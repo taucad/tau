@@ -12,6 +12,12 @@
     "revisions:test:shard-3": 150,
     "runtime": 80,
     "ui": 952,
+    "ui:test:shard-1": 175,
+    "ui:test:shard-2": 175,
+    "ui:test:shard-3": 175,
+    "ui:test:shard-4": 175,
+    "ui:test:shard-5": 175,
+    "ui:test:shard-6": 175,
     "ui-e2e": 11,
     "viewer": 92,
     "zoo": 109

@@ -15,7 +15,7 @@ Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` t
 - Prefer voxel booleans, offsets, ShapeKernel and LatticeLibrary over manual triangles. Output is mesh, not BRep.
 - Prefer an `SdfExpression` (`['max', ['abs', 'x'], ['abs', 'y']]`) over a JS `sdf` callback: expressions fill in parallel, callbacks run serially.
 - Stylised characters (mascots, chess pieces, toy creatures) are one blended SDF field: read [characters-reference.md](characters-reference.md) for the smooth-union and ellipsoid helpers.
-- Dispose large intermediates after their last use.
+- Free each large intermediate at its last use: the garbage collector cannot free a grid in the middle of one synchronous `main()`. Call `dispose()`, pass `{ consume: true }` to a boolean or offset whose receiver is finished (`a.union(b, { consume: true })`), or build a stage in `pico.scope(() => …)`, which frees everything the stage created except what it returns.
 - The viewer shows a fast preview; exports and GeoSpec checks replay the model exactly, so they can differ by about one voxel. Never request `lane: 'fast'` for manufacturing exports.
 
 Route TypeScript PicoGK requests here; native C# `main.cs` uses desktop `cad-picogk`.

@@ -16,7 +16,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { CreateProjectOptions } from '#runtime/project-library-commands.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { toast } from '@taucad/ui/components/sonner';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
 
 export type PublicationForkSource = {

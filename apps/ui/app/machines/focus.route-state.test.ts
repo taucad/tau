@@ -3,7 +3,7 @@
  * committed route is compared with focus's request by project, never by request id or chat.
  */
 import { describe, expect, it } from 'vitest';
-import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
+import type { PendingProjectRecovery } from '@taucad/files-ui/types/pending-project-operation.types';
 import type { FocusAccessAnswer } from '#machines/focus.machine.js';
 import { createFocusHarness, projectFixture, slugsOf } from '#machines/focus.machine.test.fixture.js';
 import type { FocusHarness } from '#machines/focus.machine.test.fixture.js';

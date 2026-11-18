@@ -64,6 +64,10 @@
   "taucad": {
     "hostTarget": "browser"
   },
+  "tau": {
+    "skills": null,
+    "reason": "Transcoder and format kernel; no authoring surface"
+  },
   "dependencies": {
     "@taucad/brep": "workspace:*",
     "@taucad/geometry-core": "workspace:*",

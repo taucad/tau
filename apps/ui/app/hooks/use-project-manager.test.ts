@@ -27,12 +27,15 @@ import { serializeStartRecord, startRecordPath } from '@taucad/revisions';
 import { defaultPanelState } from '@taucad/ui-core/constants/editor.constants';
 import type { ProjectFileSystemConfig } from '@taucad/files-ui/filesystem/handle-store';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
-import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type {
+  PendingProjectOperation,
+  PendingProjectStorage,
+} from '@taucad/files-ui/types/pending-project-operation.types';
+import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
+import type { ConnectedWorkspace } from '@taucad/files-ui/runtime/project-library-workspace';
 import type { CreateProjectOptions, ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
-import type { ProjectListing } from '#runtime/project-library-storage.js';
+import type { ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';

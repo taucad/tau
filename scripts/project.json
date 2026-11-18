@@ -88,7 +88,12 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "node scripts/src/validate-quickstart-budget.ts"
-      }
+      },
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/apps/docs/content/docs/runtime/getting-started/quick-start.mdx"
+      ]
     },
     "validate-prose": {
       "executor": "nx:run-commands",
@@ -122,14 +127,42 @@
       }
     },
     "test": {
+      "metadata": {
+        "description": "Suites that read only scripts, its dependencies and the workspace files listed here: the workflows and actions they pin, the Grafana rules, the agent skills and policies, the repository catalog and the root manifests. Suites that read other projects or the Nx graph are in validate-workspace-tests (scripts/vitest.config.ts)."
+      },
       "inputs": [
         "default",
         "^production",
-        "{workspaceRoot}/packages/plugins/*/README.md",
-        "{workspaceRoot}/packages/core/*/README.md",
-        "{workspaceRoot}/packages/plugins/*/src/index.ts",
-        "{workspaceRoot}/packages/core/*/src/index.ts",
-        "{workspaceRoot}/**/*"
+        "{workspaceRoot}/.github/**/*",
+        "{workspaceRoot}/infra/grafana/**/*",
+        "{workspaceRoot}/.agents/skills/**/*",
+        "{workspaceRoot}/AGENTS.md",
+        "{workspaceRoot}/docs/policy/**/*",
+        "{workspaceRoot}/tools/repositories/**/*",
+        "{workspaceRoot}/package.json",
+        "{workspaceRoot}/pnpm-workspace.yaml"
+      ]
+    },
+    "validate-workspace-tests": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The scripts suites that read other projects' files, the Nx project graph or sibling directories (workspaceTests in scripts/vitest.config.ts). Uncached and without workspace-root inputs, so it selects nothing; scripts:validate runs it in Validate workspace on every landing."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run",
+        "env": {
+          "TAU_SCRIPTS_TEST_SET": "workspace"
+        }
+      }
+    },
+    "typecheck": {
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/tools/formal.plugin.ts",
+        "{workspaceRoot}/tools/tsgo.plugin.ts"
       ]
     },
     "test:e2e:queue": {
@@ -147,9 +180,9 @@
       "inputs": ["default", "^production"],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../node_modules/.bin/vitest run",
+        "command": "vitest run",
         "env": {
-          "TAU_SCRIPTS_BROWSER_TESTS": "true"
+          "TAU_SCRIPTS_TEST_SET": "browser"
         }
       }
     },
@@ -157,13 +190,20 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "node --import tsx scripts/src/update-license-deps.mts --check"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/docs/licensing/third-party-licenses.md"]
     },
     "validate-open-source-notices": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node --import tsx scripts/src/update-open-source-notices.mts --check"
-      }
+      },
+      "inputs": [
+        "default",
+        "^default",
+        "{workspaceRoot}/apps/www/content/legal/desktop-runtime-notices.json",
+        "{workspaceRoot}/apps/www/content/legal/open-source.md"
+      ]
     },
     "prepare-geospec-test-consumer": {
       "executor": "nx:run-commands",
@@ -218,6 +258,7 @@
             "mcp",
             "slicer",
             "zoo",
+            "cadmpeg",
             "skills",
             "host",
             "cli"
@@ -227,7 +268,8 @@
       "options": {
         "command": "node scripts/src/prepare-geospec-test-consumer.ts out/artifacts/geospec-test-consumer/receipt.json",
         "forwardAllArgs": false
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/pnpm-workspace.yaml", "{workspaceRoot}/pnpm-lock.yaml"]
     },
     "check-geospec-test-consumer": {
       "executor": "nx:run-commands",
@@ -281,7 +323,8 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "node scripts/src/check-release-projects.ts"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/.github/workflows/publish.yml"]
     },
     "check-pack-install": {
       "executor": "nx:run-commands",

@@ -52,6 +52,7 @@ import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
+  acpLoginLaunch,
   defaultConfigDirectory,
   defaultDependencyStore,
   discoverAcpAgents,
@@ -86,6 +87,7 @@ import {
   isPermissionGranted,
   isTrustedSender,
   navigationDecision,
+  navigationLogTarget,
   postHogConnectOrigins,
   rendererOrigins,
 } from '#main/navigation-policy.js';
@@ -99,11 +101,13 @@ import {
 import { registerPermissionBridge } from '#main/permission-bridge.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
 import { registerTerminalRelay } from '#main/terminal-relay.js';
+import { registerAgentSignIn } from '#main/agent-sign-in.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
   bundledGitEnvironment,
   bundledStoreGuardEnvironment,
+  windowsShellSandboxEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -710,6 +714,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const storeGuardEnvironment = bundledStoreGuardEnvironment(
     app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
   );
+  /* The Windows shell sandbox helper this build ships, and its off-by-default switch (Q15, D15). */
+  const windowsSandboxEnvironment = windowsShellSandboxEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
+    environment,
+  );
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   /* A step the window does not need is logged, reported and skipped when it fails; it never ends the launch (B18). */
   const skipOptionalStep = (step: OptionalBootstrapStep, error: unknown): void => {
@@ -1235,6 +1244,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...gitEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      /* T19: the utility's runtime reporter sends to this API, under this release, only under the renderer's consent. */
+      TAU_API_URL: environment['TAU_API_URL']!, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      TAU_DESKTOP_RELEASE: app.getVersion(), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
       ...(machinesEnabled ? { TAU_DESKTOP_MACHINES_DIR: machinesDirectory } : {}),
@@ -1251,6 +1263,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       ...desktopShellBwrapEnvironment(),
       ...storeGuardEnvironment,
+      ...windowsSandboxEnvironment,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),
@@ -2005,6 +2018,33 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
   });
 
+  /* An external agent's own sign-in, the one process outside the Terminal's sandbox (D19/D20 amendment,
+   * 2026-11-16): the discovered CLI with its profile's login arguments and its adapter's environment, never a
+   * shell, started on the person's Enter. Main's environment is the base the adapter's own is built from. */
+  const agentSignIn = registerAgentSignIn({
+    ipcMain,
+    trusted,
+    launchOf: (agentId) => {
+      const adapter = externalAgents.adapterOf(agentId);
+      return adapter === undefined ? undefined : acpLoginLaunch(adapter);
+    },
+    loadPty: async () => {
+      // eslint-disable-next-line import-x/no-extraneous-dependencies -- optional on purpose: without node-pty the sign-in tab answers pty-unavailable, as the Terminal does.
+      const nodePty = await import('node-pty');
+      /* A CommonJS module: Node's ESM loader puts node-pty's exports on `default`, a bundled build on the namespace. */
+      const { spawn } = 'default' in nodePty ? nodePty.default : nodePty;
+      return { spawn: (file, args, options) => spawn(file, [...args], options) };
+    },
+    createChannel: () => new MessageChannelMain(),
+    home: homedir(),
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
+  app.on('will-quit', () => {
+    agentSignIn.closeAll();
+  });
+
   /**
    * One in-app route, as an absolute URL for whichever renderer is serving.
    *
@@ -2121,7 +2161,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       if (navigationDecision(url, origins) === 'open-externally') {
         void shell.openExternal(url);
       }
-      log.log('info', 'navigation.window-open-denied', { url });
+      log.log('info', 'navigation.window-open-denied', { target: navigationLogTarget(url) });
       return { action: 'deny' };
     });
     const guardNavigation =
@@ -2139,7 +2179,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         if (decision === 'open-externally') {
           void shell.openExternal(url);
         }
-        log.log('warn', 'navigation.blocked', { event, url, decision });
+        log.log('warn', 'navigation.blocked', { event, target: navigationLogTarget(url), decision });
       };
     window.webContents.on('will-navigate', guardNavigation('will-navigate'));
     window.webContents.on('will-redirect', guardNavigation('will-redirect'));

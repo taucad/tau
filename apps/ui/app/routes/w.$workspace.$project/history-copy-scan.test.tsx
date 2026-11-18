@@ -30,7 +30,7 @@ import type { RevisionCard } from '#hooks/use-revisions.js';
 import { projectSyncIndicator } from '#components/nav/project-sync-status.js';
 import { selectProjectFacts } from '#hooks/use-sidebar-status.js';
 import type { ProjectSidebarRow } from '#hooks/use-sidebar-status.js';
-import type { RevisionToast, WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
+import type { RevisionToast, WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
 /** The two things M11 forbids in copy. */
 const forbidden = [/\bRev \d/u, /\brevisions?\b/iu] as const;

@@ -7,13 +7,13 @@ import type { KernelProvider } from '@taucad/runtime';
  */
 export const kernelLibraries: Partial<Record<KernelProvider, Readonly<Record<string, string>>>> = {
   replicad: {
-    replicad: 'npm:@taulabs/replicad@1.1.0-taulabs.1',
-    'replicad-opencascadejs': 'npm:@taulabs/replicad-opencascadejs@0.23.0-beta.1',
+    replicad: 'npm:@taulabs/replicad@1.2.0-beta.0',
+    'replicad-opencascadejs': 'npm:@taulabs/replicad-opencascadejs@0.23.0-beta.2',
   },
   opencascadejs: { libcascade: '3.1.0' },
   jscad: { '@jscad/modeling': '2.13.0' },
   manifold: { 'manifold-3d': '3.4.1' },
-  picovoxel: { picovoxel: '0.2.1' },
+  picovoxel: { picovoxel: '0.3.0' },
   smlib: { '@classcad/smlibwasm': '0.6.2' },
   tscircuit: {
     // The connectivity-map floating Biome range can select releases before their platform binaries exist.

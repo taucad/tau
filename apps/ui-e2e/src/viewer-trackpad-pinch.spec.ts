@@ -20,14 +20,6 @@ type CameraReading = Readonly<{
   revision: number;
 }>;
 
-type PinchBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: {
-    getCamera(): CameraReading;
-    setFovAngle(angle: number): void;
-    setPostProcessingEnabled(enabled: boolean): void;
-  };
-};
-
 const previewCanvasSelector = 'canvas[data-engine]';
 const birdhouseFixtureRoute = '/__e2e/example-fixture?locator=replicad.birdhouse&graphicsBackend=webgl';
 /** One trackpad-sized wheel step, in pixels. */
@@ -37,15 +29,13 @@ async function openBirdhouseFixture(): Promise<void> {
   await target.setViewport({ width: 1280, height: 800 });
   await target.navigate(birdhouseFixtureRoute);
   await target.expectVisible(selectors.getByCss(previewCanvasSelector), 60_000);
+  // Post-processing is always on since #1983; the pinch rows read the camera, not pixels.
   await target.expectGeometryFramed();
-  await target.evaluate(() => {
-    (globalThis as unknown as PinchBridgeWindow).__TAU_SECTION_VIEW_TEST__?.setPostProcessingEnabled(false);
-  });
 }
 
 async function readCamera(): Promise<CameraReading> {
   return target.evaluate(() => {
-    const bridge = (globalThis as unknown as PinchBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -92,17 +82,14 @@ async function wheel({ deltaY, ctrlKey }: Readonly<{ deltaY: number; ctrlKey: bo
     { deltaY, ctrlKey },
   );
   await target.waitFor(
-    (revision) =>
-      ((globalThis as unknown as PinchBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getCamera().revision ?? revision) >
-      revision,
+    (revision) => (globalThis.__TAU_SECTION_VIEW_TEST__?.getCamera().revision ?? revision) > revision,
     before.revision,
   );
   // The step has landed when the camera has changed and then stayed the same for two frames.
   await target.evaluate(
     async () =>
       new Promise<void>((resolve) => {
-        const readRevision = (): number | undefined =>
-          (globalThis as unknown as PinchBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getCamera().revision;
+        const readRevision = (): number | undefined => globalThis.__TAU_SECTION_VIEW_TEST__?.getCamera().revision;
         let last = readRevision();
         let quietFrames = 0;
         const tick = (): void => {
@@ -124,10 +111,10 @@ async function wheel({ deltaY, ctrlKey }: Readonly<{ deltaY: number; ctrlKey: bo
 
 async function setOrthographic(): Promise<void> {
   await target.evaluate(() => {
-    (globalThis as unknown as PinchBridgeWindow).__TAU_SECTION_VIEW_TEST__?.setFovAngle(0);
+    globalThis.__TAU_SECTION_VIEW_TEST__?.setFovAngle(0);
   });
   await target.waitFor(() => {
-    const camera = (globalThis as unknown as PinchBridgeWindow).__TAU_SECTION_VIEW_TEST__?.getCamera();
+    const camera = globalThis.__TAU_SECTION_VIEW_TEST__?.getCamera();
     return camera?.projection === 'orthographic' && camera.requestedFov === 0;
   });
 }
@@ -172,6 +159,15 @@ describe('Viewer trackpad pinch (PF1)', () => {
     const plainRatio = plain.after.verticalSpan / plain.before.verticalSpan;
     expect(Math.sign(pinchRatio - 1), 'the pinch zooms the way the wheel does').toBe(Math.sign(deltaY));
     expect(pinchRatio).toBeCloseTo(plainRatio, 3);
-    expect(pinch.after.controlsDistance).toBeCloseTo(pinch.before.controlsDistance, 6);
+    /*
+     * Since #2003 the camera actor derives an orthographic camera's distance from its view
+     * (`orthographicCameraDistance` in `@taucad/camera`: the bounds' foreground extent plus the larger of their diagonal
+     * and the visible span), so a zoom that leaves the span above the diagonal moves the camera by exactly the span's
+     * change, keeping the near plane off the model. The pinch only zooms: nothing else moves the camera.
+     */
+    expect(pinch.after.controlsDistance - pinch.before.controlsDistance).toBeCloseTo(
+      pinch.after.verticalSpan - pinch.before.verticalSpan,
+      6,
+    );
   });
 });

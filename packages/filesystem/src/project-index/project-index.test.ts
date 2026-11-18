@@ -1705,3 +1705,60 @@ describe('ProjectIndexes declared placeholders (D9)', () => {
     expect(inner.get('/p')?.pendingFor('y.step')).toBeUndefined();
   });
 });
+
+/* D17: a snapshot write a clear or close overtakes stores nothing, and close waits for it to end. */
+describe('ProjectIndexes snapshot writes overtaken by a clear or close', () => {
+  const gatedSnapshot = async () => {
+    const { provider } = await durableRoot();
+    await provider.writeFile('project/a.ts', 'a');
+    const indexes = indexesOver(provider);
+    await indexes.ready('/p');
+    indexes.addFile('/p/b.ts', { size: 1 });
+    const gate = Promise.withResolvers<void>();
+    const reached = Promise.withResolvers<void>();
+    const mkdir = provider.mkdir.bind(provider);
+    vi.spyOn(provider, 'mkdir').mockImplementation(async (path, options) => {
+      if (path.includes('.tau/index')) {
+        reached.resolve();
+        await gate.promise;
+      }
+      return mkdir(path, options);
+    });
+    const writeFile = vi.spyOn(provider, 'writeFile');
+    const snapshotWrites = (): number =>
+      writeFile.mock.calls.filter(([path]) => String(path).includes('.tau/index')).length;
+    return { indexes, gate, reached: reached.promise, snapshotWrites };
+  };
+
+  it('should store nothing when a clear overtakes the write before the disk', async () => {
+    const { indexes, gate, reached, snapshotWrites } = await gatedSnapshot();
+    const persisting = indexes.persist('/p');
+    await reached;
+
+    indexes.clear();
+    gate.resolve();
+
+    expect(await persisting).toBe('skipped');
+    expect(snapshotWrites()).toBe(0);
+  });
+
+  it('should resolve close only once the write in flight has ended, and start none after it', async () => {
+    const { indexes, gate, reached, snapshotWrites } = await gatedSnapshot();
+    const persisting = indexes.persist('/p');
+    await reached;
+
+    let closed = false;
+    const closing = (async () => {
+      await indexes.close();
+      closed = true;
+    })();
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    gate.resolve();
+    await closing;
+
+    expect(await persisting).toBe('skipped');
+    expect(await indexes.persist('/p')).toBe('skipped');
+    expect(snapshotWrites()).toBe(0);
+  });
+});

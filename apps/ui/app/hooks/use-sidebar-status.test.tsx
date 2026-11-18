@@ -9,7 +9,7 @@ import type { Chat } from '@taucad/chat';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
 import * as questionTool from '@taucad/chat-ui/utils/question-tool';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
@@ -18,7 +18,7 @@ import type { SessionsActorRef, SessionsProjectStatus } from '#machines/sessions
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import { useSessions } from '#hooks/use-sessions.js';
 import {
   chatStatusLabel,
@@ -53,7 +53,7 @@ vi.mock('#hooks/use-sessions.js', () => ({
     policyRefusal: undefined,
   }),
 }));
-vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: vi.fn() }));
+vi.mock('@taucad/revisions-ui/services/revision-client-registry', () => ({ peekRevisionClient: vi.fn() }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({
@@ -1297,7 +1297,8 @@ const compiledHooks = await (async () => {
     '@taucad/chat-ui/utils/error.utils': await import('@taucad/chat-ui/utils/error.utils'),
     '#machines/sessions.machine.js': await import('#machines/sessions.machine.js'),
     '#services/sessions-store.js': await import('#services/sessions-store.js'),
-    '#services/revision-client-registry.js': await import('#services/revision-client-registry.js'),
+    '@taucad/revisions-ui/services/revision-client-registry':
+      await import('@taucad/revisions-ui/services/revision-client-registry'),
     '#hooks/use-sessions.js': await import('#hooks/use-sessions.js'),
     '#hooks/chat-session-store-provider.js': await import('#hooks/chat-session-store-provider.js'),
     '@taucad/ui-core/lib/xstate.lib': await import('@taucad/ui-core/lib/xstate.lib'),

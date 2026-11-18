@@ -20,7 +20,7 @@ import type * as PicovoxelModule from 'picovoxel';
 import picovoxelPackage from 'picovoxel/package.json' with { type: 'json' };
 import { createExportFile, kernelIssueCodeValues } from '@taucad/runtime/types';
 import { z } from 'zod';
-import type { KernelIssue, KernelIssueCode } from '@taucad/runtime/types';
+import type { KernelIssue, KernelIssueCode, ResourceLimitDetails } from '@taucad/runtime/types';
 import {
   asBuffer,
   checkAbort,
@@ -163,11 +163,13 @@ export type PicovoxelContext = {
   /** The fast lane's artifact, resolved from the host's `wasm` option inside this worker. */
   readonly wasm: PicovoxelArtifact;
   /**
-   * WebAssembly heap size above which an idle runtime is recycled after its render.
+   * Memory above which an idle runtime is recycled after its render: its WebAssembly heap plus the bytes
+   * PicoVoxel's grid pager holds in its far store outside the heap (I6b).
    *
    * Linear memory never shrinks, so a runtime that once built a fine model keeps its peak heap for the
-   * worker's life. Origin: blueprint D31's provisional 1.5 GiB (the option's default); a host option, not a
-   * model one, so a phone host can recycle earlier (D-RT-03).
+   * worker's life, and grids the pager parked live in the far store instead of the heap. Origin: blueprint
+   * D31's provisional 1.5 GiB (the option's default); a host option, not a model one, so a phone host can
+   * recycle earlier (D-RT-03).
    */
   readonly recycleHeapBytes: number;
   /**
@@ -252,6 +254,8 @@ const startRuntime = async (
       compiledModuleFor(runtime, picovoxelAssets[artifact].wasm),
       emscriptenOverrides(artifact),
     ]);
+    // PicoVoxel's grid pager is on by default at its 2 GiB budget, the 4 GiB heap's headroom: nothing parks below it,
+    // and output is byte-identical either way. It parks to its RAM store, never to disk, so it leaves no scratch files.
     return await artifactModule.createPicoRuntime({ wasmModule, wasm });
   } catch (error) {
     context.runtimes.delete(artifact);
@@ -409,6 +413,24 @@ const openSession = async (
 };
 
 /**
+ * The runtime's memory: its linear memory, and the bytes PicoVoxel's grid pager parked in its far store outside it
+ * (I6b). Both are runtime-wide, so every session on a runtime reports the same figures. Paged-out grids never show in
+ * the heap, so a recycle decision that read the heap alone would not see them.
+ *
+ * @param pico - A session on the runtime.
+ * @returns Heap and far-store bytes.
+ */
+const runtimeMemory = (pico: Pico): { readonly heapBytes: number; readonly farBytes: number } => {
+  try {
+    const { heapBytes, farBytes } = pico.footprint;
+    return { heapBytes, farBytes };
+  } catch {
+    // Author code disposed the kernel's session, which then reports no footprint; the module's memory is still there.
+    return { heapBytes: pico.module.HEAPU8.byteLength, farBytes: 0 };
+  }
+};
+
+/**
  * Report the render's memory through the runtime logger instead of PicoVoxel's `console.warn`.
  *
  * @param logger - Kernel logger.
@@ -417,12 +439,12 @@ const openSession = async (
  */
 const logSessionMemory = (logger: RuntimeLogger, pico: Pico, artifact: PicovoxelArtifact): void => {
   const nativeBytes = pico.memory.total;
-  const heapBytes = pico.module.HEAPU8.byteLength;
-  logger.debug(`PicoVoxel session memory native=${nativeBytes} heap=${heapBytes} variant=${artifact}`);
+  const { heapBytes, farBytes } = runtimeMemory(pico);
+  logger.debug(`PicoVoxel session memory native=${nativeBytes} heap=${heapBytes} far=${farBytes} variant=${artifact}`);
   if (nativeBytes > memoryWarningBytes) {
     logger.warn(
       `PicoVoxel held ${nativeBytes} bytes of native memory on the ${artifact} artifact. Increase voxelSize or shrink the model bounds to lower memory use.`,
-      { data: { nativeBytes, heapBytes, artifact } },
+      { data: { nativeBytes, heapBytes, farBytes, artifact } },
     );
   }
 };
@@ -553,7 +575,7 @@ const restoredWords = (value: Uint8Array, index: number, field: 'vertices' | 'tr
  * triangles are dropped here, once, so the viewer and every export see the same mesh; an adaptive
  * build keeps the in-line seam triangles that stitch its merged cells (D36).
  *
- * @param mesh - A mesh `main()` returned, or one derived from returned voxels.
+ * @param mesh - A mesh `main()` returned, or the arrays meshed from returned voxels.
  * @param part - Resolved display name and zero-based output index.
  * @param session - The session the mesh was built in.
  * @param session.lane - The session's resolved lane, used when a mesh carries no lane.
@@ -561,7 +583,7 @@ const restoredWords = (value: Uint8Array, index: number, field: 'vertices' | 'tr
  * @returns The durable snapshot.
  */
 const snapshotMesh = (
-  mesh: Mesh,
+  mesh: Pick<Mesh, 'vertices' | 'triangles' | 'lane'>,
   part: Readonly<{ index: number; name: string }>,
   session: Readonly<{ lane: PicovoxelLane; adaptive: boolean }>,
 ): PicovoxelShapeSnapshot => {
@@ -960,6 +982,34 @@ const issueCodeFor = (picoCode: PicoErrorCode | undefined): KernelIssueCode =>
       ? 'REPRESENTATION_UNSUPPORTED'
       : 'RUNTIME';
 
+/**
+ * PicoVoxel compiles an `SdfExpression` to a tape of at most a fixed number of instructions and refuses a longer one
+ * with `PICO_INVALID_ARGUMENT`. The maximum it names is the only number the refusal carries; it stops counting at the
+ * first instruction past it, so the demand is unknown.
+ */
+const tapeLimitPattern = /^Invalid SDF expression: more than (?<maximum>\d+) operations\./u;
+
+/**
+ * The capacity limit a PicoVoxel refusal names, when it is the tape-length refusal.
+ *
+ * @param picoCode - The PicoVoxel error code, when the failure carried one.
+ * @param message - The failure's message.
+ * @returns The limit details, or `undefined` for any other failure.
+ */
+const tapeLimitOf = (picoCode: PicoErrorCode | undefined, message: string): ResourceLimitDetails | undefined => {
+  const maximum =
+    picoCode === 'PICO_INVALID_ARGUMENT' ? tapeLimitPattern.exec(message)?.groups?.['maximum'] : undefined;
+  return maximum === undefined
+    ? undefined
+    : {
+        limit: 'picovoxel.tape.instructions',
+        unit: '{instruction}',
+        maximum: Number(maximum),
+        demand: { kind: 'unknown' },
+        origin: 'default',
+      };
+};
+
 const outOfMemoryRemedy =
   ' PicoVoxel ran out of WebAssembly memory; increase voxelSize (cost grows with 1/voxelSize³) or shrink the model bounds.';
 
@@ -995,9 +1045,10 @@ const buildIssue = (
   });
   const picoCode = isPicoError(error) ? error.code : undefined;
   const message = error instanceof Error ? error.message : String(error);
+  const tapeLimit = tapeLimitOf(picoCode, message);
   return {
     message: messageFor(picoCode, message),
-    code: issueCodeFor(picoCode),
+    code: tapeLimit === undefined ? issueCodeFor(picoCode) : 'RESOURCE_LIMIT',
     type: 'runtime',
     severity: 'error',
     stackFrames,
@@ -1005,6 +1056,7 @@ const buildIssue = (
     details: {
       producer: { kernelId },
       ...(picoCode ? { picoCode } : {}),
+      ...tapeLimit,
       ...(picoCode === 'PICO_LANE_LOOSENED' ? { refusal: 'PICOVOXEL_LANE_LOOSENED', picoMessage: message } : {}),
       ...options.session,
     },
@@ -1327,12 +1379,16 @@ export const picovoxelKernel = defineKernel({
         }
         throw error;
       } finally {
-        const heapBytes = pico?.module.HEAPU8.byteLength ?? 0;
+        // Read before the session is released: the heap never shrinks, and the far store holds what the pager parked.
+        const { heapBytes, farBytes } = pico === undefined ? { heapBytes: 0, farBytes: 0 } : runtimeMemory(pico);
         if (!releaseRender(pico, context.authorResources)) {
           recycleReason ??= 'a session could not be disposed';
         }
-        if (heapBytes > context.recycleHeapBytes) {
-          recycleReason ??= `its heap reached ${heapBytes} bytes`;
+        if (heapBytes + farBytes > context.recycleHeapBytes) {
+          recycleReason ??=
+            farBytes === 0
+              ? `its heap reached ${heapBytes} bytes`
+              : `its heap and far store reached ${heapBytes + farBytes} bytes (heap ${heapBytes}, far ${farBytes})`;
         }
         if (sessionArtifact !== context.wasm) {
           // D-RT-18: only the fast lane's artifact stays warm. When that is the multi build, the serial runtime

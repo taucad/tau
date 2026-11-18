@@ -36,13 +36,16 @@ import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor
 import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
-import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
+import {
+  selectWorkspaceConnectionState,
+  workspaceConnectionMachine,
+} from '@taucad/files-ui/machines/workspace-connection.machine';
 import type {
   PreparedWorkspaceCatalog,
   RegisteredWorkspace,
   WorkspaceConnectionServices,
   WorkspaceConnectionState,
-} from '#hooks/workspace-connection.machine.js';
+} from '@taucad/files-ui/machines/workspace-connection.machine';
 import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
 import {
   checkHandlePermission,
@@ -54,17 +57,20 @@ import {
 import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
-import { createLibraryDiscovery, selectEpochCurrent } from '#machines/library-discovery.machine.js';
-import type { LibraryDiscoveryActor } from '#machines/library-discovery.machine.js';
-import { createLibraryRecovery } from '#machines/library-recovery.machine.js';
-import type { LibraryRecoveryActor, ReplayOutcome } from '#machines/library-recovery.machine.js';
-import { createLibraryAccess } from '#machines/library-access.machine.js';
-import type { AccessAnswer, LibraryAccessActor } from '#machines/library-access.machine.js';
+import { createLibraryDiscovery, selectEpochCurrent } from '@taucad/files-ui/machines/library-discovery.machine';
+import type { LibraryDiscoveryActor } from '@taucad/files-ui/machines/library-discovery.machine';
+import { createLibraryRecovery } from '@taucad/files-ui/machines/library-recovery.machine';
+import type { LibraryRecoveryActor, ReplayOutcome } from '@taucad/files-ui/machines/library-recovery.machine';
+import { createLibraryAccess } from '@taucad/files-ui/machines/library-access.machine';
+import type { AccessAnswer, LibraryAccessActor } from '@taucad/files-ui/machines/library-access.machine';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import { clearLegacyProjectListing } from '#lib/legacy-project-listing.lib.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
-import type { PendingProjectOperation, PendingProjectRecovery } from '#types/pending-project-operation.types.js';
+import type {
+  PendingProjectOperation,
+  PendingProjectRecovery,
+} from '@taucad/files-ui/types/pending-project-operation.types';
 import {
   applyDiscovery,
   buildProjectListing,
@@ -77,17 +83,19 @@ import {
   rememberChatPlacement,
   replayOutcomeOf,
   scanDiscovery,
-} from '#runtime/project-library-storage.js';
-import type { DiscoveryScan, ProjectLibraryFileManager, ProjectListing } from '#runtime/project-library-storage.js';
+} from '@taucad/files-ui/runtime/project-library-storage';
+import type { DiscoveryScan, ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
+import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 import {
   createDiscoveryObservation,
   createMetadataObservation,
   createMetadataReadOwner,
-} from '#runtime/project-library-observations.js';
-import type { LibraryRecords } from '#runtime/project-library-observations.js';
+} from '@taucad/files-ui/runtime/project-library-observations';
+import type { LibraryRecords } from '@taucad/files-ui/runtime/project-library-observations';
+import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import { ProjectCommands } from '#runtime/project-library-commands.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
-import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
+import { WorkspaceCommands } from '@taucad/files-ui/runtime/project-library-workspace';
 import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 
 /** What the library takes from the runtime's composition. @public */
@@ -140,7 +148,7 @@ export type ProjectLibraryChatPorts = Readonly<{
 }>;
 
 /** The root file facade as the library reads it: its value now, and its changes (A4b). @public */
-export type ProjectLibraryRootFiles = ProjectLibraryObservable<ProjectLibraryFileManager>;
+export type ProjectLibraryRootFiles = ProjectLibraryObservable<ProjectLibraryFacade>;
 
 /** The route's answer about one project's access (`getProjectRouteAccess`). @public */
 export type ProjectRouteAccess = Exclude<AccessAnswer, Readonly<{ status: 'error' }>>;
@@ -276,14 +284,14 @@ export class ProjectLibrary {
 
   readonly #rootFiles: () => ProjectLibraryRootFiles | undefined;
   /** The root facade's current value, once the library follows it. */
-  #fileManager: ProjectLibraryFileManager | undefined;
+  #fileManager: ProjectLibraryFacade | undefined;
   #unfollowRootFiles: (() => void) | undefined;
   #stopped = false;
   readonly #bound = Promise.withResolvers<void>();
   /** Counts record replacements, so a read can tell the records it ran on were replaced while it ran. */
   #replacements = 0;
   /** The chat store and its read owner over the facade's record client. */
-  #records: LibraryRecords | undefined;
+  #records: LibraryRecords<ChatStorage> | undefined;
   readonly #changed = new Topic<void>({ name: 'project-library' });
   readonly #filesChanged = new Topic<void>({ name: 'project-library-files' });
   readonly #bindingChanged = new Topic<void>({ name: 'project-library-binding' });
@@ -329,6 +337,7 @@ export class ProjectLibrary {
       registerWorkspace: async (selection, signal) => this.#registerWorkspace(selection, signal),
       mountWorkspace: async (_workspace, selection, signal) => this.#mountWorkspace(selection, signal),
       prepareWorkspaceCatalog: async (workspace, signal) => this.#prepareWorkspaceCatalog(workspace, signal),
+      reportFault: reportAppRuntimeFault,
     };
     this.workspaceConnection = createActor(workspaceConnectionMachine, { ...options, input: connection });
     const host = {
@@ -1053,7 +1062,7 @@ export class ProjectLibrary {
    * Adopt the facade's value: a change of the record client builds the chat store and its read owner again, and a
    * change of what the observations read rebuilds them.
    */
-  #adopt(fileManager: ProjectLibraryFileManager): void {
+  #adopt(fileManager: ProjectLibraryFacade): void {
     const previous = this.#fileManager;
     if (previous === fileManager) {
       return;
@@ -1432,13 +1441,13 @@ export class ProjectLibrary {
   }
 
   /** The root facade, once there is one: a call made earlier waits, and reads the one current then. */
-  async #facade(): Promise<ProjectLibraryFileManager> {
+  async #facade(): Promise<ProjectLibraryFacade> {
     this.followRootFiles();
     await this.#bound.promise;
     return this.#fileManager!;
   }
 
-  async #currentRecords(): Promise<LibraryRecords> {
+  async #currentRecords(): Promise<LibraryRecords<ChatStorage>> {
     this.followRootFiles();
     await this.#bound.promise;
     return this.#records!;
@@ -1449,7 +1458,7 @@ export class ProjectLibrary {
    * records it ran on were replaced (a new root worker) is asked once more of the records that serve next: the chat
    * store would otherwise keep a session whose history never loaded. Only reads are asked again.
    */
-  async #read<T>(call: (records: LibraryRecords) => Promise<T>): Promise<T> {
+  async #read<T>(call: (records: LibraryRecords<ChatStorage>) => Promise<T>): Promise<T> {
     const records = await this.#currentRecords();
     const replacements = this.#replacements;
     try {

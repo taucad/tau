@@ -38,12 +38,25 @@ export default {
    * open pages eight times during e2e-nightly's development tier (2026-11-12).
    * Worker entries, which no route reaches statically, are added in `vite.config.ts`.
    *
-   * `v8_passThroughRequests` is React Router 8's behaviour (blueprint B4): loaders and actions get the request as
-   * sent, so a client navigation's `request.url` is `<path>.data?_routes=…`. Anything that means the page's own URL
-   * reads the `url` argument.
+   * React Router 8 (blueprint RR8) makes the behaviour the `v8_*` flags turned on under 7 the default, and rejects
+   * the flags:
+   * - loaders and actions get the request as sent (B4), so a client navigation's `request.url` is
+   *   `<path>.data?_routes=…`. Anything that means the page's own URL reads the `url` argument;
+   * - data requests are trailing-slash aware (B5): Home's is `/_.data`, no longer `/_root.data`. The marketing edge
+   *   function and the skew protection pin accept both names, so a tab of an earlier build still gets its data;
+   * - one Vite config builds the client and server environments (B6), so server-only options live under
+   *   `environments.ssr` in `vite.config.ts`, and the Netlify adapter (4.x) writes a function that imports
+   *   `build/server/index.js` and the adapter's `serverless` handler;
+   * - middleware is always on;
+   * - route modules split (B8, `splitRouteModules` defaults to `true`): a route's `clientLoader`, `clientAction`,
+   *   `clientMiddleware` and `HydrateFallback` load as their own chunks. No route has one that splits today, and
+   *   `scripts/check-critical-budget.mts` fails when a split module first appears in the manifest, because split
+   *   chunks load outside the patched `loadRouteModule` stale-build fallback.
    */
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
-  future: { unstable_optimizeDeps: true, v8_passThroughRequests: true, v8_middleware: true },
+  future: {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag name.
+    unstable_optimizeDeps: true,
+  },
   /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.
    *

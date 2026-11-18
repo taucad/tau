@@ -1,5 +1,5 @@
 import { reportUiError } from '#lib/error-reporting.js';
-import { PendingProjectRecoveryError } from '#runtime/project-library-storage.js';
+import { PendingProjectRecoveryError } from '@taucad/files-ui/runtime/project-library-storage';
 
 /**
  * Report a project create that failed (a location the user must choose again is not a failure and is not reported).

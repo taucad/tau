@@ -1439,11 +1439,27 @@ export class WorkspaceFileService {
     this._registry.disposeRoot(storageRootKey);
   }
 
+  /**
+   * Release all resources, as {@link WorkspaceFileService.dispose} does, then
+   * wait until nothing this service began can still write to a root.
+   *
+   * A Project Index snapshot write in flight stops at its next await before the
+   * disk, or finishes if it is past it. Await this, not `dispose`, before
+   * removing or moving a root this service served: on Windows a write that
+   * lands in `.tau/index` during the removal fails it with `ENOTEMPTY`.
+   *
+   * @returns Once no snapshot write this service began is still running.
+   */
+  public async close(): Promise<void> {
+    this.dispose();
+    await this._projectIndexes.close();
+  }
+
   /** Release all resources: watches, providers, caches, and event bus. */
   public dispose(): void {
     this._projectDirectories.dispose();
     this._externalChanges.dispose();
-    this._projectIndexes.clear();
+    this._projectIndexes.dispose();
     this._projectRoutes.clear();
     this._discoveryRoots = [];
     this._mountTable.dispose();

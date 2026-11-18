@@ -101,6 +101,18 @@
 \* lock and reading its log, instead of refusing until the project is opened. Both stay outside the model,
 \* as the registry and chat store reads did; the journal, apply and gate order is unchanged. No action or
 \* correspondence changes.
+\* DC-10 files-ui slice 5 (2026-11-17): the three library machines, `project-library.types`,
+\* `pending-project-operation.types`, `project-url.utils` and `project-name.utils` moved to `@taucad/files-ui`; the
+\* four library sources only re-point (and rewrap) their imports. No action or correspondence changes.
+\* DC-10 files-ui slice 6 (2026-11-18): `project-library-storage` and `project-library-observations` moved to
+\* `@taucad/files-ui` behind structural facade, object-store and chat-store types; `use-project-manager.tsx` and the
+\* three runtime sources re-point their imports, and the app's facade type is now `ProjectLibraryFacade`. No action or
+\* correspondence changes.
+\* DC-10 files-ui slice 7 (2026-11-18): `project-library-workspace`, the workspace connection machine and
+\* `project-library-chat-logs` moved to `@taucad/files-ui`. The machine reports its first fault through an injected
+\* `reportFault` service, which `ProjectLibrary` binds to the app's runtime fault reporter; the workspace commands read
+\* the facade and journal through structural types. The other sources re-point their imports. No action or
+\* correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

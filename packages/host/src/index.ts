@@ -101,7 +101,12 @@ export {
   readProjectId,
 } from '#machine-host.js';
 export type { CreateNodeMachineRuntimeOptions, MachineHostIdentity, MachineSecretStore } from '#machine-host.js';
-export { agentMachineFacet, openLocalMachines, openSharedMachineHost } from '#local-machines.js';
+export {
+  agentMachineFacet,
+  observeAdmissionRefusals,
+  openLocalMachines,
+  openSharedMachineHost,
+} from '#local-machines.js';
 export type {
   AdmissionRefusalReport,
   LocalMachines,
@@ -140,6 +145,7 @@ export {
   acpEnvironmentAllowlist,
   acpEnvironmentPrefixAllowlist,
   acpLiveSessionLimit,
+  acpLoginLaunch,
   acpModelProbeTimeout,
   acpNativeToolNamePaths,
   acpSessionIdleTimeout,
@@ -165,6 +171,7 @@ export type {
   AcpPromptTurn,
   AcpAgentFacts,
   AcpLimitReset,
+  AcpLoginLaunch,
   AcpSession,
   AcpShellCommand,
   AcpSupportedPlatform,

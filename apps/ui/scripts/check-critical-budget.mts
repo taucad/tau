@@ -27,13 +27,16 @@
  * the next step never fetches a viewer, three.js, kernel, wasm or worker asset. It also reports what each warm-up
  * prefetches once idle, after the warming page's own interactive tier.
  *
+ * "No split route module" (React Router 8 migration B8, RR6): no route's client loader, action, middleware or hydrate
+ * fallback is split into a chunk of its own ({@link findSplitRouteModules}).
+ *
  * Usage (after `nx build ui`):
  *   node apps/ui/scripts/check-critical-budget.mts           # check
  *   node apps/ui/scripts/check-critical-budget.mts --write   # rebaseline this build's variant
  *
  * Exit codes:
- *   0  Every class within budget and no early kernel
- *   1  A budget, heavy-family, early-kernel or warm-manifest violation, or a missing build output
+ *   0  Every class within budget, no early kernel and no split route module
+ *   1  A budget, heavy-family, early-kernel, warm-manifest or split-route-module violation, or a missing build output
  */
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -191,11 +194,40 @@ export const compareWithBudget = (input: {
   return problems;
 };
 
-/** The React Router browser manifest's preload-relevant fields. */
+/** The modules route module splitting (`splitRouteModules`, on by default in React Router 8) can move out of a route's own chunk. */
+const splitModuleFields = [
+  'clientLoaderModule',
+  'clientActionModule',
+  'clientMiddlewareModule',
+  'hydrateFallbackModule',
+] as const;
+
+/** The React Router browser manifest's preload-relevant fields, and the split modules of a route. */
 export type RouterManifest = {
   entry: { module: string; imports: readonly string[] };
-  routes: Record<string, { module: string; imports?: readonly string[]; css?: readonly string[] }>;
+  routes: Record<
+    string,
+    { module: string; imports?: readonly string[]; css?: readonly string[] } & Partial<
+      Record<(typeof splitModuleFields)[number], string>
+    >
+  >;
 };
+
+/**
+ * The route modules split out of their route's chunk (React Router 8 migration B8, RR6). None exists today. A split
+ * chunk loads outside the patched `loadRouteModule`, so a deploy that stops serving it gets no stale-build reload, and
+ * this check's preload walk does not see it; when one first appears, that gap is reviewed and this list updated.
+ *
+ * @param router - The React Router browser manifest.
+ * @returns One line per split module.
+ */
+export const findSplitRouteModules = (router: RouterManifest): string[] =>
+  Object.entries(router.routes).flatMap(([id, route]) =>
+    splitModuleFields.flatMap((field) => {
+      const file = route[field];
+      return file === undefined ? [] : [`${id} splits ${field} ${file}`];
+    }),
+  );
 
 const linkPattern = /<link\b[^>]*\brel=["']?(?:modulepreload|preload|prefetch)["']?[^>]*>/giu;
 const hrefPattern = /\bhref=["']?([^"'\s>]+)/iu;
@@ -439,6 +471,7 @@ const main = (): void => {
   }
 
   problems.push(...findEarlyKernelPreloads({ preloads: documentPreloads(), moduleIds }));
+  problems.push(...findSplitRouteModules(readRouterManifest()));
 
   const warm = parseWarmManifest(readJson<unknown>(join(clientDirectory, warmManifestFile)));
   problems.push(...findWarmManifestProblems({ warm, closures, manifest, moduleIds }));
@@ -469,7 +502,7 @@ const main = (): void => {
     console.error(problems.join('\n'));
     process.exit(1);
   }
-  console.info('Critical budget OK; no document preloads a kernel, wasm or worker asset');
+  console.info('Critical budget OK; no document preloads a kernel, wasm or worker asset; no route module is split');
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

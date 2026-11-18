@@ -280,7 +280,7 @@
       "executor": "nx:run-commands",
       "cache": true,
       "metadata": {
-        "description": "Server-output gate (React Router 8 migration RR0, ruling RD8): fails when a server output holds a .wasm file, a worker bundle or a file also in its client/assets. Checks the web build (ssr: true, so build/server must exist), the desktop renderer build and the `tau serve` build (both ssr: false, so React Router 7 deletes build/server; one left behind is checked). The docs site has its own docs:check-server-output. CI's build lane runs it whenever this app is affected; build and build:desktop are already in that lane, build:serve is added by this target."
+        "description": "Server-output gate (React Router 8 migration RR0, ruling RD8): fails when a server output holds a .wasm file, a worker bundle or a file also in its client/assets, or names an asset URL that resolves in neither output; and when the web server build no longer imports @taucad/openrscad by name (the server environment's resolve.external, RR5). Checks the web build (ssr: true, so build/server must exist), the desktop renderer build and the `tau serve` build (both ssr: false: React Router 8 leaves build/server, their configs' buildEnd removes it, and one left behind fails). The docs site has its own docs:check-server-output. CI's build lane runs it whenever this app is affected; build and build:desktop are already in that lane, build:serve is added by this target."
       },
       "dependsOn": ["build", "build:desktop", "build:serve"],
       "inputs": [
@@ -292,7 +292,26 @@
       "outputs": [],
       "options": {
         "cwd": ".",
-        "command": "node apps/ui/scripts/check-server-output.mts --server apps/ui/build --spa apps/ui/desktop/build --spa apps/ui/serve/build"
+        "command": "node apps/ui/scripts/check-server-output.mts --server apps/ui/build --spa apps/ui/desktop/build --spa apps/ui/serve/build --external @taucad/openrscad"
+      }
+    },
+    "check-route-module-patch": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "metadata": {
+        "description": "Route-module patch gate (React Router 8 migration RR8, ruling RD4): fails when the web, desktop renderer or `tau serve` client build ships React Router's loadRouteModule without Tau's local patch (tools/pnpm/patches/react-router@<version>.patch, TAU-UI-S), which loads a push navigation's destination instead of reloading the page being left when its route module fails to import. Every React Router bump re-keys the patch; a patch pnpm stops applying would otherwise ship unnoticed. CI's build lane runs it whenever this app is affected; its builds are already in that lane."
+      },
+      "dependsOn": ["build", "build:desktop", "build:serve"],
+      "inputs": [
+        "{projectRoot}/scripts/check-route-module-patch.mts",
+        {
+          "dependentTasksOutputFiles": "apps/ui/{build,desktop/build,serve/build}/client/assets/**/*.js"
+        }
+      ],
+      "outputs": [],
+      "options": {
+        "cwd": ".",
+        "command": "node apps/ui/scripts/check-route-module-patch.mts apps/ui/build apps/ui/desktop/build apps/ui/serve/build"
       }
     },
     "build:serve": {
@@ -641,7 +660,141 @@
       }
     },
     "test": {
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"]
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ]
+    },
+    "test:shard-1": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "metadata": {
+        "description": "Shard 1 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=1/6"
+      }
+    },
+    "test:shard-2": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "metadata": {
+        "description": "Shard 2 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=2/6"
+      }
+    },
+    "test:shard-3": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "metadata": {
+        "description": "Shard 3 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=3/6"
+      }
+    },
+    "test:shard-4": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "metadata": {
+        "description": "Shard 4 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=4/6"
+      }
+    },
+    "test:shard-5": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "metadata": {
+        "description": "Shard 5 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=5/6"
+      }
+    },
+    "test:shard-6": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
+      "metadata": {
+        "description": "Shard 6 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=6/6"
+      }
     },
     "formal:wide": {
       "executor": "nx:run-commands",

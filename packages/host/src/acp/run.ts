@@ -153,6 +153,13 @@ export type AcpExternalAgentPortOptions = {
   readonly mediaTranscoder?: AgentMediaTranscoder | undefined;
 };
 
+/**
+ * Where each vendor's native catalog finds skills under an additional directory: Codex reads `.agents/skills` (and Grok
+ * the `.agents` plugin root), Claude Code only `.claude/skills` (observed with Claude Code 2.1.325 and `--add-dir`,
+ * 2026-11-17). Both trees hold the same verified bytes; part of the digest so an older one-tree publication is not reused.
+ */
+const skillLayouts = ['.agents/skills', '.claude/skills'] as const;
+
 const publishSystemSkills = async (
   bundles: readonly HostSystemSkillBundle[] | undefined,
   signal: AbortSignal,
@@ -163,24 +170,24 @@ const publishSystemSkills = async (
   const registry = createSkillBundleRegistry(bundles);
   const parent = join(defaultConfigDirectory(), 'acp-skills');
   await mkdir(parent, { recursive: true, mode: 0o700 });
-  /* Codex registers this directory only with its native skill catalog. It is
+  /* Codex and Claude Code register this directory only with their native skill catalogs. It is
    * deliberately outside cwd and the operating-system temporary roots that a
    * workspace-write sandbox grants by default. Project skill discovery still
    * runs first and owns native precedence; an invalid project entry cannot
    * erase a valid package skill before that loader sees either candidate. */
   const digest = createHash('sha256')
     .update(
-      JSON.stringify(
-        registry.bundles.map((bundle) => ({
+      JSON.stringify({
+        layout: skillLayouts,
+        bundles: registry.bundles.map((bundle) => ({
           slug: bundle.slug,
           files: bundle.files.map(({ path, sha256 }) => ({ path, sha256 })),
         })),
-      ),
+      }),
     )
     .digest('hex');
   const root = join(parent, digest);
   const stagingRoot = await mkdtemp(join(parent, '.staging-'));
-  const staging = join(stagingRoot, '.agents', 'skills');
   const verified = new Map<string, string>();
   try {
     for (const bundle of registry.bundles) {
@@ -195,12 +202,15 @@ const publishSystemSkills = async (
         if (resource.path === 'SKILL.md' && bytes.toString('utf8') !== bundle.body) {
           throw new Error(`System skill body does not match SKILL.md: ${bundle.slug}`);
         }
-        const target = join(staging, bundle.slug, resource.path);
-        verified.set(join(bundle.slug, resource.path), fingerprint);
-        // oxlint-disable-next-line no-await-in-loop -- each verified resource needs its parent before its atomic publication.
-        await mkdir(dirname(target), { recursive: true });
-        // oxlint-disable-next-line no-await-in-loop -- resources must be complete before the directory becomes visible.
-        await writeFile(target, bytes, { signal });
+        for (const layout of skillLayouts) {
+          const relative = join(layout, bundle.slug, resource.path);
+          const target = join(stagingRoot, relative);
+          verified.set(relative, fingerprint);
+          // oxlint-disable-next-line no-await-in-loop -- each verified resource needs its parent before its atomic publication.
+          await mkdir(dirname(target), { recursive: true });
+          // oxlint-disable-next-line no-await-in-loop -- resources must be complete before the directory becomes visible.
+          await writeFile(target, bytes, { signal });
+        }
       }
     }
     try {
@@ -211,7 +221,7 @@ const publishSystemSkills = async (
       }
       for (const [path, fingerprint] of verified) {
         // oxlint-disable-next-line no-await-in-loop -- verify the existing immutable publication before native discovery.
-        const published = await readFile(join(root, '.agents', 'skills', path), { signal });
+        const published = await readFile(join(root, path), { signal });
         if (createHash('sha256').update(published).digest('hex') !== fingerprint) {
           throw new Error(`Published system skill resource changed: ${path}`);
         }

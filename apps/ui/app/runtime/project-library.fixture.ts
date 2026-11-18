@@ -4,7 +4,7 @@
  */
 import { Topic } from '@taucad/events';
 import type { ProjectLibraryRootFiles } from '#runtime/project-library.js';
-import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
+import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 
 /** A root file facade whose value a test sets. @public */
 export type TestRootFiles = ProjectLibraryRootFiles & Readonly<{ replace: (fileManager: unknown) => void }>;
@@ -17,13 +17,13 @@ export type TestRootFiles = ProjectLibraryRootFiles & Readonly<{ replace: (fileM
  * @public
  */
 export const testRootFiles = (fileManager: unknown): TestRootFiles => {
-  let current = fileManager as ProjectLibraryFileManager;
+  let current = fileManager as ProjectLibraryFacade;
   const changes = new Topic<void>({ name: 'test-root-files' });
   return {
     get: () => current,
     subscribe: (listener) => changes.subscribe(listener),
     replace: (next) => {
-      current = next as ProjectLibraryFileManager;
+      current = next as ProjectLibraryFacade;
       changes.emit(undefined);
     },
   };

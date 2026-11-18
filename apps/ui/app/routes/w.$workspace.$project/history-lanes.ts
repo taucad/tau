@@ -20,8 +20,8 @@
  */
 import type { RevisionConflictFacet, RevisionStatusProjection } from '@taucad/revisions';
 import type { RevisionCard } from '#hooks/use-revisions.js';
-import { branchSlotsOf } from '#components/revisions/revision-graph-view.js';
-import type { BranchSlot } from '#components/revisions/revision-graph-view.js';
+import { branchSlotsOf } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
+import type { BranchSlot } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
 
 /** Which branches History draws. */
 export type HistoryFilter = 'this' | 'all';

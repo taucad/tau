@@ -14,8 +14,8 @@ import {
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator, ProjectDiscoveryIssue } from '@taucad/filesystem';
 import { describeProjectManifestIssue } from '@taucad/types';
-import type { ProjectListItem } from '#types/project-library.types.js';
-import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
+import type { PendingProjectRecovery } from '@taucad/files-ui/types/pending-project-operation.types';
 import { createColumns } from '#components/project-library/columns.js';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Card, CardHeader, CardFooter } from '@taucad/ui/components/card';
@@ -68,12 +68,15 @@ import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitClock, useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
 import type { WaitIndicatorTiming } from '@taucad/ui/utils/wait-timing';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
-import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
+import type {
+  ProjectDiscoveryConflict,
+  WorkspaceBindingRepairGroup,
+} from '@taucad/files-ui/runtime/project-library-storage';
 import { ProjectCard, ProjectCardMedia } from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader, SectionHeader, usePhoneTopBar } from '#components/layout/page-header.js';
-import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
+import { projectSlugOf, projectUrlOr } from '@taucad/files-ui/utils/project-url.utils';
 import {
   projectLocationDescriptor,
   projectLocationFullLabel,

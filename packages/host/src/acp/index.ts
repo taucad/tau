@@ -30,7 +30,8 @@ export type { AcpWireFrame, SpawnedAcpAdapter } from '#acp/spawn.js';
 export { acpLiveSessionLimit, acpSessionIdleTimeout, createAcpExternalAgentPort, tauMcpServerName } from '#acp/run.js';
 export type { AcpExternalAgentPortOptions } from '#acp/run.js';
 export type { AgentMediaTranscoder, AgentMediaTranscoding } from '#acp/media.js';
-export { acpNativeToolNamePaths, modelChoice } from '#acp/session.js';
+export { acpLoginLaunch, acpNativeToolNamePaths, modelChoice } from '#acp/session.js';
+export type { AcpLoginLaunch } from '#acp/session.js';
 export { openAcpSession } from '#acp/acp-session.js';
 export type {
   AcpAgentFacts,

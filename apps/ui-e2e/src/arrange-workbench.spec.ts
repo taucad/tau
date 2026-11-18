@@ -117,18 +117,7 @@ test('arranges review views and a report from the live root, then restores', asy
     .poll(
       async () =>
         target.evaluate(() => {
-          const bridges =
-            (
-              globalThis as {
-                __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                  getSectionState(): { isActive: boolean; cuts: Array<{ kind: string; offset?: number }> };
-                  getCamera(): {
-                    position: readonly [number, number, number];
-                    target: readonly [number, number, number];
-                  };
-                }>;
-              }
-            ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+          const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
           return bridges.some((bridge) => {
             const section = bridge.getSectionState();
             const camera = bridge.getCamera();
@@ -209,8 +198,7 @@ export default function main() {
   await target.expectVisible(selectors.getByCss(composer), 60_000);
   const componentIds = async (): Promise<string[]> =>
     target.evaluate(() => {
-      const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getModelComponents(): Array<{ id: string }> } })
-        .__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       return bridge?.getModelComponents().map(({ id }) => id) ?? [];
     });
   await expect
@@ -243,12 +231,7 @@ export default function main() {
     .poll(
       async () =>
         target.evaluate((requestedIds) => {
-          const bridges =
-            (
-              globalThis as {
-                __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{ getModelVisibility(): { hiddenComponentIds: string[] } }>;
-              }
-            ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+          const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
           return bridges.some((bridge) =>
             requestedIds.every((id) => bridge.getModelVisibility().hiddenComponentIds.includes(id)),
           );

@@ -1,52 +1,7 @@
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-
-type SectionCut =
-  | Readonly<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }>
-  | Readonly<{ kind: 'revolution'; axis: 'x' | 'y' | 'z'; start: number; sweep: number }>;
-
-type SectionViewBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: {
-    setSectionCuts(cuts: readonly SectionCut[]): string[];
-    selectSectionCut(id: string | undefined): void;
-    getSectionState(): { isCommitted: boolean };
-    setCamera(camera: {
-      position: readonly [number, number, number];
-      target?: readonly [number, number, number];
-      fov?: number;
-      zoom?: number;
-    }): void;
-    getSectionHelperSummary(): {
-      sectionHelperMeshCount: number;
-      sectionHelperLineSegments2Count: number;
-      sectionHelperContourSegmentCount: number;
-      sectionHelperMaterialStates: ReadonlyArray<{
-        objectType: string;
-        materialType: string;
-        renderOrder: number;
-        transparent: boolean;
-        depthTest: boolean;
-        depthWrite: boolean;
-      }>;
-    };
-    getSectionCapStencilDiagnostics():
-      | {
-          sequence: number;
-          latest:
-            | {
-                drawnPieceCount: number;
-                crossingSourceCount: number;
-                outlineSourceCount: number;
-                loopSourceCount: number;
-              }
-            | undefined;
-        }
-      | undefined;
-    getSectionCapCompleteness(): SectionCapCompleteness | undefined;
-    getRenderFrame(): { metersPerRenderUnit: number };
-  };
-};
+import type { SectionViewTestBridgeApi } from '@taucad/app/test-bridges/section-view';
 
 /**
  * Every reason the caps give for capping a source per loop: a closure failure (the viewer's
@@ -62,7 +17,7 @@ const perLoopReasons = [
 ] as const;
 type PerLoopReason = (typeof perLoopReasons)[number];
 /** The reasons a defect in the geometry itself gives, as opposed to visibility or an unavailable census. */
-const geometryReasons: ReadonlySet<PerLoopReason> = new Set(['open-surface', 'collapsed-triangle']);
+const geometryReasons: ReadonlySet<string> = new Set<PerLoopReason>(['open-surface', 'collapsed-triangle']);
 
 type SectionCapCompleteness = Readonly<{
   status: 'complete';
@@ -71,7 +26,7 @@ type SectionCapCompleteness = Readonly<{
   perLoopSourceCount: number;
   pendingSourceCount: number;
   sources: ReadonlyArray<
-    Readonly<{ sourceKey: string; grade: 'exact' | 'per-loop' | 'pending'; reason: PerLoopReason | undefined }>
+    Readonly<{ sourceKey: string; grade: 'exact' | 'per-loop' | 'pending'; reason: string | undefined }>
   >;
 }>;
 
@@ -105,7 +60,7 @@ const expectNoWebGpuValidationFailures = async (from?: number): Promise<void> =>
 async function waitForCommittedSection(): Promise<void> {
   await target.waitFor(
     () => {
-      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       const completeness = bridge?.getSectionCapCompleteness();
       return (
         bridge?.getSectionState().isCommitted === true &&
@@ -124,7 +79,7 @@ async function waitForCommittedSection(): Promise<void> {
  */
 async function driveSectionView(start: number): Promise<void> {
   await target.evaluate((nextStart) => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -302,7 +257,7 @@ async function getSectionHelperSummary(): Promise<{
   }>;
 }> {
   return target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -312,10 +267,10 @@ async function getSectionHelperSummary(): Promise<{
 }
 
 async function getSectionCapStencilDiagnostics(): Promise<
-  ReturnType<NonNullable<SectionViewBridgeWindow['__TAU_SECTION_VIEW_TEST__']>['getSectionCapStencilDiagnostics']>
+  ReturnType<SectionViewTestBridgeApi['getSectionCapStencilDiagnostics']>
 > {
   return target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -326,7 +281,7 @@ async function getSectionCapStencilDiagnostics(): Promise<
 
 async function getSectionCapCompleteness(): Promise<SectionCapCompleteness | undefined> {
   return target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -372,14 +327,75 @@ async function expectClosedSectionCapIntegrity(backend: 'webgl' | 'webgpu', star
     `${backend}: caps should outline their cut edges`,
   ).toBeGreaterThan(0);
   expect(
-    stats.edgeLineish,
+    await countCapOutlineInk(),
     `start=${start}°: generated cap outlines should remain visibly near-black in the composed frame`,
   ).toBeGreaterThan(20);
 }
 
+/** Show or hide the cap outlines and wait until the canvas has drawn the change. */
+async function setCapOutlinesVisible(visible: boolean): Promise<void> {
+  const before = await target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__!.getRendererIdentity().frame);
+  expect(
+    await target.evaluate((next) => globalThis.__TAU_SECTION_VIEW_TEST__!.setSectionCapOutlinesVisible(next), visible),
+    'the section view should be mounted',
+  ).toBe(true);
+  await expect
+    .poll(async () => target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__!.getRendererIdentity().frame))
+    .toBeGreaterThan(before);
+}
+
+/**
+ * The pixels the cap outlines make near-black in the composed frame, at device resolution: dark with the outlines,
+ * not dark in the same frame drawn without them. The outline is one CSS pixel wide, so a whole-frame thumbnail
+ * averages it away and counts shading and overlay text instead; this compares the frame with itself.
+ */
+async function countCapOutlineInk(): Promise<number> {
+  const canvas = selectors.getByCss('canvas[data-engine]');
+  const withOutlines = await target.screenshot(canvas);
+  await setCapOutlinesVisible(false);
+  let withoutOutlines: string;
+  try {
+    withoutOutlines = await target.screenshot(canvas);
+  } finally {
+    await setCapOutlinesVisible(true);
+  }
+  return target.evaluate(
+    async ({ outlined, bare }) => {
+      const decode = async (pngBase64: string): Promise<Uint8ClampedArray> => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${pngBase64}`;
+        await image.decode();
+        const decoded = document.createElement('canvas');
+        decoded.width = image.width;
+        decoded.height = image.height;
+        const context = decoded.getContext('2d');
+        if (!context) {
+          throw new Error('2D sampling context unavailable.');
+        }
+        context.drawImage(image, 0, 0);
+        return context.getImageData(0, 0, image.width, image.height).data;
+      };
+      const [a, b] = await Promise.all([decode(outlined), decode(bare)]);
+      if (a.length !== b.length) {
+        throw new Error('The outlined and bare frames differ in size.');
+      }
+      const darkest = (data: Uint8ClampedArray, index: number): number =>
+        Math.max(data[index]!, data[index + 1]!, data[index + 2]!);
+      let ink = 0;
+      for (let index = 0; index < a.length; index += 4) {
+        if (darkest(a, index) <= 150 && darkest(b, index) > 150) {
+          ink++;
+        }
+      }
+      return ink;
+    },
+    { outlined: withOutlines, bare: withoutOutlines },
+  );
+}
+
 async function driveNonManifoldSectionView(): Promise<void> {
   await target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -396,7 +412,7 @@ async function driveNonManifoldSectionView(): Promise<void> {
 
 async function driveCubeCylinderOverlayDepthSectionView(): Promise<void> {
   await target.evaluate(() => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -416,7 +432,7 @@ async function driveCubeCylinderOverlayDepthSectionView(): Promise<void> {
 
 async function driveFlowerAttachmentSectionView(offsetMillimetres = 0): Promise<void> {
   await target.evaluate((nextOffset) => {
-    const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
     }

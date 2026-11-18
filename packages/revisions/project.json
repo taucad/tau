@@ -13,6 +13,14 @@
         "cwd": "{projectRoot}"
       }
     },
-    "formal:nightly": {}
+    "formal:nightly": {},
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/packages/agent-host/specs/lean/corpus/pull-records.{trace,expected}"
+      ]
+    }
   }
 }

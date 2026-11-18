@@ -22,11 +22,11 @@ import type { QueryClient } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionLine, RevisionRow, StartReading } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
 import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
-import { entryTitleOf } from '#lib/revision-entry-title.js';
+import { entryTitleOf } from '@taucad/revisions-ui/lib/revision-entry-title';
 import type { RevisionWhoContext } from '#lib/revision-actor.js';
 import { holdRevisionGraph, refreshPushRecords } from '#lib/revision-pushes.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
-import type { RevisionClient } from '#types/revision-client.types.js';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 

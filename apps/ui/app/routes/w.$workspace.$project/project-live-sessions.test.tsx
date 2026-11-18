@@ -36,7 +36,7 @@ import { SessionsProvider, useLiveProjectIds } from '#hooks/use-sessions.js';
 import { UnloadProvider, useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { createSessionsActor, selectProjectSessionRuntime } from '#services/sessions-store.js';
 import type { SessionRuntimeOpener, SessionsObservable, SessionWiring } from '#services/sessions-store.js';
-import { revisionClients } from '#services/revision-client-registry.js';
+import { revisionClients } from '@taucad/revisions-ui/services/revision-client-registry';
 import { focusedProjectStandIn } from '#services/focused-project.fixture.js';
 import type { ProjectChoices } from '#runtime/choices.js';
 import { openSessionProjectRuntime, sessionProjectRuntimeOf } from '#runtime/project-runtime.session.js';
@@ -135,6 +135,7 @@ type RevisionStatus = Readonly<{
     chats?: 'ready' | 'pending';
     hasAppliedRemote?: boolean;
   }>;
+  entryManifest?: string;
 }>;
 
 /** One project's revision client: the session's close cut, the focus long poll and what the lifecycle sends it. */
@@ -467,7 +468,7 @@ vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 
 vi.mock('#hooks/use-revision-status.js', async () => {
   const { useProject } = await import('#hooks/use-project.js');
-  const { revisionClients } = await import('#services/revision-client-registry.js');
+  const { revisionClients } = await import('@taucad/revisions-ui/services/revision-client-registry');
   return {
     /* The project's one client, in the real table the session's close reads it from (`peekRevisionClient`). */
     getRevisionClient: ({ projectId, worker }: { readonly projectId: string; readonly worker: Worker }) => {
@@ -1110,6 +1111,20 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     await flushTasks();
 
     expect(retrySpyOf(projectA)).toHaveBeenCalled();
+  });
+
+  /* STO-25: the model renders from the first view once the manifest is read again after the closure landed it. */
+  it('should retry the manifest observation once a cloud open’s write names the tau.json it landed', async () => {
+    tauCloudIntent.set(projectA, 'open');
+    await openAndRender([projectA], { projectId: projectA });
+    expect(retrySpyOf(projectA)).not.toHaveBeenCalled();
+
+    act(() => {
+      revisionClientOf(projectA).setStatus({ entryManifest: 'a'.repeat(64) });
+    });
+    await flushTasks();
+
+    expect(retrySpyOf(projectA)).toHaveBeenCalledOnce();
   });
 
   it('should open one revision client per live project from its session, and cut the close through it (S27, A7b)', async () => {

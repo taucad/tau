@@ -493,6 +493,9 @@ vi.mock('#main/utility-environment.js', () => ({
   packagedEsbuildEnvironment: vi.fn(() => ({ ESBUILD_BINARY_PATH: '/staged/esbuild' })),
   bundledGitEnvironment: vi.fn(() => ({})),
   bundledStoreGuardEnvironment: vi.fn(() => ({})),
+  windowsShellSandboxEnvironment: vi.fn(() => ({
+    TAU_WINDOWS_SANDBOX_HELPER: String.raw`C:\Tau\resources\windows-sandbox\win32-x64\tau-windows-sandbox.exe`,
+  })),
   compileCacheEnvironment: vi.fn((userDataPath: string) => ({
     TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
   })),
@@ -1160,6 +1163,22 @@ describe('desktop main compute owner', () => {
       expect(carrying).toHaveLength(1);
       expect(carrying[0]?.['TAU_DESKTOP_USER_DATA_DIR']).toBe(state.userData);
       expect(carrying[0]?.['TAU_DESKTOP_AUTHORITY_DIR']).toBe(join(state.userData, 'filesystem-authority'));
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'gives the Windows shell sandbox helper to the services utility alone',
+    async () => {
+      await bootstrap();
+      const carrying = state.utilityEnvironmentAdditions.filter(
+        (additions) => 'TAU_WINDOWS_SANDBOX_HELPER' in additions,
+      );
+      expect(carrying).toHaveLength(1);
+      expect(carrying[0]).toHaveProperty('TAU_DESKTOP_USER_DATA_DIR', state.userData);
+      expect(carrying[0]?.['TAU_WINDOWS_SANDBOX_HELPER']).toBe(
+        String.raw`C:\Tau\resources\windows-sandbox\win32-x64\tau-windows-sandbox.exe`,
+      );
     },
     bootMilliseconds,
   );

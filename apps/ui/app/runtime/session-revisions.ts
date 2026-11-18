@@ -529,26 +529,32 @@ export type SessionRevisionsAheadPorts = Pick<
   'sessionUser' | 'anonymity' | 'salt' | 'cloudOpen' | 'reportFault'
 >;
 
-/* The first projection a client publishes, or `undefined` once `signal` aborts first. */
+/*
+ * The first projection an opened client publishes, or `undefined` once `signal` aborts or the client closes first. A
+ * client tells its listeners with no projection only when it closes, so a word with none ends the wait: a later reopen
+ * is somebody else's open, not this one's.
+ */
 const firstStatus = async (
   client: RevisionClient,
   signal: AbortSignal,
 ): Promise<RevisionStatusProjection | undefined> => {
   const answered = Promise.withResolvers<RevisionStatusProjection | undefined>();
-  const look = (): void => {
-    const status = client.status();
-    if (status !== undefined || signal.aborted) {
-      answered.resolve(status);
-    }
+  const end = (): void => {
+    answered.resolve(undefined);
   };
-  const unsubscribe = client.subscribe(look);
-  signal.addEventListener('abort', look, { once: true });
-  look();
+  const unsubscribe = client.subscribe(() => {
+    answered.resolve(signal.aborted ? undefined : client.status());
+  });
+  signal.addEventListener('abort', end, { once: true });
+  const status = client.status();
+  if (signal.aborted || status !== undefined) {
+    answered.resolve(signal.aborted ? undefined : status);
+  }
   try {
     return await answered.promise;
   } finally {
     unsubscribe();
-    signal.removeEventListener('abort', look);
+    signal.removeEventListener('abort', end);
   }
 };
 
@@ -586,7 +592,10 @@ export const openRevisionsAheadOfSession =
       return () => undefined;
     }
     const account = user.id;
+    /* The gesture's ownership: released ends it and a continued open's lock wait and hold with it. */
     const ended = new AbortController();
+    /* The wait for the root's first answer: it ends with the ownership, at a release or a hand-over alike. */
+    const owned = new AbortController();
     const unsubscribes: Array<() => void> = [];
     const stopFollowing = (): void => {
       runIsolated(unsubscribes.splice(0), ports.reportFault);
@@ -610,6 +619,7 @@ export const openRevisionsAheadOfSession =
         }
         aheadOfSession.delete(projectId);
         ended.abort();
+        owned.abort();
         stopFollowing();
         if ((sessionHolds.get(projectId) ?? 0) === 0 && peekRevisionClient(projectId) === client) {
           // async-iife: bootstrap -- a withdrawal sends its frame before it returns.
@@ -620,6 +630,8 @@ export const openRevisionsAheadOfSession =
       handOver: () => {
         if (aheadOfSession.get(projectId) === record) {
           aheadOfSession.delete(projectId);
+          /* From here the session's route owns the remote's connection; an open already continued runs on. */
+          owned.abort();
           stopFollowing();
         }
       },
@@ -662,11 +674,11 @@ export const openRevisionsAheadOfSession =
       if (continueOpen === undefined || !ports.cloudOpen.get(projectId)) {
         return;
       }
-      const status = await firstStatus(client, ended.signal);
+      const status = await firstStatus(client, owned.signal);
       const canOpen = ports.cloudOpen.canOpen?.(projectId) ?? true;
       if (
         status === undefined ||
-        ended.signal.aborted ||
+        aheadOfSession.get(projectId) !== record ||
         !canOpen ||
         ports.sessionUser.get()?.id !== account ||
         nextTauCloudStep('open', { auth: 'authed', isResolved: true, canSyncFiles: true }, status) !== 'connect'

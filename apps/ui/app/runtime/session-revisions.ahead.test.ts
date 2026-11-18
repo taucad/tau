@@ -329,6 +329,46 @@ describe('an open ahead of its session (STO-25 SP6)', () => {
     });
   });
 
+  /* Review of d158d3e7 (LOW): the wait for the root's first answer ends with the gesture's ownership. */
+  describe('the first-answer wait ends at hand-over and when the client closes', () => {
+    it('never continues the open on a later reopen after a session took the client before its first answer', async () => {
+      const log: string[] = [];
+      const { client, answerUser, publish } = createClient(log);
+      revisionClientTestApi.adopt(projectId, worker, client);
+      const store = createPorts({ user: ada, cloudOpen: true });
+      stops.push(openRevisionsAheadOfSession(store.ports)({ projectId, workspace, worker, asserted: true }));
+      answerUser();
+      await settle();
+      /* A session takes the client before the root answered, then closes it. */
+      const stop = startSessionChild(store.ports);
+      answerUser();
+      await settle();
+      stop();
+      /* Another session reopens it later: its first answer is no longer the gesture's. */
+      stops.push(startSessionChild(store.ports));
+      answerUser();
+      await settle();
+      publish({ kind: 'none', phase: 'none' });
+      await settle();
+      expect(store.continued).toStrictEqual([]);
+    });
+
+    it('never continues the open on a client that closed before its first answer', async () => {
+      const log: string[] = [];
+      const { client, answerUser, publish } = createClient(log);
+      revisionClientTestApi.adopt(projectId, worker, client);
+      const store = createPorts({ user: ada, cloudOpen: true });
+      stops.push(openRevisionsAheadOfSession(store.ports)({ projectId, workspace, worker, asserted: true }));
+      answerUser();
+      await settle();
+      client.close();
+      await settle();
+      publish({ kind: 'none', phase: 'none' });
+      await settle();
+      expect(store.continued).toStrictEqual([]);
+    });
+  });
+
   describe('MEDIUM: a created or catalogued project’s Tau remote is connected from the gesture', () => {
     it('continues the owed open as soon as the root first answers with no remote, with no session or route', async () => {
       const log: string[] = [];

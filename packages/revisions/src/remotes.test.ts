@@ -251,7 +251,7 @@ describe('remotes', () => {
     );
     // The refusal names files, never a count (D16, AC16).
     expect(lfsRemoteUnsupportedMessage(['models/housing.step', 'models/bracket.step'])).toBe(
-      'Large files can’t be backed up to this Git host: models/bracket.step, models/housing.step. Back up to Tau Cloud instead, or remove them from the project.',
+      'Large files can’t be backed up to this Git host: models/bracket.step, models/housing.step. Back up to Tau instead, or remove them from the project.',
     );
   });
 });
@@ -570,7 +570,7 @@ describe('remoteTransportError', () => {
 
   it('leaves a sideband refusal without the ceiling marker a plain rejection', () => {
     const stderr = [
-      'remote: Tau: refused refs/heads/main — Tau Cloud never deletes a ref; retention is decided on the server.',
+      'remote: Tau: refused refs/heads/main — Tau never deletes a ref; retention is decided on the server.',
       ' ! [remote rejected] refs/heads/main -> refs/heads/main (pre-receive hook declined)',
     ].join('\n');
 
@@ -816,16 +816,16 @@ describe('createGitRemoteTransport', () => {
 describe('registerProjectFailureMessage', () => {
   it('tells a collaborator the owner alone backs a project up', () => {
     expect(registerProjectFailureMessage(403, 'PROJECT_ROLE_INSUFFICIENT', 'Forbidden')).toBe(
-      'Only the project owner can back this project up to Tau Cloud.',
+      'Only the project owner can back this project up to the cloud.',
     );
   });
 
   it('keeps the classes it already answered', () => {
     expect(registerProjectFailureMessage(403, 'GIT_SYNC_NOT_ENTITLED')).toBe(
-      'Syncing files to Tau Cloud is a paid plan feature.',
+      'Syncing files to the cloud is a paid plan feature.',
     );
-    expect(registerProjectFailureMessage(404)).toBe('This project isn’t on Tau Cloud for this account.');
-    expect(registerProjectFailureMessage(500)).toBe('Couldn’t start backing up to Tau Cloud. Try again.');
+    expect(registerProjectFailureMessage(404)).toBe('This project isn’t in the cloud for this account.');
+    expect(registerProjectFailureMessage(500)).toBe('Couldn’t start backing up this project. Try again.');
   });
 });
 
@@ -846,8 +846,8 @@ describe('publishFailureMessage', () => {
     [400, 'MISSING_ENTRY_PATH', 'This version does not contain the file this project opens with.'],
     [413, undefined, 'This version is larger than a shared link may be.'],
     [400, 'PAYLOAD_TOO_LARGE', 'This version is larger than a shared link may be.'],
-    [500, undefined, 'Couldn’t publish to Tau Cloud. Try again.'],
-    [429, 'SOMETHING_NEW', 'Couldn’t publish to Tau Cloud. Try again.'],
+    [500, undefined, 'Couldn’t publish this version. Try again.'],
+    [429, 'SOMETHING_NEW', 'Couldn’t publish this version. Try again.'],
   ];
 
   it.each(rows)('answers %i/%s with one sentence for every host', (status, code, message) => {
@@ -921,14 +921,14 @@ describe('the Tau Cloud publish and register legs', () => {
     try {
       await expect(
         registerProjectOverHttp('https://api.test', { kind: 'cookie' }, { id: 'p1', name: 'Alpha' }),
-      ).rejects.toThrow('Only the project owner can back this project up to Tau Cloud.');
+      ).rejects.toThrow('Only the project owner can back this project up to the cloud.');
       await expect(
         registerProjectOverHttp(
           'https://api.test',
           { kind: 'bearer', authorization: 'Bearer t' },
           { id: 'p1', name: undefined },
         ),
-      ).rejects.toThrow('Only the project owner can back this project up to Tau Cloud.');
+      ).rejects.toThrow('Only the project owner can back this project up to the cloud.');
 
       expect(refused.urls).toEqual(['https://api.test/v1/projects/p1', 'https://api.test/v1/projects/p1']);
       expect(refused.calls[0]?.body).toBe(JSON.stringify({ name: 'Alpha' }));

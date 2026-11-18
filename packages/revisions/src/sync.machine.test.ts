@@ -1042,7 +1042,7 @@ describe('syncMachine', () => {
       expect(harness.effects.running('push')).toBe(1);
     });
     harness.effects.settle('push', {
-      error: Object.assign(new Error('Syncing files to Tau Cloud is a paid plan feature.'), {
+      error: Object.assign(new Error('Syncing files to the cloud is a paid plan feature.'), {
         code: 'REMOTE_NOT_ENTITLED',
       }),
     });
@@ -1053,7 +1053,7 @@ describe('syncMachine', () => {
 
     const facet = selectSyncFacet(harness.actor.getSnapshot());
     expect(facet.reason).toBe('notEntitled');
-    expect(facet.error).toBe('Syncing files to Tau Cloud is a paid plan feature.');
+    expect(facet.error).toBe('Syncing files to the cloud is a paid plan feature.');
     expect(facet.error).not.toMatch(/could not be reached/u);
 
     /* No backoff reaches a state that pushes: only the person does. */
@@ -1072,7 +1072,7 @@ describe('syncMachine', () => {
       expect(harness.effects.running('fetch')).toBe(1);
     });
     harness.effects.settle('fetch', {
-      error: Object.assign(new Error('Syncing files to Tau Cloud is a paid plan feature.'), {
+      error: Object.assign(new Error('Syncing files to the cloud is a paid plan feature.'), {
         code: 'REMOTE_NOT_ENTITLED',
       }),
     });
@@ -1082,7 +1082,7 @@ describe('syncMachine', () => {
 
     const facet = selectSyncFacet(harness.actor.getSnapshot());
     expect(facet.reason).toBe('notEntitled');
-    expect(facet.error).toBe('Syncing files to Tau Cloud is a paid plan feature.');
+    expect(facet.error).toBe('Syncing files to the cloud is a paid plan feature.');
 
     /* No backoff re-opens the pull: only the person does. */
     harness.clock.advance(600_000);

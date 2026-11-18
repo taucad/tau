@@ -1178,7 +1178,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           : 'origin';
     const url = input.url ?? (input.kind === 'tau' ? options.remoteUrl?.(input.projectId) : undefined);
     if (url === undefined) {
-      throw new RevisionPortError('INVALID_TRANSPORT', 'Couldn’t find this project on Tau Cloud. Try again.');
+      throw new RevisionPortError('INVALID_TRANSPORT', 'Couldn’t find this project in the cloud. Try again.');
     }
     return { name, url };
   };
@@ -1659,7 +1659,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const url = options.remoteUrl?.(projectId);
     if (url === undefined) {
-      throw new RevisionPortError('INVALID_TRANSPORT', 'Couldn’t find this project on Tau Cloud. Try again.');
+      throw new RevisionPortError('INVALID_TRANSPORT', 'Couldn’t find this project in the cloud. Try again.');
     }
     await port.setRemote({ name: tauRemoteName, url });
     return tauRemoteName;
@@ -6618,10 +6618,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         async ({ input }) => {
           const record = options.publishPublication;
           if (record === undefined) {
-            throw new RevisionPortError(
-              'INVALID_TRANSPORT',
-              'This host is not signed in to Tau Cloud, so it cannot publish.',
-            );
+            throw new RevisionPortError('INVALID_TRANSPORT', 'This host is not signed in, so it cannot publish.');
           }
           return record(input);
         },

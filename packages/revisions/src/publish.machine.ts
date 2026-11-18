@@ -171,7 +171,7 @@ const unsupported = async (): Promise<never> => {
 };
 
 const reason = (error: unknown): string =>
-  error instanceof Error ? error.message : 'Couldn’t publish to Tau Cloud. Try again.';
+  error instanceof Error ? error.message : 'Couldn’t publish this version. Try again.';
 
 type PublishEnqueue = EnqueueObject<PublishMachineEvent, PublishMachineEmitted>;
 
@@ -435,7 +435,7 @@ const publishMachineDefinition = setup({
           if (context.parentRef === undefined) {
             return {
               target: 'error',
-              context: failWith(context, enq, 'Back this project up to Tau Cloud before publishing.'),
+              context: failWith(context, enq, 'Back this project up to the cloud before publishing.'),
             };
           }
           enq.sendTo(context.parentRef, {
@@ -468,7 +468,7 @@ const publishMachineDefinition = setup({
               enq,
               event.outcome === 'conflicted'
                 ? 'This project changed here and somewhere else. Choose what to keep, then publish again.'
-                : 'This project isn’t backed up to Tau Cloud yet. Publish again when you’re back online.',
+                : 'This project isn’t backed up to the cloud yet. Publish again when you’re back online.',
             ),
           };
         },

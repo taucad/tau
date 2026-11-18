@@ -98,11 +98,11 @@ const subCommands: Record<string, CommandDef> = {
     const { openCommand } = await import('./commands/open.js');
     return openCommand as CommandDef;
   }),
-  clone: lazyCommand('clone', 'Clone one of this account’s Tau Cloud projects onto this machine', async () => {
+  clone: lazyCommand('clone', 'Clone one of your cloud projects onto this machine', async () => {
     const { cloneCommand } = await import('./commands/clone.js');
     return cloneCommand as CommandDef;
   }),
-  publish: lazyCommand('publish', 'Publish a named version of a project to Tau Cloud and print its link', async () => {
+  publish: lazyCommand('publish', 'Publish a named version of a project and print its link', async () => {
     const { publishCommand } = await import('./commands/publish.js');
     return publishCommand as CommandDef;
   }),

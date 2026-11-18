@@ -750,7 +750,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           registerRemoteProject: async (id: string) => {
             const credential = options.tauCredential?.();
             if (credential === undefined) {
-              throw new Error('Sign in with `tau auth login` to back up to Tau Cloud.');
+              throw new Error('Sign in with `tau auth login` to back up to the cloud.');
             }
             /* B4c: a GitHub-linked project says so, as the browser's registration does (K4). */
             await registerProjectOverHttp(
@@ -766,7 +766,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           publishPublication: async (input: PublishPublicationActorInput) => {
             const credential = options.tauCredential?.();
             if (credential === undefined) {
-              throw new Error('Sign in with `tau auth login` to back up to Tau Cloud.');
+              throw new Error('Sign in with `tau auth login` to back up to the cloud.');
             }
             return publishOverHttp(apiBaseUrl, { kind: 'bearer', authorization: credential.authorization }, input);
           },
@@ -2605,7 +2605,7 @@ export const openProjectRevisions = async (
       return place.revisionId === undefined
         ? Object.freeze({
             status: 'refused',
-            reason: 'This project has nothing on Tau Cloud yet.',
+            reason: 'This project has nothing in the cloud yet.',
           })
         : Object.freeze({
             status: 'opened',
@@ -2620,7 +2620,7 @@ export const openProjectRevisions = async (
           resolve(
             Object.freeze({
               status: 'refused',
-              reason: status.remote.error ?? 'Couldn’t open this project from Tau Cloud.',
+              reason: status.remote.error ?? 'Couldn’t open this project from the cloud.',
             }),
           );
           return;
@@ -2650,8 +2650,8 @@ export const openProjectRevisions = async (
                * not know. */
               reason:
                 status.sync.state === 'conflicted'
-                  ? 'This project has work of its own that Tau Cloud does not have.'
-                  : (status.sync.error ?? 'Couldn’t finish opening this project from Tau Cloud.'),
+                  ? 'This project has work of its own that its cloud copy does not have.'
+                  : (status.sync.error ?? 'Couldn’t finish opening this project from the cloud.'),
             }),
           );
         }

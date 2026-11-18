@@ -3963,7 +3963,7 @@ describe('independent sync record failures', () => {
     const refusing: RevisionPort = {
       ...context.port,
       push: async () => {
-        throw new RevisionPortError('REMOTE_NOT_ENTITLED', 'Syncing files to Tau Cloud is a paid plan feature.');
+        throw new RevisionPortError('REMOTE_NOT_ENTITLED', 'Syncing files to the cloud is a paid plan feature.');
       },
     };
     const actors = createRevisionActors({
@@ -3976,7 +3976,7 @@ describe('independent sync record failures', () => {
 
     await expect(run(actors.sync.push, { remote: 'tau', branch: 'main', leases: {} })).rejects.toMatchObject({
       code: 'REMOTE_NOT_ENTITLED',
-      message: 'Syncing files to Tau Cloud is a paid plan feature.',
+      message: 'Syncing files to the cloud is a paid plan feature.',
     });
   }, 30_000);
 

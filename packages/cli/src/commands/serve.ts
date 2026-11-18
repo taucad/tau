@@ -851,7 +851,7 @@ const smokeTest = async (url: string, ui: boolean): Promise<void> => {
 export const serveCommand = defineCommand({
   meta: {
     name: 'serve',
-    description: 'Serve a project folder to the browser on this machine; --relay also offers it to Tau Cloud',
+    description: 'Serve a project folder to the browser on this machine; --relay also offers it to Tau',
   },
   args: {
     dir: {

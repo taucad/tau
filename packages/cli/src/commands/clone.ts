@@ -90,7 +90,7 @@ const directoryNameOf = (project: CloudProject): string =>
 export const cloneCommand = defineCommand({
   meta: {
     name: 'clone',
-    description: 'Clone one of this account’s Tau Cloud projects onto this machine',
+    description: 'Clone one of your cloud projects onto this machine',
   },
   args: {
     project: {
@@ -119,7 +119,7 @@ export const cloneCommand = defineCommand({
         return;
       }
       if (projects.length === 0) {
-        await writeStdout('This account has no projects on Tau Cloud yet.\n');
+        await writeStdout('This account has no cloud projects yet.\n');
         return;
       }
       await writeStdout(projects.map((project) => `${project.id}  ${project.name}\n`).join(''));
@@ -130,7 +130,7 @@ export const cloneCommand = defineCommand({
     if (project === undefined) {
       throw cliError(
         'NO_SUCH_PROJECT',
-        `This account has no project ${args.project} on Tau Cloud. Run \`tau clone\` to list them.`,
+        `This account has no cloud project ${args.project}. Run \`tau clone\` to list them.`,
         exitCodes.refused,
       );
     }

@@ -598,7 +598,7 @@ const refusalSentence = (code: RevisionPortErrorCode, remote: string | undefined
       return 'Sign in again to keep backing up.';
     }
     case 'REMOTE_NOT_ENTITLED': {
-      return 'Syncing files to Tau Cloud is a paid plan feature.';
+      return 'Syncing files to the cloud is a paid plan feature.';
     }
     case 'REMOTE_FORBIDDEN': {
       return remote?.startsWith('github-')
@@ -618,7 +618,7 @@ const refusalSentence = (code: RevisionPortErrorCode, remote: string | undefined
       return 'Couldn’t back up the latest changes. Tau will get the newer changes and try again.';
     }
     case 'REMOTE_DAMAGED': {
-      return 'This project’s backup on Tau Cloud is damaged and needs repair before it can back up again.';
+      return 'This project’s cloud backup is damaged and needs repair before it can back up again.';
     }
     default: {
       return 'Your backup is busy. Tau will try again.';
@@ -658,7 +658,7 @@ const tokenExpired = (answered: RemoteRefusal, authenticate: string | undefined)
  * import { remoteTransportError } from '@taucad/revisions';
  *
  * const error = Object.assign(new Error('HTTP Error: 403 Forbidden'), {
- *   data: { statusCode: 403, response: '{"code":"GIT_SYNC_NOT_ENTITLED","message":"Syncing files to Tau Cloud is a paid plan feature."}' },
+ *   data: { statusCode: 403, response: '{"code":"GIT_SYNC_NOT_ENTITLED","message":"Syncing files to the cloud is a paid plan feature."}' },
  * });
  * remoteTransportError(error, { remote: 'tau' }).code; // 'REMOTE_NOT_ENTITLED'
  * ```
@@ -849,7 +849,7 @@ export const publishFailureMessage = (status: number, code?: string): string => 
   if (status === 413 || code === 'PAYLOAD_TOO_LARGE') {
     return 'This version is larger than a shared link may be.';
   }
-  return 'Couldn’t publish to Tau Cloud. Try again.';
+  return 'Couldn’t publish this version. Try again.';
 };
 
 /**
@@ -986,7 +986,7 @@ export const readRemoteStorageOverHttp = async (
  */
 export const registerProjectFailureMessage = (status: number, code?: string, message?: string): string => {
   if (status === 401) {
-    return 'Sign in to back this project up to Tau Cloud.';
+    return 'Sign in to back this project up to the cloud.';
   }
   if (status === 403) {
     /* The ceiling names itself, so the server's own sentence is the only one
@@ -996,25 +996,25 @@ export const registerProjectFailureMessage = (status: number, code?: string, mes
       return message;
     }
     if (code === 'GIT_SYNC_NOT_ENTITLED') {
-      return 'Syncing files to Tau Cloud is a paid plan feature.';
+      return 'Syncing files to the cloud is a paid plan feature.';
     }
     /* D27: registration needs `owner`, so a collaborator pressing *Connect* is
      * refused by role rather than by plan or by quota. Without its own rung it
      * fell through to "Try again", which is the one thing retrying cannot fix. */
     if (code === 'PROJECT_ROLE_INSUFFICIENT') {
-      return 'Only the project owner can back this project up to Tau Cloud.';
+      return 'Only the project owner can back this project up to the cloud.';
     }
   }
   if (status === 404) {
-    return 'This project isn’t on Tau Cloud for this account.';
+    return 'This project isn’t in the cloud for this account.';
   }
   if (status === 429) {
     return 'You’ve started backing up too many projects today. Try again tomorrow.';
   }
   if (status === 400) {
-    return 'Couldn’t back up this project to Tau Cloud. Email support@tau.new.';
+    return 'Couldn’t back up this project. Email support@tau.new.';
   }
-  return 'Couldn’t start backing up to Tau Cloud. Try again.';
+  return 'Couldn’t start backing up this project. Try again.';
 };
 
 /**
@@ -1048,7 +1048,7 @@ export const remoteCarriesLargeObjects = (remote: Remote): boolean =>
  * @public
  */
 export const lfsRemoteUnsupportedMessage = (paths: readonly string[]): string =>
-  `Large files can’t be backed up to this Git host: ${[...paths].toSorted().join(', ')}. Back up to Tau Cloud instead, or remove them from the project.`;
+  `Large files can’t be backed up to this Git host: ${[...paths].toSorted().join(', ')}. Back up to Tau instead, or remove them from the project.`;
 
 /**
  * What the page told a browser host about reaching a third-party remote.

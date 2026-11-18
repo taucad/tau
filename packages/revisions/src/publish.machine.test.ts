@@ -402,7 +402,7 @@ describe('publishMachine', () => {
 
     expect(actor.getSnapshot().matches('error')).toBe(true);
     expect(emitted).toStrictEqual([
-      { type: 'toast.error', requestId: 'pub-1', message: 'Back this project up to Tau Cloud before publishing.' },
+      { type: 'toast.error', requestId: 'pub-1', message: 'Back this project up to the cloud before publishing.' },
     ]);
     actor.stop();
   });

@@ -932,7 +932,7 @@ describe('remoteMachine', () => {
             throw new RevisionPortError(
               // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the table names real codes.
               refusal.code as RevisionPortErrorCode,
-              'Syncing files to Tau Cloud is a paid plan feature.',
+              'Syncing files to the cloud is a paid plan feature.',
             );
           },
         }),
@@ -950,7 +950,7 @@ describe('remoteMachine', () => {
         reason: refusal.reason,
       });
       /* The sentence is still the server's own, untouched (N4). */
-      expect(facet.error).toBe('Syncing files to Tau Cloud is a paid plan feature.');
+      expect(facet.error).toBe('Syncing files to the cloud is a paid plan feature.');
       actor.stop();
     }
   });
@@ -1327,7 +1327,7 @@ describe('remoteMachine', () => {
           run: async ({ input }): Promise<void> => {
             expect(input.kind).toBe('tau');
             await Promise.resolve();
-            throw new RevisionPortError('REMOTE_NOT_ENTITLED', 'Syncing files to Tau Cloud is a paid plan feature.');
+            throw new RevisionPortError('REMOTE_NOT_ENTITLED', 'Syncing files to the cloud is a paid plan feature.');
           },
         }),
       });

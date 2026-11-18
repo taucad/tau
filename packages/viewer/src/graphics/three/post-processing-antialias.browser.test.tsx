@@ -28,7 +28,6 @@ import type * as fxaaModule from '#graphics/three/fxaa.js';
 import { createActor, createAsyncLogic } from 'xstate';
 import { afterEach, expect, inject, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
-import { HardwareComposition } from '#test/hardware-composition.test-utils.jsx';
 import { eachWithHardwareClaims } from '#test/hardware-claims.test-utils.js';
 import { SceneOverlay, useOverlayDepthRestorer } from '#graphics/three/scene-overlay.jsx';
 import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.jsx';

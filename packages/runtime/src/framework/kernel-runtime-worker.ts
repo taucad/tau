@@ -153,7 +153,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   private readonly selectionCache = new Map<string, { id: string; method: SelectionMethod }>();
   private readonly selectionErrors = new Map<string, unknown>();
   private kernelPlugins: readonly KernelPluginEntry[] = [];
-  private cachedDetectionDeps?: GetDependenciesResult;
   private initialized = false;
 
   public constructor(options: KernelRuntimeWorkerOptions) {
@@ -230,7 +229,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     this.lastOwnerKernel = undefined;
     this.selectionCache.clear();
     this.selectionErrors.clear();
-    this.cachedDetectionDeps = undefined;
   }
 
   protected override async onGetDependencies(
@@ -246,12 +244,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: GetDependenciesInput,
     runtime: KernelRuntime,
   ): Promise<GetDependenciesResult> {
-    if (this.cachedDetectionDeps) {
-      const deps = this.cachedDetectionDeps;
-      this.cachedDetectionDeps = undefined;
-      return deps;
-    }
-
+    /* Always the kernel's own resolve, never the selection pass's import detection: a bundled
+     * kernel resolves from the bundle its describe and evaluate use next, and the build key can then
+     * stand on that bundle's output (R24). */
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
       return { resolved: [input.entryPath], unresolved: [] };
@@ -1119,7 +1114,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   private clearFileDerivedKernelState(): void {
     this.selectionCache.clear();
     this.selectionErrors.clear();
-    this.cachedDetectionDeps = undefined;
   }
 
   // =====================================================================
@@ -1387,13 +1381,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
           const detectSpan = runtime.tracer.startSpan('kernel.detect-bundle', {
             entryPath,
           });
-          const { detectedModules, dependencies } = await bundler.definition.detectImports(
+          const { detectedModules } = await bundler.definition.detectImports(
             { entryPath },
             { signal: runtime.signal },
             bundler.ctx,
           );
           detectSpan.end();
-          this.cachedDetectionDeps = { resolved: dependencies, unresolved: [] };
 
           matchingConfigs = configsWithBuiltins.filter((config) =>
             config.builtinModuleNames!.some((name) =>

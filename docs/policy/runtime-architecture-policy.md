@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-11-16'
+updated: '2026-11-18'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -640,6 +640,8 @@ The `geometryCache()` middleware persists three role-aligned entries under `.tau
 | **export** | `export-{hash}.bin` | `wrapExport`   | Nonempty export files after selected contributors/transcoders         |
 
 The native-build key is exact rather than scope-selected. It covers source/import hashes, parameters, kernel version and initialization, implementation assets, mutative evaluation middleware and dependencies, and parsed `evaluateOptionsSchema` options. The artifact `dependencyHash` additionally covers the selected view or export, route options, requested content, contributors, and transcoders. View packing belongs in `render`; file encoding belongs in `export`.
+
+For a kernel whose `resolve` answers from `runtime.bundler`, the bundled output stands in for the content of the sources it was printed from: those files enter the key by path, and a `bundle` dependency carries the SHA-256 of the output code. A comment-only or formatting-only edit prints the same bundle and keeps the key; a code, import-target or imported-asset change prints a different one. Such a kernel MUST read its sources only through the bundle (source maps serve error locations only). A kernel that resolves on its own keeps raw content hashes. Requested view `content` is keyed after its operation defaults are applied, so an omitted property and its default share a key. Parameters are keyed as sent (an omitted parameter and its explicit default can differ, because a parameter record fills omitted values).
 
 A warm exact-match export reuses the evaluation's live handle, restores its serialized handle, or reheats from the retained evaluation input, in that order. An export-only request writes no view entry. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the Replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a WASM instance.
 

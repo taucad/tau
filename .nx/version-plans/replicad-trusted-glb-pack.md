@@ -1,5 +1,5 @@
 ---
-replicad: patch
+replicad: minor
 geometry-core: minor
 ---
 

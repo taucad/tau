@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises';
 import type { Config } from '@react-router/dev/config';
 
 /**
@@ -18,4 +19,11 @@ import type { Config } from '@react-router/dev/config';
  */
 export default {
   ssr: false,
+  /**
+   * React Router 8 leaves `build/server` after an `ssr: false` build (7 deleted it). Nothing serves it, so it is removed
+   * here, before the desktop package copies `build/client`.
+   */
+  async buildEnd({ reactRouterConfig }) {
+    await rm(`${reactRouterConfig.buildDirectory}/server`, { recursive: true, force: true });
+  },
 } satisfies Config;

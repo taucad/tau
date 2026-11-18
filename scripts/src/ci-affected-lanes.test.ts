@@ -256,7 +256,7 @@ describe('ci.yml affected-only lanes', () => {
     const lane = ci.jobs['affected-lane'];
     const targets = lane?.env?.['BUILD_TARGETS'] ?? '';
     expect(targets).toBe(
-      'build size check-desktop-payload check-critical-budget check-static-shells check-server-output',
+      'build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch',
     );
     // Both build shards take their projects from one `nx affected` over these targets, and run them all.
     const pins = steps.find((step) => step.id === 'pins')?.run ?? '';
@@ -273,6 +273,8 @@ describe('ci.yml affected-only lanes', () => {
     // The SSR bundle budget (`ui:size`) and the server-output check (RR0) run there too.
     expect(nxTargets(build)).toContainEqual({ target: 'size', affected: true });
     expect(nxTargets(build)).toContainEqual({ target: 'check-server-output', affected: true });
+    // And the check that every client build ships the patched React Router route-module loader (RR8).
+    expect(nxTargets(build)).toContainEqual({ target: 'check-route-module-patch', affected: true });
     // The target belongs to `ui`, so `nx affected` selects it exactly when `ui` is affected, and it brings
     // the renderer and desktop main/preload builds it reads.
     const ui = JSON.parse(read('apps/ui/project.json')) as {
@@ -287,6 +289,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(ui.targets['size']?.dependsOn).toEqual(['build']);
     expect(ui.targets['check-static-shells']?.dependsOn).toEqual(['build']);
     expect(ui.targets['check-server-output']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
+    expect(ui.targets['check-route-module-patch']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
     const docs = JSON.parse(read('apps/docs/project.json')) as {
       targets: Record<string, { readonly dependsOn?: readonly unknown[] }>;
     };

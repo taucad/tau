@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RevisionFailure, reportRevisionToast } from '#lib/revision-failure-reporting.js';
+import { RevisionFailure, createRevisionToastReporter } from '#lib/revision-failure-reporting.js';
 
-const reportUiError = vi.hoisted(() => vi.fn(async () => undefined));
-vi.mock('#lib/error-reporting.js', () => ({ reportUiError }));
+const reportUiError = vi.fn(async () => undefined);
+const reportRevisionToast = createRevisionToastReporter(reportUiError);
 
 afterEach(() => {
   reportUiError.mockClear();
 });
 
-describe('reportRevisionToast', () => {
+describe('createRevisionToastReporter', () => {
   it('should report an error toast with its code, subject and operation, grouped by subject and code', () => {
     reportRevisionToast({
       type: 'error',

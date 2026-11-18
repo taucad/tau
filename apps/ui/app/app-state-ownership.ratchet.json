@@ -1,6 +1,7 @@
 {
   "components": {
     "files": [
+      "apps/libs/revisions-ui/src/hooks/use-revision-status.ts",
       "apps/ui/app/hooks/chat-session-store.fixture.tsx",
       "apps/ui/app/hooks/use-file-manager.tsx",
       "apps/ui/app/hooks/use-project-manager.tsx",
@@ -104,8 +105,8 @@
     ]
   },
   "counts": {
-    "apps/ui/app/hooks/use-revision-status.ts#.start()": 1,
-    "apps/ui/app/hooks/use-revision-status.ts#setTimeout": 1,
+    "apps/libs/revisions-ui/src/hooks/use-revision-status.ts#.start()": 1,
+    "apps/libs/revisions-ui/src/hooks/use-revision-status.ts#setTimeout": 1,
     "apps/ui/app/runtime/app-runtime-provider.tsx#.start()": 1,
     "apps/ui/app/runtime/file-manager-host.ts#setTimeout": 1
   }

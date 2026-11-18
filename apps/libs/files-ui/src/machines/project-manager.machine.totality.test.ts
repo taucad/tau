@@ -17,23 +17,18 @@
  */
 import { pathTable, unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths';
 import type { UnansweredEvent } from '@taucad/xstate-testing/paths';
-import type { Remote } from 'comlink';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { matchesState } from 'xstate';
 import type { AnyMachineSnapshot } from 'xstate';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
-import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
 import {
   projectManagerEventTypes,
   projectManagerIgnoredEvents,
   projectManagerMachine,
-} from '#hooks/project-manager.machine.js';
-import type { ProjectManagerEvent } from '#hooks/project-manager.machine.js';
-
-vi.mock('#hooks/object-store-worker.js', () => ({
-  createObjectStoreWorker: () => ({ terminate: vi.fn() }),
-}));
+} from '#machines/project-manager.machine.js';
+import type { ProjectManagerEvent, ProjectManagerServices } from '#machines/project-manager.machine.js';
+import type { ProjectLibraryObjectStore } from '#types/project-library-io.types.js';
 
 /** One or more samples of every event type; the mapped type fails to compile when the union gains a type. */
 type Samples = { [T in ProjectManagerEvent['type']]: ReadonlyArray<Extract<ProjectManagerEvent, { type: T }>> };
@@ -44,7 +39,7 @@ const samples: Samples = {
     {
       type: 'workerInitialized',
       worker: mock<Worker>(),
-      wrappedWorker: mock<Remote<ObjectStoreWorkerType>>(),
+      wrappedWorker: mock<ProjectLibraryObjectStore>(),
     },
   ],
 };
@@ -60,6 +55,11 @@ const machine = projectManagerMachine.provide({
     initializeWorkerActor: pending,
   },
 });
+const services: ProjectManagerServices = {
+  startObjectStore: () => ({ worker: mock<Worker>(), wrappedWorker: mock<ProjectLibraryObjectStore>() }),
+  reportFault: () => undefined,
+  reportWorkerFailed: () => undefined,
+};
 const events: readonly ProjectManagerEvent[] = Object.values(samples).flat();
 /** The worker invoke's answers, built in and so never public; offered only while the invoke runs. */
 const workerAnswers = [
@@ -67,6 +67,7 @@ const workerAnswers = [
   { type: 'xstate.error.actor.initializeWorkerActor', error: new Error('worker failed') },
 ] as unknown as readonly ProjectManagerEvent[];
 const options = {
+  input: services,
   events: (snapshot: AnyMachineSnapshot) =>
     snapshot.matches('creatingWorker') ? [...events, ...workerAnswers] : events,
   limit: 100,

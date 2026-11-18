@@ -291,7 +291,7 @@ const mockResumeResources = vi.fn<(operationId: string) => Promise<readonly Chat
 const mockCompletePending = vi.fn<(operationId: string) => Promise<void>>();
 const mockBeginPermanentDeleteProject = vi.fn<(projectId: string, storage: unknown) => Promise<string>>();
 const mockPrepareProjectCreation = vi.fn<(input: unknown) => Promise<PendingProjectOperation>>();
-vi.mock('#hooks/project-manager.machine.js', async () => {
+vi.mock('@taucad/files-ui/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({

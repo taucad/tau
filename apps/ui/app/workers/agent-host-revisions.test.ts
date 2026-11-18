@@ -4,7 +4,7 @@ import type {
   WorkerRevisionRequest,
   WorkerRevisionResponse,
   WorkerRevisionResult,
-} from '#machines/file-manager.worker.revisions.js';
+} from '@taucad/revisions-ui/types/revision-worker-protocol';
 import { createPortRevisionsClient } from '#workers/agent-host-revisions.js';
 
 type RevisionRow = Extract<WorkerRevisionResult, { kind: 'log' }>['rows'][number];

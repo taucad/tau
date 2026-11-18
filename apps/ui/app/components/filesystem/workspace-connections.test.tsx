@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
 import { toast } from '@taucad/ui/components/sonner';

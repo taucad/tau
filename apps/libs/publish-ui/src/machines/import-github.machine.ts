@@ -2,14 +2,44 @@ import { createCallbackLogic, setup, types } from 'xstate';
 import type { AnyActorRef, EnqueueObject, SystemRegistry } from 'xstate';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 import { isReservedBranchName } from '@taucad/revisions';
-import { getGitHubClient } from '#lib/github-api.js';
-import { normalizeRepositoryFolder, parseGitHubUrl } from '#routes/import.$/import.utils.js';
+import { normalizeRepositoryFolder, parseGitHubUrl } from '#lib/github-url.js';
+
+/**
+ * The GitHub reads the import needs. The app hands in its unauthenticated client (`apps/ui` `lib/github-api`), which
+ * holds the API base and user agent, so this machine reads no app configuration.
+ */
+export type ImportGitHubClient = {
+  getRepository(
+    owner: string,
+    repo: string,
+  ): Promise<{
+    avatarUrl: string | undefined;
+    description: string | undefined;
+    stars: number;
+    forks: number;
+    watchers: number;
+    license: string | undefined;
+    defaultBranch: string;
+    isPrivate: boolean;
+    lastUpdated: string;
+  }>;
+  listBranches(options: { owner: string; repo: string; pageSize?: number; cursor?: string }): Promise<{
+    branches: Array<{ name: string; sha: string; updatedAt: number }>;
+    hasMore: boolean;
+    endCursor: string | undefined;
+  }>;
+  listFiles(owner: string, repo: string, ref: string): Promise<Array<{ path: string; size: number }>>;
+  getArchiveUrl(options: { owner: string; repo: string; ref: string }): string;
+  getAuthHeaders(): Record<string, string>;
+};
 
 /**
  * Import GitHub Machine Context
  */
 export type ImportGitHubContext = {
   parentRef: AnyActorRef | undefined;
+  /** The GitHub client the page handed in. */
+  githubClient: ImportGitHubClient;
   repoUrl: string;
   owner: string;
   repo: string;
@@ -135,6 +165,7 @@ function toBranchesFetchError(error: unknown): Error {
  * Import GitHub Machine Input
  */
 type ImportGitHubInput = {
+  githubClient: ImportGitHubClient;
   parentRef?: AnyActorRef;
   owner?: string;
   repo?: string;
@@ -274,9 +305,11 @@ function buildImportUrl({
   return `${importPath}${queryString}`;
 }
 
-const getRepoMetadataActor = fromSafeAsync<RepoMetadataResult, { owner: string; repo: string }>(async ({ input }) => {
-  const client = getGitHubClient();
-  const metadata = await client.getRepository(input.owner, input.repo);
+const getRepoMetadataActor = fromSafeAsync<
+  RepoMetadataResult,
+  { client: ImportGitHubClient; owner: string; repo: string }
+>(async ({ input }) => {
+  const metadata = await input.client.getRepository(input.owner, input.repo);
 
   return {
     type: 'metadataRetrieved',
@@ -284,25 +317,25 @@ const getRepoMetadataActor = fromSafeAsync<RepoMetadataResult, { owner: string; 
   };
 });
 
-const getBranchesActor = fromSafeAsync<BranchesResult, { owner: string; repo: string; cursor?: string }>(
-  async ({ input }) => {
-    const client = getGitHubClient();
-    const result = await client.listBranches({
-      owner: input.owner,
-      repo: input.repo,
-      pageSize: 100,
-      cursor: input.cursor,
-    });
+const getBranchesActor = fromSafeAsync<
+  BranchesResult,
+  { client: ImportGitHubClient; owner: string; repo: string; cursor?: string }
+>(async ({ input }) => {
+  const result = await input.client.listBranches({
+    owner: input.owner,
+    repo: input.repo,
+    pageSize: 100,
+    cursor: input.cursor,
+  });
 
-    return {
-      type: 'branchesRetrieved',
-      /* A conflict line is a decision, not a branch to copy (D14). */
-      branches: result.branches.filter(({ name }) => !isReservedBranchName(name)),
-      hasMore: result.hasMore,
-      endCursor: result.endCursor,
-    };
-  },
-);
+  return {
+    type: 'branchesRetrieved',
+    /* A conflict line is a decision, not a branch to copy (D14). */
+    branches: result.branches.filter(({ name }) => !isReservedBranchName(name)),
+    hasMore: result.hasMore,
+    endCursor: result.endCursor,
+  };
+});
 
 // Get files actor - lists files in the repository tree without downloading content
 type FilesResult = {
@@ -310,9 +343,11 @@ type FilesResult = {
   files: Array<{ path: string; size: number }>;
 };
 
-const getFilesActor = fromSafeAsync<FilesResult, { owner: string; repo: string; ref: string }>(async ({ input }) => {
-  const client = getGitHubClient();
-  const files = await client.listFiles(input.owner, input.repo, input.ref);
+const getFilesActor = fromSafeAsync<
+  FilesResult,
+  { client: ImportGitHubClient; owner: string; repo: string; ref: string }
+>(async ({ input }) => {
+  const files = await input.client.listFiles(input.owner, input.repo, input.ref);
 
   return {
     type: 'filesRetrieved',
@@ -606,6 +641,7 @@ export const importGitHubMachine = setup({
   id: 'importGitHub',
   context: ({ input }) => ({
     parentRef: input.parentRef,
+    githubClient: input.githubClient,
     repoUrl: input.owner && input.repo ? `https://github.com/${input.owner}/${input.repo}` : '',
     owner: input.owner ?? '',
     repo: input.repo ?? '',
@@ -659,6 +695,7 @@ export const importGitHubMachine = setup({
         id: 'loadMoreBranches',
         src: 'getBranchesActor',
         input: ({ context }) => ({
+          client: context.githubClient,
           owner: context.owner,
           repo: context.repo,
           cursor: context.branchesCursor,
@@ -716,6 +753,7 @@ export const importGitHubMachine = setup({
                 id: 'fetchMetadata',
                 src: 'getRepoMetadataActor',
                 input: ({ context }) => ({
+                  client: context.githubClient,
                   owner: context.owner,
                   repo: context.repo,
                 }),
@@ -764,6 +802,7 @@ export const importGitHubMachine = setup({
                 id: 'fetchBranches',
                 src: 'getBranchesActor',
                 input: ({ context }) => ({
+                  client: context.githubClient,
                   owner: context.owner,
                   repo: context.repo,
                   cursor: undefined,
@@ -801,6 +840,7 @@ export const importGitHubMachine = setup({
                 id: 'fetchFiles',
                 src: 'getFilesActor',
                 input: ({ context }) => ({
+                  client: context.githubClient,
                   owner: context.owner,
                   repo: context.repo,
                   ref: context.selectedBranch,
@@ -841,6 +881,7 @@ export const importGitHubMachine = setup({
         id: 'fetchFilesOnBranchChange',
         src: 'getFilesActor',
         input: ({ context }) => ({
+          client: context.githubClient,
           owner: context.owner,
           repo: context.repo,
           ref: context.selectedBranch,
@@ -868,7 +909,7 @@ export const importGitHubMachine = setup({
       invoke: {
         src: 'importWorkerActor',
         input: ({ context }) => {
-          const client = getGitHubClient();
+          const client = context.githubClient;
           return {
             downloadUrl: client.getArchiveUrl({
               owner: context.owner,

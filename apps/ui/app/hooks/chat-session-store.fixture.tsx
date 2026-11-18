@@ -11,7 +11,7 @@ import type { ChatSessionStoreOptions } from '#services/chat-session-store.js';
 import { ChatSessionStoreProvider } from '#hooks/chat-session-store-provider.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import { inspect } from '#machines/inspector.js';
 import {
   isPlacementOnThisDevice,

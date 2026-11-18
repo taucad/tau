@@ -3,15 +3,15 @@ import type { ReactNode } from 'react';
 import { toast } from '@taucad/ui/components/sonner';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
-import type { RevisionCommands } from '#hooks/use-revision-status.js';
+import type { RevisionCommands } from '@taucad/revisions-ui/hooks/use-revision-status';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import { revisionWarningCodes } from '#lib/revision-failure-reporting.js';
+import { revisionWarningCodes } from '@taucad/revisions-ui/lib/revision-failure-reporting';
 import type { RevisionFailureSubject } from '@taucad/ui-core/lib/revision-failure-copy';
 import type { BranchOperation } from '@taucad/revisions';
-import type { RevisionToast } from '#machines/file-manager.worker.revisions.js';
+import type { RevisionToast } from '@taucad/revisions-ui/types/revision-worker-protocol';
 import { useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
-import type { RevisionClient } from '#types/revision-client.types.js';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 import {
   needsDecision,
   reopenedSentence,

@@ -54,6 +54,7 @@
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/build123d": "workspace:*",
+    "@taucad/cadmpeg": "workspace:*",
     "@taucad/desktop-terminal": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/events": "workspace:*",

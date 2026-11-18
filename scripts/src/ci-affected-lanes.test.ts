@@ -169,6 +169,7 @@ describe('ci.yml affected-only lanes', () => {
       desktop: { tags: ['ci:desktop'] },
       shell: { tags: ['ci:shell'], pr: 'queue', queue: 'any-touched' },
       'e2e-queue': { targets: ['test:e2e:queue'], pr: 'touched' },
+      'compute-qualify': { targets: ['compute-qualify-ci'] },
     });
   });
 
@@ -232,6 +233,7 @@ describe('ci.yml affected-only lanes', () => {
       'shell',
       'formal-nightly',
       'e2e-queue',
+      'compute-qualify',
     ]);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');
@@ -246,7 +248,7 @@ describe('ci.yml affected-only lanes', () => {
     const run = steps.find((step) => step.name === "Run the lane's tasks")?.run ?? '';
     const build = /^\s*build\) (.*) ;;$/mu.exec(run)?.[1] ?? '';
     expect(build).toBe(
-      'pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output --parallel=1',
+      'pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch --parallel=1',
     );
     expect(nxTargets(build)).toContainEqual({ target: 'check-desktop-payload', affected: true });
     // The critical-path budget (PL0) runs beside it in the same lane, so a ui change is held to its budget.
@@ -256,6 +258,8 @@ describe('ci.yml affected-only lanes', () => {
     // The SSR bundle budget (`ui:size`) and the server-output check (RR0) run there too.
     expect(nxTargets(build)).toContainEqual({ target: 'size', affected: true });
     expect(nxTargets(build)).toContainEqual({ target: 'check-server-output', affected: true });
+    // And the check that every client build ships the patched React Router route-module loader (RR8).
+    expect(nxTargets(build)).toContainEqual({ target: 'check-route-module-patch', affected: true });
     // The target belongs to `ui`, so `nx affected` selects it exactly when `ui` is affected, and it brings
     // the renderer and desktop main/preload builds it reads.
     const ui = JSON.parse(read('apps/ui/project.json')) as {
@@ -270,6 +274,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(ui.targets['size']?.dependsOn).toEqual(['build']);
     expect(ui.targets['check-static-shells']?.dependsOn).toEqual(['build']);
     expect(ui.targets['check-server-output']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
+    expect(ui.targets['check-route-module-patch']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
     const docs = JSON.parse(read('apps/docs/project.json')) as {
       targets: Record<string, { readonly dependsOn?: readonly unknown[] }>;
     };
@@ -317,6 +322,8 @@ describe('ci.yml affected-only lanes', () => {
     // The plan reads only the verdict's run id: no per-lane conclusions of the queue run.
     expect(planStep?.env?.['REUSED']).toBe(expression('steps.queue.outputs.run-id'));
     expect(Object.keys(planStep?.env ?? {}).sort()).toEqual([
+      'COMPUTE_QUALIFY_LANE_PATHS',
+      'COMPUTE_QUALIFY_LANE_PROJECTS',
       'LANE_SELECTORS',
       'NATIVE_DARWIN_LANE_PATHS',
       'QUEUE_HUBS',
@@ -523,6 +530,7 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
       ['FORMAL', 'formal', 'formal'],
       ['API', 'api', 'api'],
       ['BILLING', 'billing-e2e', 'billing'],
+      ['COMPUTE_QUALIFY', 'compute-qualify', 'compute-qualify'],
     ] as const) {
       expect(gateStep?.env?.[`${key}_REQUIRED`]).toBe(expression(`needs.plan.outputs.${output}`));
       expect(gateStep?.env?.[`${key}_RESULT`]).toBe(expression(`needs.${job}.result`));
@@ -1232,6 +1240,8 @@ describe('plan lane selection', () => {
       tags: ['ci:shell'],
       targets: ['test:shell-conformance', 'formal:nightly'],
     },
+    replicad: { root: 'packages/plugins/replicad', type: 'lib' },
+    'runtime-e2e': { root: 'apps/runtime-e2e', tags: ['ci:quarantined'], targets: ['test', 'compute-qualify-ci'] },
   };
   const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
 
@@ -1349,6 +1359,8 @@ describe('plan lane selection', () => {
           ['LANE_SELECTORS', selectors],
           ['SHELL_LANE_PATHS', planStep?.env?.['SHELL_LANE_PATHS'] ?? '[]'],
           ['NATIVE_DARWIN_LANE_PATHS', planStep?.env?.['NATIVE_DARWIN_LANE_PATHS'] ?? '[]'],
+          ['COMPUTE_QUALIFY_LANE_PROJECTS', planStep?.env?.['COMPUTE_QUALIFY_LANE_PROJECTS'] ?? '[]'],
+          ['COMPUTE_QUALIFY_LANE_PATHS', planStep?.env?.['COMPUTE_QUALIFY_LANE_PATHS'] ?? '[]'],
           ['VIEWER_PARITY_LANE_PATHS', planStep?.env?.['VIEWER_PARITY_LANE_PATHS'] ?? '[]'],
           ['VIEWER_PARITY_PINS', planStep?.env?.['VIEWER_PARITY_PINS'] ?? '[]'],
           ['QUEUE_HUBS', planStep?.env?.['QUEUE_HUBS'] ?? '[]'],
@@ -1554,6 +1566,38 @@ describe('plan lane selection', () => {
     const queue = plan('merge_group', { affected: [], files: ['libs/tau-examples/src/standalone/picogk-extra.ts'] });
     expect(queue.status, queue.stderr).toBe(0);
     expect(queue.outputs['native-darwin']).toBe('false');
+  });
+
+  it('should run the compute qualification lane only when a measured project is affected or a qualification path changed', () => {
+    // The runtime-e2e project is affected through almost any dependency; a measured project (the Replicad plugin) keeps it.
+    for (const event of ['merge_group', 'pull_request']) {
+      const measured = plan(event, {
+        affected: ['replicad', 'runtime-e2e'],
+        files: ['packages/plugins/replicad/src/a.ts'],
+      });
+      expect(measured.status, measured.stderr).toBe(0);
+      expect(measured.outputs['compute-qualify'], event).toBe('true');
+    }
+    const harness = plan('pull_request', {
+      affected: ['runtime-e2e'],
+      files: ['apps/runtime-e2e/src/compute-baseline/qualification-baselines.json'],
+    });
+    expect(harness.status, harness.stderr).toBe(0);
+    expect(harness.outputs['compute-qualify']).toBe('true');
+    const model = plan('merge_group', {
+      affected: ['core', 'runtime-e2e'],
+      files: ['libs/tau-examples/src/kernels/replicad/six-axis-arm/main.ts'],
+    });
+    expect(model.outputs['compute-qualify']).toBe('true');
+    // Affected only through an unmeasured dependency, or a sibling suite of the project: no lane.
+    const unrelated = plan('merge_group', { affected: ['core', 'runtime-e2e'], files: ['packages/core/src/index.ts'] });
+    expect(unrelated.status, unrelated.stderr).toBe(0);
+    expect(unrelated.outputs['compute-qualify']).toBe('false');
+    const sibling = plan('pull_request', {
+      affected: ['runtime-e2e'],
+      files: ['apps/runtime-e2e/src/host-relay.test.ts'],
+    });
+    expect(sibling.outputs['compute-qualify']).toBe('false');
   });
 
   it.each([

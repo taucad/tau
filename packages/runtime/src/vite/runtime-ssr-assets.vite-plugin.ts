@@ -168,7 +168,13 @@ export const runtimeAssetsPlugin = (): Plugin => {
         const packageMatches = code.includes('import.meta.resolve')
           ? findPackageAssetMatches(collectMatches(code, packageUrlPattern), id)
           : [];
-        const relativeMatches = isSsrBuild ? findAssetMatches(collectMatches(code, urlPattern), id) : [];
+        /*
+         * A shared-config build (Vite's Environment API with `builder.sharedConfigBuild`, as React Router's
+         * `future.v8_viteEnvironmentApi` sets it) resolves one config for every environment, so `configResolved` sees no
+         * `build.ssr`; the server environment is then known only by its consumer.
+         */
+        const isServerBuild = isSsrBuild || (!isServe && this.environment.config.consumer === 'server');
+        const relativeMatches = isServerBuild ? findAssetMatches(collectMatches(code, urlPattern), id) : [];
         const matches = [...packageMatches, ...relativeMatches];
         if (matches.length === 0) {
           return;

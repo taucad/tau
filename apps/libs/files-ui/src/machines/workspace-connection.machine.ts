@@ -1,9 +1,8 @@
 import { setup, types } from 'xstate';
-import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
-import { hostPathName } from '@taucad/files-ui/filesystem/desktop-bridge';
-import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
+import type { DirectoryPick } from '#constants/browser.constants.js';
+import { hostPathName } from '#filesystem/desktop-bridge.js';
+import type { Workspace } from '#filesystem/handle-store.js';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
-import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 
 export type PreparedWorkspaceCatalog = {
   readonly projectCount: number;
@@ -25,6 +24,11 @@ export type WorkspaceConnectionServices = {
   registerWorkspace(selection: DirectoryPick, signal: AbortSignal): Promise<RegisteredWorkspace>;
   mountWorkspace(workspace: RegisteredWorkspace, selection: DirectoryPick, signal: AbortSignal): Promise<void>;
   prepareWorkspaceCatalog(workspace: RegisteredWorkspace, signal: AbortSignal): Promise<PreparedWorkspaceCatalog>;
+  /**
+   * Report the machine's first fault once (D23). The app passes its runtime fault reporter, the one its other machines
+   * report through; nothing here names an app module.
+   */
+  reportFault(error: unknown): void;
 };
 
 type WorkspaceConnectionContext = {
@@ -241,10 +245,13 @@ export const workspaceConnectionMachine = setup({
     if (context.fault !== undefined) {
       return { context: { faults } };
     }
+    const { services } = context;
     enq(() => {
-      reportAppRuntimeFault(event.error);
+      services.reportFault(event.error);
     });
-    return { context: { fault: faultMessage(event.error, 'workspace connection fault'), faults } };
+    return {
+      context: { fault: event.error instanceof Error ? event.error.message : 'workspace connection fault', faults },
+    };
   },
   context: ({ input }) => ({
     services: input,

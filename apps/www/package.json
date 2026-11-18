@@ -11,6 +11,7 @@
     "dev": "node scripts/prepare-assets.ts --dev && react-router dev"
   },
   "dependencies": {
+    "@react-router/node": "catalog:",
     "@taucad/planetary-gearbox": "workspace:*",
     "@taucad/utils": "workspace:*",
     "three": "catalog:",
@@ -33,7 +34,7 @@
     "playwright": "catalog:",
     "sharp": "catalog:",
     "@react-router/dev": "catalog:",
-    "@netlify/vite-plugin-react-router": "^3.1.1",
+    "@netlify/vite-plugin-react-router": "catalog:",
     "@tailwindcss/vite": "^4.3.1",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",

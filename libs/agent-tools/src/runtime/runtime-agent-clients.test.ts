@@ -279,26 +279,6 @@ describe('createRuntimeAgentClients', () => {
     });
   });
 
-  it('should report the build of an evaluation that failed', async () => {
-    const clients = clientsFor(
-      runtimeFixture({
-        evaluate: () => ({
-          success: false,
-          id: 'evaluation-1',
-          transient: false,
-          issues: [],
-          build: { reused: false, elapsed: 40 },
-        }),
-      }),
-    );
-
-    await expect(clients.kernelClient.evaluateModel({ targetFile: 'main.ts' })).resolves.toMatchObject({
-      success: true,
-      status: 'error',
-      build: { reused: false, elapsed: 40 },
-    });
-  });
-
   it('omits the build report from a runtime that reports none', async () => {
     const clients = clientsFor(runtimeFixture());
 

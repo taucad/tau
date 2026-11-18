@@ -276,6 +276,21 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     input: (input) => `targetFile: ${input.targetFile}`,
     output(output) {
       const lines = [`Status: ${output.status}`];
+      if (output.build) {
+        const { reused, elapsed, operations, costliest } = output.build;
+        const facts = [
+          `${reused ? 'reused' : 'computed'}, ${Math.round(elapsed)} ms`,
+          operations === undefined
+            ? undefined
+            : `operations ${operations.reused} reused, ${operations.computed} computed`,
+          costliest === undefined || costliest.length === 0
+            ? undefined
+            : `costliest ${costliest
+                .map(({ operation, elapsed: spent, calls }) => `${operation} ${Math.round(spent)} ms (${calls} calls)`)
+                .join(', ')}`,
+        ].filter(Boolean);
+        lines.push(`Build: ${facts.join('; ')}`);
+      }
       if (output.tessellation) {
         const {
           triangles,
@@ -303,6 +318,10 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
         ].filter(Boolean);
         if (resolution.length > 0) {
           lines.push(`Resolution: ${resolution.join(', ')}`);
+        }
+        if (output.tessellation.meshes) {
+          const { reused, computed } = output.tessellation.meshes;
+          lines.push(`Meshes: ${reused} reused, ${computed} computed`);
         }
       }
       if (output.mechanism?.declared) {

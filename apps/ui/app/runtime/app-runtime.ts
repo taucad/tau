@@ -603,10 +603,29 @@ export const createAppRuntime = ({
     openAhead: createSessionsOpenAhead({
       loadRevisions: loadSessionRevisions,
       worker: host.sharedWorker,
-      routeRequest: {
-        get: () => focus.getSnapshot().context.request,
+      focus: {
+        get: () => {
+          const snapshot = focus.getSnapshot();
+          const { answer, request } = snapshot.context;
+          return {
+            ...(request === undefined ? {} : { request }),
+            ...(snapshot.hasTag('focused') && answer?.projectId !== undefined ? { focusedOn: answer.projectId } : {}),
+            ...(snapshot.hasTag('held') && answer?.projectId !== undefined && answer.answer.status !== 'ready'
+              ? { heldOn: answer.projectId }
+              : {}),
+          };
+        },
         subscribe: (listener) => {
           const subscription = focus.subscribe(listener);
+          return () => {
+            subscription.unsubscribe();
+          };
+        },
+      },
+      registry: {
+        get: () => registry.getSnapshot().context,
+        subscribe: (listener) => {
+          const subscription = registry.subscribe(listener);
           return () => {
             subscription.unsubscribe();
           };

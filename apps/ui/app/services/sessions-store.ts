@@ -920,6 +920,22 @@ export type SessionsAheadRouteRequest = Readonly<{
   slugs?: Readonly<{ workspaceSlug: string; projectSlug: string }>;
 }>;
 
+/**
+ * Focus as an early open reads it: the route's request, and where an open settled. `focusedOn` is the project focus is
+ * focused on; `heldOn` the project focus holds on an answer that opens nothing (start failed, access refused, trashed,
+ * missing, …).
+ *
+ * @public
+ */
+export type SessionsAheadFocusView = Readonly<{
+  request?: SessionsAheadRouteRequest;
+  focusedOn?: string;
+  heldOn?: string;
+}>;
+
+/** The registry as an early open reads it: which projects have a session, and in what state. @public */
+export type SessionsAheadRegistryView = Pick<SessionsMachineContext, 'refs' | 'status'>;
+
 /** What an *Open* gesture asks of the registry's composition: start its project's open now (STO-25 SP6). @public */
 export type SessionsOpenAheadGesture = Readonly<{
   projectId: string;
@@ -938,12 +954,15 @@ export type SessionsOpenAhead = (gesture: SessionsOpenAheadGesture) => () => voi
  * session will use, so the session's `revisions` child takes the same connection when the registry opens the project.
  *
  * Liveness is the registry's, with no timer: one gesture at a time (a newer one releases the last), and a gesture's
- * connection lives until the project's session takes it, or until focus's route request names another place (the
- * person went elsewhere), who is signed in changes, or the gesture itself releases it (its navigation failed). Its
- * release never closes a client a session holds (`openRevisionsAheadOfSession`). The desktop's revisions are its
- * host's, so nothing starts there; nor before the shared worker exists.
+ * connection lives until the project's session takes it. It is released when focus's route request names another
+ * place (the person went elsewhere); when the open settles without a session for the project (focus focused on it with
+ * none, after a budget decline, or held on an answer that opens nothing, after a start failure); when the registry's
+ * session for it fails, closes or goes; when who is signed in changes; or when the gesture itself releases it. A
+ * release never closes a client a session holds (`openRevisionsAheadOfSession`), so once a session's `revisions` child
+ * took the client these are no-ops. The desktop's revisions are its host's, so nothing starts there; nor before the
+ * shared worker exists.
  *
- * @param input - The `revisions` module loader, the shared worker, focus's route request and whether this is the desktop.
+ * @param input - The `revisions` module loader, the shared worker, focus, the registry and whether this is the desktop.
  * @returns The gesture's entry point.
  * @public
  */
@@ -951,7 +970,8 @@ export const createSessionsOpenAhead = (
   input: Readonly<{
     loadRevisions: () => Promise<SessionRevisionsAheadModule>;
     worker: () => Worker | undefined;
-    routeRequest: SessionsObservable<SessionsAheadRouteRequest | undefined>;
+    focus: SessionsObservable<SessionsAheadFocusView>;
+    registry: SessionsObservable<SessionsAheadRegistryView>;
     /** The desktop build; read from the bridge unless a row says. */
     desktop?: boolean;
   }>,
@@ -970,7 +990,10 @@ export const createSessionsOpenAhead = (
     const { projectId, slugs } = gesture;
     const ended = new AbortController();
     let releaseOpen: (() => void) | undefined;
-    const startedAt = input.routeRequest.get()?.requestId;
+    const startedAt = input.focus.get().request?.requestId;
+    /* Whether the registry has had a session for the project since the gesture: one that goes ended without it. */
+    let hadSession = input.registry.get().refs[projectId] !== undefined;
+    let stopFollowing: () => void = () => undefined;
     const names = (request: SessionsAheadRouteRequest): boolean =>
       !request.home &&
       (request.projectId === undefined
@@ -986,7 +1009,7 @@ export const createSessionsOpenAhead = (
         if (current === slot) {
           current = undefined;
         }
-        stopFollowingRoute();
+        stopFollowing();
         try {
           releaseOpen?.();
         } catch (error) {
@@ -995,12 +1018,36 @@ export const createSessionsOpenAhead = (
       },
     };
     current = slot;
-    const stopFollowingRoute = input.routeRequest.subscribe(() => {
-      const request = input.routeRequest.get();
+    /* Whether the gesture's open is over without a session for the project, or the person is elsewhere. */
+    const isOver = (): boolean => {
+      const { request, focusedOn, heldOn } = input.focus.get();
       if (request !== undefined && request.requestId !== startedAt && !names(request)) {
+        return true;
+      }
+      const { refs, status } = input.registry.get();
+      const hasSession = refs[projectId] !== undefined;
+      const state = status[projectId]?.state;
+      const sessionEnded =
+        (hadSession && !hasSession) || state === 'failed' || state === 'closing' || state === 'closed';
+      hadSession ||= hasSession;
+      return sessionEnded || heldOn === projectId || (focusedOn === projectId && !hasSession);
+    };
+    const follow = (): void => {
+      if (isOver()) {
         slot.release();
       }
-    });
+    };
+    const stopFocus = input.focus.subscribe(follow);
+    const stopRegistry = input.registry.subscribe(follow);
+    stopFollowing = () => {
+      stopFocus();
+      stopRegistry();
+    };
+    if (ended.signal.aborted) {
+      /* Released while subscribing: let go of what was just taken. */
+      stopFollowing();
+      return slot.release;
+    }
     // async-iife: bootstrap -- the gesture never waits on the module; the session loads the same one.
     void (async (): Promise<void> => {
       try {

@@ -4,7 +4,12 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { createSessionsOpenAhead } from '#services/sessions-store.js';
-import type { SessionRevisionsAheadModule, SessionsAheadRouteRequest } from '#services/sessions-store.js';
+import type {
+  SessionRevisionsAheadModule,
+  SessionsAheadFocusView,
+  SessionsAheadRegistryView,
+  SessionsAheadRouteRequest,
+} from '#services/sessions-store.js';
 import type { SessionRevisionsAheadInput } from '#runtime/session-revisions.js';
 
 const worker = { name: 'shared-worker' } as unknown as Worker;
@@ -23,21 +28,26 @@ const compose = (options: Readonly<{ desktop?: boolean; worker?: Worker }> = {})
     createSessionRevisionsAheadPorts: () => ({}),
   } as unknown as SessionRevisionsAheadModule;
   const loadRevisions = vi.fn(async () => module);
-  let request: SessionsAheadRouteRequest | undefined = { requestId: 'r0', home: true };
+  let view: SessionsAheadFocusView = { request: { requestId: 'r0', home: true } };
+  let registry: SessionsAheadRegistryView = { refs: {}, status: {} };
   const listeners = new Set<() => void>();
+  const subscribe = (listener: () => void): (() => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  };
+  const tell = (): void => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
   const openAhead = createSessionsOpenAhead({
     loadRevisions,
     worker: () => ('worker' in options ? options.worker : worker),
     desktop: options.desktop ?? false,
-    routeRequest: {
-      get: () => request,
-      subscribe: (listener) => {
-        listeners.add(listener);
-        return () => {
-          listeners.delete(listener);
-        };
-      },
-    },
+    focus: { get: () => view, subscribe },
+    registry: { get: () => registry, subscribe },
   });
   return {
     openAhead,
@@ -46,10 +56,22 @@ const compose = (options: Readonly<{ desktop?: boolean; worker?: Worker }> = {})
     loadRevisions,
     listeners,
     route: (next: SessionsAheadRouteRequest) => {
-      request = next;
-      for (const listener of listeners) {
-        listener();
-      }
+      view = { ...view, request: next };
+      tell();
+    },
+    /** Focus settles: focused on a project, or held on an answer that opens nothing. */
+    settle: (next: Omit<SessionsAheadFocusView, 'request'>) => {
+      view = { request: view.request, ...next };
+      tell();
+    },
+    /** The registry's sessions: `opening`, `live`, `failed`, … per project, or none. */
+    sessions: (states: Readonly<Record<string, 'opening' | 'live' | 'closing' | 'failed' | undefined>>) => {
+      const live = Object.entries(states).filter(([, state]) => state !== undefined);
+      registry = {
+        refs: Object.fromEntries(live.map(([id]) => [id, {}])),
+        status: Object.fromEntries(live.map(([id, state]) => [id, { state }])),
+      } as unknown as SessionsAheadRegistryView;
+      tell();
     },
   };
 };
@@ -119,5 +141,54 @@ describe('createSessionsOpenAhead (STO-25 SP6)', () => {
     expect(harness.opened).toStrictEqual([]);
     release();
     expect(harness.released).toStrictEqual([]);
+  });
+  /* Review of d158d3e7 (MEDIUM): an open that settles without a session leaves no connection or download behind. */
+  describe('releases when the open settles without a session', () => {
+    const onTheRoute = async () => {
+      const harness = compose();
+      harness.openAhead({ projectId: 'p1', slugs: slugsOf('one') });
+      await settle();
+      harness.route({ requestId: 'r1', home: false, projectId: 'p1', slugs: slugsOf('one') });
+      return harness;
+    };
+
+    it('keeps the connection while the registry opens the session and once it is live', async () => {
+      const harness = await onTheRoute();
+      harness.sessions({ p1: 'opening' });
+      harness.settle({ focusedOn: 'p1' });
+      harness.sessions({ p1: 'live' });
+      expect(harness.released).toStrictEqual([]);
+    });
+
+    it('releases a budget decline: focus settles on the project with no session for it', async () => {
+      const harness = await onTheRoute();
+      harness.settle({ focusedOn: 'p1' });
+      expect(harness.released).toStrictEqual(['p1']);
+    });
+
+    it('releases a start failure: focus holds the project on an answer that opens nothing', async () => {
+      const harness = await onTheRoute();
+      harness.settle({ heldOn: 'p1' });
+      expect(harness.released).toStrictEqual(['p1']);
+    });
+
+    it('releases when the registry’s session fails or closes, whatever focus says', async () => {
+      const failed = await onTheRoute();
+      failed.sessions({ p1: 'opening' });
+      failed.sessions({ p1: 'failed' });
+      expect(failed.released).toStrictEqual(['p1']);
+
+      const closed = await onTheRoute();
+      closed.sessions({ p1: 'opening' });
+      closed.sessions({});
+      expect(closed.released).toStrictEqual(['p1']);
+    });
+
+    it('ignores what the registry and focus say of other projects', async () => {
+      const harness = await onTheRoute();
+      harness.sessions({ p2: 'failed' });
+      harness.settle({ heldOn: 'p2' });
+      expect(harness.released).toStrictEqual([]);
+    });
   });
 });

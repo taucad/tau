@@ -25,12 +25,16 @@ export const admitKernelBuildReport = (value: unknown): KernelBuildReport | unde
 };
 
 /**
- * The evaluation's build report: reused when no kernel build ran for it or the kernel answered from a build it kept.
- * @param ran - The kernel's `evaluate` ran for this evaluation.
+ * The build report of a successful evaluation.
+ * @param built - The kernel's `evaluate` ran for this evaluation; otherwise the retained build or a stored one answered.
  * @param kernel - The admitted report of that run.
- * @param elapsed - Milliseconds the worker spent producing the evaluation.
- * @returns The report.
+ * @param elapsed - Milliseconds the worker spent producing the evaluation, reported to a tenth of a millisecond.
+ * @returns The report: reused when no build ran or the kernel answered from a build it kept.
  * @internal
  */
-export const buildReportOf = (ran: boolean, kernel: KernelBuildReport | undefined, elapsed: number): BuildReport =>
-  !ran || kernel?.reused === true ? { reused: true, elapsed } : { ...kernel, reused: false, elapsed };
+export const buildReportOf = (built: boolean, kernel: KernelBuildReport | undefined, elapsed: number): BuildReport => {
+  const tenths = Math.round(elapsed * 10) / 10;
+  return !built || kernel?.reused === true
+    ? { reused: true, elapsed: tenths }
+    : { ...kernel, reused: false, elapsed: tenths };
+};

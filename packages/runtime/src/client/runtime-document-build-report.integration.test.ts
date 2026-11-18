@@ -7,6 +7,7 @@ import { inProcessTransport } from '#transport/in-process-transport.js';
 import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
 import type { KernelBuildReport } from '#types/runtime-kernel-v2.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
+import { admitKernelBuildReport } from '#framework/kernel-build-report.js';
 
 /** Any number: elapsed times vary from run to run. */
 const anyNumber: unknown = expect.any(Number);
@@ -165,6 +166,41 @@ it('keeps the first three costliest operations and drops a malformed kernel repo
   } finally {
     first.close();
     second.close();
+    await client.shutdown();
+  }
+});
+
+it('admits a report that says the kernel did not reuse the build', () => {
+  const report: KernelBuildReport = { reused: false, operations: { reused: 1, computed: 2 } };
+  expect(admitKernelBuildReport(report)).toStrictEqual(report);
+});
+
+it('reports no build for a failed evaluation whose build never ran', async () => {
+  const { client, runs } = reportingClient(() => ({ operations: { reused: 0, computed: 1 } }));
+  const document = client.open({
+    source: { files: { 'model.part': 'a' } },
+    parameters: { size: 'not a number' },
+    watch: false,
+  });
+  try {
+    const evaluation = await evaluated(document.evaluation());
+    expect(evaluation).toMatchObject({ success: false });
+    expect(runs.count).toBe(0);
+    expect(evaluation).not.toHaveProperty('build');
+  } finally {
+    document.close();
+    await client.shutdown();
+  }
+});
+
+it('reports the elapsed time to a tenth of a millisecond', async () => {
+  const { client } = reportingClient(() => undefined);
+  const document = client.open({ source: { files: { 'model.part': 'a' } }, watch: false });
+  try {
+    const { build } = (await evaluated(document.evaluation())) as { build?: { elapsed: number } };
+    expect(Math.round(build!.elapsed * 10) / 10).toBe(build!.elapsed);
+  } finally {
+    document.close();
     await client.shutdown();
   }
 });

@@ -705,8 +705,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** The evaluation currently entering its terminal kernel hook. */
   private activeEvaluationSlot: EvaluationSlot | undefined;
-  /** Runs of the kernel's `evaluate`, so an evaluation can tell whether a build ran for it. */
-  private kernelEvaluations = 0;
+  /**
+   * How the terminal evaluate of the current document evaluation was answered: `retained` (the retained build) or
+   * `built` (the kernel's `evaluate` ran). Still `undefined` after a successful evaluation: a stored build answered.
+   */
+  private buildOutcome: 'retained' | 'built' | undefined;
   private nextEvaluationId = 0;
   /** Latest admitted evaluation, whether or not its display projection succeeded. */
   private retainedEvaluation: EvaluationSlot | undefined;
@@ -1874,7 +1877,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             const manifest = described.data;
             const parametersWithDefaults = mergeParameterDefaults({}, parameters, legacyProjection.schema);
             const buildStarted = performance.now();
-            const evaluationsBefore = this.kernelEvaluations;
+            this.buildOutcome = undefined;
             const { artifact } = await this.materializeRender(
               {
                 file,
@@ -1888,7 +1891,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             );
             const { result } = artifact;
             const build = buildReportOf(
-              this.kernelEvaluations !== evaluationsBefore,
+              this.buildOutcome === 'built',
               artifact.evaluationSlot?.kernelBuild,
               performance.now() - buildStarted,
             );
@@ -1920,7 +1923,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                     transient,
                     issues: result.issues,
                     sourceRevision: sourceRevisionForArtifact(artifact, described.sourceRevision),
-                    build,
                   },
                 };
           }
@@ -4052,6 +4054,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
         }
         if (sameBuild && (retained.hasHandle || retained.serializedNativeHandleSlot)) {
+          this.buildOutcome = 'retained';
           evaluationSlot = retained;
           this.activeEvaluationSlot = retained;
           computeSpan.end();
@@ -4087,7 +4090,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           );
         }
         let result: EvaluateResult;
-        this.kernelEvaluations++;
+        this.buildOutcome = 'built';
         try {
           result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime(), evaluationSlot);
           if (result.success) {

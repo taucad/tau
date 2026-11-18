@@ -81,7 +81,7 @@ const exportOffer = z
 const count = z.number().int().nonnegative();
 /** What a kernel may report about a build (`EvaluateOutput.build`); the worker admits it with this schema. */
 export const kernelBuildReportSchema = z.object({
-  reused: z.literal(true).optional(),
+  reused: z.boolean().optional(),
   operations: z.object({ reused: count, computed: count }).optional(),
   costliest: z
     .array(
@@ -117,7 +117,6 @@ const evaluation = discriminatedWireUnion('success', [
       transient: z.boolean(),
       issues,
       ...provenance,
-      build: buildReport.optional(),
     })
     .strip(),
 ]);

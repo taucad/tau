@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createContext, useCallback, useContext } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -7,6 +8,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { CombinedChatState } from '#hooks/use-chat.js';
+import type * as AgentSignIns from '#components/terminal/agent-sign-ins.js';
 import { agentJob, createFixture } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { agentApprovalToolName } from '@taucad/chat-ui/services/agent-host-event-projection';
 import { initialChatProjection, reduceChatProjection, selectOpenApprovals } from '#machines/chat-projection.logic.js';
@@ -22,11 +24,21 @@ let activeExecution: CombinedChatState['activeExecution'];
 let attachedHostId: CombinedChatState['attachedHostId'];
 let machines: RuntimeTransportFacet<MachineClient> = { available: false, reason: 'unsupported' };
 
-const regenerate = vi.fn();
+/** The chat a banner belongs to; two banners in one render stand for two chats. */
+const ChatIdContext = createContext('chat-1');
+const regenerate = vi.fn<(chatId: string) => void>();
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: <T,>(selector: (state: CombinedChatState) => T): T =>
     selector({ messages, activeExecution, attachedHostId, projection } as CombinedChatState),
-  useChatActions: () => ({ regenerate }),
+  useChatContext: () => ({ activeChatId: useContext(ChatIdContext) }),
+  useChatActions: () => {
+    const chatId = useContext(ChatIdContext);
+    return {
+      regenerate: useCallback(() => {
+        regenerate(chatId);
+      }, [chatId]),
+    };
+  },
 }));
 vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
   useCadChatClient: () => ({ respondToToolApproval }),
@@ -39,12 +51,13 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
 }));
 
 let signInBridge: unknown;
-const requestAgentSignIn = vi.fn();
-vi.mock('#components/terminal/agent-sign-ins.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  desktopAgentSignInBridge: () => signInBridge,
-  requestAgentSignIn,
-}));
+const requestAgentSignIn = vi.fn<(agentId: string, chatId?: string) => void>();
+vi.mock('#components/terminal/agent-sign-ins.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof AgentSignIns>();
+  /* Recorded and real: the card's request is what binds a sign-in's success to its chat. */
+  requestAgentSignIn.mockImplementation(actual.requestAgentSignIn);
+  return { ...actual, desktopAgentSignInBridge: () => signInBridge, requestAgentSignIn };
+});
 const { reportAgentSignInExit } = await import('#components/terminal/agent-sign-ins.js');
 
 const { ChatApprovalBanner, pendingAgentHostApprovals, pendingApprovals } =
@@ -675,7 +688,7 @@ describe('a login an external agent is waiting on', () => {
 
       await userEvent.click(screen.getByRole('button', { name: "Sign in in Tau's Terminal" }));
 
-      expect(requestAgentSignIn).toHaveBeenCalledExactlyOnceWith('acme');
+      expect(requestAgentSignIn).toHaveBeenCalledExactlyOnceWith('acme', 'chat-1');
       expect(setWorkbenchOpen).toHaveBeenCalledExactlyOnceWith(true);
       /* The sign-in is its own workbench tab; the person's shell is not opened for it. */
       expect(openPanel).not.toHaveBeenCalled();
@@ -710,11 +723,12 @@ describe('a login an external agent is waiting on', () => {
       expect(screen.getByText('acme account sign-in')).toBeInTheDocument();
     });
 
-    it('tries the turn again by itself once the sign-in exits 0, as Try again would', () => {
+    it('tries the turn again by itself once the sign-in it asked for exits 0, as Try again would', async () => {
       signInBridge = { open: vi.fn() };
       activeExecution = { kind: 'acp', agentId: 'beta', hostId: 'desktop' } as unknown as typeof activeExecution;
       messages = [loginFor('beta')];
       const { rerender } = renderBanner();
+      await userEvent.click(screen.getByRole('button', { name: "Sign in in Tau's Terminal" }));
 
       act(() => {
         reportAgentSignInExit('beta', 0);
@@ -756,11 +770,37 @@ describe('a login an external agent is waiting on', () => {
       expect(regenerate).not.toHaveBeenCalled();
     });
 
-    it('shows the card again, without another retry, when the retried turn still needs a sign-in', () => {
+    it("carries on only the chat that asked for the sign-in, never another chat's card for the same agent", async () => {
+      signInBridge = { open: vi.fn() };
+      activeExecution = { kind: 'acp', agentId: 'eta', hostId: 'desktop' } as unknown as typeof activeExecution;
+      messages = [loginFor('eta')];
+      render(
+        <TooltipProvider>
+          {/* The other chat's card comes first, so it is the first to see the success. */}
+          <ChatIdContext value='chat-other'>
+            <ChatApprovalBanner />
+          </ChatIdContext>
+          <ChatIdContext value='chat-asking'>
+            <ChatApprovalBanner />
+          </ChatIdContext>
+        </TooltipProvider>,
+      );
+      const [, asking] = screen.getAllByRole('button', { name: "Sign in in Tau's Terminal" });
+      await userEvent.click(asking!);
+
+      act(() => {
+        reportAgentSignInExit('eta', 0);
+      });
+
+      expect(regenerate).toHaveBeenCalledExactlyOnceWith('chat-asking');
+    });
+
+    it('shows the card again, without another retry, when the retried turn still needs a sign-in', async () => {
       signInBridge = { open: vi.fn() };
       activeExecution = { kind: 'acp', agentId: 'zeta', hostId: 'desktop' } as unknown as typeof activeExecution;
       messages = [loginFor('zeta')];
       const { rerender } = renderBanner();
+      await userEvent.click(screen.getByRole('button', { name: "Sign in in Tau's Terminal" }));
       act(() => {
         reportAgentSignInExit('zeta', 0);
       });

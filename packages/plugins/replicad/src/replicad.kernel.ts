@@ -761,10 +761,11 @@ export const replicadKernel = defineKernel({
             context.libraryTrace.emitSummary();
             context.tracingSummary?.flush();
             if (documentTier) {
-              const { hits, misses, opaque, failureHits, evicted, entries } = documentTier.operations.stats();
+              const { hits, misses, stored, opaque, failureHits, evicted, entries } = documentTier.operations.stats();
               mainSpan.end({
                 tierHits: hits,
                 tierMisses: misses,
+                tierStored: stored,
                 tierOpaque: opaque,
                 tierFailureHits: failureHits,
                 tierEvicted: evicted,

@@ -119,8 +119,10 @@ const outputPieces = (text: string): string[] => {
   let rest = text;
   while (rest.length > terminalLimits.outputCharacters) {
     let cut = terminalLimits.outputCharacters;
-    const code = rest.codePointAt(cut - 1) ?? 0;
-    if (code >= 0xd8_00 && code <= 0xdb_ff) {
+    /* Read the unit after the cut: there a trailing surrogate reads as itself, while `codePointAt` on the leading one
+     * before the cut returns the whole pair's value and never looks like a surrogate. */
+    const code = rest.codePointAt(cut) ?? 0;
+    if (code >= 0xdc_00 && code <= 0xdf_ff) {
       cut -= 1;
     }
     pieces.push(rest.slice(0, cut));
@@ -260,7 +262,11 @@ export const registerAgentSignIn = (options: AgentSignInOptions): AgentSignIn =>
         break;
       }
       case 'resize': {
-        session.pty?.resize(frame.size.columns, frame.size.rows);
+        try {
+          session.pty?.resize(frame.size.columns, frame.size.rows);
+        } catch {
+          /* The PTY closed before its exit arrived (EBADF); onExit reports the exit. */
+        }
         break;
       }
       case 'close': {

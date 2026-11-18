@@ -14,11 +14,24 @@
       }
     },
     "formal:nightly": {},
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/packages/agent-host/specs/lean/corpus/pull-records.{trace,expected}"
+      ]
+    },
     "test:shard-1": {
       "executor": "nx:run-commands",
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/packages/agent-host/specs/lean/corpus/pull-records.{trace,expected}"
+      ],
       "metadata": {
         "description": "Shard 1 of 3 of revisions:test for the CI test lanes: the files test-shards.test-utils.ts deals to it by measured seconds (test-shards.test.seconds.json). The 3 shards together run every file of revisions:test exactly once (test-shards.test.ts); revisions:test itself still runs them all."
       },
@@ -31,7 +44,12 @@
       "executor": "nx:run-commands",
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/packages/agent-host/specs/lean/corpus/pull-records.{trace,expected}"
+      ],
       "metadata": {
         "description": "Shard 2 of 3 of revisions:test for the CI test lanes: the files test-shards.test-utils.ts deals to it by measured seconds (test-shards.test.seconds.json). The 3 shards together run every file of revisions:test exactly once (test-shards.test.ts); revisions:test itself still runs them all."
       },
@@ -44,7 +62,12 @@
       "executor": "nx:run-commands",
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/packages/agent-host/specs/lean/corpus/pull-records.{trace,expected}"
+      ],
       "metadata": {
         "description": "Shard 3 of 3 of revisions:test for the CI test lanes: the files test-shards.test-utils.ts deals to it by measured seconds (test-shards.test.seconds.json). The 3 shards together run every file of revisions:test exactly once (test-shards.test.ts); revisions:test itself still runs them all."
       },

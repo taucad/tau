@@ -641,13 +641,29 @@
       }
     },
     "test": {
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"]
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ]
     },
     "test:shard-1": {
       "executor": "nx:run-commands",
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
       "metadata": {
         "description": "Shard 1 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },
@@ -660,7 +676,15 @@
       "executor": "nx:run-commands",
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
       "metadata": {
         "description": "Shard 2 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },
@@ -673,7 +697,15 @@
       "executor": "nx:run-commands",
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
       "metadata": {
         "description": "Shard 3 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },
@@ -686,7 +718,15 @@
       "executor": "nx:run-commands",
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
       "metadata": {
         "description": "Shard 4 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },
@@ -699,7 +739,15 @@
       "executor": "nx:run-commands",
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
       "metadata": {
         "description": "Shard 5 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },
@@ -712,7 +760,15 @@
       "executor": "nx:run-commands",
       "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
-      "inputs": ["default", "^production", "serviceEnvironment", "reactEventLayer", "{workspaceRoot}/.oxlintrc.json"],
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "reactEventLayer",
+        "{workspaceRoot}/.oxlintrc.json",
+        "{workspaceRoot}/packages/plugins/*/package.json",
+        "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
+      ],
       "metadata": {
         "description": "Shard 6 of 6 of ui:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 6 shards together run every file of ui:test exactly once (test-shards.test.ts); ui:test itself still runs them all."
       },

@@ -6,25 +6,24 @@
  * driven through the library's `workspaceConnection` actor, one at a time, with its telemetry, and settles from the
  * actor's snapshots. Nothing here is mounted, so a provider remount never cancels a connection in flight.
  */
-import type { Remote } from 'comlink';
 import type { ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
-import { selectWorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
-import type { PreparedWorkspaceCatalog, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
-import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
-import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
+import { selectWorkspaceConnectionState } from '#machines/workspace-connection.machine.js';
+import type { PreparedWorkspaceCatalog, workspaceConnectionMachine } from '#machines/workspace-connection.machine.js';
+import { directoryPicker } from '#constants/browser.constants.js';
+import type { DirectoryPick } from '#constants/browser.constants.js';
 import {
   getWorkspaceMetadata,
   requestHandlePermission,
   repairWorkspaceBindings as repairStoredWorkspaceBindings,
   setProjectFileSystemConfig,
-} from '@taucad/files-ui/filesystem/handle-store';
-import type { Workspace, WorkspaceBindingRepairResult } from '@taucad/files-ui/filesystem/handle-store';
-import { deriveWorkspaceBindingRepairs, routeConfigFor } from '@taucad/files-ui/runtime/project-library-storage';
-import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
-import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
+} from '#filesystem/handle-store.js';
+import type { Workspace, WorkspaceBindingRepairResult } from '#filesystem/handle-store.js';
+import { deriveWorkspaceBindingRepairs, routeConfigFor } from '#runtime/project-library-storage.js';
+import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
+import type { ProjectLibraryFileManager } from '#types/project-library-io.types.js';
+import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { Actor, SnapshotFrom } from 'xstate';
 
 /** A connected workspace folder: the row, how many projects it holds, and whether this connection minted it. @public */
@@ -50,12 +49,24 @@ export type WorkspaceConnectionTrace = {
 
 type ConnectionSnapshot = SnapshotFrom<typeof workspaceConnectionMachine>;
 
+/**
+ * The object-store worker's pending-operation journal reads the workspace commands make. The app passes its
+ * `Remote<ObjectStoreWorker>`.
+ *
+ * @public
+ */
+export type WorkspaceJournal = Readonly<{
+  getPendingProjectOperations: () => Promise<readonly PendingProjectOperation[]>;
+  hasPendingProjectOperationForWorkspace: (workspaceId: string) => Promise<boolean>;
+}>;
+
 /** What the workspace commands read from the library that builds them. @public */
 export type WorkspaceCommandsHost = Readonly<{
   workspaceConnection: Actor<typeof workspaceConnectionMachine>;
-  /** The root file facade, once there is one. */
-  facade: () => Promise<ProjectLibraryFacade>;
-  readiedWorker: () => Promise<Remote<ObjectStoreWorker>>;
+  /** The root file facade, once there is one; the commands only resync its project roots. */
+  facade: () => Promise<Pick<ProjectLibraryFileManager, 'workspace'>>;
+  /** The object-store worker, ready; the commands only read its pending-operation journal. */
+  readiedWorker: () => Promise<WorkspaceJournal>;
   whenDiscoveryReady: () => Promise<void>;
   discover: () => Promise<ProjectDiscoveryResult>;
   prepareCurrentWorkspaceCatalog: (selected?: Workspace, signal?: AbortSignal) => Promise<PreparedWorkspaceCatalog>;

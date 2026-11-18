@@ -90,8 +90,8 @@ TAU_COMPUTE_BASELINE_FANOUT=full pnpm nx test runtime-e2e --watch=false
 
 ## Arms
 
-`bypass` is the corrected **off** baseline: the loader hook stubs the compute session, because the shipped kernel has no
-supported switch (`packages/plugins/replicad/src/replicad.kernel.ts:486` derives `enabled` from asset resolution).
+`bypass` is the corrected **off** baseline: `run-arm.mts` passes the kernel's `computeReuse: false` (the shipped default),
+so no operation adapter is constructed, and every other arm passes `computeReuse: true`.
 `memory` is the resident tier over `fromMemoryFs`, `durable` the full adapter over a node-filesystem store, and
 `poison` answers every lookup with a deliberately wrong BRep so the parity oracle and the work counters can be shown to
 fail on a wrong cache.

@@ -45,10 +45,17 @@
     "./machines/file-manager-sync-fs-adapter": "./src/machines/file-manager-sync-fs-adapter.ts",
     "./machines/file-manager-worker-error": "./src/machines/file-manager-worker-error.ts",
     "./machines/file-manager-worker-name": "./src/machines/file-manager-worker-name.ts",
+    "./machines/library-access.machine": "./src/machines/library-access.machine.ts",
+    "./machines/library-discovery.machine": "./src/machines/library-discovery.machine.ts",
+    "./machines/library-recovery.machine": "./src/machines/library-recovery.machine.ts",
+    "./types/pending-project-operation.types": "./src/types/pending-project-operation.types.ts",
+    "./types/project-library.types": "./src/types/project-library.types.ts",
     "./utils/export-formats.utils": "./src/utils/export-formats.utils.ts",
     "./utils/file-tree-download-policy": "./src/utils/file-tree-download-policy.ts",
     "./utils/file-tree.utils": "./src/utils/file-tree.utils.ts",
     "./utils/project-creation-location.utils": "./src/utils/project-creation-location.utils.ts",
+    "./utils/project-name.utils": "./src/utils/project-name.utils.ts",
+    "./utils/project-url.utils": "./src/utils/project-url.utils.ts",
     "./utils/workspace-telemetry.utils": "./src/utils/workspace-telemetry.utils.ts",
     "./package.json": "./package.json"
   },
@@ -57,6 +64,7 @@
   },
   "devDependencies": {
     "@taucad/runtime": "workspace:*",
+    "@taucad/xstate-testing": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "^14.6.1",
@@ -68,6 +76,7 @@
   },
   "dependencies": {
     "@taucad/agent-host": "workspace:*",
+    "@taucad/chat": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-client": "workspace:*",
@@ -79,7 +88,8 @@
     "@taucad/utils": "workspace:*",
     "@taucad/workbench-panes": "workspace:*",
     "lucide-react": "catalog:",
-    "radix-ui": "catalog:"
+    "radix-ui": "catalog:",
+    "xstate": "catalog:"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",

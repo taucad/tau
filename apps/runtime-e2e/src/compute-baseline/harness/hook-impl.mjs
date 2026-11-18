@@ -12,7 +12,9 @@ const replaceOnce = (code, from, to, url) => {
   const parts = code.split(from);
   if (parts.length !== 2)
     throw new Error(
-      `[lane-b hook] expected exactly one match in ${url} for: ${from.slice(0, 80)} (found ${parts.length - 1})`,
+      `[lane-b hook] expected exactly one match in ${url} for: ${from.slice(0, 80)} (found ${parts.length - 1}). ` +
+        'The kernel source changed under the benchmark harness: update the substitution in ' +
+        'apps/runtime-e2e/src/compute-baseline/harness/hook-impl.mjs to the new source.',
     );
   return parts.join(to);
 };
@@ -63,13 +65,7 @@ const patches = {
     return code;
   },
   '/replicad.kernel.ts': (code, url) => {
-    // The off arm now routes through the real kernel option (W0 collision C2).
-    code = replaceOnce(
-      code,
-      'const computeReuseEnabled = computeReuseOption ?? assetsIdentified;',
-      'const computeReuseEnabled = globalThis.__laneB?.semanticDisabled ? false : (computeReuseOption ?? assetsIdentified);',
-      url,
-    );
+    // Arm selection goes through the kernel's own `computeReuse` option (run-arm.mts), not a source patch.
     code = replaceOnce(
       code,
       'library: computeReuse?.library ?? replicadLibrary,',

@@ -148,7 +148,8 @@ export const renderTranscoder = defineTranscoder({
   //          renders them without the options it predates.
   // 16.0.0 = nanoraster 0.9: `lineColor`, `toneMapping`, the GTAO controls, `lighting.headlamp` and the environment
   //          object reach the backend.
-  version: '16.0.0',
+  // 17.0.0 = nanoraster 0.10: AO profile H2, the viewer's smooth GTAO distance falloff and untrimmed denoise.
+  version: '17.0.0',
   edges,
 
   async initialize() {

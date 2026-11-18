@@ -43,7 +43,7 @@ import { isOrphanedProjectRoute } from '@taucad/files-ui/filesystem/orphaned-pro
 import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
 import { createEntrylessProject, createInitialProject } from '#constants/project.constants.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
-import { fitProjectName, maxProjectNameLength, projectNameFromReply } from '#utils/project-name.utils.js';
+import { fitProjectName, maxProjectNameLength, projectNameFromReply } from '@taucad/files-ui/utils/project-name.utils';
 import {
   getEmptyCode,
   getKernelDependencies,
@@ -51,14 +51,17 @@ import {
   getKernelProjectTemplate,
   getMainFile,
 } from '#utils/kernel.utils.js';
-import { directorySlug, homeWorkspaceSlug } from '#utils/project-url.utils.js';
-import type { ProjectSlugs } from '#utils/project-url.utils.js';
+import { directorySlug, homeWorkspaceSlug } from '@taucad/files-ui/utils/project-url.utils';
+import type { ProjectSlugs } from '@taucad/files-ui/utils/project-url.utils';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { withNamedLock } from '#lib/named-lock.js';
 import { selectCaughtUp } from '#machines/chat-projection.logic.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { ChatStorage } from '#types/storage.types.js';
-import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
+import type {
+  PendingProjectOperation,
+  PendingProjectStorage,
+} from '@taucad/files-ui/types/pending-project-operation.types';
 import {
   allocateProjectBasePath,
   composerAttachmentsOf,

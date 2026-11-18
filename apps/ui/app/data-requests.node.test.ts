@@ -54,6 +54,41 @@ describe('data requests', () => {
     expect(config.future.v8_passThroughRequests).toBe(true);
   });
 
+  it('names data requests trailing-slash aware, as React Router 8 does', () => {
+    expect(config.future.v8_trailingSlashAwareDataRequests).toBe(true);
+  });
+
+  describe('data request names (RR4)', () => {
+    const home = { id: 'routes/_index', index: true, module: { default: () => null } } satisfies Omit<
+      TestRoute,
+      'parentId'
+    >;
+
+    it("answers Home's data at `/_.data`, the name the client now sends", async () => {
+      const handler = handlerFor(home);
+
+      const result = await requestData(handler, 'https://tau.new/', ['root']);
+
+      expect(result).toMatchObject({
+        kind: 'routes',
+        status: 200,
+        routes: { root: { data: { queries: { models: 'catalog' } } } },
+      });
+    });
+
+    it('answers a page with a trailing slash at `<path>/_.data`, with the data of that page', async () => {
+      const handler = handlerFor({ id: 'routes/projects', path: 'projects', module: { default: () => null } });
+
+      const result = await requestData(handler, 'https://tau.new/projects/', ['root']);
+
+      expect(result).toMatchObject({
+        kind: 'routes',
+        status: 200,
+        routes: { root: { data: { queries: { models: 'catalog' } } } },
+      });
+    });
+  });
+
   describe('root loader', () => {
     it('redirects a www data request to the apex page, not to its .data URL', async () => {
       const handler = handlerFor({ id: 'routes/projects', path: 'projects', module: { default: () => null } });

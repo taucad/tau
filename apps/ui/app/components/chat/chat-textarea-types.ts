@@ -23,12 +23,12 @@ import { attachmentModelForExecution, attachmentSendBlockReason } from '#utils/c
 import type { StoredAttachmentRef } from '@taucad/chat-ui/utils/attachment.utils';
 import { homeComposerAttachmentDirectory, useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
-import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { toast } from '@taucad/ui/components/sonner';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useComposerExit } from '@taucad/chat-ui/components/use-composer-exit';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import type { HandOffTarget } from '#components/hand-off/hand-off-store.js';
+import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-submit-button.js';
 import { getClipboardImageFiles, handleClipboardImagePaste } from '@taucad/chat-ui/components/chat-paste-handler';
 import { readAttachmentFile } from '@taucad/chat-ui/utils/attachment-intake';
 import type { AttachmentIntakeRefusal } from '@taucad/chat-ui/utils/attachment-intake';
@@ -198,14 +198,6 @@ export type ChatTextareaProperties = {
    */
   readonly enableMobileCollapse?: boolean;
 };
-
-// Define the key combination for cancelling the stream
-export const cancelChatStreamKeyCombination = {
-  key: 'Backspace',
-  modKey: true,
-  shiftKey: true,
-  requireAllModifiers: true,
-} satisfies KeyCombination;
 
 /**
  * Optional callbacks the chat textarea uses to dispatch drag-drops of

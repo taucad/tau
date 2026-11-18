@@ -23,7 +23,7 @@ import {
   pendingMergeNote,
   pendingMergeTitle,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
-import { projectChatIdFromSearch } from '#utils/project-url.utils.js';
+import { projectChatIdFromSearch } from '@taucad/files-ui/utils/project-url.utils';
 
 /** A row the lanes add: a branch's chip, a merge waiting on a decision, or the agent's work in progress. */
 export type LaneStep =

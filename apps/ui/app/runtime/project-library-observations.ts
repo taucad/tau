@@ -19,7 +19,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { createCallbackLogic } from 'xstate';
 import type { WatchEvent } from '@taucad/filesystem';
 import type { ChatStorage } from '#types/storage.types.js';
-import type { LibraryDiscoveryEvent } from '#machines/library-discovery.machine.js';
+import type { LibraryDiscoveryEvent } from '@taucad/files-ui/machines/library-discovery.machine';
 import type { ProjectLibraryFileManager, ProjectListing } from '#runtime/project-library-storage.js';
 
 /*

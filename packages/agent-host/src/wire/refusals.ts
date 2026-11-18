@@ -93,6 +93,11 @@ export const refusals = {
   TOOL_RESULT_PERSISTENCE_FAILED: { owner: 'host', retry: 'resume' },
   /** A prepared model invocation has no recorded resolution; Resume reconciles it first (W3, RV1-F3). */
   INVOCATION_UNRESOLVED: { owner: 'host', retry: 'resume' },
+  /**
+   * The API's deployment answer for this run's model origin could not be had or read, so the run did not know whether
+   * its calls are funded and made none (I1). Resume once the API answers; the answer is then recorded with the run.
+   */
+  DEPLOYMENT_UNKNOWN: { owner: 'host', retry: 'resume' },
   /** The host is closing (was `LAUNCHER_CLOSED`); re-send to its successor. */
   HOST_CLOSED: { owner: 'host', retry: 'wait' },
   /** The host configures no model and the admission named none. */

@@ -697,6 +697,111 @@ export const useTauCloudEligibility = (): TauCloudEligibility => {
   return { auth, isResolved, canSyncFiles };
 };
 
+/* The Tau Cloud opens this document is running, by project (STO-25 SP6); each answers whether it connected. */
+const cloudOpensInFlight = new Map<string, Promise<boolean>>();
+
+/** What {@link continueCloudOpen} continues. @public */
+export type CloudOpenContinuation = Readonly<{
+  projectId: string;
+  /** The account the open is owed to: it stops being owed when another is signed in. */
+  account: string | undefined;
+  /** Send `connectRemote('tau')` on the project's client. */
+  connect: () => Promise<void>;
+  /** The gesture asserted the project active itself, just before (the *Open* click after creating its stub). */
+  asserted?: boolean;
+  /** Ends the wait for the lock and the open's hold; the open itself is the remote's from then. */
+  signal?: AbortSignal;
+}>;
+
+const runCloudOpen = async (input: CloudOpenContinuation): Promise<boolean> => {
+  const { projectId, account, connect, signal } = input;
+  try {
+    if (input.asserted !== true) {
+      await assertCloudProjectActive(projectId);
+    }
+    const owed = (): boolean =>
+      signal?.aborted !== true &&
+      getRevisionSessionUser()?.id === account &&
+      tauCloudIntent.get(projectId) === 'open' &&
+      canOpenCloudProject(projectId);
+    /*
+     * S20: one cold open per device. A second tab waits here and finds the open done. The client is
+     * looked up as the open goes, so a tab whose client is not made yet still takes the lock, and one
+     * whose client is replaced lets it go.
+     */
+    let opened = peekRevisionClient(projectId);
+    return await holdCloudOpen({
+      projectId,
+      owed,
+      connect,
+      source: {
+        status: () => peekRevisionClient(projectId)?.status(),
+        subscribe: (listener) => peekRevisionClient(projectId)?.subscribe(listener) ?? (() => undefined),
+        alive: () => {
+          const current = peekRevisionClient(projectId);
+          opened ??= current;
+          return current === opened;
+        },
+      },
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch (error) {
+    if (
+      error instanceof CloudProjectUnavailableError &&
+      getRevisionSessionUser()?.id === account &&
+      tauCloudIntent.get(projectId) === 'open'
+    ) {
+      tauCloudIntent.set(projectId, undefined);
+    }
+    if (signal?.aborted !== true) {
+      console.error('Could not open the Tau Cloud project:', error);
+    }
+    return false;
+  }
+};
+
+/** Test-only: forget the opens in flight, which a row's unsettled hold would otherwise leave to the next. @internal */
+export const cloudOpenContinuationTestApi = {
+  reset: (): void => {
+    cloudOpensInFlight.clear();
+  },
+};
+
+/**
+ * Connect a Tau Cloud project whose open is owed (`open` intent) and hold its open lock until it lands (S20).
+ *
+ * One per project in this document (STO-25 SP6): the *Open* gesture starts it before the project route loads, and the
+ * route's {@link useTauCloudIntentConnection} may ask again while it runs. A second call waits for the one running and
+ * connects nothing when that one connected; when it did not (not owed, refused, ended before connecting), the second
+ * runs its own, which asks again whether the open is still owed.
+ *
+ * @param input - The project, its account, the connection, whether the gesture asserted it active, and the end.
+ * @returns Whether this call connected.
+ * @public
+ */
+export const continueCloudOpen = async (input: CloudOpenContinuation): Promise<boolean> => {
+  const { projectId } = input;
+  for (;;) {
+    const running = cloudOpensInFlight.get(projectId);
+    if (running === undefined) {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- each newer open in flight is waited for in turn.
+    if (await running) {
+      return false;
+    }
+  }
+  const own = runCloudOpen(input);
+  cloudOpensInFlight.set(projectId, own);
+  try {
+    return await own;
+  } finally {
+    if (cloudOpensInFlight.get(projectId) === own) {
+      cloudOpensInFlight.delete(projectId);
+    }
+  }
+};
+
 /**
  * Act on a project's intent from inside its session: expose the inline backup
  * offer, connect Tau Cloud through the same verb the
@@ -749,45 +854,7 @@ export const useTauCloudIntentConnection = ({
           tauCloudIntent.set(projectId, 'connected');
         }
         if (intent === 'open') {
-          const connectActiveProject = async (): Promise<void> => {
-            try {
-              await assertCloudProjectActive(projectId);
-              const owed = (): boolean =>
-                getRevisionSessionUser()?.id === account &&
-                tauCloudIntent.get(projectId) === 'open' &&
-                canOpenCloudProject(projectId);
-              /*
-               * S20: one cold open per device. A second tab waits here and finds the open done. The client is
-               * looked up as the open goes, so a tab whose client is not made yet still takes the lock, and one
-               * whose client is replaced lets it go.
-               */
-              let opened = peekRevisionClient(projectId);
-              await holdCloudOpen({
-                projectId,
-                owed,
-                connect: async () => connectRemote('tau'),
-                source: {
-                  status: () => peekRevisionClient(projectId)?.status(),
-                  subscribe: (listener) => peekRevisionClient(projectId)?.subscribe(listener) ?? (() => undefined),
-                  alive: () => {
-                    const current = peekRevisionClient(projectId);
-                    opened ??= current;
-                    return current === opened;
-                  },
-                },
-              });
-            } catch (error) {
-              if (
-                error instanceof CloudProjectUnavailableError &&
-                getRevisionSessionUser()?.id === account &&
-                tauCloudIntent.get(projectId) === 'open'
-              ) {
-                tauCloudIntent.set(projectId, undefined);
-              }
-              console.error('Could not open the Tau Cloud project:', error);
-            }
-          };
-          void connectActiveProject();
+          void continueCloudOpen({ projectId, account, connect: async () => connectRemote('tau') });
         } else {
           void connectRemote('tau');
         }

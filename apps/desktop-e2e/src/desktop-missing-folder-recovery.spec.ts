@@ -365,8 +365,7 @@ describe('desktop missing-folder recovery (the operator rehearsal)', () => {
   /* T-REH.2, the release gate: the profile is produced by the release's base commit and opened by the candidate.
    * It needs that build, which only the release-gate job provides (`desktop-e2e:test:e2e:rehearsal-gate` refuses to
    * run without it), so the PR lane reports it as skipped rather than passing it for the wrong reason. */
-  // Expected-failure: @rifont until 2026-12-15
-  it.runIf(baseDesktopRoot !== undefined).fails(
+  it.runIf(baseDesktopRoot !== undefined)(
     "should open the base commit's broken profile in the candidate with nothing forgotten automatically",
     async () => {
       await rehearse('rehearsal-base', baseDesktopRoot);

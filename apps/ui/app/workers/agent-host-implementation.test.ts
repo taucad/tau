@@ -24,6 +24,7 @@ describe('createImplementationLoader', () => {
   });
 
   it('forgets a warm load that failed, so the first use loads again and can succeed', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const load = vi
       .fn<() => Promise<string>>()
       .mockRejectedValueOnce(new Error('network'))
@@ -38,6 +39,9 @@ describe('createImplementationLoader', () => {
     await Promise.resolve();
     await expect(loader.get()).resolves.toBe('impl');
     expect(load).toHaveBeenCalledTimes(2);
+    /* The early failure nobody waited on is logged, not silent. */
+    expect(warn).toHaveBeenCalledWith('[agent-host worker] early implementation load failed', expect.any(Error));
+    warn.mockRestore();
   });
 
   it('reports a failed use to its caller, and the next use loads again', async () => {

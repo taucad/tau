@@ -5,12 +5,13 @@
  * the provide carries. The worker therefore starts the load as soon as the page connects (`warm`), so the module
  * arrives while the page is still opening the project, and the first provide only waits for what is left of it.
  *
- * A load that failed is forgotten, warm or not: the next use loads again, and only a use reports the failure.
+ * A load that failed is forgotten, warm or not: a load that failed before a use is retried by that use; a use waiting
+ * on it reports its failure. An early failure nobody waited on is logged, never thrown.
  */
 
 /** One module, loaded at most once at a time. */
 export type ImplementationLoader<Module> = Readonly<{
-  /** Start the load now if nothing has; its failure is left for the next use to retry and report. Never throws. */
+  /** Start the load now if nothing has; a failure before the next use is retried by it. Never throws. */
   warm: () => void;
   /** The module: the load in flight or done, or a new one when none is or the last one failed. */
   get: () => Promise<Module>;
@@ -43,8 +44,9 @@ export const createImplementationLoader = <Module>(load: () => Promise<Module>):
         void (async (): Promise<void> => {
           try {
             await get();
-          } catch {
-            /* Forgotten by `get`: the first use loads again. */
+          } catch (error) {
+            /* Forgotten by `get`: a later use loads again; a use already waiting reports this failure itself. */
+            console.warn('[agent-host worker] early implementation load failed', error);
           }
         })();
       }

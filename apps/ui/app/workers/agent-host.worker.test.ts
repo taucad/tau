@@ -1,33 +1,91 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { connectAgentWorkerChannel } from '@taucad/agent-host/channel-client';
+import type { AgentHostWorkerProtocol } from '#workers/agent-host.contract.js';
 
-/* Counts evaluations of the host implementation, the module a `provide` needs. */
+/* The page's half of the worker's control channel. */
+type PageChannel = ReturnType<typeof connectAgentWorkerChannel<AgentHostWorkerProtocol>>;
+
+/* Records evaluations of the host implementation, the module a `provide` needs. */
 const implementation = vi.hoisted(() => ({ evaluations: 0 }));
 
-vi.mock('#workers/agent-host.impl.js', () => {
-  implementation.evaluations += 1;
-  return { openBrowserProjectHost: vi.fn() };
-});
+/* Long enough for a load started at the connection to have evaluated (the mock evaluates within a few ticks). */
+const settle = async (): Promise<void> => {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 50);
+  });
+};
+
+/**
+ * Connect a page-side channel to a fresh copy of the worker module. Each test re-imports the module after
+ * `vi.resetModules()`, so its `connected` latch and its loader are its own; the copies earlier tests left on
+ * `globalThis` are already connected and ignore the frame.
+ */
+const connectWorker = async (): Promise<PageChannel> => {
+  const { connectAgentWorkerChannel } = await import('@taucad/agent-host/channel-client');
+  const { agentHostWorkerProtocolSchemas } = await import('#workers/agent-host.contract.js');
+  await import('#workers/agent-host.worker.js');
+  const { port1, port2 } = new MessageChannel();
+  globalThis.dispatchEvent(
+    new MessageEvent('message', { data: { type: 'agent-host/connect', sessionId: 'session-1', port: port1 } }),
+  );
+  return connectAgentWorkerChannel<AgentHostWorkerProtocol>(port2, {
+    sessionKey: 'session-1',
+    protocolSchemas: agentHostWorkerProtocolSchemas,
+    label: 'test-page',
+  });
+};
 
 describe('agent-host worker', () => {
-  const opened: MessagePort[] = [];
+  let channel: PageChannel | undefined;
 
-  afterEach(() => {
-    for (const port of opened) {
-      port.close();
-    }
-    opened.length = 0;
+  beforeEach(() => {
+    vi.resetModules();
+    implementation.evaluations = 0;
   });
 
-  it('starts loading its host implementation when the page connects, before any provide', async () => {
-    await import('#workers/agent-host.worker.js');
-    const { port1, port2 } = new MessageChannel();
-    opened.push(port1, port2);
+  afterEach(async () => {
+    /* Closing the page's half closes the worker's, which stops its keepalive. */
+    channel?.close();
+    await channel?.closed;
+    channel = undefined;
+    vi.doUnmock('#workers/agent-host.impl.js');
+  });
 
-    globalThis.dispatchEvent(
-      new MessageEvent('message', { data: { type: 'agent-host/connect', sessionId: 'session-1', port: port1 } }),
-    );
+  it('starts loading its host implementation once its capabilities have answered, before any provide', async () => {
+    vi.doMock('#workers/agent-host.impl.js', () => {
+      implementation.evaluations += 1;
+      return { openBrowserProjectHost: vi.fn() };
+    });
+    channel = await connectWorker();
 
-    /* No `provide` is sent: the implementation is loaded while the page is still opening the project. */
+    await channel.call('init', { tabId: 'tab-1' });
+    await settle();
+    /* Connected and initialised, not yet probed: the session's readiness probe has the worker to itself. */
+    expect(implementation.evaluations).toBe(0);
+
+    await channel.call('capabilities', { durability: 'exclusive-append' });
+    /* No `provide` is sent: the implementation loads while the page is still opening the project. */
+    await vi.waitFor(() => {
+      expect(implementation.evaluations).toBe(1);
+    });
+  });
+
+  it('answers its capabilities while the implementation import has not settled', async () => {
+    vi.doMock('#workers/agent-host.impl.js', async () => {
+      implementation.evaluations += 1;
+      return new Promise<never>(() => {
+        /* Never settles: the import stays pending for the whole test. */
+      });
+    });
+    channel = await connectWorker();
+    await channel.call('init', { tabId: 'tab-1' });
+
+    const report = await channel.call('capabilities', { durability: 'exclusive-append' });
+    expect(report.checks.worker).toBe(true);
+    /* A second probe answers too, with the import still pending. */
+    await expect(channel.call('capabilities', { durability: 'ephemeral' })).resolves.toMatchObject({
+      checks: { worker: true },
+    });
     await vi.waitFor(() => {
       expect(implementation.evaluations).toBe(1);
     });

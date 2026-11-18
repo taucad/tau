@@ -87,9 +87,12 @@ const loadImplementationModule = async () => {
 };
 
 /*
- * Loaded once (STO-25 SP6-warm): the page connects when it opens a project (its capability probe), well before its first
- * `provide`, which waits on the project's revision root and the session. The load starts at the connection, so a warm
- * reopen's chat history does not wait for this module after those. A failed early load is retried by the provide.
+ * Loaded once (STO-25 SP6-warm). The page probes this worker's capabilities when it opens a project, well before its
+ * first `provide`, which waits on the project's revision root and the session. The load starts once that probe has
+ * answered: the session's readiness waits on the probe, which must not share the thread with this module's evaluation
+ * (a stall there past the page's liveness bound would close the channel and fail the probe for the document). A warm
+ * reopen's chat history then does not wait for this module after the provide's own inputs. A load that failed before
+ * a provide is retried by that provide; a provide waiting on it reports its failure.
  */
 const implementation = createImplementationLoader(loadImplementationModule);
 
@@ -142,7 +145,6 @@ workerScope.addEventListener('message', (event) => {
   }
   const connection = parseAgentHostWorkerConnect(event.data);
   connected = true;
-  implementation.warm();
   const server: ChannelServer<AgentHostWorkerProtocol> = {
     // oxlint-disable-next-line eslint/max-params -- @taucad/rpc ChannelServer callback contract.
     call: async (_context, name, args) => {
@@ -152,7 +154,10 @@ workerScope.addEventListener('message', (event) => {
           return undefined;
         }
         case 'capabilities': {
-          return capabilityOf((args as Calls['capabilities']['args']).durability);
+          const report = await capabilityOf((args as Calls['capabilities']['args']).durability);
+          /* After the probe has answered, so its reply never waits on the implementation's evaluation. */
+          implementation.warm();
+          return report;
         }
         case 'provide': {
           return hosts.provide(args as Calls['provide']['args']);

@@ -74,7 +74,9 @@ export function DesktopUpdateControl({
   const intent = intentOf(phase);
   const title = failedAction ? failedTitles[failedAction] : restartsWhenReady ? 'Restarts when ready' : titles[phase];
   const detail = failedAction
-    ? 'Tau is still open. Try again.'
+    ? failedAction === 'restart' || failedAction === 'move'
+      ? 'Tau is still open. Try again.'
+      : 'Your work isn’t affected. Try again.'
     : restartsWhenReady
       ? 'Tau will save your work and restart as soon as the download finishes.'
       : phase === 'ready'
@@ -84,9 +86,10 @@ export function DesktopUpdateControl({
             ? 'Tau saves your work, then restarts to install. Quitting normally leaves the update for later.'
             : 'Tau saves your work, then restarts to install. If you’d rather wait, it installs when you quit Tau.'))
         : details[phase];
+  /* One spinner at a time: a busy button carries its own, so the tile spins only while downloading. */
   const Icon = failed
     ? ShieldAlert
-    : busyLabel !== undefined || phase === 'downloading'
+    : phase === 'downloading'
       ? Loader
       : phase === 'current'
         ? Check
@@ -126,7 +129,8 @@ export function DesktopUpdateControl({
         restartsWhenReady || phase === 'disabled'
           ? undefined
           : {
-              label: labels[phase],
+              /* A repeated failed action is "Try again" (UX policy). */
+              label: failedAction ? 'Try again' : labels[phase],
               variant: phase === 'error' || phase === 'current' || phase === 'system-managed' ? 'outline' : 'default',
               busy: busyLabel !== undefined,
               busyLabel,
@@ -183,12 +187,13 @@ const details: Readonly<Record<Phase, string>> = {
   disabled: 'This copy of Tau doesn’t update itself.',
   checking: 'Looking for a newer version of Tau.',
   current: 'Tau checks for new versions on its own.',
-  downloading: 'Keep working. We’ll let you know here when it’s ready.',
+  downloading: 'Keep working. Tau will let you know here when it’s ready.',
   ready: '',
   /* Only the manual-update route offers `available`; its Download opens the archive in the browser. */
   available: 'Opens your browser to download the latest version. Tau stays open.',
   /* Main retries on a backoff and checks again every few hours, so "later" holds. */
-  error: 'Couldn’t download the update. Your work isn’t affected, and Tau will try again later.',
+  /* `error` also covers a failed check (offline, say) and a failure before restarting. */
+  error: 'Tau couldn’t check for or download an update. Your work isn’t affected, and Tau will try again later.',
   saving: 'Tau restarts as soon as everything is saved.',
   /* `prepareToInstall` refuses while work is unsaved or a machine still runs. */
   'restart-blocked':

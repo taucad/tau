@@ -74,7 +74,7 @@ describe('browser update control', () => {
 
     // Another tab's newer version stopped this tab's saving, and the title says so.
     expect(screen.getByRole('button', { name: 'Reload needed' })).toBeInTheDocument();
-    expect(await screen.findByRole('region', { name: 'Tau update' })).toHaveTextContent(
+    expect(await screen.findByRole('group', { name: 'Tau update' })).toHaveTextContent(
       'A newer Tau is open in another tab, so this tab has stopped saving changes to your project list.',
     );
     expect(screen.getByRole('textbox', { name: 'Model draft' })).toHaveFocus();
@@ -104,7 +104,7 @@ describe('browser update control', () => {
     await announce(buildId + 3_600_000);
     await announce(later);
 
-    expect(await screen.findByRole('region', { name: 'Tau update' })).toHaveTextContent(
+    expect(await screen.findByRole('group', { name: 'Tau update' })).toHaveTextContent(
       `Tau · Updated ${format.format(later)}`,
     );
   });
@@ -129,7 +129,7 @@ describe('browser update control', () => {
     vi.stubGlobal('fetch', async () => Response.json({ buildId: rolledBack }));
     await announce(buildId + 1);
 
-    const details = await screen.findByRole('region', { name: 'Tau update' });
+    const details = await screen.findByRole('group', { name: 'Tau update' });
     expect(details).toHaveTextContent(`Tau · Version from ${format.format(rolledBack)}`);
     expect(details).toHaveTextContent('This version of Tau was withdrawn, and this tab has stopped saving');
     expect(details).not.toHaveTextContent('newer');
@@ -157,7 +157,7 @@ describe('browser update control', () => {
     expect(isBuildSuperseded()).toBe(false);
     expect(screen.getByRole('button', { name: 'Update ready' })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Sidebar' })).toHaveAttribute('data-open', 'false');
-    expect(screen.queryByRole('region', { name: 'Tau update' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Tau update' })).not.toBeInTheDocument();
   });
 
   it('opens the sidebar once writes stop, even after the offer was already shown', async () => {
@@ -180,7 +180,7 @@ describe('browser update control', () => {
     await announce(buildId + 2);
 
     expect(screen.getByRole('status', { name: 'Sidebar' })).toHaveAttribute('data-open', 'true');
-    expect(await screen.findByRole('region', { name: 'Tau update' })).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: 'Tau update' })).toBeInTheDocument();
   });
 
   it('does not open the sidebar again when the offer is withdrawn', async () => {
@@ -254,7 +254,7 @@ describe('browser update control', () => {
     await announce(buildId + 1);
 
     expect(screen.getByRole('status', { name: 'Mobile sheet' })).toHaveAttribute('data-open', 'true');
-    expect(await screen.findByRole('region', { name: 'Tau update' })).toHaveTextContent(
+    expect(await screen.findByRole('group', { name: 'Tau update' })).toHaveTextContent(
       'this tab has stopped saving changes to your project list',
     );
   });

@@ -58,6 +58,19 @@ describe('DesktopAppNotice', () => {
     expect(screen.queryByRole('region', { name: 'Try Tau on desktop' })).not.toBeInTheDocument();
   });
 
+  it('keeps keyboard focus in the stack after dismissing', async () => {
+    render(
+      <SidebarNotices>
+        <DesktopAppNotice />
+        <section>
+          <button type='button'>Update ready</button>
+        </section>
+      </SidebarNotices>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss desktop app offer' }));
+    expect(screen.getByRole('button', { name: 'Update ready' })).toHaveFocus();
+  });
+
   it('hides when another tab dismisses it', () => {
     renderStack();
     act(() => {

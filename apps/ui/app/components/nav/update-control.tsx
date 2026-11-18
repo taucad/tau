@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { Loader } from '@taucad/ui/components/loader';
 import { ArrowUpRight, ChevronRight } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
@@ -52,6 +52,13 @@ export function UpdateControl({
 }): React.JSX.Element {
   const titleId = useId();
   const detailsId = useId();
+  /* A live region that mounts already filled is often not announced, so the title is written into it after mount. */
+  const statusRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (statusRef.current) {
+      statusRef.current.textContent = title;
+    }
+  }, [title]);
   return (
     <SidebarNotice labelledBy={titleId}>
       <SidebarNoticeHeader>
@@ -80,7 +87,7 @@ export function UpdateControl({
         </SidebarNoticeCorner>
       </SidebarNoticeHeader>
       {isOpen ? (
-        <div id={detailsId} role='region' aria-label='Tau update' className='pt-2'>
+        <div id={detailsId} role='group' aria-label='Tau update' className='pt-2'>
           {/* Text sits one step inside the actions, which keep the shared right edge. */}
           <div className='px-1'>
             {version ? <p className='text-xs leading-4 text-muted-foreground'>{version}</p> : undefined}
@@ -88,8 +95,9 @@ export function UpdateControl({
           </div>
           {/* Wraps the action under the link when a narrow sidebar cannot fit both on one line. */}
           <SidebarNoticeActions className='mt-3'>
+            {/* "What's new" sits on the shell's inner edge, its label in line with the text above. */}
             {releasePage ? (
-              <Button asChild variant='ghost' size='xs' className='mr-auto -ml-2'>
+              <Button asChild variant='ghost' size='xs' className='mr-auto px-1 has-[>svg]:px-1'>
                 <a href={releasePage} target='_blank' rel='noopener noreferrer'>
                   What’s new
                   <ArrowUpRight className='size-3' />
@@ -105,9 +113,7 @@ export function UpdateControl({
           </SidebarNoticeActions>
         </div>
       ) : undefined}
-      <span className='sr-only' role='status' aria-live='polite'>
-        {title}
-      </span>
+      <span ref={statusRef} className='sr-only' role='status' aria-live='polite' />
     </SidebarNotice>
   );
 }

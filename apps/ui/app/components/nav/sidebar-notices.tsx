@@ -165,7 +165,8 @@ export function SidebarNoticeCard({
         {/* A fixed square that sets the card's height: a two-line title and the action (70px) fit beside it, so the tile
           spans the card without its width depending on how the title wraps. */}
         <SidebarNoticeTile className='size-18 [&_svg]:size-6'>{icon}</SidebarNoticeTile>
-        <div className='flex min-w-0 flex-1 flex-col items-start gap-1.5'>
+        {/* Stretched to the tile's height, so the action's bottom inset matches every other notice's. */}
+        <div className='flex min-w-0 flex-1 flex-col items-start justify-between gap-1.5 self-stretch'>
           {/* Only the title keeps clear of the close button; the action runs under it to the shared right edge. */}
           <div className='max-w-full min-w-0 pr-6'>
             <p id={titleId} className={cn(sidebarNoticeTitle, 'whitespace-normal')}>
@@ -193,7 +194,10 @@ export function SidebarNoticeCard({
             size='icon-xs'
             className='text-muted-foreground'
             aria-label={dismissLabel}
-            onClick={onDismiss}
+            onClick={(event) => {
+              focusAfterDismiss(event.currentTarget);
+              onDismiss();
+            }}
           >
             <X className='size-4' />
           </Button>
@@ -202,6 +206,21 @@ export function SidebarNoticeCard({
     </SidebarNotice>
   );
 }
+
+/**
+ * Keep keyboard focus in the sidebar when a notice goes away: on the next notice's first control, else the first
+ * control of the account footer.
+ *
+ * @param from - The control that dismissed the notice.
+ */
+const focusAfterDismiss = (from: HTMLElement): void => {
+  const next =
+    from.closest('section')?.nextElementSibling?.querySelector<HTMLElement>('button, a[href]') ??
+    from
+      .closest('[data-slot=sidebar]')
+      ?.querySelector<HTMLElement>('[data-slot=sidebar-footer] button, [data-slot=sidebar-footer] a[href]');
+  next?.focus();
+};
 
 const dismissalKey = (id: string): string => `tau.sidebar-notice.${id}.dismissed`;
 const dismissalTopic = new Topic<void>({ name: 'sidebar-notice-dismissal' });
@@ -252,11 +271,11 @@ const serverDismissed = (): boolean => true;
 export function useSidebarNoticeDismissal(id: string): readonly [isDismissed: boolean, dismiss: () => void] {
   const isDismissed = useSyncExternalStore(subscribeDismissals, () => readDismissed(id), serverDismissed);
   const dismiss = useCallback(() => {
-    sessionDismissals.add(id);
     try {
       globalThis.localStorage.setItem(dismissalKey(id), new Date().toISOString());
     } catch {
-      // Persistence is best-effort; the notice still hides for this page.
+      // Blocked or full storage: remember it for this page only.
+      sessionDismissals.add(id);
     }
     dismissalTopic.emit();
   }, [id]);

@@ -3,8 +3,8 @@ import type { DateRange } from 'react-day-picker';
 import { addDays, format } from 'date-fns';
 import type { FinancialActivityKind, WireUsageSnapshot } from '@taucad/billing';
 import type { UsageSnapshotQuery } from '@taucad/billing/hooks/use-usage-snapshot';
-import { unresolvedProjectName } from '#routes/usage/activity-names.js';
-import type { ProjectNames } from '#routes/usage/activity-names.js';
+import { unresolvedProjectName } from '#components/usage/activity-names.js';
+import type { ProjectNames } from '#components/usage/activity-names.js';
 
 /** Every normalized activity the server can report, in presentation order. */
 export const usageActivityKinds: readonly FinancialActivityKind[] = [

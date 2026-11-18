@@ -1,6 +1,6 @@
 /* oxlint-disable typescript/no-restricted-types -- The billing wire returns explicit JSON nulls; a fixture has to be able to say so. */
 import { describe, expect, it } from 'vitest';
-import { chatLabel, projectLabel } from '#routes/usage/activity-names.js';
+import { chatLabel, projectLabel } from '#components/usage/activity-names.js';
 
 const names = new Map([
   ['proj_gearbox', 'Gearbox'],

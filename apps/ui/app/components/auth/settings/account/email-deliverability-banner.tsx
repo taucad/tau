@@ -1,6 +1,6 @@
 import { useAuth, useSession } from '@better-auth-ui/react';
 import { useQuery } from '@tanstack/react-query';
-import { BillingNotice, supportEmail } from '#components/billing/billing-primitives.js';
+import { BillingNotice, supportEmail } from '@taucad/billing-ui/components/billing/billing-primitives';
 import { ENV } from '#environment.config.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 

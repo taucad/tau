@@ -1,19 +1,17 @@
 import React, { useMemo } from 'react';
-import { Bar, BarChart, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { ChartContainer, ChartTooltip } from '@taucad/ui/components/chart';
 import type { ChartConfig } from '@taucad/ui/components/chart';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import type { WireUsageModelPage } from '@taucad/billing';
-import { getUsageColor } from '#routes/usage/provider-colors.js';
-import { CreditUsageTooltip } from '#routes/usage/charts/credit-usage-tooltip.js';
-import { displayCredits, formatChartCredits } from '#routes/usage/credits.js';
+import type { WireUsageDayPage } from '@taucad/billing';
+import { CreditUsageTooltip } from '#components/usage/charts/credit-usage-tooltip.js';
+import { displayCredits, formatChartCredits } from '#components/usage/credits.js';
 
-type UsageBarChartProps = {
-  /** Server model groups for the whole range. */
-  readonly models: WireUsageModelPage['items'];
+type UsageLineChartProps = {
+  /** Server day groups; the client never re-buckets rows into days. */
+  readonly days: WireUsageDayPage['items'];
   readonly title?: string;
   readonly description?: string;
-  readonly maxBars?: number;
 };
 
 const chartConfig: ChartConfig = {
@@ -23,24 +21,21 @@ const chartConfig: ChartConfig = {
   },
 };
 
-function UsageBarChartComponent({
-  models,
-  title = 'Credits by model',
+function UsageLineChartComponent({
+  days,
+  title = 'Credits over time',
   description,
-  maxBars = 10,
-}: UsageBarChartProps): React.JSX.Element {
+}: UsageLineChartProps): React.JSX.Element {
   const chartData = useMemo(
     () =>
-      [...models]
+      [...days]
+        .sort((a, b) => a.day.localeCompare(b.day))
         .map((item) => ({
-          model: item.modelDisplayName ?? item.modelId,
+          dateLabel: item.day === 'unknown' ? 'Not reported' : item.day,
           credits: displayCredits(item.netUsedCreditAtoms),
           creditAtoms: item.netUsedCreditAtoms,
-          fill: getUsageColor(item.modelId),
-        }))
-        .sort((a, b) => b.credits - a.credits)
-        .slice(0, maxBars),
-    [models, maxBars],
+        })),
+    [days],
   );
 
   if (chartData.length === 0) {
@@ -65,30 +60,20 @@ function UsageBarChartComponent({
       </CardHeader>
       <CardContent className='min-w-0'>
         <ChartContainer config={chartConfig} className='h-75 w-full min-w-0'>
-          <BarChart data={chartData} layout='vertical' margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-            <XAxis
-              type='number'
+          <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} accessibilityLayer>
+            <CartesianGrid strokeDasharray='3 3' vertical={false} />
+            <XAxis dataKey='dateLabel' tickLine={false} axisLine={false} tickMargin={8} />
+            <YAxis
               allowDecimals={false}
               tickFormatter={(value: number) => `${formatChartCredits(value)} cr`}
               tickLine={false}
               axisLine={false}
-            />
-            <YAxis
-              dataKey='model'
-              type='category'
-              tickLine={false}
-              axisLine={false}
-              width={120}
-              tick={{ fontSize: 14 }}
+              tickMargin={8}
+              width={60}
             />
             {/* @ts-expect-error - ChartTooltipContent types don't match Recharts exactly */}
             <ChartTooltip cursor={false} content={CreditUsageTooltip} />
-            <Bar
-              dataKey='credits'
-              shape={({ x, y, width, height, fill }) => (
-                <rect x={x} y={y} width={width} height={height} fill={fill} rx={8} ry={8} />
-              )}
-            />
+            <Bar dataKey='credits' fill='var(--color-credits)' radius={[4, 4, 0, 0]} />
           </BarChart>
         </ChartContainer>
       </CardContent>
@@ -96,4 +81,4 @@ function UsageBarChartComponent({
   );
 }
 
-export const UsageBarChart = React.memo(UsageBarChartComponent);
+export const UsageLineChart = React.memo(UsageLineChartComponent);

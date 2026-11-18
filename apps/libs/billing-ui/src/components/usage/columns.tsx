@@ -5,7 +5,7 @@ import { DataTableColumnHeader } from '@taucad/ui-kit/components/data-table';
 import { formatNumberAbbreviation } from '@taucad/ui-core/utils/number.utils';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
-import { getUsageColor } from '#routes/usage/provider-colors.js';
+import { getUsageColor } from '#components/usage/provider-colors.js';
 
 /** Stable row identity used for sorting keys and the open detail row. */
 export const usageEventId = (event: WireUsageEvent): string =>

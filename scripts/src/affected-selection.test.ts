@@ -54,6 +54,7 @@ const uiLibraries = [
   'editor-ui',
   'settings-ui',
   'publish-ui',
+  'billing-ui',
   'ui-core',
 ];
 

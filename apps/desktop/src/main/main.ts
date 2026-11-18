@@ -102,7 +102,6 @@ import { registerPermissionBridge } from '#main/permission-bridge.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
 import { registerTerminalRelay } from '#main/terminal-relay.js';
 import { registerAgentSignIn } from '#main/agent-sign-in.js';
-import type { AgentSignInPtyBinding } from '#main/agent-sign-in.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
@@ -2031,10 +2030,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
     loadPty: async () => {
       // eslint-disable-next-line import-x/no-extraneous-dependencies -- optional on purpose: without node-pty the sign-in tab answers pty-unavailable, as the Terminal does.
-      const module = (await import('node-pty')) as unknown as {
-        default?: AgentSignInPtyBinding;
-      } & AgentSignInPtyBinding;
-      return module.default ?? module;
+      const nodePty = await import('node-pty');
+      /* A CommonJS module: Node's ESM loader puts node-pty's exports on `default`, a bundled build on the namespace. */
+      const { spawn } = 'default' in nodePty ? nodePty.default : nodePty;
+      return { spawn: (file, args, options) => spawn(file, [...args], options) };
     },
     createChannel: () => new MessageChannelMain(),
     home: homedir(),

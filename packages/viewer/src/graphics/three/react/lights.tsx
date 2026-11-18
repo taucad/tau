@@ -29,26 +29,10 @@ import {
 } from '#graphics/three/utils/lights.utils.js';
 import type { StudioLightingSettings } from '#graphics/three/utils/lights.utils.js';
 import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
-import { rendererUsesSoftwareRasterizer } from '#graphics/three/utils/software-rasterizer.js';
-import { isCoarsePointerDevice } from '#graphics/three/utils/device-tier.js';
+import { useRenderTier } from '#graphics/three/use-render-tier.js';
 import { useViewerEnvironment } from '#environment/viewer-environment.jsx';
 
 type UpDirection = 'x' | 'y' | 'z';
-
-/**
- * Environment cubemap resolution (px), from the viewer render profile. Higher = sharper specular reflections.
- *
- * The filtered output is `3·r × 4·r` RGBA16F (24 MiB at 512, 6 MiB at 256) and the source cube
- * adds 12 MiB at 512, so a coarse-pointer device captures at 256: studio reflections are soft.
- *
- * A software rasterizer filters the environment on the CPU: at 512 its blur passes hold every core for about thirty
- * seconds before the first frame shows, and at 256 still for several. Reflections there are soft; the stage is usable.
- */
-const {
-  default: envResolution,
-  coarsePointer: coarsePointerEnvResolution,
-  softwareRasterizer: softwareRasterizerEnvResolution,
-} = viewerRenderProfile.lighting.environmentResolution;
 
 /** Studio card placement, as multiples of the scene radius; broad, low-energy fills keep metallic and back-facing surfaces readable. */
 const { keyPosition: studioKeyPosition, fills: studioFills } = viewerRenderProfile.lighting.studio;
@@ -125,12 +109,8 @@ export function Lights({
   });
 
   const showEnvironment = useDeferredValue(!enableMatcap);
-  const resolution = useMemo(() => {
-    if (rendererUsesSoftwareRasterizer(gl)) {
-      return softwareRasterizerEnvResolution;
-    }
-    return isCoarsePointerDevice() ? coarsePointerEnvResolution : envResolution;
-  }, [gl]);
+  // The canvas's render tier sizes the environment (`viewerRenderProfile.lighting.environmentResolution`).
+  const resolution = useRenderTier().features.environmentResolution;
 
   // Drei recaptures whenever its children change, so each environment is memoised on exactly
   // what it draws. The studio is also keyed on those values: new radiance remounts the capture

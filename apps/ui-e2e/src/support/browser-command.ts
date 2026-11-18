@@ -2606,11 +2606,7 @@ export const uiSampleCameraDuringClick: BrowserCommand<[selector: string, frameC
   }
 
   const samples = page.evaluate(async (count) => {
-    const bridge = (
-      globalThis as unknown as {
-        __TAU_SECTION_VIEW_TEST__?: { getCamera(): unknown };
-      }
-    ).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Graphics e2e bridge is not installed.');
     }

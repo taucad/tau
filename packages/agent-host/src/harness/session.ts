@@ -454,6 +454,12 @@ type CreateTransportStreamOptions = {
     | ((purpose: 'generation' | 'compaction', modelId: string, signal: AbortSignal) => Promise<string>)
     | undefined;
   readonly bindInvocation?: ((attemptId: string, metadata: ProviderMessageMetadata) => Promise<void>) | undefined;
+  /**
+   * The attempt id for a call no funded transport prepares (Q13): `${runId}:${attempt}:${n}`, so the API files it under
+   * the run's trace (LI2, LI3) as it does a funded call's; `n` is random, so no two calls share an id. Absent, the
+   * call takes `createId`.
+   */
+  readonly runAttemptId?: (() => Promise<string>) | undefined;
   readonly invocationPurpose?: 'generation' | 'compaction' | undefined;
   /** The next generation step's turn labels (`x-tau-turn-step`, `x-tau-turn-gap`); asked once per generation call. */
   readonly turnLabels?: (() => Promise<GatewayTurnLabels>) | undefined;
@@ -706,6 +712,12 @@ const attemptOf = (events: readonly AgentLogEvent[], runId: string): number => {
   return last?.type === 'run.lifecycle' && typeof last.attempt === 'number' ? last.attempt : 1;
 };
 
+/** A random decimal position for an unprepared call's attempt id (Q13): 53 bits, so ids do not collide. */
+const randomPosition = (): string => {
+  const [high = 0, low = 0] = crypto.getRandomValues(new Uint32Array(2));
+  return String((high % 2 ** 21) * 2 ** 32 + low);
+};
+
 /** Adapt the W3 model transport into pi's provider event protocol. @public */
 export const createTransportStreamFunction =
   (options: CreateTransportStreamOptions): StreamFn =>
@@ -809,7 +821,7 @@ export const createTransportStreamFunction =
         const attemptId =
           funded && options.prepareInvocation
             ? await options.prepareInvocation(invocationPurpose, model.id, signal)
-            : options.createId();
+            : ((await options.runAttemptId?.()) ?? options.createId());
         signal.throwIfAborted();
         const committedContext = options.committedContext?.();
         const committedTurns = (await options.committedTurns?.()) ?? [];
@@ -1217,6 +1229,7 @@ const compactionModelsWithTransport = (options: {
   readonly toolInputIds: Map<string, string>;
   readonly createId: () => string;
   readonly prepareInvocation?: CreateTransportStreamOptions['prepareInvocation'];
+  readonly runAttemptId?: CreateTransportStreamOptions['runAttemptId'];
   readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
   readonly kernel?: CreateTransportStreamOptions['kernel'];
   /** The session's side table, so a summarised document keeps its name (P32). */
@@ -1233,7 +1246,7 @@ const compactionModelsWithTransport = (options: {
         const attemptId =
           funded && options.prepareInvocation
             ? await options.prepareInvocation('compaction', model.id, signal)
-            : options.createId();
+            : ((await options.runAttemptId?.()) ?? options.createId());
         signal.throwIfAborted();
         const documents = options.documents();
         const kernel = options.kernel?.();
@@ -1906,6 +1919,9 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     });
     return attemptId;
   };
+  /* Q13: an unprepared call still names its run and attempt; the random position keeps every id distinct (I16). */
+  const runAttemptId = async (): Promise<string> =>
+    `${options.runId}:${String(attemptOf(await record.events(), options.runId))}:${randomPosition()}`;
   /*
    * R1: the run's labels are read from the log once, at this session's first generation step, so a resumed run (on
    * this device or another) labels its steps the way the run that started them would have. Every later step of the
@@ -1934,6 +1950,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     toolInputIds,
     createId,
     documents: () => documents,
+    runAttemptId,
     ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
     committedContext: () => committedContext,
     committedTurns: async () => committedTurnContexts(await record.rows()),
@@ -2084,6 +2101,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           toolInputIds,
           createId,
           documents: () => documents,
+          runAttemptId,
           ...(options.modelTransport.funding.type === 'funded' ? { prepareInvocation, bindInvocation } : {}),
           kernel: runKernel,
         }),

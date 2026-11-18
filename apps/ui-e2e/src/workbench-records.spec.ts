@@ -9,12 +9,6 @@ const workspace = 'workbench-records-external';
 const viewPath = (id: string): string => `/.tau/workbench/views/${id}.json`;
 const mainEntry = 'public/models/honeycomb.js';
 const viewTab = (id: string) => selectors.getByCss(`.dv-tab[data-tab-panel-id="${id}"]`);
-type CameraEvidence = {
-  position: readonly [number, number, number];
-  target: readonly [number, number, number];
-  verticalSpan: number;
-  zoom: number;
-};
 const readFile = async (path: string): Promise<string | undefined> => {
   const files = await readWorkbenchTree(workspace);
   return files[path];
@@ -80,18 +74,7 @@ test('reloads authored records and preserves invalid and newer bytes', async () 
     .poll(
       async () =>
         target.evaluate(() => {
-          const bridges =
-            (
-              globalThis as {
-                __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                  getSectionState(): {
-                    isActive: boolean;
-                    cuts: Array<{ kind: string; plane?: string; offset?: number }>;
-                  };
-                  getCamera(): { position: readonly number[] };
-                }>;
-              }
-            ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+          const bridges = globalThis.__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
           return bridges.some((bridge) => {
             const section = bridge.getSectionState();
             return (
@@ -295,13 +278,7 @@ test('adopts a valid external WebAccess layout edit without a reload', async () 
     .poll(
       async () =>
         target.evaluate(() => {
-          const bridge = (
-            globalThis as {
-              __TAU_SECTION_VIEW_TEST__?: {
-                getCamera(): { position: readonly [number, number, number]; target: readonly [number, number, number] };
-              };
-            }
-          ).__TAU_SECTION_VIEW_TEST__;
+          const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
           if (!bridge) {
             return false;
           }
@@ -332,8 +309,7 @@ test('keeps the live camera and canvas when only workbench tabs change', async (
     .poll(
       async () =>
         target.evaluate(() => {
-          const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { isGeometryFramed(): boolean } })
-            .__TAU_SECTION_VIEW_TEST__;
+          const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
           return bridge?.isGeometryFramed() ?? false;
         }),
       { timeout: 60_000 },
@@ -341,20 +317,10 @@ test('keeps the live camera and canvas when only workbench tabs change', async (
     .toBe(true);
 
   await target.evaluate(() => {
-    type Bridge = {
-      setCamera(camera: {
-        position: readonly [number, number, number];
-        target: readonly [number, number, number];
-        fov: number;
-      }): void;
-      getCamera(): CameraEvidence;
-      getViewportCanvas(): HTMLCanvasElement;
-    };
     const scope = globalThis as typeof globalThis & {
-      __TAU_SECTION_VIEW_TEST__?: Bridge;
       __workbenchCameraIdentity?: { canvas: HTMLCanvasElement };
     };
-    const bridge = scope.__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     const canvas = bridge?.getViewportCanvas();
     if (!bridge || !canvas) {
       throw new Error('Viewer camera and canvas are required.');
@@ -366,16 +332,14 @@ test('keeps the live camera and canvas when only workbench tabs change', async (
     .poll(
       async () =>
         target.evaluate(() => {
-          const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getCamera(): { position: number[] } } })
-            .__TAU_SECTION_VIEW_TEST__;
-          return bridge ? Math.abs(bridge.getCamera().position[0]! - 0.2) < 0.001 : false;
+          const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
+          return bridge ? Math.abs(bridge.getCamera().position[0] - 0.2) < 0.001 : false;
         }),
       { timeout: 60_000 },
     )
     .toBe(true);
   const settledCamera = await target.evaluate(() => {
-    const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getCamera(): CameraEvidence } })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     return bridge!.getCamera();
   });
   const offset = settledCamera.position.map((value, index) => value - settledCamera.target[index]!);
@@ -396,21 +360,16 @@ test('keeps the live camera and canvas when only workbench tabs change', async (
   expect(await target.textContent(modelTab.getByCss('.dockview-tab-title'))).toBe('Model tree');
   const identity = await target.evaluate(() => {
     const scope = globalThis as typeof globalThis & {
-      __TAU_SECTION_VIEW_TEST__?: { getViewportCanvas(): HTMLCanvasElement };
       __workbenchCameraIdentity?: { canvas: HTMLCanvasElement };
     };
     return {
-      canvasSame: scope.__TAU_SECTION_VIEW_TEST__?.getViewportCanvas() === scope.__workbenchCameraIdentity?.canvas,
+      canvasSame: globalThis.__TAU_SECTION_VIEW_TEST__?.getViewportCanvas() === scope.__workbenchCameraIdentity?.canvas,
       selectedCanvasSame: document.querySelector('canvas[data-engine]') === scope.__workbenchCameraIdentity?.canvas,
     };
   });
   expect(identity.canvasSame, JSON.stringify(identity)).toBe(true);
   expect(identity.selectedCanvasSame, JSON.stringify(identity)).toBe(true);
-  const afterLayout = await target.evaluate(() =>
-    (
-      globalThis as { __TAU_SECTION_VIEW_TEST__?: { getCamera(): CameraEvidence } }
-    ).__TAU_SECTION_VIEW_TEST__!.getCamera(),
-  );
+  const afterLayout = await target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__!.getCamera());
   for (let index = 0; index < 3; index++) {
     expect(afterLayout.position[index]).toBeCloseTo(settledCamera.position[index]!, 3);
     expect(afterLayout.target[index]).toBeCloseTo(settledCamera.target[index]!, 3);
@@ -433,7 +392,7 @@ test('keeps the live camera and canvas when only workbench tabs change', async (
           pose.target?.every((value, index) => Math.abs(value - settledCamera.target[index]!) < 0.001) &&
           pose.direction?.every((value, index) => Math.abs(value - direction[index]!) < 0.001) &&
           Math.abs((pose.verticalSpan ?? 0) - settledCamera.verticalSpan) < 0.001 &&
-          Math.abs((pose.perspectiveZoom ?? 0) - settledCamera.zoom) < 0.001,
+          Math.abs((pose.perspectiveZoom ?? 0) - (settledCamera.zoom ?? 0)) < 0.001,
         );
         return matches
           ? 'true'

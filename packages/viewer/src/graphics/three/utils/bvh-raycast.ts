@@ -39,6 +39,16 @@ export const createRaycastClipTest = (
     );
 };
 
+/**
+ * Whether `object` is a fat line (`LineSegments2`, on WebGL and WebGPU alike): a `Mesh` subclass that draws edges, not
+ * a surface a ray can meet.
+ *
+ * @param object - The scene object.
+ * @returns `true` for a fat line.
+ * @public
+ */
+export const isFatLineMesh = (object: THREE.Object3D): boolean => object.type === 'LineSegments2';
+
 function isWorldVisible(object: THREE.Object3D): boolean {
   let current: THREE.Object3D | undefined = object;
   while (current) {
@@ -91,7 +101,8 @@ export type MeshPick = Readonly<{
 }>;
 
 /**
- * Raycasts the meshes for the nearest visible hit that clipping keeps, through each geometry's tree. A geometry
+ * Raycasts the surface meshes for the nearest visible hit that clipping keeps, through each geometry's tree; fat lines
+ * among them are skipped. A geometry
  * under the synchronous threshold is built on first use; a larger one is requested from the BVH worker and makes the
  * pick pending only when the ray enters its bounds before the nearest answered hit, so a farther mesh never wins in its
  * place. A geometry whose build failed is skipped.
@@ -113,6 +124,9 @@ export function raycastFirstVisibleMeshHit({
   for (const mesh of meshes) {
     const positionAttribute = mesh.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
     if (
+      // A fat line is a mesh only to the renderer: its position attribute is a quad template the shader widens per
+      // segment, not a surface, so a tree over it answers rays that meet nothing drawn.
+      isFatLineMesh(mesh) ||
       !isWorldVisible(mesh) ||
       !raycaster.layers.test(getGltfOccurrenceLayers(mesh)) ||
       positionAttribute === undefined

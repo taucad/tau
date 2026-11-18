@@ -12,16 +12,16 @@ import { resolveShapeName, uniqueShapeName } from '@taucad/geometry-core';
 import { getOC } from 'replicad';
 
 import {
+  createReplicadOccurrenceReader,
   extractInstanceEdgeIds,
   extractInstanceFaceIds,
   extractPrototypeEdges,
   extractPrototypeFaces,
-  inspectReplicadShapeIdentity,
   transformReplicadGeometryInstance,
 } from '#utils/tessellation-instancing.js';
 import type {
   Meshable,
-  ReplicadShapeIdentityInfo,
+  ReplicadShapeOccurrenceInfo,
   ReplicadTessellationInstance,
 } from '#utils/tessellation-instancing.js';
 
@@ -76,7 +76,7 @@ type SvgShapeConfiguration = NamedInputShape & { shape: Svgable };
 type MeshableConfiguration = NamedInputShape & { shape: Meshable };
 type MeshableInstance = {
   config: MeshableConfiguration;
-  info: ReplicadShapeIdentityInfo;
+  info: ReplicadShapeOccurrenceInfo;
 };
 
 type PrototypeGroup = {
@@ -420,7 +420,7 @@ function instancingGroupKey(instance: MeshableInstance, tessellation: Tessellati
   ].join('|');
 }
 
-function isInstancingEligible(info: ReplicadShapeIdentityInfo): boolean {
+function isInstancingEligible(info: ReplicadShapeOccurrenceInfo): boolean {
   return info.canPrototypeMesh && info.partnerKey.length > 0 && Number.isFinite(info.determinant);
 }
 
@@ -431,13 +431,10 @@ function groupMeshableInstances(
 ): {
   groups: PrototypeGroup[];
   grouped: Set<MeshableConfiguration>;
-  missedContentHashGroups: number;
 } {
   const candidates = new Map<string, PrototypeGroup>();
-  const contentHashes = new Map<string, number>();
 
   for (const instance of instances) {
-    contentHashes.set(instance.info.prototypeHash, (contentHashes.get(instance.info.prototypeHash) ?? 0) + 1);
     if (!isInstancingEligible(instance.info)) {
       continue;
     }
@@ -459,15 +456,7 @@ function groupMeshableInstances(
     }
   }
 
-  let missedContentHashGroups = 0;
-  for (const count of contentHashes.values()) {
-    if (count > 1) {
-      missedContentHashGroups++;
-    }
-  }
-  missedContentHashGroups = Math.max(0, missedContentHashGroups - groups.length);
-
-  return { groups, grouped, missedContentHashGroups };
+  return { groups, grouped };
 }
 
 function detectInstancingGroups({
@@ -486,7 +475,6 @@ function detectInstancingGroups({
   instances: MeshableInstance[];
   groups: PrototypeGroup[];
   grouped: Set<MeshableConfiguration>;
-  missedContentHashGroups: number;
 } {
   const span = tracer?.startSpan('replicad.tessellation-instancing.detect', {
     shapeCount: configs.length,
@@ -496,6 +484,7 @@ function detectInstancingGroups({
   });
 
   try {
+    const readOccurrence = createReplicadOccurrenceReader(openCascade);
     const instances: MeshableInstance[] = [];
     for (const config of configs) {
       if (!hasMeshableShape(config)) {
@@ -504,7 +493,7 @@ function detectInstancingGroups({
 
       instances.push({
         config,
-        info: inspectReplicadShapeIdentity({ openCascade, shape: config.shape }),
+        info: readOccurrence(config.shape),
       });
     }
 
@@ -515,7 +504,6 @@ function detectInstancingGroups({
       prototypeCount: groupedResult.groups.length,
       instanceCount,
       eligibleInstanceCount: groupedResult.grouped.size,
-      missedContentHashGroups: groupedResult.missedContentHashGroups,
     });
 
     return {
@@ -535,7 +523,7 @@ function instanceFromConfig({
   edgeIds,
 }: {
   config: MeshableConfiguration;
-  info: ReplicadShapeIdentityInfo;
+  info: ReplicadShapeOccurrenceInfo;
   faceIds: number[];
   edgeIds: number[];
 }): ReplicadTessellationInstance {
@@ -570,7 +558,6 @@ function renderPrototypeGroup({
   const prototypeGeometry = createEmptyReplicadGeometry(prototypeConfig);
   const shapeNames = group.instances.map((instance) => instance.config.name).join(',');
   const sharedAttributes = {
-    prototypeHash: group.prototype.info.prototypeHash,
     partnerKey: group.prototype.info.partnerKey,
     instanceCount: group.instances.length,
     shapeNames,
@@ -612,7 +599,6 @@ function renderPrototypeGroup({
     tracer,
     name: 'replicad.tessellation-instancing.expand',
     attributes: {
-      prototypeHash: group.prototype.info.prototypeHash,
       partnerKey: group.prototype.info.partnerKey,
       instanceCount: group.instances.length,
       vertexCount: prototypeGeometry.faces.vertices.length / 3,
@@ -705,6 +691,7 @@ function renderWithTessellationInstancing(
  * @param shapes - The shapes to render with optional color/name metadata
  * @param options - Tessellation, BRep edge, and telemetry options
  * @returns An array of SVG or Replicad geometry objects
+ * @throws When tessellation instancing is on and detection or prototype meshing fails; there is no flat fallback.
  */
 export function render(
   shapes: NamedInputShape[],
@@ -718,19 +705,16 @@ export function render(
   }: RenderOptions = {},
 ): Array<GeometrySvg | GeometryReplicad> {
   if (tessellationInstancing && openCascade) {
-    try {
-      const result = renderWithTessellationInstancing(shapes, {
-        openCascade,
-        tessellation,
-        collectBrepEdges,
-        tracer,
-      });
-      onRenderMode?.(result.renderMode);
-      return result.geometries;
-    } catch {
-      onRenderMode?.('flat');
-      return render(shapes, { tessellation, collectBrepEdges, tracer, tessellationInstancing: false });
-    }
+    // No flat fallback: flat meshing delivers different bytes, so a detection or instancing failure is a render error
+    // (the kernel reports it as a build issue) rather than a silent change of output.
+    const result = renderWithTessellationInstancing(shapes, {
+      openCascade,
+      tessellation,
+      collectBrepEdges,
+      tracer,
+    });
+    onRenderMode?.(result.renderMode);
+    return result.geometries;
   }
 
   onRenderMode?.('flat');

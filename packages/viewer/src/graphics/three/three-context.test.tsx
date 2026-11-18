@@ -11,6 +11,7 @@ import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import type * as GraphicsBackendModule from '#graphics/graphics-backend.js';
 import { ThreeProvider } from '#graphics/three/three-context.jsx';
 import { useWebglContextRef, WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.jsx';
+import { hardwareRenderTier } from '#graphics/three/render-tier.js';
 
 const canvas = vi.hoisted(() => ({ cssPixels: 0 }));
 const allocation = vi.hoisted(() => ({
@@ -42,6 +43,7 @@ vi.mock('#graphics/three/three-canvas-instance.jsx', () => ({
       actor.send({
         type: 'hostCreated',
         backend: graphicsBackend,
+        tier: hardwareRenderTier(graphicsBackend),
         surface: { width: canvas.cssPixels, height: 1, pixelRatio: 2 },
         domElement: document.createElement('canvas'),
         host: createCallbackLogic<CanvasHostCommand, undefined>(() => undefined),

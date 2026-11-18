@@ -27,7 +27,7 @@ import type {
   PersonProfile,
   ViewerPreferences,
 } from '@taucad/preferences';
-import { SettingsGroup, SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import {
   gizmoStyleCopy,
   linuxAltNote,

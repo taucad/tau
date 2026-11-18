@@ -20,7 +20,7 @@ import { formatTestModelHeadline, runStatusFromCounts } from '@taucad/host/agent
 import { defineCommand } from 'citty';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 
-import { cliError, createOutput, emit, exitCodes, sanitize } from '#output.js';
+import { cliError, createOutput, emit, exitCodes, reserveStdout, sanitize } from '#output.js';
 import { resolveProjectRoot } from '#project-root.js';
 
 /**
@@ -263,6 +263,10 @@ export const testCommand = defineCommand({
     },
   },
   async run({ args }) {
+    if (args.json) {
+      /* The record is the only thing on stdout; a model's own console output goes to stderr. */
+      reserveStdout();
+    }
     const output = await createOutput();
     const { root: projectRoot } = resolveProjectRoot({
       project: typeof args.project === 'string' ? args.project : undefined,

@@ -88,6 +88,8 @@ export const childContextSchema = z.object({
   pluginDirectories: z.boolean(),
   grokControls: z.boolean(),
   grokAutoAvailable: z.boolean().optional(),
+  /* The mode Tau last chose by default (PR5); `null` once the person picked one; absent until a turn decides. */
+  defaultModeId: z.string().nullable().optional(),
   /* The session the record names until the restore ladder answers; then the one this child prompts. */
   acpSessionId: z.string().optional(),
   contextLost: z.boolean(),

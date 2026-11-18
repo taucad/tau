@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AcpSessionData } from '@taucad/chat';
+import { isRecordedOnHost } from '@taucad/chat-ui/utils/chat-execution';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 
 /** One option an external agent's session offers, besides its model. */
@@ -66,7 +67,9 @@ export const useAgentConfig = (
     };
   }, [owner]);
   const liveSession =
-    execution.kind === 'acp' && sessionData?.agentId === execution.agentId && sessionData.hostId === execution.hostId;
+    execution.kind === 'acp' &&
+    sessionData?.agentId === execution.agentId &&
+    isRecordedOnHost(sessionData.hostId, execution.hostId);
   const sessionModel = sessionData?.configOptions.find((option) => option.category === 'model')?.currentValue;
   const liveModel = liveSession && (execution.model === undefined || execution.model === sessionModel);
   const confirmedOptions = useMemo(
@@ -88,6 +91,7 @@ export const useAgentConfig = (
   if (pending.owner !== owner) {
     setPending({ owner, confirmed, values: {}, submitted: {} });
   }
+  const inFlight = status === 'submitted' || status === 'streaming';
   const previousStatus = useRef(status);
   const previousSession = useRef<AcpSessionData | undefined>(undefined);
   useEffect(() => {
@@ -112,7 +116,8 @@ export const useAgentConfig = (
       ),
     );
     setPending({ owner, confirmed, values: retained, submitted: settled || sessionReplaced ? {} : pending.submitted });
-    if (liveSession) {
+    /* Mid-turn records can predate the mode Tau sets for the turn; the turn's own settle writes what it confirmed. */
+    if (liveSession && !inFlight) {
       const actual = Object.fromEntries(confirmedOptions.map((option) => [option.id, option.currentValue]));
       const { config: _config, ...selection } = execution;
       const selectedReasoning = liveModel
@@ -130,6 +135,7 @@ export const useAgentConfig = (
     confirmed,
     confirmedOptions,
     discoveredOptions,
+    inFlight,
     execution,
     liveModel,
     liveSession,
@@ -150,10 +156,15 @@ export const useAgentConfig = (
       : [];
   return {
     options,
+    /* A turn in flight shows what it asked for: the session record it opened with can precede the mode Tau sets
+     * (Claude opens in `default`, then moves to `auto`), and settles only with the turn. */
     valueOf: (option) =>
-      liveSession && (liveModel || option.category !== 'thought_level')
+      liveSession && (liveModel || option.category !== 'thought_level') && !inFlight
         ? (pendingValues[option.id] ?? option.currentValue)
-        : ((execution.kind === 'acp' ? execution.config?.[option.id] : undefined) ?? option.currentValue),
+        : (pendingValues[option.id] ??
+          (execution.kind === 'acp' ? execution.config?.[option.id] : undefined) ??
+          (inFlight ? discoveredOptions.find((discovered) => discovered.id === option.id)?.currentValue : undefined) ??
+          option.currentValue),
     select: (id, value) => {
       if (execution.kind !== 'acp' || activeOwner.current !== owner) {
         return;

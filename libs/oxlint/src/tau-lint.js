@@ -32,6 +32,7 @@ import { noSceneOverrideMaterialRule } from './rules/no-scene-override-material.
 import { staticImportMetaUrlRule } from './rules/static-import-meta-url.js';
 import { requireUsingOnDisposableRule } from './rules/require-using-on-disposable.js';
 import { noImplInIndexRule } from './rules/no-impl-in-index.js';
+import { noTestBridgeRedeclarationRule } from './rules/no-test-bridge-redeclaration.js';
 import { pluginCapabilityFilenameRule } from './rules/plugin-capability-filename.js';
 import { noAuthoredPointerCursorRule } from './rules/no-authored-pointer-cursor.js';
 import { noInlineActorSelectorRule } from './rules/no-inline-actor-selector.js';
@@ -54,7 +55,7 @@ import { noRaisedOverlayLayerRule } from './rules/no-raised-overlay-layer.js';
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.30.0',
+    version: '1.31.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -82,6 +83,7 @@ const plugin = {
     'static-import-meta-url': staticImportMetaUrlRule,
     'require-using-on-disposable': requireUsingOnDisposableRule,
     'no-impl-in-index': noImplInIndexRule,
+    'no-test-bridge-redeclaration': noTestBridgeRedeclarationRule,
     'plugin-capability-filename': pluginCapabilityFilenameRule,
     'no-authored-pointer-cursor': noAuthoredPointerCursorRule,
     'no-inline-actor-selector': noInlineActorSelectorRule,

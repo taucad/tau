@@ -1004,6 +1004,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   /** Host-shaped admissions the legacy `admit` hands `prepareAdmission` beside its command. */
   const legacyConfigs = new Map<string, TauAgentAdmissionConfig>();
   let closed = false;
+  /* Set once the close has begun dropping every chat's log: a writer opened after it would never be closed, and its
+   * lock would refuse every later host for the chat `WRITER_LOCKED` until the process exits. */
+  let logsReleased = false;
   let closing: Promise<void> | undefined;
 
   const createTerm = options.createLeaderEpoch ?? createPortableId;
@@ -1114,6 +1117,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const logOf = async (chatId: string): Promise<DurableEventLog> => {
     const store = storeOf(chatId);
     if (store.log === undefined) {
+      if (logsReleased) {
+        throw coded('HOST_CLOSED' satisfies RefusalCode, 'The Tau agent host is closed.');
+      }
       const opened = options.openEventLog(chatId);
       store.log = opened;
       const forget = async (): Promise<void> => {
@@ -3578,14 +3584,25 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         for (const store of stores.values()) {
           store.heartbeat?.cancel();
         }
-        await registry.close();
-        await Promise.allSettled([...deferredLogCloses.values()].map(async ({ done }) => done.promise));
-        await drainApprovalScans();
+        /* The logs are dropped whatever the steps before them threw: a writer left open holds the chat's lock for
+         * the process's life, and every later host for the chat is refused `WRITER_LOCKED`. */
+        let failure: { readonly error: unknown } | undefined;
+        try {
+          await registry.close();
+          await Promise.allSettled([...deferredLogCloses.values()].map(async ({ done }) => done.promise));
+          await drainApprovalScans();
+        } catch (error) {
+          failure = { error };
+        }
         for (const store of stores.values()) {
           wake(store);
         }
         await Promise.allSettled([...stores.keys()].map(async (chatId) => closeExternalChat(chatId)));
+        logsReleased = true;
         await Promise.allSettled([...stores.keys()].map(async (chatId) => serial(chatId, async () => dropLog(chatId))));
+        if (failure !== undefined) {
+          throw failure.error;
+        }
       })();
       const attempt = closing;
       try {

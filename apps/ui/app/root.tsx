@@ -11,7 +11,6 @@ import { globalStylesLinks } from '#styles/global.styles.js';
 import { CookieConsentBanner } from '#components/cookie-consent-banner.js';
 import { WebAnalyticsProvider } from '#providers/web-analytics-provider.js';
 import { ProductApp, RootErrorBoundary, RootLayout } from '#root-layout.js';
-import { documentScrollClass } from '#components/layout/document-scroll.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 import { DeferredExampleCommandPaletteItems } from '#components/nav/deferred-example-command-items.js';
 import type { Handle } from '#types/matches.types.js';
@@ -112,10 +111,6 @@ export default function App(): React.JSX.Element {
 }
 
 export function ErrorBoundary(): React.JSX.Element {
-  // The root error document renders outside the shell's scroller, so it brings its own (D4.8).
-  return (
-    <div data-slot='root-error-document' className={documentScrollClass}>
-      <RootErrorBoundary />
-    </div>
-  );
+  /* The root error document brings its own scroller (D4.8); `RootErrorBoundary` owns it, for the desktop root too. */
+  return <RootErrorBoundary />;
 }

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { SourceMapGenerator } from 'source-map-js';
 import { formatOcRuntimeError } from '#oc-error-formatter.js';
 import type { OcExceptionInstance } from '#oc-exceptions.js';
@@ -16,6 +16,19 @@ function buildSourceMap(generatedFile: string, originalSource: string): string {
     name: 'main',
   });
   return generator.toString();
+}
+
+// The runtime's cooperative-abort error is internal; this stand-in has the name/code shape the
+// runtime recognises across realms.
+class RenderAbortedError extends Error {
+  public constructor() {
+    super('Render aborted by a superseding document operation');
+    this.name = 'RenderAbortedError';
+  }
+
+  public get code(): 'RUNTIME_RENDER_ABORTED' {
+    return 'RUNTIME_RENDER_ABORTED';
+  }
 }
 
 function buildErrorWithStack(blobUrl: string): Error {
@@ -78,5 +91,27 @@ describe('formatOcRuntimeError', () => {
     expect(received, 'secondary hook should fire on remapped frames').toBeDefined();
     const taggedUser = issue.stackFrames!.find((f) => f.functionName?.startsWith('tagged:'));
     expect(taggedUser).toBeDefined();
+  });
+
+  it('reports a superseded run without parsing its stack or reading source maps', () => {
+    const blobUrl = 'blob:http://localhost:3000/superseded';
+    const error = new RenderAbortedError();
+    error.stack = buildErrorWithStack(blobUrl).stack;
+    const applySecondarySourceMaps = vi.fn((frames: KernelStackFrame[]) => frames);
+
+    const issue = formatOcRuntimeError(error, emptyOcInstance, {
+      bundleSourceMap: buildSourceMap(blobUrl, 'main.ts'),
+      entryUrl: blobUrl,
+      applySecondarySourceMaps,
+    });
+
+    expect(applySecondarySourceMaps).not.toHaveBeenCalled();
+    expect(issue).toEqual({
+      message: 'Render aborted by a superseding document operation',
+      code: 'RUNTIME',
+      type: 'runtime',
+      severity: 'error',
+      stackFrames: [],
+    });
   });
 });

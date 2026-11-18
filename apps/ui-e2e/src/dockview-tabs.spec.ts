@@ -8,21 +8,11 @@ const seedRoute = '/__e2e/project-file-tree';
 const seedProjectName = 'sgenoud/models file-tree e2e';
 
 const editorTab = (path: string): Locator => selectors.getByCss(`.dv-tab[aria-label="${path}"]`);
+/** The tab's tooltip trigger: the shared `WorkbenchTab` row (#930), whose own `data-slot` its trigger wraps. */
 const tabTooltipTrigger = (path: string): Locator =>
-  selectors.getByCss(`.dv-tab[aria-label="${path}"] .dv-default-tab[data-slot="tooltip-trigger"]`);
+  selectors.getByCss(`.dv-tab[aria-label="${path}"] .dv-default-tab[data-slot="workbench-tab"]`);
 const tabGroup = (path: string): Locator => selectors.getByCss(`.dv-groupview:has(.dv-tab[aria-label="${path}"])`);
 const overflowPicker = (path: string): Locator => tabGroup(path).getByRole('button', { name: 'Open tabs' });
-const viewerGroup = (): Locator =>
-  selectors.getByCss('.dv-groupview:has([data-testid="cad-viewer-canvas-region"])').first();
-
-const openViewerFile = async (name: RegExp, path: string): Promise<void> => {
-  await target.click(viewerGroup().getByRole('button', { name: 'Open file' }));
-  const fileDrawer = selectors.getByRole('dialog', { name: 'Open File' });
-  await target.expectVisible(fileDrawer);
-  await target.click(fileDrawer.getByRole('option', { name }));
-  await target.expectVisible(editorTab(path), 15_000);
-};
-
 const openSeededProject = async (): Promise<void> => {
   await target.navigate(seedRoute);
   try {
@@ -189,14 +179,34 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
   const lastTab = editorTab('src/readme.md');
   await target.expectFocused(lastTab);
   await target.expectAttribute(dragTarget, 'aria-selected', 'true');
+  // Home moves to the group's first tab (the APG tabs pattern). The seeded group opens with its own Parameters and New
+  // tab ahead of the files, so the first tab is not the first file opened here.
   await target.press(lastTab, 'Home');
-  await target.expectFocused(shortTab);
-  await target.press(shortTab, ' ');
-  await target.expectAttribute(shortTab, 'aria-selected', 'true');
+  const firstTab = tabList.getByRole('tab').first();
+  await target.expectFocused(firstTab);
+  await target.press(firstTab, ' ');
+  await target.expectAttribute(firstTab, 'aria-selected', 'true');
   await target.click(longTab);
 
+  /* The editor group keeps its own width as the window grows (the viewer takes the room), so a wider window alone no
+   * longer makes its tabs fit. The person widens the group too: drag its sash toward the viewer until the tabs fit and
+   * the picker leaves, then back, and narrow the window until they overflow again. */
   await target.setViewport({ width: 3200, height: 900 });
+  await target.expectVisible(overflowPicker('package.json'));
+  const groupBox = await target.boundingBox(tabGroup('package.json'));
+  if (!groupBox) {
+    throw new Error('The editor group had no box.');
+  }
+  const sashY = groupBox.y + groupBox.height / 2;
+  await target.mouseMove(groupBox.x, sashY);
+  await target.mouseDown();
+  await target.mouseMove(groupBox.x - 800, sashY, { steps: 12 });
+  await target.mouseUp();
   await target.expectCount(overflowPicker('package.json'), 0);
+  await target.mouseMove(groupBox.x - 800, sashY);
+  await target.mouseDown();
+  await target.mouseMove(groupBox.x, sashY, { steps: 12 });
+  await target.mouseUp();
   await target.setViewport({ width: 1440, height: 900 });
   await target.expectVisible(overflowPicker('package.json'));
 
@@ -253,6 +263,8 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
   expect(await target.textContent(tooltip)).toContain('public/models/nested/strainer.js');
 
   await target.scrollIntoView(shortTab);
+  // The strip scrolled under the pointer parked on the long tab: read the resting state with the pointer away.
+  await target.mouseMove(1, 1);
   const inactiveBeforeHover = await readTabVisualState(shortTab);
   const shortTabBox = await target.boundingBox(shortTab);
   if (!shortTabBox) {
@@ -345,29 +357,7 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
     secondScrollLeft: 70,
   });
 
-  await target.setViewport({ width: 390, height: 844 });
-  const modelTab = selectors.getByRole('tab', { name: 'Model', exact: true }).last();
-  await target.click(modelTab);
-  await target.expectVisible(viewerGroup());
-  await openViewerFile(/box-corner\.js/u, 'public/models/box-corner.js');
-  await openViewerFile(/strainer\.js/u, 'public/models/nested/strainer.js');
-
-  const viewerPicker = viewerGroup().getByRole('button', { name: 'Open tabs' });
-  await target.expectVisible(viewerPicker);
-  await target.click(viewerPicker);
-  const overflowDrawer = selectors.getByRole('dialog', { name: 'Open tabs' });
-  await target.expectVisible(overflowDrawer);
-  await target.expectCount(selectors.getByCss('[data-slot="popover-content"]'), 0);
-  const viewerSearch = overflowDrawer.getByPlaceholder('Search open tabs…');
-  await target.fill(viewerSearch, 'public/models/nested/strainer.js');
-  await target.click(overflowDrawer.getByRole('option', { name: /strainer\.js/u }));
-  await target.expectAttribute(editorTab('public/models/nested/strainer.js'), 'aria-selected', 'true');
-  await target.expectFocused(viewerPicker);
-
-  const chatTab = selectors.getByRole('tab', { name: 'Chat', exact: true }).last();
-  await target.click(chatTab);
-  await target.expectAttribute(chatTab, 'data-state', 'active');
-  await target.expectVisible(selectors.getByRole('dialog', { name: 'Chat Interface' }));
-  await target.click(modelTab);
-  await target.expectVisible(viewerPicker);
+  /* No phone rows: since #1026 a phone reaches each Workbench surface from the sheet and its navigation, and the stage
+   * viewer draws no tab strip, so no Dockview tab overflow picker is on screen there. The picker's drawer form on a
+   * coarse pointer is covered by `dockview-tab-overflow-picker.test.tsx`. */
 });

@@ -203,6 +203,29 @@ export const runCommand = async (options: RunCommandOptions): Promise<GitCommand
   }
 };
 
+type ActivityTotals = { count: number; totalMilliseconds: number; longestMilliseconds: number };
+const gitActivityWindows = new Set<ActivityTotals>();
+
+/**
+ * Every Git process this realm runs through {@link runGitCommand}, timed from spawn to exit, read over windows: a
+ * caller opens one, and closing it answers how many processes finished while it was open, their total time and the
+ * longest (a turn's admission, for one). With no window open a process costs one empty loop.
+ *
+ * @public
+ */
+export const gitCommandActivity = Object.freeze({
+  open: (): Readonly<{ close: () => Readonly<ActivityTotals> }> => {
+    const totals = { count: 0, totalMilliseconds: 0, longestMilliseconds: 0 };
+    gitActivityWindows.add(totals);
+    return {
+      close: () => {
+        gitActivityWindows.delete(totals);
+        return { ...totals };
+      },
+    };
+  },
+});
+
 /**
  * Run one argument-array Git command without invoking a shell.
  *
@@ -210,14 +233,25 @@ export const runCommand = async (options: RunCommandOptions): Promise<GitCommand
  * @returns Captured process bytes and exit status.
  * @public
  */
-export const runGitCommand = async (options: RunGitCommandOptions): Promise<GitCommandResult> =>
-  runCommand({
-    executable: options.gitExecutable,
-    cwd: options.cwd,
-    args: ['-C', options.cwd, ...options.args],
-    ...(options.env === undefined ? {} : { env: options.env }),
-    ...(options.input === undefined ? {} : { input: options.input }),
-    ...(options.deadline === undefined ? {} : { deadline: options.deadline }),
-    ...(options.maxBuffer === undefined ? {} : { maxBuffer: options.maxBuffer }),
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-  });
+export const runGitCommand = async (options: RunGitCommandOptions): Promise<GitCommandResult> => {
+  const start = performance.now();
+  try {
+    return await runCommand({
+      executable: options.gitExecutable,
+      cwd: options.cwd,
+      args: ['-C', options.cwd, ...options.args],
+      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.input === undefined ? {} : { input: options.input }),
+      ...(options.deadline === undefined ? {} : { deadline: options.deadline }),
+      ...(options.maxBuffer === undefined ? {} : { maxBuffer: options.maxBuffer }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+  } finally {
+    const milliseconds = performance.now() - start;
+    for (const totals of gitActivityWindows) {
+      totals.count += 1;
+      totals.totalMilliseconds += milliseconds;
+      totals.longestMilliseconds = Math.max(totals.longestMilliseconds, milliseconds);
+    }
+  }
+};

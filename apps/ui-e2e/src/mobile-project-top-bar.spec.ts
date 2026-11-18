@@ -3,7 +3,7 @@ import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { prepareComposerPage, readHomeJson } from '#support/chat-attachments.js';
-import { answerIfAsked } from '#support/revision-session.js';
+import { answerIfAsked, createBranchHere, pickBranchVerb, switchToBranch } from '#support/revision-session.js';
 import { waitForStageReady } from '#support/viewer-stage.js';
 
 /**
@@ -249,10 +249,15 @@ const editWidth = async (value: string): Promise<void> => {
   await target.expectValue(width.first(), value, 30_000);
 };
 
-/** Save from the History strip, reached through the project sheet. */
-const saveRevisionFromSheet = async (): Promise<void> => {
+/**
+ * Save from the History strip, reached through the project sheet. After a save the store refused, the strip's verb is
+ * *Try again* (`selectStripVerbs`: an unconfirmed record outranks unsaved changes), which saves the same way.
+ *
+ * @param verb - The strip's saving verb.
+ */
+const saveRevisionFromSheet = async (verb: 'Save' | 'Try again' = 'Save'): Promise<void> => {
   await openFromProjectSheet('History');
-  const save = revisionsStrip().getByRole('button', { name: 'Save', exact: true });
+  const save = revisionsStrip().getByRole('button', { name: verb, exact: true });
   await target.expectVisible(save, 60_000);
   await target.click(save, { touch: true });
 };
@@ -345,9 +350,9 @@ test.each([
     await target.keyboardPress('Escape');
     await target.expectCount(projectSheet(), 0);
 
-    // Released, the next save lands and the line rests on Saved again.
+    // Released, Try again lands the save and the line rests on Saved again.
     await releaseProjectFile('.git/refs/heads/main');
-    await saveRevisionFromSheet();
+    await saveRevisionFromSheet('Try again');
     await expectStatus('Saved', 120_000);
   },
 );
@@ -364,24 +369,15 @@ test.each([
     await saveRevisionFromSheet();
     await expectStatus('Saved', 120_000);
 
+    /* #1906 (C2, D3): the History header's branch chip is the branch menu, New branch… its last item, and a branch's
+     * verbs sit on its chip's ⋮ in History's lanes, where *Run this chat here* places the chat in focus. */
     await openFromProjectSheet('History');
-    await target.click(revisionsStrip().getByRole('button', { name: 'New branch' }), { touch: true });
-    await target.fill(selectors.getByRole('textbox', { name: 'Branch name' }), branch);
-    await target.click(selectors.getByRole('button', { name: 'Create branch' }), { touch: true });
-    const row = selectors
-      .getByRole('region', { name: 'History', exact: true })
-      .getByRole('list', { name: 'Branches', exact: true })
-      .getByRole('listitem')
-      .filter({ has: selectors.getByRole('button', { name: `Actions for ${branch}`, exact: true }) });
-    await target.expectVisible(row, 60_000);
+    await createBranchHere(branch, { touch: true });
     // On main the line names no branch.
     await expectStatus('Saved');
 
     // The chat in focus is placed on the branch: the line says so as a fact, and the bar gains no control.
-    await target.click(row.getByRole('button', { name: `Actions for ${branch}`, exact: true }), { touch: true });
-    await target.click(selectors.getByRole('menuitem', { name: `Use ${branch} in this chat`, exact: true }), {
-      touch: true,
-    });
+    await pickBranchVerb(branch, 'Run this chat here', { click: { touch: true } });
     await expectStatus(`Saved · Switch to ${branch}`, 60_000);
     await target.expectCount(topBar().getByRole('button'), 3);
 
@@ -396,25 +392,10 @@ test.each([
   },
 );
 
-/** The History surface's Branches row for `name`, by its own *Actions for* button. */
-const branchRow = (name: string): Locator =>
-  selectors
-    .getByRole('region', { name: 'History', exact: true })
-    .getByRole('list', { name: 'Branches', exact: true })
-    .getByRole('listitem')
-    .filter({ has: selectors.getByRole('button', { name: `Actions for ${name}`, exact: true }) });
-
-/** Put the workbench on `name` from its Branches row, answering the guard when it asks. */
+/** Put the workbench on `name` from the History header's branch chip, which switches at once (C7). */
 const switchTo = async (name: string): Promise<void> => {
   await openFromProjectSheet('History');
-  await target.click(selectors.getByRole('button', { name: `Switch to ${name}`, exact: true }), { touch: true });
-  await answerIfAsked(
-    'Switch branch',
-    selectors
-      .getByRole('region', { name: 'History', exact: true })
-      .getByCss(`ul[aria-label="Branches"] > li[aria-current="true"]`)
-      .filter({ has: selectors.getByRole('button', { name: `Actions for ${name}`, exact: true }) }),
-  );
+  await switchToBranch(name, { touch: true });
 };
 
 test.each([
@@ -430,10 +411,7 @@ test.each([
     await saveRevisionFromSheet();
     await expectStatus('Saved', 120_000);
     await openFromProjectSheet('History');
-    await target.click(revisionsStrip().getByRole('button', { name: 'New branch' }), { touch: true });
-    await target.fill(selectors.getByRole('textbox', { name: 'Branch name' }), branch);
-    await target.click(selectors.getByRole('button', { name: 'Create branch' }), { touch: true });
-    await target.expectVisible(branchRow(branch), 60_000);
+    await createBranchHere(branch, { touch: true });
     await switchTo(branch);
     await expectStatus(`Saved · on ${branch}`, 60_000);
     await editWidth('41');
@@ -445,12 +423,7 @@ test.each([
     await expectStatus('Saved', 120_000);
 
     await openFromProjectSheet('History');
-    await target.click(branchRow(branch).getByRole('button', { name: `Actions for ${branch}`, exact: true }), {
-      touch: true,
-    });
-    await target.click(selectors.getByRole('menuitem', { name: `Merge ${branch} into main`, exact: true }), {
-      touch: true,
-    });
+    await pickBranchVerb(branch, 'Merge into main', { click: { touch: true } });
     const files = selectors.getByRole('list', { name: `Files to resolve in ${branch}` });
     await answerIfAsked('Merge branch', files, 120_000);
 

@@ -55,6 +55,7 @@ import { allocateSlug, projectNameToSlug } from '@taucad/ui-core/utils/project-d
 import { toStorageWriteError, WorkspaceIdentityConflictError } from '@taucad/ui-core/filesystem/workspace-errors';
 import { probeHomeOpfs } from '#filesystem/home-opfs-probe.js';
 import { desktopBridge, hostPathName, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+import { armDatabaseOpenDeadline } from '@taucad/ui-core/lib/database-open-deadline';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
@@ -261,6 +262,8 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(dbName, dbVersion);
     let blocked = false;
+    /* An open that fires no event at all must not hold the start (B31): it rejects at the deadline. */
+    const deadline = armDatabaseOpenDeadline(request, dbName, reject);
 
     // Pure bootstrap: create whatever the current schema needs and nothing
     // else. The v2 -> v3 legacy-handle promotion was deleted at L6 — the
@@ -309,11 +312,21 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
     // "Opening Home" shell for as long as the other tab lives. Fail loudly instead.
     request.addEventListener('blocked', () => {
       blocked = true;
-      reject(new Error(`Opening ${dbName} is blocked by another Tau tab on an older version; close it and reload.`));
+      deadline.clear();
+      reject(
+        Object.assign(
+          new Error(`Opening ${dbName} is blocked by another Tau tab on an older version; close it and reload.`),
+          { name: 'StorageUpgradeBlockedError' },
+        ),
+      );
     });
 
     request.addEventListener('success', () => {
+      deadline.clear();
       const db = request.result;
+      if (deadline.expired()) {
+        return; // The deadline closed this late connection.
+      }
       if (blocked) {
         // The blocker closed after we had already failed; nothing owns this connection, and leaving it
         // open would block the next upgrade in turn.
@@ -332,6 +345,7 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
     });
 
     request.addEventListener('error', () => {
+      deadline.clear();
       reject(request.error ?? new Error(`Failed to open IndexedDB database: ${dbName}`));
     });
   });
@@ -1565,6 +1579,65 @@ function reportWorkspaceRootSkip(
   onSkip?.({ workspaceId, reason });
 }
 
+/** The grant list could not be read; carries the failure as its cause. */
+class GrantListUnreadableError extends Error {
+  public override readonly name = 'GrantListUnreadableError';
+}
+
+/** Which input of the route topology could not be read, so the start went on with Home alone (B5, D1). */
+export type ProjectRootConfigurationDegraded = Readonly<{
+  input: 'records' | 'grants';
+  /** The failure's name (`VersionError`, `DatabaseOpenTimeoutError`, …): never its message, which can hold a path. */
+  errorName: string;
+}>;
+
+/** The route topology, and the input that could not be read when the start went on without it. */
+export type ProjectRootConfigurationRead = Readonly<{
+  configuration: ProjectRootConfiguration;
+  degraded: ProjectRootConfigurationDegraded | undefined;
+}>;
+
+const errorName = (error: unknown): string =>
+  error instanceof Error || error instanceof DOMException ? error.name : 'UnknownError';
+
+/**
+ * Home's root when the records cannot be read. The desktop's Home is node by build (its data path); the web has no
+ * engine to read without the database and guesses none (row S37), so the read rejects there.
+ */
+const homeRootWithoutRecords = (cause: unknown): StorageRootConfig => {
+  if (isDesktopTarget) {
+    return { backend: 'node', path: nodeHomeRoot() };
+  }
+  throw cause;
+};
+
+/**
+ * The route topology for the file worker, or Home alone when its records or the grant list cannot be read
+ * (desktop resilient startup blueprint D1, B5). A degraded start is still a start: Home's files are on disk.
+ *
+ * @param onRootSkipped - Telemetry sink for workspaces left out of the topology (R13).
+ * @returns The configuration and, when it is Home alone for that reason, which input failed.
+ * @public
+ */
+export async function readProjectRootConfigs(
+  onRootSkipped?: (skip: WorkspaceRootSkip) => void,
+): Promise<ProjectRootConfigurationRead> {
+  try {
+    return { configuration: await getProjectRootConfigs(onRootSkipped), degraded: undefined };
+  } catch (error) {
+    const input = error instanceof GrantListUnreadableError ? 'grants' : 'records';
+    const cause = error instanceof GrantListUnreadableError ? error.cause : error;
+    let home: StorageRootConfig;
+    try {
+      const backend = await getHomeStorageBackend();
+      home = backend === 'node' ? { backend: 'node', path: nodeHomeRoot() } : { backend };
+    } catch (homeError) {
+      home = homeRootWithoutRecords(homeError);
+    }
+    return { configuration: { projects: [], roots: [home] }, degraded: { input, errorName: errorName(cause) } };
+  }
+}
+
 /*
  * Linked-checkout routes for the open project (charter D4, blueprint S27, W2
  * review R4). The registry inside the revision tree is the only writer of
@@ -1612,7 +1685,13 @@ export async function getProjectRootConfigs(
   });
   // The native grant is the connection authority. Keep metadata and project
   // bindings for reconnect, but never scan a disconnected directory at boot.
-  const grantedPaths = new Set(await desktopBridge()?.directories?.list());
+  let grantList: readonly string[] | undefined;
+  try {
+    grantList = await desktopBridge()?.directories?.list();
+  } catch (error) {
+    throw new GrantListUnreadableError('The granted folder list could not be read', { cause: error });
+  }
+  const grantedPaths = new Set(grantList);
   const nodeRoots = new Map(
     workspaces
       .filter((workspace) => isNodeWorkspace(workspace))

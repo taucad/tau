@@ -1,9 +1,10 @@
 import type { RootState } from '@react-three/fiber';
-import { WebGPUCoordinateSystem } from 'three';
 import { createCallbackLogic } from 'xstate';
 import type { WebGPURenderer } from 'three/webgpu';
 import type { RendererInstance } from '#graphics/three/renderer.js';
 import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
+import { resolveRenderTier } from '#graphics/three/render-tier.js';
+import type { RenderTierOverride } from '#graphics/three/render-tier.js';
 import { viewerContextLost } from '#lib/viewer-events.js';
 import type {
   CanvasEvent,
@@ -37,11 +38,16 @@ export const surfacePriority = -2;
 
 /**
  * The R3F root a host adapter is built around, plus the renderer factory's retirement check: a retired factory's
- * canvas was removed, so nothing it reports belongs to a live canvas.
+ * canvas was removed, so nothing it reports belongs to a live canvas. `renderTierOverride` is the embedder's test-only
+ * override, applied when the root's render tier is resolved.
  *
  * @public
  */
-export type CanvasHostRoot = Readonly<{ root: RootState; isRetired: () => boolean }>;
+export type CanvasHostRoot = Readonly<{
+  root: RootState;
+  isRetired: () => boolean;
+  renderTierOverride?: RenderTierOverride | undefined;
+}>;
 
 /**
  * The R3F root's surface as the canvas actor records it.
@@ -208,7 +214,7 @@ export const createCanvasHostLogic = ({ root, isRetired }: CanvasHostRoot): Canv
 
 /**
  * The `hostCreated` event that hands one R3F root to its canvas actor: from `onCreated`, and again when the surface
- * re-attaches to a root that is still live.
+ * re-attaches to a root that is still live. It carries the root's render tier, resolved once for its renderer.
  *
  * @param host - The R3F root and its factory's retirement check.
  * @returns The event, with the host adapter built around the root.
@@ -219,9 +225,11 @@ export const canvasHostCreated = (host: CanvasHostRoot): Extract<CanvasEvent, { 
   const state = host.root.get();
   // R3F types its renderer as WebGL even when the factory supplies WebGPU.
   const renderer = state.gl as RendererInstance;
+  const tier = resolveRenderTier(renderer, host.renderTierOverride);
   return {
     type: 'hostCreated',
-    backend: renderer.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl',
+    backend: tier.backend,
+    tier,
     surface: surfaceOf(state),
     domElement: renderer.domElement,
     host: createCanvasHostLogic(host),

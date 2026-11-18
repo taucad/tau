@@ -118,6 +118,14 @@ const useTabsOverflow = ({
   return isOverflowing;
 };
 
+/**
+ * Dockview's group model splices tabs into the one array it hands header actions, so the array's identity never changes
+ * as tabs open and close, and a list memoized on it (as the React Compiler memoizes it) goes stale (#2291). Dockview
+ * re-renders the header actions on every tab change, and React reads a store snapshot on every render, so the tab ids
+ * snapshot below follows the array's current contents with nothing to subscribe to.
+ */
+const subscribeToNothing = (): (() => void) => () => undefined;
+
 type DockviewTabsComboBoxProperties = Pick<IDockviewHeaderActionsProps, 'activePanel'> &
   Pick<DockviewTabOverflowPickerProperties, 'getIcon' | 'leadingIcon'> &
   Pick<
@@ -141,7 +149,11 @@ export function DockviewTabsComboBox({
   description = 'Search and activate an open tab in this pane.',
   ...properties
 }: DockviewTabsComboBoxProperties): React.JSX.Element {
-  const groupedItems = useMemo(() => [{ name: 'Open tabs', items: [...panels] }], [panels]);
+  const tabIds = useSyncExternalStore(subscribeToNothing, () => panels.map(({ id }) => id).join('\0'));
+  const groupedItems = useMemo(() => {
+    const byId = new Map(panels.map((panel) => [panel.id, panel]));
+    return [{ name: 'Open tabs', items: tabIds.split('\0').flatMap((id) => byId.get(id) ?? []) }];
+  }, [panels, tabIds]);
 
   return (
     <ComboBoxResponsive<IDockviewPanel>

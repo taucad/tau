@@ -6,9 +6,7 @@ import type { ImportOrigin, ImportPlanner } from '#machines/import-disk.machine.
 import type { ImportListing, ImportSourceDescriptor } from '@taucad/ui-core/machines/import-staging';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
-vi.mock('#routes/import.$/import.utils.js', () => ({
-  findMainFile: vi.fn(() => 'main.ts'),
-}));
+const pickMainFile = (): string => 'main.ts';
 
 const listing: ImportListing = {
   name: 'Test Import',
@@ -49,7 +47,7 @@ function createTestActor(options?: {
     },
   });
 
-  return createActor(machine, { input: { plan } });
+  return createActor(machine, { input: { plan, pickMainFile } });
 }
 
 describe('importDiskMachine', () => {
@@ -143,7 +141,7 @@ describe('importDiskMachine', () => {
     });
 
     it('should fail plainly without a planner', async () => {
-      const actor = createActor(importDiskMachine, { input: {} });
+      const actor = createActor(importDiskMachine, { input: { pickMainFile } });
       actor.start();
       actor.send({ type: 'processZip', file: new File([''], 'a.zip') });
       await waitFor(actor, (s) => s.value === 'error');

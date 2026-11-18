@@ -26,15 +26,6 @@ type MeasureState = {
   }>;
 };
 
-type MeasureBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: {
-    setCamera(camera: { position: MeasurePoint; target?: MeasurePoint; fov?: number; zoom?: number }): void;
-    projectWorldPoint(point: MeasurePoint): { x: number; y: number; visible: boolean };
-    getMeasureState(): MeasureState;
-    getGraphicsBackend(): 'webgl' | 'webgpu';
-  };
-};
-
 const previewCanvasSelector = 'canvas[data-engine]';
 const measureFixtureLocator = 'jscad.section-picking-fixture';
 
@@ -75,7 +66,7 @@ async function openMeasureFixture(backend: 'webgl' | 'webgpu', locator = measure
 
   // Straight down onto the cube's top face, so its corners are the only snap candidates.
   await target.evaluate(() => {
-    const api = (globalThis as unknown as MeasureBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const api = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!api) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -87,7 +78,7 @@ async function openMeasureFixture(backend: 'webgl' | 'webgpu', locator = measure
 
 async function projectWorldPoint(point: MeasurePoint): Promise<{ x: number; y: number; visible: boolean }> {
   return target.evaluate((nextPoint) => {
-    const api = (globalThis as unknown as MeasureBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const api = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!api) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -98,7 +89,7 @@ async function projectWorldPoint(point: MeasurePoint): Promise<{ x: number; y: n
 
 async function measureState(): Promise<MeasureState> {
   return target.evaluate(() => {
-    const api = (globalThis as unknown as MeasureBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const api = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!api) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -450,7 +441,7 @@ for (const backend of ['webgl', 'webgpu'] as const) {
 test('resolves CAD occurrence minimum through the browser AP242 worker', async () => {
   await openMeasureFixture('webgl', 'replicad.bench-vise');
   await target.evaluate(() => {
-    const api = (globalThis as unknown as MeasureBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const api = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!api) {
       throw new Error('Section view e2e bridge is not installed.');
     }
@@ -512,7 +503,7 @@ test.each(['webgl', 'webgpu'] as const)(
   async (backend) => {
     await openMeasureFixture(backend, 'openscad.cyber-chess-set');
     await target.evaluate(() => {
-      const api = (globalThis as unknown as MeasureBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const api = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!api) {
         throw new Error('Section view e2e bridge is not installed.');
       }

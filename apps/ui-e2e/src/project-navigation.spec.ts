@@ -90,19 +90,12 @@ type CameraEvidence = Readonly<{
   position: readonly [number, number, number];
   quaternion: readonly [number, number, number, number];
   target: readonly [number, number, number];
-  zoom: number;
+  zoom?: number;
   aspect: number;
 }>;
 
-type CameraBridge = Readonly<{
-  getCamera(): CameraEvidence;
-  setCamera(camera: CameraInput): void;
-}>;
-
 const waitForCameraBridge = async (): Promise<void> => {
-  await target.waitFor(() =>
-    Boolean((globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: CameraBridge }).__TAU_SECTION_VIEW_TEST__),
-  );
+  await target.waitFor(() => Boolean(globalThis.__TAU_SECTION_VIEW_TEST__));
 };
 
 const waitForTwoFrames = async (): Promise<void> => {
@@ -121,8 +114,7 @@ const waitForTwoFrames = async (): Promise<void> => {
 const setCamera = async (camera: CameraInput): Promise<CameraEvidence> => {
   await waitForCameraBridge();
   await target.evaluate((nextCamera) => {
-    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: CameraBridge })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Graphics e2e bridge is unavailable.');
     }
@@ -134,8 +126,7 @@ const setCamera = async (camera: CameraInput): Promise<CameraEvidence> => {
 
 const readCamera = async (): Promise<CameraEvidence> =>
   target.evaluate(() => {
-    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: CameraBridge })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Graphics e2e bridge is unavailable.');
     }
@@ -182,7 +173,6 @@ const setFieldOfView = async (degrees: number): Promise<void> => {
 const startCameraRestoreObservation = async (entryPath: string): Promise<void> => {
   await target.evaluate((observedEntryPath) => {
     const scope = globalThis as typeof globalThis & {
-      __TAU_SECTION_VIEW_TEST__?: CameraBridge;
       __tauCameraRestoreSamples?: CameraEvidence[];
       __tauStopCameraRestoreObservation?: boolean;
     };
@@ -195,7 +185,7 @@ const startCameraRestoreObservation = async (entryPath: string): Promise<void> =
       const isEntryActive = [...document.querySelectorAll<HTMLElement>('.dv-tab.dv-active-tab')].some(
         (tab) => tab.ariaLabel === observedEntryPath,
       );
-      const cameraBridge = scope.__TAU_SECTION_VIEW_TEST__;
+      const cameraBridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       const samples = scope.__tauCameraRestoreSamples;
       if (isEntryActive && cameraBridge && samples) {
         samples.push(cameraBridge.getCamera());
@@ -229,7 +219,7 @@ const expectCameraFrameRestored = (actual: CameraEvidence, expected: CameraEvide
   expect(actual.projection).toBe(expected.projection);
   expect(actual.requestedFov).toBeCloseTo(expected.requestedFov, 8);
   expect(actual.verticalSpan).toBeCloseTo(expected.verticalSpan, 7);
-  expect(actual.zoom).toBeCloseTo(expected.zoom, 8);
+  expect(actual.zoom).toBeCloseTo(expected.zoom ?? Number.NaN, 8);
   expect(actual.aspect).toBeCloseTo(expected.aspect, 7);
   const quaternionDot = Math.abs(
     actual.quaternion.reduce((sum, value, index) => sum + value * expected.quaternion[index]!, 0),
@@ -325,17 +315,10 @@ type DurableViewSettings = Readonly<{
   sectionView?: Readonly<{ active: boolean; cuts: readonly SectionCutValues[] }>;
 }>;
 
-type SectionViewBridge = Readonly<{
-  setSectionCuts(cuts: readonly SectionCutInput[]): string[];
-  getSectionState(): Readonly<{ isActive: boolean; cuts: ReadonlyArray<SectionCutValues & Readonly<{ id: string }>> }>;
-  getViewSettings(): (DurableViewSettings & Record<string, unknown>) | undefined;
-}>;
-
 const setSectionCuts = async (cuts: readonly SectionCutInput[]): Promise<void> => {
   await waitForCameraBridge();
   await target.evaluate((nextCuts) => {
-    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Graphics e2e bridge is unavailable.');
     }
@@ -347,8 +330,7 @@ const setSectionCuts = async (cuts: readonly SectionCutInput[]): Promise<void> =
 /** The live section's values; cut ids are made anew at every seed, so they are left out. */
 const readSectionView = async (): Promise<SectionViewEvidence> =>
   target.evaluate(() => {
-    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Graphics e2e bridge is unavailable.');
     }
@@ -359,8 +341,7 @@ const readSectionView = async (): Promise<SectionViewEvidence> =>
 /** The persisted record this view owns, narrowed to keys Law 4 calls durable. */
 const readDurableViewSettings = async (): Promise<DurableViewSettings | undefined> =>
   target.evaluate(() => {
-    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
-      .__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     const settings = bridge?.getViewSettings();
     if (!settings) {
       return undefined;

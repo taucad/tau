@@ -76,6 +76,7 @@
     "./graphics/three/react/gltf-mesh": "./src/graphics/three/react/gltf-mesh.tsx",
     "./graphics/three/render-frame-timing": "./src/graphics/three/render-frame-timing.ts",
     "./graphics/three/render-loop-observer": "./src/graphics/three/render-loop-observer.ts",
+    "./graphics/three/render-tier": "./src/graphics/three/render-tier.ts",
     "./graphics/three/renderer": "./src/graphics/three/renderer.ts",
     "./graphics/three/scene-overlay": "./src/graphics/three/scene-overlay.tsx",
     "./graphics/three/stage": "./src/graphics/three/stage.tsx",
@@ -335,6 +336,11 @@
         "types": "./dist/graphics/three/render-loop-observer.d.mts",
         "import": "./dist/graphics/three/render-loop-observer.mjs",
         "default": "./dist/graphics/three/render-loop-observer.mjs"
+      },
+      "./graphics/three/render-tier": {
+        "types": "./dist/graphics/three/render-tier.d.mts",
+        "import": "./dist/graphics/three/render-tier.mjs",
+        "default": "./dist/graphics/three/render-tier.mjs"
       },
       "./graphics/three/renderer": {
         "types": "./dist/graphics/three/renderer.d.mts",

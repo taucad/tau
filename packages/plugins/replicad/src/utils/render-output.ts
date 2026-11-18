@@ -656,12 +656,10 @@ function renderPrototypeGroup(options: PrototypeGroupOptions): Array<[MeshableCo
       meshMemoKey({ mode: 'instanced', info: instance.info, tessellation, material: instance.config.material }),
     ),
   ].join(';');
-  const kept = meshMemo.lookupGroup(
-    prototype,
-    key,
-    group.instances.length,
-    (meshes) => !collectBrepEdges || meshes.every((mesh) => mesh.edges !== undefined),
-  );
+  const kept = meshMemo.lookupGroup(prototype, key, {
+    instances: group.instances.length,
+    usable: (meshes) => !collectBrepEdges || meshes.every((mesh) => mesh.edges !== undefined),
+  });
   if (kept) {
     return group.instances.map((instance, index) => [
       instance.config,

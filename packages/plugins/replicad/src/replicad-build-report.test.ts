@@ -117,7 +117,7 @@ describe('replicad build report', () => {
       const agent = agentClient(false);
       try {
         const { evaluation, rendering } = await agent.call({ size: 10, radius: 0.5 });
-        expect(evaluation.build).toStrictEqual({ reused: false, elapsed: anyNumber });
+        expect(buildOf(evaluation)).toStrictEqual({ reused: false, elapsed: anyNumber });
         expect(meshesOf(rendering)).toBeUndefined();
       } finally {
         await agent.shutdown();

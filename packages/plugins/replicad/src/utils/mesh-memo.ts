@@ -87,8 +87,7 @@ export type ReplicadMeshMemo = {
   lookupGroup(
     prototype: ReplicadShapeOccurrenceInfo,
     key: string,
-    instances: number,
-    usable?: (meshes: readonly MemoMesh[]) => boolean,
+    group: Readonly<{ instances: number; usable?: (meshes: readonly MemoMesh[]) => boolean }>,
   ): readonly MemoMesh[] | undefined;
   /** Keeps an instanced group's meshes, one per instance in group order. */
   storeGroup(prototype: ReplicadShapeOccurrenceInfo, key: string, meshes: readonly MemoMesh[]): void;
@@ -237,7 +236,7 @@ export function createReplicadMeshMemo({
     const named = new Set([...exportSlot.values()].map(({ partnerKey }) => partnerKey));
     for (const { partnerKey } of slot.values()) {
       const partner = partners.get(partnerKey);
-      if (partner && partner.meshes.size === 0 && partner.boxes.size === 0 && !named.has(partnerKey)) {
+      if (partner?.meshes.size === 0 && partner.boxes.size === 0 && !named.has(partnerKey)) {
         evict(partnerKey);
       }
     }
@@ -336,7 +335,7 @@ export function createReplicadMeshMemo({
     store(info, key, mesh) {
       keepFor(info, key, mesh);
     },
-    lookupGroup(prototype, key, instances, usable) {
+    lookupGroup(prototype, key, { instances, usable }) {
       const meshes = kept(prototype, key) as readonly MemoMesh[] | undefined;
       if (meshes?.length === instances && (usable === undefined || usable(meshes))) {
         counters.hits += instances;

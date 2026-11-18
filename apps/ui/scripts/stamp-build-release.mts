@@ -27,11 +27,13 @@ export const releaseManifestName = 'tau-release.json';
 const placeholderLiteral = new RegExp(`(["'\`])${unstampedBuildRelease}\\1`, 'gu');
 
 /** The JavaScript files of a server build, relative to `serverDirectory`. */
-const serverScripts = async (serverDirectory: string): Promise<string[]> =>
-  (await readdir(serverDirectory, { recursive: true }))
+const serverScripts = async (serverDirectory: string): Promise<string[]> => {
+  const names = await readdir(serverDirectory, { recursive: true });
+  return names
     .map(String)
     .filter((name) => /\.[cm]?js$/u.test(name))
     .toSorted();
+};
 
 /**
  * Replace the release placeholder in every server script and write the release manifest.

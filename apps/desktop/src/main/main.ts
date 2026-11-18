@@ -731,12 +731,14 @@ if (recordsBootHealth) {
     log: logMain,
   });
 }
+/* LW8: the commit packaging recorded beside the bundles (`dist/host-build.json`); empty when none was (ST-9). */
+const desktopHostBuild = readDesktopHostBuild(join(import.meta.dirname, '..'));
 const bootHealth: BootHealth | undefined = recordsBootHealth
   ? startBootHealth({
       path: join(app.getPath('userData'), bootHealthFileName),
       build: buildIdentity({
         version: app.getVersion(),
-        sourceCommit: typeof tauDesktopHostBuild === 'string' ? tauDesktopHostBuild : '',
+        sourceCommit: desktopHostBuild,
         packaged: app.isPackaged,
       }),
       version: app.getVersion(),
@@ -1462,8 +1464,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       /* T19: the utility's runtime reporter sends to this API, under this release, only under the renderer's consent. */
       TAU_API_URL: environment['TAU_API_URL']!, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_RELEASE: app.getVersion(), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-      /* LW8: the commit packaging recorded beside the bundles (`dist/host-build.json`); empty when none was. */
-      TAU_DESKTOP_HOST_BUILD: readDesktopHostBuild(join(import.meta.dirname, '..')), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      /* LW8: the commit packaging recorded beside the bundles, read above. */
+      TAU_DESKTOP_HOST_BUILD: desktopHostBuild, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
       ...(machinesEnabled ? { TAU_DESKTOP_MACHINES_DIR: machinesDirectory } : {}),

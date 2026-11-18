@@ -51,7 +51,8 @@ export default {
    * - route modules split (B8, `splitRouteModules` defaults to `true`): a route's `clientLoader`, `clientAction`,
    *   `clientMiddleware` and `HydrateFallback` load as their own chunks. No route has one that splits today, and
    *   `scripts/check-critical-budget.mts` fails when a split module first appears in the manifest, because split
-   *   chunks load outside the patched `loadRouteModule` stale-build fallback.
+   *   chunks load outside the patched `loadRouteModule` stale-build fallback. The root's `clientMiddleware` (RR9) is
+   *   not split: React Router never splits the root route module, which hydration has already loaded.
    */
   future: {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag name.
@@ -71,7 +72,8 @@ export default {
    * get ~4 KB smaller and a cold first visit transfers ~6 KB more.
    *
    * React Router's `/__manifest` version check goes with it; it only ever covered routes not
-   * yet discovered. Skew is handled by `build-skew` (`stale-build-navigation`,
+   * yet discovered. Skew is handled by `build-skew` (`stale-build-navigation`, whose root client
+   * middleware runs after route matching and never asks `/__manifest` either, and
    * `stale-build-recovery`) and the patched route-module loader.
    */
   routeDiscovery: { mode: 'initial' },

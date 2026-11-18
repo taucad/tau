@@ -328,6 +328,11 @@ export type DesktopBridge = {
     list(): Promise<readonly string[]>;
     /** Forget a folder without deleting files; refuses active projects. */
     disconnect(path: string): Promise<void>;
+    /**
+     * The text of a granted folder's `.tau/workspace.json`, or `undefined` when it has none or is not granted. Absent
+     * on a shell that predates it (desktop resilient startup blueprint R7).
+     */
+    readMarker?(path: string): Promise<string | undefined>;
     onChange(listener: () => void): () => void;
     open(path: string): Promise<void>;
     /** Select a file or folder inside a granted root in the file manager. */
@@ -339,7 +344,11 @@ export type DesktopBridge = {
      * `undefined` when the user cancels — the shape `showDirectoryPicker`'s
      * `AbortError` is normalized to.
      */
-    selectDirectory(options?: { readonly id?: string }): Promise<string | undefined>;
+    selectDirectory(options?: {
+      readonly id?: string;
+      /** Where to open: Locate passes a folder's old place, and the picker opens at its nearest existing part (R4). */
+      readonly defaultPath?: string;
+    }): Promise<string | undefined>;
     /**
      * Native folder picker for an import (W7.4): the folder is copied, not
      * opened in place, so it is not admitted as a root. Resolves to the grant

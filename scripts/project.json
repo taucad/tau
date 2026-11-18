@@ -123,7 +123,10 @@
     "validate-dead-code": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "NX_DAEMON=false knip --config tools/quality/knip.config.ts --max-issues 316"
+        "command": "knip --config tools/quality/knip.config.ts --max-issues 316",
+        "env": {
+          "NX_DAEMON": "false"
+        }
       }
     },
     "test": {
@@ -298,10 +301,7 @@
       }
     },
     "validate": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "true"
-      },
+      "executor": "nx:noop",
       "dependsOn": [
         {
           "target": "validate-*"
@@ -339,10 +339,7 @@
       ]
     },
     "release-gate": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "true"
-      },
+      "executor": "nx:noop",
       "dependsOn": [
         {
           "target": "validate"

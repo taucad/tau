@@ -96,7 +96,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
 
 vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => <span aria-hidden /> }));
 
-vi.mock('#components/tier-badge.js', () => ({
+vi.mock('@taucad/billing-ui/components/tier-badge', () => ({
   ProBadge: () => <span>Pro</span>,
 }));
 

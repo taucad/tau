@@ -39,7 +39,7 @@ import {
   normalizeGitHubUrl,
   resolveGitHubImportTarget,
   resolveImportRoute,
-  supportedKernelExtensions,
+  isMainFileCandidate,
   findMainFile,
   handOverHostGrants,
 } from '#routes/import.$/import.utils.js';
@@ -582,12 +582,12 @@ export default function ImportRoute(): React.JSX.Element {
     () =>
       createStaticDataSource(
         linkedSelection?.files
-          .filter(({ path }) => supportedKernelExtensions.some((extension) => path.endsWith(extension)))
+          .filter(({ path }) => isMainFileCandidate(path))
           .map(({ path, size }) => ({ path, size })) ?? [],
       ),
     [linkedSelection],
   );
-  const linkedMainFileSupported = supportedKernelExtensions.some((extension) => linkedMainFile.endsWith(extension));
+  const linkedMainFileSupported = isMainFileCandidate(linkedMainFile);
   const linkedManifest = useMemo(
     () => (linkedSelection?.manifest === undefined ? undefined : readLinkedGithubManifest(linkedSelection.manifest)),
     [linkedSelection],
@@ -852,9 +852,7 @@ export default function ImportRoute(): React.JSX.Element {
   const reviewLinkedRepository = useCallback((selection: GithubRepositorySelection): void => {
     const manifest = selection.manifest === undefined ? undefined : readLinkedGithubManifest(selection.manifest);
     const paths = selection.files.map((file) => file.path);
-    const supportedPaths = paths.filter((path) =>
-      supportedKernelExtensions.some((extension) => path.endsWith(extension)),
-    );
+    const supportedPaths = paths.filter((path) => isMainFileCandidate(path));
     const manifestMain = manifest?.success === true ? manifest.data.assets.main?.entryPath : undefined;
     const unsupportedLargeBlob = selection.files.find((file) => file.size >= largeObjectThresholdBytes);
     setLinkedSelection(selection);

@@ -91,13 +91,13 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — fifty-eight today', () => {
+  it('is every non-private type:package project, sorted — fifty-nine today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    // `geospec` left for taucad/geospec (59 to 58), then `rhino` was removed (58 to 57), then `heif` was added (57 to 58, #2337).
-    expect(names).toHaveLength(58);
+    // `geospec` left for taucad/geospec (59 to 58), then `rhino` was removed (58 to 57), then `heif` was added (57 to 58, #2337), then `cadmpeg` was added (58 to 59, #2588).
+    expect(names).toHaveLength(59);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.
     for (const name of ['archive-core', 'runtime', 'runtime-testing', 'cli']) {

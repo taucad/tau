@@ -800,6 +800,45 @@ if (
   );
 }
 
+/* The cadmpeg-ts engine falls back to its WebAssembly modules when the addon does not load, so the native
+ * backend is pinned and the loaded shared object is read back, as for nanoraster. */
+const cadmpegAddon = resolve(
+  appPath,
+  `Contents/Resources/app.asar.unpacked/node_modules/cadmpeg-ts-darwin-${architecture}/cadmpeg-ts.darwin-${architecture}.node`,
+);
+if (!existsSync(cadmpegAddon)) {
+  throw new Error(`The packaged app does not contain the adjacent cadmpeg-ts-darwin-${architecture} addon.`);
+}
+const cadmpegEntry = pathToFileURL(
+  resolve(appPath, 'Contents/Resources/app.asar/node_modules/cadmpeg-ts/dist/index.node.mjs'),
+).href;
+const cadmpegIdentity = run('env', [
+  'ELECTRON_RUN_AS_NODE=1',
+  appExecutable,
+  '--input-type=module',
+  '-e',
+  `const {readFileSync}=await import("node:fs");
+const {createCadmpeg}=await import(${JSON.stringify(cadmpegEntry)});
+const engine=await createCadmpeg({backend:"native"});
+const result=await engine.convert({name:"cube.step",bytes:readFileSync(${JSON.stringify(resolve(workspaceRoot, 'packages/plugins/cadmpeg/src/fixtures/cube.step'))})},{to:"step"});
+const loaded=process.report.getReport().sharedObjects.filter((path)=>path.endsWith("cadmpeg-ts.darwin-${architecture}.node"));
+const rootVersion=JSON.parse(readFileSync(${JSON.stringify(resolve(appPath, 'Contents/Resources/app.asar/node_modules/cadmpeg-ts/package.json'))},"utf8")).version;
+const platformVersion=JSON.parse(readFileSync(${JSON.stringify(resolve(appPath, `Contents/Resources/app.asar/node_modules/cadmpeg-ts-darwin-${architecture}/package.json`))},"utf8")).version;
+process.stdout.write(JSON.stringify([engine.backend,result.files.some((file)=>file.bytes.length>0),loaded,rootVersion,platformVersion]));`,
+]);
+const [cadmpegBackend, cadmpegWrote, loadedCadmpegAddons, cadmpegVersion, cadmpegPlatformVersion] = JSON.parse(
+  cadmpegIdentity,
+) as [string, boolean, string[], string, string];
+if (
+  cadmpegBackend !== 'native' ||
+  !cadmpegWrote ||
+  loadedCadmpegAddons.length !== 1 ||
+  realpathSync(loadedCadmpegAddons[0]!) !== realpathSync(cadmpegAddon) ||
+  cadmpegVersion !== cadmpegPlatformVersion
+) {
+  throw new Error(`The packaged Electron runtime loaded an unexpected cadmpeg-ts backend or addon: ${cadmpegIdentity}`);
+}
+
 let machObjectCount = 0;
 for (const path of filesUnder(appPath)) {
   if (!isMachObject(path)) {

@@ -3,12 +3,13 @@ import { deriveExportTargets, deriveImportExtensions } from '@taucad/runtime/plu
 import { defineRuntime } from '@taucad/runtime/worker';
 import { assimp } from '@taucad/assimp';
 import { brep } from '@taucad/brep';
+import { cadmpeg } from '@taucad/cadmpeg';
 import { gltf } from '@taucad/gltf';
 import { image } from '@taucad/image';
 
 /** @public */
 export const converterRuntime = defineRuntime({
-  plugins: [gltf(), brep(), assimp({ preset: 'all' }), image()],
+  plugins: [gltf(), brep(), cadmpeg(), assimp({ preset: 'all' }), image()],
 });
 
 /** @public */

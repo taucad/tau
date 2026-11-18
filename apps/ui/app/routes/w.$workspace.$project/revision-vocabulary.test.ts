@@ -24,7 +24,7 @@ import {
   versionPhrase,
   waitingSentence,
 } from '#routes/w.$workspace.$project/revision-vocabulary.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 
 /**
  * A2: who made an entry is a name or nothing. The label that described an

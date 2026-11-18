@@ -19,7 +19,7 @@
  *   lands on, linked to the branch it brings in, which is then in view.
  */
 import type { RevisionConflictFacet, RevisionStatusProjection } from '@taucad/revisions';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { branchSlotsOf } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
 import type { BranchSlot } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
 

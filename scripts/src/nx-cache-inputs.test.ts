@@ -48,6 +48,7 @@ const notTaskInputs = new Set([
   'NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN',
   'pnpm_config_verify_deps_before_run',
   'LANE',
+  'BUILD_TARGETS',
   'TAU_S3_CONFORMANCE_ACCESS_KEY_ID',
   'TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY',
 ]);

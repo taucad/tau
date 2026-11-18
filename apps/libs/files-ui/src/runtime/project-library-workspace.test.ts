@@ -8,7 +8,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
 import { workspaceConnectionMachine } from '#machines/workspace-connection.machine.js';
+import { workspaceMarkerSchemaUrl } from '@taucad/types';
 import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
+import type { WorkspaceCommandsHost } from '#runtime/project-library-workspace.js';
 
 vi.mock('#constants/browser.constants.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -32,7 +34,7 @@ const notCalled = async (): Promise<never> => {
 
 const actors: Array<{ stop: () => void }> = [];
 
-const commandsOver = () => {
+const commandsOver = (facade: WorkspaceCommandsHost['facade'] = notCalled) => {
   const workspaceConnection = createActor(workspaceConnectionMachine, {
     input: {
       registerWorkspace: vi.fn(
@@ -58,7 +60,7 @@ const commandsOver = () => {
   });
   const commands = new WorkspaceCommands({
     workspaceConnection,
-    facade: notCalled,
+    facade,
     readiedWorker: notCalled,
     whenDiscoveryReady: notCalled,
     discover: notCalled,
@@ -89,5 +91,53 @@ describe('WorkspaceCommands over a faulting connection (A4b, B2)', () => {
       'Workspace connection fault',
     );
     expect(operations.size).toBe(2);
+  });
+});
+
+describe('Locate folder evidence (blueprint D2 step 3)', () => {
+  it('should read the marker, the projects one level down and the projects inside a parent, through scoped reads only', async () => {
+    const tree: Record<string, readonly string[]> = {
+      '': ['gearbox', 'archive', '.tau', 'empty'],
+      archive: ['bracket'],
+      empty: [],
+      gearbox: [],
+    };
+    const files: Record<string, string> = {
+      '.tau/workspace.json': JSON.stringify({
+        $schema: workspaceMarkerSchemaUrl,
+        workspaceId: 'wsp_locate000000000000000',
+        slug: 'workshop',
+        createdAt: '2026-07-24T00:11:47.808Z',
+      }),
+      'gearbox/.tau/project.json': JSON.stringify({ version: 1, projectId: 'proj_gearbox' }),
+      'archive/bracket/.tau/project.json': JSON.stringify({ version: 1, projectId: 'proj_bracket' }),
+    };
+    const scope = { backend: 'node', path: '/Volumes/Archive/Workshop' } as const;
+    const readShallowDirectory = vi.fn(async (path: string, options: { scope: unknown }) => {
+      expect(options.scope).toEqual(scope);
+      return (tree[path] ?? []).map((name) => ({ id: name, name, size: 0, mtimeMs: 0, children: [] }));
+    });
+    const readFile = vi.fn(async (path: string, options: { scope: unknown }) => {
+      expect(options.scope).toEqual(scope);
+      const text = files[path];
+      if (text === undefined) {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      }
+      return text;
+    });
+    const { commands } = commandsOver(
+      async () =>
+        ({ scopedStorage: { readShallowDirectory, readFile } }) as unknown as Awaited<
+          ReturnType<WorkspaceCommandsHost['facade']>
+        >,
+    );
+
+    const evidence = await commands.readFolderEvidence({ ...scope, wasGranted: false });
+
+    expect(evidence.marker?.workspaceId).toBe('wsp_locate000000000000000');
+    expect(evidence.projects).toEqual([{ projectId: 'proj_gearbox', directory: 'gearbox' }]);
+    expect(evidence.subfolders).toEqual([
+      { name: 'archive', projects: [{ projectId: 'proj_bracket', directory: 'bracket' }] },
+    ]);
   });
 });

@@ -824,6 +824,19 @@ describe('the page client of the worker revision root', () => {
     revisionClient.close();
   });
 
+  it('should hold a first view the page shows until the client opens, then say it on the port (STO-25)', () => {
+    const { worker, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    const shownFrames = (): unknown[] =>
+      messages.filter((message) => (message as { command?: string }).command === 'firstViewShown');
+    revisionClient.firstViewShown?.();
+    expect(shownFrames()).toEqual([]);
+
+    revisionClient.open();
+    expect(shownFrames()).toEqual([{ command: 'firstViewShown' }]);
+    revisionClient.close();
+  });
+
   it("should say the page's resolved telemetry consent on every port and every change, and stop when closed (PR-7)", () => {
     telemetryConsent.set('denied');
     const { worker, messages } = controlledWorker();

@@ -26,7 +26,7 @@
       "cache": true,
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config vitest.scenarios.config.ts"
+        "command": "vitest run --config vitest.scenarios.config.ts"
       }
     },
     "test:native-darwin": {
@@ -59,7 +59,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config vitest.scenarios.config.ts src/tail-relay.integration.test.ts",
+        "command": "vitest run --config vitest.scenarios.config.ts src/tail-relay.integration.test.ts",
         "env": {
           "TAU_DS3_TAIL_RELAY": "1"
         }

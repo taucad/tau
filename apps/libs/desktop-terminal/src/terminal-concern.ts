@@ -54,6 +54,12 @@ export type TerminalConcernOptions = {
    * 2026-11-16).
    */
   readonly shell?: (() => Promise<ShellProbe>) | undefined;
+  /**
+   * The shell's one-time setup, then a fresh probe (`DesktopShell.provision` in the services host). Called only for an
+   * `open` frame that carries `setUp` while the probe answers `provisioning-required`: the person chose Set up in pane
+   * chrome. Absent, such a start is refused with the probe's own answer.
+   */
+  readonly provision?: (() => Promise<ShellProbe>) | undefined;
   /** Whether main's latest root allowlist still admits a project root. */
   readonly isTrustedRoot: (root: string) => boolean;
   /** The physical spelling a root is keyed by. */
@@ -365,9 +371,9 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
     };
 
     /** Start one shell for this connection; refuses end the connection with the shell service's own words. */
-    const openShell = async (size: TerminalSize, access: TerminalAccess | undefined): Promise<void> => {
+    const openShell = async (size: TerminalSize, access: TerminalAccess | undefined, setUp: boolean): Promise<void> => {
       /* One admission bound for the whole start: main's allowlist, then the shell service's registration below. */
-      const settleBy = now() + admissionMilliseconds;
+      let settleBy = now() + admissionMilliseconds;
       awaitingAdmission = true;
       const admitted = await awaitAdmission(projectRoot, isEnded, settleBy).finally(() => {
         awaitingAdmission = false;
@@ -385,9 +391,24 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
         );
         return;
       }
-      const probe = options.shell === undefined ? undefined : await options.shell().catch(() => undefined);
+      let probe = options.shell === undefined ? undefined : await options.shell().catch(() => undefined);
       if (isEnded()) {
         return;
+      }
+      if (
+        setUp &&
+        options.provision !== undefined &&
+        probe?.status === 'unavailable' &&
+        probe.code === 'provisioning-required'
+      ) {
+        /* The person chose Set up: the host may wait on its administrator prompt for minutes. */
+        log('terminal.setup');
+        probe = await options.provision().catch(() => probe);
+        if (isEnded()) {
+          return;
+        }
+        /* The setup wait is the person's, not the registry's: the shell service's admission bound starts now. */
+        settleBy = now() + admissionMilliseconds;
       }
       if (probe === undefined) {
         await refuse(
@@ -500,7 +521,7 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
     };
 
     /** Open a shell once quit holds no starts; a connection that ends while held opens nothing. */
-    const start = async (size: TerminalSize, access: TerminalAccess | undefined): Promise<void> => {
+    const start = async (size: TerminalSize, access: TerminalAccess | undefined, setUp = false): Promise<void> => {
       for (let hold = startHold; hold !== undefined; hold = startHold) {
         // oxlint-disable-next-line no-await-in-loop -- a released hold can be taken again by the next quit.
         await hold.promise;
@@ -510,7 +531,7 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
       }
       starting = true;
       try {
-        await openShell(size, access);
+        await openShell(size, access, setUp);
       } finally {
         starting = false;
       }
@@ -544,7 +565,7 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
           live.set(key, connection);
           claimed = true;
           size = frame.size;
-          await start(frame.size, undefined);
+          await start(frame.size, undefined, frame.setUp === true);
           return;
         }
         case 'input': {

@@ -72,6 +72,21 @@ const endedCopy: Record<TerminalExitReason, string> = {
   'host-stopped': "The Terminal ended because Tau's shell service stopped.",
 };
 
+/**
+ * The action an ended or refused pane offers: Set up for a shell whose one-time setup has not run (on Windows, one
+ * administrator prompt), otherwise a plain restart.
+ */
+const restartAction = (
+  state: Extract<PaneState, { phase: 'ended' | 'refused' }>,
+): Readonly<{ label: string; setUp: boolean }> => {
+  if (state.phase === 'ended') {
+    return { label: 'Start a new Terminal', setUp: false };
+  }
+  return state.refusal.code === 'provisioning-required'
+    ? { label: 'Set up', setUp: true }
+    : { label: 'Try again', setUp: false };
+};
+
 /** Split a comma- or line-separated field into entries. */
 const entries = (value: string): string[] =>
   value
@@ -245,6 +260,8 @@ export function TerminalPane({
   const menuActionRef = useRef(false);
   const actionInputRef = useRef<HTMLInputElement>(null);
   const restartRef = useRef(false);
+  /* Set by the Set up action: the next start asks the host to run the shell's one-time setup first. */
+  const setUpRef = useRef(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [screenReaderMode] = useCookie(cookieName.terminalScreenReader, true);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -344,6 +361,9 @@ export function TerminalPane({
   }, [state.phase]);
 
   const start = useCallback(async () => {
+    /* Read once: a start that cannot run leaves no setup request behind for a later one. */
+    const isSetUp = setUpRef.current;
+    setUpRef.current = false;
     const host = hostRef.current;
     if (!host || projectRoot === undefined || bridge === undefined) {
       return;
@@ -351,11 +371,17 @@ export function TerminalPane({
     teardown();
     targetRef.current = { projectRoot, bridge };
     const generation = generationRef.current;
+    /* Set until this start's shell opens or is refused: the setup notice then says how it went. */
+    let settingUp = isSetUp;
     setState({ phase: 'starting' });
     setIsRequestingAccess(false);
     setFindTerm(undefined);
     setAccessRequest(undefined);
-    setNotice(undefined);
+    setNotice(
+      settingUp
+        ? 'Setting up the shell sandbox. Approve the administrator prompt your computer shows; Tau asks only once.'
+        : undefined,
+    );
     let view: TerminalRendererView;
     try {
       view = await loadRenderer({
@@ -401,6 +427,10 @@ export function TerminalPane({
       }
       switch (frame.type) {
         case 'opened': {
+          if (settingUp) {
+            settingUp = false;
+            setNotice('The shell sandbox is set up.');
+          }
           setState({ phase: 'running', projectLabel: frame.session.projectLabel, access: frame.session.access });
           view.focus();
           break;
@@ -449,6 +479,10 @@ export function TerminalPane({
           sessionRef.current = undefined;
           setAccessRequest(undefined);
           restartRef.current = false;
+          if (settingUp) {
+            settingUp = false;
+            setNotice(undefined);
+          }
           setState({ phase: 'refused', refusal: frame });
           break;
         }
@@ -470,7 +504,7 @@ export function TerminalPane({
     });
     try {
       // Attach input before launching; synchronous frames wait until their session can acknowledge paint.
-      session = bridge.open({ projectRoot, size }, (frame) => {
+      session = bridge.open({ projectRoot, size, ...(settingUp ? { setUp: true } : {}) }, (frame) => {
         if (hasFailed || startup.overflow || generation !== generationRef.current) {
           return;
         }
@@ -659,10 +693,11 @@ export function TerminalPane({
                 <Button
                   size='sm'
                   onClick={() => {
+                    setUpRef.current = restartAction(state).setUp;
                     void start();
                   }}
                 >
-                  {state.phase === 'ended' ? 'Start a new Terminal' : 'Try again'}
+                  {restartAction(state).label}
                 </Button>
               </div>
             ) : null}

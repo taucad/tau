@@ -7,7 +7,7 @@ import { Loader } from '@taucad/ui/components/loader';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { homeProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 
 export const loader = async (): Promise<Response> => {
   const environment = await getEnvironment();

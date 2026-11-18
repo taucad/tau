@@ -108,6 +108,7 @@ import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
   bundledGitEnvironment,
   bundledStoreGuardEnvironment,
+  windowsShellSandboxEnvironment,
   compileCacheEnvironment,
   loginShellEnvironment,
   packagedEsbuildEnvironment,
@@ -714,6 +715,11 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const storeGuardEnvironment = bundledStoreGuardEnvironment(
     app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
   );
+  /* The Windows shell sandbox helper this build ships, and its off-by-default switch (Q15, D15). */
+  const windowsSandboxEnvironment = windowsShellSandboxEnvironment(
+    app.isPackaged ? process.resourcesPath : join(import.meta.dirname, '../../resources'),
+    environment,
+  );
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   /* A step the window does not need is logged, reported and skipped when it fails; it never ends the launch (B18). */
   const skipOptionalStep = (step: OptionalBootstrapStep, error: unknown): void => {
@@ -1239,6 +1245,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...gitEnvironment,
       ...compileCacheEnvironment(app.getPath('userData')),
       TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      /* T19: the utility's runtime reporter sends to this API, under this release, only under the renderer's consent. */
+      TAU_API_URL: environment['TAU_API_URL']!, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      TAU_DESKTOP_RELEASE: app.getVersion(), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
       ...(machinesEnabled ? { TAU_DESKTOP_MACHINES_DIR: machinesDirectory } : {}),
@@ -1255,6 +1264,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_DESKTOP_USER_DATA_DIR: app.getPath('userData'), // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       ...desktopShellBwrapEnvironment(),
       ...storeGuardEnvironment,
+      ...windowsSandboxEnvironment,
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
     createChannel: () => new MessageChannelMain(),

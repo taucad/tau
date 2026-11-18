@@ -2,9 +2,9 @@ import path from 'node:path';
 import { readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { driftManifestProblems, hashFiles, machineActions, machineAlphabet } from '@taucad/formal/drift';
-import { libraryAccessMachine, libraryAccessQueryMachine } from '#machines/library-access.machine.js';
-import { libraryDiscoveryMachine } from '#machines/library-discovery.machine.js';
-import { libraryRecoveryMachine } from '#machines/library-recovery.machine.js';
+import { libraryAccessMachine, libraryAccessQueryMachine } from '@taucad/files-ui/machines/library-access.machine';
+import { libraryDiscoveryMachine } from '@taucad/files-ui/machines/library-discovery.machine';
+import { libraryRecoveryMachine } from '@taucad/files-ui/machines/library-recovery.machine';
 
 const specs = import.meta.dirname;
 const workspace = path.resolve(specs, '../../../..');
@@ -29,9 +29,9 @@ describe('LibraryCatalog.tla implementation correspondence', () => {
         tables: hashFiles(specs, ['expected.json', ...configs]),
         sources: hashFiles(workspace, [
           'apps/ui/app/hooks/use-project-manager.tsx',
-          'apps/ui/app/machines/library-discovery.machine.ts',
-          'apps/ui/app/machines/library-recovery.machine.ts',
-          'apps/ui/app/machines/library-access.machine.ts',
+          'apps/libs/files-ui/src/machines/library-discovery.machine.ts',
+          'apps/libs/files-ui/src/machines/library-recovery.machine.ts',
+          'apps/libs/files-ui/src/machines/library-access.machine.ts',
           'apps/ui/app/runtime/project-library.ts',
           'apps/ui/app/runtime/project-library-commands.ts',
           'apps/ui/app/runtime/project-library-workspace.ts',

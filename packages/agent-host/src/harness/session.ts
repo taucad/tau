@@ -660,6 +660,21 @@ const stallBounded = <T>(events: AsyncIterable<T>, bound: StreamStallBound, onSt
 });
 
 /** Whether Tau's gateway ledger funds this provider's calls on this transport. */
+/**
+ * D1, I1: a transport with a `deployment` is a root whose billing mode is chosen per run; only its run's
+ * `deployment.forRun` transport makes calls. Refused before anything is prepared, so no prepared row is left behind.
+ *
+ * @param transport - The session's transport.
+ */
+const refuseRootTransport = (transport: ModelTransport): void => {
+  if (transport.deployment !== undefined) {
+    throw Object.assign(
+      new Error('This model call was made on a transport whose billing mode no run has chosen; no call was made.'),
+      { code: 'DEPLOYMENT_UNKNOWN' satisfies RefusalCode },
+    );
+  }
+};
+
 const isFunded = (transport: ModelTransport, providerKind: ModelProviderKind | undefined): boolean =>
   transport.funding.type === 'funded' && transport.funding.usesBillingAttempt(providerKind);
 
@@ -816,6 +831,7 @@ export const createTransportStreamFunction =
       try {
         /* An aborted run sends nothing more: pi's loop can ask again after a revoked tool answers (D13). */
         signal.throwIfAborted();
+        refuseRootTransport(options.transport);
         const invocationPurpose = options.invocationPurpose ?? 'generation';
         const funded = isFunded(options.transport, options.providerKind);
         const attemptId =
@@ -1242,6 +1258,7 @@ const compactionModelsWithTransport = (options: {
       let stopReason: StopReason | undefined;
       const signal = streamOptions?.signal ?? new AbortController().signal;
       try {
+        refuseRootTransport(options.transport);
         const funded = isFunded(options.transport, options.providerKind);
         const attemptId =
           funded && options.prepareInvocation

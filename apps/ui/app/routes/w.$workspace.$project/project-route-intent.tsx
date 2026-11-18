@@ -29,7 +29,7 @@ import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.
 import { stringParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import type { CommittedProjectRoute } from '#machines/focus.route-state.js';
 import type { FocusRouteCommand } from '#machines/focus.machine.js';
-import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js';
+import { projectChatIdFromSearch, projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 
 /** The canonical project URL, for the mounts that ask whether a project is what is opening. @public */
 export const projectRoutePath = '/w/:workspace/:project';

@@ -94,13 +94,14 @@ const cliEndToEnd = (proves: string): Oracle => ({
 /**
  * The merge-queue `native-darwin` lane of `ci.yml` (Q-2), which runs `test:native-darwin` when it is affected. A `main`
  * push reuses the queue's verdict and skips it, so the evidence is the merge-queue run on a `main` commit;
- * `native-darwin.yml` itself runs only when called or dispatched.
+ * `native-darwin.yml` itself runs only when called or dispatched. Each selected project is a job of its own,
+ * `Native kernels on darwin-arm64 (<project>)` (ST-3), and every one of them must pass.
  */
 const nativeDarwin = (proves: string): Oracle => ({
   kind: 'job',
   workflow: 'ci.yml',
-  job: 'Native darwin / Native kernels on darwin-arm64',
-  match: 'exact',
+  job: 'Native darwin / Native kernels on darwin-arm64 (',
+  match: 'prefix',
   scope: 'main',
   proves,
 });

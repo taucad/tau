@@ -16,7 +16,7 @@ import { createChatFileStore } from '#db/chat-file-storage.js';
 import type { ChatStoreClient } from '#db/chat-file-storage.js';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import type { ChatStorage } from '#types/storage.types.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 
 /**

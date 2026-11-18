@@ -183,6 +183,8 @@ export type ActiveChatSessionContextValue = {
   chat: ChatView;
   persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine>;
   draftActorRef: ActorRefFrom<typeof draftMachine>;
+  /** This chat's composer record on this device: whether it is read yet decides whether a painted draft hint is taken. */
+  composerRecordRef: ComposerRecordRef;
 };
 
 /**
@@ -243,6 +245,11 @@ export type ChatComposerContextValue = {
   attachmentSource: string | undefined;
   /** Consume the current draft at its persistence owner. */
   consumeDraft: () => Promise<void>;
+  /**
+   * Home's own composer record, which its draft persists to; a chat's is on `session`. Read for record-wins: an Enter
+   * on Home's painted draft waits for it and is sent only when it holds that text (ruling 2026-11-17T03:43Z).
+   */
+  homeRecordRef?: ComposerRecordRef;
 };
 
 const ChatComposerContext = createContext<ChatComposerContextValue | undefined>(undefined);
@@ -423,8 +430,9 @@ export function HomeNewProjectComposerProvider({
       canSelectExecution: true,
       attachmentSource: undefined,
       consumeDraft,
+      homeRecordRef: recordRef,
     }),
-    [consumeDraft, draftActorRef, execution, kernel, model],
+    [consumeDraft, draftActorRef, execution, kernel, model, recordRef],
   );
   return <ChatComposerContext.Provider value={value}>{children}</ChatComposerContext.Provider>;
 }
@@ -492,8 +500,9 @@ function ActiveChatSessionProvider({
       chat: session.chat,
       persistenceActorRef: session.persistenceActorRef,
       draftActorRef: session.draftActorRef,
+      composerRecordRef: session.composerRecordRef,
     }),
-    [chatId, session.chat, session.persistenceActorRef, session.draftActorRef],
+    [chatId, session.chat, session.persistenceActorRef, session.draftActorRef, session.composerRecordRef],
   );
 
   const composerValue = useMemo<ChatComposerContextValue>(

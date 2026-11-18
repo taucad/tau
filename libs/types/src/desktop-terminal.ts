@@ -67,7 +67,15 @@ export const terminalProjectRootSchema = accessRootSchema;
 
 /** Pane → host. @public */
 export const terminalClientFrameSchema = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.literal('open'), size: terminalSizeSchema }),
+  z.strictObject({
+    type: z.literal('open'),
+    size: terminalSizeSchema,
+    /**
+     * The person chose Set up in pane chrome after a `provisioning-required` refusal: the host runs the shell's
+     * one-time setup first (on Windows, one administrator prompt), then starts the shell. Never sent on its own.
+     */
+    setUp: z.literal(true).optional(),
+  }),
   z.strictObject({ type: z.literal('input'), data: z.string().min(1).max(terminalLimits.inputCharacters) }),
   z.strictObject({ type: z.literal('resize'), size: terminalSizeSchema }),
   /**
@@ -177,7 +185,11 @@ export type DesktopTerminalSession = {
 /** The typed terminal seam the desktop preload exposes as `window.tau.terminal`. @public */
 export type DesktopTerminalBridge = {
   open(
-    request: Readonly<{ projectRoot: string; size: TerminalSize }>,
+    request: Readonly<{
+      projectRoot: string;
+      size: TerminalSize;
+      setUp?: true | undefined;
+    }>,
     listener: (frame: TerminalHostFrame) => void,
   ): DesktopTerminalSession;
 };

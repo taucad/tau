@@ -28,6 +28,11 @@ describe('skewProtectionCookie', () => {
     expect(pinned('/assets/route-CIX3STd0.js')).toBe(true);
     expect(pinned(`/csharp-language/${'a'.repeat(64)}/manifest.json`)).toBe(true);
     expect(pinned('/projects.data')).toBe(true);
+    // The root data request by both of its names (`/_.data` under trailing-slash-aware data requests) and a
+    // trailing-slash page's data request: a tab of either build keeps its deploy (RR4).
+    expect(pinned('/_root.data')).toBe(true);
+    expect(pinned('/_.data')).toBe(true);
+    expect(pinned('/w/home/_.data')).toBe(true);
     expect(pinned('/__manifest')).toBe(true);
     expect(pinned('/projects')).toBe(false);
     // PicoGK loads by digest from the dependency hosts; no deploy serves or pins it.

@@ -34,7 +34,11 @@ export type IntelBetaDmgDependencies = {
   readonly existing: (key: string) => Promise<string | undefined>;
   readonly put: (key: string, immutable: boolean) => Promise<void>;
   readonly copy: (source: string, key: string) => Promise<void>;
-  /** The tag the channel's `latest/download.json` currently promotes. */
+  /**
+   * The release the channel's Intel update feed (`latest/desktop-update-darwin-x64.json`) currently serves, which is
+   * also the release behind `latest/Tau-macos-x64.zip`. Staging promotes most candidates without Intel, so this can
+   * trail `latest/download.json`.
+   */
   readonly latestTag: () => Promise<string>;
   readonly verify: (url: string, sha256: string, size: number) => Promise<void>;
   readonly log: (message: string) => void;
@@ -42,7 +46,7 @@ export type IntelBetaDmgDependencies = {
 
 /**
  * Write `releases/<tag>/Tau-macos-x64.dmg` once, then point `latest/Tau-macos-x64.dmg` at it only while the tag is the
- * channel's promoted release, so the latest DMG never runs ahead of the latest ZIP and its update feed.
+ * release the channel's Intel feed serves, so the latest DMG always wraps the same build as the latest Intel ZIP.
  * @param options - Release tag, the DMG's digest and size, and the side effects.
  * @returns Whether the latest pointer moved.
  */
@@ -63,15 +67,40 @@ export const publishIntelBetaDmg = async (options: {
     throw new Error(`Refusing to replace immutable ${release}`);
   }
   await dependencies.verify(`${base}/${intelBetaDmgName}`, sha256, size);
-  const promoted = await dependencies.latestTag();
-  if (promoted !== tag) {
-    dependencies.log(`${tag} is not the promoted release (${promoted}); latest/${intelBetaDmgName} is unchanged.`);
+  const served = await dependencies.latestTag();
+  if (served !== tag) {
+    dependencies.log(`${tag} is not the Intel feed's release (${served}); latest/${intelBetaDmgName} is unchanged.`);
     return { latest: false };
   }
   await dependencies.copy(release, `latest/${intelBetaDmgName}`);
   await dependencies.verify(`${base.split('/releases/')[0]}/latest/${intelBetaDmgName}`, sha256, size);
   dependencies.log(`Published ${intelBetaDmgName} for ${tag} and pointed latest at it.`);
   return { latest: true };
+};
+
+const intelFeed = z.object({
+  currentRelease: z.string(),
+  releases: z.array(z.object({ version: z.string(), updateTo: z.object({ name: z.string() }) })),
+});
+
+/**
+ * Read the release tag the channel's Intel update feed currently serves.
+ * @param tag - Any tag on the channel, which selects its download origin.
+ * @param fetcher - The HTTP client, injectable for tests.
+ * @returns The `updateTo.name` of the feed entry whose version is `currentRelease`.
+ */
+export const intelFeedTag = async (tag: string, fetcher: typeof fetch = fetch): Promise<string> => {
+  const url = `${desktopReleaseBaseUrl(tag).split('/releases/')[0]}/latest/desktop-update-darwin-x64.json`;
+  const response = await fetcher(url, { cache: 'no-store', redirect: 'error' });
+  if (!response.ok) {
+    throw new Error(`latest/desktop-update-darwin-x64.json answered ${response.status}`);
+  }
+  const feed = intelFeed.parse(await response.json());
+  const current = feed.releases.find((release) => release.version === feed.currentRelease);
+  if (!current) {
+    throw new Error(`The Intel feed lists no entry for its current release ${feed.currentRelease}`);
+  }
+  return current.updateTo.name;
 };
 
 const required = (name: string): string => {
@@ -163,14 +192,7 @@ const main = async (): Promise<void> => {
           ...headers,
         ]);
       },
-      latestTag: async () => {
-        const url = `${desktopReleaseBaseUrl(tag).split('/releases/')[0]}/latest/download.json`;
-        const response = await fetch(url, { cache: 'no-store', redirect: 'error' });
-        if (!response.ok) {
-          throw new Error(`latest/download.json answered ${response.status}`);
-        }
-        return z.object({ tag: z.string() }).parse(await response.json()).tag;
-      },
+      latestTag: async () => intelFeedTag(tag),
       verify: async (url, expected, bytes) =>
         verifyMirrorReadback({ url, name: intelBetaDmgName, sha256: expected, size: bytes }),
       log: (message) => {

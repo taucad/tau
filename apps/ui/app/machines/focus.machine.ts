@@ -50,7 +50,7 @@ import { createActor, matchesState, setup, types } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, AnyActorRef, StateValue } from 'xstate';
 import type { Project } from '@taucad/types';
 import type { EventSchemaMap } from '@taucad/ui-core/lib/xstate.lib';
-import type { AccessAnswer } from '#machines/library-access.machine.js';
+import type { AccessAnswer } from '@taucad/files-ui/machines/library-access.machine';
 import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 
 /**

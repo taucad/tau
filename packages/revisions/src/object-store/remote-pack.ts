@@ -682,16 +682,28 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
       return whole;
     };
 
-    /* The bases of `wave` not asked for yet, while the budget lasts; a held base counts what names it. */
+    /* The base `offset`'s held header names, or `undefined`: a header that does not parse is the reading call's to tell. */
+    const heldBaseOf = (offset: number, entry: AheadEntry | undefined): number | undefined => {
+      if (entry?.bytes === undefined) {
+        return undefined;
+      }
+      try {
+        return baseOffsetOf(offset, entry.bytes.subarray(0, Math.min(32, entry.bytes.byteLength)));
+      } catch {
+        return undefined;
+      }
+    };
+
+    /*
+     * The bases of `wave` not asked for yet, while the budget lasts; a held base counts what names it. Every header is
+     * parsed before any base is registered, and none throws, so no base is registered that its wave never asks for.
+     */
     const basesOf = (wave: readonly number[]): number[] => {
+      const named = wave.map((offset) => [offset, heldBaseOf(offset, ahead.get(offset))] as const);
       const next: number[] = [];
-      for (const offset of wave) {
+      for (const [offset, baseOffset] of named) {
         const entry = ahead.get(offset);
-        const baseOffset =
-          entry?.bytes === undefined
-            ? undefined
-            : baseOffsetOf(offset, entry.bytes.subarray(0, Math.min(32, entry.bytes.byteLength)));
-        if (baseOffset === undefined) {
+        if (baseOffset === undefined || entry === undefined) {
           continue;
         }
         if (!ahead.has(baseOffset) && unasked(baseOffset) && affordable(baseOffset)) {
@@ -701,7 +713,7 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
         const base = ahead.get(baseOffset);
         if (base !== undefined) {
           base.refs += 1;
-          entry!.base = baseOffset;
+          entry.base = baseOffset;
         }
       }
       return next;
@@ -730,12 +742,23 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
         wave = basesOf(wave);
       }
     };
-    /* A wave that throws (an entry whose header does not parse) stops the read-ahead; a call reading it is told. */
+    /*
+     * However the read-ahead ends — every wave landed, a read failed, the chain ran past its depth, or something threw —
+     * every entry it registered and did not land is dropped and its waiters told, so they ask for it themselves and no
+     * call waits on an entry nothing will fetch.
+     */
     const done = (async (): Promise<void> => {
       try {
         await run();
       } catch {
         stop();
+      } finally {
+        for (const [offset, entry] of ahead) {
+          if (entry.owner === owner && entry.bytes === undefined) {
+            ahead.delete(offset);
+            entry.settle('dropped');
+          }
+        }
       }
     })();
     return Object.freeze({

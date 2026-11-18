@@ -1,4 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { describe, expect, it } from 'vitest';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
@@ -7,7 +11,8 @@ import { createObjectStore, gitFilesOf } from '#object-store/object-store.js';
 import { buildPack, indexBuiltPack } from '#object-store/pack-writer.js';
 import type { PackObject } from '#object-store/pack-writer.js';
 import { aheadPieces, coalesceRanges, maximumRangeBytes, openRemotePack } from '#object-store/remote-pack.js';
-import { encodePackIndex } from '#pack-reader/pack-index.js';
+import { encodePackIndex, readPackIndex } from '#pack-reader/pack-index.js';
+import { gitToolchainOnPath } from '#test/native-git-harness.js';
 
 const encoder = new TextEncoder();
 const inline = createInlineCompute();
@@ -87,17 +92,26 @@ describe('aheadPieces', () => {
   });
 
   it('stays linear in scattered entries', () => {
-    /* 200,000 entries none of which touches the next: one piece each. A sweep, not a scan per entry (SP6 review). */
+    /*
+     * 200,000 entries none of which touches the next: one piece each. A sweep, not a scan per entry (SP6 review):
+     * every read of an entry's bounds is counted, and a sweep reads each a few times, never once per piece.
+     */
+    let reads = 0;
     const entries = Array.from({ length: 200_000 }, (_value, at) => ({
-      start: at * 100,
-      end: at * 100 + 50,
+      get start(): number {
+        reads += 1;
+        return at * 100;
+      },
+      get end(): number {
+        reads += 1;
+        return at * 100 + 50;
+      },
       rank: at,
     }));
-    const started = performance.now();
     const pieces = aheadPieces(entries, 1024 * 1024);
     expect(pieces).toHaveLength(entries.length);
     expect(pieces.at(-1)!.fills).toEqual([[entries.length - 1, 0]]);
-    expect(performance.now() - started).toBeLessThan(2000);
+    expect(reads).toBeLessThanOrEqual(entries.length * 8);
   });
 });
 
@@ -450,6 +464,105 @@ describe('openRemotePack', () => {
       fetchRange: async (offset, length) => built.pack.slice(offset, offset + length),
     });
     await expect(pack.readMany([first!.oid])).rejects.toBeInstanceOf(TypeError);
+  });
+});
+
+/* A call's answer, or `undefined` when it has not settled after `ms`: a hang is a failed assertion, not a stuck run. */
+const settledWithin = async <Result>(
+  work: Promise<Result>,
+  ms: number,
+): Promise<PromiseSettledResult<Result> | undefined> =>
+  Promise.race([
+    (async () => {
+      const [settled] = await Promise.allSettled([work]);
+      return settled;
+    })(),
+    (async () => {
+      await sleep(ms);
+      return undefined;
+    })(),
+  ]);
+
+describe.runIf(gitToolchainOnPath)('a read-ahead over offset deltas', () => {
+  it('settles every base it asked for when a later header does not parse, so no call waits forever', async () => {
+    /* Eight similar blobs: git stores one whole and the rest as offset deltas. */
+    const directory = await mkdtemp(join(tmpdir(), 'tau-ahead-ofs-'));
+    try {
+      execFileSync('git', ['init', '-q', directory]);
+      const base = Array.from({ length: 2000 }, (_value, line) => `line ${String(line)} ${String(line * 7919)}`);
+      const oids: string[] = [];
+      for (let version = 0; version < 8; version += 1) {
+        const file = join(directory, `f${String(version)}`);
+        const lines = base.with(version * 100, `changed ${String(version)}`);
+        // oxlint-disable-next-line no-await-in-loop -- one blob at a time.
+        await writeFile(file, `${lines.join('\n')}\ntail ${String(version)}\n`);
+        oids.push(execFileSync('git', ['-C', directory, 'hash-object', '-w', file], { encoding: 'utf8' }).trim());
+      }
+      execFileSync(
+        'git',
+        [
+          '-C',
+          directory,
+          'pack-objects',
+          '-q',
+          '--window=10',
+          '--depth=50',
+          '--delta-base-offset',
+          join(directory, 'out'),
+        ],
+        { input: `${oids.join('\n')}\n` },
+      );
+      const written = await readdir(directory);
+      const packFile = written.find((name) => name.startsWith('out-') && name.endsWith('.pack'))!;
+      const packBytes = new Uint8Array(await readFile(join(directory, packFile)));
+      const indexBytes = new Uint8Array(await readFile(join(directory, packFile.replace(/\.pack$/u, '.idx'))));
+      const verified = execFileSync(
+        'git',
+        ['verify-pack', '-v', join(directory, packFile.replace(/\.pack$/u, '.idx'))],
+        {
+          encoding: 'utf8',
+        },
+      );
+      const deltas = verified
+        .split('\n')
+        .map((line) => line.split(/\s+/u))
+        .filter((fields) => /^[\da-f]{40}$/u.test(fields[0] ?? '') && fields.length >= 7)
+        .map((fields) => fields[0]!);
+      expect(deltas.length).toBeGreaterThanOrEqual(2);
+      const index = readPackIndex(indexBytes);
+      /* The second delta's base distance zeroed as served: its header names no base before it. */
+      let corruptAt = index.offsetOf(deltas[1]!)!;
+      /* Past the entry's size header: each byte below 0x80 ends it. */
+      while (packBytes[corruptAt]! >= 0x80) {
+        corruptAt += 1;
+      }
+      corruptAt += 1;
+      const pack = await openRemotePack({
+        name: `pack-${Buffer.from(packBytes.subarray(-20)).toString('hex')}`,
+        size: packBytes.byteLength,
+        index: indexBytes,
+        compute: inline,
+        fetchRange: async (offset, length) => {
+          await sleep(3);
+          const bytes = packBytes.slice(offset, offset + length);
+          if (offset <= corruptAt && corruptAt < offset + length) {
+            bytes[corruptAt - offset] = 0;
+          }
+          return bytes;
+        },
+      });
+      const ahead = pack.readAhead([deltas[0]!, deltas[1]!], { bytes: 1024 * 1024 });
+      await sleep(100);
+      /* The first delta's base was asked for before the second header failed: a call reaching it still answers. */
+      const first = await settledWithin(pack.readMany([deltas[0]!]), 3000);
+      expect(first?.status).toBe('fulfilled');
+      const second = await settledWithin(pack.readMany([deltas[1]!]), 3000);
+      expect(second?.status).toBe('rejected');
+      await ahead.release();
+      expect(pack.counters.aheadHeldBytes).toBe(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
 

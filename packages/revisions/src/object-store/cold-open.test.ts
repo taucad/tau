@@ -1672,3 +1672,145 @@ describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
     expect(kept.filter(Boolean).length).toBeLessThan(blobs.length);
   });
 });
+
+describe.runIf(gitToolchainOnPath)('a cold open whose delta header does not parse', () => {
+  it('answers undefined for smart HTTP rather than wait on a base it read ahead', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'tau-cold-ofs-'));
+    try {
+      /* Git's own variable names, set by entry so no config of the host's leaks in. */
+      const environment: NodeJS.ProcessEnv = { ...process.env };
+      for (const [name, value] of [
+        ['GIT_AUTHOR_NAME', 'Tau'],
+        ['GIT_AUTHOR_EMAIL', 'tau@example.com'],
+        ['GIT_COMMITTER_NAME', 'Tau'],
+        ['GIT_COMMITTER_EMAIL', 'tau@example.com'],
+        ['GIT_CONFIG_NOSYSTEM', '1'],
+        ['HOME', directory],
+      ] as const) {
+        environment[name] = value;
+      }
+      const git = (...args: string[]): string =>
+        execFileSync('git', args, { cwd: directory, encoding: 'utf8', env: environment }).trim();
+      git('init', '-q', '-b', 'main');
+      /* Eight similar files in one commit: git stores one whole and deltas the rest against it. */
+      const body = Array.from({ length: 2000 }, (_value, line) => `line ${String(line)} ${String(line * 7919)}`);
+      await Promise.all(
+        Array.from({ length: 8 }, async (_value, version) =>
+          writeFile(
+            join(directory, `f${String(version)}.scad`),
+            `${body.with(version * 100, `changed ${String(version)}`).join('\n')}\ntail ${String(version)}\n`,
+          ),
+        ),
+      );
+      git('add', '-A');
+      git('commit', '-q', '-m', 'Similar');
+      /* Larger versions of the same files under a ref the open does not ask for: git deltas the head's blobs against
+       * them, so their bases are read ahead as bases, not as listed blobs. */
+      const entries = Array.from({ length: 8 }, (_value, version) => {
+        const larger = `${body.with(version * 100, `changed ${String(version)}`).join('\n')}\n${body.join('\n')}\n`;
+        const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], {
+          cwd: directory,
+          input: larger,
+          encoding: 'utf8',
+        }).trim();
+        return `100644 blob ${blob}\tf${String(version)}.scad`;
+      });
+      const tree = execFileSync('git', ['mktree'], {
+        cwd: directory,
+        input: `${entries.join('\n')}\n`,
+        encoding: 'utf8',
+      }).trim();
+      git('update-ref', 'refs/tau/ops/larger', git('commit-tree', tree, '-m', 'Larger'));
+      git('repack', '-adfq');
+      const packDirectory = join(directory, '.git', 'objects', 'pack');
+      const packFiles = await readdir(packDirectory);
+      const packFile = packFiles.find((name) => name.endsWith('.pack'))!;
+      const pack = new Uint8Array(await readFile(join(packDirectory, packFile)));
+      const index = new Uint8Array(await readFile(join(packDirectory, packFile.replace(/\.pack$/u, '.idx'))));
+      const packName = `pack-${Buffer.from(pack.subarray(-20)).toString('hex')}-${nonce}`;
+      const main = git('rev-parse', 'refs/heads/main');
+      const listed = lines(git('ls-tree', '-r', '-l', main)).map((line) => {
+        const [meta = '', path = ''] = line.split('\t');
+        const [mode = '', , oid = '', size = ''] = meta.split(/\s+/u);
+        return { mode, oid, size, path };
+      });
+      const deltas = new Set(
+        lines(git('verify-pack', '-v', join(packDirectory, packFile.replace(/\.pack$/u, '.idx'))))
+          .map((line) => line.split(/\s+/u))
+          .filter((fields) => /^[\da-f]{40}$/u.test(fields[0] ?? '') && fields.length >= 7)
+          .map((fields) => fields[0]!),
+      );
+      const listedDeltas = listed.filter((entry) => deltas.has(entry.oid));
+      expect(listedDeltas.length).toBeGreaterThanOrEqual(2);
+      /* The second listed delta's base distance zeroed as served, after the first delta's base was asked for. */
+      const packIndex = readPackIndex(index);
+      let corruptAt = packIndex.offsetOf(listedDeltas[1]!.oid)!;
+      /* Past the entry's size header: each byte below 0x80 ends it. */
+      while (pack[corruptAt]! >= 0x80) {
+        corruptAt += 1;
+      }
+      corruptAt += 1;
+      const listing = new Uint8Array(
+        gzipSync(
+          `${[
+            `tau-head-listing\t1\t${main}\t${git('rev-parse', `${main}^{tree}`)}`,
+            ...listed.map((entry) => `${entry.mode}\t${entry.oid}\t${entry.size}\t\t\t${entry.path}`),
+          ].join('\n')}\n`,
+        ),
+      );
+      const fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+        if (url.href.startsWith(catalogueUrl)) {
+          return Response.json({
+            format: 1,
+            generation: 1,
+            refs: [{ ref: 'refs/heads/main', oid: main }],
+            listings: [{ commit: main, href: `${filesOrigin}/listing`, bytes: listing.byteLength }],
+            packs: [
+              {
+                key: `packs/${packName}.pack`,
+                bytes: pack.byteLength,
+                index: { href: `${filesOrigin}/${packName}.idx`, bytes: index.byteLength },
+                pack: { href: `${filesOrigin}/${packName}.pack`, bytes: pack.byteLength },
+              },
+            ],
+            complete: true,
+            expiresAt: Math.floor(Date.now() / 1000) + 900,
+          });
+        }
+        if (url.href === `${filesOrigin}/listing`) {
+          return new Response(listing, { status: 200 });
+        }
+        if (url.href.endsWith('.idx')) {
+          return new Response(index, { status: 200 });
+        }
+        const range = packRangeRefused(new Headers(init?.headers).get('range') ?? undefined, pack.byteLength)!;
+        await new Promise((resolve) => {
+          setTimeout(resolve, 3);
+        });
+        const bytes = pack.slice(...range);
+        if (range[0] <= corruptAt && corruptAt < range[1]) {
+          bytes[corruptAt - range[0]] = 0;
+        }
+        return new Response(bytes, { status: 206 });
+      }) as typeof globalThis.fetch;
+      const compute = countingCompute();
+      const store = await emptyStore(compute, 'cold-ofs-corrupt');
+
+      const opened = await Promise.race([
+        /* One blob per batch: the batch with the first delta is read on its own, before the corrupt one. */
+        coldOpenFromCatalogue({ catalogueUrl, fetch, store, compute, batchObjects: 1 }),
+        new Promise<'hung'>((resolve) => {
+          setTimeout(() => {
+            resolve('hung');
+          }, 5000);
+        }),
+      ]);
+
+      expect(opened).toBeUndefined();
+      expect(await store.has(main)).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+});

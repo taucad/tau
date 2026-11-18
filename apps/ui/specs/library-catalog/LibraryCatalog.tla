@@ -101,6 +101,9 @@
 \* lock and reading its log, instead of refusing until the project is opened. Both stay outside the model,
 \* as the registry and chat store reads did; the journal, apply and gate order is unchanged. No action or
 \* correspondence changes.
+\* DC-10 files-ui slice 5 (2026-11-17): the three library machines, `project-library.types`,
+\* `pending-project-operation.types`, `project-url.utils` and `project-name.utils` moved to `@taucad/files-ui`; the
+\* four library sources only re-point (and rewrap) their imports. No action or correspondence changes.
 EXTENDS Naturals, FiniteSets, TLC
 
 CONSTANTS Projects,        \* project ids

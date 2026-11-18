@@ -54,17 +54,20 @@ import {
 import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
-import { createLibraryDiscovery, selectEpochCurrent } from '#machines/library-discovery.machine.js';
-import type { LibraryDiscoveryActor } from '#machines/library-discovery.machine.js';
-import { createLibraryRecovery } from '#machines/library-recovery.machine.js';
-import type { LibraryRecoveryActor, ReplayOutcome } from '#machines/library-recovery.machine.js';
-import { createLibraryAccess } from '#machines/library-access.machine.js';
-import type { AccessAnswer, LibraryAccessActor } from '#machines/library-access.machine.js';
+import { createLibraryDiscovery, selectEpochCurrent } from '@taucad/files-ui/machines/library-discovery.machine';
+import type { LibraryDiscoveryActor } from '@taucad/files-ui/machines/library-discovery.machine';
+import { createLibraryRecovery } from '@taucad/files-ui/machines/library-recovery.machine';
+import type { LibraryRecoveryActor, ReplayOutcome } from '@taucad/files-ui/machines/library-recovery.machine';
+import { createLibraryAccess } from '@taucad/files-ui/machines/library-access.machine';
+import type { AccessAnswer, LibraryAccessActor } from '@taucad/files-ui/machines/library-access.machine';
 import type { ChatSessionDeps } from '#services/chat-session-store.js';
-import type { ProjectLibraryState } from '#types/project-library.types.js';
+import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import { clearLegacyProjectListing } from '#lib/legacy-project-listing.lib.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
-import type { PendingProjectOperation, PendingProjectRecovery } from '#types/pending-project-operation.types.js';
+import type {
+  PendingProjectOperation,
+  PendingProjectRecovery,
+} from '@taucad/files-ui/types/pending-project-operation.types';
 import {
   applyDiscovery,
   buildProjectListing,

@@ -32,7 +32,7 @@ import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
-import { projectChatUrl } from '#utils/project-url.utils.js';
+import { projectChatUrl } from '@taucad/files-ui/utils/project-url.utils';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { sidebarRowEditorClass } from '#components/nav/sidebar-row.js';

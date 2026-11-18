@@ -33,6 +33,7 @@ import type {
   FileMode,
   FileStatEntry,
 } from '@taucad/filesystem';
+import { maximumChangesetEntries } from '@taucad/filesystem';
 import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/project-core';
 
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
@@ -47,7 +48,7 @@ import { createRevisionActors } from '#revision-effects.js';
 import type { RevisionActors, RevisionFileSystem } from '#revision-effects.js';
 import { generatedGitattributesContent, generatedGitattributesPath, tauRevisionPolicy } from '#workspace-config.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
-import { testIdentity } from '#test/identity.js';
+import { recordedBy, testIdentity } from '#test/identity.js';
 
 /** A clock stopped at `time`: these rows read only its `now()`. */
 const clockAt = (time: number): StepClock => {
@@ -1448,4 +1449,194 @@ describe('conversion inside recoverable materialization', () => {
     expect(await context.tree.readFile('tau.json', 'utf8')).toBe('before');
     expect(new TextDecoder().decode(target.get('tau.json'))).toBe('imported');
   });
+});
+
+describe('a cold open written from its listing (STO-25)', () => {
+  const manifest = serializeProjectManifest({
+    $schema: projectManifestSchemaUrl,
+    name: 'Aircraft',
+    description: '',
+    tags: [],
+    assets: { main: { entryPath: 'main.ts' } },
+  });
+  const sized = (seed: string, bytes: number): string => seed.repeat(Math.ceil(bytes / seed.length)).slice(0, bytes);
+  const { bytes: pointerBytes } = lfsPointerFor(new TextEncoder().encode('solid part\n'));
+  /* More deferred files than one changeset takes, so their bytes arrive in more than one read. */
+  const sources = Array.from({ length: maximumChangesetEntries + 44 }, (_, index): [string, string] => [
+    `src/file-${String(index).padStart(4, '0')}.ts`,
+    sized(`export const value${String(index)} = ${String(index)};\n`, 1100),
+  ]);
+  const remoteFiles: ReadonlyArray<readonly [string, string | Uint8Array<ArrayBuffer>]> = [
+    ['tau.json', manifest],
+    ['main.ts', sized('export const main = 1;\n', 2048)],
+    ['.gitattributes', '*.step filter=lfs diff=lfs merge=lfs -text\n'],
+    ['models/part.step', pointerBytes],
+    ['model/aircraft.usda', sized('def Xform "Part" {}\n', 8192)],
+    ...sources,
+  ];
+
+  /**
+   * An unborn `main` whose remote head holds {@link remoteFiles}, over a port
+   * that lists each file's size as a cold open's head listing does.
+   *
+   * @param files - What the checkout holds before the open.
+   * @param failRead - Paths a store read refuses.
+   * @returns The project, its actors, and the ordered log of reads, the bracket and writes.
+   */
+  const opening = async (
+    files: Readonly<Record<string, string>> = {},
+    failRead?: (paths: readonly string[]) => boolean,
+  ) => {
+    const context = await project(files);
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    await context.port.setHead('main');
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree(remoteFiles.map(([path, content]) => [path, content] as const)),
+      provenance: { source: 'user', ...recordedBy('grace'), createdAt: Date.UTC(2026, 10, 18) },
+      summary: { generated: 'Remote' },
+    });
+    const remote = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head: remote });
+    const remoteTree = (await context.port.readTree(remote, { largeObjects: 'local' }))!;
+    const sizes = new Map(remoteTree.entries().map(({ path, content }) => [path, content.byteLength]));
+    const events: string[] = [];
+    /* A slow object source: the model's bytes arrive only once the closure has landed, or after a bound. */
+    const { promise: closureLanded, resolve: landClosure } = Promise.withResolvers<void>();
+    const port: RevisionPort = {
+      ...context.port,
+      listTree: async (id) => {
+        const listing = await context.port.listTree!(id);
+        return listing?.map((file) => ({ ...file, size: sizes.get(file.path)! }));
+      },
+      readTree: async (id, readOptions) => {
+        const paths = readOptions?.paths;
+        events.push(`read ${paths === undefined ? '*' : paths.join(',')}`);
+        if (paths !== undefined && failRead?.(paths) === true) {
+          throw new Error('the store could not read that pack');
+        }
+        if (paths?.includes('model/aircraft.usda') === true && events.includes('bracket')) {
+          await Promise.race([
+            closureLanded,
+            new Promise<void>((resolve) => {
+              setTimeout(() => {
+                events.push('model read unblocked by its bound');
+                resolve();
+              }, 2000);
+            }),
+          ]);
+        }
+        const tree = await context.port.readTree(id, readOptions);
+        events.push(`read-done ${paths === undefined ? '*' : paths.join(',')}`);
+        return tree;
+      },
+    };
+    const { checkout } = context;
+    const watched: RevisionFileSystem = Object.assign(Object.create(checkout) as RevisionFileSystem, {
+      applyBatch: async (entries: readonly BatchEntry[], batchOptions?: BatchOptions): Promise<BatchReceipt[]> => {
+        const receipts = await checkout.applyBatch!(entries, batchOptions);
+        events.push(...entries.flatMap((entry) => (entry.op === 'write' ? [`write ${entry.path}`] : [])));
+        if (entries.some((entry) => entry.op === 'write' && entry.path === 'tau.json')) {
+          landClosure();
+        }
+        return receipts;
+      },
+    });
+    const brackets: Array<Parameters<NonNullable<Parameters<typeof createRevisionActors>[0]['onApplyingTree']>>[2]> =
+      [];
+    const outcomes: unknown[] = [];
+    const actors = createRevisionActors({
+      identity: testIdentity,
+      port,
+      projectId: 'project-1',
+      clock: clockAt(clockReading),
+      filesystem: async () => watched,
+      onApplyingTree: (_place, _paths, bracket) => {
+        brackets.push(bracket);
+        events.push('bracket');
+        return (outcome) => {
+          outcomes.push(outcome);
+          events.push('release');
+        };
+      },
+    });
+    /* Where in the log a path's bytes were first read. */
+    const readOf = (path: string, kind = 'read'): number =>
+      events.findIndex(
+        (event) =>
+          event.startsWith(`${kind} `) &&
+          event
+            .slice(kind.length + 1)
+            .split(',')
+            .includes(path),
+      );
+    return { ...context, actors, remote, remoteTree, events, brackets, outcomes, readOf };
+  };
+
+  it('should open the bracket and land the entry closure before the tree’s other bytes are read', async () => {
+    const opened = await opening();
+    await expect(run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
+      checkoutId: 'live',
+      revisionId: opened.remote,
+    });
+    const { events, readOf } = opened;
+    /* No whole-tree read in the write: it begins from the listing. */
+    expect(events.slice(0, events.indexOf('release'))).not.toContain('read *');
+    const bracket = events.indexOf('bracket');
+    expect(bracket).toBeGreaterThan(-1);
+    expect(readOf('model/aircraft.usda')).toBeGreaterThan(bracket);
+    /* The closure lands without waiting on the model's bytes, the manifest it lands named to the bracket. */
+    expect(events).not.toContain('model read unblocked by its bound');
+    const usda = readOf('model/aircraft.usda', 'read-done');
+    expect(events.indexOf('write tau.json')).toBeLessThan(usda);
+    expect(events.indexOf('write main.ts')).toBeLessThan(usda);
+    expect(readOf('main.ts')).toBeLessThan(bracket);
+    /* The manifest named is the one that landed, as the host prepared it. */
+    expect(opened.brackets).toStrictEqual([
+      {
+        purpose: 'tree',
+        closure: ['tau.json', 'main.ts'],
+        manifest: new Uint8Array(await opened.tree.readFile('tau.json')),
+      },
+    ]);
+    expect(opened.outcomes).toEqual([{ failed: false }]);
+    /* A changeset's bytes at a time: the deferred files come in more than one bounded read. */
+    const deferredReads = events.slice(bracket, events.indexOf('release')).filter((event) => event.startsWith('read '));
+    expect(deferredReads.length).toBeGreaterThan(1);
+    for (const read of deferredReads) {
+      expect(read.slice(5).split(',').length).toBeLessThanOrEqual(maximumChangesetEntries);
+    }
+    /* Every other file landed as the revision holds it, the pointer as its placeholder. */
+    const others = opened.remoteTree.entries().filter((entry) => entry.path !== 'tau.json');
+    const landed = await Promise.all(others.map(async ({ path }) => new Uint8Array(await opened.tree.readFile(path))));
+    expect(landed).toEqual(others.map(({ content }) => content));
+    expect(await opened.port.readRef('main')).toBe(opened.remote);
+  }, 30_000);
+
+  it('should keep a file the checkout already holds as the revision does, reading it before the bracket', async () => {
+    const usda = remoteFiles.find(([path]) => path === 'model/aircraft.usda')![1] as string;
+    const opened = await opening({ 'model/aircraft.usda': usda });
+    await run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' });
+    expect(opened.readOf('model/aircraft.usda')).toBeLessThan(opened.events.indexOf('bracket'));
+    expect(opened.events).not.toContain('write model/aircraft.usda');
+    expect(await opened.tree.readFile('model/aircraft.usda', 'utf8')).toBe(usda);
+    expect(await opened.port.readRef('main')).toBe(opened.remote);
+  }, 30_000);
+
+  it('should fail the write and take back what it landed when a deferred read fails', async () => {
+    const failing = sources.at(-1)![0];
+    const opened = await opening({}, (paths) => paths.includes(failing));
+    await expect(run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toThrow(
+      'the store could not read that pack',
+    );
+    /* The closure and the first deferred batch had landed: the rollback took them back, leaving the checkout whole. */
+    expect(opened.events).toContain('write tau.json');
+    expect(opened.events).toContain(`write ${sources[0]![0]}`);
+    /* The write and its rollback each released whole: the checkout was never left torn. */
+    expect(opened.outcomes.length).toBeGreaterThan(0);
+    expect(opened.outcomes).not.toContainEqual({ failed: true });
+    const left = await Promise.all(remoteFiles.map(async ([path]) => opened.tree.exists(path)));
+    expect(left.filter(Boolean)).toEqual([]);
+    expect(await opened.port.readRef('main')).toBeUndefined();
+  }, 30_000);
 });

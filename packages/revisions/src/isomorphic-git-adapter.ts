@@ -685,12 +685,22 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     oid: string,
     paths: readonly string[],
   ): Promise<ReadonlyMap<string, Readonly<{ oid: string; mode: string }>>> => {
+    /* Each tree once per call: paths under one directory share its read and its decode. */
+    const read = new Map<string, Promise<readonly TreeCodecEntry[]>>();
+    const entriesOf = async (tree: string): Promise<readonly TreeCodecEntry[]> => {
+      let entries = read.get(tree);
+      if (entries === undefined) {
+        entries = treeEntries(tree);
+        read.set(tree, entries);
+      }
+      return entries;
+    };
     const entryAt = async (path: string): Promise<Readonly<{ oid: string; mode: string }> | undefined> => {
       const segments = path.split('/');
       let tree = oid;
       for (const [index, segment] of segments.entries()) {
         // oxlint-disable-next-line no-await-in-loop -- each directory names the next one to read.
-        const entries = await treeEntries(tree);
+        const entries = await entriesOf(tree);
         const entry = entries.find((candidate) => candidate.path === segment);
         if (entry === undefined) {
           return undefined;

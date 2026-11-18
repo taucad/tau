@@ -28,6 +28,16 @@ export const unknownBuildRelease = '0000000';
 const releaseLabel = /^[\da-f]{7,12}$|^\d+\.\d+\.\d+$/u;
 
 /**
+ * Whether a value is a release label: a short commit or a desktop semver. A web build's server graph holds a
+ * placeholder until the deploy stamps its commit (`apps/ui/scripts/stamp-build-release.mts`), and the placeholder is
+ * not a label.
+ *
+ * @param value - The candidate label.
+ * @returns `true` for a label.
+ */
+export const isBuildReleaseLabel = (value: string): boolean => releaseLabel.test(value);
+
+/**
  * This build's release label for runtime telemetry: the desktop app's semver (compiled in), else the web build's short
  * commit the server published as `window.ENV.TAU_RELEASE`, else {@link unknownBuildRelease}.
  *
@@ -38,7 +48,7 @@ export const readBuildRelease = (): string => {
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent in a worker.
   const published = compiled === '' && globalThis.window ? globalThis.window.ENV?.TAU_RELEASE : undefined;
   const release = compiled === '' ? published : compiled;
-  return typeof release === 'string' && releaseLabel.test(release) ? release : unknownBuildRelease;
+  return typeof release === 'string' && isBuildReleaseLabel(release) ? release : unknownBuildRelease;
 };
 
 /**

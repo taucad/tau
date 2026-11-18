@@ -1980,6 +1980,109 @@ describe('startHostDaemon', () => {
     }
   }, 60_000);
 
+  /* GI-Q6, I1: a local-only daemon given a session token but no account (the CLI's startup lookup failed) never runs
+   * funded unstamped: it looks the account up when a funded run is admitted, and refuses the run when it still cannot. */
+  it.each([
+    ['stamps the account it looks up', 200],
+    ['refuses DEPLOYMENT_UNKNOWN without a gateway call when the account stays unknown', 503],
+  ] as const)(
+    'should keep a local-account run with no revision actor off unstamped funding: %s',
+    async (_name, sessionStatus) => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-lazy-principal-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      const requests: string[] = [];
+      /* A Cloud API: it answers funded and never finishes a model call, so a funded run stays mid-call. */
+      const gateway = createServer((request, response) => {
+        requests.push(request.url ?? '');
+        if (request.url === '/v1/deployment') {
+          response.writeHead(200, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ version: 1, edition: 'cloud', billing: { funded: true }, maxAgeSeconds: 300 }));
+        } else if (request.url === '/v1/auth/get-session') {
+          response.writeHead(sessionStatus, { 'content-type': 'application/json' });
+          response.end(
+            JSON.stringify(sessionStatus === 200 ? { user: { id: 'user_lazy' } } : { message: 'unavailable' }),
+          );
+        }
+      });
+      resources.push({
+        close: () => {
+          gateway.closeAllConnections();
+          gateway.close();
+        },
+      });
+      await new Promise<void>((resolve) => {
+        gateway.listen(0, '127.0.0.1', resolve);
+      });
+      const address = gateway.address();
+      if (!address || typeof address === 'string') {
+        throw new TypeError('Expected a TCP gateway address.');
+      }
+      projectHostSpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        relay: false,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: {
+          ...(await agentOptionsIn(join(temporaryDirectory, 'agent'))),
+          tauApiToken: 'lazy-session',
+          gatewayBaseUrl: `http://127.0.0.1:${String(address.port)}`,
+        },
+      });
+      await daemon.ready;
+      const options = projectHostSpy.mock.calls.at(-1)?.[0];
+      if (options === undefined) {
+        throw new TypeError('Expected the daemon to open a project host.');
+      }
+      const root = await mkdtemp(join(temporaryDirectory, 'root-'));
+      const launcher = createNodeLauncher({
+        workspaceRoot: root,
+        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+        systemPrompt: 'You are Tau.',
+        toolRegistry: { list: () => [], invoke: async () => ({ content: 'no tools', isError: true }) },
+        modelTransport: options.modelTransport,
+        credential: options.credential,
+      });
+      const events = join(root, '.tau', 'chats', 'chat-lazy', 'events.jsonl');
+      try {
+        await launcher.execute({
+          type: 'start',
+          commandId: 'cmd-lazy',
+          payload: {
+            trigger: 'submit',
+            chatId: 'chat-lazy',
+            runId: 'run-lazy',
+            message: { id: 'user-1', role: 'user', content: 'hello' },
+          },
+        });
+        const settled = sessionStatus === 200 ? '"type":"model.invocation-prepared"' : '"code":"DEPLOYMENT_UNKNOWN"';
+        await vi.waitFor(
+          async () => {
+            expect(await readFile(events, 'utf8')).toContain(settled);
+          },
+          { timeout: 10_000 },
+        );
+        const log = await readFile(events, 'utf8');
+        const prepared = log
+          .split('\n')
+          .filter((line) => line.includes('"type":"model.invocation-prepared"'))
+          .map((line) => JSON.parse(line) as { readonly principal?: string });
+        if (sessionStatus === 200) {
+          expect(prepared.map((row) => row.principal)).toEqual(['user_lazy']);
+          expect(options.credential()).toEqual({ mode: 'session', principal: 'user_lazy' });
+        } else {
+          expect(prepared).toEqual([]);
+          expect(requests.filter((url) => url !== '/v1/deployment' && url !== '/v1/auth/get-session')).toEqual([]);
+        }
+      } finally {
+        await launcher.close();
+        await daemon.close();
+      }
+    },
+    60_000,
+  );
+
   /* W6.r1 round 3 (GI-Q6): the account the pairing exchange returned, stored with the credential, is the principal
    * the daemon's credential port and its funded transport name. */
   it.each([true, false])(

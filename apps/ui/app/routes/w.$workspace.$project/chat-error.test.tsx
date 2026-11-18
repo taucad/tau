@@ -485,12 +485,33 @@ describe('ChatError', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
-  /* I1: a run whose server's billing mode is unknown made no model call; it resumes once the server answers. */
-  it('should name a server whose billing mode could not be confirmed and offer Resume', () => {
+  /* I1: a run whose server's billing mode is unknown made no model call; it resumes once the server answers. The host
+   * names its own remedy when it has one (an unreadable recorded mode, a host that cannot fund the run). */
+  it('should show the host instruction for a billing mode it could not confirm and offer Resume', () => {
     projected({
       category: errorCategory.generic,
       title: 'Error',
-      message: 'The deployment answer for this API is unknown.',
+      message: 'This run was started under a billing mode this build cannot read; update Tau, then resume.',
+      code: 'DEPLOYMENT_UNKNOWN',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText("Couldn't confirm how this server bills model calls")).toBeInTheDocument();
+    expect(
+      screen.getByText('This run was started under a billing mode this build cannot read; update Tau, then resume.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Check your connection/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
+  it('should fall back to the connection copy for a billing mode refusal without a host instruction', () => {
+    /* A projected failure always carries the host's sentence; a persisted card can arrive without one. */
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: '',
       code: 'DEPLOYMENT_UNKNOWN',
     });
 
@@ -499,11 +520,9 @@ describe('ChatError', () => {
     expect(screen.getByText("Couldn't confirm how this server bills model calls")).toBeInTheDocument();
     expect(
       screen.getByText(
-        'The app could not confirm how this Tau server bills model calls, so it made none. Check your connection, then resume.',
+        'The app could not confirm how this Tau server bills model calls, so this attempt made none. Check your connection, then resume.',
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
   });
 
   /* The masked in-stream failure arrives on an HTTP 200, so its category reads

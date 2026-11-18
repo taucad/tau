@@ -30,7 +30,8 @@ const harness = (
   overrides: Partial<Omit<DeploymentModeResolverInput, 'fetch' | 'now'>> = {},
 ) => {
   let clock = 1_000_000;
-  const fetch = vi.fn(async (url: string, _init?: RequestInit): Promise<Response> => {
+  const fetch = vi.fn<typeof globalThis.fetch>(async (request) => {
+    const url = request instanceof Request ? request.url : request.toString();
     const next = byOrigin[new URL(url).origin]?.shift();
     if (next === undefined) {
       throw new Error(`no response scripted for ${url}`);
@@ -41,7 +42,7 @@ const harness = (
     return typeof next === 'function' ? next() : next;
   });
   const resolver = createDeploymentModeResolver({
-    fetch: fetch as unknown as typeof globalThis.fetch,
+    fetch,
     now: () => clock,
     ...overrides,
   });
@@ -196,6 +197,32 @@ describe('createDeploymentModeResolver', () => {
       const second = harness({ [api]: [json({}, 503)] }, { storage: () => storage });
       second.advance(deploymentModeDefaults.maxAgeBounds.minimum + 1);
       await expect(second.resolver.mode(api)).resolves.toBe('unknown');
+    }
+  });
+
+  /* The agent host bounds its deployment ask at 10 s; the request must give up first so a stale answer can stand in. */
+  it('should let a stale funded answer stand in for a hanging request before the agent host gives up at 10 s', async () => {
+    vi.useFakeTimers();
+    try {
+      const { resolver, advance } = harness({
+        [api]: [
+          json(cloud),
+          async () =>
+            new Promise<Response>(() => {
+              /* Never settles. */
+            }),
+        ],
+      });
+      await expect(resolver.mode(api)).resolves.toBe('funded');
+      advance(300 + 1);
+
+      const pending = resolver.mode(api);
+      await vi.advanceTimersByTimeAsync(9000);
+
+      await expect(Promise.race([pending, Promise.resolve('still waiting')])).resolves.toBe('funded');
+      expect(deploymentModeDefaults.requestTimeout).toBeLessThan(9000);
+    } finally {
+      vi.useRealTimers();
     }
   });
 

@@ -22,7 +22,10 @@ export type DeploymentModeResolverInput = Readonly<{
   fetch?: typeof globalThis.fetch | undefined;
   /** The clock, epoch milliseconds; defaults to `Date.now`. */
   now?: (() => number) | undefined;
-  /** Milliseconds before a request is abandoned (then `unknown`); defaults to the answer cache's 10 s. */
+  /**
+   * Milliseconds before a request is abandoned (then a stale answer within the grace window, else `unknown`); defaults
+   * to {@link deploymentModeDefaults.requestTimeout}.
+   */
   requestTimeout?: number | undefined;
 }>;
 
@@ -48,12 +51,15 @@ export type DeploymentModeResolver = Readonly<{
  * - `staleGraceSeconds`: a day. A stale answer stands in only when this route fails, and a model call needs the same
  *   API, so it covers a route-only outage (a `5xx` on `/v1/deployment` while the gateway answers) without turning an
  *   API that was never answered into `unfunded`.
+ * - `requestTimeout`: 5 s, well inside the agent host's 10 s bound on the deployment ask, so a hanging route gives up
+ *   while a stale answer can still stand in; at 10 s the agent host would refuse the run `unknown` first.
  *
  * @public
  */
 export const deploymentModeDefaults = {
   maxAgeBounds: { minimum: 60, maximum: 3600 } satisfies MaxAgeBounds,
   staleGraceSeconds: 86_400,
+  requestTimeout: 5000,
 } as const;
 
 /** The storage key prefix; the origin follows it. @public */
@@ -174,7 +180,7 @@ export const createDeploymentModeResolver = (input: DeploymentModeResolverInput 
     /* Read per request, not bound at creation, so a host's later fetch instrumentation is used. */
     fetch: input.fetch ?? (async (request, init) => globalThis.fetch(request, init)),
     now,
-    ...(input.requestTimeout === undefined ? {} : { requestTimeout: input.requestTimeout }),
+    requestTimeout: input.requestTimeout ?? deploymentModeDefaults.requestTimeout,
   });
   const resolve = async (url: string): Promise<OriginAnswer<DeploymentAnswer>> => {
     try {

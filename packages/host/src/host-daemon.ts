@@ -71,6 +71,7 @@ import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import { createZooProxyChildCredential } from '#zoo-proxy-child.js';
 import type { HostZooProxyOptions } from '#zoo-proxy-child.js';
 import type { RuntimeChildHandle, RuntimeChildNativeKernels } from '#runtime-child-supervisor.js';
+import { createTauIdentityReader } from '#telemetry.js';
 import type { ReportingConsent } from '#telemetry.js';
 
 /** Milliseconds. */
@@ -931,10 +932,26 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       options.relay === false && agent.tauCloudEnabled !== true && agent.tauApiToken ? agent.tauApiToken : undefined;
     /* The CLI session's account (`session.user.id`, as the web and desktop hosts name theirs): a funded run stamps its
      * attempts with it, so another account's resume is refused (GI-Q6). Never an anonymous pseudonym. */
-    const sessionPrincipal =
+    let sessionPrincipal =
       localAccountSession === undefined || agent.revisionActor?.anonymous === true
         ? undefined
         : agent.revisionActor?.id;
+    /* Without it (an anonymous actor, or the CLI's startup lookup failed), the token's account is looked up on demand
+     * through `get-session` and kept once known. */
+    const readSessionIdentity =
+      localAccountSession === undefined || sessionPrincipal !== undefined
+        ? undefined
+        : createTauIdentityReader({
+            apiOrigin: agent.gatewayBaseUrl,
+            readToken: async () => ({ kind: 'token', token: localAccountSession }),
+          });
+    const resolveSessionPrincipal = async (): Promise<string | undefined> => {
+      if (sessionPrincipal === undefined && readSessionIdentity !== undefined) {
+        const identity = await readSessionIdentity();
+        sessionPrincipal = identity.kind === 'signed-in' ? identity.principalId : undefined;
+      }
+      return sessionPrincipal;
+    };
     const canonicalWorkspaceRoot = await realpath(agent.workspaceRoot);
     const authorityRoot = join(
       defaultConfigDirectory(),
@@ -1093,11 +1110,28 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
          * cloud project, so its receipts name no project by design. */
         ...(agent.hostLabels === undefined ? {} : { hostLabels: agent.hostLabels }),
         billing: {
-          /* The gateway's API answers whether a run is funded; an unknown answer refuses the run (I1). */
-          deployment: async () => deployment.mode(agent.gatewayBaseUrl),
-          /* The account the credential port names: the paired device's, or the CLI session's. */
-          principal: () =>
-            localAccountSession === undefined ? credentialPrincipal(credentialState) : sessionPrincipal,
+          /* The gateway's API answers whether a run is funded; an unknown answer refuses the run (I1). A funded run on
+           * the CLI session whose account cannot be learned is refused the same way, never run unstamped (GI-Q6). */
+          deployment: async () => {
+            const mode = await deployment.mode(agent.gatewayBaseUrl);
+            return mode === 'funded' &&
+              localAccountSession !== undefined &&
+              (await resolveSessionPrincipal()) === undefined
+              ? 'unknown'
+              : mode;
+          },
+          /* The account the credential port names: the paired device's, or the CLI session's, which a resumed funded
+           * attempt needs as much as a new one; unknown, the prepare is refused rather than left unstamped. */
+          principal: async () => {
+            if (localAccountSession === undefined) {
+              return credentialPrincipal(credentialState);
+            }
+            const principal = await resolveSessionPrincipal();
+            if (principal === undefined) {
+              throw new Error('The account of this Tau session could not be looked up.');
+            }
+            return principal;
+          },
         },
       }),
       credential: () =>

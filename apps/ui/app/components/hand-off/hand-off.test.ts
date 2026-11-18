@@ -9,6 +9,7 @@ import {
   resetInputAcceptedForTest,
 } from '#components/hand-off/hand-off.js';
 import type { HandOffElement, HandOffOptions } from '#components/hand-off/hand-off.js';
+import { projectComposerBox } from '#components/chat/project-composer-hand-off.js';
 
 const record = vi.hoisted(() => vi.fn());
 vi.mock('@taucad/ui-core/lib/project-open-performance', () => ({
@@ -466,5 +467,163 @@ describe('hand-off contract (P4)', () => {
     recordInputAccepted();
 
     expect(record).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * A15d (C10; programme control's ruling of 2026-11-16T22:06Z, the operator's 2026-11-13T13:14Z item 5): a queuing
+ * surface's box draws the queued send and Escape cancels it, and a box that asks for it has the served input paint the
+ * stored draft as prefilled text, never as an edit. Literal attributes: the rows read the served DOM.
+ */
+describe('hand-off queued send and stored draft (A15d, C10)', () => {
+  const status = 'Send queued. Press Escape to cancel.';
+
+  beforeEach(async () => {
+    await nextFrame();
+    stubPointer(false);
+    stubTimeline();
+    localStorage.clear();
+  });
+  afterEach(() => {
+    document.body.replaceChildren();
+    localStorage.clear();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** A box with its status slot around a served input and its script, as the served page has it. */
+  const serveInBox = (attributes: readonly string[] = []): { box: HTMLElement; input: HandOffElement } => {
+    const box = document.createElement('div');
+    box.dataset['handOffBox'] = '';
+    for (const attribute of attributes) {
+      box.setAttribute(attribute, '');
+    }
+    const statusSlot = document.createElement('span');
+    statusSlot.dataset['slot'] = 'queued-send-status';
+    const host = document.createElement('div');
+    const input = document.createElement('textarea');
+    const script = document.createElement('script');
+    script.textContent = handOffScript('previous-sibling', { queueSubmit: true });
+    host.append(input, script);
+    box.append(statusSlot, host);
+    document.body.append(box);
+    return { box, input: input as HandOffElement };
+  };
+
+  const trackInBox = (): { box: HTMLElement; input: HandOffElement } => {
+    const box = document.createElement('div');
+    box.dataset['handOffBox'] = '';
+    const statusSlot = document.createElement('span');
+    statusSlot.dataset['slot'] = 'queued-send-status';
+    const input = document.createElement('textarea') as HandOffElement;
+    box.append(statusSlot, input);
+    document.body.append(box);
+    installHandOffTracker(input, { queueSubmit: true });
+    return { box, input };
+  };
+
+  const statusOf = (box: HTMLElement): string | undefined =>
+    box.querySelector('[data-slot=queued-send-status]')?.textContent ?? undefined;
+
+  it.each([
+    { name: 'the served script', make: serveInBox },
+    { name: 'the tracker', make: trackInBox },
+  ])('should draw a queued send in its box, from $name, until an edit or Escape cancels it', ({ make }) => {
+    const { box, input } = make();
+    play(input, [{ kind: 'type', text: 'Make a bracket.' }]);
+    expect(Object.hasOwn(box.dataset, 'earlyText')).toBe(true);
+    play(input, [{ kind: 'key', init: { key: 'Enter' } }]);
+    expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(true);
+    expect(statusOf(box)).toBe(status);
+    expect(captureHandOff(input).submitQueued).toBe(true);
+
+    play(input, [{ kind: 'key', init: { key: 'Escape' } }]);
+    expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(false);
+    expect(statusOf(box)).toBe('');
+    expect(captureHandOff(input).submitQueued).toBe(false);
+    expect(input.value).toBe('Make a bracket.');
+
+    play(input, [
+      { kind: 'key', init: { key: 'Enter' } },
+      { kind: 'type', text: ' Twice' },
+    ]);
+    expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(false);
+    expect(captureHandOff(input).submitQueued).toBe(false);
+  });
+
+  /* The two spellings still agree, Escape included, inside a box and out of one. */
+  it.each([
+    { name: 'Escape after Enter', inBox: false },
+    { name: 'Escape after Enter, in a box', inBox: true },
+  ])('should record the same state from both spellings for $name', ({ inBox }) => {
+    const served = inBox ? serveInBox().input : serveWithScript({ queueSubmit: true });
+    const tracked = inBox ? trackInBox().input : createTracked({ queueSubmit: true });
+    const steps: readonly Step[] = [
+      { kind: 'type', text: 'Make a bracket.' },
+      { kind: 'key', init: { key: 'Enter' } },
+      { kind: 'key', init: { key: 'Escape' } },
+    ];
+    play(served, steps);
+    play(tracked, steps);
+    expect(served.tauHandOff?.submitQueued).toBe(false);
+    expect(tracked.tauHandOff).toEqual(served.tauHandOff);
+  });
+
+  it('should paint the stored draft into an empty served input as prefilled text, not an edit', () => {
+    history.replaceState(null, '', '/');
+    localStorage.setItem(
+      'tau-draft-hint',
+      JSON.stringify({ v: 1, home: { usedAt: 1, text: 'A bracket for the shelf' }, projects: {} }),
+    );
+    const { box, input } = serveInBox(['data-draft-hint']);
+    expect(input.value).toBe('A bracket for the shelf');
+    expect(Object.hasOwn(box.dataset, 'earlyText')).toBe(true);
+    expect(captureHandOff(input)).toMatchObject({ text: 'A bracket for the shelf', edited: false, prefilled: true });
+
+    play(input, [{ kind: 'type', text: '!' }]);
+    const edited = captureHandOff(input);
+    expect(edited).toMatchObject({ edited: true });
+    expect(edited.prefilled).toBeUndefined();
+  });
+
+  it("should paint a project chat's draft with its chat, and nothing outside a box that asks", () => {
+    history.replaceState(null, '', '/w/acme/bracket?chat=chat-1');
+    localStorage.setItem(
+      'tau-draft-hint',
+      JSON.stringify({ v: 1, projects: { 'acme/bracket': { usedAt: 1, text: 'Fillet it', chatId: 'chat-1' } } }),
+    );
+    try {
+      expect(captureHandOff(serveInBox(['data-draft-hint']).input)).toMatchObject({
+        text: 'Fillet it',
+        prefilled: true,
+        prefilledChatId: 'chat-1',
+      });
+      expect(serveInBox().input.value).toBe('');
+      expect(serveWithScript({ queueSubmit: true }).value).toBe('');
+      expect(serveWithScript({ queueSubmit: false }).value).toBe('');
+    } finally {
+      history.replaceState(null, '', '/');
+    }
+  });
+
+  it('should queue an Enter on a painted draft nobody edited visibly, as any Enter, and cancel it on Escape', () => {
+    history.replaceState(null, '', '/');
+    localStorage.setItem(
+      'tau-draft-hint',
+      JSON.stringify({ v: 1, home: { usedAt: 1, text: 'Fillet it' }, projects: {} }),
+    );
+    /* The project composer's own box. */
+    const { box, input } = serveInBox(Object.keys(projectComposerBox));
+    expect(input.value).toBe('Fillet it');
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    input.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true);
+    expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(true);
+    expect(statusOf(box)).toBe(status);
+    expect(captureHandOff(input)).toMatchObject({ submitQueued: true, prefilled: true, edited: false });
+
+    play(input, [{ kind: 'key', init: { key: 'Escape' } }]);
+    expect(Object.hasOwn(box.dataset, 'queuedSend')).toBe(false);
+    expect(captureHandOff(input).submitQueued).toBe(false);
   });
 });

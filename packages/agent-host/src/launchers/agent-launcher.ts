@@ -93,6 +93,12 @@ export type AgentLauncherOptions = Readonly<{
   /** The clock every incarnation runs on; the process's timers when absent. */
   clock?: CreateTauAgentHostOptions['clock'];
   /**
+   * The monotonic clock every incarnation times liveness on (`CreateTauAgentHostOptions.monotonicNow`): a live run's
+   * quiet time and publish cadence, and a paused run's hold. Give it with {@link clock} so the hold and the heartbeat
+   * timers that test it run on the same clock; `performance.now()` when absent.
+   */
+  monotonicNow?: CreateTauAgentHostOptions['monotonicNow'];
+  /**
    * Whether this launcher admits the run a `start` or `resume` names, read per command. While it answers `false` (a
    * host draining its live runs before it closes, T3), the command is refused `HOST_CLOSED`, unless it is a re-send of one already
    * applied or its chat has a live run, which the host answers as ever (`replayed`, `CHAT_RUN_LIVE`). Another tab that
@@ -313,14 +319,16 @@ const runOf = async (chatId: string, view: ChatView): Promise<HostRunSnapshot | 
  * @example <caption>A Node launcher over one workspace</caption>
  * ```typescript
  * import { createGatewayModelTransport } from '@taucad/agent-host';
- * import type { ToolRegistry } from '@taucad/agent-host';
+ * import type { DeploymentModeAnswer, ToolRegistry } from '@taucad/agent-host';
  * import { createAgentLauncher } from '@taucad/agent-host/launcher';
  * import { createNodeChatStore } from '@taucad/agent-host/node';
  *
  * declare const toolRegistry: ToolRegistry;
+ * // The API's deployment answer for the gateway's origin (`GET /v1/deployment`), fetched and cached by the host.
+ * declare const deployment: (signal: AbortSignal) => Promise<DeploymentModeAnswer>;
  * const launcher = createAgentLauncher({
  *   chats: createNodeChatStore({ workspaceRoot: process.cwd() }),
- *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/' }),
+ *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/', billing: { deployment } }),
  *   credential: () => ({ mode: 'session' }),
  *   systemPrompt: 'You are Tau.',
  *   toolRegistry,
@@ -620,6 +628,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
     ...(options.turnPlacement === undefined ? {} : { placement: options.turnPlacement }),
     ...(options.delays === undefined ? {} : { delays: options.delays }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.monotonicNow === undefined ? {} : { monotonicNow: options.monotonicNow }),
     onLiveEvent: (event: AgentLiveEvent) => {
       const sourceGeneration = writerGenerations.get(event.chatId);
       if (sourceGeneration === undefined) {
@@ -1340,8 +1349,19 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         replay.clear();
         writerGenerations.clear();
         placing.abort();
-        await port.close();
-        await host.close();
+        /* Every step runs whatever an earlier one threw: a leadership close that fails must still let the host close
+         * its chat writers, or the lock outlives this launcher and the next host for the project is refused
+         * `WRITER_LOCKED` until the process exits. */
+        const failures: unknown[] = [];
+        const settle = async (step: () => Promise<unknown>): Promise<void> => {
+          try {
+            await step();
+          } catch (error) {
+            failures.push(error);
+          }
+        };
+        await settle(async () => port.close());
+        await settle(async () => host.close());
         const unclaimed = [...views.values()];
         views.clear();
         await Promise.allSettled(
@@ -1354,6 +1374,12 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
           wakeReads(chatId);
         }
         live.close();
+        if (failures.length === 1) {
+          throw failures[0];
+        }
+        if (failures.length > 1) {
+          throw new AggregateError(failures, 'The Tau agent launcher could not close every part.');
+        }
       })();
       const attempt = closing;
       try {

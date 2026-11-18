@@ -1,7 +1,7 @@
 {
   "name": "@taucad/settings-ui",
   "version": "0.1.0-beta.0",
-  "description": "Tau UI app settings feature: settings copy and the viewer settings analytics person properties, the settings modules that read no app state",
+  "description": "Tau UI app settings feature: the settings catalogue and search, the settings layout primitives, settings copy and the viewer settings analytics person properties, the settings modules that read no app state",
   "type": "module",
   "sideEffects": false,
   "private": true,
@@ -25,6 +25,9 @@
     "node": ">=24.0.0"
   },
   "exports": {
+    "./components/settings/settings-catalogue": "./src/components/settings/settings-catalogue.ts",
+    "./components/settings/settings-item": "./src/components/settings/settings-item.tsx",
+    "./components/settings/settings-section": "./src/components/settings/settings-section.ts",
     "./components/settings/setup-answers-copy": "./src/components/settings/setup-answers-copy.ts",
     "./components/settings/viewer/viewer-person-properties": "./src/components/settings/viewer/viewer-person-properties.ts",
     "./components/settings/viewer/viewer-settings-copy": "./src/components/settings/viewer/viewer-settings-copy.ts",
@@ -37,10 +40,13 @@
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "dependencies": {
-    "@taucad/preferences": "workspace:*"
+    "@taucad/preferences": "workspace:*",
+    "@taucad/ui": "workspace:*",
+    "lucide-react": "catalog:"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",

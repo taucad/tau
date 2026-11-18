@@ -368,7 +368,7 @@ export const writePhoneFrameHint = (key: string, tab: MobilePanelId, now: number
  * falls back to.
  *
  * It derives the values as `frameHintVariables`, `phoneFrameHintVariables` and `phoneFrameDestination` do; the
- * frame-hint test holds them together.
+ * frame-hint test holds them together. Its CSP hash is listed in `#lib/inline-script-hashes`.
  *
  * @returns The script body.
  */

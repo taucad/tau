@@ -33,7 +33,10 @@ import { mintViewRecordId } from '#workbench-records/converters.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { exceptionsForView, viewExceptions, viewExceptionsStore } from '#workbench-records/view-exceptions.js';
 import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/records/view-record';
-import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import {
+  useProjectWorkspace,
+  useWorkspaceLayoutReady,
+} from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
@@ -41,7 +44,6 @@ import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
 import { useProject } from '#hooks/use-project.js';
 import { useModelAvailability } from '#hooks/use-project-availability.js';
-import { useFileTreeMap } from '@taucad/files-ui/hooks/use-file-tree';
 import { chooseProjection } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { Dockview } from '#components/panes/dockview.js';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
@@ -132,14 +134,24 @@ function ViewerPanel({
     () => properties.api.isVisible,
     () => true,
   );
-  return isVisible ? (
+  /* The viewer's first frame waits for layout-ready (#2293). A project's layout record is applied the moment its dock
+   * attaches, which on a return to a live project is before the lanes are laid out: the panel is then at Dockview's
+   * 100 px minimum inside a 1 px lane, and a canvas mounted there takes that box's aspect and keeps it for frames after
+   * the lanes settle. Until then the panel shows the viewer's frame, which has no size of its own to keep. */
+  const isLayoutReady = useWorkspaceLayoutReady();
+  if (!isVisible) {
+    return undefined;
+  }
+  return isLayoutReady ? (
     /* The product tour's Look around tip hangs from this viewer's corner; the first viewer on the page is used. */
     <div ref={viewerAnchor} className='size-full'>
       <Suspense fallback={<ViewerFrame />}>
         <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} profile={profile} />
       </Suspense>
     </div>
-  ) : undefined;
+  ) : (
+    <ViewerFrame />
+  );
 }
 
 export function createViewerNewTab({
@@ -272,16 +284,47 @@ const isViewerSourcePath = (path: string, capabilities: Pick<CapabilitiesManifes
     (registration) => registration.kind === 'kernel' && sourcePathMatchesExtensions(path, registration.extensions),
   );
 
+/** A file entry as the tree or the project search answers it: enough to decide whether the viewer opens it. */
+type ViewerCandidateEntry = Pick<FileEntry, 'type' | 'path' | 'name' | 'size' | 'provenance'>;
+
 export const listViewerSelectableFiles = (
-  fileTree: ReadonlyMap<string, FileEntry>,
+  entries: Iterable<ViewerCandidateEntry>,
   capabilities: Pick<CapabilitiesManifest, 'registrations'>,
 ): ViewerSelectableFile[] =>
-  [...fileTree.values()]
+  [...new Map([...entries].map((entry) => [entry.path, entry])).values()]
     .filter(
       (entry) => entry.type === 'file' && isProjectViewerEntry(entry) && isViewerSourcePath(entry.path, capabilities),
     )
     .map(({ name, path, size }) => ({ name, path, size }))
     .sort((a, b) => a.path.localeCompare(b.path));
+
+/** How many files one extension's search lists for an empty viewer; the picker scrolls past ten. */
+const viewerSourceSearchLimit = 200;
+
+/**
+ * The project's viewer source files, from the project's authority rather than the lazy tree: the tree holds only the
+ * directories someone has expanded, so a file under a collapsed folder would be missing from an empty viewer.
+ *
+ * @param tree - The project's file tree service.
+ * @param capabilities - The runtime's registrations; kernel extensions decide what the viewer opens.
+ * @returns Every viewer source file the searches found, in path order.
+ */
+export async function listViewerSourceFiles(
+  tree: Pick<FileTreeService, 'searchFiles'>,
+  capabilities: Pick<CapabilitiesManifest, 'registrations'>,
+): Promise<ViewerSelectableFile[]> {
+  const extensions = capabilities.registrations.flatMap((registration) =>
+    registration.kind === 'kernel' ? registration.extensions : [],
+  );
+  // A name glob per extension, at any depth; a wildcard kernel takes every file.
+  const queries = extensions.includes('*') ? [''] : [...new Set(extensions.map((extension) => `*.${extension}`))];
+  const results = await Promise.all(
+    queries.map(async (query) =>
+      tree.searchFiles(query, { maxResults: viewerSourceSearchLimit, includeDirectories: false }),
+    ),
+  );
+  return listViewerSelectableFiles(results.flat(), capabilities);
+}
 
 /** Browse and search the project's authority, including directories the visible tree has never expanded. */
 export function createViewerFileDataSource(
@@ -342,13 +385,42 @@ function useViewerFileDataSource(): FileSelectorDataSource {
 }
 
 function useViewerSelectableFiles(): ViewerSelectableFile[] | undefined {
-  const fileTree = useFileTreeMap();
+  const tree = useOptionalFileManager()?.treeService;
   const capabilities = useViewerCapabilities();
-
-  return useMemo(
-    () => (capabilities ? listViewerSelectableFiles(fileTree, capabilities) : undefined),
-    [fileTree, capabilities],
+  const revision = useSyncExternalStore(
+    useCallback((listener: () => void) => tree?.subscribeTree(listener) ?? (() => undefined), [tree]),
+    useCallback(() => tree?.completeTreeVersion ?? 0, [tree]),
+    () => 0,
   );
+  const [listed, setListed] = useState<ViewerSelectableFile[]>();
+
+  useEffect(() => {
+    if (!tree || !capabilities) {
+      return undefined;
+    }
+    const superseded = new AbortController();
+    // A search answers the tree revision it started on; a later revision runs its own.
+    const isCurrent = (): boolean => !superseded.signal.aborted && tree.completeTreeVersion === revision;
+    // async-iife: bootstrap -- An effect cannot await the project search.
+    void (async () => {
+      try {
+        const files = await listViewerSourceFiles(tree, capabilities);
+        if (isCurrent()) {
+          setListed(files);
+        }
+      } catch {
+        if (isCurrent()) {
+          setListed([]);
+        }
+      }
+    })();
+    return () => {
+      superseded.abort();
+    };
+  }, [tree, capabilities, revision]);
+
+  // A list for an older tree is kept while the next search runs, so the picker does not flash back to loading.
+  return capabilities ? listed : undefined;
 }
 
 export function ViewerEmptyFilePicker({

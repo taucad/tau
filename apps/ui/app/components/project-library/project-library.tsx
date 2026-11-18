@@ -14,8 +14,8 @@ import {
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
 import type { ProjectLocator, ProjectDiscoveryIssue } from '@taucad/filesystem';
 import { describeProjectManifestIssue } from '@taucad/types';
-import type { ProjectListItem } from '#types/project-library.types.js';
-import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
+import type { PendingProjectRecovery } from '@taucad/files-ui/types/pending-project-operation.types';
 import { createColumns } from '#components/project-library/columns.js';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Card, CardHeader, CardFooter } from '@taucad/ui/components/card';
@@ -73,7 +73,7 @@ import { ProjectCard, ProjectCardMedia } from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
 import { PageHeader, SectionHeader, usePhoneTopBar } from '#components/layout/page-header.js';
-import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
+import { projectSlugOf, projectUrlOr } from '@taucad/files-ui/utils/project-url.utils';
 import {
   projectLocationDescriptor,
   projectLocationFullLabel,
@@ -226,7 +226,7 @@ export function ProjectLibrary({
   const [repairTarget, setRepairTarget] = useState<WorkspaceBindingRepairGroup | undefined>();
   /* Everything this device holds, the Trash included — one listing under the
      same query key — so a trashed project is never offered as Tau Cloud's alone. */
-  const { projects: heldProjects } = useProjects({ includeDeleted: true });
+  const { projects: heldProjects } = useProjects({ scope: 'all' });
   const {
     projects,
     conflicts,
@@ -244,7 +244,7 @@ export function ProjectLibrary({
     chooseProjectDirectory,
     updateName,
     isLoading,
-  } = useProjects({ includeDeleted: showDeleted });
+  } = useProjects({ scope: showDeleted ? 'trash' : 'live' });
   const degradedProjects = projects.filter(
     (project) => project.manifestIssue !== undefined && project.deletedAt === undefined,
   );

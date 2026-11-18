@@ -1,6 +1,6 @@
 'use client';
 
-import { SettingsGroup, SettingsItem } from '#components/settings/settings-item.js';
+import { SettingsGroup, SettingsItem } from '@taucad/settings-ui/components/settings/settings-item';
 
 import { useAuth } from '@better-auth-ui/react';
 import { cn } from '@taucad/ui/utils/cn';

@@ -264,7 +264,7 @@ Hover never reveals the only route to an action (DESIGN Composition and visible 
 
 **Why**: Color Policy §2 (2026-08-26) makes hover and ordinary selection structural neutrals; the card's `hover:border-primary/60` (2026-08-22) and the library's `ring-3 ring-primary` selection predate it, and at the audit 16 sites used `hover:border-primary*`, `hover:text-primary` or `hover:bg-primary*`.
 
-**Enforced by**: focus geometry: `packages/ui/src/styles/focus-outline.test.ts` with its regex extended over `apps/ui/app`; accent hover: `tau-lint/no-accent-hover`; motion: UI Policy §6 (review).
+**Enforced by**: focus geometry: `packages/ui/src/styles/focus-outline.test.ts` for the design system's components, and `apps/ui/app/styles/focus-outline.test.ts` with the same regex over `apps/ui/app` and the UI libraries it depends on; accent hover: `tau-lint/no-accent-hover`; motion: UI Policy §6 (review).
 
 ### 9. Choose button variants by role and sizes by variant
 

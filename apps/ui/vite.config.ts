@@ -445,7 +445,7 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
 export const createUiReactCompilerPlugin = (): Plugin => {
   const compilerPlugins = react({
     compiler: { target: '19', logDiagnostics: true },
-    // The ui-kit (UI wave A), chat-ui (UI wave B), project-workspace (UI wave C), files-ui, editor-ui and settings-ui (UI wave D) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
+    // The ui-kit (UI wave A), chat-ui (UI wave B), project-workspace (UI wave C), files-ui, editor-ui, settings-ui and publish-ui (UI wave D) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
     include: [
       '**/apps/ui/app/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-kit/src/**/*.{js,jsx,ts,tsx}',
@@ -454,6 +454,7 @@ export const createUiReactCompilerPlugin = (): Plugin => {
       '**/apps/libs/files-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/editor-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/settings-ui/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/publish-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-core/src/**/*.{js,jsx,ts,tsx}',
     ],
     exclude: [

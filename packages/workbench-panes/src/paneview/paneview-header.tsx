@@ -155,9 +155,12 @@ export function PaneviewHeader({
         /* The sidebar row's lit states and colour (`sidebarRowClass`): hover, focus-within and
          * an open nested menu light `bg-sidebar-accent`, so an action's `nested-action-hover`
          * reads as a surface on top. `data-[state=open]` is the pane's expansion, whose
-         * `bg-card` needs the compound variants to yield to the lit states. */
+         * `bg-card` needs the compound variants to yield to the lit states. `leading-5` is the
+         * row's own: Dockview sets the pane header's inline line-height to its header size
+         * (`paneviewHeaderSize`, 40px), which made the title taller than this 32px row and its
+         * toggle a target whose size axe cannot determine (#2291). */
         className={cn(
-          'group/paneview-header mx-2 my-1 flex h-8 min-w-0 items-center overflow-hidden rounded-lg border border-transparent bg-transparent pr-1 text-[13px] select-none',
+          'group/paneview-header mx-2 my-1 flex h-8 min-w-0 items-center overflow-hidden rounded-lg border border-transparent bg-transparent pr-1 text-[13px] leading-5 select-none',
           'hover:bg-sidebar-accent focus-within:bg-sidebar-accent has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
           'data-[state=open]:border-border data-[state=open]:bg-card data-[state=open]:hover:bg-sidebar-accent data-[state=open]:focus-within:bg-sidebar-accent data-[state=open]:has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
         )}

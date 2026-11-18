@@ -166,7 +166,7 @@ export function ThreeCanvasInstance({
 }: ThreeCanvasInstanceProps): React.JSX.Element {
   const dpr = resolveViewerPixelRatio();
   const isInspectorEnabled = useViewerFeature('webGpuInspector');
-  const { showRenderFps = true, readableCanvas = false } = useViewerEnvironment();
+  const { showRenderFps = true, readableCanvas = false, renderTierOverride } = useViewerEnvironment();
   const isTauDebugEnabled = useViewerFeature('tauDebug');
   const canvasId = useId();
   const graphicsRef = useGraphics();
@@ -330,7 +330,7 @@ export function ThreeCanvasInstance({
       if (glProperty.isRetired()) {
         return;
       }
-      const held: CanvasHostRoot = { root: state, isRetired: glProperty.isRetired };
+      const held: CanvasHostRoot = { root: state, isRetired: glProperty.isRetired, renderTierOverride };
       rootRef.current = held;
       installTauPointerRays(state);
       const created = canvasHostCreated(held);

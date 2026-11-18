@@ -83,7 +83,10 @@ let targets: RenderTarget[];
 
 vi.mock('@react-three/fiber', () => ({
   createPortal: (children: React.ReactNode) => <div data-testid='environment'>{children}</div>,
-  useThree: () => ({ camera, scene, gl: renderer, invalidate }),
+  useThree: (selector?: (state: { gl: unknown }) => unknown) => {
+    const state = { camera, scene, gl: renderer, invalidate };
+    return selector ? selector(state) : state;
+  },
   useFrame: vi.fn(),
 }));
 

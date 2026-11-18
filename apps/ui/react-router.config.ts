@@ -45,16 +45,25 @@ export default {
    * `v8_viteEnvironmentApi` is React Router 8's build (blueprint B6, RR5): one Vite config builds the client and server
    * environments, so server-only options live under `environments.ssr` in `vite.config.ts`, and the Netlify adapter
    * (4.x) writes a function that imports `build/server/index.js` and the adapter's `serverless` handler.
+   *
+   * `v8_trailingSlashAwareDataRequests` is React Router 8's data request naming (blueprint B5, RR4): a path ending in
+   * `/` asks for `<path>_.data`, so Home's data request is `/_.data`, no longer `/_root.data`. The marketing edge
+   * function and the skew protection pin accept both names, so a tab of an earlier build still gets its data.
+   *
+   * `v8_splitRouteModules` is React Router 8's default (blueprint B8, RR6): a route's `clientLoader`, `clientAction`,
+   * `clientMiddleware` and `HydrateFallback` load as their own chunks. No route has one that splits today, and
+   * `scripts/check-critical-budget.mts` fails when a split module first appears in the manifest, because split chunks
+   * load outside the patched `loadRouteModule` stale-build fallback.
    */
   future: {
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
+    /* eslint-disable @typescript-eslint/naming-convention -- React Router's flag names. */
     unstable_optimizeDeps: true,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
     v8_passThroughRequests: true,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
     v8_middleware: true,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
+    v8_splitRouteModules: true,
+    v8_trailingSlashAwareDataRequests: true,
     v8_viteEnvironmentApi: true,
+    /* eslint-enable @typescript-eslint/naming-convention -- The flag names end here. */
   },
   /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.
@@ -79,7 +88,9 @@ export default {
    * the Home shell is moved off `/`'s static path to the file the marketing edge
    * function rewrites to (progressive loading PL4, `scripts/place-static-shells.ts`),
    * and where the offline shell worker is generated from the emitted `/usage`
-   * document and the Vite build manifest (B5 R3). The desktop and daemon configs
+   * document and the Vite build manifest (B5 R3), and where the warm manifest is
+   * written from the Vite build manifest and the module-id manifest (progressive
+   * loading PL8, `scripts/write-warm-manifest.ts`). The desktop and daemon configs
    * are separate files and never run this: both already boot from a packaged SPA
    * index fallback.
    */
@@ -90,6 +101,16 @@ export default {
         `Static shell: ${placed.from} -> ${placed.to}${placed.removed.map((file) => `, removed ${file}`).join('')}`,
       );
     }
+    const { writeWarmManifest } = await import('./scripts/write-warm-manifest');
+    const warm = writeWarmManifest({
+      clientDirectory: `${reactRouterConfig.buildDirectory}/client`,
+      moduleIdsPath: `${reactRouterConfig.buildDirectory}/client-module-ids.json`,
+    });
+    console.log(
+      `Warm manifest: ${Object.entries(warm.classes)
+        .map(([id, files]) => `${id} ${String(files.length)} files`)
+        .join(', ')}`,
+    );
     if (!tauCloudEnabled) {
       return;
     }

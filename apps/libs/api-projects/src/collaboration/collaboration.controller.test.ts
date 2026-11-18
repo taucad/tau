@@ -210,7 +210,7 @@ describe('CollaboratorsController', () => {
       ownerId,
     );
 
-    await expect(invitationsController.accept(invited.token, inviteeId)).resolves.toMatchObject({
+    await expect(invitationsController.accept({ token: invited.token }, inviteeId)).resolves.toMatchObject({
       projectId,
       role: 'write',
     });
@@ -219,7 +219,7 @@ describe('CollaboratorsController', () => {
   });
 
   it('should refuse a token that was never issued', async () => {
-    await expect(invitationsController.accept('not-a-token', inviteeId)).rejects.toThrow(NotFoundException);
+    await expect(invitationsController.accept({ token: 'not-a-token' }, inviteeId)).rejects.toThrow(NotFoundException);
   });
 
   // === role change (PATCH) ===
@@ -233,7 +233,7 @@ describe('CollaboratorsController', () => {
       { email: 'invitee@example.test', role: 'write' },
       ownerId,
     );
-    await invitationsController.accept(invited.token, inviteeId);
+    await invitationsController.accept({ token: invited.token }, inviteeId);
     const tokenHashBefore = invitations[0]?.['tokenHash'];
 
     await expect(
@@ -252,7 +252,9 @@ describe('CollaboratorsController', () => {
     );
     await collaboratorsController.setRole({ projectId, email: 'Invitee@Example.test' }, { role: 'write' }, ownerId);
 
-    await expect(invitationsController.accept(invited.token, inviteeId)).resolves.toMatchObject({ role: 'write' });
+    await expect(invitationsController.accept({ token: invited.token }, inviteeId)).resolves.toMatchObject({
+      role: 'write',
+    });
     expect(collaborators).toStrictEqual([expect.objectContaining({ userId: inviteeId, role: 'write' })]);
   });
 
@@ -280,7 +282,7 @@ describe('CollaboratorsController', () => {
       { email: 'invitee@example.test', role: 'write' },
       ownerId,
     );
-    await invitationsController.accept(invited.token, inviteeId);
+    await invitationsController.accept({ token: invited.token }, inviteeId);
 
     await collaboratorsController.revoke(projectId, 'invitee@example.test', ownerId);
     expect(collaborators).toStrictEqual([]);
@@ -297,7 +299,7 @@ describe('CollaboratorsController', () => {
       { email: 'invitee@example.test', role: 'write' },
       ownerId,
     );
-    await invitationsController.accept(invited.token, inviteeId);
+    await invitationsController.accept({ token: invited.token }, inviteeId);
     await collaboratorsController.invite(projectId, { email: 'invitee@example.test', role: 'write' }, ownerId);
 
     await collaboratorsController.revoke(projectId, 'invitee@example.test', ownerId);
@@ -312,7 +314,7 @@ describe('CollaboratorsController', () => {
       { email: 'invitee@example.test', role: 'write' },
       ownerId,
     );
-    await invitationsController.accept(invited.token, inviteeId);
+    await invitationsController.accept({ token: invited.token }, inviteeId);
     expect(collaborators[0]).toMatchObject({ role: 'write' });
 
     await collaboratorsController.invite(projectId, { email: 'invitee@example.test', role: 'read' }, ownerId);

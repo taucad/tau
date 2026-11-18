@@ -8,8 +8,8 @@ import { describe, expect, it } from 'vitest';
 import { consumers } from '#consumer-parity-summary.js';
 
 /*
- * The end-to-end ratchet (operator ruling 2026-11-15): an end-to-end suite that passed two consecutive e2e-nightly
- * runs is listed in its project's `test:e2e:queue` `dependsOn`, runs in ci.yml's `e2e-queue` lane (one row per suite,
+ * The end-to-end ratchet (operator ruling 2026-11-15): an end-to-end suite that passed five consecutive e2e-nightly
+ * runs (two before 2026-11-17, merge-queue defect MQ-3) is listed in its project's `test:e2e:queue` `dependsOn`, runs in ci.yml's `e2e-queue` lane (one row per suite,
  * in the merge queue, when its project is affected) and leaves the nightly matrix for good. The plan's own rows and
  * failures are pinned with the other lanes in `ci-affected-lanes.test.ts`.
  */
@@ -68,8 +68,8 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     'ui-e2e:test:e2e:non-isolated',
   ];
 
-  it('should plan the lane from test:e2e:queue, in the merge queue only', () => {
-    expect(laneSelectors['e2e-queue']).toEqual({ targets: ['test:e2e:queue'], pr: 'queue' });
+  it('should plan the lane from test:e2e:queue, in the merge queue and for a pull request that touches the project', () => {
+    expect(laneSelectors['e2e-queue']).toEqual({ targets: ['test:e2e:queue'], pr: 'touched' });
     expect(planScript).toContain('e2e_queue=$(flag e2e-queue)');
     expect(planScript).toContain('echo "e2e-queue-suites=$e2e_queue_suites"');
     expect(ci.jobs['plan']?.outputs?.['e2e-queue-suites']).toBe(expression('steps.plan.outputs.e2e-queue-suites'));

@@ -2,11 +2,11 @@ import { Fragment, useMemo, useState } from 'react';
 import { ChevronRight, Cloud, Copy, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 import { useProjects } from '#hooks/use-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useAppUiPreferences } from '#hooks/use-app-ui-preferences.js';
-import { projectChatUrl, projectUrl, projectUrlOr } from '#utils/project-url.utils.js';
+import { projectChatUrl, projectUrl, projectUrlOr } from '@taucad/files-ui/utils/project-url.utils';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import {
   SidebarGroup,
@@ -29,10 +29,11 @@ import { ProjectChatList } from '#components/nav/project-chat-list.js';
 import { sidebarDisclosureButtonClass } from '#components/nav/sidebar-disclosure.styles.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { StatusMark } from '#components/nav/status-mark.js';
-import { ProjectSyncStatus } from '#components/nav/project-sync-status.js';
+import { ProjectSyncStatus, projectSyncIndicator } from '#components/nav/project-sync-status.js';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import {
   SidebarFailureRow,
+  SidebarRowActions,
   SidebarRowContextMenu,
   SidebarRowLink,
   SidebarRowMenuButton,
@@ -524,51 +525,47 @@ function ProjectNavigationItem({
                 hasTooltip={false}
                 onClick={onOpen}
               />
-              <span
-                className='flex shrink-0 items-center'
-                onClick={(event) => {
-                  event.stopPropagation();
-                }}
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                }}
+              {/* R13, D13: the row's actions are for the row being reached and sit over the name's dissolved tail, so
+                  revealing them never moves the name; a sync exception stays shown in the same slot. */}
+              <SidebarRowActions
+                status={
+                  projectSyncIndicator(row.sync, isCloudPending) === undefined ? undefined : (
+                    <ProjectSyncStatus
+                      sync={row.sync}
+                      isCloudPending={isCloudPending}
+                      onOpenDetails={openSyncDetails}
+                    />
+                  )
+                }
               >
-                <ProjectSyncStatus sync={row.sync} isCloudPending={isCloudPending} onOpenDetails={openSyncDetails} />
-                {/* R13: the row's actions are for the row being reached: fine pointers see them on
-                    hover or focus, coarse pointers always, and an open menu keeps its anchor (I3). */}
-                <span
-                  data-slot='project-row-actions'
-                  className='hidden items-center group-focus-within/row:flex group-hover/row:flex has-[:is([aria-haspopup=menu],[aria-haspopup=dialog])[data-state=open]]:flex pointer-coarse:flex'
-                >
-                  <SidebarRowMenuButton isResponsive name={project.name} items={menuItems} className='w-48' />
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type='button'
-                        variant='ghost'
-                        size='icon'
-                        className={sidebarRowButtonClass}
-                        aria-label={`New chat in ${project.name}`}
-                        aria-disabled={!canCreateChat}
-                        onClick={() => {
-                          if (canCreateChat) {
-                            void onCreateChat();
-                          }
-                        }}
-                      >
-                        <SquarePen aria-hidden className='size-3.5' />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side='bottom'>
-                      {isCloudPending
-                        ? 'New chat — Wait for project files to be ready.'
-                        : project.slugs
-                          ? 'New chat'
-                          : 'New chat — Project address is not ready.'}
-                    </TooltipContent>
-                  </Tooltip>
-                </span>
-              </span>
+                <SidebarRowMenuButton isResponsive name={project.name} items={menuItems} className='w-48' />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      className={sidebarRowButtonClass}
+                      aria-label={`New chat in ${project.name}`}
+                      aria-disabled={!canCreateChat}
+                      onClick={() => {
+                        if (canCreateChat) {
+                          void onCreateChat();
+                        }
+                      }}
+                    >
+                      <SquarePen aria-hidden className='size-3.5' />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side='bottom'>
+                    {isCloudPending
+                      ? 'New chat — Wait for project files to be ready.'
+                      : project.slugs
+                        ? 'New chat'
+                        : 'New chat — Project address is not ready.'}
+                  </TooltipContent>
+                </Tooltip>
+              </SidebarRowActions>
             </>
           )}
         </div>

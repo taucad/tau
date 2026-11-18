@@ -6,6 +6,7 @@ import { filesPane, treeItem } from '#support/file-tree.js';
 import { axeAudit } from '#support/page-audit.js';
 import { writeWorkbenchFile } from '#support/workbench-files.js';
 import type {
+  EarlyInput,
   ShownSpan,
   ProjectLoadFrame,
   ProjectLoadBox,
@@ -1452,7 +1453,7 @@ knownDefect(
   'F6 (A15d): with the agent host 3 s late, the chat lane shows no empty state or skeleton, its header indicator shows from 1,000 ms for at least 500 ms, and the composer keeps its box',
   {
     artifact: 'f6-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: turnBudget,
     measure: async () => measureHeldTranscript('f6-wide'),
     assert: (record) => {
@@ -1543,6 +1544,268 @@ knownDefect(
         },
         'F7: the served page had no composer to type in before hydration, or the typing was not adopted in place',
         { servedInput: true, text: 'abc', caret: 3, focused: true, composerMoves: [] },
+      );
+    },
+  },
+);
+
+/** The composer bar's controls, as rects in page order: the add trigger, each collapsible group's controls, Send. */
+const measureComposerBarControls = async (barSelector: string): Promise<readonly string[]> =>
+  target.evaluate((selector) => {
+    const bar = document.querySelector(selector);
+    if (!bar) {
+      return [];
+    }
+    const controls = bar.querySelectorAll(
+      ':scope > [data-slot=composer-left] > :not(input):not([data-slot=composer-collapsible]), :scope [data-slot=composer-collapsible] > *, :scope > [data-slot=composer-right] > :not([data-slot=composer-collapsible])',
+    );
+    const box = (rect: DOMRect): string =>
+      `${Math.round(rect.x)},${Math.round(rect.y)} ${Math.round(rect.width)}x${Math.round(rect.height)}`;
+    /* The composer's input row: the box child that holds the input (the native textarea, or the editor). */
+    let row = bar.parentElement?.querySelector('textarea, .tiptap') ?? undefined;
+    while (row?.parentElement && row.parentElement !== bar.parentElement) {
+      row = row.parentElement;
+    }
+    return [
+      `bar ${box(bar.getBoundingClientRect())}`,
+      `input row ${row ? box(row.getBoundingClientRect()) : 'none'}`,
+      ...[...controls]
+        .map((control) => control.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0)
+        .map((rect) => box(rect)),
+    ];
+  }, barSelector);
+
+knownDefect(
+  'F7b (A15d): the project composer bar controls keep their rects across adoption, the served bar reserving each control at its resting box',
+  {
+    artifact: 'f7b-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => {
+      const { path } = await seedProjects('wide');
+      await target.navigate('/');
+      await target.expectVisible(composer, 60_000);
+      await holdRequestsUntilReleased(entryChunk);
+      const early = await openBeforeHydration({
+        path,
+        input: anyComposerInput,
+        hydrated: richComposer,
+        text: '',
+        wait: 1500,
+        settle: 0,
+      });
+      const before = await measureComposerBarControls(
+        '[data-slot="workspace-frame-composer"] [data-slot="composer-bar"]',
+      );
+      await releaseHeldRequests();
+      await settleProject();
+      const after = await measureComposerBarControls('[data-chat-composer="main"] [data-slot="composer-bar"]');
+      await keepRecord('f7b-wide', { early: { ...early, before: undefined, after: undefined }, before, after });
+      return { early, before, after };
+    },
+    assert: ({ early, before, after }) => {
+      precondition(early.found && !early.hydratedBeforeAct, 'F7b: the served page had no composer before hydration');
+      /* The bar, its input row, Add and Send keep their whole rect. The mode and model controls keep their slot, the edge the bar lays them
+       * out from (mode's left, model's right beside Send) and their height; their widths follow their labels, which
+       * the frame cannot know (label parity is A10's, programme control 13:30Z). */
+      const parse = (rect: string | undefined): readonly number[] => (rect ?? '').split(/[ ,x]/u).map(Number);
+      const slot = (rects: readonly string[]): readonly string[] =>
+        rects.map((rect, index) => {
+          const [x = 0, y = 0, width = 0, height = 0] = parse(rect);
+          /* After the bar and its input row: add, mode, model, Send. */
+          return index === 3
+            ? `left ${x}, y ${y}, h ${height}`
+            : index === 4
+              ? `right ${x + width}, y ${y}, h ${height}`
+              : rect;
+        });
+      /* Both bars are measured whole (bar, input row, Add, mode, model, Send), so a selector that stops matching
+       * cannot make the comparison below pass on two empty lists. */
+      expectMeasured(
+        {
+          controls: after.length,
+          hasInputRow: after[1]?.startsWith('input row ') === true && !after[1].endsWith('none'),
+        },
+        'F7b: the rich bar, its input row or one of its controls was not measured',
+        { controls: 6, hasInputRow: true },
+      );
+      expectMeasured(
+        { controls: before.length, slots: slot(before) },
+        'F7b: the served bar does not reserve the rich bar controls in their boxes',
+        { controls: after.length, slots: slot(after) },
+      );
+    },
+  },
+);
+
+const projectDraft = 'Fillet the bracket edges';
+
+knownDefect(
+  "H-e (A15d, project route): a project chat's stored draft is the composer value in the first frame it is painted",
+  {
+    artifact: 'h-e-project-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => {
+      await seedProjects('wide', { regions: { input: anyComposerInput } });
+      await target.type(composer, projectDraft);
+      /* The draft is in the chat's composer record, and its hint, before the measured load. */
+      await target.delay(settleWindow);
+      await target.reload();
+      await target.waitFor(
+        ([selector, draft]) => document.querySelector(selector)?.textContent.includes(draft) === true,
+        [richComposer, projectDraft] as const,
+        { timeout: 60_000 },
+      );
+      const record = await keepRecord('h-e-project-wide');
+      precondition(
+        regionsOf(record, 'input').some((entry) => entry.present && entry.text === projectDraft),
+        'H-e (project): the draft never came back after the reload',
+      );
+      return record;
+    },
+    assert: (record) => {
+      const first = regionsOf(record, 'input').find((entry) => entry.present);
+      expectMeasured(
+        first?.text,
+        `H-e (project): the composer's first painted value, ${first === undefined ? 'absent' : describeFrame(first)}`,
+        projectDraft,
+      );
+    },
+  },
+);
+
+/** The reply the agent host gives a sent painted draft, so a row can tell a send happened. */
+const paintedReply = 'Filleting the bracket edges.';
+/** Another text the draft hint can hold than the chat's record does. */
+const otherDraft = 'Chamfer the bracket edges';
+/** What the composer's status says once a queued send on a painted draft is cancelled. */
+const paintedSendCancelled = 'Queued send cancelled: the saved draft differs.';
+
+/**
+ * Enter pressed on a project chat's painted draft before hydration (ruling 2026-11-17T03:28Z): the chat's record holds
+ * `projectDraft`; the draft hint paints it (`same`) or another text (`other`).
+ */
+const enterOnPaintedDraft = async (
+  label: string,
+  hint: 'same' | 'other',
+): Promise<{
+  readonly early: EarlyInput;
+  readonly served: { readonly painted: string; readonly queued: boolean; readonly status: string };
+  readonly replied: boolean;
+  readonly text: string;
+  readonly status: string;
+}> => {
+  const { path } = await seedProjects('wide');
+  await target.type(composer, projectDraft);
+  /* The draft is in the chat's composer record, and its hint, before the measured load. */
+  await target.delay(settleWindow);
+  if (hint === 'other') {
+    await target.evaluate((text) => {
+      const stored = JSON.parse(localStorage.getItem('tau-draft-hint') ?? '{"v":1,"projects":{}}') as {
+        projects: Record<string, { text: string }>;
+      };
+      for (const entry of Object.values(stored.projects)) {
+        entry.text = text;
+      }
+      localStorage.setItem('tau-draft-hint', JSON.stringify(stored));
+    }, otherDraft);
+  }
+  await target.installAgentHostGatewayFixture([{ text: paintedReply, usage }]);
+  /* Hydration waits for the Enter, not for a fixed time a loaded runner can outlast. */
+  await holdRequestsUntilReleased(entryChunk);
+  const early = await openBeforeHydration({
+    path,
+    input: anyComposerInput,
+    hydrated: richComposer,
+    text: '',
+    enter: true,
+    wait: 1500,
+    settle: 0,
+  });
+  const served = await target.evaluate(
+    (input) => ({
+      painted: document.querySelector<HTMLTextAreaElement>(input)?.value ?? '',
+      queued: document.querySelector('[data-hand-off-box][data-queued-send]') !== null,
+      status: document.querySelector('[data-hand-off-box] [role=status]')?.textContent ?? '',
+    }),
+    'textarea[aria-label="Chat message"]',
+  );
+  await releaseHeldRequests();
+  await target.expectVisible(selectors.getByCss(richComposer), 60_000);
+  /* A send reaches the agent host and its reply shows; time for it to happen, or not. Where it should happen the row
+   * waits for the reply rather than a fixed time a loaded runner can outlast; the window after it still catches a
+   * second send. */
+  if (hint === 'same') {
+    await target
+      .waitFor((reply) => document.body.textContent.includes(reply), paintedReply, { timeout: 30_000 })
+      .catch(() => undefined);
+  }
+  await target.delay(settleWindow * 4);
+  const state = await target.evaluate(
+    ([selector, reply]) => ({
+      replied: document.body.textContent.includes(reply),
+      text: document.querySelector(selector)?.textContent.trim() ?? '',
+      status: [...document.querySelectorAll('[role=status]')].map((node) => node.textContent).join(' | '),
+    }),
+    [richComposer, paintedReply] as const,
+  );
+  await target.writeArtifact(
+    `project-load-frames/${label}.json`,
+    `${JSON.stringify({ early: { ...early, before: undefined, after: undefined }, served, state }, null, 2)}\n`,
+  );
+  precondition(early.found, `${label}: the served composer was not on screen before hydration`);
+  precondition(!early.hydratedBeforeAct, `${label}: the page had hydrated before the Enter`);
+  const held = await readDelayedRequests();
+  precondition(
+    held.some((url) => new RegExp(entryChunk, 'u').test(url)),
+    `${label}: the entry chunk was never delayed`,
+  );
+  return { early, served, ...state };
+};
+
+knownDefect(
+  'H-f (A15d, project route, painted draft the record holds): Enter on the painted draft before hydration queues visibly and sends it once after adoption',
+  {
+    artifact: 'h-f-painted-same-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => enterOnPaintedDraft('h-f-painted-same-wide', 'same'),
+    assert: ({ served, replied, text }) => {
+      expectMeasured(
+        { painted: served.painted, queued: served.queued, servedStatus: served.status, replied, text },
+        'H-f (project, same): the Enter on the painted draft was not queued visibly, or not sent once after adoption',
+        {
+          painted: projectDraft,
+          queued: true,
+          servedStatus: 'Send queued. Press Escape to cancel.',
+          replied: true,
+          text: '',
+        },
+      );
+    },
+  },
+);
+
+knownDefect(
+  'H-f (A15d, project route, painted draft the record does not hold): Enter on it queues visibly, then is cancelled with the record’s text shown and a status saying why',
+  {
+    artifact: 'h-f-painted-other-wide',
+    expectedFailure: false,
+    budget: loadBudget,
+    measure: async () => enterOnPaintedDraft('h-f-painted-other-wide', 'other'),
+    assert: ({ served, replied, text, status }) => {
+      expectMeasured(
+        {
+          painted: served.painted,
+          queued: served.queued,
+          replied,
+          text,
+          cancelledNotice: status.includes(paintedSendCancelled),
+        },
+        'H-f (project, other): the Enter on a painted draft the record does not hold was not queued visibly, or was sent, or not cancelled with the record’s text and a notice',
+        { painted: otherDraft, queued: true, replied: false, text: projectDraft, cancelledNotice: true },
       );
     },
   },
@@ -2047,7 +2310,7 @@ knownDefect(
   'F13 (A15d): under reduced motion, with the agent host 3 s late, the chat lane indicator has words and runs no animation',
   {
     artifact: 'f13-wide',
-    expectedFailure: true,
+    expectedFailure: false,
     budget: turnBudget,
     measure: async () => {
       await target.emulateReducedMotion('reduce');

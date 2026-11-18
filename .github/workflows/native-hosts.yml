@@ -12,6 +12,13 @@
 # - macOS Intel (darwin-x64): the same prepare and suites, PicoGK's typed refusal on the `arch` axis
 #   and a refused `TAU_DEPENDENCY_TARGET`; `macos-26-intel`, GitHub-hosted (ruling X39).
 #
+# One job per host and project (ST-3, lane budget, operator approval 2026-11-18), so the slowest job is one
+# project's checks rather than all of them in series: `build123d` runs the Build123d suites on the seed;
+# `cli` builds the CLI and runs `tau prepare build123d` to `ready`, and on linux-x64 the glibc 2.28, musl
+# and libGL selection checks; `picogk` runs each `test:native-linux` project on linux-x64 (a job per
+# project) and PicoGK's typed refusals on darwin-x64. Every check runs exactly as before, in exactly one
+# job, and the caller's required check needs every job (a failed job fails the called workflow).
+#
 # Placement (CI throughput review Q-3, 2026-11-13): `ci.yml` calls this workflow (`workflow_call`) in the
 # merge queue, and on a push to `main` the queue did not already prove, when its plan finds a
 # `tag:ci:native-hosts` project (Build123d, PicoGK, the CLI) or a `test:native-linux` project affected.
@@ -98,7 +105,7 @@ jobs:
           echo "intel=true" >> "$GITHUB_OUTPUT"
 
   linux:
-    name: Native kernels on ${{ matrix.target }}
+    name: Native kernels on ${{ matrix.target }} (${{ matrix.project }})
     needs: [plan]
     # Called from `ci.yml`, the plan is skipped and `ci.yml`'s plan selected these rows.
     if: ${{ !cancelled() && (inputs.intel != '' || needs.plan.outputs.linux == 'true') }}
@@ -111,14 +118,22 @@ jobs:
           - target: linux-x64-glibc
             runner: ubuntu-24.04
             arch: x64
+            project: build123d
+          - target: linux-x64-glibc
+            runner: ubuntu-24.04
+            arch: x64
+            project: cli
           - target: linux-arm64-glibc
             runner: ubuntu-24.04-arm
             arch: arm64
+            project: build123d
+          - target: linux-arm64-glibc
+            runner: ubuntu-24.04-arm
+            arch: arm64
+            project: cli
     env:
       TARGET: ${{ matrix.target }}
       ARCH: ${{ matrix.arch }}
-      # `ci.yml`'s selection when it called this workflow, this workflow's plan otherwise.
-      NATIVE_LINUX: ${{ inputs.native-linux || needs.plan.outputs.native-linux }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -173,10 +188,12 @@ jobs:
           key: ${{ steps.seed-key.outputs.key }}
 
       - name: Build the CLI
+        if: matrix.project == 'cli'
         run: pnpm nx build cli --outputStyle=static
 
       # The oracle: an empty store reaches `ready` on this host, and the receipt records the host.
       - name: Prepare Build123d with tau prepare
+        if: matrix.project == 'cli'
         env:
           TAU_DEPENDENCY_DIR: ${{ github.workspace }}/out/cache/build123d-seed
           TAU_CONFIG_DIR: ${{ runner.temp }}/tau-ready
@@ -198,6 +215,7 @@ jobs:
       # This row qualifies the suites on this host, and their task hash names no host, so a remote entry
       # (written by `ci.yml` on linux-x64) must never stand in for running them here.
       - name: Run the Build123d suites
+        if: matrix.project == 'build123d'
         run: pnpm nx run build123d:test --outputStyle=static --skip-remote-cache
 
       # These selection checks use the read-only checkout and an empty store without networking.
@@ -206,7 +224,7 @@ jobs:
       # independently tests rejection below the floor (2.27), where Node 24 itself cannot run.
       # Alpine (musl) still has no closure and refuses on libc, with Alpine's own Node (D18).
       - name: Accept glibc 2.28 selection and refuse musl
-        if: matrix.arch == 'x64'
+        if: matrix.arch == 'x64' && matrix.project == 'cli'
         run: |
           node_root=$(dirname "$(dirname "$(command -v node)")")
           expect_blocked() {
@@ -257,7 +275,7 @@ jobs:
       # a container, so the runner itself loses libGL for this step, offline from the seed into an
       # empty store, and gets it back afterwards.
       - name: Refuse a host without libGL
-        if: matrix.arch == 'x64'
+        if: matrix.arch == 'x64' && matrix.project == 'cli'
         env:
           TAU_CONFIG_DIR: ${{ runner.temp }}/tau-nogl
           TAU_DEPENDENCY_DIR: ${{ github.workspace }}/out/cache/build123d-seed
@@ -282,16 +300,62 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # The `test:native-linux` projects, one job each: `ci.yml`'s selection when it called this workflow, this
+  # workflow's plan otherwise.
+  native-linux-rows:
+    name: List the linux-x64 native rows
+    needs: [plan]
+    if: ${{ !cancelled() && (inputs.intel != '' || needs.plan.outputs.linux == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      projects: ${{ steps.list.outputs.projects }}
+    steps:
+      - name: List the test:native-linux projects
+        id: list
+        env:
+          NATIVE_LINUX: ${{ inputs.native-linux || needs.plan.outputs.native-linux }}
+        run: |
+          set -euo pipefail
+          projects=$(jq -cn --arg list "$NATIVE_LINUX" '$list | split(",") | map(select(. != ""))')
+          echo "Native linux-x64 rows: $projects"
+          echo "projects=$projects" >> "$GITHUB_OUTPUT"
+
+  native-linux:
+    name: Native kernels on linux-x64-glibc (${{ matrix.project }})
+    needs: [native-linux-rows]
+    if: ${{ !cancelled() && needs.native-linux-rows.result == 'success' && needs.native-linux-rows.outputs.projects != '[]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.native-linux-rows.outputs.projects) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: ${{ github.event_name == 'push' }}
+
+      - name: Setup Linux sandbox prerequisites
+        id: sandbox
+        uses: ./.github/actions/setup-linux-sandbox
+
       # The linux-x64 native rows (charter D27, D30), the counterpart of `native-darwin.yml`. Each
       # closure test appends its golden comparison to TAU_GOLDEN_SUMMARY_FILE and fails on a mismatch
       # or a missing entry, with the observed entry (`closureIntegrity`, `treeIntegrity`, `fileCount`)
-      # in its failure message, which is what `tau-plugin.golden.json` records. They run after the
-      # Build123d steps, whatever those concluded, so each row reports on its own.
+      # in its failure message, which is what `tau-plugin.golden.json` records. Each project is a job of
+      # its own, apart from the Build123d rows, so each row reports on its own.
       - name: Run the linux-x64 native rows
         id: rows
-        if: ${{ !cancelled() && matrix.arch == 'x64' && env.NATIVE_LINUX != '' && steps.sandbox.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sandbox.outcome == 'success' }}
         env:
-          PROJECTS: ${{ env.NATIVE_LINUX }}
+          PROJECTS: ${{ matrix.project }}
           TAU_GOLDEN_SUMMARY_FILE: ${{ runner.temp }}/golden-receipts.md
         run: |
           printf '%s\n' '| Closure | Target | treeIntegrity | Golden | Files | Result |' '| --- | --- | --- | --- | ---: | --- |' \
@@ -313,12 +377,18 @@ jobs:
           fi
 
   intel:
-    name: Native kernels on darwin-x64
+    name: Native kernels on darwin-x64 (${{ matrix.project }})
     needs: [plan]
     # Called from `ci.yml`, when its plan finds a `tag:ci:native-hosts` project affected; every dispatch.
     if: ${{ !cancelled() && (inputs.intel == 'true' || needs.plan.outputs.intel == 'true') }}
     runs-on: macos-26-intel
     timeout-minutes: 60
+    # One job per project: the Build123d suites, `tau prepare build123d` with the built CLI, and PicoGK's
+    # refusals. Run 2026-11-17 in one job: 24.9 / 28.8 min (p50 / p90 of 14 queue jobs).
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [build123d, cli, picogk]
     env:
       TARGET: darwin-x64
     steps:
@@ -332,9 +402,10 @@ jobs:
         with:
           save-pnpm-store: ${{ github.event_name == 'push' }}
 
-      # The seed holds archive bytes only, so it is keyed by this target's pins alone.
+      # The seed holds archive bytes only, so it is keyed by this target's pins alone. PicoGK's refusals use none.
       - name: Identify the Build123d closure
         id: seed-key
+        if: matrix.project != 'picogk'
         run: |
           digest=$(node --input-type=module -e '
             import { createHash } from "node:crypto";
@@ -352,26 +423,30 @@ jobs:
 
       - name: Restore the seed
         id: seed
+        if: matrix.project != 'picogk'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: out/cache/build123d-seed
           key: ${{ steps.seed-key.outputs.key }}
 
       - name: Fill the seed from the pinned origins
+        if: matrix.project != 'picogk'
         run: pnpm nx run build123d:seed --outputStyle=static
 
       # A cache saved in the merge queue is scoped to the queue's ref and reaches no later run.
       - name: Save the seed
-        if: steps.seed.outputs.cache-hit != 'true' && github.event_name != 'merge_group'
+        if: matrix.project != 'picogk' && steps.seed.outputs.cache-hit != 'true' && github.event_name != 'merge_group'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: out/cache/build123d-seed
           key: ${{ steps.seed-key.outputs.key }}
 
       - name: Build the CLI
+        if: matrix.project != 'build123d'
         run: pnpm nx build cli --outputStyle=static
 
       - name: Prepare Build123d with tau prepare
+        if: matrix.project == 'cli'
         env:
           TAU_DEPENDENCY_DIR: ${{ github.workspace }}/out/cache/build123d-seed
           TAU_CONFIG_DIR: ${{ runner.temp }}/tau-ready
@@ -393,12 +468,14 @@ jobs:
       # The Intel runner needs more than Vitest's default 5 s to import OCP in the sandbox.
       # Never from a remote entry: the hash names no host (see the Linux row).
       - name: Run the Build123d suites
+        if: matrix.project == 'build123d'
         run: pnpm nx run build123d:test --outputStyle=static --testTimeout=120000 --skip-remote-cache
 
       # D13: PicoGK declares darwin-arm64 and linux-x64 on glibc, so an Intel Mac refuses on `arch`;
       # forcing `TAU_DEPENDENCY_TARGET` to a target PicoGK does not declare is refused on `os`. Both
       # before any download.
       - name: Refuse PicoGK on Intel and an undeclared forced target
+        if: matrix.project == 'picogk'
         run: |
           refuse() {
             local name=$1 axis=$2 code=0

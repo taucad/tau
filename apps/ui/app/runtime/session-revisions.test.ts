@@ -23,7 +23,7 @@ import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
 import type { RevisionStatusProjection } from '@taucad/revisions';
 import type { CheckoutCutsOutcome } from '@taucad/revisions/revision-effects';
-import type { EditorTextScope } from '#lib/editor-document-session.js';
+import type { EditorTextScope } from '@taucad/editor-ui/lib/editor-document-session';
 import {
   closeDebtLimit,
   closeDebtMaxAgeMilliseconds,

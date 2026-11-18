@@ -43,6 +43,7 @@ import {
   getAllProjectFileSystemConfigs,
   getProjectFileSystemConfig,
   getWorkspace,
+  getWorkspaceMetadata,
   listWorkspaces,
   pinHomeStorageBackend,
   requestHomeStoragePersistence,
@@ -62,11 +63,11 @@ import type {
   PendingProjectRecovery,
   PendingProjectRecoveryReason,
   PendingProjectStorage,
-} from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
-import { projectSlugsOf } from '#utils/project-url.utils.js';
-import type { DiscoveryPlan, DiscoveryWrites } from '#machines/library-discovery.machine.js';
-import type { RecoveryRowInput, ReplayOutcome } from '#machines/library-recovery.machine.js';
+} from '@taucad/files-ui/types/pending-project-operation.types';
+import type { ProjectLibraryEntry, ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
+import { projectSlugsOf } from '@taucad/files-ui/utils/project-url.utils';
+import type { DiscoveryPlan, DiscoveryWrites } from '@taucad/files-ui/machines/library-discovery.machine';
+import type { RecoveryRowInput, ReplayOutcome } from '@taucad/files-ui/machines/library-recovery.machine';
 
 /** The root file manager's facade, as `FileManagerScope` builds it in React until A4b (D15 ruling, A2). @public */
 export type ProjectLibraryFileManager = Pick<
@@ -823,6 +824,16 @@ export const classifyMissingProject = async (
       (root) =>
         root.status === 'inaccessible' && persistentStorageRootKey(root.root) === persistentStorageRootKey(config),
     )
+  ) {
+    return 'unavailable';
+  }
+  /* A workspace whose folder access was withdrawn (Disconnect, or the handle gone) keeps its identity and bindings: the
+   * project is on storage this device cannot reach now, not missing (W30, storage `revoked`), so the route says to
+   * reconnect it rather than that the project does not exist. */
+  if (
+    config?.backend === 'webaccess' &&
+    (await getWorkspace(config.workspaceId)) === undefined &&
+    (await getWorkspaceMetadata(config.workspaceId)) !== undefined
   ) {
     return 'unavailable';
   }

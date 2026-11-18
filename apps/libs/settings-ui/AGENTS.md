@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-Tau UI app settings feature: settings copy and the viewer settings analytics person properties, the settings modules that read no app state
+Tau UI app settings feature: the settings catalogue and search, the settings layout primitives, settings copy and the viewer settings analytics person properties, the settings modules that read no app state
 
 - Nx project: `settings-ui`
 - Project root: `apps/libs/settings-ui`
@@ -47,6 +47,7 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 
 - Layer `feature`: never import `apps/ui` (`#components/*`, `#hooks/*`, `#lib/*`, `#routes/*`, `#environment.config`). A module moves here only when everything it imports, tests included, is already a package or an app-lib.
 - App services arrive by injection, never by import: `setViewerPersonProperties(analytics, …)` takes the app's `useAnalytics()` value through the structural `ViewerAnalytics` type.
+- The catalogue is ungated. The host passes its Experimental flags to `createSettingsCatalogue`, gates the result (Tau Cloud, desktop, flags) and provides it through `SettingsSectionsProvider`; without a provider `SettingsItem` offers every entry but the flags.
 - Billing settings stay out; they belong to the billing library.
 - Lib-internal imports use `#<path>.js`; `package.json` maps `#*` to `./src/*`, and TypeScript and Vite resolve `.js` to the `.ts`/`.tsx` source.
 - `apps/ui/vite.config.ts` applies the React Compiler to `src/**`, and `apps/ui/app/styles/global.css` scans it with `@source`, as when these files lived in `apps/ui/app`.

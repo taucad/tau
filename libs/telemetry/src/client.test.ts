@@ -249,8 +249,8 @@ describe('toRuntimeEntry', () => {
   });
 
   const limit = {
-    limit: 'occt.export.triangles',
-    unit: '{triangle}',
+    limit: 'host.utility.resident',
+    unit: 'By',
     maximum: 10,
     demand: { kind: 'measured', value: 12 },
     origin: 'default',
@@ -281,12 +281,13 @@ describe('toRuntimeEntry', () => {
     );
     expect(entry.detail).toMatchObject({
       code: 'HOST_LIMIT_EXCEEDED',
-      limit: { id: 'occt.export.triangles', maximum: 10, demand: { kind: 'measured', value: 12 } },
+      limit: { id: 'host.utility.resident', maximum: 10, demand: { kind: 'measured', value: 12 } },
     });
   });
 
   it.each([
     ['an id off the allowlist', { ...limit, limit: 'customer.secret' }],
+    ['a retired id', { ...limit, limit: 'occt.export.triangles', unit: '{triangle}' }],
     ['a unit off the list', { ...limit, unit: 'parsecs' }],
     ['a non-finite maximum', { ...limit, maximum: Number.NaN }],
     ['a negative maximum', { ...limit, maximum: -1 }],
@@ -296,6 +297,32 @@ describe('toRuntimeEntry', () => {
       toRuntimeEntry(observation({ outcome: { type: 'issue', code: 'RESOURCE_LIMIT' }, limit: details }), context),
     );
     expect(entry.detail.limit).toEqual({ id: '_OTHER' });
+  });
+
+  /* T05: each limit id with a producer keeps its numbers at the boundary, so the ingest can count it and its ratio. */
+  it.each([
+    ['host.utility.resident', 'By', 1000],
+    ['picovoxel.tape.instructions', '{instruction}', 65_536],
+    ['geospec.work.units', '{unit}', 1000],
+  ] as const)('should keep %s with its numbers at the limit -1, at and +1', (id, unit, maximum) => {
+    for (const value of [maximum - 1, maximum, maximum + 1]) {
+      const entry = valid(
+        toRuntimeEntry(
+          observation({
+            outcome: { type: 'issue', code: 'RESOURCE_LIMIT' },
+            limit: { limit: id, unit, maximum, demand: { kind: 'measured', value }, origin: 'default' },
+          }),
+          context,
+        ),
+      );
+      expect(entry.detail.limit).toEqual({
+        id,
+        unit,
+        maximum,
+        demand: { kind: 'measured', value },
+        origin: 'default',
+      });
+    }
   });
 
   it('should keep an unknown demand', () => {

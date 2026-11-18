@@ -373,11 +373,32 @@ describe('probeAcpAgentModels', () => {
     expect(probed.agents[0]?.models?.[1]?.thoughtLevel?.currentValue).toBe('medium');
     expect(probed.agents[0]?.defaultModel).toBe('gpt-5.3-codex-spark');
     expect(probed.agents[0]?.configOptions?.map((option) => option.id)).toEqual(['mode', 'web_search']);
+    /* PR5: a new chat is shown the mode its first turn chooses, and no plan. */
+    expect(probed.agents[0]?.configOptions?.[0]).toMatchObject({
+      currentValue: 'auto',
+    });
+    const offered = probed.agents[0]?.configOptions?.[0];
+    expect(
+      offered?.type === 'select' && offered.options.flatMap((entry) => ('value' in entry ? [entry.value] : [])),
+    ).toEqual(['auto', 'default', 'acceptEdits', 'bypassPermissions']);
     expect(probed.agents[0]?.thoughtLevel).toMatchObject({
       id: 'thought_level',
       currentValue: 'medium',
       options: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }],
     });
+  });
+
+  it('keeps a mode option whose values carry adapter `_meta`, as codex-acp 1.7.0 sends them', async () => {
+    const probed = await probeAcpAgentModels(
+      { agents: [fixtureAdapter('value-meta')], refused: [] },
+      { modelProbeTimeout: 20_000 },
+    );
+
+    const offered = probed.agents[0]?.configOptions?.find((option) => option.category === 'mode');
+    expect(offered).toMatchObject({ id: 'mode', currentValue: 'auto' });
+    expect(
+      offered?.type === 'select' && offered.options.flatMap((entry) => ('value' in entry ? [entry] : [])),
+    ).toContainEqual({ value: 'auto', name: 'Auto' });
   });
 
   it('flattens a grouped select, because Tau’s picker is one list', async () => {

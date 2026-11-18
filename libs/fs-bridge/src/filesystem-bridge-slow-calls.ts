@@ -43,6 +43,50 @@ export type SlowFileSystemBridgeCall = {
   readonly errorCode?: string;
 };
 
+/**
+ * What finished while an activity window was open. Durations are in milliseconds.
+ *
+ * @public
+ */
+export type FileSystemBridgeActivityTotals = Readonly<{
+  count: number;
+  totalMilliseconds: number;
+  longestMilliseconds: number;
+}>;
+
+const openActivityWindows = new Set<{ count: number; totalMilliseconds: number; longestMilliseconds: number }>();
+
+/**
+ * Every bridge call this realm issues, read over windows: a caller opens one, and closing it answers how many calls
+ * settled while it was open, their total round-trip time and the longest. With no window open a call costs one size
+ * check. The shape is `@taucad/revisions`' activity meter, so a turn's admission can count the calls it waited on.
+ *
+ * @public
+ */
+export const fileSystemBridgeActivity = Object.freeze({
+  open: (): Readonly<{ close: () => FileSystemBridgeActivityTotals }> => {
+    const totals = { count: 0, totalMilliseconds: 0, longestMilliseconds: 0 };
+    openActivityWindows.add(totals);
+    return Object.freeze({
+      close: (): FileSystemBridgeActivityTotals => {
+        openActivityWindows.delete(totals);
+        return Object.freeze({ ...totals });
+      },
+    });
+  },
+});
+
+const recordActivity = (milliseconds: number): void => {
+  if (openActivityWindows.size === 0) {
+    return;
+  }
+  for (const totals of openActivityWindows) {
+    totals.count += 1;
+    totals.totalMilliseconds += milliseconds;
+    totals.longestMilliseconds = Math.max(totals.longestMilliseconds, milliseconds);
+  }
+};
+
 const slowCalls: SlowFileSystemBridgeCall[] = [];
 const starts = new WeakMap<SlowFileSystemBridgeCall, number>();
 let nextCallId = 0;
@@ -74,6 +118,9 @@ export const timeFileSystemBridgeCall = async (
   let callId: number | undefined;
   const record = (outcome: SlowFileSystemBridgeCall['outcome'], error?: unknown): void => {
     const duration = performance.now() - start;
+    if (outcome !== 'pending') {
+      recordActivity(duration);
+    }
     if (duration < slowFileSystemBridgeCallThreshold) {
       return;
     }

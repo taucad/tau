@@ -91,6 +91,10 @@ const samples: Samples = {
   webAccessUnavailable: [
     { type: 'webAccessUnavailable', reason: 'permission', activeWorkspaceId: 'wsp_1', activeWorkspaceName: 'Parts' },
   ],
+  rootStatusChanged: [
+    { type: 'rootStatusChanged', roots: [{ storageRootKey: 'indexeddb', backend: 'indexeddb', state: 'available' }] },
+  ],
+  recheckRoots: [{ type: 'recheckRoots' }],
 };
 
 /** Every effect settles only when the traversal delivers its built-in answer. */

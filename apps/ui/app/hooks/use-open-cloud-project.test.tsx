@@ -4,7 +4,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 import { CloudProjectUnavailableError, useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
@@ -227,7 +227,7 @@ describe('useOpenCloudProject', () => {
 
     await act(async () => result.current.open({ id: trashed.id, name: 'Old Hinge', role: 'owner' }));
 
-    expect(useProjectsOptions.at(-1)).toEqual({ includeDeleted: true });
+    expect(useProjectsOptions.at(-1)).toEqual({ scope: 'all' });
     expect(mockCreateProject).not.toHaveBeenCalled();
     expect(result.current.location.pathname).toBe('/projects');
     expect(mockToastInfo).toHaveBeenCalledOnce();

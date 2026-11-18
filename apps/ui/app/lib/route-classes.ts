@@ -9,7 +9,8 @@
  *   rewrite, redirect and header rules of `netlify.toml`, which {@link renderNetlifyShellRouting} generates and
  *   `route-classes.test.ts` holds equal to the checked-in file, and the Home shell's file, which the marketing edge
  *   function names and the build moves into place (`scripts/place-static-shells.ts`);
- * - the interactive roots the critical-path guards measure (`scripts/critical-path.mts`);
+ * - the interactive roots the critical-path guards measure (`scripts/critical-path.mts`), and the warm manifest the
+ *   build writes from them (`scripts/write-warm-manifest.ts`, read by `warm-next-step.ts` and the marketing site);
  * - the shell invariants checked on the build output (`scripts/check-static-shells.mts`).
  *
  * The file imports nothing, so build configuration and native Node scripts can read it before app aliases exist.
@@ -42,6 +43,11 @@ type RouteClassBase = Readonly<{
    * so it belongs to the interactive tier). Present on the classes the critical-path guards measure.
    */
   interactive?: readonly string[];
+  /**
+   * The class whose interactive tier this class's documents prefetch once idle (progressive loading PL8,
+   * `warm-next-step.ts`): the step a visitor most likely takes next. It names a class with {@link interactive} roots.
+   */
+  warms?: string;
 }>;
 
 /** A class served by one prerendered document for all of its URLs. */
@@ -81,9 +87,9 @@ export const shellSentinel = '__shell';
 
 /**
  * The one-segment grammar a shell parameter matches: any segment without a dot. Every slug and id the app writes is one
- * (percent escapes included); a dot marks React Router's `<path>.data` requests and file names, which stay on the
- * function. Used as the URLPattern group of the function's `excludedPaths`, so a data request is never excluded. The
- * slash is escaped because a URLPattern group, unlike a regular expression, rejects a bare one.
+ * (percent escapes included); a dot marks React Router's `<path>.data` and `<path>/_.data` requests and file names,
+ * which stay on the function. Used as the URLPattern group of the function's `excludedPaths`, so a data request is never
+ * excluded. The slash is escaped because a URLPattern group, unlike a regular expression, rejects a bare one.
  */
 export const shellSegment = String.raw`[^\/.]+`;
 
@@ -121,7 +127,8 @@ const projectClass: StaticShellClass = {
  * The Home shell (PL4): `/` is marketing or Home by the visitor's `tau-entry` preference, so the marketing edge function
  * chooses per request and rewrites a `tau-entry=app` visit to this document. Home has no server loader and the root
  * loader reads no visitor (PL2), so the function's Home was already a function of the deploy only. Every other answer at
- * `/` (no preference, `?website`, a write, the `www` alias) and `/_root.data` stay where they were.
+ * `/` (no preference, `?website`, a write, the `www` alias) and the root data request (`/_root.data` or `/_.data`) stay
+ * where they were.
  */
 const homeClass: StaticShellClass = {
   id: 'home',
@@ -133,6 +140,8 @@ const homeClass: StaticShellClass = {
   routes: ['_index'],
   // Home's open graph adds the rich composer, which `useNewProjectComposer` requests at mount.
   interactive: [...shellRoots, 'routes/_index/route.tsx', 'components/chat/new-project-chat-composer.tsx'],
+  // LB9: a project row and the composer's first send both open the project route.
+  warms: 'project',
 };
 
 /** The registry. Order is report order. */
@@ -172,7 +181,7 @@ export const routeClasses: readonly RouteClass[] = [
       'files',
       'github.complete',
       'import.$',
-      'invitations.$token',
+      'invitations._index',
       'loader',
       'loader_.glass',
       'machines.$hostId.$machineId',
@@ -202,6 +211,7 @@ export const routeClasses: readonly RouteClass[] = [
       'health.ready.ts',
       'health.startup.ts',
       'i.$',
+      'invitations.$token',
       'settings_',
       'settings_.$',
     ],
@@ -308,9 +318,9 @@ export type PrerenderedFiles = Readonly<{ document: string; data: readonly strin
 
 /**
  * The files the prerender pass writes for a path (`@react-router/dev` `prerenderRoute` and `prerenderData`): the
- * document at `<path>/index.html`, and the root loader's data at `<path>.data`. For `/` the data file is `_root.data`
- * on React Router 7, and `_.data` under the trailing-slash-aware data requests React Router 8 makes the default, so both
- * are named.
+ * document at `<path>/index.html`, and the root loader's data at `<path>.data`. For `/` the data file is `_.data` under
+ * the trailing-slash-aware data requests the app builds with (React Router 8's default), and `_root.data` without them,
+ * so both are named.
  *
  * @param path - A prerender path.
  * @returns The document file and the candidate data files.

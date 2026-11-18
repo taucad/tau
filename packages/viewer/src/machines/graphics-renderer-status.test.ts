@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { selectCanvasAwaitingFrame, selectCanvasBackend } from '#machines/canvas.machine.js';
 import { reportWebGpuCanvasLoss } from '#graphics/graphics-backend.js';
+import { hardwareRenderTier } from '#graphics/three/render-tier.js';
 
 describe('WebGPU capability probe', () => {
   it('should report the probe unsettled until it answers', async () => {
@@ -94,6 +95,7 @@ const startGraphics = () => {
     canvas()?.ref.send({
       type: 'hostCreated',
       backend,
+      tier: hardwareRenderTier(backend),
       surface,
       domElement: document.createElement('canvas'),
       host: idleHost,

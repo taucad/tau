@@ -82,7 +82,8 @@ TAU_WEBSOCKET_URL = "ws://localhost:4001"
 # Home shell (progressive loading PL4): the edge function rewrites it to
 # `/__shell/home/index.html`, where the build moves the prerender of `/`
 # (scripts/place-static-shells.ts), and expires `tau_skew` on it. Nothing else
-# at `/`, and not `/_root.data`, changes delivery.
+# at `/`, and not the root data request (`/_root.data`, or `/_.data` with
+# trailing-slash-aware data requests; the edge function accepts both), changes delivery.
 
 # The docs site serves documentation at its root, so the old runtime-scoped
 # LLM indexes are replaced by its top-level ones rather than moving verbatim.

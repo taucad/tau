@@ -16,6 +16,7 @@ import {
 } from '#workers/agent-host.contract.js';
 import type { BrowserProjectHost, ResidentWorkerContext } from '#workers/agent-host.impl.js';
 import { createProjectHosts } from '#workers/agent-host-projects.js';
+import { createImplementationLoader } from '#workers/agent-host-implementation.js';
 import { randomUuid } from '@taucad/utils/id';
 
 type WorkerScope = {
@@ -74,7 +75,7 @@ const capabilityOf = async (
   return probe;
 };
 
-const loadImplementation = async () => {
+const loadImplementationModule = async () => {
   try {
     return await import('./agent-host.impl.js');
   } catch (error) {
@@ -84,6 +85,13 @@ const loadImplementation = async () => {
     );
   }
 };
+
+/*
+ * Loaded once (STO-25 SP6-warm): the page connects when it opens a project (its capability probe), well before its first
+ * `provide`, which waits on the project's revision root and the session. The load starts at the connection, so a warm
+ * reopen's chat history does not wait for this module after those. A failed early load is retried by the provide.
+ */
+const implementation = createImplementationLoader(loadImplementationModule);
 
 /* D-092: a fault in one chat or one project host is logged and the worker continues. */
 workerScope.addEventListener('error', (event) => {
@@ -117,7 +125,7 @@ const requireTab = (): string => {
 
 /** One project host per project; a newer `provide` replaces the incarnation, and `release` closes it (RH-R4). */
 const hosts = createProjectHosts<BrowserProjectHost>(async (args) => {
-  const loaded = await loadImplementation();
+  const loaded = await implementation.get();
   return loaded.openBrowserProjectHost(args, {
     tabId: requireTab(),
     visibility,
@@ -134,6 +142,7 @@ workerScope.addEventListener('message', (event) => {
   }
   const connection = parseAgentHostWorkerConnect(event.data);
   connected = true;
+  implementation.warm();
   const server: ChannelServer<AgentHostWorkerProtocol> = {
     // oxlint-disable-next-line eslint/max-params -- @taucad/rpc ChannelServer callback contract.
     call: async (_context, name, args) => {

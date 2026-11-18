@@ -1219,6 +1219,15 @@ jobs:
     permissions: *fail-fast-permissions
     steps: *fail-fast-steps
 
+  fail-fast-windows-unit:
+    name: Fail fast (windows-unit)
+    needs: [windows-unit]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.windows-unit.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
   fail-fast-formal-nightly:
     name: Fail fast (formal-nightly)
     needs: [formal-nightly]

@@ -186,7 +186,59 @@ const apiWorkspaceClosure = (tracked: readonly string[]): readonly string[] => {
   return [...seen];
 };
 
+/*
+ * ST-9: a value that changes on every commit makes a task miss the cache on every commit. `ui:build` and
+ * `desktop:build` keyed on `GITHUB_SHA`, `COMMIT_REF` and `git rev-parse HEAD`; both now stamp their build id after
+ * the build (`apps/ui/scripts/stamp-build-release.mts`, `apps/desktop/src/shared/desktop-host-build.ts`).
+ */
+const volatileEnvironment =
+  /^(?:GITHUB_SHA|COMMIT_REF|GITHUB_RUN_ID|GITHUB_RUN_NUMBER|GITHUB_RUN_ATTEMPT|GITHUB_REF|GITHUB_HEAD_REF|BUILD_ID)$/u;
+const volatileCommand = /\bgit\s+(?:rev-parse|log|describe|show)\b|\bdate\b|Date\.now/u;
+
+/** Every `env` and `runtime` input in nx.json and each project.json, with where it is declared. */
+const environmentAndRuntimeInputs = (): ReadonlyArray<{
+  readonly where: string;
+  readonly input: Record<string, string>;
+}> => {
+  const inputsOf = (where: string, inputs: readonly Input[] | undefined) =>
+    (inputs ?? []).flatMap((input) => (typeof input === 'object' ? [{ where, input }] : []));
+  const files = execFileSync('git', ['ls-files', '*project.json'], { cwd: root, encoding: 'utf8' })
+    .split('\n')
+    .filter((file) => file.endsWith('project.json'));
+  return [
+    ...Object.entries(nx.namedInputs).flatMap(([name, inputs]) => inputsOf(`nx.json namedInputs.${name}`, inputs)),
+    ...Object.entries(nx.targetDefaults).flatMap(([name, { inputs }]) =>
+      inputsOf(`nx.json targetDefaults.${name}`, inputs),
+    ),
+    ...files.flatMap((file) => {
+      const { targets, namedInputs } = JSON.parse(read(file)) as {
+        targets?: Record<string, { inputs?: readonly Input[] }>;
+        namedInputs?: Record<string, readonly Input[]>;
+      };
+      return [
+        ...Object.entries(targets ?? {}).flatMap(([target, { inputs }]) => inputsOf(`${file} ${target}`, inputs)),
+        ...Object.entries(namedInputs ?? {}).flatMap(([name, inputs]) =>
+          inputsOf(`${file} namedInputs.${name}`, inputs),
+        ),
+      ];
+    }),
+  ];
+};
+
 describe('nx cache inputs', () => {
+  it('should key no task on a value that changes on every commit', () => {
+    const inputs = environmentAndRuntimeInputs();
+
+    expect(inputs.length).toBeGreaterThan(20);
+    expect(
+      inputs.filter(
+        ({ input }) =>
+          (typeof input['env'] === 'string' && volatileEnvironment.test(input['env'])) ||
+          (typeof input['runtime'] === 'string' && volatileCommand.test(input['runtime'])),
+      ),
+    ).toEqual([]);
+  });
+
   it('should keep workflow files out of sharedGlobals and hash the runner Node version instead', () => {
     const shared = nx.namedInputs['sharedGlobals'] ?? [];
     expect(shared.filter((input) => typeof input === 'string' && input.includes('.github/'))).toEqual([]);

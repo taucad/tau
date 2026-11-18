@@ -8,6 +8,7 @@
  * Exit codes: n/a (library module).
  */
 
+import { execFileSync } from 'node:child_process';
 import { chmod, cp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
@@ -18,6 +19,7 @@ import { preparationPluginsOf } from '@taucad/native-process-core/store';
 import { createPreparationHost, readManagedPreparation } from '@taucad/runtime/preparation/node';
 import type { Integrity } from '@taucad/runtime/preparation/node';
 
+import { desktopHostBuildOf, writeDesktopHostBuild } from '#shared/desktop-host-build.js';
 import { desktopReleaseIdentity } from '#shared/desktop-release.js';
 import {
   desktopNativeDeployments,
@@ -387,6 +389,21 @@ export const stageRuntimePackages = async (
     readonly main: string;
     readonly type: string;
   }>(resolve(desktopRoot, 'package.json'));
+  /*
+   * LW8: the commit this app is packaged from, beside the bundles, where main reads it (`#shared/desktop-host-build`).
+   * The release workflow checks out the release tag, so it is the tag's commit. `desktop:build` compiles no commit in,
+   * so its cache key holds sources and configuration only (ST-9).
+   */
+  writeDesktopHostBuild(
+    resolve(stageRoot, 'dist'),
+    desktopHostBuildOf(() =>
+      execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: desktopRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    ),
+  );
   await Promise.all([
     copyTree(resolve(desktopRoot, 'dist/main'), resolve(stageRoot, 'dist/main'), excludesBuildDiagnostics),
     copyTree(resolve(desktopRoot, 'dist/preload'), resolve(stageRoot, 'dist/preload'), excludesBuildDiagnostics),

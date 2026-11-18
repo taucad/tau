@@ -1,9 +1,6 @@
-import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { defineConfig } from 'electron-vite';
 import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
-// oxlint-disable-next-line no-restricted-imports -- The build config runs before the package's `#` imports resolve.
-import { desktopHostBuildOf } from './src/shared/desktop-host-build.js';
 
 const cloudValue = process.env['TAU_CLOUD_ENABLED'];
 if (cloudValue !== undefined && cloudValue !== 'true' && cloudValue !== 'false') {
@@ -19,16 +16,10 @@ const define = {
   tauSentryRelease: JSON.stringify(process.env['SENTRY_RELEASE'] ?? ''),
   /* The release workflow passes the PostHog project key; without one the renderer's analytics stay inert. */
   tauPostHogClientKey: JSON.stringify(process.env['POSTHOG_CLIENT_KEY'] ?? ''),
-  /* LW8: agent observability's build id, the commit of the tree built; the release workflow checks out its tag. */
-  tauDesktopHostBuild: JSON.stringify(
-    desktopHostBuildOf(() =>
-      execFileSync('git', ['rev-parse', 'HEAD'], {
-        cwd: import.meta.dirname,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }),
-    ),
-  ),
+  /*
+   * LW8's build id (the commit) is not compiled in, so `desktop:build`'s cache key holds no commit (ST-9). Packaging
+   * records it beside the bundles instead (`src/shared/desktop-host-build.ts`).
+   */
 } as const;
 
 const bundledWorkspaceDependencies = [

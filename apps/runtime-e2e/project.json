@@ -69,7 +69,10 @@
       "dependsOn": [{ "projects": ["cli"], "target": "build" }],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "node --import @oxc-node/core/register ../../packages/cli/dist/bin/tau.mjs prepare picogk && GEOSPEC_TURBOFAN_NATIVE=1 vitest run src/picogk-turbofan-native.test.ts"
+        "command": "node --import @oxc-node/core/register ../../packages/cli/dist/bin/tau.mjs prepare picogk && vitest run src/picogk-turbofan-native.test.ts",
+        "env": {
+          "GEOSPEC_TURBOFAN_NATIVE": "1"
+        }
       }
     },
     "example-health": {

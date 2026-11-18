@@ -32,8 +32,8 @@ import { githubNoreplyAuthor, githubProjectBinding } from '@taucad/ui-core/lib/g
 import type { GithubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import type { ReportingConsent } from '@taucad/telemetry/client';
 import type {
+  ReportingConsent,
   RevisionToast,
   WorkerRevisionCommand,
   WorkerRevisionEvent,

@@ -53,7 +53,6 @@
     "@taucad/agent-host": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/revisions": "workspace:*",
-    "@taucad/telemetry": "workspace:*",
     "@taucad/ui": "workspace:*",
     "@taucad/ui-core": "workspace:*"
   },

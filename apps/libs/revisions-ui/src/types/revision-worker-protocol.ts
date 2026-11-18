@@ -29,7 +29,6 @@ import type {
   TurnAttemptKey,
 } from '@taucad/revisions';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
-import type { ReportingConsent } from '@taucad/telemetry/client';
 
 /**
  * A command the page sends to one project's revision root.
@@ -40,6 +39,15 @@ import type { ReportingConsent } from '@taucad/telemetry/client';
  *
  * @public
  */
+
+/**
+ * The page's telemetry consent as the port carries it. It mirrors `ReportingConsent` from the app's
+ * telemetry library, which this library does not import (scripts/src/telemetry-release-partition.test.ts);
+ * the app's binding in `#hooks/use-revision-status` passes its consent through, so the compiler keeps the two
+ * in step.
+ */
+export type ReportingConsent = 'granted' | 'denied' | 'unknown';
+
 export type WorkerRevisionCommand =
   | Readonly<{ command: 'restore'; revisionId: string }>
   /** *Undo restore*: restore the first parent of `revisionId`, or of the last restore (D2). */

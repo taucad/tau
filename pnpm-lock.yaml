@@ -4083,9 +4083,6 @@ importers:
       '@taucad/revisions':
         specifier: workspace:*
         version: link:../../../packages/revisions
-      '@taucad/telemetry':
-        specifier: workspace:*
-        version: link:../../../libs/telemetry
       '@taucad/ui':
         specifier: workspace:*
         version: link:../../../packages/ui

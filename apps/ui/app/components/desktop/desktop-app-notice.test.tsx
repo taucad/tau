@@ -29,9 +29,10 @@ describe('DesktopAppNotice', () => {
     vi.unstubAllEnvs();
   });
 
-  it('offers the downloads page in a new tab', () => {
+  it('offers the downloads page in a new tab', async () => {
     renderStack();
-    expect(screen.getByRole('region', { name: 'Try Tau on desktop' })).toBeInTheDocument();
+    // The card is a deferred chunk, loaded once the notice decides to show.
+    expect(await screen.findByRole('region', { name: 'Try Tau on desktop' })).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'Download' });
     expect(link).toHaveAttribute('href', '/download');
     expect(link).toHaveAttribute('target', '_blank');
@@ -41,15 +42,16 @@ describe('DesktopAppNotice', () => {
     ['macos', '0 0 384 512'],
     ['windows', '0 0 448 512'],
     ['linux', '0 0 448 512'],
-  ])('shows the %s mark in the tile', (os, viewBox) => {
+  ])('shows the %s mark in the tile', async (os, viewBox) => {
     mockState.os = os;
     const { container } = renderStack();
+    await screen.findByRole('region', { name: 'Try Tau on desktop' });
     expect(container.querySelector('section svg')).toHaveAttribute('viewBox', viewBox);
   });
 
   it('stays dismissed on this device, across remounts', async () => {
     const { container, unmount } = renderStack();
-    await userEvent.click(screen.getByRole('button', { name: 'Dismiss desktop app offer' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Dismiss desktop app offer' }));
     expect(screen.queryByRole('region', { name: 'Try Tau on desktop' })).not.toBeInTheDocument();
     expect(container.querySelector('[data-slot=sidebar-notices]')).toBeEmptyDOMElement();
     expect(localStorage.getItem('tau.sidebar-notice.desktop-app.dismissed')).not.toBeNull();
@@ -67,12 +69,13 @@ describe('DesktopAppNotice', () => {
         </section>
       </SidebarNotices>,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Dismiss desktop app offer' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Dismiss desktop app offer' }));
     expect(screen.getByRole('button', { name: 'Update ready' })).toHaveFocus();
   });
 
-  it('hides when another tab dismisses it', () => {
+  it('hides when another tab dismisses it', async () => {
     renderStack();
+    await screen.findByRole('region', { name: 'Try Tau on desktop' });
     act(() => {
       localStorage.setItem('tau.sidebar-notice.desktop-app.dismissed', '2026-11-17T00:00:00.000Z');
       globalThis.dispatchEvent(new StorageEvent('storage', { key: 'tau.sidebar-notice.desktop-app.dismissed' }));

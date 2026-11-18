@@ -1,17 +1,22 @@
-import { useSyncExternalStore } from 'react';
-import { PlatformLogo } from '@taucad/ui-kit/icons/platform-logos';
+import { lazy, Suspense, useSyncExternalStore } from 'react';
 import type { DesktopPlatform } from '@taucad/ui-kit/icons/platform-logos';
-import { SidebarNoticeCard, useSidebarNoticeDismissal } from '#components/nav/sidebar-notices.js';
+import { useSidebarNoticeDismissal } from '#components/nav/sidebar-notices.js';
 import { isTauDesktopReleased } from '#components/desktop/open-in-desktop.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { osClass } from '#telemetry/platform-class.js';
 
-/**
- * The marketing site's download page, served on the app's own origin by the marketing edge
- * (`netlify/edge-functions/marketing.ts`). It picks the visitor's platform and lists the
- * macOS, Windows and Linux builds, which GitHub's release page does not.
+/*
+ * Deferred tier (progressive loading policy): the card and the OS marks load only once this notice has decided to show
+ * (a released build, a computer that runs Tau Desktop, not dismissed), which is never during SSR or hydration. A failed
+ * load shows nothing: the offer is optional, and the next page load tries again.
  */
-export const tauDownloadsPath = '/download';
+const DesktopAppNoticeCard = lazy(async () => {
+  try {
+    return await import('#components/desktop/desktop-app-notice-card.js');
+  } catch {
+    return { default: (): undefined => undefined };
+  }
+});
 
 /** The per-device dismissal id. Renaming it shows the offer again on every device. */
 export const desktopAppNoticeId = 'desktop-app';
@@ -40,12 +45,8 @@ export function DesktopAppNotice(): React.JSX.Element | undefined {
     return undefined;
   }
   return (
-    <SidebarNoticeCard
-      title='Try Tau on desktop'
-      icon={<PlatformLogo platform={platform} />}
-      action={{ label: 'Download', href: tauDownloadsPath, opensInNewTab: true }}
-      dismissLabel='Dismiss desktop app offer'
-      onDismiss={dismiss}
-    />
+    <Suspense fallback={undefined}>
+      <DesktopAppNoticeCard platform={platform} onDismiss={dismiss} />
+    </Suspense>
   );
 }

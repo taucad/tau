@@ -54,7 +54,7 @@ describe('formal nightly workflow', () => {
     const step = list?.steps?.find((candidate) => candidate.id === 'list');
     expect(step?.run).toContain('pnpm nx show projects --with-target formal:nightly --json | tail -1');
     expect(step?.run).toContain('exit 1');
-    expect(step?.run).toContain('for target in formal:nightly formal:nightly:check; do');
+    expect(step?.run).toContain('for target in formal:nightly formal:nightly:check formal:nightly:mutants; do');
     expect(step?.run).toContain('pnpm nx show projects --with-target "$target" --json | tail -1');
     expect(list?.outputs?.['tiers']).toBe(`\${{ steps.list.outputs.tiers }}`);
   });

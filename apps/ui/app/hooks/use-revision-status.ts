@@ -51,6 +51,11 @@ import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-plac
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { reportRevisionToast } from '#lib/revision-failure-reporting.js';
 import { pageTelemetry } from '#telemetry/runtime-telemetry.js';
+import {
+  longestRenewalDelayMilliseconds,
+  startGithubCredentialRenewal,
+} from '#machines/github-credential-renewal.machine.js';
+import type { GithubCredentialRenewal } from '#machines/github-credential-renewal.machine.js';
 import type { ReportingConsent } from '@taucad/telemetry/client';
 
 type ConnectionOperation = 'connect' | 'status' | 'open' | 'subscribe' | 'stream';
@@ -510,8 +515,6 @@ const githubRenewWindowMilliseconds = 5 * 60_000;
  * held token working until it expires. Either way: ask again in a minute.
  */
 const githubRenewRetryMilliseconds = 60_000;
-/** `setTimeout` fires at once past this, which would turn a far deadline into a loop. */
-const longestTimerMilliseconds = 2_147_483_647;
 
 /**
  * How long until this project's GitHub credential is re-minted (D2).
@@ -524,7 +527,7 @@ const longestTimerMilliseconds = 2_147_483_647;
 export const githubCredentialRenewDelay = (expiresAt: string, now: number): number => {
   const remaining = Date.parse(expiresAt) - now;
   return Number.isFinite(remaining) && remaining > githubRenewWindowMilliseconds
-    ? Math.min(remaining - githubRenewWindowMilliseconds, longestTimerMilliseconds)
+    ? Math.min(remaining - githubRenewWindowMilliseconds, longestRenewalDelayMilliseconds)
     : githubRenewRetryMilliseconds;
 };
 
@@ -532,9 +535,12 @@ export const githubCredentialRenewDelay = (expiresAt: string, now: number): numb
  * One project's pending re-mint; `epoch` retires every mint already in flight.
  * `withdrawn` is set while the root holds an `unavailable` frame from a failed
  * mint, so the retry that succeeds also has the refused remote try again.
+ * `renewal` counts the wait as an `after` (A10, I15), started on the first
+ * schedule; `due` is what the armed wait runs, set by that schedule.
  */
 type GithubCredentialLease = {
-  timer: ReturnType<typeof setTimeout> | undefined;
+  renewal: GithubCredentialRenewal | undefined;
+  due: (() => void) | undefined;
   epoch: number;
   withdrawn: boolean;
 };
@@ -545,7 +551,7 @@ const githubCredentialLease = (projectId: string): GithubCredentialLease => {
   if (held !== undefined) {
     return held;
   }
-  const lease: GithubCredentialLease = { timer: undefined, epoch: 0, withdrawn: false };
+  const lease: GithubCredentialLease = { renewal: undefined, due: undefined, epoch: 0, withdrawn: false };
   githubCredentialLeases.set(projectId, lease);
   return lease;
 };
@@ -560,8 +566,8 @@ const stopGithubCredential = (projectId: string): void => {
   if (lease === undefined) {
     return;
   }
-  globalThis.clearTimeout(lease.timer);
-  lease.timer = undefined;
+  lease.renewal?.cancel();
+  lease.due = undefined;
   lease.epoch += 1;
   lease.withdrawn = false;
 };
@@ -700,9 +706,8 @@ const mintGithubCredential = async (
  */
 function scheduleGithubCredential(client: RevisionClient, projectId: string, renewDelay: number): void {
   const lease = githubCredentialLease(projectId);
-  globalThis.clearTimeout(lease.timer);
-  lease.timer = globalThis.setTimeout(() => {
-    lease.timer = undefined;
+  lease.due = () => {
+    lease.due = undefined;
     const { withdrawn } = lease;
     // async-iife: bootstrap -- a renewal reports through the frame it sends, or retries.
     void (async (): Promise<void> => {
@@ -710,7 +715,9 @@ function scheduleGithubCredential(client: RevisionClient, projectId: string, ren
         resumeRefusedRemote(client);
       }
     })();
-  }, renewDelay);
+  };
+  lease.renewal ??= startGithubCredentialRenewal(() => lease.due?.());
+  lease.renewal.schedule(renewDelay);
 }
 
 /**
@@ -1479,8 +1486,9 @@ export const revisionClientTestApi = {
     revisionIdentityCommands(projectId, () => client),
   reset: (): void => {
     revisionClients.clear();
-    for (const projectId of githubCredentialLeases.keys()) {
+    for (const [projectId, lease] of githubCredentialLeases) {
       stopGithubCredential(projectId);
+      lease.renewal?.stop();
     }
     githubCredentialLeases.clear();
     for (const projectId of pendingReplacements.keys()) {

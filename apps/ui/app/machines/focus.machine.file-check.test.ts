@@ -289,7 +289,7 @@ describe('a session with no revision client (A14)', () => {
     cleanups.push(() => {
       registry.stop();
     });
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     await flushTasks();
 
     expect(registry.getSnapshot().context.status[projectId]).toMatchObject({ state: 'live', availability: 'settled' });
@@ -306,7 +306,7 @@ describe('a session with no revision client (A14)', () => {
     cleanups.push(() => {
       registry.stop();
     });
-    registry.send({ type: 'open', projectId });
+    registry.send({ type: 'open', projectId, request: { workspace: '' } });
     await flushTasks();
 
     expect(registry.getSnapshot().context.status[projectId]).toMatchObject({ state: 'live', availability: 'settled' });

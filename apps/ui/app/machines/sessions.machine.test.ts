@@ -3,7 +3,7 @@
 
 import { createActor, createCallbackLogic } from 'xstate';
 import type { EventObject } from 'xstate';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
 
 import * as machineModule from './sessions.machine.js';
@@ -198,7 +198,7 @@ const report = (
 };
 
 const openIdle = async (actor: ReturnType<typeof harness>['actor'], projectId: string): Promise<void> => {
-  actor.send({ type: 'open', projectId });
+  actor.send({ type: 'open', projectId, request: { workspace: '' } });
   await settle();
   report(actor, projectId);
 };
@@ -223,8 +223,8 @@ describe('sessionsMachine', async () => {
   it('opens a project once and treats a second open as a touch (I22)', async () => {
     const { actor, started } = harness();
 
-    actor.send({ type: 'open', projectId: 'projA' });
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
     await settle();
 
     expect(started).toEqual(['projA']);
@@ -248,7 +248,7 @@ describe('sessionsMachine', async () => {
     await settle();
     expect(closeSteps).toEqual(['cancel:projA', 'producers:projA', 'flush:projA']);
 
-    actor.send({ type: 'open', projectId: 'projC' });
+    actor.send({ type: 'open', projectId: 'projC', request: { workspace: '' } });
     actor.send({ type: 'releaseMemory', keepProjectId: 'projB' });
     actor.send({ type: 'idleExpired', projectId: 'projA' });
     await settle();
@@ -284,9 +284,9 @@ describe('sessionsMachine', async () => {
     await settle();
     expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
 
-    actor.send({ type: 'open', projectId: 'projB' });
-    actor.send({ type: 'open', projectId: 'projA' });
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projB', request: { workspace: '' } });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
     expect(started).toEqual(['projA']);
     expect(stopped).toEqual([]);
     expect(Object.keys(actor.getSnapshot().context.refs)).toEqual(['projA']);
@@ -320,8 +320,8 @@ describe('sessionsMachine', async () => {
       }
       actor.send({ type: 'releaseMemory', keepProjectId: 'projB' });
       await settle();
-      actor.send({ type: 'open', projectId: 'projA' });
-      actor.send({ type: 'open', projectId: 'projB' });
+      actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
+      actor.send({ type: 'open', projectId: 'projB', request: { workspace: '' } });
       closeFlush.resolve();
       await settle();
 
@@ -346,7 +346,7 @@ describe('sessionsMachine', async () => {
     await openIdle(actor, 'projA');
     actor.send({ type: 'releaseMemory' });
     await settle();
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
     producerFlush.reject(new Error('Editor save refused'));
     await settle();
 
@@ -378,7 +378,7 @@ describe('sessionsMachine', async () => {
       actor.send({ type: 'releaseMemory' });
       await settle();
       expect(actor.getSnapshot().context.status['projA']?.state).toBe('closing');
-      actor.send({ type: 'open', projectId: 'projA' });
+      actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
       closeFlush.reject(new Error('Sync flush failed'));
       await settle();
 
@@ -415,7 +415,7 @@ describe('sessionsMachine', async () => {
     await openIdle(actor, 'projA');
     actor.send({ type: 'releaseMemory' });
     await settle();
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
     actor.send({ type: 'quit' });
     closeFlush.resolve();
     await settle();
@@ -429,9 +429,9 @@ describe('sessionsMachine', async () => {
   it('keeps both projects live across navigation between them (pin a)', async () => {
     const { actor, started, stopped } = harness();
 
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
     const firstRef = actor.getSnapshot().context.refs['projA'];
-    actor.send({ type: 'open', projectId: 'projB' });
+    actor.send({ type: 'open', projectId: 'projB', request: { workspace: '' } });
     actor.send({ type: 'touch', projectId: 'projA' });
     await settle();
 
@@ -451,7 +451,7 @@ describe('sessionsMachine', async () => {
       actor.send({ type: 'touch', projectId: `proj${index}` });
     }
 
-    actor.send({ type: 'open', projectId: 'projNinth' });
+    actor.send({ type: 'open', projectId: 'projNinth', request: { workspace: '' } });
     await settle();
 
     /* Room is made, not refused: the ninth opens and the row it replaced says
@@ -483,7 +483,7 @@ describe('sessionsMachine', async () => {
     /* The least recently touched project is the one recording. */
     recording('proj0');
 
-    actor.send({ type: 'open', projectId: 'projNinth' });
+    actor.send({ type: 'open', projectId: 'projNinth', request: { workspace: '' } });
     await settle();
 
     expect(stopped).toEqual(['proj1']);
@@ -492,7 +492,7 @@ describe('sessionsMachine', async () => {
     for (const projectId of Object.keys(actor.getSnapshot().context.refs)) {
       recording(projectId);
     }
-    actor.send({ type: 'open', projectId: 'projTenth' });
+    actor.send({ type: 'open', projectId: 'projTenth', request: { workspace: '' } });
     await settle();
 
     expect(emitted.find((event) => event.type === 'budgetRefused')?.projectId).toBe('projTenth');
@@ -504,12 +504,12 @@ describe('sessionsMachine', async () => {
     const { actor, emitted, started } = harness();
     for (let index = 0; index < browserLiveProjectBudget; index += 1) {
       const projectId = `proj${index}`;
-      actor.send({ type: 'open', projectId });
+      actor.send({ type: 'open', projectId, request: { workspace: '' } });
       await settle();
       report(actor, projectId, { runs: 1 });
     }
 
-    actor.send({ type: 'open', projectId: 'projNinth' });
+    actor.send({ type: 'open', projectId: 'projNinth', request: { workspace: '' } });
 
     const refusal = emitted.find((event) => event.type === 'budgetRefused');
     expect(refusal?.projectId).toBe('projNinth');
@@ -525,11 +525,11 @@ describe('sessionsMachine', async () => {
     'closes the $label project without asking when another opens on a one-project device (B-08)',
     async ({ facts }) => {
       const { actor, emitted, started, stopped } = harness({ budget: constrainedLiveProjectBudget });
-      actor.send({ type: 'open', projectId: 'projFirst' });
+      actor.send({ type: 'open', projectId: 'projFirst', request: { workspace: '' } });
       await settle();
       report(actor, 'projFirst', facts);
 
-      actor.send({ type: 'open', projectId: 'projSecond' });
+      actor.send({ type: 'open', projectId: 'projSecond', request: { workspace: '' } });
       await settle();
 
       /* Opening the second project is the only way forward from the first, so it
@@ -545,11 +545,11 @@ describe('sessionsMachine', async () => {
 
   it('still asks before stopping a running project on a one-project device (I24)', async () => {
     const { actor, emitted, started, stopped } = harness({ budget: constrainedLiveProjectBudget });
-    actor.send({ type: 'open', projectId: 'projFirst' });
+    actor.send({ type: 'open', projectId: 'projFirst', request: { workspace: '' } });
     await settle();
     report(actor, 'projFirst', { runs: 1 });
 
-    actor.send({ type: 'open', projectId: 'projSecond' });
+    actor.send({ type: 'open', projectId: 'projSecond', request: { workspace: '' } });
     await settle();
 
     expect(emitted.find((event) => event.type === 'budgetRefused')).toMatchObject({
@@ -565,12 +565,12 @@ describe('sessionsMachine', async () => {
     const { actor, emitted, started } = harness();
     for (let index = 0; index < browserLiveProjectBudget; index += 1) {
       const projectId = `proj${index}`;
-      actor.send({ type: 'open', projectId });
+      actor.send({ type: 'open', projectId, request: { workspace: '' } });
       await settle();
       report(actor, projectId, { dirty: true });
     }
 
-    actor.send({ type: 'open', projectId: 'projNinth' });
+    actor.send({ type: 'open', projectId: 'projNinth', request: { workspace: '' } });
     await settle();
 
     expect(emitted.find((event) => event.type === 'budgetRefused')?.projectId).toBe('projNinth');
@@ -582,7 +582,7 @@ describe('sessionsMachine', async () => {
     const { actor, emitted, started, stopped } = harness({ budget: constrainedLiveProjectBudget, flushRefuses: true });
     await openIdle(actor, 'projFirst');
 
-    actor.send({ type: 'open', projectId: 'projSecond' });
+    actor.send({ type: 'open', projectId: 'projSecond', request: { workspace: '' } });
     await settle();
 
     /* The close came back live with its reason recorded; the open is not left
@@ -599,7 +599,7 @@ describe('sessionsMachine', async () => {
 
   it('offers the idle window again once the refusal is gone (R6)', async () => {
     const { actor, stopped } = harness();
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
     await settle();
     report(actor, 'projA', { runs: 1 });
 
@@ -621,9 +621,9 @@ describe('sessionsMachine', async () => {
   it('suggests only projects a policy could close', async () => {
     const { actor } = harness({ budget: 3 });
     await openIdle(actor, 'projClean');
-    actor.send({ type: 'open', projectId: 'projRunning' });
+    actor.send({ type: 'open', projectId: 'projRunning', request: { workspace: '' } });
     report(actor, 'projRunning', { runs: 1 });
-    actor.send({ type: 'open', projectId: 'projDirty' });
+    actor.send({ type: 'open', projectId: 'projDirty', request: { workspace: '' } });
     report(actor, 'projDirty', { dirty: true });
 
     expect(sessionsCloseSuggestions(actor.getSnapshot().context)).toEqual(['projClean']);
@@ -632,11 +632,11 @@ describe('sessionsMachine', async () => {
 
   it('never closes a running, dirty or unpushed project on the idle window (pin c)', async () => {
     const { actor, stopped } = harness();
-    actor.send({ type: 'open', projectId: 'projRunning' });
+    actor.send({ type: 'open', projectId: 'projRunning', request: { workspace: '' } });
     report(actor, 'projRunning', { runs: 1 });
-    actor.send({ type: 'open', projectId: 'projDirty' });
+    actor.send({ type: 'open', projectId: 'projDirty', request: { workspace: '' } });
     report(actor, 'projDirty', { dirty: true });
-    actor.send({ type: 'open', projectId: 'projUnpushed' });
+    actor.send({ type: 'open', projectId: 'projUnpushed', request: { workspace: '' } });
     report(actor, 'projUnpushed', { pushed: false });
 
     for (const projectId of ['projRunning', 'projDirty', 'projUnpushed']) {
@@ -672,7 +672,7 @@ describe('sessionsMachine', async () => {
     await settle();
     expect(actor.getSnapshot().context.closed['projA']).toBeDefined();
 
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
 
     expect(actor.getSnapshot().context.closed['projA']).toBeUndefined();
     actor.stop();
@@ -756,7 +756,7 @@ describe('sessionsMachine', async () => {
     await openIdle(actor, 'projA');
     await openIdle(actor, 'projB');
     await openIdle(actor, 'projC');
-    actor.send({ type: 'open', projectId: 'projRunning' });
+    actor.send({ type: 'open', projectId: 'projRunning', request: { workspace: '' } });
     await settle();
     report(actor, 'projRunning', { runs: 1 });
 
@@ -834,12 +834,17 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
     actor.stop();
   });
 
-  it('should spawn a bare open with no request, as the sidebar and the notice send it until A5b', async () => {
+  /* A10 made `request` required (every sender is focus, D7); this row held the bare open the sidebar and the notice
+   * sent until A5b, which no sender can build now. */
+  it('should spawn every open with the request it carries, since no open is bare', async () => {
     const { actor } = harness();
 
     await openIdle(actor, 'projA');
 
-    expect(sessionRequest(actor, 'projA')).toBeUndefined();
+    expect(sessionRequest(actor, 'projA')).toEqual({ workspace: '' });
+    expectTypeOf<
+      Extract<SessionsMachineEvent, { type: 'open' }>['request']
+    >().toEqualTypeOf<ProjectSessionOpenRequest>();
     actor.stop();
   });
 
@@ -892,7 +897,7 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
   it('should keep the request of an open that switch-closes an unpushed project on a one-project device (B-08)', async () => {
     const closeFlush = Promise.withResolvers<void>();
     const { actor, started } = harness({ budget: constrainedLiveProjectBudget, closeFlush: closeFlush.promise });
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
     await settle();
     report(actor, 'projA', { pushed: false });
     const request = requestFor('projB');
@@ -926,10 +931,10 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
 
   it('should resume a budget-refused open with its request once the person closes a project (R8)', async () => {
     const { actor, started, emitted } = harness({ budget: 2 });
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
     await settle();
     report(actor, 'projA', { runs: 1 });
-    actor.send({ type: 'open', projectId: 'projRun' });
+    actor.send({ type: 'open', projectId: 'projRun', request: { workspace: '' } });
     await settle();
     report(actor, 'projRun', { runs: 1 });
     const request = requestFor('projB');
@@ -1061,15 +1066,21 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
     actor.stop();
   });
 
-  it('should only touch a live project on an open with no request', async () => {
+  /* A10 (D14): an open with no request only touched a live project. Every open now carries one, so a live project
+   * always hears the open's chat; the next row holds a request that names none. Only the chat fields move. */
+  it('should forward the chat of every open to a live project, keeping its workspace and kernel', async () => {
     const { actor } = harness();
     actor.send({ type: 'open', projectId: 'projA', request: requestFor('projA', { chatId: 'chat-1' }) });
     await settle();
 
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
     await settle();
 
-    expect(sessionRequest(actor, 'projA')).toEqual(requestFor('projA', { chatId: 'chat-1' }));
+    expect(sessionRequest(actor, 'projA')).toEqual({
+      ...requestFor('projA'),
+      chatId: undefined,
+      createdChatId: undefined,
+    });
     actor.stop();
   });
 
@@ -1152,7 +1163,7 @@ describe('sessionsMachine — the open request carrier (A5c, R3-F2)', () => {
   it('should report the open facts of a session on its status: chat ready and the first file check settled', async () => {
     const { actor } = harness();
 
-    actor.send({ type: 'open', projectId: 'projA' });
+    actor.send({ type: 'open', projectId: 'projA', request: { workspace: '' } });
     await settle();
 
     expect(actor.getSnapshot().context.status['projA']).toMatchObject({
@@ -1299,7 +1310,7 @@ describe('sessionsMachine — the machine contract (PV-S5, MC-R17)', () => {
 
   it('answers every sampled event, or declares it ignored, in every reachable state', () => {
     const events = [
-      { type: 'open', projectId: 'a' },
+      { type: 'open', projectId: 'a', request: { workspace: '' } },
       { type: 'touch', projectId: 'a' },
       { type: 'close', projectId: 'a', reason: 'user' },
       { type: 'idleExpired', projectId: 'a' },

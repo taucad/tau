@@ -5,7 +5,8 @@
  * app-state-ownership.ratchet.json:
  *
  * - `components`: the scoped files and every `.tsx` or `use-*.ts` file a lane creates or moves scoped code into.
- *   Counted: `useActorRef`, `createActor` and `.start()` calls, `storeMounts` references, `queueMicrotask`,
+ *   Counted: `useActorRef`, `createActor` and `.start()` calls (except a `MessageChannel` port's own `start()`, on
+ *   `.port1` or `.port2`, which starts message delivery and no actor), `storeMounts` references, `queueMicrotask`,
  *   `setTimeout`, `setInterval` and `requestAnimationFrame` calls, `useFlushOnClose` registrations and `waitFor`
  *   calls with a timeout.
  * - `modules`: the non-React modules the programme creates and every other file under `runtime/`. Only the timers
@@ -16,9 +17,13 @@
  * `counts` holds one line per file and pattern above zero, keyed `<workspace-relative path>#<pattern>`. A measured
  * count above or below its line fails, so a lane that removes a site lowers its line (and deletes it at 0) in the
  * same PR. A listed file that does not exist fails, and so does a non-test file under `apps/ui/app/runtime/` that is
- * in neither set. Test files are never scanned. Lanes edit the manifest, never this test.
+ * in neither set, and a `.tsx` or `use-*.ts` file listed in `modules`, where its actors would go uncounted. Test files
+ * are never scanned. Lanes edit the manifest, never this test.
  *
- * End state (A10): one line, `.start()` at 1 in `apps/ui/app/runtime/app-runtime-provider.tsx`, in `components`.
+ * End state (A10, reached): `.start()` at 1 in `apps/ui/app/runtime/app-runtime-provider.tsx`, in `components`: the
+ * runtime's one start after hydration (charter D5, D15 boundary 2). One accepted line arrived on main after the
+ * programme's lanes: `setTimeout` at 1 in `runtime/file-manager-host.ts`, Home's file service start deadline (#2422,
+ * desktop resilient startup WP2), a page-time bound kept off the runtime's clock. Another line needs a ruling.
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -50,6 +55,13 @@ type OwnershipManifest = Readonly<{
 }>;
 
 const testFilePattern = /\.(?:test|spec)(?:-d)?\./u;
+/** A component or hook module: it belongs in `components`, where actor creation and starts are counted. */
+const componentFilePattern = /(?:\.tsx|(?:^|\/)use-[^/]*\.ts)$/u;
+/** The lines left at A10: the runtime's start after hydration, and Home's file service start deadline (#2422). */
+const endStateCounts = {
+  'apps/ui/app/runtime/app-runtime-provider.tsx#.start()': 1,
+  'apps/ui/app/runtime/file-manager-host.ts#setTimeout': 1,
+} as const;
 const sourceFilePattern = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 
 function calleeName(node: ts.CallExpression): string | undefined {
@@ -75,6 +87,11 @@ function isWaitForWithTimeout(node: ts.CallExpression): boolean {
   );
 }
 
+/** A `MessageChannel` port read off its channel (`channel.port1`, `opened.port2`): its `start()` starts no actor. */
+function isChannelPort(receiver: ts.Expression): boolean {
+  return ts.isPropertyAccessExpression(receiver) && (receiver.name.text === 'port1' || receiver.name.text === 'port2');
+}
+
 /** The pattern a node is counted under, if any. */
 function patternOf(node: ts.Node): string | undefined {
   if (ts.isIdentifier(node)) {
@@ -88,7 +105,10 @@ function patternOf(node: ts.Node): string | undefined {
   }
   const name = calleeName(node);
   if (name === 'start') {
-    return ts.isPropertyAccessExpression(node.expression) && node.arguments.length === 0 ? '.start()' : undefined;
+    const callee = node.expression;
+    return ts.isPropertyAccessExpression(callee) && node.arguments.length === 0 && !isChannelPort(callee.expression)
+      ? '.start()'
+      : undefined;
   }
   return name !== undefined && componentPatterns.includes(name) ? name : undefined;
 }
@@ -204,6 +224,9 @@ function ownershipRatchetProblems(input: {
       if (testFilePattern.test(path)) {
         problems.push(`${path}: a test file is never scanned; remove it from ${set}.files`);
       }
+      if (set === 'modules' && componentFilePattern.test(path)) {
+        problems.push(`${path}: a component or hook file belongs in components.files, where actors are counted`);
+      }
     }
   }
   problems.push(...sortedUniqueProblems('counts', Object.keys(manifest.counts)));
@@ -287,6 +310,7 @@ function Host() {
   void waitFor(ref, ready, { timeout: 10 });
   void waitFor(ref, ready);
   port.start(options);
+  channel.port2.start();
   let timer: ReturnType<typeof setTimeout>;
 }
 `,
@@ -377,6 +401,22 @@ describe('ownershipRatchetProblems', () => {
     ]);
   });
 
+  it('should fail a component or hook file listed in modules, where its actors would go uncounted', () => {
+    const fixture = fixtureManifest(exact, {
+      modules: { files: ['app/runtime/provider.tsx', 'app/runtime/root.ts', 'app/runtime/use-root.ts'] },
+    });
+    expect(
+      ownershipRatchetProblems({
+        ...fixture,
+        readSource: (path) => fixtureSources[path] ?? '',
+        runtimeFiles: ['app/runtime/root.ts'],
+      }),
+    ).toEqual([
+      'app/runtime/provider.tsx: a component or hook file belongs in components.files, where actors are counted',
+      'app/runtime/use-root.ts: a component or hook file belongs in components.files, where actors are counted',
+    ]);
+  });
+
   it('should reject malformed manifests', () => {
     const fixture = fixtureManifest(
       { ...exact, 'app/other.tsx#setTimeout': 1, 'app/host.tsx#setInterval': 0 },
@@ -416,4 +456,33 @@ describe('app state ownership ratchet', () => {
     });
     expect(problems, problems.join('\n')).toEqual([]);
   }, 60_000);
+
+  it('should hold the end state: the runtime start after hydration and the file service start deadline (A10)', () => {
+    const manifest = JSON.parse(
+      readFileSync(fileURLToPath(new URL('app-state-ownership.ratchet.json', import.meta.url)), 'utf8'),
+    ) as OwnershipManifest;
+    expect(manifest.counts).toEqual(endStateCounts);
+    expect(manifest.components.files).toContain('apps/ui/app/runtime/app-runtime-provider.tsx');
+  });
+
+  it('should hold the GitHub renewal factory, the one long-lived module start a component reaches, to its one caller (A10 debt)', () => {
+    const appRoot = fileURLToPath(new URL('.', import.meta.url));
+    const callers: string[] = [];
+    const visit = (directory: string): void => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) {
+          visit(path);
+        } else if (
+          sourceFilePattern.test(entry.name) &&
+          !testFilePattern.test(entry.name) &&
+          /\bstartGithubCredentialRenewal\(/u.test(readFileSync(path, 'utf8'))
+        ) {
+          callers.push(relative(appRoot, path).split(sep).join('/'));
+        }
+      }
+    };
+    visit(appRoot);
+    expect(callers).toEqual(['hooks/use-revision-status.ts']);
+  });
 });

@@ -92,7 +92,7 @@ describe('B9: the runtime survives an owner change below the billing fence', () 
     const view = render(at('owner-a'));
     const registryA = seen.registry as ReturnType<typeof useSessions>;
     await act(async () => {
-      registryA.send({ type: 'open', projectId: 'p1' });
+      registryA.send({ type: 'open', projectId: 'p1', request: { workspace: '' } });
       await Promise.resolve();
     });
     /* The agent-host double settles after a microtask, and the session's runtime loads by dynamic import (A6d). */

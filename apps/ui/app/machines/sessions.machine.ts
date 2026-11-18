@@ -73,7 +73,7 @@ export type SessionsProjectStatus = Readonly<{
  *
  * @public
  */
-export type SessionsPendingOpen = Readonly<{ projectId: string; request: ProjectSessionOpenRequest | undefined }>;
+export type SessionsPendingOpen = Readonly<{ projectId: string; request: ProjectSessionOpenRequest }>;
 
 /** Why a project is no longer live, for the row that shows the reason. @public */
 export type SessionsClosedRecord = Readonly<{ reason: ProjectSessionCloseReason; at: number }>;
@@ -130,11 +130,11 @@ export type SessionsMachineContext = Readonly<{
 
 /** Events accepted by sessionsMachine. @public */
 export type SessionsMachineEvent =
-  /** `request` is optional until A10: the sidebar and the notice send bare opens until A5b. */
+  /** Every open carries its request: focus is the only outside sender (D7, A5b), and A10 made the field required. */
   | {
       readonly type: 'open';
       readonly projectId: string;
-      readonly request?: ProjectSessionOpenRequest;
+      readonly request: ProjectSessionOpenRequest;
       readonly reason?: string;
     }
   | { readonly type: 'close'; readonly projectId: string; readonly reason: ProjectSessionCloseReason }
@@ -304,10 +304,10 @@ const touchProject = (context: SessionsMachineContext, projectId: string): Parti
  * The model drops a request whose epoch is not the library's (`RegistryChecksEpoch`). The registry's copy of that
  * epoch arrives by event and can lag, so when the two differ, or the registry has heard of none, it cannot know the
  * request is current, and it fails safe: it drops the open and says so, and focus re-sends from its fresh answer
- * (`liveness-registry-epoch`). An open whose request names no epoch (a bare open, until A5b) resumes as today.
+ * (`liveness-registry-epoch`). An open whose request names no epoch resumes as it came.
  */
 const staleEpochOf = (context: SessionsMachineContext, pending: SessionsPendingOpen): number | undefined => {
-  const epoch = pending.request?.epoch;
+  const { epoch } = pending.request;
   return epoch !== undefined && epoch !== context.libraryEpoch ? epoch : undefined;
 };
 
@@ -481,7 +481,7 @@ export const sessionsMachine = setup({
             /* A request's chat reaches the session beside the touch (R3-F1), a request with none too: the route then
              * names no chat, and the session answers with the one its editor shows (A6d, I2). */
             const ref = context.refs[event.projectId];
-            if (ref !== undefined && event.request !== undefined) {
+            if (ref !== undefined) {
               enq.sendTo(ref, {
                 type: 'chatRequested',
                 chatId: event.request.chatId,

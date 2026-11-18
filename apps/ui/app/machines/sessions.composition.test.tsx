@@ -1011,7 +1011,7 @@ describe('sessions composition — sidebar rows across eight live projects (S48(
   it('wakes the moving chat row and its own project row, and no sibling', async () => {
     const view = await renderRoute('row-0');
     for (let index = 1; index < browserLiveProjectBudget; index += 1) {
-      await send({ type: 'open', projectId: `row-${String(index)}` });
+      await send({ type: 'open', projectId: `row-${String(index)}`, request: { workspace: '' } });
     }
     await settle();
     const projectIds = Array.from({ length: browserLiveProjectBudget }, (_, index) => `row-${String(index)}`);
@@ -1173,13 +1173,13 @@ describe('sessions composition', () => {
   it('closes the least recently touched idle project for a ninth open (pin b, P47)', async () => {
     const view = await renderRoute('pin-b-0');
     for (let index = 1; index < browserLiveProjectBudget; index += 1) {
-      await send({ type: 'open', projectId: `pin-b-${index}` });
+      await send({ type: 'open', projectId: `pin-b-${index}`, request: { workspace: '' } });
       await send({ type: 'touch', projectId: `pin-b-${index}` });
     }
     await settle();
     expect(liveProjectIds()).toHaveLength(browserLiveProjectBudget);
 
-    await send({ type: 'open', projectId: 'pin-b-ninth' });
+    await send({ type: 'open', projectId: 'pin-b-ninth', request: { workspace: '' } });
     await settle();
 
     /* Room was made, not refused: the least recently touched idle project
@@ -1226,10 +1226,10 @@ describe('sessions composition', () => {
     expect(sessionOf('projection-a')?.getSnapshot().context.pushed).toBe(true);
 
     for (let index = 2; index < browserLiveProjectBudget; index += 1) {
-      await send({ type: 'open', projectId: `projection-${String(index)}` });
+      await send({ type: 'open', projectId: `projection-${String(index)}`, request: { workspace: '' } });
       await send({ type: 'touch', projectId: `projection-${String(index)}` });
     }
-    await send({ type: 'open', projectId: 'projection-ninth' });
+    await send({ type: 'open', projectId: 'projection-ninth', request: { workspace: '' } });
     await settle();
 
     expect(liveProjectIds()).toHaveLength(browserLiveProjectBudget);
@@ -1266,10 +1266,10 @@ describe('sessions composition', () => {
     expect(revisionClientLifecycle).toEqual(['mount']);
 
     for (let index = 1; index < browserLiveProjectBudget; index += 1) {
-      await send({ type: 'open', projectId: `route-family-${String(index)}` });
+      await send({ type: 'open', projectId: `route-family-${String(index)}`, request: { workspace: '' } });
       await send({ type: 'touch', projectId: `route-family-${String(index)}` });
     }
-    await send({ type: 'open', projectId: 'route-family-ninth' });
+    await send({ type: 'open', projectId: 'route-family-ninth', request: { workspace: '' } });
     await settle();
 
     expect(liveProjectIds()).not.toContain('route-family-a');
@@ -1354,7 +1354,7 @@ describe('sessions composition', () => {
     for (let index = 0; index < browserLiveProjectBudget; index += 1) {
       const projectId = index === 0 ? 'pin-b2-0' : `pin-b2-${index}`;
       if (index > 0) {
-        await send({ type: 'open', projectId });
+        await send({ type: 'open', projectId, request: { workspace: '' } });
       }
       await settle();
       sessionOf(projectId)?.send({
@@ -1365,7 +1365,7 @@ describe('sessions composition', () => {
     }
     await settle();
 
-    await send({ type: 'open', projectId: 'pin-b2-ninth' });
+    await send({ type: 'open', projectId: 'pin-b2-ninth', request: { workspace: '' } });
 
     const refusal = emitted.find((event) => event.type === 'budgetRefused');
     expect(refusal?.projectId).toBe('pin-b2-ninth');
@@ -1474,7 +1474,7 @@ describe('sessions composition', () => {
 
   it('runs every session closing before it is quiesced (pin e, D31)', async () => {
     const view = await renderRoute('pin-e-1');
-    await send({ type: 'open', projectId: 'pin-e-2' });
+    await send({ type: 'open', projectId: 'pin-e-2', request: { workspace: '' } });
     await settle();
     expect(liveProjectIds()).toEqual(['pin-e-1', 'pin-e-2']);
 
@@ -1618,7 +1618,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
   it('closes an idle project through its own child timer', async () => {
     const registry = startRegistry();
     registry.start();
-    registry.send({ type: 'open', projectId: 'timer-idle' });
+    registry.send({ type: 'open', projectId: 'timer-idle', request: { workspace: '' } });
     await drain(registry);
     expect(registry.getSnapshot().context.refs['timer-idle']?.getSnapshot().value).toEqual({ live: 'idle' });
 
@@ -1644,7 +1644,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
   it('never arms the window while a run is in flight, and arms it again when the run settles', async () => {
     const registry = startRegistry();
     registry.start();
-    registry.send({ type: 'open', projectId: 'timer-busy' });
+    registry.send({ type: 'open', projectId: 'timer-busy', request: { workspace: '' } });
     await drain(registry);
     const session = registry.getSnapshot().context.refs['timer-busy'];
     session?.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
@@ -1671,7 +1671,7 @@ describe('sessions composition — the idle window (S48(6))', () => {
   it('re-arms the window after a refusal rather than asking once (R6)', async () => {
     const registry = startRegistry();
     registry.start();
-    registry.send({ type: 'open', projectId: 'timer-rearm' });
+    registry.send({ type: 'open', projectId: 'timer-rearm', request: { workspace: '' } });
     await drain(registry);
     const session = registry.getSnapshot().context.refs['timer-rearm'];
     session?.send({ type: 'revisionState', dirty: true, pushed: true });
@@ -2261,7 +2261,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
         }),
     );
     await act(async () => {
-      freshActor.send({ type: 'open', projectId: 'quit-hold' });
+      freshActor.send({ type: 'open', projectId: 'quit-hold', request: { workspace: '' } });
       await Promise.resolve();
     });
     await settle();

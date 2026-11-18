@@ -20,6 +20,7 @@ export type {
   KernelFileSystem,
   KernelDefinition,
   KernelServices,
+  KernelExecuteOptions,
   RealmResources,
   RealmGroup,
   RealmHoldInput,

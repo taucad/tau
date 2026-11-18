@@ -1589,7 +1589,7 @@ describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {
 
   it('should take ref, projects and seed as workflow_call inputs and give each caller its own group', () => {
     const inputs = nightly.on.workflow_call?.inputs ?? {};
-    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'seed']);
+    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'seed', 'uncached']);
     expect(inputs['ref']).toMatchObject({ type: 'string', required: true });
     expect(inputs['projects']).toMatchObject({ type: 'string', required: false });
     expect(inputs['seed']).toMatchObject({ type: 'string', required: false });

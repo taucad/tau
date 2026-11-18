@@ -201,7 +201,9 @@ describe('platform update consent', () => {
     await updater.check();
     await updater.install();
     expect(updater.snapshot()).toMatchObject({ phase: 'restart-blocked' });
-    expect(updater.snapshot().detail).toContain('spawn EAGAIN');
+    // The raw error stays in main's status and log; the renderer words the notice.
+    expect(updater.status()).toContain('spawn EAGAIN');
+    expect(updater.snapshot().detail).toBeUndefined();
     expect(release).toHaveBeenCalledOnce();
   });
   it('APT describes system policy truthfully and never downloads package files', async () => {
@@ -450,7 +452,9 @@ describe('classified update refusals (T-B25.1)', () => {
       blockedReason: 'clock',
       downloadPage: 'https://github.com/taucad/tau/releases/latest',
     });
-    expect(snapshot.detail).toMatch(/date and time/u);
+    /* main's status keeps the wording for the log; the renderer words the notice from `blockedReason`. */
+    expect(updater.status()).toMatch(/date and time/u);
+    expect(snapshot.detail).toBeUndefined();
     /* The next check that passes clears the reason. */
     await updater.check();
     expect(updater.snapshot().phase).toBe('ready');
@@ -468,7 +472,8 @@ describe('classified update refusals (T-B25.1)', () => {
     const snapshot = updater.snapshot();
     expect(snapshot.phase).toBe('error');
     expect(snapshot).not.toHaveProperty('blockedReason');
-    expect(snapshot.detail).toMatch(/^Update failed: /u);
+    expect(updater.status()).toMatch(/^Update failed: /u);
+    expect(snapshot.detail).toBeUndefined();
     expect(snapshot.downloadPage).toBe('https://github.com/taucad/tau/releases/latest');
   });
 

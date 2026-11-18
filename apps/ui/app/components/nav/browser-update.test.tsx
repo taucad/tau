@@ -72,9 +72,10 @@ describe('browser update control', () => {
 
     await announce(buildId + 1);
 
-    expect(screen.getByRole('button', { name: 'Update ready' })).toBeInTheDocument();
-    expect(await screen.findByRole('dialog', { name: 'Tau update' })).toHaveTextContent(
-      'Reload to continue with the latest version.',
+    // Another tab's newer version stopped this tab's saving, and the title says so.
+    expect(screen.getByRole('button', { name: 'Reload needed' })).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: 'Tau update' })).toHaveTextContent(
+      'A newer Tau is open in another tab, so this tab has stopped saving changes to your project list.',
     );
     expect(screen.getByRole('textbox', { name: 'Model draft' })).toHaveFocus();
     // The sidebar is the only update surface: nothing floats over the workspace.
@@ -93,17 +94,22 @@ describe('browser update control', () => {
       </SidebarProvider>,
     );
     const later = buildId + 48 * 3_600_000;
-    const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    const format = new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
 
     await announce(buildId + 3_600_000);
     await announce(later);
 
-    expect(await screen.findByRole('dialog', { name: 'Tau update' })).toHaveTextContent(
+    expect(await screen.findByRole('group', { name: 'Tau update' })).toHaveTextContent(
       `Tau · Updated ${format.format(later)}`,
     );
   });
 
-  it('words a rollback as a replacement and dates the build it serves', async () => {
+  it('words a rollback as a withdrawn version and dates the version it switches to', async () => {
     const { BrowserUpdate, BrowserUpdateReveal, SidebarProvider, buildId } = await load();
     render(
       <SidebarProvider>
@@ -112,16 +118,21 @@ describe('browser update control', () => {
       </SidebarProvider>,
     );
     const rolledBack = buildId - 48 * 3_600_000;
-    const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    const format = new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
 
     // A newer tab announces itself, and the server names the older build it rolled back to.
     vi.stubGlobal('fetch', async () => Response.json({ buildId: rolledBack }));
     await announce(buildId + 1);
 
-    const dialog = await screen.findByRole('dialog', { name: 'Tau update' });
-    expect(dialog).toHaveTextContent(`Tau · Built ${format.format(rolledBack)}`);
-    expect(dialog).toHaveTextContent('This version of Tau has been replaced.');
-    expect(dialog).not.toHaveTextContent('newer version');
+    const details = await screen.findByRole('group', { name: 'Tau update' });
+    expect(details).toHaveTextContent(`Tau · Version from ${format.format(rolledBack)}`);
+    expect(details).toHaveTextContent('This version of Tau was withdrawn, and this tab has stopped saving');
+    expect(details).not.toHaveTextContent('newer');
   });
 
   it("shows a lone tab's deploy offer without opening the sidebar while the tab still writes", async () => {
@@ -146,7 +157,7 @@ describe('browser update control', () => {
     expect(isBuildSuperseded()).toBe(false);
     expect(screen.getByRole('button', { name: 'Update ready' })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Sidebar' })).toHaveAttribute('data-open', 'false');
-    expect(screen.queryByRole('dialog', { name: 'Tau update' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Tau update' })).not.toBeInTheDocument();
   });
 
   it('opens the sidebar once writes stop, even after the offer was already shown', async () => {
@@ -169,7 +180,7 @@ describe('browser update control', () => {
     await announce(buildId + 2);
 
     expect(screen.getByRole('status', { name: 'Sidebar' })).toHaveAttribute('data-open', 'true');
-    expect(await screen.findByRole('dialog', { name: 'Tau update' })).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: 'Tau update' })).toBeInTheDocument();
   });
 
   it('does not open the sidebar again when the offer is withdrawn', async () => {
@@ -243,8 +254,19 @@ describe('browser update control', () => {
     await announce(buildId + 1);
 
     expect(screen.getByRole('status', { name: 'Mobile sheet' })).toHaveAttribute('data-open', 'true');
-    expect(await screen.findByRole('dialog', { name: 'Tau update' })).toHaveTextContent(
-      'Reload to continue with the latest version.',
+    expect(await screen.findByRole('group', { name: 'Tau update' })).toHaveTextContent(
+      'this tab has stopped saving changes to your project list',
     );
+  });
+
+  it('words each state by whether saving stopped and whether the reload goes back', async () => {
+    const { updateCopy } = await import('#components/nav/browser-update.js');
+    expect(updateCopy({ hasStoppedSaving: false, isRolledBack: false })).toEqual({
+      title: 'Update ready',
+      detail: 'Reload when you’re ready to get the latest version. Until then, some parts of Tau may not load.',
+    });
+    expect(updateCopy({ hasStoppedSaving: false, isRolledBack: true }).title).toBe('Version withdrawn');
+    expect(updateCopy({ hasStoppedSaving: true, isRolledBack: false }).title).toBe('Reload needed');
+    expect(updateCopy({ hasStoppedSaving: true, isRolledBack: true }).detail).toMatch(/withdrawn.*stopped saving/u);
   });
 });

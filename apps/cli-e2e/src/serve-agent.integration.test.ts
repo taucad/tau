@@ -95,10 +95,23 @@ const startStubRelay = async (): Promise<{ readonly url: URL; readonly controlFr
   return { url: new URL(`http://127.0.0.1:${String(port)}`), controlFrames };
 };
 
+/** The deployment answer a self-host API publishes (`GET /v1/deployment`): runs take the unfunded transport. */
+const selfHostDeploymentAnswer = JSON.stringify({
+  version: 1,
+  edition: 'self-host',
+  billing: { funded: false },
+  maxAgeSeconds: 300,
+});
+
 /** A gateway whose single turn is released by the caller, not by a timer. */
 const startStubGateway = async (): Promise<{ readonly url: URL; readonly release: () => void }> => {
   const released = Promise.withResolvers<void>();
   const server = createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/v1/deployment') {
+      /* Answered at once: these tests drive the run channel, not billing, so the API says self-host. */
+      response.writeHead(200, { 'content-type': 'application/json' }).end(selfHostDeploymentAnswer);
+      return;
+    }
     // async-iife: bootstrap -- node's request listener is synchronous; the stubbed turn can only be fired from here.
     void (async () => {
       // Drain the request so the daemon's fetch does not stall on backpressure.
@@ -402,6 +415,11 @@ const startStubApi = async (): Promise<{
   const released = Promise.withResolvers<void>();
   const controlFrames: unknown[] = [];
   const server = createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/v1/deployment') {
+      /* Answered at once: these tests drive the run channel, not billing, so the API says self-host. */
+      response.writeHead(200, { 'content-type': 'application/json' }).end(selfHostDeploymentAnswer);
+      return;
+    }
     // async-iife: bootstrap -- node's request listener is synchronous.
     void (async () => {
       for await (const _chunk of request) {

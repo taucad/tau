@@ -182,6 +182,12 @@
           restarting: 'Restarting…',
           'move-required': 'Move Tau to Applications to update it.',
         };
+        const blockedText = {
+          clock:
+            'Tau couldn’t verify the update because your computer’s date and time look wrong. Correct them, then check again.',
+          'installation-marker':
+            'This copy of Tau can’t update itself. Download Tau and install it again; your projects stay where they are.',
+        };
         const render = (state) => {
           if (!state || typeof state !== 'object') {
             return;
@@ -198,7 +204,9 @@
           const update = state.update;
           if (update && typeof update.phase === 'string') {
             const version = update.version ? ` (${update.version})` : '';
-            updateStatus.textContent = `${phaseText[update.phase] ?? update.phase}${version}${update.detail ? ` ${update.detail}` : ''}`;
+            /* Main words only an update APT installed; the two refusals only the person can fix are worded here (B25, B27). */
+            const note = blockedText[update.blockedReason] ?? update.detail;
+            updateStatus.textContent = `${phaseText[update.phase] ?? update.phase}${version}${note ? ` ${note}` : ''}`;
             installButton.hidden = update.phase !== 'ready';
           } else {
             updateStatus.textContent = 'The updater is not running yet. Download Tau always works.';

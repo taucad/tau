@@ -74,7 +74,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
 // Raised 35,600 -> 35,800 on 2026-10-24 for the client Operation Observation section (runtime observability PR-1).
 // Raised 35,800 -> 36,200 on 2026-11-13 for the editor Terminal page (Terminal git access TG6).
 // Raised 36,200 -> 36,350 on 2026-11-15 for the external agents page's install, sign-in and update commands (ACP agent install paths P6).
-const siteCeiling = 36_350;
+// Raised 36,350 -> 36,800 on 2026-11-18 for the editor Native CAD Files page (cadmpeg plugin W8).
+const siteCeiling = 36_800;
 
 const documentTypeCaps = {
   tutorial: 1500,

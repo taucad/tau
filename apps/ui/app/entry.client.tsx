@@ -12,7 +12,7 @@ import { scheduleNextStepWarm } from '#lib/warm-next-step.js';
 import { reactRootErrorHooks } from '#lib/react-root-errors.js';
 import { projectRouteId, registerEagerRouteModules } from '#lib/eager-route-modules.js';
 import * as projectRouteModule from '#routes/w.$workspace.$project/route.js';
-import { installStaleBuildNavigation } from '#lib/stale-build-navigation.js';
+import { installLiveBuildChecks } from '#lib/stale-build-navigation.js';
 import { installStaleBuildRecovery, recoverFromSdkLoadFailure } from '#lib/stale-build-recovery.js';
 import { installProjectOpenLoadTiming } from '@taucad/ui-core/lib/project-open-load-timing';
 import { setProjectOpenRouteClassReader } from '@taucad/ui-core/lib/project-open-performance';
@@ -45,8 +45,8 @@ void startErrorReporting(recoverFromSdkLoadFailure);
 // TAU-UI-6: a lazy chunk a deploy stopped serving reloads the page into the live build once.
 installStaleBuildRecovery();
 
-// TAU-UI-S: notice a deploy before the next click, and load in-app links as documents once one replaced this build.
-installStaleBuildNavigation();
+// TAU-UI-S: notice a deploy before the next click; the root's client middleware then loads the next page as a document.
+installLiveBuildChecks();
 
 /* D5: the app runtime, created here and held, not started; `AppRuntimeProvider` starts it once after hydration. A
  * hot update keeps the held one (`import.meta.hot.data`), so development never makes a second. */

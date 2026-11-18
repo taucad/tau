@@ -27,6 +27,7 @@ import { createActor, waitFor } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, AnyActorRef, SnapshotFrom } from 'xstate';
 import type { QueryClient } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
+import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
@@ -34,7 +35,8 @@ import type { ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem'
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
-import { projectManagerMachine } from '#hooks/project-manager.machine.js';
+import { projectManagerMachine } from '@taucad/files-ui/machines/project-manager.machine';
+import { createObjectStoreWorker } from '#hooks/object-store-worker.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import {
   selectWorkspaceConnectionState,
@@ -97,6 +99,7 @@ import {
 } from '@taucad/files-ui/runtime/project-library-observations';
 import type { LibraryRecords } from '@taucad/files-ui/runtime/project-library-observations';
 import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
+import { reportProjectLibraryWorkerFailed } from '#lib/file-service-reports.js';
 import { ProjectCommands } from '#runtime/project-library-commands.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
 import { WorkspaceCommands } from '@taucad/files-ui/runtime/project-library-workspace';
@@ -370,7 +373,17 @@ export class ProjectLibrary {
   }: ProjectLibraryOptions) {
     this.queryClient = queryClient;
     this.#rootFiles = rootFiles ?? (() => undefined);
-    this.projectManager = createActor(projectManagerMachine, options);
+    this.projectManager = createActor(projectManagerMachine, {
+      ...options,
+      input: {
+        startObjectStore() {
+          const worker = createObjectStoreWorker();
+          return { worker, wrappedWorker: wrap<ObjectStoreWorker>(worker) };
+        },
+        reportFault: reportAppRuntimeFault,
+        reportWorkerFailed: reportProjectLibraryWorkerFailed,
+      },
+    });
     const connection: WorkspaceConnectionServices = {
       registerWorkspace: async (selection, signal) => this.#registerWorkspace(selection, signal),
       mountWorkspace: async (_workspace, selection, signal) => this.#mountWorkspace(selection, signal),
@@ -1591,6 +1604,8 @@ export class ProjectLibrary {
     if (!snapshot.context.wrappedWorker) {
       throw new Error(`${label} not initialized`);
     }
-    return snapshot.context.wrappedWorker;
+    /* The machine holds the store it was handed as the library's contract; its only producer is this library's
+     * `startObjectStore`, which wraps the app's object-store worker. */
+    return snapshot.context.wrappedWorker as Remote<ObjectStoreWorker>;
   }
 }

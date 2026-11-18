@@ -85,12 +85,14 @@ export const startPlatformUpdateController = (
     blockedReason?: DesktopUpdateSnapshot['blockedReason'],
   ): void => {
     status = detail;
-    const { blockedReason: _previous, ...rest } = snapshot;
+    /* The renderer owns the notice's copy; `status` keeps main's wording, raw errors included, for the log. Only an
+       update APT already installed is worded here, since the renderer cannot tell it from a downloaded one. */
+    const { blockedReason: _previousReason, detail: _previous, ...rest } = snapshot;
     snapshot = {
       ...rest,
       revision: snapshot.revision + 1,
       phase,
-      detail,
+      ...(phase === 'ready' && backend.systemManaged ? { detail } : {}),
       downloadPage: desktopDownloadPage(channel, snapshot),
       ...(blockedReason === undefined ? {} : { blockedReason }),
     };
@@ -212,7 +214,7 @@ export const startPlatformUpdateController = (
     publish(
       'ready',
       backend.systemManaged
-        ? 'APT installed a newer version. Save and restart to use it; this session keeps its original files.'
+        ? 'APT installed a newer Tau. Restart to start using it; Tau saves your work first.'
         : 'Saves your work, then restarts to install. Quitting normally leaves the update for later.',
     );
   };

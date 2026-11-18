@@ -3218,8 +3218,10 @@ describe('desktop main update path without a renderer (WP7)', () => {
           );
         });
         const blocked = (await snapshot({ senderFrame: {} })) as { phase: string; detail?: string };
-        expect(blocked.detail).toMatch(/can.t update itself/u);
-        expect(blocked.detail).not.toMatch(/Update failed/u);
+        /* The renderer and the recovery window word "can't update itself" from `blockedReason`; main's raw error stays
+           in its log, never in the snapshot (#2557). */
+        expect(blocked.phase).toBe('disabled');
+        expect(blocked).not.toHaveProperty('detail');
         const check = state.handlers.get('tau:updates:check')!;
         await check({ senderFrame: {} });
         await check({ senderFrame: {} });

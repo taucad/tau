@@ -118,7 +118,7 @@ const finish = async (
 const harness = (
   projectIds: readonly string[],
   wrapPort = (port: RevisionPort): RevisionPort => port,
-  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock' | 'observeStatus'> & {
+  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock' | 'observeStatus' | 'firstViewShown'> & {
     onCreatePort?: (telemetryConsent: () => ReportingConsent | undefined) => void;
     observeFileEvents?: boolean;
     wrapFileSystem?: (filesystem: RootedFileSystem) => RootedFileSystem;
@@ -149,6 +149,7 @@ const harness = (
     /* The floor between mints is pinned in `@taucad/revisions`; here a verb runs as soon as the last mint published. */
     mintFloor: 0,
     ...(extra.observeStatus === undefined ? {} : { observeStatus: extra.observeStatus }),
+    ...(extra.firstViewShown === undefined ? {} : { firstViewShown: extra.firstViewShown }),
     createPort: (projectId, _credential, telemetryConsent) => {
       extra.onCreatePort?.(telemetryConsent);
       return wrapPort(
@@ -376,6 +377,21 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       expect(observed.map((entry) => entry.status)).toContainEqual(status);
     }
     expect(observed.at(-1)?.status).toEqual(root.status());
+  });
+
+  it('should tell the host when the page says its first view shows, under its own project (STO-25)', async () => {
+    const shown: string[] = [];
+    const fixture = harness(['alpha'], (port) => port, {
+      firstViewShown: (projectId) => {
+        shown.push(projectId);
+      },
+    });
+    const client = await fixture.open('alpha');
+    await client.settle();
+    expect(shown).toEqual([]);
+    client.send({ command: 'firstViewShown' });
+    await client.settle();
+    expect(shown).toEqual(['alpha']);
   });
 
   it('should start one root per opened project and stop its actor when the last port closes', async () => {

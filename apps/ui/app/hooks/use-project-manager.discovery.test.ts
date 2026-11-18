@@ -204,7 +204,7 @@ const mockGetProjectLibraryState = vi.fn<(projectId: string) => Promise<ProjectL
 const mockDeleteProjectResources = vi.fn<(projectId: string) => Promise<void>>();
 /** Runs at the next readiness wait for the worker (`getReadiedWorker`), then clears itself. */
 let onWorkerRead: (() => void) | undefined;
-vi.mock('#hooks/project-manager.machine.js', async () => {
+vi.mock('@taucad/files-ui/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({

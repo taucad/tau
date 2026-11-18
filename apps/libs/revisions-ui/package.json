@@ -1,7 +1,7 @@
 {
   "name": "@taucad/revisions-ui",
   "version": "0.1.0-beta.0",
-  "description": "Tau UI app revisions feature: the History graph layout and view, revision timeline styles, the revision region and name popover, entry titles, the revision compute worker, and the page's revision clients over the worker port protocol, with the app's services injected",
+  "description": "Tau UI app revisions feature: the History graph layout and view, revision timeline styles, the revision region and name popover, entry titles, the revision compute worker, the page's revision clients over the worker port protocol, and the history hooks every revision surface reads, with the app's services injected",
   "type": "module",
   "sideEffects": false,
   "private": true,
@@ -32,6 +32,7 @@
     "./components/revisions/revision-region": "./src/components/revisions/revision-region.tsx",
     "./components/revisions/revision-timeline": "./src/components/revisions/revision-timeline.ts",
     "./hooks/use-revision-status": "./src/hooks/use-revision-status.ts",
+    "./hooks/use-revisions": "./src/hooks/use-revisions.ts",
     "./lib/revision-entry-title": "./src/lib/revision-entry-title.ts",
     "./lib/revision-failure-reporting": "./src/lib/revision-failure-reporting.ts",
     "./machines/revision-compute": "./src/machines/revision-compute.ts",
@@ -47,9 +48,11 @@
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "vitest-mock-extended": "catalog:"
   },
   "dependencies": {
+    "@tanstack/react-query": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/revisions": "workspace:*",

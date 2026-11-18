@@ -6,7 +6,7 @@ import type { Project, ProjectManifest } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
-import type { projectManagerMachine } from '#hooks/project-manager.machine.js';
+import type { projectManagerMachine } from '@taucad/files-ui/machines/project-manager.machine';
 import type {
   FolderEvidence,
   RelinkTarget,

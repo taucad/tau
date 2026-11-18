@@ -27,7 +27,7 @@ export type DesktopUpdateSnapshot = {
    * Only a user gesture sets it; a background download never does.
    */
   readonly installWhenReady?: boolean;
-  /** Main-owned status for system policy and installation failures. */
+  /** Main-owned wording for the one state the renderer cannot word itself: an update APT already installed. */
   readonly detail?: string;
   /**
    * Why the updater cannot go on by itself, when the cause is one a person can act on: the computer's clock refused

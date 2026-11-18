@@ -20,7 +20,11 @@ import type { RevisionClient, RevisionSessionUser } from '@taucad/revisions-ui/t
 import { revisionClientTestApi } from '#hooks/use-revision-status.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
-import { openRevisionsAheadOfSession, sessionRevisionsCallback } from '#runtime/session-revisions.js';
+import {
+  openRevisionsAheadOfSession,
+  sessionRevisionsAheadTestApi,
+  sessionRevisionsCallback,
+} from '#runtime/session-revisions.js';
 import type {
   SessionRevisionsAheadPorts,
   SessionRevisionsCloudOpenContinuation,
@@ -169,6 +173,8 @@ afterEach(() => {
     stop();
   }
   revisionClientTestApi.reset();
+  /* Each row starts with no session holding a client and no gesture owning one. */
+  sessionRevisionsAheadTestApi.reset();
 });
 
 describe('an open ahead of its session (STO-25 SP6)', () => {
@@ -267,6 +273,22 @@ describe('an open ahead of its session (STO-25 SP6)', () => {
       expect(log).toStrictEqual([]);
       second();
     });
+  });
+
+  it('leaves a client open while another session child still holds it, and closes it with the last', async () => {
+    const log: string[] = [];
+    const { client, answerUser } = createClient(log);
+    revisionClientTestApi.adopt(projectId, worker, client);
+    const { ports } = createPorts({ user: ada });
+    const first = startSessionChild(ports);
+    const second = startSessionChild(ports);
+    answerUser();
+    await settle();
+    log.length = 0;
+    first();
+    expect(log).not.toContain('close');
+    second();
+    expect(log).toStrictEqual(['setCredential:withdrawn', 'close']);
   });
 
   describe('LOW: the connection is bound to the account it was opened for', () => {

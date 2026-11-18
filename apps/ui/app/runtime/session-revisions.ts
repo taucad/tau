@@ -478,6 +478,14 @@ type AheadOfSession = Readonly<{
 
 const aheadOfSession = new Map<string, AheadOfSession>();
 
+/** Test-only: forget every hold and every gesture's connection, so no row hands the next one its state. @internal */
+export const sessionRevisionsAheadTestApi = {
+  reset: (): void => {
+    sessionHolds.clear();
+    aheadOfSession.clear();
+  },
+};
+
 /**
  * A `revisions` child takes its project's client: a connection the gesture opened ahead of it becomes the child's when
  * it is the same client opened for the same account, and is closed first otherwise (a stale identity is never adopted).
@@ -825,6 +833,10 @@ export const sessionRevisionsCallback =
       return () => {
         closed.abort();
         connected = undefined;
+        /* Another child still holds the project's client (this one's own hold is released after): it stays open. */
+        if ((sessionHolds.get(projectId) ?? 0) > 1) {
+          return;
+        }
         // async-iife: bootstrap -- a withdrawal sends its frame before it returns.
         void next.setCredential(withdrawnCredential);
         next.close();

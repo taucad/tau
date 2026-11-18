@@ -1,16 +1,37 @@
 import { setup, types } from 'xstate';
-import { wrap } from 'comlink';
-import type { Remote } from 'comlink';
 import { safeDispose } from '@taucad/utils/dispose';
-import { createObjectStoreWorker } from '#hooks/object-store-worker.js';
-import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
 import { eventSchemas, fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
-import { faultMessage, reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
-import { reportProjectLibraryWorkerFailed } from '#lib/file-service-reports.js';
+import type { ProjectLibraryObjectStore } from '#types/project-library-io.types.js';
+
+/**
+ * A started object-store worker: the worker itself, which the machine terminates, and the store its callers use.
+ *
+ * @public
+ */
+export type StartedObjectStore = {
+  readonly worker: Worker;
+  readonly wrappedWorker: ProjectLibraryObjectStore;
+};
+
+/**
+ * What the project manager machine is given: how to start the object-store worker and how to report. The app passes
+ * its worker factory and its reporters; nothing here names an app module.
+ *
+ * @public
+ */
+export type ProjectManagerServices = {
+  /** Start the object-store worker and wrap it. */
+  startObjectStore(): StartedObjectStore;
+  /** Report the machine's first fault once (D23): the app's runtime fault reporter. */
+  reportFault(error: unknown): void;
+  /** Report that the library's worker failed to start (D5): by name, never by message. */
+  reportWorkerFailed(error: unknown): void;
+};
 
 type ProjectManagerContext = {
+  readonly services: ProjectManagerServices;
   worker: Worker | undefined;
-  wrappedWorker: Remote<ObjectStoreWorkerType> | undefined;
+  wrappedWorker: ProjectLibraryObjectStore | undefined;
   error: Error | undefined;
   /** The first defect the root `onError` caught (MC-R12, D23); later ones are its consequences and are not kept. */
   fault: string | undefined;
@@ -18,34 +39,9 @@ type ProjectManagerContext = {
 
 type WorkerInitializedEvent = {
   type: 'workerInitialized';
-  worker: Worker;
-  wrappedWorker: Remote<ObjectStoreWorkerType>;
-};
+} & StartedObjectStore;
 
-const initializeWorkerActor = fromSafeAsync<WorkerInitializedEvent, { context: ProjectManagerContext }>(
-  async ({ input, signal }) => {
-    const { context } = input;
-    console.debug('[ProjectManager] initializeWorkerActor: start');
-
-    if (context.worker) {
-      safeDispose(() => context.worker?.terminate());
-    }
-
-    signal.throwIfAborted();
-
-    const worker = createObjectStoreWorker();
-    const wrappedWorker = wrap<ObjectStoreWorkerType>(worker);
-
-    console.debug('[ProjectManager] initializeWorkerActor: success');
-    return { type: 'workerInitialized', worker, wrappedWorker };
-  },
-);
-
-const projectManagerActors = {
-  initializeWorkerActor,
-} as const;
-
-/** Events accepted by projectManagerMachine. @public */
+/** Events accepted by the project manager machine. @public */
 export type ProjectManagerEvent = { type: 'initialize' } | WorkerInitializedEvent;
 
 /**
@@ -75,19 +71,43 @@ export const projectManagerIgnoredEvents: ReadonlyArray<readonly [state: string,
   ['error', 'workerInitialized'],
 ];
 
+const initializeWorkerActor = fromSafeAsync<WorkerInitializedEvent, { context: ProjectManagerContext }>(
+  async ({ input, signal }) => {
+    const { context } = input;
+    console.debug('[ProjectManager] initializeWorkerActor: start');
+
+    if (context.worker) {
+      safeDispose(() => context.worker?.terminate());
+    }
+
+    signal.throwIfAborted();
+
+    const { worker, wrappedWorker } = context.services.startObjectStore();
+
+    console.debug('[ProjectManager] initializeWorkerActor: success');
+    return { type: 'workerInitialized', worker, wrappedWorker };
+  },
+);
+
 /**
  * Project Manager Machine
  *
  * This machine manages the object-store WebWorker for project operations:
- * - Initializes the worker that wraps IndexedDB operations
+ * - Starts the worker that wraps IndexedDB operations through the injected `startObjectStore`
  * - Provides access to the wrapped worker for performing CRUD operations
+ *
+ * The app passes {@link ProjectManagerServices} as the actor's input: its object-store worker factory, its runtime
+ * fault reporter and its worker-failure report.
+ *
+ * @public
  */
 export const projectManagerMachine = setup({
   schemas: {
     context: types<ProjectManagerContext>(),
     events: eventSchemas<ProjectManagerEvent>(),
+    input: types<ProjectManagerServices>(),
   },
-  actors: projectManagerActors,
+  actors: { initializeWorkerActor },
 }).createMachine({
   id: 'projectManager',
   /* A defect no transition modelled is recorded and reported once, and the machine stays where it was and keeps
@@ -96,17 +116,19 @@ export const projectManagerMachine = setup({
     if (context.fault !== undefined) {
       return {};
     }
+    const { services } = context;
     enq(() => {
-      reportAppRuntimeFault(event.error);
+      services.reportFault(event.error);
     });
-    return { context: { fault: faultMessage(event.error, 'project manager fault') } };
+    return { context: { fault: event.error instanceof Error ? event.error.message : 'project manager fault' } };
   },
-  context: {
+  context: ({ input }) => ({
+    services: input,
     worker: undefined,
     wrappedWorker: undefined,
     error: undefined,
     fault: undefined,
-  },
+  }),
   initial: 'initializing',
   exit: ({ context }, enq) => {
     enq(() => {
@@ -164,10 +186,11 @@ export const projectManagerMachine = setup({
 
     error: {
       entry: ({ context }, enq) => {
+        const { services, error } = context;
         enq(() => {
-          console.error('[ProjectManager] state → error', context.error);
+          console.error('[ProjectManager] state → error', error);
           /* D5: the library's worker failing is reported by name, never by message. */
-          reportProjectLibraryWorkerFailed(context.error);
+          services.reportWorkerFailed(error);
         });
       },
       on: {
@@ -179,4 +202,5 @@ export const projectManagerMachine = setup({
   },
 });
 
+/** The project manager machine. @public */
 export type ProjectManagerMachine = typeof projectManagerMachine;

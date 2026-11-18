@@ -1,37 +1,13 @@
-/* eslint-disable @typescript-eslint/naming-convention -- Sentry tag and context keys are snake_case (blueprint "Sentry events"). */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
-import type { Remote } from 'comlink';
-import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
-import { projectManagerMachine } from '#hooks/project-manager.machine.js';
 import { fromSafeAsync } from '@taucad/ui-core/lib/xstate.lib';
+import { projectManagerMachine } from '#machines/project-manager.machine.js';
+import type { ProjectManagerServices } from '#machines/project-manager.machine.js';
+import type { ProjectLibraryObjectStore } from '#types/project-library-io.types.js';
 
-vi.mock('#hooks/object-store-worker.js', () => ({
-  createObjectStoreWorker: () => ({ terminate: vi.fn() }),
-}));
-
-vi.mock('comlink', () => ({
-  wrap: vi.fn(() => ({})),
-}));
-
-const faults = vi.hoisted(() => ({ reported: [] as unknown[] }));
-const uiReports = vi.hoisted(() => ({ calls: [] as Array<{ error: unknown; details: unknown }> }));
-
-vi.mock('#lib/error-reporting.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  reportUiError: async (error: unknown, details?: unknown) => {
-    uiReports.calls.push({ error, details });
-    return undefined;
-  },
-}));
-
-vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  reportAppRuntimeFault: (error: unknown) => {
-    faults.reported.push(error);
-  },
-}));
+const faults = { reported: [] as unknown[] };
+const workerFailures = { reported: [] as unknown[] };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,12 +16,25 @@ vi.mock('#runtime/app-runtime-faults.js', async (importOriginal) => ({
 type WorkerInitializedEvent = {
   type: 'workerInitialized';
   worker: Worker;
-  wrappedWorker: Remote<ObjectStoreWorkerType>;
+  wrappedWorker: ProjectLibraryObjectStore;
 };
 
 // ---------------------------------------------------------------------------
 // Factory helpers
 // ---------------------------------------------------------------------------
+
+const services: ProjectManagerServices = {
+  startObjectStore: () => ({
+    worker: mock<Worker>({ terminate: vi.fn() }),
+    wrappedWorker: mock<ProjectLibraryObjectStore>(),
+  }),
+  reportFault(error) {
+    faults.reported.push(error);
+  },
+  reportWorkerFailed(error) {
+    workerFailures.reported.push(error);
+  },
+};
 
 function createTestActor(options?: { initResult?: () => Promise<void>; initEmit?: WorkerInitializedEvent }) {
   const machine = projectManagerMachine.provide({
@@ -58,14 +47,14 @@ function createTestActor(options?: { initResult?: () => Promise<void>; initEmit?
         const event: WorkerInitializedEvent = options?.initEmit ?? {
           type: 'workerInitialized',
           worker: mock<Worker>({ terminate: vi.fn() }),
-          wrappedWorker: mock<Remote<ObjectStoreWorkerType>>(),
+          wrappedWorker: mock<ProjectLibraryObjectStore>(),
         };
         return event;
       }),
     },
   });
 
-  return createActor(machine);
+  return createActor(machine, { input: services });
 }
 
 async function startAndInit(options?: Parameters<typeof createTestActor>[0]) {
@@ -81,6 +70,11 @@ async function startAndInit(options?: Parameters<typeof createTestActor>[0]) {
 // ---------------------------------------------------------------------------
 
 describe('projectManagerMachine', () => {
+  beforeEach(() => {
+    faults.reported.length = 0;
+    workerFailures.reported.length = 0;
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -186,10 +180,6 @@ describe('projectManagerMachine', () => {
   // Root onError (charter D23, B2; plan § 4 A4a)
   // =========================================================================
   describe('root onError', () => {
-    afterEach(() => {
-      faults.reported.length = 0;
-    });
-
     it('should keep the first fault an effect throws, report it once, and keep answering', async () => {
       const first = new Error('first fault');
       const second = new Error('second fault');
@@ -229,32 +219,38 @@ describe('projectManagerMachine', () => {
 
   // T-R9.2 (D5): the library worker's failure is reported, not only logged.
   describe('reporting', () => {
-    beforeEach(() => {
-      uiReports.calls.length = 0;
-    });
-
-    it('should report one project_library.worker_failed event with the error name when the worker throws', async () => {
+    it('should report the worker failure once through the injected reporter when the worker throws', async () => {
       class WorkerConstructionError extends Error {
         public override readonly name = 'WorkerConstructionError';
       }
+      const failure = new WorkerConstructionError('Failed to construct the worker at /Users/someone/app');
       const actor = createTestActor({
         initResult: async () => {
-          throw new WorkerConstructionError('Failed to construct the worker at /Users/someone/app');
+          throw failure;
         },
       });
       actor.start();
       actor.send({ type: 'initialize' });
       await waitFor(actor, (s) => s.value === 'error');
 
-      await vi.waitFor(() => {
-        expect(uiReports.calls).toHaveLength(1);
-      });
-      const [{ error, details }] = uiReports.calls as [{ error: Error; details: Record<string, unknown> }];
-      expect(details).toMatchObject({
-        tags: { tau_event: 'project_library.worker_failed', error_name: 'WorkerConstructionError' },
-        level: 'error',
-      });
-      expect(error.message).not.toContain('/');
+      expect(workerFailures.reported).toEqual([failure]);
+      actor.stop();
+    });
+  });
+
+  // The real worker start goes through the injected `startObjectStore`.
+  describe('object store start', () => {
+    it('should start the object store through the injected factory and hold what it returns', async () => {
+      const worker = mock<Worker>({ terminate: vi.fn() });
+      const wrappedWorker = mock<ProjectLibraryObjectStore>();
+      const startObjectStore = vi.fn(() => ({ worker, wrappedWorker }));
+      const actor = createActor(projectManagerMachine, { input: { ...services, startObjectStore } });
+      actor.start();
+      actor.send({ type: 'initialize' });
+      const ready = await waitFor(actor, (s) => s.value === 'ready');
+      expect(startObjectStore).toHaveBeenCalledOnce();
+      expect(ready.context.worker).toBe(worker);
+      expect(ready.context.wrappedWorker).toBe(wrappedWorker);
       actor.stop();
     });
   });

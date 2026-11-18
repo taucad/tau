@@ -147,6 +147,9 @@ try {
     }
   });
   await navigationPage.goto(origin);
+  // Hydration waits for idle time or the first pointer or key press, and a link clicked before it is a native full
+  // page load that replaces the document and its probe. The client enhancement marks the page once React has hydrated.
+  await navigationPage.waitForFunction(() => document.body.dataset['page'] === '/');
   await navigationPage.evaluate(() => {
     document.documentElement.dataset['navigationProbe'] = 'retained';
   });

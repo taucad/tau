@@ -6,6 +6,10 @@ inputs:
     description: 'Comma-separated tools for `formal setup`: tlc, lean, apalache'
     required: false
     default: 'tlc'
+  save-cache:
+    description: "'true' saves the toolchain cache when it missed, on `main` only (formal-toolchain-cache.yml); every other job only restores"
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
@@ -26,8 +30,13 @@ runs:
 
     # Toolchains live under node_modules/.cache/formal, never in `pnpm install`.
     # The key changes when the lock does, so a re-pin re-downloads and re-verifies.
+    # Only `main` saves an entry (formal-toolchain-cache.yml seeds one per tool selection), and a
+    # pull request or merge-queue job restores `main`'s: a job that saved under its own ref left an
+    # entry no later run could read (CI throughput review, formal speed: the restore missed in every
+    # sampled queue job, and each agent-host job saved 473 MB).
     - name: Restore formal toolchain cache
-      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      id: restore
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: node_modules/.cache/formal
         key: formal-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-key.outputs.tools }}-${{ hashFiles('tools/formal/toolchain.lock') }}
@@ -38,3 +47,10 @@ runs:
       env:
         FORMAL_TOOLS: ${{ inputs.tools }}
       run: pnpm nx run formal:setup --tools="$FORMAL_TOOLS"
+
+    - name: Save formal toolchain cache
+      if: inputs.save-cache == 'true' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: node_modules/.cache/formal
+        key: formal-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-key.outputs.tools }}-${{ hashFiles('tools/formal/toolchain.lock') }}

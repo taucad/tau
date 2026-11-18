@@ -27,8 +27,7 @@
       "glb": "out/test-results/viewer-parity/fixtures/replicad.t-slot-rail.glb",
       "source": "replicad/t-slot-rail",
       "class": "prismatic",
-      "rationale": "narrow slots, dense one-pixel parallel edges",
-      "knownFailure": "AO profile H2 (tau #2481): the viewer's GTAO uses a smooth 3D-distance falloff while nanoraster keeps the hard thickness slab, so the deep slots differ (ao-on D2 about 2.0%, ao-off unchanged). Owner: viewer AO; cleared when nanoraster ports the falloff (Tau Brain research/three-upgrade-tech-debt.md)."
+      "rationale": "narrow slots, dense one-pixel parallel edges"
     },
     {
       "name": "replicad.lego",

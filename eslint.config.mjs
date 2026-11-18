@@ -809,7 +809,8 @@ const config = [
      * Omitting `packageDir` reads the nearest `package.json`.
      */
     files: ['{packages,libs,apps/libs,examples}/**/*.{ts,tsx,mts,cts}'],
-    ignores: ['**/*.{spec,test,test-d,config,setup}.{ts,tsx,mts,cts}', '**/e2e/**', '**/scripts/**'],
+    // Test helpers (`*.test-utils.*`) are imported by tests only and are never a package entry or export.
+    ignores: ['**/*.{spec,test,test-d,test-utils,config,setup}.{ts,tsx,mts,cts}', '**/e2e/**', '**/scripts/**'],
     rules: {
       'import-x/no-extraneous-dependencies': ['error', { ...noExtraneousDependenciesOptions, peerDependencies: true }],
     },

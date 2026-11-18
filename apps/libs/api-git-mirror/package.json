@@ -67,7 +67,7 @@
     "@nestjs/testing": "catalog:",
     "@taucad/api-core": "workspace:*",
     "dotenv": "catalog:",
-    "postgres": "^3.4.9",
+    "postgres": "4.1.1",
     "reflect-metadata": "^0.2.2",
     "vitest-mock-extended": "catalog:",
     "zod": "catalog:"

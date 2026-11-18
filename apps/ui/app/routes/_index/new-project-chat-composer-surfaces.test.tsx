@@ -30,7 +30,11 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   ),
   // The hero's native early input adopts into this actor, and its bar at rest reads the model.
   useChatComposer: () => ({
-    draftActorRef: { send: vi.fn() },
+    draftActorRef: {
+      send: vi.fn(),
+      getSnapshot: () => ({ context: { draftText: '', draftAttachments: [] } }),
+      subscribe: () => ({ unsubscribe: () => undefined }),
+    },
     model: {
       model: {
         id: 'm',

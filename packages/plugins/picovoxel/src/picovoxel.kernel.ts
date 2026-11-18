@@ -20,7 +20,7 @@ import type * as PicovoxelModule from 'picovoxel';
 import picovoxelPackage from 'picovoxel/package.json' with { type: 'json' };
 import { createExportFile, kernelIssueCodeValues } from '@taucad/runtime/types';
 import { z } from 'zod';
-import type { KernelIssue, KernelIssueCode } from '@taucad/runtime/types';
+import type { KernelIssue, KernelIssueCode, ResourceLimitDetails } from '@taucad/runtime/types';
 import {
   asBuffer,
   checkAbort,
@@ -960,6 +960,34 @@ const issueCodeFor = (picoCode: PicoErrorCode | undefined): KernelIssueCode =>
       ? 'REPRESENTATION_UNSUPPORTED'
       : 'RUNTIME';
 
+/**
+ * PicoVoxel compiles an `SdfExpression` to a tape of at most a fixed number of instructions and refuses a longer one
+ * with `PICO_INVALID_ARGUMENT`. The maximum it names is the only number the refusal carries; it stops counting at the
+ * first instruction past it, so the demand is unknown.
+ */
+const tapeLimitPattern = /^Invalid SDF expression: more than (?<maximum>\d+) operations\./u;
+
+/**
+ * The capacity limit a PicoVoxel refusal names, when it is the tape-length refusal.
+ *
+ * @param picoCode - The PicoVoxel error code, when the failure carried one.
+ * @param message - The failure's message.
+ * @returns The limit details, or `undefined` for any other failure.
+ */
+const tapeLimitOf = (picoCode: PicoErrorCode | undefined, message: string): ResourceLimitDetails | undefined => {
+  const maximum =
+    picoCode === 'PICO_INVALID_ARGUMENT' ? tapeLimitPattern.exec(message)?.groups?.['maximum'] : undefined;
+  return maximum === undefined
+    ? undefined
+    : {
+        limit: 'picovoxel.tape.instructions',
+        unit: '{instruction}',
+        maximum: Number(maximum),
+        demand: { kind: 'unknown' },
+        origin: 'default',
+      };
+};
+
 const outOfMemoryRemedy =
   ' PicoVoxel ran out of WebAssembly memory; increase voxelSize (cost grows with 1/voxelSize³) or shrink the model bounds.';
 
@@ -995,9 +1023,10 @@ const buildIssue = (
   });
   const picoCode = isPicoError(error) ? error.code : undefined;
   const message = error instanceof Error ? error.message : String(error);
+  const tapeLimit = tapeLimitOf(picoCode, message);
   return {
     message: messageFor(picoCode, message),
-    code: issueCodeFor(picoCode),
+    code: tapeLimit === undefined ? issueCodeFor(picoCode) : 'RESOURCE_LIMIT',
     type: 'runtime',
     severity: 'error',
     stackFrames,
@@ -1005,6 +1034,7 @@ const buildIssue = (
     details: {
       producer: { kernelId },
       ...(picoCode ? { picoCode } : {}),
+      ...tapeLimit,
       ...(picoCode === 'PICO_LANE_LOOSENED' ? { refusal: 'PICOVOXEL_LANE_LOOSENED', picoMessage: message } : {}),
       ...options.session,
     },

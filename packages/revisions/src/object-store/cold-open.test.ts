@@ -752,6 +752,9 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     const ahead = pack.readAhead([deepest![0]!], { bytes: 1024 * 1024 });
     const read = await pack.readMany([deepest![0]!]);
     expect(read.get(deepest![0]!)?.type).toBe(hosted.git('cat-file', '-t', deepest![0]!));
+    /* Read, it is dropped, and so are the bases only it named. */
+    expect(pack.counters.aheadPeakBytes).toBeGreaterThan(0);
+    expect(pack.counters.aheadHeldBytes).toBe(0);
     await ahead.release();
     /* A wave per link of the chain, every one the read-ahead's: the read itself sent none. */
     expect(pack.counters.waves).toBe(depth + 1);
@@ -1302,6 +1305,116 @@ describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
     expect(served.roundTrips()).toBeGreaterThanOrEqual(13);
   });
 
+  it("reads every pack's trees ahead before any pack's blobs take the budget", async () => {
+    /* Two packs: the blobs alone first, then the commit and trees; the budget holds the second pack and no more. */
+    const blobs = new Set(blobsOfDeep());
+    const everything = lines(deep.git('rev-list', '--objects', deep.main)).map((line) => line.split(' ')[0]!);
+    const split = join(deep.directory, 'split');
+    await mkdir(split, { recursive: true });
+    const packOf = async (oids: readonly string[], prefix: string) => {
+      const checksum = execFileSync('git', ['pack-objects', '-q', join(split, prefix)], {
+        cwd: deep.directory,
+        input: `${oids.join('\n')}\n`,
+        encoding: 'utf8',
+      }).trim();
+      const pack = new Uint8Array(await readFile(join(split, `${prefix}-${checksum}.pack`)));
+      const index = new Uint8Array(await readFile(join(split, `${prefix}-${checksum}.idx`)));
+      return { pack, index, name: `pack-${Buffer.from(pack.subarray(-20)).toString('hex')}-${nonce}` };
+    };
+    const packs = [
+      await packOf(
+        everything.filter((oid) => blobs.has(oid)),
+        'blobs',
+      ),
+      await packOf(
+        everything.filter((oid) => !blobs.has(oid)),
+        'rest',
+      ),
+    ];
+    const restIndex = readPackIndex(packs[1]!.index);
+    let restBytes = 0;
+    for (const oid of everything.filter((candidate) => !blobs.has(candidate))) {
+      const offset = restIndex.offsetOf(oid)!;
+      restBytes += restIndex.endOf(offset, packs[1]!.pack.byteLength) - offset;
+    }
+    let answeredDepth = 0;
+    let deepest = 0;
+    const fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+      if (url.href.startsWith(catalogueUrl)) {
+        return Response.json({
+          format: 1,
+          generation: 1,
+          refs: [{ ref: 'refs/heads/main', oid: deep.main }],
+          listings: [{ commit: deep.main, href: `${filesOrigin}/listing`, bytes: deep.listing.byteLength }],
+          packs: packs.map((pack) => ({
+            key: `packs/${pack.name}.pack`,
+            bytes: pack.pack.byteLength,
+            index: { href: `${filesOrigin}/${pack.name}.idx`, bytes: pack.index.byteLength },
+            pack: { href: `${filesOrigin}/${pack.name}.pack`, bytes: pack.pack.byteLength },
+          })),
+          complete: true,
+          expiresAt: Math.floor(Date.now() / 1000) + 900,
+        });
+      }
+      if (url.href === `${filesOrigin}/listing`) {
+        return new Response(deep.listing, { status: 200 });
+      }
+      const pack = packs.find((candidate) => url.href.startsWith(`${filesOrigin}/${candidate.name}`))!;
+      if (url.href.endsWith('.idx')) {
+        return new Response(pack.index, { status: 200 });
+      }
+      const range = packRangeRefused(new Headers(init?.headers).get('range') ?? undefined, pack.pack.byteLength)!;
+      const depth = answeredDepth + 1;
+      deepest = Math.max(deepest, depth);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 5);
+      });
+      answeredDepth = Math.max(answeredDepth, depth);
+      return new Response(pack.pack.slice(...range), { status: 206 });
+    }) as typeof globalThis.fetch;
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'deep-two-packs');
+
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch, store, compute, readAheadBytes: restBytes });
+
+    expect(opened).toBeDefined();
+    /* The commit and every tree in the first wave, the blobs read when wanted: two round trips, not thirteen. */
+    expect(deepest).toBeLessThanOrEqual(2);
+    expect(opened!.report.listingTrees).toEqual({ matched: 1, missed: 0 });
+  });
+
+  it('opens a head whose listing does not hash to its tree, reading the trees as the walk reaches them', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'deep-unhashed');
+    const served = serveDeep();
+    /* A submodule line whose id is not hex: no tree hashes from it, and nothing reads it. */
+    const text = String(gunzipSync(deep.listing));
+    const odd = new Uint8Array(gzipSync(`${text}160000\t${'z'.repeat(40)}\t-\t\t\tvendor\n`));
+    const fetch = (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+      return url.href.includes('/listings/') ? new Response(odd, { status: 200 }) : served.fetch(input, init);
+    }) as typeof globalThis.fetch;
+
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch, store, compute });
+
+    expect(opened).toBeDefined();
+    expect(opened!.report.listingTrees).toEqual({ matched: 0, missed: 1 });
+    expect(await store.has(deepestOf())).toBe(true);
+    expect(served.roundTrips()).toBeGreaterThan(1);
+  });
+
+  it('refuses a read-ahead budget that is not a finite count of bytes', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'deep-bad-budget');
+    for (const readAheadBytes of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      // oxlint-disable-next-line no-await-in-loop -- one budget at a time.
+      await expect(
+        coldOpenFromCatalogue({ catalogueUrl, fetch: serveDeep().fetch, store, compute, readAheadBytes }),
+      ).rejects.toBeInstanceOf(RangeError);
+    }
+  });
+
   it('reads ahead no more stored bytes than its budget, and the rest as the walk wants it', async () => {
     const compute = countingCompute();
     const store = await emptyStore(compute, 'deep-budget');
@@ -1491,6 +1604,30 @@ describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
     expect(most).toBeLessThanOrEqual(2);
   });
 
+  it('holds no more read-ahead bytes than its budget, by default too, and nothing once the open ends', async () => {
+    const compute = countingCompute();
+    const budget = Math.floor(deep.pack.byteLength / 3);
+    const budgets = [undefined, budget];
+    const openedAll = await Promise.all(
+      budgets.map(async (readAheadBytes) =>
+        coldOpenFromCatalogue({
+          catalogueUrl,
+          fetch: serveDeep().fetch,
+          store: await emptyStore(compute, `deep-ahead-bound-${String(readAheadBytes)}`),
+          compute,
+          batchObjects: 1,
+          ...(readAheadBytes === undefined ? {} : { readAheadBytes }),
+        }),
+      ),
+    );
+    for (const [at, opened] of openedAll.entries()) {
+      expect(opened).toBeDefined();
+      expect(opened!.report.ranges.aheadPeakBytes).toBeGreaterThan(0);
+      expect(opened!.report.ranges.aheadPeakBytes).toBeLessThanOrEqual(budgets[at] ?? 32 * 1024 * 1024);
+      expect(opened!.report.ranges.aheadHeldBytes).toBe(0);
+    }
+  });
+
   it('stops walking the levels once a listed blob fails', async () => {
     const compute = countingCompute();
     const store = await emptyStore(compute, 'deep-walk-stops');
@@ -1504,6 +1641,20 @@ describe.runIf(gitToolchainOnPath)('a cold open of a deep tree (SP5)', () => {
     expect(served.inFlight()).toBe(0);
     const deepest = extentOf(deepestOf());
     expect(served.asked.some((range) => touches(range, deepest))).toBe(false);
+  });
+
+  it('stops at the first wave once a listed blob read ahead fails, and keeps nothing that names it', async () => {
+    const compute = countingCompute();
+    const store = await emptyStore(compute, 'deep-ahead-stops');
+    const blob = deep.git('rev-parse', `${deep.main}:part-0.scad`);
+    const served = serveDeep([extentOf(blob)]);
+
+    expect(await coldOpenFromCatalogue({ catalogueUrl, fetch: served.fetch, store, compute })).toBeUndefined();
+    expect(served.inFlight()).toBe(0);
+    /* Every tree came with the blob; nothing was asked after the blob failed. */
+    expect(served.roundTrips()).toBe(1);
+    const trees = [deep.git('rev-parse', `${deep.main}^{tree}`), deepestOf()];
+    expect(await Promise.all([deep.main, ...trees].map(async (oid) => store.has(oid)))).toEqual([false, false, false]);
   });
 
   it('stops keeping the listed blobs once the walk fails', async () => {

@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { describe, expect, it } from 'vitest';
 import { createInlineCompute } from '#compute-worker/compute-worker.js';
@@ -5,7 +6,7 @@ import { digestHex } from '#object-hash.js';
 import { createObjectStore, gitFilesOf } from '#object-store/object-store.js';
 import { buildPack, indexBuiltPack } from '#object-store/pack-writer.js';
 import type { PackObject } from '#object-store/pack-writer.js';
-import { coalesceRanges, maximumRangeBytes, openRemotePack } from '#object-store/remote-pack.js';
+import { aheadPieces, coalesceRanges, maximumRangeBytes, openRemotePack } from '#object-store/remote-pack.js';
 import { encodePackIndex } from '#pack-reader/pack-index.js';
 
 const encoder = new TextEncoder();
@@ -19,6 +20,24 @@ const blob = (text: string): PackObject => {
     data,
   };
 };
+
+/* A blob of `bytes` random bytes: it does not compress. */
+const randomBlob = (bytes: number): PackObject => {
+  const data = new Uint8Array(randomBytes(bytes));
+  return {
+    oid: createHash('sha1')
+      .update(`blob ${String(bytes)}\0`)
+      .update(data)
+      .digest('hex'),
+    type: 'blob',
+    data,
+  };
+};
+
+const sleep = async (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 /* Distinct blobs that do not delta against each other. */
 const blobs = (count: number): PackObject[] =>
@@ -35,6 +54,50 @@ describe('coalesceRanges', () => {
       [10 + maximumRangeBytes, 10 + 2 * maximumRangeBytes],
       [10 + 2 * maximumRangeBytes, end],
     ]);
+  });
+});
+
+describe('aheadPieces', () => {
+  it('cuts entries into pieces and names the part of each entry every piece fills', () => {
+    const pieces = aheadPieces(
+      [
+        { start: 0, end: 10, rank: 2 },
+        { start: 10, end: 25, rank: 0 },
+        { start: 40, end: 45, rank: 1 },
+      ],
+      8,
+    );
+    expect(pieces.map(({ start, end, rank }) => [start, end, rank])).toEqual([
+      [0, 8, 2],
+      [8, 16, 0],
+      [16, 24, 0],
+      [24, 25, 0],
+      [40, 45, 1],
+    ]);
+    expect(pieces.map((piece) => piece.fills)).toEqual([
+      [[0, 0]],
+      [
+        [0, 1],
+        [1, 0],
+      ],
+      [[1, 1]],
+      [[1, 2]],
+      [[2, 0]],
+    ]);
+  });
+
+  it('stays linear in scattered entries', () => {
+    /* 200,000 entries none of which touches the next: one piece each. A sweep, not a scan per entry (SP6 review). */
+    const entries = Array.from({ length: 200_000 }, (_value, at) => ({
+      start: at * 100,
+      end: at * 100 + 50,
+      rank: at,
+    }));
+    const started = performance.now();
+    const pieces = aheadPieces(entries, 1024 * 1024);
+    expect(pieces).toHaveLength(entries.length);
+    expect(pieces.at(-1)!.fills).toEqual([[entries.length - 1, 0]]);
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 });
 
@@ -273,6 +336,101 @@ describe('openRemotePack', () => {
     failing = false;
     const read = await pack.readMany([objects[0]!.oid]);
     expect(read.get(objects[0]!.oid)?.data).toStrictEqual(objects[0]!.data);
+  });
+
+  it('lets a call waiting on an entry a release dropped ask for it itself', async () => {
+    /* More pieces than a read-ahead's 24 reads: some are still queued when it stops. */
+    const objects = Array.from({ length: 30 }, () => randomBlob(1_153_434));
+    const built = await buildPack(objects, inline);
+    const pack = await openRemotePack({
+      name: `pack-${built.checksum}`,
+      size: built.pack.byteLength,
+      index: await indexBuiltPack(built, inline),
+      compute: inline,
+      fetchRange: async (offset, length, signal) => {
+        await sleep(20);
+        signal?.throwIfAborted();
+        return built.pack.slice(offset, offset + length);
+      },
+    });
+    const ahead = pack.readAhead(
+      objects.map((object) => object.oid),
+      { bytes: built.pack.byteLength },
+    );
+    const last = objects.at(-1)!;
+    const reading = pack.readMany([last.oid]);
+    await sleep(5);
+    await ahead.release();
+    const read = await reading;
+    expect(Buffer.from(read.get(last.oid)!.data).equals(last.data)).toBe(true);
+    expect(pack.counters.aheadHeldBytes).toBe(0);
+  }, 30_000);
+
+  it('fails a call waiting on a read that failed with its own cause, and not a call waiting on another', async () => {
+    /* More pieces than a read-ahead's 24 reads: some are still queued when it stops. */
+    const objects = Array.from({ length: 30 }, () => randomBlob(1_153_434));
+    const built = await buildPack(objects, inline);
+    const sorted = built.entries.toSorted((left, right) => left.offset - right.offset);
+    const pack = await openRemotePack({
+      name: `pack-${built.checksum}`,
+      size: built.pack.byteLength,
+      index: await indexBuiltPack(built, inline),
+      compute: inline,
+      fetchRange: async (offset, length, signal) => {
+        await sleep(offset === sorted[0]!.offset ? 2 : 20);
+        signal?.throwIfAborted();
+        if (offset === sorted[0]!.offset) {
+          throw new Error('The connection was reset.');
+        }
+        return built.pack.slice(offset, offset + length);
+      },
+    });
+    const ahead = pack.readAhead(
+      sorted.map((entry) => entry.oid),
+      { bytes: built.pack.byteLength },
+    );
+    const lastOid = sorted.at(-1)!.oid;
+    const [first, last] = await Promise.allSettled([pack.readMany([sorted[0]!.oid]), pack.readMany([lastOid])]);
+    await ahead.release();
+    expect(first.status === 'rejected' && String(first.reason)).toContain('reset');
+    const lastData = last.status === 'fulfilled' ? last.value.get(lastOid)?.data : undefined;
+    expect(Buffer.from(lastData!).equals(objects.find((object) => object.oid === lastOid)!.data)).toBe(true);
+  }, 30_000);
+
+  it('drops each entry once a call has read it, and holds no more than its budget', async () => {
+    const objects = blobs(20);
+    const built = await buildPack(objects, inline);
+    const pack = await openRemotePack({
+      name: `pack-${built.checksum}`,
+      size: built.pack.byteLength,
+      index: await indexBuiltPack(built, inline),
+      compute: inline,
+      fetchRange: async (offset, length) => built.pack.slice(offset, offset + length),
+    });
+    const oids = objects.map((object) => object.oid);
+    const total = oids.reduce((sum, oid) => sum + pack.entryBytes(oid)!, 0);
+    const ahead = pack.readAhead(oids, { bytes: total });
+    await pack.readMany(oids.slice(0, 10));
+    const rest = oids.slice(10).reduce((sum, oid) => sum + pack.entryBytes(oid)!, 0);
+    expect(pack.counters.aheadHeldBytes).toBe(rest);
+    expect(pack.counters.aheadPeakBytes).toBeLessThanOrEqual(total);
+    await ahead.release();
+    expect(pack.counters.aheadHeldBytes).toBe(0);
+  });
+
+  it('refuses a budget that is not a finite count of bytes', async () => {
+    const objects = blobs(2);
+    const built = await buildPack(objects, inline);
+    const pack = await openRemotePack({
+      name: `pack-${built.checksum}`,
+      size: built.pack.byteLength,
+      index: await indexBuiltPack(built, inline),
+      compute: inline,
+      fetchRange: async (offset, length) => built.pack.slice(offset, offset + length),
+    });
+    for (const bytes of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(() => pack.readAhead([objects[0]!.oid], { bytes })).toThrow(RangeError);
+    }
   });
 
   it("refuses an object whose bytes are another object's", async () => {

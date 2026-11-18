@@ -452,7 +452,7 @@ describe('classified update refusals (T-B25.1)', () => {
       blockedReason: 'clock',
       downloadPage: 'https://github.com/taucad/tau/releases/latest',
     });
-    /* main's status keeps the wording for the log; the renderer words the notice from `blockedReason`. */
+    /* The main process status keeps the wording for the log; the renderer words the notice from `blockedReason`. */
     expect(updater.status()).toMatch(/date and time/u);
     expect(snapshot.detail).toBeUndefined();
     /* The next check that passes clears the reason. */

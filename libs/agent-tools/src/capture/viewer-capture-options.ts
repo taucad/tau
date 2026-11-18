@@ -144,7 +144,7 @@ export const buildViewerCaptureImageOptions = ({
     ao: {
       radiusPixels: radiusCssPixels * pixelRatio,
       intensity: ambientOcclusion.intensity,
-      distanceFalloff: ambientOcclusion.distanceFalloff,
+      distanceFalloff: ambientOcclusion.slabDistanceFalloff,
       thicknessRatio: ambientOcclusion.thicknessRatio,
       denoiseDepthTolerance: ambientOcclusion.denoiseDepthTolerance,
       samples: ambientOcclusion.samples,

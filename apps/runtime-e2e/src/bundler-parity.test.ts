@@ -74,6 +74,7 @@ const exportFixture = async (
   }
 };
 
+/** Closed solids carry `doubleSided: false` since tau #1406, which changes each JSON chunk, not the BIN. */
 const fixtures = [
   [
     'birdhouse',
@@ -81,11 +82,11 @@ const fixtures = [
     {
       explicit: {
         binBytes: 143_040,
-        sha256: '859ea5b203307f785e5cb6dd0b983d7510afc81586a5ec25cfaf2865a8f0f70f',
+        sha256: '8494e2a2ed2184123589d8a2d6e042e7cae7254e77248f3ca21151e288b281c8',
       },
       high: {
         binBytes: 114_000,
-        sha256: '349f672160f14f5adf0ae02ecaf28bf8b9f63a5d734882d8d16d6a6b48b342d4',
+        sha256: 'fbc517ecd99dfe0f233e318c1f474d6ae0d6b7a82d6d85e53291dfba14c24fa2',
       },
     },
   ],
@@ -95,11 +96,11 @@ const fixtures = [
     {
       explicit: {
         binBytes: 8640,
-        sha256: '19f87172285f36487c45bce3c24208ced0a66c234b7679d8787e3f4cbf8767ff',
+        sha256: 'cfc6bf7aaf47873e47c86a7c993b72e13970b8980e0afa4eff9b5e37511a13f1',
       },
       high: {
         binBytes: 11_232,
-        sha256: '6649f4e793fdb25658769bf9e47583d99b6b6d813c3e0dcbb0dfee7de3d546e1',
+        sha256: 'db08aaef39311b32c2f13123f5cc8772dfbb99d4566c767954eed23d7851949d',
       },
     },
   ],

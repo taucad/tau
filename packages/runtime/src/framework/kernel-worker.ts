@@ -602,6 +602,14 @@ export type ResolvedMiddleware = {
 };
 
 /**
+ * The publication hold of one transient frame: its results publish only if a commit adopts them.
+ * @param documentId - The document the frame belongs to.
+ * @param evaluationId - The frame's evaluation.
+ * @returns The hold token.
+ */
+const transientHold = (documentId: string, evaluationId: string): string => `${documentId}:${evaluationId}`;
+
+/**
  * Base class for kernel workers providing lifecycle, middleware, bundler, and caching infrastructure.
  * @public
  */
@@ -699,6 +707,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private nextEvaluationId = 0;
   /** Latest admitted evaluation, whether or not its display projection succeeded. */
   private retainedEvaluation: EvaluationSlot | undefined;
+  /** Evaluations whose queued build publication reads their handle, per action, oldest first (R1). */
+  private readonly pendingBuildPublications = new Map<ActionDigest, EvaluationSlot[]>();
+  /** The transient frame the running operation computes for; its results never publish on their own (R4). */
+  private activeOperationHold: string | undefined;
 
   /**
    * Live native handles this worker owns, mapped to the owner that can release
@@ -1264,15 +1276,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         record.current?.artifact?.evaluationSlot?.id ?? record.committed?.artifact?.evaluationSlot?.id;
       if (
         closedSlotId !== undefined &&
-        ![...this.documents.values()].some(
-          (live) =>
-            live.current?.artifact?.evaluationSlot?.id === closedSlotId ||
-            live.committed?.artifact?.evaluationSlot?.id === closedSlotId,
-        ) &&
-        ![...this.pinnedDocumentEvaluations.keys()].some(
-          (evaluation) => evaluation.artifact?.evaluationSlot?.id === closedSlotId,
-        ) &&
-        this.retainedEvaluation?.id === closedSlotId
+        !this.isEvaluationSlotOpen(closedSlotId) &&
+        this.retainedEvaluation?.id === closedSlotId &&
+        // The worker keeps its latest build while the compute store holds or queues it: a reopen then
+        // reuses the live handle instead of a restored snapshot, and the queued snapshot can still read it.
+        this.retainedEvaluation.buildPublication === undefined
       ) {
         this.retainedEvaluation = undefined;
       }
@@ -1285,6 +1293,93 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         },
       });
     });
+  }
+
+  /**
+   * Whether an open document or a pinned export still references an evaluation.
+   * @param slotId - The evaluation slot.
+   * @returns True while a document or pin can read it.
+   */
+  private isEvaluationSlotOpen(slotId: number): boolean {
+    return (
+      [...this.documents.values()].some(
+        (document) =>
+          document.current?.artifact?.evaluationSlot?.id === slotId ||
+          document.committed?.artifact?.evaluationSlot?.id === slotId,
+      ) ||
+      [...this.pinnedDocumentEvaluations.keys()].some(
+        (evaluation) => evaluation.artifact?.evaluationSlot?.id === slotId,
+      )
+    );
+  }
+
+  /**
+   * Follow the build publication an evaluate phase queues, so its handle outlives a document close
+   * until the snapshot is taken (R1), and so a later reuse of the live handle knows the store has it (R3).
+   * @param capability - The evaluate phase's compute facet.
+   * @param computedSlot - The evaluation that computed the value, once the kernel handler ran.
+   * @returns The facet, its evaluate observed.
+   */
+  private trackBuildPublication(
+    capability: KernelComputeCapability,
+    computedSlot: () => EvaluationSlot | undefined,
+  ): KernelComputeCapability {
+    if (capability.status === 'off') {
+      return capability;
+    }
+    const { evaluate } = capability;
+    return {
+      ...capability,
+      evaluate: async (evaluation) => {
+        const result = await evaluate(evaluation);
+        const slot = computedSlot();
+        if (result.source !== 'computed' || slot?.hasHandle !== true) {
+          return result;
+        }
+        if (result.publication.status === 'stored') {
+          slot.buildPublication = 'stored';
+        } else if (result.publication.status === 'deferred') {
+          slot.buildPublication ??= 'pending';
+          slot.pendingPublications = (slot.pendingPublications ?? 0) + 1;
+          const queued = this.pendingBuildPublications.get(result.actionDigest);
+          if (queued) {
+            queued.push(slot);
+          } else {
+            this.pendingBuildPublications.set(result.actionDigest, [slot]);
+          }
+        }
+        return result;
+      },
+    };
+  }
+
+  /**
+   * A queued publication settled: release a build publication's hold on its handle.
+   * @param actionDigest - The published action.
+   * @param stored - Whether the store now holds the action.
+   */
+  private settleBuildPublication(actionDigest: ActionDigest, stored: boolean): void {
+    const queued = this.pendingBuildPublications.get(actionDigest);
+    const slot = queued?.shift();
+    if (!slot) {
+      return;
+    }
+    if (queued?.length === 0) {
+      this.pendingBuildPublications.delete(actionDigest);
+    }
+    slot.pendingPublications = Math.max(0, (slot.pendingPublications ?? 1) - 1);
+    if (stored) {
+      slot.buildPublication = 'stored';
+    } else if (slot.buildPublication === 'pending' && slot.pendingPublications === 0) {
+      slot.buildPublication = undefined;
+      if (this.retainedEvaluation === slot && !this.isEvaluationSlotOpen(slot.id)) {
+        // Kept past its close only for the store; nothing will hold it there now.
+        this.retainedEvaluation = undefined;
+      }
+    }
+    if (this.admittedOperations === 0) {
+      this.disposeUnreachableNativeHandles();
+    }
   }
 
   /** Subscribe one view to the document's current and future evaluations. */
@@ -1685,6 +1780,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         const previousProgress = this.onProgress;
         this.activeDocumentEvaluationController = controller;
         this.activeDocumentEvaluationSequence = Number(evaluationId) >>> 0;
+        this.activeOperationHold = transient ? transientHold(document.id, evaluationId) : undefined;
         this.onProgress = (phase, detail) => {
           this.onDocumentProgressUpdate?.({
             documentId: document.id,
@@ -1823,6 +1919,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           if (evaluationSlot !== undefined && priorEvaluation?.artifact?.evaluationSlot === evaluationSlot) {
             priorEvaluation.projections ??= new Map();
             evaluation.projections = priorEvaluation.projections;
+            if (priorEvaluation.transient && !transient) {
+              // A committed state adopts the last frame's build and meshes: publish them once now (R4).
+              this.computeHost?.releaseHeld(transientHold(document.id, priorEvaluation.id));
+            }
           }
           if (initialWatchRefusal && evaluation.result.success) {
             throw initialWatchRefusal.error;
@@ -1881,6 +1981,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         } finally {
           this.activeDocumentEvaluationController = undefined;
           this.activeDocumentEvaluationSequence = 0;
+          this.activeOperationHold = undefined;
           this.onProgress = previousProgress;
         }
       },
@@ -2139,6 +2240,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               };
               computeOperationId = randomUuid();
               this.trackProjectionRelease(computeOperationId);
+              this.activeOperationHold = evaluation.transient ? transientHold(document.id, evaluation.id) : undefined;
               try {
                 projected = await this.runMeshPhase({
                   computeOperationId,
@@ -2157,6 +2259,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 });
               } finally {
                 this.activeDocumentNativeOperation = undefined;
+                this.activeOperationHold = undefined;
               }
               // Never cache what an aborted render made of its abort: the same options must render again.
               controller.signal.throwIfAborted();
@@ -2730,6 +2833,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.watchedPaths.clear();
     this.pendingNativeHandle = undefined;
     this.retainedEvaluation = undefined;
+    this.pendingBuildPublications.clear();
     // Nothing references the handles now — release them before onCleanup tears
     // down the kernel that owns their memory.
     this.disposeUnreachableNativeHandles();
@@ -3806,6 +3910,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       nativeHandleKey,
     });
     let evaluationSlot = this.createEvaluationSlot(owner, evaluationIdentityKey);
+    /* The worker still holds this build live: a store lookup could only return a restored copy, which
+     * meshes every occurrence instead of its shared prototypes and costs a snapshot on the request path. */
+    const live =
+      this.retainedEvaluation?.identityKey === evaluationIdentityKey && this.retainedEvaluation.hasHandle
+        ? this.retainedEvaluation
+        : undefined;
+    // Set by the terminal handler; middleware decides whether it runs.
+    const terminal = { ran: false };
+    /* No build action when it cannot store anything (the kernel has no snapshot serializer) or need not
+     * (the live build is already stored or queued): middleware then sees reuse off for this phase (R3). */
+    const buildCompute = (): KernelComputeCapability => {
+      if (!this.kernelStoresNativeHandleForOwner(owner) || live?.buildPublication !== undefined) {
+        return { status: 'off' };
+      }
+      return this.trackBuildPublication(this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal), () =>
+        terminal.ran ? evaluationSlot : undefined,
+      );
+    };
 
     const runtimes = new Map<string, KernelMiddlewareRuntime>();
     for (const { middleware, options: middlewareOptions, enabled, id } of createMiddleware) {
@@ -3818,7 +3940,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             onLog: this.onLog,
             middlewareName: middleware.name,
             filesystem: this.filesystem,
-            compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal),
+            compute: buildCompute(),
             dependencies: nativeHandleDependencies,
             dependencyHash: nativeHandleKey,
             stateSchema: middleware.stateSchema,
@@ -3833,6 +3955,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     let chain: (input: EvaluateRequest) => Promise<EvaluateResult> = named(
       'kernelHandler',
       async (handlerInput: EvaluateRequest) => {
+        terminal.ran = true;
         const computeSpan = tracer.startSpan('kernel.compute');
         const createSchema = owner.binding?.kernelId
           ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
@@ -3922,6 +4045,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             success: true,
             data: retained.terminalOffers ?? {},
             issues: retained.terminalIssues ?? [],
+            // A reused live build can still be published, for example once a slider frame is committed.
+            ...(retained.hasHandle && retained.serializeHandleSnapshot
+              ? { serializeHandleSnapshot: retained.serializeHandleSnapshot }
+              : {}),
             [nativeBuildInputSymbol]: retained.nativeBuildInput,
           };
         }
@@ -3951,6 +4078,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           if (result.success) {
             evaluationSlot.terminalOffers = result.data;
             evaluationSlot.terminalIssues = [...result.issues];
+            evaluationSlot.serializeHandleSnapshot = result.serializeHandleSnapshot;
           }
         } finally {
           if (documentController) {
@@ -4012,6 +4140,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       evaluated = await chain(input);
     } finally {
       this.activeEvaluationSlot = undefined;
+    }
+    if (
+      !terminal.ran &&
+      evaluated.success &&
+      live?.hasHandle === true &&
+      live.nativeBuildInput !== undefined &&
+      canonicalJson(live.nativeBuildInput) === canonicalJson(evaluated[nativeBuildInputSymbol])
+    ) {
+      // A store hit for the build this worker still holds: keep the live handle, not the restored copy (R3).
+      evaluationSlot = live;
+      live.buildPublication = 'stored';
+      const { serializedHandle: _restored, ...hit } = evaluated;
+      evaluated = hit;
     }
     evaluationSlot.offers = evaluated.success ? evaluated.data : undefined;
     if (evaluated.success) {
@@ -4186,6 +4327,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         ]),
         ...[...this.committedAdmissions].map((admission) => admission.evaluation?.artifact?.evaluationSlot?.id),
         ...[...this.pinnedDocumentEvaluations.keys()].map((evaluation) => evaluation.artifact?.evaluationSlot?.id),
+        // A queued publication reads its snapshot from the live handle when it runs (R1).
+        ...[...this.pendingBuildPublications.values()].flat().map((slot) => slot.id),
       ].filter((id): id is number => id !== undefined),
     );
 
@@ -4621,6 +4764,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** A deferred snapshot may read the payload only while its evaluation is retained. */
   protected isEvaluationSlotLive(slot: EvaluationSlot): boolean {
     return this.ownedNativeHandles.get(slot.id)?.slot === slot;
+  }
+
+  /**
+   * Whether the owner's kernel can snapshot its native handle, so a build entry can be stored.
+   * The base worker has no kernel registry and keeps the build action.
+   */
+  protected kernelStoresNativeHandleForOwner(_owner: OperationOwner): boolean {
+    return true;
   }
 
   /**
@@ -7661,6 +7812,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           this.telemetryCollector?.flush();
         }
         this.settleProjectionRelease(operationId, actionDigest, status === 'stored' || reason === 'duplicate');
+        this.settleBuildPublication(actionDigest, status === 'stored' || reason === 'duplicate');
       },
       onScopeSettled: ({ operationId, generation, settlement }) => {
         this.tracer.startSpan('kernel.compute.reuse', { operationId }).end({
@@ -7673,7 +7825,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         });
       },
     });
-    const capability = this.observeComputeReuse(this.computeHost.capability(signal, operationId));
+    const capability = this.observeComputeReuse(
+      this.computeHost.capability(
+        signal,
+        operationId,
+        this.activeOperationHold === undefined ? undefined : { hold: this.activeOperationHold },
+      ),
+    );
     const release = this.projectionReleases.get(operationId);
     if (capability.status === 'off' || !release) {
       return capability;

@@ -150,7 +150,15 @@ export type CreateTauAgentHostOptions = {
   readonly openEventLog: (chatId: string) => Promise<DurableEventLog>;
   readonly createId?: (() => string) | undefined;
   readonly createLeaderEpoch?: (() => string) | undefined;
+  /** The wall clock: what rows and cross-device stamps say, and nothing this host times itself by. */
   readonly now?: (() => Date) | undefined;
+  /**
+   * This process's monotonic clock, in milliseconds (#1097): every liveness interval the host keeps (quiet time, time
+   * since publish, a paused run's hold, a "not shared" answer's age, the pull ask's spacing) is measured on it, so a
+   * wall clock that steps (a VM resume, an NTP step, a manual change) never pauses or hurries a live run's heartbeat.
+   * `performance.now()` when absent.
+   */
+  readonly monotonicNow?: (() => number) | undefined;
   readonly clientContext?:
     | CreateAgentSessionOptions['clientContext']
     | (() => Promise<ClientContext | undefined> | ClientContext | undefined);
@@ -343,17 +351,21 @@ type ChatStore = {
   externalKind?: string | undefined;
   /** The ledger the host's close left: a read after close answers from it and opens nothing (L2a D14). */
   final?: ChatLedger | undefined;
-  /** The term this host last wrote the chat under, and when: a heartbeat writes only under a term already claimed. */
+  /**
+   * The term this host last wrote the chat under, and when on the monotonic clock: a heartbeat writes only under a term
+   * already claimed.
+   */
   wrote?: Readonly<{ leaderEpoch: string; at: number }> | undefined;
   /** The armed heartbeat (XD3): the incarnation it was armed for, and how to cancel it. */
   heartbeat?: Readonly<{ deliver: ChatStore['deliver']; cancel: () => void }> | undefined;
-  /** When this host last paused the chat's run under its current term: where its hold starts (XD3). */
+  /** When this host last paused the chat's run under its current term, on the monotonic clock: its hold's start (XD3). */
   pausedAt?: number | undefined;
-  /** When this host last asked the placement to publish the chat's ref for its live run (XD3). */
+  /** When this host last asked the placement to publish the chat's ref for its live run, on the monotonic clock (XD3). */
   publishedAt?: number | undefined;
   /**
    * What the placement last said about the chat reaching another device (XD3): shared, or not shared until a moment
-   * one heartbeat interval after it said so; unknown before the first answer and once that moment has passed.
+   * one heartbeat interval after it said so (on the monotonic clock); unknown before the first answer and once that
+   * moment has passed.
    */
   sharing?: Readonly<{ shared: true } | { shared: false; until: number }> | undefined;
   /** The run whose start already asked the placement about sharing, so it is asked once per run. */
@@ -371,7 +383,10 @@ type ChatStore = {
    * for them ({@link carriedPlace}, round 21) spends its entry; a command answered otherwise withdraws its own.
    */
   carried?: readonly CarriedTurns[] | undefined;
-  /** When this host last asked the placement to pull, for another device's run that awaits one (XD3, round 18). */
+  /**
+   * When this host last asked the placement to pull, on the monotonic clock, for another device's run that awaits one
+   * (XD3, round 18).
+   */
   pullAskedAt?: number | undefined;
   /**
    * Whether that ask found this device able to pull the chat (round 27): `false` once the placement answered it
@@ -968,6 +983,8 @@ const approvalAnswers = (
 export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgentHost => {
   const createId = options.createId ?? createPortableId;
   const now = options.now ?? (() => new Date());
+  /** Liveness is timed here, never on {@link now}: {@link CreateTauAgentHostOptions.monotonicNow}. */
+  const elapsed = options.monotonicNow ?? (() => performance.now());
   const stores = new Map<string, ChatStore>();
   const deferredLogCloses = new Map<
     string,
@@ -987,6 +1004,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   /** Host-shaped admissions the legacy `admit` hands `prepareAdmission` beside its command. */
   const legacyConfigs = new Map<string, TauAgentAdmissionConfig>();
   let closed = false;
+  /* Set once the close has begun dropping every chat's log: a writer opened after it would never be closed, and its
+   * lock would refuse every later host for the chat `WRITER_LOCKED` until the process exits. */
+  let logsReleased = false;
   let closing: Promise<void> | undefined;
 
   const createTerm = options.createLeaderEpoch ?? createPortableId;
@@ -1097,6 +1117,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const logOf = async (chatId: string): Promise<DurableEventLog> => {
     const store = storeOf(chatId);
     if (store.log === undefined) {
+      if (logsReleased) {
+        throw coded('HOST_CLOSED' satisfies RefusalCode, 'The Tau agent host is closed.');
+      }
       const opened = options.openEventLog(chatId);
       store.log = opened;
       const forget = async (): Promise<void> => {
@@ -1409,7 +1432,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    */
   const publishChat = async (store: ChatStore, chatId: string, runId: string): Promise<boolean> => {
     const notShared = (): boolean => {
-      store.sharing = { shared: false, until: now().getTime() + heartbeatInterval };
+      store.sharing = { shared: false, until: elapsed() + heartbeatInterval };
       return false;
     };
     const publish = options.placement?.publish;
@@ -1448,7 +1471,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (sharing.shared) {
       return 'shared';
     }
-    return now().getTime() < sharing.until ? 'not-shared' : 'recheck';
+    return elapsed() < sharing.until ? 'not-shared' : 'recheck';
   };
   const pausedHold = options.delays?.pausedRunHold ?? pausedRunHoldMilliseconds;
   /** Whether the chat's current run is paused here and still inside its hold (XD3). */
@@ -1456,7 +1479,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     store?.ledger !== undefined &&
     chatRunState(store.ledger) === 'paused' &&
     store.pausedAt !== undefined &&
-    now().getTime() - store.pausedAt < pausedHold;
+    elapsed() - store.pausedAt < pausedHold;
   /**
    * The run a heartbeat may be written for now, under which term, or `undefined` when none may: the host is open, the
    * chat's incarnation is the one that armed it and its log is open, its run is live, and this host already wrote the
@@ -1522,7 +1545,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const { wrote } = store;
       /* What this tick decided on: a heartbeat is written only if no row lands before it does. */
       const decided = wrote;
-      const at = now().getTime();
+      const at = elapsed();
       const quiet = wrote?.leaderEpoch === target.leaderEpoch ? at - wrote.at : heartbeatInterval;
       if (quiet < heartbeatInterval) {
         /* Rows were written within the interval, so no heartbeat; those rows are published on the same cadence, or a
@@ -1550,7 +1573,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
        */
       const sharing = sharingOf(store);
       if (sharing === 'not-shared') {
-        store.publishedAt = now().getTime();
+        store.publishedAt = elapsed();
         armHeartbeat(chatId);
         return;
       }
@@ -1558,7 +1581,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
        * until the next tick, so the tick still publishes once. */
       const rechecked = sharing === 'recheck';
       if (rechecked) {
-        store.publishedAt = now().getTime();
+        store.publishedAt = elapsed();
         await publishChat(store, chatId, target.runId);
         if (sharingOf(store) === 'not-shared') {
           armHeartbeat(chatId);
@@ -1587,7 +1610,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
         /* Fire and forget: an offline remote queues the push, and an older session has no such verb. */
         if (!rechecked) {
-          store.publishedAt = now().getTime();
+          store.publishedAt = elapsed();
           void publishChat(store, chatId, target.runId);
         }
       } catch {
@@ -1670,7 +1693,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * Ask the placement to pull the project's remote now (XD3, rounds 18 and 19), and answer whether this device can pull
    * the chat at all (round 27). Another device's run on the chat has been quiet here a while, and only pulls show
    * whether it stayed quiet there for the staleness bound (`foreignRunStanding`). At most once a heartbeat interval per
-   * chat (a clock that went back asks again); between asks the last answer stands. The ask is answered once made, not
+   * chat, on the monotonic clock; between asks the last answer stands. The ask is answered once made, not
    * once pulled, and waited for within the admission's segment bound: what the pull brings, the next command reads.
    *
    * A placement that cannot pull the chat (chat sync off, no remote, no record identity) answers `CHAT_NOT_SHARED`: no
@@ -1678,20 +1701,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * verb, or one fenced, failing or not answering in time, is taken to pull, and the run keeps holding the chat.
    *
    * @param chatId - The chat.
-   * @param at - This device's time.
+   * @param at - This device's wall time, which names the ask; its spacing is timed on the monotonic clock.
    * @returns Whether this device can pull the chat.
    */
   const askPull = async (chatId: string, at: number): Promise<boolean> => {
     const store = storeOf(chatId);
     const pull = options.placement?.pull;
-    const since = store.pullAskedAt === undefined ? heartbeatInterval : at - store.pullAskedAt;
+    const asked = elapsed();
+    const since = store.pullAskedAt === undefined ? heartbeatInterval : asked - store.pullAskedAt;
     if (pull === undefined) {
       return true;
     }
-    if (since >= 0 && since < heartbeatInterval) {
+    if (since < heartbeatInterval) {
       return store.pulls ?? true;
     }
-    store.pullAskedAt = at;
+    store.pullAskedAt = asked;
     let pulls = true;
     try {
       const answer = await withinSegmentBound(pull({ requestId: `pull:${chatId}:${String(at)}`, chatId }));
@@ -2262,9 +2286,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           if (store.carried !== undefined) {
             store.carried = carriedAfterRow(store.carried, place === undefined ? undefined : carried, row);
           }
-          store.wrote = { leaderEpoch, at: now().getTime() };
+          store.wrote = { leaderEpoch, at: elapsed() };
           if (row.type === 'run.lifecycle' && row.state === 'paused') {
-            store.pausedAt = now().getTime();
+            store.pausedAt = elapsed();
           }
           runChats.set(row.runId, chatId);
           if (row.type === 'message.appended') {
@@ -3560,14 +3584,25 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         for (const store of stores.values()) {
           store.heartbeat?.cancel();
         }
-        await registry.close();
-        await Promise.allSettled([...deferredLogCloses.values()].map(async ({ done }) => done.promise));
-        await drainApprovalScans();
+        /* The logs are dropped whatever the steps before them threw: a writer left open holds the chat's lock for
+         * the process's life, and every later host for the chat is refused `WRITER_LOCKED`. */
+        let failure: { readonly error: unknown } | undefined;
+        try {
+          await registry.close();
+          await Promise.allSettled([...deferredLogCloses.values()].map(async ({ done }) => done.promise));
+          await drainApprovalScans();
+        } catch (error) {
+          failure = { error };
+        }
         for (const store of stores.values()) {
           wake(store);
         }
         await Promise.allSettled([...stores.keys()].map(async (chatId) => closeExternalChat(chatId)));
+        logsReleased = true;
         await Promise.allSettled([...stores.keys()].map(async (chatId) => serial(chatId, async () => dropLog(chatId))));
+        if (failure !== undefined) {
+          throw failure.error;
+        }
       })();
       const attempt = closing;
       try {

@@ -17,7 +17,11 @@
  *    recognised as replaced after the next deploy.
  * 5. **Headers.** The function document's COOP, COEP, CORP, report-only CSP, `Reporting-Endpoints` and
  *    `Document-Policy` equal the static headers the shell gets on this site (`netlify.toml` and the `_headers` the
- *    build writes for `TAU_FRONTEND_URL`).
+ *    build writes for `TAU_FRONTEND_URL`). **Script hashes:** every inline script of the shell is either one whose
+ *    CSP hash is listed in `app/lib/inline-script-hashes.ts`, or one whose source is not fixed and is recognised by
+ *    how it begins (the client environment, the icon sprite loader, React Router's and React's own scripts); any
+ *    other inline script fails, so a new Tau
+ *    inline script is listed with its hash before it ships.
  * 6. **Sentinel guard.** The shell's placeholder (`__shell`) appears in no rendered text, attribute or loader data.
  * 7. **Nothing left behind (edge shells).** The Home shell's prerendered `index.html` and root data file (`_.data`, or
  *    `_root.data` without trailing-slash-aware data requests) are gone from the client output: Netlify's function
@@ -33,6 +37,7 @@
  *   0  Every shell holds every invariant
  *   1  An invariant fails, or a build output is missing
  */
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -42,6 +47,7 @@ import type { ServerBuild } from 'react-router';
 import { prerenderedFiles, shellDocumentFile, shellSentinel, staticShellClasses } from '../app/lib/route-classes.ts';
 import type { StaticShellClass } from '../app/lib/route-classes.ts';
 import { resolveContentSecurityPolicyEnvironment } from '../app/lib/content-security-policy.server.ts';
+import { tauInlineScriptHashes } from '../app/lib/inline-script-hashes.ts';
 import { contentSecurityPolicyHeaders } from './write-content-security-policy-headers.mts';
 /* oxlint-enable no-restricted-imports */
 
@@ -132,6 +138,67 @@ export const findSentinelLeaks = (html: string, sentinel: string): string[] => {
  * @returns The id, or `undefined` when the document publishes none.
  */
 export const publishedBuildId = (html: string): string | undefined => /TAU_BUILD_ID\\?":\\?"(\d+)/u.exec(html)?.[1];
+
+/**
+ * The CSP hash source of an inline script's text: SHA-256 of its UTF-8 bytes, base64 (CSP3 § 6.7.3.3).
+ *
+ * @param source - The script element's text.
+ * @returns The `'sha256-…'` source expression.
+ */
+export const scriptHashSource = (source: string): string =>
+  `'sha256-${createHash('sha256').update(source, 'utf8').digest('base64')}'`;
+
+/**
+ * The text of each inline script a document runs: every `<script>` without `src`, other than a data block.
+ *
+ * @param html - The document.
+ * @returns Each script's text, in document order.
+ */
+export const inlineScripts = (html: string): string[] =>
+  [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/giu)]
+    .filter(
+      ([, attributes = '']) =>
+        !/\bsrc\s*=/iu.test(attributes) && !/\btype\s*=\s*["']?application\/(?:ld\+)?json/iu.test(attributes),
+    )
+    .map((match) => match[2] ?? '');
+
+/**
+ * The inline scripts whose source is not fixed, so no hash can be listed for them, recognised by how they begin: the
+ * client environment carries the build id and the site's environment (per deploy); the icon sprite loader carries the
+ * build's hashed sprite URLs (per build); React Router's context, stream and route-module loader carry loader data and
+ * the build's asset URLs (per build, and per request on a function document); its scroll restoration and React's
+ * streaming runtime (`$RC`, `$RB`, `$RT`) belong to those libraries' versions and to the document's Suspense boundaries.
+ */
+export const unfixedInlineScripts: ReadonlyArray<Readonly<{ label: string; pattern: RegExp }>> = [
+  { label: 'the client environment', pattern: /^window\.ENV = \{/u },
+  { label: 'the icon sprite loader', pattern: /^\(\(\)=>\{if\(document\.getElementById\("tau-svg-sprite"\)\)return;/u },
+  { label: "React Router's context and stream", pattern: /^window\.__reactRouterContext[ .]/u },
+  { label: "React Router's route-module loader", pattern: /^import "\/assets\/manifest-[\w-]+\.js";\n/u },
+  { label: "React Router's scroll restoration", pattern: /^\(\(storageKey\d*, restoreKey\) => \{/u },
+  { label: "React's streaming runtime", pattern: /^(?:\$R[A-Z]|requestAnimationFrame\(function\(\)\{\$RT=)/u },
+];
+
+/**
+ * Every inline script of a document that is neither listed with its CSP hash nor recognised as one whose source is
+ * not fixed (shell invariant 5, "the CSP and its script hashes").
+ *
+ * @param html - The document.
+ * @param listed - The listed hash sources.
+ * @returns One message per unlisted script.
+ */
+export const findUnlistedInlineScripts = (
+  html: string,
+  listed: readonly string[] = Object.values(tauInlineScriptHashes),
+): string[] =>
+  inlineScripts(html)
+    .filter(
+      (source) =>
+        !listed.includes(scriptHashSource(source)) && !unfixedInlineScripts.some(({ pattern }) => pattern.test(source)),
+    )
+    .map(
+      (source) =>
+        `an inline script whose hash ${scriptHashSource(source)} is not listed in app/lib/inline-script-hashes.ts: ${JSON.stringify(source.slice(0, 120))}`,
+    );
 
 /**
  * The first difference between two documents, for a readable failure.
@@ -277,6 +344,7 @@ export const checkShell = (
       `the shell publishes build id ${String(shellBuildId)}, the server's /health/build ${String(input.serverBuildId)}`,
     );
   }
+  problems.push(...findUnlistedInlineScripts(input.prerendered));
   for (const leak of findSentinelLeaks(input.prerendered, shellSentinel)) {
     problems.push(`the shell renders its placeholder: ${leak}`);
   }
@@ -371,7 +439,7 @@ const main = async (): Promise<number> => {
     );
     if (problems.length === 0) {
       console.log(
-        `✓ ${routeClass.label}: ${shellDocumentFile(routeClass)} is neutral, deterministic, equal to the function's document, carries build ${String(serverBuildId)} and the function's headers`,
+        `✓ ${routeClass.label}: ${shellDocumentFile(routeClass)} is neutral, deterministic, equal to the function's document, carries build ${String(serverBuildId)} and the function's headers, and lists every fixed inline script's hash`,
       );
     }
   }

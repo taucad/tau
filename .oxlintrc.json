@@ -120,6 +120,7 @@
     "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
     "tau-lint/no-impl-in-index": "error",
+    "tau-lint/no-test-bridge-redeclaration": "error",
     "tau-lint/plugin-capability-filename": "error",
     "tau-lint/no-authored-pointer-cursor": "error",
     "tau-lint/no-inline-actor-selector": "error",
@@ -1126,6 +1127,8 @@
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
         "apps/libs/files-ui/src/**/*.{ts,tsx}",
         "apps/libs/editor-ui/src/**/*.{ts,tsx}",
+        "apps/libs/settings-ui/src/**/*.{ts,tsx}",
+        "apps/libs/publish-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
       // Tests and route entries retain the uncompiled React Router/Vitest transform paths.
@@ -1134,6 +1137,8 @@
         "apps/libs/project-workspace/src/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/files-ui/src/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/editor-ui/src/**/*.{test,spec}.{ts,tsx}",
+        "apps/libs/settings-ui/src/**/*.{test,spec}.{ts,tsx}",
+        "apps/libs/publish-ui/src/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{test,spec}.{ts,tsx}",
         "apps/ui/app/root.{ts,tsx}",
         "apps/ui/app/routes/*.{ts,tsx}",
@@ -1557,11 +1562,7 @@
     },
     {
       // Current publish/import inversions. -- W9
-      "files": [
-        "apps/ui/app/lib/github-api.ts",
-        "apps/ui/app/machines/import-disk.machine.test.ts",
-        "apps/ui/app/machines/import-disk.machine.ts"
-      ],
+      "files": ["apps/ui/app/lib/github-api.ts"],
       "rules": { "no-restricted-imports": "off" }
     },
     {
@@ -1753,6 +1754,8 @@
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
         "apps/libs/files-ui/src/**/*.{ts,tsx}",
         "apps/libs/editor-ui/src/**/*.{ts,tsx}",
+        "apps/libs/settings-ui/src/**/*.{ts,tsx}",
+        "apps/libs/publish-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
       "rules": {
@@ -1768,6 +1771,8 @@
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
         "apps/libs/files-ui/src/**/*.{ts,tsx}",
         "apps/libs/editor-ui/src/**/*.{ts,tsx}",
+        "apps/libs/settings-ui/src/**/*.{ts,tsx}",
+        "apps/libs/publish-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
       "excludeFiles": ["**/*.{test,spec}.{ts,tsx}", "**/*.test-harness.{ts,tsx}", "**/*.stories.{ts,tsx}"],
@@ -1783,6 +1788,8 @@
         "apps/libs/project-workspace/src/**/*.{ts,tsx}",
         "apps/libs/files-ui/src/**/*.{ts,tsx}",
         "apps/libs/editor-ui/src/**/*.{ts,tsx}",
+        "apps/libs/settings-ui/src/**/*.{ts,tsx}",
+        "apps/libs/publish-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}",
         "packages/ui/src/**/*.{ts,tsx}"
       ],
@@ -1817,6 +1824,8 @@
         "apps/libs/project-workspace/src/**/*.tsx",
         "apps/libs/files-ui/src/**/*.tsx",
         "apps/libs/editor-ui/src/**/*.tsx",
+        "apps/libs/settings-ui/src/**/*.tsx",
+        "apps/libs/publish-ui/src/**/*.tsx",
         "apps/libs/ui-core/src/**/*.tsx",
         "packages/ui/src/**/*.tsx"
       ],
@@ -2014,16 +2023,17 @@
             // conversion and preview routes and the e2e fixtures.
             "deferredLeaves": [
               "apps/libs/chat-ui/src/chat-clients/_internal/shared-chat-transport.ts",
+              "apps/libs/editor-ui/src/components/code/code-editor-view.client.tsx",
               "apps/libs/editor-ui/src/components/code/editor-definition.ts",
               "apps/libs/editor-ui/src/components/code/editor-language-features.ts",
+              "apps/libs/editor-ui/src/components/code/editor-lint.ts",
               "apps/libs/editor-ui/src/components/code/editor-search-panel.tsx",
               "apps/libs/editor-ui/src/components/code/editor-surface-theme.ts",
               "apps/libs/editor-ui/src/components/code/json-depth-highlighting.ts",
+              "apps/libs/editor-ui/src/lib/kcl-language/",
               "apps/libs/ui-core/src/lib/lsp-completion-apply.ts",
               "apps/libs/ui-core/src/services/headless-capture-presentation.ts",
               "apps/ui/app/components/cad/ar-webxr-scene.ts",
-              "apps/ui/app/components/code/code-editor-view.client.tsx",
-              "apps/ui/app/components/code/editor-lint.ts",
               "apps/ui/app/components/geometry/debug/",
               "apps/ui/app/components/geometry/loader/glass-prism-controller.ts",
               "apps/ui/app/components/geometry/loader/glass-prism-light-sheet.ts",

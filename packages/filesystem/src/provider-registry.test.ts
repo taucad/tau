@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ProviderRegistry } from '#provider-registry.js';
 import { isMissingWorkspaceHandleError } from '#workspace-errors.js';
 import type { FileSystemProvider } from '#types.js';
 import type { WorkspaceScope } from '#mount-table.js';
+import { serveNodeFsProvider } from '#backend/node/host.js';
+import { tauPathPolicy } from '#path-registry.js';
 
 const directIdbInitialize = vi.hoisted(() => vi.fn<() => Promise<void>>(async () => undefined));
 
@@ -359,6 +361,88 @@ describe('ProviderRegistry', () => {
 
   describe('node backend', () => {
     const nodeScope: WorkspaceScope = { backend: 'node', path: '/tmp/tau-root' };
+    const hosts: Array<() => Promise<void>> = [];
+
+    /** The host half on `port`: it answers the connect-time description; no root is admitted. */
+    const serveHost = (port: MessagePort): void => {
+      hosts.push(serveNodeFsProvider(port, { policy: tauPathPolicy, allowRoot: () => false }).close);
+    };
+
+    /**
+     * A port to a real host through a relay that may answer the host's description itself, so a test can
+     * give the host a disk unlike this process's.
+     *
+     * @param answer - Given the count of `describe` asks so far, the reply's fields, or `undefined` to let the host answer.
+     * @returns The client's end of the relay.
+     */
+    const relayHost = (answer: (asks: number) => Record<string, unknown> | undefined): MessagePort => {
+      const client = new MessageChannel();
+      const host = new MessageChannel();
+      serveHost(host.port2);
+      let asks = 0;
+      client.port2.addEventListener('message', ({ data }: MessageEvent<{ v: number; id: number; op: string }>) => {
+        if (data.op === 'describe') {
+          asks += 1;
+          const reply = answer(asks);
+          if (reply !== undefined) {
+            client.port2.postMessage({ v: data.v, id: data.id, ...reply });
+            return;
+          }
+        }
+        host.port1.postMessage(data);
+      });
+      host.port1.addEventListener('message', ({ data }: MessageEvent<unknown>) => {
+        client.port2.postMessage(data);
+      });
+      client.port2.start();
+      host.port1.start();
+      hosts.push(async () => {
+        client.port1.close();
+        client.port2.close();
+        host.port1.close();
+      });
+      return client.port1;
+    };
+
+    afterEach(async () => {
+      await Promise.all(hosts.splice(0).map(async (close) => close()));
+    });
+
+    it("should take file modes from the host's answer, not the worker's platform", async () => {
+      const connectTo = async (fileModes: boolean): Promise<FileSystemProvider> => {
+        const port = relayHost(() => ({ type: 'result', value: { fileModes } }));
+        return new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort: async () => port }).getProvider(
+          nodeScope,
+        );
+      };
+
+      // One of the two answers always contradicts this process's own disk.
+      const modelessHost = await connectTo(false);
+      expect(modelessHost.getFileMode).toBeUndefined();
+      expect(modelessHost.setFileMode).toBeUndefined();
+
+      const modeHost = await connectTo(true);
+      expect(modeHost.getFileMode).toBeTypeOf('function');
+      expect(modeHost.setFileMode).toBeTypeOf('function');
+    });
+
+    it("should report the real host's disk", async () => {
+      const port = relayHost(() => undefined);
+      const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort: async () => port });
+      const provider = await nodeRegistry.getProvider(nodeScope);
+      expect(provider.getFileMode === undefined).toBe(process.platform === 'win32');
+    });
+
+    it('keeps the channel when the host fails to describe its disk, and asks it again', async () => {
+      const port = relayHost((asks) => (asks === 1 ? { type: 'error', message: 'host is busy' } : undefined));
+      const createNodeFsPort = vi.fn(async () => port);
+      const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort });
+
+      await expect(nodeRegistry.getProvider(nodeScope)).rejects.toThrow('host is busy');
+      await expect(nodeRegistry.getProvider(nodeScope)).resolves.toBeDefined();
+      // The second resolution reused the open channel instead of orphaning it for a fresh port.
+      expect(createNodeFsPort).toHaveBeenCalledOnce();
+    });
 
     it('retries a refused services port on the next provider resolution', async () => {
       const { port1, port2 } = new MessageChannel();
@@ -366,6 +450,7 @@ describe('ProviderRegistry', () => {
         .fn<() => Promise<MessagePort>>()
         .mockRejectedValueOnce(new Error('services broker is quiescing'))
         .mockResolvedValueOnce(port1);
+      serveHost(port2);
       const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort });
       await expect(nodeRegistry.getProvider(nodeScope)).rejects.toThrow('services broker is quiescing');
       await expect(nodeRegistry.getProvider(nodeScope)).resolves.toBeDefined();
@@ -378,6 +463,7 @@ describe('ProviderRegistry', () => {
       const createNodeFsPort = vi.fn(async () => {
         const { port1, port2 } = new MessageChannel();
         ports.push(port2);
+        serveHost(port2);
         return port1;
       });
       const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort });

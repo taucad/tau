@@ -48,3 +48,54 @@ export const projectLibraryEntryToListItem = (entry: ProjectLibraryEntry): Proje
   ...(entry.workspaceName === undefined ? {} : { workspaceName: entry.workspaceName }),
   ...(entry.issue === undefined ? {} : { manifestIssue: entry.issue }),
 });
+
+/*
+ * A project's lifecycle (W30): three axes, each answered by one owner and never inferred from another. A trashed
+ * project is still on this device; a project with no cloud copy is not a network fault; storage that was revoked is
+ * not a missing project.
+ */
+
+/** This device's copy: listed (`live`), in the Trash (`trashed`), or no longer held (`gone`). */
+export type ProjectLocalState = 'live' | 'trashed' | 'gone';
+
+/**
+ * Tau Cloud's copy, as its last answer said: it has one (`present`), it said it has none or deleted it (`absent`),
+ * nothing has answered yet (`unknown`), or the request failed (`unreachable`). Only `unreachable` is a network fault.
+ */
+export type ProjectCloudState = 'present' | 'absent' | 'unknown' | 'unreachable';
+
+/** The storage that holds this device's copy: readable (`connected`), its access withdrawn (`revoked`), or not reachable now (`unavailable`). */
+export type ProjectStorageState = 'connected' | 'revoked' | 'unavailable';
+
+/** One project's lifecycle on every axis. */
+export type ProjectLifecycle = Readonly<{
+  local: ProjectLocalState;
+  cloud: ProjectCloudState;
+  storage: ProjectStorageState;
+}>;
+
+/** Which local projects a listing shows: the live ones, the Trash, or both. */
+export type ProjectScope = 'live' | 'trash' | 'all';
+
+/**
+ * The local state of a listed project.
+ *
+ * @param project - A row of the local listing.
+ * @returns `trashed` when it carries a deletion time, else `live`.
+ */
+export const projectLocalStateOf = (project: Pick<ProjectListItem, 'deletedAt'>): Exclude<ProjectLocalState, 'gone'> =>
+  project.deletedAt === undefined ? 'live' : 'trashed';
+
+/**
+ * Whether a listed project belongs to a scope.
+ *
+ * @param project - A row of the local listing.
+ * @param scope - The listing's scope.
+ * @returns `true` when the scope shows it.
+ */
+export const isInProjectScope = (project: Pick<ProjectListItem, 'deletedAt'>, scope: ProjectScope): boolean => {
+  if (scope === 'all') {
+    return true;
+  }
+  return projectLocalStateOf(project) === (scope === 'trash' ? 'trashed' : 'live');
+};

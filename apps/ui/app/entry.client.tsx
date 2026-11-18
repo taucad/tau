@@ -8,6 +8,7 @@ import { observeLongAnimationFrames } from '@taucad/viewer/lib/renderer-telemetr
 import { startErrorReporting } from '#lib/error-reporting.js';
 import { readRouteId, routePathInstrumentation } from '#lib/sentry-context.lib.js';
 import { routeClassOfRouteId } from '#lib/route-classes.js';
+import { scheduleNextStepWarm } from '#lib/warm-next-step.js';
 import { reactRootErrorHooks } from '#lib/react-root-errors.js';
 import { projectRouteId, registerEagerRouteModules } from '#lib/eager-route-modules.js';
 import * as projectRouteModule from '#routes/w.$workspace.$project/route.js';
@@ -22,6 +23,7 @@ import { AppRuntimeProvider } from '#runtime/app-runtime-provider.js';
 import { admittedAnalytics } from '#providers/posthog-analytics-provider.js';
 import { ENV } from '#environment.config.js';
 import { isRemoteHostHarness } from '#utils/remote-host-harness.js';
+import { isSafeModeRequested } from '#lib/boot-signals.js';
 
 /* D21: started before hydration and never stopped, so the frames that block the first paint are
  * recorded too (the observer is buffered, and the platform only reports frames over 50 ms). */
@@ -54,6 +56,9 @@ if (heldAppRuntime() === undefined) {
       analytics: admittedAnalytics,
       /* The remote-host harness renders no file manager (`root-layout.tsx`), so its runtime starts none. */
       idleFileManagers: isRemoteHostHarness(ENV.TAU_DEBUG, globalThis.location.pathname),
+      /* D0: `?safe=1` starts this page load in safe mode, read before the runtime exists. The next navigation drops the
+       * parameter, and a reload without it is a normal start. */
+      safeMode: isSafeModeRequested(globalThis.location.search),
       ...(inspect === undefined ? {} : { inspect }),
     }),
   );
@@ -76,4 +81,13 @@ startTransition(() => {
     // deploy stopped serving goes to the recovery instead. React's console output stays.
     reactRootErrorHooks,
   );
+});
+
+// PL8 (LB9): once Home is loaded and idle, prefetch the project route's interactive tier, so opening a project
+// downloads no module. Nothing under Save-Data, and only the files the warm manifest lists.
+scheduleNextStepWarm({
+  readRouteClass: () => {
+    const routeId = readRouteId();
+    return routeId === undefined ? undefined : routeClassOfRouteId(routeId);
+  },
 });

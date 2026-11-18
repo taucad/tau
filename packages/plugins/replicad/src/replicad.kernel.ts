@@ -636,19 +636,20 @@ export const replicadKernel = defineKernel({
         logger.warn('Failed to load default font', { data: error });
       }
 
-      // Off constructs nothing: no asset read, no digest, no adapter (D14, I13, A5).
+      /* Off unless asked for: the operation adapter keeps text BRep and feeds restored operands into
+       * booleans, so its geometry depended on cache history, and it measured no speed-up (audit R2).
+       * Off constructs nothing: no asset read, no digest, no adapter (D14, I13, A5). */
       const identifiedAssets =
-        computeReuseOption === false
-          ? undefined
-          : await identifyImplementationAssets(
+        computeReuseOption === true
+          ? await identifyImplementationAssets(
               resolved.variant,
               typeof wasm === 'string' ? [] : [wasm.wasmUrl, wasm.wasmBindingsUrl],
-            );
+            )
+          : undefined;
       const assetsIdentified = identifiedAssets !== undefined;
-      // Explicit off wins; omission keeps the historical asset-derived default (C2).
-      const computeReuseEnabled = computeReuseOption ?? assetsIdentified;
+      const computeReuseEnabled = computeReuseOption === true && assetsIdentified;
       const implementationAssets = identifiedAssets ?? [];
-      if (!assetsIdentified && computeReuseOption !== false) {
+      if (!assetsIdentified && computeReuseOption === true) {
         logger.warn('Replicad semantic compute reuse disabled because implementation assets could not be identified.');
       }
       const computeProducer = {

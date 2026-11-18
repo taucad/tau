@@ -57,7 +57,7 @@ import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
 import { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
 import type { KeepAwakeBlocker } from '#keep-awake.js';
 import { agentMachineFacet, openSharedMachineHost } from '#local-machines.js';
-import type { SharedMachineHost } from '#local-machines.js';
+import type { OpenSharedMachineHostOptions, SharedMachineHost } from '#local-machines.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
@@ -335,6 +335,12 @@ export type HostDaemonOptions = {
    * `tau serve` but the cloud host container) reports no sync attempts.
    */
   readonly syncTelemetryConsent?: () => ReportingConsent;
+  /**
+   * Runtime telemetry for `--machines` (T19): told each new machine operation and each request the shared store's
+   * admission refuses. The cloud host container composes it from the same reporter as `observeRuntimeClient`; every
+   * other `tau serve` leaves it out.
+   */
+  readonly machineTelemetry?: Pick<OpenSharedMachineHostOptions, 'onOperation' | 'onAdmissionRefusal'>;
   /**
    * Agent observability (T11): observe the chats the agent's project host leads, given that project's id and its
    * own-row read. It must not throw and never affects a run. The cloud host container composes it from a module its
@@ -893,6 +899,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       onWarning: ({ code, message }) => {
         emit({ type: 'warning', code, message });
       },
+      ...options.machineTelemetry,
     });
     if (shared === undefined) {
       emit({

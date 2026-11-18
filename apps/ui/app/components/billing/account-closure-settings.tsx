@@ -13,7 +13,7 @@ import {
 } from '@taucad/ui/components/alert-dialog';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
-import { SettingsRow } from '#components/settings/settings-item.js';
+import { SettingsRow } from '@taucad/settings-ui/components/settings/settings-item';
 import { authClient } from '#lib/auth-client.js';
 import { createPaymentRequestId } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';

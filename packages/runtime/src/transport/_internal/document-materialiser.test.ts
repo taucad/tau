@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { materialiseDocumentExport, materialiseRendering } from '#transport/_internal/document-materialiser.js';
+import {
+  ArtifactContentInvalidError,
+  materialiseDocumentExport,
+  materialiseRendering,
+} from '#transport/_internal/document-materialiser.js';
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import { documentProtocolCallNames, documentProtocolNotifyNames } from '#types/runtime-document-protocol.types.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
@@ -101,6 +105,37 @@ describe('document wire', () => {
     expect(rendering).toBeUndefined();
     await client.close();
   });
+
+  it.each([
+    ['model/gltf-binary', { delivery: 'inline', bytes: new Uint8Array(new ArrayBuffer(0)) }, 'GLTF_BYTES_INVALID'],
+    ['image/svg+xml', '<svg>', 'SVG_DOCUMENT_INVALID'],
+  ] as const)(
+    'rejects a delivered %s that breaks its content rule with the worker code',
+    async (mimeType, content, code) => {
+      const rejection = materialiseRendering(
+        {
+          success: true,
+          view: 'model',
+          requestId: 'req-1',
+          evaluationId: 'eval-1',
+          transient: false,
+          issues: [],
+          hash: 'hash',
+          artifact: { mimeType, content },
+        },
+        async (delivered) => (delivered.delivery === 'inline' ? delivered.bytes : new Uint8Array()),
+        () => true,
+      );
+      const rejected = await rejection.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(rejected).toBeInstanceOf(ArtifactContentInvalidError);
+      expect(rejected).toBeInstanceOf(TypeError);
+      expect(rejected).toHaveProperty('code', code);
+      expect((rejected as Error).cause).toBeInstanceOf(TypeError);
+    },
+  );
 
   it('preserves a nonempty export and admits unknown media after materialisation', async () => {
     const client = inProcessTransport({ runtime: defineRuntime({}), fileSystem: fromMemoryFs() }).materialize();

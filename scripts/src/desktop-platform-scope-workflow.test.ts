@@ -184,7 +184,7 @@ describe('desktop route qualification platform scopes', () => {
   const selection = step(jobs['admission'], (item) => item.id === 'selection');
 
   it.each([
-    ['windows', [], ['windows-nsis-x64']],
+    ['windows', [], ['windows-nsis-x64', 'windows-nsis-recovery-x64']],
     ['macos', [], ['macos-zip-arm64', 'macos-dmg-arm64']],
   ])('a %s run selects exactly its own rows', (scope, canary, rows) => {
     const outputs = runOutputs(selection.run, {
@@ -208,7 +208,37 @@ describe('desktop route qualification platform scopes', () => {
       TAU_DESKTOP_QUALIFICATION_SCOPE: 'all',
       CHANNEL: 'production',
     });
-    expect(ids(all['matrix'])).toHaveLength(11);
+    // Eleven A→B→C rows and the three T-B22.4 recovery rows.
+    expect(ids(all['matrix'])).toHaveLength(14);
+  });
+
+  it('runs a T-B22.4 recovery row for each Windows and Linux route and admits them before any receipt is published', () => {
+    const all = runOutputs(selection.run, {
+      TAU_QUALIFICATION_GRAPHICS: 'stock',
+      TAU_DESKTOP_QUALIFICATION_SCOPE: 'all',
+      CHANNEL: 'staging',
+    });
+    const recovery = ((all['matrix'] ?? []) as Array<{ id: string; route: string; scenario?: string }>).filter(
+      (row) => row.scenario === 'recovery',
+    );
+    expect(recovery.map((row) => [row.id, row.route])).toEqual([
+      ['windows-nsis-recovery-x64', 'windows-nsis'],
+      ['ubuntu-apt-recovery-x11', 'linux-apt'],
+      ['ubuntu-appimage-recovery-x11', 'linux-appimage'],
+    ]);
+    const software = runOutputs(selection.run, {
+      TAU_QUALIFICATION_GRAPHICS: 'isolated-software',
+      TAU_DESKTOP_QUALIFICATION_SCOPE: 'linux',
+      CHANNEL: 'staging',
+    });
+    expect(ids(software['matrix']).some((id) => id.includes('recovery'))).toBe(false);
+    const installed = jobs['installed']!;
+    expect(installed.env?.['TAU_QUALIFICATION_SCENARIO']).toBe(['$', "{{ matrix.scenario || 'chain' }}"].join(''));
+    const receipts = jobs['receipts']!.steps!;
+    const admit = receipts.findIndex((item) => item.run === 'pnpm nx run desktop:collect-qualification-recovery');
+    const firstUpload = receipts.findIndex((item) => item.uses?.startsWith('actions/upload-artifact'));
+    expect(admit).toBeGreaterThan(-1);
+    expect(admit).toBeLessThan(firstUpload);
   });
 
   it('runs Windows on hosted windows-2025 without the Linux GPU path and publishes bound receipts', () => {
@@ -223,7 +253,11 @@ describe('desktop route qualification platform scopes', () => {
     expect(evaluate(condition(lineEndings.if), { runner: { os: 'Windows' } })).toBe(true);
     const uploads = jobs['receipts']!.steps!.filter((item) => item.uses?.startsWith('actions/upload-artifact'));
     const names = uploads.map((item) => interpolate(item.with?.['name'] ?? '', context({ scope: 'windows' })));
-    expect(names).toEqual(['desktop-windows-host-matrix', 'desktop-windows-ci-receipts']);
+    expect(names).toEqual([
+      'desktop-windows-host-matrix',
+      'desktop-windows-ci-receipts',
+      'desktop-windows-recovery-receipts',
+    ]);
     expect(interpolate(uploads[1]!.with?.['path'] ?? '', context({ scope: 'windows' }))).toContain(
       'qualification-binding.json',
     );
@@ -297,5 +331,47 @@ describe('desktop route promotion Windows scope', () => {
       }
     }
     expect(load.run).toMatch(/!= windows/u);
+  });
+
+  // Operator ruling 2026-11-17T08:27Z: beta Windows promotes without its Windows 11 clean-host run, on either channel.
+  it('promotes Windows with the VM run left empty, as clean-host pending, on both channels', () => {
+    expect(on.workflow_dispatch.inputs['vm-run-id']).not.toHaveProperty('required', true);
+    const publication = jobs['publication']!;
+    for (const channel of ['staging', 'production']) {
+      const inputs = {
+        operation: 'promote-routes',
+        scope: 'windows',
+        channel,
+        'candidate-run-id': '1',
+        'ci-run-id': '2',
+        'vm-run-id': '',
+      };
+      const run: Context = {
+        github: { ref: 'refs/heads/main', event_name: 'workflow_dispatch' },
+        vars: { DESKTOP_INSTALLER_PUBLICATION_STAGING: 'true', DESKTOP_INSTALLER_PUBLICATION_PRODUCTION: 'true' },
+        inputs,
+        matrix: { channel },
+        steps: { selected: { outputs: { run: 'true' } } },
+      };
+      expect(evaluate(condition(publication.if), run)).toBe(true);
+      // The empty input reaches the publisher as an empty string, which it reads as an omitted VM run.
+      expect(interpolate(publication.env?.['TAU_ROUTE_VM_RUN_ID'] ?? '', run)).toBe('');
+      // No workflow gate keys on the VM run, so the publisher alone decides which scope may leave it pending.
+      for (const item of publication.steps ?? []) {
+        expect(`${item.if ?? ''}\n${item.run ?? ''}`).not.toMatch(/vm-run-id|TAU_ROUTE_VM_RUN_ID/u);
+      }
+      for (const name of [
+        'Retrieve qualified candidate or completed metadata',
+        'Publish or renew under the shared channel lock',
+      ]) {
+        expect(evaluate(condition(step(publication, (item) => item.name === name).if), run)).toBe(true);
+      }
+      // Every other production gate is unchanged: the shell conformance check still runs before a production promotion.
+      const conformance = step(
+        publication,
+        (item) => item.name === "Require green shell conformance on the candidate's commit",
+      );
+      expect(evaluate(condition(conformance.if), run)).toBe(channel === 'production');
+    }
   });
 });

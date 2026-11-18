@@ -27,6 +27,7 @@ import type { WatchEvent } from '@taucad/filesystem';
 
 import { createServicesHost, refusedRuntimePortMessage } from '#services-host.impl.js';
 import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort } from '#services-host.impl.js';
+import { recordingTelemetryApi } from '#runtime-telemetry.fixture.js';
 
 /**
  * Every `createProjectHostActor` call the utility makes, and every project host
@@ -287,6 +288,118 @@ describe('createServicesHost — root admission', () => {
       asyncRealpath.mockRestore();
       host.dispose();
       await rm(home, { recursive: true, force: true });
+    }
+  });
+  it('should serve Home by its published non-canonical spelling before that root settles', async () => {
+    /* Windows names the profile by its 8.3 spelling (`C:\\Users\\RUNNER~1`) and macOS `$TMPDIR` lives under
+     * `/var` for `/private/var`: main publishes that spelling, and the renderer's first request names it, before
+     * the background `realpath` has answered (packaged Windows e2e, "Refusing to serve an unadmitted filesystem
+     * root"). A symlink is the portable stand-in for either. */
+    const { promises: fsPromises } = await import('node:fs');
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-published-spelling-')));
+    const physical = join(sandbox, 'physical-home');
+    const outside = join(sandbox, 'outside');
+    const published = join(sandbox, 'published-home');
+    await Promise.all([mkdir(join(physical, 'project'), { recursive: true }), mkdir(outside)]);
+    await symlink(physical, published, 'junction');
+    await symlink(outside, join(physical, 'escape'), 'junction');
+    /* Every background `realpath` hangs, so nothing settles. */
+    const asyncRealpath = vi.spyOn(fsPromises, 'realpath').mockImplementation((async (candidate: string) => {
+      void candidate;
+      return Promise.withResolvers<string>().promise;
+    }) as typeof fsPromises.realpath);
+    const serve = vi.fn<NonNullable<ServicesHostOptions['serve']>>(() => ({
+      run: vi.fn(),
+      close: async () => undefined,
+    }));
+    const { host } = hostHarness({ serve });
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [published] }));
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+      const [, options] = serve.mock.calls[0]!;
+
+      expect(options.allowRoot(published)).toBe(true);
+      expect(options.allowRoot(join(published, 'project'))).toBe(true);
+      /* Still physical: a link under the root that leaves it is refused by either spelling. */
+      expect(options.allowRoot(join(published, 'escape'))).toBe(false);
+      expect(options.allowRoot(`${published}-evil`)).toBe(false);
+    } finally {
+      asyncRealpath.mockRestore();
+      host.dispose();
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('createServicesHost — admitted spelling before canonicalisation', () => {
+  it('should admit the exact published spelling before its background realpath settles', async () => {
+    /* Windows CI: `tmpdir()` is an 8.3 short name (`C:\\Users\\RUNNER~1`) whose physical spelling differs, as a
+     * macOS `/var` root differs from `/private/var`. A symlinked root stands in for both here. */
+    const { promises: fsPromises } = await import('node:fs');
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-short-name-')));
+    const physical = join(sandbox, 'physical');
+    const alias = join(sandbox, 'alias');
+    await mkdir(physical);
+    await symlink(physical, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const unsettled = vi
+      .spyOn(fsPromises, 'realpath')
+      .mockImplementation(
+        (async (_candidate: string) => Promise.withResolvers<string>().promise) as typeof fsPromises.realpath,
+      );
+    const serve = vi.fn<NonNullable<ServicesHostOptions['serve']>>(() => ({
+      run: vi.fn(),
+      close: async () => undefined,
+    }));
+    const { host } = hostHarness({ serve });
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [alias] }));
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+      const [, options] = serve.mock.calls[0]!;
+
+      expect(options.allowRoot(alias)).toBe(true);
+      expect(options.allowRoot(`${alias}-evil`)).toBe(false);
+    } finally {
+      unsettled.mockRestore();
+      host.dispose();
+      await unlink(alias);
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('createServicesHost — admitted spelling after canonicalisation', () => {
+  it('should refuse a published link retargeted after its realpath settled', async () => {
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-retarget-')));
+    const granted = join(sandbox, 'granted');
+    const elsewhere = join(sandbox, 'elsewhere');
+    const alias = join(sandbox, 'alias');
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+    await Promise.all([mkdir(granted), mkdir(elsewhere)]);
+    await symlink(granted, alias, linkType);
+    const serve = vi.fn<NonNullable<ServicesHostOptions['serve']>>(() => ({
+      run: vi.fn(),
+      close: async () => undefined,
+    }));
+    const { host } = hostHarness({ serve });
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [alias] }));
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+      const [, options] = serve.mock.calls[0]!;
+      await vi.waitFor(() => {
+        expect(options.allowRoot(granted)).toBe(true);
+      });
+      expect(options.allowRoot(alias)).toBe(true);
+
+      await unlink(alias);
+      await symlink(elsewhere, alias, linkType);
+      expect(options.allowRoot(alias)).toBe(false);
+    } finally {
+      host.dispose();
+      await unlink(alias);
+      await rm(sandbox, { recursive: true, force: true });
     }
   });
 });
@@ -634,8 +747,10 @@ public static class Params
 });
 
 describe('createServicesHost — filesystem authority lifetime', () => {
+  /* Sandboxes by their canonical spelling, as main publishes a root: a macOS `/var` or Windows 8.3 temp path is served
+   * only once the background `realpath` settles (D8), and these rows serve their concern synchronously. */
   const createHeldRuntimeWrite = async (outcome: 'success' | 'failure') => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-runtime-drain-'));
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-runtime-drain-')));
     const root = join(sandbox, 'project');
     const authorityDirectory = join(sandbox, 'authority');
     await Promise.all([mkdir(root), mkdir(authorityDirectory)]);
@@ -722,7 +837,7 @@ describe('createServicesHost — filesystem authority lifetime', () => {
   });
 
   it('shares one real checked-write owner across overlapping rooted views and drains it on quiesce', async () => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-'));
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-authority-')));
     const root = join(sandbox, 'home');
     const project = join(root, 'project');
     const authorityDirectory = join(sandbox, 'authority');
@@ -774,7 +889,7 @@ describe('createServicesHost — filesystem authority lifetime', () => {
   });
 
   it('rejects a broad authored root that encloses authority metadata before applying its checked write', async () => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-overlap-'));
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-authority-overlap-')));
     const authorityDirectory = join(sandbox, 'filesystem-authority');
     const contentDirectory = join(sandbox, 'project');
     await Promise.all([mkdir(authorityDirectory), mkdir(contentDirectory)]);
@@ -807,7 +922,7 @@ describe('createServicesHost — filesystem authority lifetime', () => {
   });
 
   it('refuses physical and symlinked broad roots before reading, listing, stating, or watching authority metadata', async () => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-private-'));
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-authority-private-')));
     const alias = `${sandbox}-alias`;
     const authorityDirectory = join(sandbox, 'filesystem-authority');
     await mkdir(authorityDirectory);
@@ -855,7 +970,7 @@ describe('createServicesHost — filesystem authority lifetime', () => {
   });
 
   it('returns OS writer ownership when an actual MessageChannel client disconnects', async () => {
-    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-detach-'));
+    const sandbox = realpathSync.native(await mkdtemp(join(tmpdir(), 'tau-desktop-authority-detach-')));
     const root = join(sandbox, 'project');
     const authorityDirectory = join(sandbox, 'authority');
     await Promise.all([mkdir(root), mkdir(authorityDirectory)]);
@@ -1932,6 +2047,82 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     host.handleMessage(frame({ type: 'authToken', token: 'bearer-2', principal: 'user_2' }));
     expect(options.credential()).toEqual({ mode: 'session', principal: 'user_2' });
   });
+
+  /* PR-7 follow-up (AR-W6-02): desktop sync telemetry follows the consent main relays, read per attempt. */
+  it("should give each project host the renderer's consent as main relays it, and unknown until then", async () => {
+    const { host, workspaceRoot } = await configuredHost();
+    connect(host, workspaceRoot);
+    await vi.waitFor(() => {
+      expect(projectHostCalls).toHaveLength(1);
+    });
+    const options = projectHostCalls[0]!.host();
+    expect(options.syncTelemetryPlacement).toBe('desktop');
+    /* Nothing said yet: the host's sync reporter sends nothing. */
+    expect(options.syncTelemetryConsent?.()).toBe('unknown');
+    host.handleMessage(frame({ type: 'telemetryConsent', consent: 'granted' }));
+    expect(options.syncTelemetryConsent?.()).toBe('granted');
+    /* Telemetry off, or GPC, resolves to denied in the renderer; main relays it as such. */
+    host.handleMessage(frame({ type: 'telemetryConsent', consent: 'denied' }));
+    expect(options.syncTelemetryConsent?.()).toBe('denied');
+    host.handleMessage(frame({ type: 'telemetryConsent', consent: 'yes' }));
+    expect(options.syncTelemetryConsent?.()).toBe('unknown');
+  });
+
+  /* T19: the agent's `prepare_kernel` is main's preparation, and each one it settles is one `prepare` entry. */
+  it.each([
+    ['granted', 'granted', 1],
+    ['denied', 'denied', 0],
+    ['unknown, as main has not relayed it', undefined, 0],
+  ] as const)(
+    "should report each preparation the agent settles while the renderer's consent is %s",
+    async (_why, consent, reported) => {
+      const telemetrySandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-telemetry-'));
+      workspaces.push(telemetrySandbox);
+      const api = recordingTelemetryApi(join(telemetrySandbox, 'config'));
+      const blocked = {
+        status: 'blocked',
+        kernel: 'build123d',
+        reason: 'offline-miss',
+        message: 'No network at /home/a/.tau',
+      } as const;
+      const prepare = vi.fn(async () => blocked);
+      const { host, workspaceRoot } = await configuredHost(
+        {},
+        { nativeKernels: { prepare, preparable: [] }, runtimeTelemetry: api.runtimeTelemetry },
+      );
+      host.handleMessage(frame({ type: 'authToken', token: 'bearer-1', principal: 'user_1' }));
+      if (consent !== undefined) {
+        host.handleMessage(frame({ type: 'telemetryConsent', consent }));
+      }
+      connect(host, workspaceRoot);
+      await vi.waitFor(() => {
+        expect(projectHostCalls).toHaveLength(1);
+      });
+      const { prepareKernel } = projectHostCalls[0]!.host();
+
+      /* The agent's answer is main's, whatever is reported. */
+      await expect(
+        prepareKernel?.({ kernel: 'build123d' }, { signal: new AbortController().signal, onProgress: () => undefined }),
+      ).resolves.toEqual(blocked);
+      expect(prepare).toHaveBeenCalledOnce();
+      await host.quiesce();
+
+      expect(api.operations()).toHaveLength(reported);
+      if (reported === 0) {
+        expect(api.posts()).toEqual([]);
+      } else {
+        expect(api.operations()[0]!.detail).toMatchObject({
+          operation: 'prepare',
+          outcome: 'refused',
+          code: 'offline-miss',
+          route: 'desktop',
+          caller: 'host',
+        });
+        expect(JSON.stringify(api.posts())).not.toMatch(/build123d|\/home\/a|user_1|bearer-1/u);
+      }
+    },
+    20_000,
+  );
 
   /* W6.r1 round 3: the funded transport names the same account, read per invocation. */
   it("should give the funded transport the signed-in session's user id as its principal", async () => {

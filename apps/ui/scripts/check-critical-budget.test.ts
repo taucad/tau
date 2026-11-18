@@ -5,12 +5,13 @@ import {
   buildVariantOf,
   compareWithBudget,
   findEarlyKernelPreloads,
+  findSplitRouteModules,
+  findWarmManifestProblems,
   measureClass,
   preloadHrefs,
-  rootKeys,
-  staticClosure,
 } from '#scripts/check-critical-budget.mts';
-import type { ClassBudget, ClassMeasure } from '#scripts/check-critical-budget.mts';
+import { rootKeys, staticClosure } from '#scripts/interactive-closure.ts';
+import type { ClassBudget, ClassMeasure, RouterManifest } from '#scripts/check-critical-budget.mts';
 
 const manifest = {
   'app/entry.client.tsx': { file: 'assets/entry.client-a.js', imports: ['_react-b.js'] },
@@ -211,5 +212,84 @@ describe('buildVariantOf', () => {
       }),
     ).toBe('self-host');
     expect(() => buildVariantOf({ ...moduleIds, chunks: [] })).toThrow(/cloud or a self-host/u);
+  });
+});
+
+describe('findWarmManifestProblems (PL8)', () => {
+  const closures = new Map([
+    ['home', ['assets/entry.client-a.js', 'assets/react-b.js', 'assets/root-c.js', 'assets/root-c.css']],
+    ['project', ['assets/entry.client-a.js', 'assets/three-e.js', 'assets/three-e.css', 'assets/kernel-g.js']],
+  ]);
+  const check = (classes: Record<string, readonly string[]>): string[] =>
+    findWarmManifestProblems({ warm: { version: 1, classes }, closures, manifest, moduleIds });
+
+  it('should accept light files of each class closure', () => {
+    expect(check({ home: ['/assets/entry.client-a.js', '/assets/root-c.css'], project: [] })).toEqual([]);
+  });
+
+  it('should refuse a heavy chunk, its stylesheet and a kernel chunk even inside the closure', () => {
+    expect(check({ home: [], project: ['/assets/three-e.js', '/assets/three-e.css', '/assets/kernel-g.js'] })).toEqual([
+      expect.stringMatching(/project lists \/assets\/three-e\.js, which belongs with the three module/u),
+      expect.stringMatching(/project lists \/assets\/three-e\.css, which belongs with the three module/u),
+      expect.stringMatching(/project lists \/assets\/kernel-g\.js, which belongs with the kernels module/u),
+    ]);
+  });
+
+  it('should refuse a worker, a wasm file and a file outside the interactive tier', () => {
+    expect(
+      check({
+        home: ['/assets/kernel.worker-h.js', '/assets/opencascade-i.wasm', '/assets/viewer-f.js'],
+        project: [],
+      }),
+    ).toEqual([
+      expect.stringMatching(/home lists \/assets\/kernel\.worker-h\.js, which is not a script or stylesheet/u),
+      expect.stringMatching(/home lists \/assets\/opencascade-i\.wasm, which is not a script or stylesheet/u),
+      expect.stringMatching(/home lists \/assets\/viewer-f\.js, which is outside its interactive tier/u),
+    ]);
+  });
+
+  it('should require exactly the guarded classes, and a readable manifest', () => {
+    expect(check({ home: [], publication: [] })).toEqual([
+      "warm manifest: no list for the guarded class 'project'",
+      "warm manifest: 'publication' is not a class the critical-path guards measure",
+    ]);
+    expect(findWarmManifestProblems({ warm: undefined, closures, manifest, moduleIds })).toEqual([
+      expect.stringMatching(/__shell\/warm\.json is missing/u),
+    ]);
+  });
+});
+
+describe('findSplitRouteModules (React Router 8 migration B8, RR6)', () => {
+  const manifest = (routes: RouterManifest['routes']): RouterManifest => ({
+    entry: { module: '/assets/entry.client-a.js', imports: [] },
+    routes,
+  });
+
+  it('should pass a manifest whose routes load one module each, as today', () => {
+    expect(
+      findSplitRouteModules(
+        manifest({
+          root: { module: '/assets/root-a.js' },
+          'routes/import.$': { module: '/assets/route-b.js', imports: ['/assets/chunk-c.js'] },
+        }),
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it('should name every split module, which loads outside the patched stale-build fallback', () => {
+    expect(
+      findSplitRouteModules(
+        manifest({
+          'routes/import.$': {
+            module: '/assets/route-b.js',
+            clientLoaderModule: '/assets/route-b-client-loader.js',
+          },
+          'routes/projects_': { module: '/assets/route-d.js', hydrateFallbackModule: '/assets/route-d-fallback.js' },
+        }),
+      ),
+    ).toStrictEqual([
+      'routes/import.$ splits clientLoaderModule /assets/route-b-client-loader.js',
+      'routes/projects_ splits hydrateFallbackModule /assets/route-d-fallback.js',
+    ]);
   });
 });

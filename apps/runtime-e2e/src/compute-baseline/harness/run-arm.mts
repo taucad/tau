@@ -370,6 +370,8 @@ const kernelFor = async () => {
         replicadKernel({
           wasm: values.wasm as 'multi' | 'single' | 'auto',
           libraryTracing: values.libraryTracing as 'off' | 'summary',
+          // The operation adapter is off unless asked for; every arm but the off baseline measures it.
+          computeReuse: arm !== 'bypass',
         }),
       ],
     };

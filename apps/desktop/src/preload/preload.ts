@@ -74,6 +74,7 @@ import type {
 } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 import { createTerminalBridge } from '#preload/terminal-bridge.js';
+import { createAgentSignInBridge } from '#preload/agent-sign-in-bridge.js';
 import { permissionBridge } from '#preload/permission-bridge.js';
 
 const bootstrap = readBootstrap(process.argv);
@@ -202,6 +203,8 @@ contextBridge.exposeInMainWorld('tau', {
   },
   /* The Terminal's own seam: preload holds the session port and validates both directions (W5). */
   terminal: createTerminalBridge(ipcRenderer),
+  /* An external agent's own sign-in in a Terminal tab: the page names the agent, main chooses what runs. */
+  agentSignIn: createAgentSignInBridge(ipcRenderer),
   agentHost: {
     retain: async (workspaceRoot: string, projectId: string, attachmentId: string): Promise<void> => {
       await ipcRenderer.invoke(agentHostSessionChannels.retain, { workspaceRoot, projectId, attachmentId });

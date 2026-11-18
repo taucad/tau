@@ -31,7 +31,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { cn } from '@taucad/ui/utils/cn';
 import { checkHandlePermission, getWorkspace, listWorkspaces } from '@taucad/files-ui/filesystem/handle-store';
 import type { HomeStorageBackend, Workspace } from '@taucad/files-ui/filesystem/handle-store';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { WorkspaceDirectoryStatus } from '@taucad/ui-core/constants/workspace-directory-copy.constants';
@@ -39,7 +39,7 @@ import { toast } from '@taucad/ui/components/sonner';
 import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
-import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 import { folderStatusOf, useRootStatuses, workspaceStorageRootKey } from '#components/filesystem/folder-status.js';

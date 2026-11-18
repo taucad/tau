@@ -15,7 +15,7 @@
     "apps/ui/app/services",
     "apps/ui/app/lib/agent-host-placement.ts",
     "apps/ui/app/chat-clients",
-    "apps/ui/app/hooks/use-revision-status.ts",
+    "apps/libs/revisions-ui/src/hooks/use-revision-status.ts",
     "apps/ui/app/machines/file-manager.worker.revisions.ts",
     "apps/ui/app/machines/file-manager.machine.ts",
     "apps/ui/app/workers/agent-host-projects.ts",
@@ -234,7 +234,7 @@
     {
       "id": "B11",
       "bound": "GitHub credential renewal",
-      "site": "apps/ui/app/hooks/use-revision-status.ts",
+      "site": "apps/libs/revisions-ui/src/hooks/use-revision-status.ts",
       "token": "lease.timer = undefined",
       "class": "External edge",
       "owner": "W8"

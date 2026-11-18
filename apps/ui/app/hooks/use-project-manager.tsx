@@ -14,8 +14,8 @@ import type {
 } from '@taucad/files-ui/filesystem/handle-store';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
 import type { AppUiPreferences, ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
-import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
-import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
+import type { PendingProjectRecovery } from '@taucad/files-ui/types/pending-project-operation.types';
+import type { ProjectLibraryEntry, ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import {
@@ -28,14 +28,14 @@ import {
   selectMetadataObservationError,
   selectMetadataObservationErrors,
 } from '#runtime/project-library.js';
-import type { ProjectListing } from '#runtime/project-library-storage.js';
+import type { ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
 import type { ProjectLibrary, ProjectRouteAccess } from '#runtime/project-library.js';
 import type { CreatedProject, CreateProjectOptions, ImportStagingTarget } from '#runtime/project-library-commands.js';
-import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
+import type { ConnectedWorkspace } from '@taucad/files-ui/runtime/project-library-workspace';
 import { selectRuntimeProjectLibrary } from '#runtime/app-runtime.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { prepareFirstProjectTour } from '#components/tour/first-project-tour.js';
-import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 
 type ProjectManagerContextType = {
   discoveryObservationError: string | undefined;

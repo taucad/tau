@@ -13,7 +13,7 @@ import type { ChatProjection } from '#machines/chat-projection.logic.js';
 import type { ProjectClosePlan } from '#services/chat-session-store.js';
 import type { Chat } from '@taucad/chat';
 import { ProjectLibrary } from '#runtime/project-library.js';
-import type { ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
+import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 import { testRootFiles } from '#runtime/project-library.fixture.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
 import type { ChatStorage } from '#types/storage.types.js';
@@ -66,7 +66,7 @@ vi.mock('#db/chat-file-storage.js', () => ({
 /** A chat log, as the stand-in reader below reads it: `running` holds a run that has not ended. */
 const logWithRun = (ended: boolean): string => (ended ? 'ended' : 'running');
 /* A read owner that admits every read at once: no observation runs in these rows. */
-vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
+vi.mock('@taucad/files-ui/runtime/project-library-observations', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createMetadataReadOwner: (source: ChatStorage) => ({
     connect: () => () => undefined,
@@ -81,8 +81,8 @@ vi.mock('#runtime/project-library-observations.js', async (importOriginal) => ({
 const chatOf = (id: string): Chat => ({ id, resourceId: 'p1', name: id, messages: [], createdAt: 0, updatedAt: 0 });
 
 /** A root file facade whose chat store holds `chats` for every project. */
-const facadeWith = (chats: readonly Chat[]): ProjectLibraryFileManager => {
-  const fileManager = mock<ProjectLibraryFileManager>();
+const facadeWith = (chats: readonly Chat[]): ProjectLibraryFacade => {
+  const fileManager = mock<ProjectLibraryFacade>();
   stores.set(fileManager.recordFiles, chats);
   return fileManager;
 };

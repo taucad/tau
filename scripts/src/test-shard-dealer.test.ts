@@ -18,6 +18,14 @@ const table = (seconds: Record<string, number>, defaultSeconds = 10): DurationTa
 const dealAll = (projects: readonly string[], durations: DurationTable = snapshot, shards = 3): string[][] =>
   deal(projects, shards, durations);
 
+/** The `test:shard-<n>` tasks of ui, which the `test-<n>` lanes deal in place of `ui` (CI throughput review ST-1). */
+const uiShards = Object.keys(
+  (JSON.parse(readFileSync(resolve(root, 'apps/ui/project.json'), 'utf8')) as { targets: Record<string, unknown> })
+    .targets,
+)
+  .filter((target) => /^test:shard-\d+$/u.test(target))
+  .map((target) => `ui:${target}`);
+
 const expectPartition = (projects: readonly string[], dealt: readonly string[][]): void => {
   const union = dealt.flat();
   expect(union.toSorted()).toEqual([...projects].toSorted());
@@ -102,6 +110,24 @@ describe('deal', () => {
     expect(dealt).toEqual([['ui-e2e'], ['ui-core'], []]);
   });
 
+  it('spreads ui over the six test lanes as its shard tasks, which a broad landing deals in place of ui', () => {
+    const units = [...broad.filter((project) => project !== 'ui'), ...uiShards];
+    const dealt = dealAll(units, snapshot, 6);
+    expectPartition(units, dealt);
+    const loads = dealt.map((shard) => shard.reduce((sum, unit) => sum + weightOf(unit, snapshot), 0));
+    const heaviest = Math.max(...units.map((unit) => weightOf(unit, snapshot)));
+    // The longest-processing-time bound: no lane passes the even share by more than its heaviest unit.
+    expect(Math.max(...loads)).toBeLessThanOrEqual(loads.reduce((sum, load) => sum + load, 0) / 6 + heaviest);
+    // No lane carries more than its share of ui's shards.
+    for (const shard of dealt) {
+      expect(shard.filter((unit) => uiShards.includes(unit)).length).toBeLessThanOrEqual(
+        Math.ceil(uiShards.length / 5),
+      );
+    }
+    // A ui-only landing: one shard per lane.
+    expect(dealAll(uiShards, snapshot, 6).map((shard) => shard.length)).toEqual([1, 1, 1, 1, 1, 1]);
+  });
+
   it('honours another shard count', () => {
     const dealt = dealAll(broad, snapshot, 2);
     expect(dealt).toHaveLength(2);
@@ -112,7 +138,11 @@ describe('deal', () => {
 describe('parseDurations', () => {
   it('accepts the checked-in snapshot and its project names are real projects', () => {
     for (const project of Object.keys(snapshot.seconds)) {
-      expect(broad).toContain(project);
+      expect([...broad, ...uiShards]).toContain(project);
+    }
+    // Every shard task of ui is weighed, so the deal never falls back to the default for them.
+    for (const task of uiShards) {
+      expect(Object.keys(snapshot.seconds)).toContain(task);
     }
     expect(snapshot.defaultSeconds).toBeGreaterThan(0);
   });
@@ -214,7 +244,7 @@ describe('ci.yml', () => {
     .find((step) => step.name === "Run the lane's tasks")?.run;
 
   it('deals the test lanes with this script', () => {
-    expect(lanes).toMatch(/node scripts\/src\/test-shard-dealer\.ts --shard "\$\{LANE#test-\}" --shards 3/u);
+    expect(lanes).toMatch(/node scripts\/src\/test-shard-dealer\.ts --shard "\$\{LANE#test-\}" --shards 6/u);
   });
 
   it('deals the package-check lanes with this script and their own snapshot', () => {

@@ -14,7 +14,11 @@
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "node --import @oxc-node/core/register apps/libs/api-email/scripts/generate-email-palette.mts"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/packages/ui/src/styles/tokens.css"]
+    },
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "{workspaceRoot}/apps/ui/public/wordmark.png"]
     }
   }
 }

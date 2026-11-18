@@ -31,6 +31,11 @@ on:
   workflow_dispatch: {}
   workflow_call:
     inputs:
+      uncached:
+        description: Read and write no Nx cache, local or remote (the release gate passes true)
+        type: boolean
+        required: false
+        default: false
       ref:
         description: Commit the tiers check out (the merge-queue commit, a release candidate)
         type: string
@@ -56,8 +61,11 @@ concurrency:
 env:
   # Nx remote cache, provisioned by tau-cloud `tau-ci-cache`. The server is set only when a
   # token is present (fork and Dependabot runs get none, and Nx fails on a tokenless 403).
-  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
-  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+  # `uncached` (the release gate, CI scaling review C2): no cache server, no token and `NX_SKIP_NX_CACHE`, so a
+  # cached tier is never read at the gate. The caller's own workflow-level `env` does not reach this workflow.
+  NX_SKIP_NX_CACHE: ${{ inputs.uncached && 'true' || 'false' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_SERVER: ${{ !inputs.uncached && secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN != '' && vars.NX_SELF_HOSTED_REMOTE_CACHE_SERVER || '' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ !inputs.uncached && secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN || '' }}
 
 jobs:
   # One job per project with a `formal:nightly` target, each with its own budget: a single serial job
@@ -72,6 +80,12 @@ jobs:
   # exactly one shard, and the caller's required check needs every shard to pass. agent-host's 46 runs
   # measure 2,797 JVM-seconds (job 134332529778, 23.7 min on one runner at two JVMs); on four runners the
   # slowest shard is its longest config, `TurnSettlement.two-turns.cfg` at 392 s.
+  # A project with a `formal:nightly:mutants` target runs its mutant matrix there, split into
+  # `MUTANT_SHARDS` jobs (ST-3, lane budget): each re-runs the same-seed simulation, deals the mutants
+  # by the measured seconds in tools/formal/mutant-seconds.json (`formal nightly --mutants-only --shard
+  # k/N`, a control and its mutants together) and runs its own share on the runner's slot pool, so every
+  # mutant is in exactly one shard, and the caller's required check needs every shard to pass. agent-host's
+  # 75 mutants measure 17.3 min in series; three shards hold about 5.8 min each.
   projects:
     name: List the formal nightly projects
     runs-on: ubuntu-latest
@@ -98,6 +112,7 @@ jobs:
         env:
           REQUESTED: ${{ inputs.projects || '' }}
           CHECK_SHARDS: 4
+          MUTANT_SHARDS: 3
         run: |
           # `pipefail` so a failing `nx` call fails the step. `tail -1` keeps the JSON array and drops Nx's log lines.
           set -euo pipefail
@@ -118,11 +133,13 @@ jobs:
             echo "Requested projects: $projects"
           fi
           tiers='[]'
-          for target in formal:nightly formal:nightly:check; do
+          for target in formal:nightly formal:nightly:check formal:nightly:mutants; do
             selected=$(pnpm nx show projects --with-target "$target" --json | tail -1)
-            # One job per project and target; a `formal:nightly:check` tier is one job per shard.
+            # One job per project and target; a `formal:nightly:check` or `formal:nightly:mutants` tier is one
+            # job per shard.
             shards=1
             if [ "$target" = formal:nightly:check ]; then shards=$CHECK_SHARDS; fi
+            if [ "$target" = formal:nightly:mutants ]; then shards=$MUTANT_SHARDS; fi
             tiers=$(jq -c --arg target "$target" --argjson projects "$selected" --argjson requested "$projects" \
               --argjson shards "$shards" \
               '. + [$projects[] | select(. as $name | $requested | index([$name]) != null) | . as $project
@@ -183,7 +200,8 @@ jobs:
             export FORMAL_SEED
             echo "FORMAL_SEED=$FORMAL_SEED from seed source $TAU_FORMAL_SEED"
           fi
-          # A shard's `--shard k/N` reaches the formal runner and is part of the task's Nx hash.
+          # A shard's `--shard k/N` reaches the formal runner, which runs only that shard's share, and is part
+          # of the task's Nx hash.
           shard=()
           if [ -n "$SHARD" ]; then shard=(--shard="$SHARD"); fi
           pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream "${shard[@]}"

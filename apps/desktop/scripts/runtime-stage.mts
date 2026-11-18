@@ -49,6 +49,7 @@ export type RuntimePlatformPackages = Readonly<{
   esbuild: string;
   libassimp: string | undefined;
   nanoraster: string;
+  cadmpeg: string;
   /**
    * Native payloads the bundled imports load through `optionalDependencies`: sharp's libvips (where it
    * is a separate package) before sharp's addon, so the addon finds it as a sibling, then
@@ -79,6 +80,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     esbuild: '@esbuild/darwin-arm64',
     libassimp: 'libassimp-darwin-arm64',
     nanoraster: 'nanoraster-darwin-arm64',
+    cadmpeg: 'cadmpeg-ts-darwin-arm64',
     bundledOptionalDependencies: [
       '@img/sharp-libvips-darwin-arm64',
       '@img/sharp-darwin-arm64',
@@ -93,6 +95,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     // The pinned Assimp release has no Intel Mac addon; this host uses its WASM backend.
     libassimp: undefined,
     nanoraster: 'nanoraster-darwin-x64',
+    cadmpeg: 'cadmpeg-ts-darwin-x64',
     bundledOptionalDependencies: [
       '@img/sharp-libvips-darwin-x64',
       '@img/sharp-darwin-x64',
@@ -106,6 +109,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     esbuild: '@esbuild/linux-x64',
     libassimp: 'libassimp-linux-x64-gnu',
     nanoraster: 'nanoraster-linux-x64-gnu',
+    cadmpeg: 'cadmpeg-ts-linux-x64-gnu',
     bundledOptionalDependencies: [
       '@img/sharp-libvips-linux-x64',
       '@img/sharp-linux-x64',
@@ -119,6 +123,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     esbuild: '@esbuild/win32-x64',
     libassimp: 'libassimp-win32-x64-msvc',
     nanoraster: 'nanoraster-win32-x64-msvc',
+    cadmpeg: 'cadmpeg-ts-win32-x64-msvc',
     /* `@img/sharp-win32-x64` carries libvips itself; there is no separate libvips package. */
     bundledOptionalDependencies: ['@img/sharp-win32-x64', '@parcel/watcher-win32-x64'],
     unusedSandboxHelpers: ['vendor/seccomp', 'vendor/srt-win/arm64'],
@@ -139,6 +144,8 @@ export type ResolvedRuntimePackages = Readonly<{
   libassimpPlatform: string | undefined;
   nanoraster: InstalledPackage;
   nanorasterPlatform: string;
+  cadmpeg: InstalledPackage;
+  cadmpegPlatform: string;
   sandboxRuntime: InstalledPackage;
   nodePty: InstalledPackage;
   bundledImports: readonly InstalledPackage[];
@@ -185,6 +192,7 @@ export const resolveRuntimePackages = async (
   const esbuild = await installed(await realpath(resolve(pluginModules('esbuild'), 'esbuild')));
   const libassimp = await installed(await realpath(resolve(pluginModules('assimp'), 'libassimp')));
   const nanoraster = await installed(await realpath(resolve(pluginModules('image'), 'nanoraster')));
+  const cadmpeg = await installed(await realpath(resolve(pluginModules('cadmpeg'), 'cadmpeg-ts')));
   /* The ACP adapters are spawned as `node <modulePath>` from inside the packaged
    * app, so they are staged with their runtime dependency closure and unpacked
    * out of the ASAR — a module path inside `app.asar` is not a real file. A native
@@ -235,6 +243,8 @@ export const resolveRuntimePackages = async (
     libassimpPlatform: platform.libassimp ? platformPackage(libassimp.source, platform.libassimp) : undefined,
     nanoraster,
     nanorasterPlatform: platformPackage(nanoraster.source, platform.nanoraster),
+    cadmpeg,
+    cadmpegPlatform: platformPackage(cadmpeg.source, platform.cadmpeg),
     sandboxRuntime,
     nodePty,
     bundledImports,
@@ -409,6 +419,10 @@ export const stageRuntimePackages = async (
       markNodePtySpawnHelperExecutable(resolve(stageRoot, 'node_modules/node-pty'), platform.nodePtyNative),
     ),
     copyRuntimePackage(platform.nanoraster, packages.nanorasterPlatform),
+    /* The `node` entry's `auto` backend loads the addon from the platform package and reads
+     * `dist/wasm` only when that addon fails, so the WebAssembly modules stay out of the app. */
+    copyRuntimePackage('cadmpeg-ts', packages.cadmpeg.source, ['dist/wasm']),
+    copyRuntimePackage(platform.cadmpeg, packages.cadmpegPlatform),
     writeFile(
       resolve(stageRoot, 'package.json'),
       `${JSON.stringify(
@@ -429,6 +443,8 @@ export const stageRuntimePackages = async (
             ...(platform.libassimp ? { [platform.libassimp]: packages.libassimp.version } : {}),
             nanoraster: packages.nanoraster.version,
             [platform.nanoraster]: packages.nanoraster.version,
+            'cadmpeg-ts': packages.cadmpeg.version,
+            [platform.cadmpeg]: packages.cadmpeg.version,
             '@anthropic-ai/sandbox-runtime': packages.sandboxRuntime.version,
             'node-pty': packages.nodePty.version,
             ...Object.fromEntries(packages.bundledImports.map(({ name, version }) => [name, version])),

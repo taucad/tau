@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { Workspace, WorkspaceEntry } from '@taucad/files-ui/filesystem/handle-store';
-import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 import FilesRoute from '#routes/files/route.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { RootStatus } from '@taucad/filesystem';

@@ -1,6 +1,6 @@
 # picovoxel — Interfaces
 
-34 top-level symbols. Signatures are verbatim typescript.
+33 top-level symbols. Signatures are verbatim typescript.
 
 AddBeamOptions: interface AddBeamOptions
 
@@ -25,6 +25,11 @@ Bounds: interface Bounds
 
   max: Vec3
 
+// The opt-in for an operation that uses up its receiver
+ConsumeOptions: interface ConsumeOptions
+
+  consume?: boolean
+
 // `createPico` options
 CreatePicoOptions: interface CreatePicoOptions extends CreatePicoRuntimeOptions, CreatePicoSessionOptions
 
@@ -36,6 +41,9 @@ CreatePicoRuntimeOptions: interface CreatePicoRuntimeOptions
 
   // A compiled `WebAssembly.Module` of this entry's wasm (`pico.wasm` for the base entry, `pico-multi.wasm` for `picovoxel/multi`)
   wasmModule?: WebAssembly.Module
+
+  // The grid pager, on by default
+  pager?: PagerOptions | false
 
 // Options that shape a session
 CreatePicoSessionOptions: interface CreatePicoSessionOptions
@@ -59,6 +67,18 @@ CreatePicoSessionOptions: interface CreatePicoSessionOptions
   registry?: HandleRegistry
 
   now?: () => number
+
+// Runtime-wide memory
+Footprint: interface Footprint
+
+  // Bytes of wasm linear memory (the heap's current size, at most 4 GiB)
+  heapBytes: number
+
+  // Bytes the far store holds on its host, RAM or disk
+  farBytes: number
+
+  // The pager's figures
+  pager: PagerStats | null
 
 FromStlOptions: interface FromStlOptions
 
@@ -172,6 +192,11 @@ Mesh: interface Mesh
   // Mesh.toStl (method)
   toStl(options?: ToStlOptions): Uint8Array;
 
+  // Streams the binary STL of this mesh to `write` in chunks instead of returning one buffer
+  // Remarks: By default `write` receives the 50-byte triangle records only, and the result carries the 84-byte header for the caller to place first (for example `new Blob([result.header, ...chunks])`). With `includeHeader: true` the header is the first chunk, so the chunks are the whole file in order. Lane rules are those of `toStl()`.
+  // Mesh.streamStl (method)
+  streamStl(write: StlChunkSink, options?: StreamStlOptions): StreamStlResult;
+
   // GLB container (positions + indices)
   // Mesh.toGlb (method)
   toGlb(options?: {
@@ -184,12 +209,21 @@ Mesh: interface Mesh
   // Raw ABI handle — escape hatch
   readonly handle: bigint
 
-  // Optional
+  // Frees the mesh now
   // Mesh.dispose (method)
   dispose(): void;
 
   // Mesh.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
+
+// One batch of the uniform mesh
+MeshChunk: interface MeshChunk
+
+  // The batch's new vertices, xyz triples in mm
+  vertices: Float32Array
+
+  // The batch's triangles as corner triples indexing the WHOLE mesh's vertices
+  triangles: Uint32Array
 
 Metadata: interface Metadata
 
@@ -224,6 +258,79 @@ Metadata: interface Metadata
 
   // Metadata.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
+
+// Options for {@link Voxels.offset} and {@link Voxels.smoothen}
+OffsetOptions: interface OffsetOptions extends ConsumeOptions
+
+  // Millimetres
+  distance: number
+
+  // See {@link Voxels.offset}
+  fastRenorm?: boolean
+
+  // Opt-in sweep engine, `fast` (docs/lanes.md)
+  fastSweeping?: boolean
+
+// `createPico({ pager })`
+PagerOptions: interface PagerOptions
+
+  // Resident grid bytes (Σ `memUsage` of live Voxels) allowed at a safe point
+  budgetBytes?: number
+
+  // Frame codec (default `'lz4'`)
+  codec?: PagerCodec
+
+  // `'pipelined'` (default on picovoxel/multi) overlaps coding on the pool with storing and freeing
+  mode?: PagerMode
+
+  // The encode arena, taken once when the runtime starts — heap the model cannot use
+  arena?: {
+      slots?: number;
+      reserveMiB?: number;
+    }
+
+  // Where parked grids go
+  store?: 'ram' | 'disk'
+
+  // Size bound of the store in bytes (default unbounded for `'ram'`, 16 GiB for `'disk'`)
+  storeMaxBytes?: number
+
+  // `'disk'` only
+  directory?: string
+
+  minParkBytes?: number
+
+// What the pager has done, for memory reports
+PagerStats: interface PagerStats
+
+  readonly budgetBytes: number
+
+  readonly codec: PagerCodec
+
+  readonly mode: PagerMode
+
+  readonly store: 'ram' | 'disk'
+
+  // Σ `memUsage` of resident grids
+  readonly residentBytes: number
+
+  readonly parkedGrids: number
+
+  // Σ `memUsage` the parked grids had when parked
+  readonly parkedBytes: number
+
+  // Bytes of park images in the far store
+  readonly imageBytes: number
+
+  // Bytes the far store holds on its host (RAM or disk)
+  readonly farBytes: number
+
+  // Heap the encode arena holds
+  readonly arenaBytes: number
+
+  readonly parks: number
+
+  readonly restores: number
 
 Pico: interface Pico
 
@@ -296,11 +403,19 @@ Pico: interface Pico
   // PicoGK's own per-type allocation counters — the leak oracle
   readonly allocated: AllocatedCounts
 
+  // Runtime-wide heap and far-store bytes (see {@link Footprint})
+  readonly footprint: Footprint
+
   // Escape hatch
   readonly module: PicoWasmModule
 
   // Escape hatch
   readonly handle: bigint
+
+  // Runs `build` and disposes every object it created except what it returns
+  // Remarks: To free an intermediate before the scope ends, dispose it, or pass `{ consume: true }` to the operation that uses it last.
+  // Pico.scope (method)
+  scope<T>(build: () => T): T;
 
   // Deterministic teardown
   // Pico.dispose (method)
@@ -424,7 +539,7 @@ ScalarFieldSlice: interface ScalarFieldSlice
   // Raw field values, row-major
   data: Float32Array
 
-ShellOptions: interface ShellOptions
+ShellOptions: interface ShellOptions extends ConsumeOptions
 
   offset?: number
 
@@ -439,6 +554,40 @@ ShellOptions: interface ShellOptions
 
   // See `offset({ fastSweeping })`
   fastSweeping?: boolean
+
+// Options for {@link Voxels.streamMesh}
+StreamMeshOptions: interface StreamMeshOptions
+
+  // The most surface leaves (8³ voxels each) one batch owns
+  batchLeaves?: number
+
+// What {@link Voxels.streamMesh} returns once every chunk has been delivered
+StreamMeshResult: interface StreamMeshResult
+
+  vertexCount: number
+
+  triangleCount: number
+
+// Options for `Mesh.streamStl` and `Voxels.streamStl`
+StreamStlOptions: interface StreamStlOptions
+
+  // Hand the 84-byte header to the sink as the first chunk, so the chunks are the whole file in order (an append-only sink, such as a `WritableStream`, needs this)
+  includeHeader?: boolean
+
+  // The most triangle records in one chunk (50 bytes each)
+  chunkTriangles?: number
+
+  // As `ToStlOptions.acceptLane`
+  acceptLane?: 'fast'
+
+// What a streamed STL export returns once every chunk has been written
+StreamStlResult: interface StreamStlResult
+
+  // The finished 84-byte header (`PicoGK UNITS=mm`, the lane stamp for non-exact provenance, the triangle count)
+  header: Uint8Array<ArrayBuffer>
+
+  // Triangles written
+  triangleCount: number
 
 SurfaceNormalFieldOptions: interface SurfaceNormalFieldOptions
 
@@ -545,293 +694,3 @@ VoxelSlice: interface VoxelSlice
 
   // The native background (outside-narrow-band) value of the raw sdf data
   background: number
-
-Voxels: interface Voxels
-
-  // An independent copy of this field
-  // Voxels.clone (method)
-  clone(): Voxels;
-
-  // Pure union
-  // Voxels.union (method)
-  union(...others: Voxels[]): Voxels;
-
-  // Pure subtraction of every operand
-  // Voxels.subtract (method)
-  subtract(...others: Voxels[]): Voxels;
-
-  // Pure intersection
-  // Voxels.intersect (method)
-  intersect(other: Voxels): Voxels;
-
-  // Content equality
-  // Voxels.equals (method)
-  equals(other: Voxels): boolean;
-
-  // THE emptiness oracle
-  readonly isEmpty: boolean
-
-  // Pure surface offset
-  // Remarks: `fastRenorm` (opt-in) runs the renormalization upstream performs after every half-voxel CFL step with a first-order upwind gradient instead of 5th-order HJ-WENO — 3.5–3.9x on the offset family, since renormalization is 94–97% of the offset wall. It CHANGES THE OUTPUT (measured at ≤2.2% volume, ≤0.36 mm peak narrow-band displacement, level set still clean; the measurements are recorded in the repository's bench/results/webgpu-v2/sk-0.8-ab.json), so it is never the library default — a session may default it on (see `CreatePicoOptions.fastRenorm`), and an explicit per-op value always wins. `fastSweeping`: opt-in sweep engine, `fast` (docs/lanes.md).
-  // Voxels.offset (method)
-  offset(options: {
-      distance: number;
-      fastRenorm?: boolean;
-      fastSweeping?: boolean;
-    }): Voxels;
-
-  // Two offsets in sequence (closing/opening when signs differ)
-  // Voxels.doubleOffset (method)
-  doubleOffset(options: {
-      first: number;
-      second: number;
-      fastRenorm?: boolean;
-      fastSweeping?: boolean;
-    }): Voxels;
-
-  // In, 2× out, in again
-  // Voxels.smoothen (method)
-  smoothen(options: {
-      distance: number;
-      fastRenorm?: boolean;
-      fastSweeping?: boolean;
-    }): Voxels;
-
-  // Over-offset composition
-  // Voxels.fillet (method)
-  fillet(options: {
-      rounding: number;
-      finalSurfaceDistance?: number;
-      fastRenorm?: boolean;
-      fastSweeping?: boolean;
-    }): Voxels;
-
-  // Shell
-  // Voxels.shell (method)
-  shell(options: ShellOptions): Voxels;
-
-  // Everything outside the box is trimmed away (cube-mesh intersect, as C#)
-  // Voxels.trim (method)
-  trim(bounds: Bounds): Voxels;
-
-  // Projects the slice at startZ through endZ (mm)
-  // Voxels.projectZSlice (method)
-  projectZSlice(options: {
-      startZ: number;
-      endZ: number;
-    }): Voxels;
-
-  // Pure
-  // Voxels.withMesh (method)
-  withMesh(mesh: Mesh): Voxels;
-
-  // Pure
-  // Voxels.withLattice (method)
-  withLattice(lattice: Lattice): Voxels;
-
-  // Pure
-  // Voxels.withImplicit (method)
-  withImplicit(options: {
-      sdf: SdfFunction | SdfExpression;
-      boundsMin: Vec3;
-      boundsMax: Vec3;
-    }): Voxels;
-
-  // The gyroid-in-sphere idiom
-  // Voxels.maskedByImplicit (method)
-  maskedByImplicit(options: {
-      sdf: SdfFunction | SdfExpression;
-    }): Voxels;
-
-  // Volume in mm³ from the raw grid — fast but approximate after booleans (use `properties()`)
-  readonly volume: number
-
-  // Volume (mm³), surface area (mm²) and bounds free of boolean residue, from one native traversal of the mesh → fresh-voxels round-trip (src/pico-props.cpp)
-  // Remarks: As in C# `CalculateProperties`, the round trip fills a sealed cavity, or one whose openings are about two voxels wide or narrower, and drops its surface. Cross-check parts with internal voids with `toMesh().measure()`; see https://github.com/taucad/picovoxel/blob/main/docs/memory-and-limits.md#known-limits.
-  // Voxels.properties (method)
-  properties(): {
-      volume: number;
-      area: number;
-      bounds: Bounds;
-    };
-
-  // The canonical grid hash
-  // Voxels.gridHash (method)
-  gridHash(): {
-      hash: string;
-      activeVoxels: number;
-      insideTiles: number;
-      insideOffVoxels: number;
-    };
-
-  // Oracle test tooling
-  // Voxels.densifyInterior (method)
-  densifyInterior(): void;
-
-  // Bounding box via the intermediate mesh (the only accurate way)
-  // Voxels.bounds (method)
-  bounds(): Bounds;
-
-  // True if the point is at or below the surface
-  // Voxels.isInside (method)
-  isInside(position: Vec3): boolean;
-
-  // Surface normal at a point on the surface (use after closest/raycast)
-  // Voxels.surfaceNormal (method)
-  surfaceNormal(surfacePoint: Vec3): Vec3;
-
-  // Closest surface point, or null when the field is empty
-  // Voxels.closestPointOnSurface (method)
-  closestPointOnSurface(position: Vec3): Vec3 | null;
-
-  // Ray-surface intersection, or null on a miss
-  // Voxels.raycastToSurface (method)
-  raycastToSurface(position: Vec3, direction: Vec3): Vec3 | null;
-
-  // N rays over ONE cached intersector and one ABI crossing
-  // Remarks: `subVoxel: true` (opt-in) keeps each hit's fractional position instead of truncating it to a whole voxel, which can put an upstream hit up to one voxel inside the surface on each positive axis. Hit and miss are the same rays either way; only the hit positions move onto the surface.
-  // Voxels.raycastBatch (method)
-  raycastBatch(options: {
-      origins: ArrayLike<number>;
-      directions: ArrayLike<number>;
-      subVoxel?: boolean;
-    }): {
-      hits: Float32Array;
-      hit: Uint8Array;
-    };
-
-  // N closest-surface-point queries over one index build (openvdb ClosestSurfacePoint)
-  // Voxels.closestPointsOnSurface (method)
-  closestPointsOnSurface(options: {
-      points: ArrayLike<number>;
-    }): {
-      points: Float32Array;
-      found: Uint8Array;
-    };
-
-  // Field extent in discrete voxel units
-  // Voxels.dimensions (method)
-  dimensions(): {
-      origin: Vec3;
-      size: Vec3;
-    };
-
-  // Number of Z slices
-  readonly sliceCount: number
-
-  // Real-world origin of slice `index` in mm
-  // Voxels.sliceOrigin (method)
-  sliceOrigin(index?: number): Vec3;
-
-  // One slice image
-  // Voxels.getSlice (method)
-  getSlice(options: GetSliceOptions): VoxelSlice;
-
-  // Triangle mesh of the zero level set
-  // Voxels.toMesh (method)
-  toMesh(options?: ToMeshOptions): Mesh;
-
-  // Voxels.toScalarField (method)
-  toScalarField(): ScalarField;
-
-  readonly metadata: Metadata
-
-  readonly memUsage: number
-
-  // Value provenance
-  readonly lane: 'exact' | 'fast'
-
-  // Raw ABI handle — escape hatch
-  readonly handle: bigint
-
-  // Optional
-  // Voxels.dispose (method)
-  dispose(): void;
-
-  // Voxels.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-// Beam thickness for a given point in space (C# `IBeamThickness`)
-BeamThickness: interface BeamThickness
-
-  // BeamThickness.beamThickness (method)
-  beamThickness(pt: Vec3): number;
-
-  // BeamThickness.updateCell (method)
-  updateCell(cell: UnitCell): void;
-
-  // BeamThickness.setBoundingVoxels (method)
-  setBoundingVoxels(voxels: Voxels): void;
-
-// A collection of unit cells (C# `ICellArray`)
-CellArray: interface CellArray
-
-  // CellArray.unitCells (method)
-  unitCells(): readonly UnitCell[];
-
-// Coordinate transformation ahead of a raw TPMS lookup (C# `ICoordinateTrafo`)
-CoordinateTrafo: interface CoordinateTrafo
-
-  // CoordinateTrafo.apply (method)
-  apply(pt: Vec3): Vec3;
-
-// Beam-connecting logic for one unit cell (C# `ILatticeType`)
-LatticeType: interface LatticeType
-
-  // LatticeType.addCell (method)
-  addCell(lattice: Lattice, cell: UnitCell, beamThickness: BeamThickness, subSamples?: number): void;
-
-// Raw TPMS surface equation (C# `IRawTPMSPattern`)
-RawTpmsPattern: interface RawTpmsPattern
-
-  // RawTpmsPattern.signedDistance (method)
-  signedDistance(x: number, y: number, z: number): number;
-
-// Turns a raw signed distance + wall thickness into the final field (C# `ISplittingLogic`)
-SplittingLogic: interface SplittingLogic
-
-  // SplittingLogic.advancedSignedDistance (method)
-  advancedSignedDistance(signedDistance: number, wallThickness: number): number;
-
-// A lattice unit cell (C# `IUnitCell`, preview dropped)
-UnitCell: interface UnitCell
-
-  // UnitCell.cornerPoints (method)
-  cornerPoints(): readonly Vec3[];
-
-  // UnitCell.cellCentre (method)
-  cellCentre(): Vec3;
-
-  // UnitCell.cellBounding (method)
-  cellBounding(): Bounds;
-
-// A cylindrical coordinate (C# `Cylindrical`)
-Cylindrical: interface Cylindrical
-
-  readonly r: number
-
-  readonly phi: Rad
-
-  readonly z: number
-
-// A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`)
-Frame: interface Frame
-
-  // Origin of the frame in world coordinates (C# `vecPos`)
-  readonly pos: Vec3
-
-  // Local X axis in world coordinates (C# `vecLx`)
-  readonly lx: Vec3
-
-  // Local Y axis in world coordinates (C# `vecLy`)
-  readonly ly: Vec3
-
-  // Local Z axis in world coordinates (C# `vecLz`)
-  readonly lz: Vec3
-
-// A polar coordinate (C# `PicoGK.Numerics.Polar`)
-Polar: interface Polar
-
-  readonly r: number
-
-  readonly phi: Rad

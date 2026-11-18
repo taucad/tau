@@ -1,5 +1,5 @@
 /**
- * React Router v7 integrations for `@taucad/runtime` consumers.
+ * React Router (7 and 8) integrations for `@taucad/runtime` consumers.
  *
  * This namespace hosts framework-specific helpers. Low-level primitives are
  * re-exported from `@taucad/runtime/cross-origin-isolation`; this module adds

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectFileSystemConfig, Workspace, WorkspaceConnection } from '@taucad/files-ui/filesystem/handle-store';
-import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
+import type { ConnectedWorkspace } from '@taucad/files-ui/runtime/project-library-workspace';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
 
 vi.mock('@taucad/files-ui/filesystem/use-persistent-storage-status', () => ({

@@ -93,6 +93,7 @@ jobs:
       shell-projects: ${{ steps.plan.outputs.shell-projects }}
       e2e-queue: ${{ steps.plan.outputs.e2e-queue }}
       e2e-queue-suites: ${{ steps.plan.outputs.e2e-queue-suites }}
+      compute-qualify: ${{ steps.plan.outputs.compute-qualify }}
       reused: ${{ steps.queue.outputs.run-id }}
       affected-base: ${{ steps.queue.outputs.affected-base }}
     steps:
@@ -201,13 +202,26 @@ jobs:
              "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "paths", "queue": "never"},
              "desktop": {"tags": ["ci:desktop"]},
              "shell": {"tags": ["ci:shell"], "pr": "queue", "queue": "any-touched"},
-             "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "touched"}}
+             "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "touched"},
+             "compute-qualify": {"targets": ["compute-qualify-ci"]}}
           QUEUE_HUBS: '["agent-host", "host"]'
           SHELL_LANE_PATHS: >-
             [".github/workflows/shell-conformance.yml",
              "apps/desktop/scripts/hosted-linux-bwrap-fixture.mts",
              "apps/desktop/scripts/linux-apt-package.mts",
              "apps/desktop/scripts/runtime-stage.mts"]
+          # Compute reuse qualification lane (`compute-qualify`, audit R5): `runtime-e2e:compute-qualify-ci` asserts the
+          # Replicad reuse-off GLB hashes and work counts of `apps/runtime-e2e/src/compute-baseline`. runtime-e2e stays
+          # quarantined from the test lanes, and it is affected by most of the workspace, so the selector's project is
+          # kept only when a project the qualification measures is affected (COMPUTE_QUALIFY_LANE_PROJECTS) or a file it
+          # reads outside the graph changed (COMPUTE_QUALIFY_LANE_PATHS: the harness and the pinned example models).
+          COMPUTE_QUALIFY_LANE_PROJECTS: '["replicad", "runtime", "middleware", "occt-core", "esbuild"]'
+          COMPUTE_QUALIFY_LANE_PATHS: >-
+            ["apps/runtime-e2e/src/compute-baseline",
+             "apps/runtime-e2e/project.json",
+             "libs/tau-examples/src/kernels/replicad/gridfinity-box",
+             "libs/tau-examples/src/kernels/replicad/six-axis-arm",
+             "libs/tau-examples/src/kernels/replicad/spur-gearbox"]
           NATIVE_DARWIN_LANE_PATHS: >-
             [".github/workflows/native-darwin.yml",
              "scripts/src/check-standalone-project.ts",
@@ -287,6 +301,21 @@ jobs:
             lanes=$(jq -c --slurpfile graph "$RUNNER_TEMP/graph.json" \
               '."native-darwin" = ([$graph[0].graph.nodes[] | select(.data.targets // {} | has("test:native-darwin")) | .name] | sort)' <<< "$lanes")
             echo "Native darwin lane paths changed: $darwin_paths"
+          fi
+          # The compute qualification lane's input check: keep its project only when a measured project is affected or a
+          # qualification path changed (a path names a file or a directory).
+          if [ "$(jq -c '."compute-qualify"' <<< "$lanes")" != '[]' ]; then
+            qualify_projects=$(jq -c --argjson projects "$COMPUTE_QUALIFY_LANE_PROJECTS" \
+              '[.[] | select(. as $name | $projects | index([$name]) != null)]' <<< "$affected")
+            qualify_paths=$(git diff --name-only --no-renames "$NX_BASE" "${NX_HEAD:-HEAD}" \
+              | jq -cRn --argjson paths "$COMPUTE_QUALIFY_LANE_PATHS" \
+                  '[inputs | select(. as $file | any($paths[] as $path | $file == $path or ($file | startswith($path + "/")); .))]')
+            if [ "$qualify_projects" = '[]' ] && [ "$qualify_paths" = '[]' ]; then
+              lanes=$(jq -c '."compute-qualify" = []' <<< "$lanes")
+              echo "Compute qualification lane: no measured project affected and no qualification path changed."
+            else
+              echo "Compute qualification inputs: projects $qualify_projects, paths $qualify_paths"
+            fi
           fi
           # The viewer parity lane's path check, which only the pull-request "paths" rule below reads (`path_lanes`):
           # the pull request's own files (the same diff as that rule) against VIEWER_PARITY_LANE_PATHS and the
@@ -438,6 +467,7 @@ jobs:
             echo "shell-projects=$shell_projects"
             echo "e2e-queue=$e2e_queue"
             echo "e2e-queue-suites=$e2e_queue_suites"
+            echo "compute-qualify=$(flag compute-qualify)"
           } >> "$GITHUB_OUTPUT"
           # `staging.yml` reads which service lanes `nx affected` selected (`api`, `billing-e2e`,
           # keyed by their job), before the reuse and pull-request rules above, and the merge-queue
@@ -514,7 +544,7 @@ jobs:
           fi
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
-  # typecheck, build, three package-check shards and three test shards. One runner running every
+  # typecheck, build, three package-check shards and six test shards. One runner running every
   # task in turn took 1 h 40 min on a full graph (run 37221169741, 2026-10-04); the
   # lanes bring that down to the longest lane. Each lane keeps `--parallel=1`, which
   # its own 16 GB runner still needs (see `Run the lane's tasks`).
@@ -539,7 +569,8 @@ jobs:
     strategy:
       fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
-        lane: [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3]
+        lane:
+          [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3, test-4, test-5, test-6]
     steps:
       # Two commits in a queue run, full history otherwise (see `plan`).
       - name: Checkout
@@ -595,7 +626,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
             typecheck) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
-            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output --graph="$graph" > /dev/null ;;
+            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch --graph="$graph" > /dev/null ;;
             pkgcheck-*) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
             test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
@@ -627,12 +658,18 @@ jobs:
       # refuse rather than skip when they are absent. The whole of `test` for that tag
       # runs in the `api` lane below, which has both; these lanes stay hermetic.
       #
-      # The three test shards split the affected projects with a `test` target by
+      # The six test shards split the affected projects with a `test` target by
       # measured uncached test seconds (scripts/src/test-shard-dealer.ts and its
       # duration snapshot). The project list comes from the graph at run time,
       # never from this file: one `nx affected -t test --graph=<file>` writes the affected
-      # `test` tasks and the project graph (each project's tags) without running
+      # `test` tasks and the project graph (each project's tags and targets) without running
       # anything, in place of an `nx show projects --affected` and an `nx graph` (X8).
+      # A project that declares `test:shard-<n>` targets is dealt as those tasks instead of
+      # its whole `test`: `ui:test`, about 950 s uncached, is six `ui:test:shard-<n>` tasks of
+      # about 160 s, so it no longer sets one lane's floor (CI throughput review ST-1,
+      # decomposition rows DC-9/DC-10). Each is cacheable and keyed on its own `--shard`; its
+      # Vitest config deals the files by measured seconds, and the six run every file once
+      # (apps/ui/test-shards.test.ts). Locally, `ui:test` still runs every file.
       #
       # `--parallel=1`: ui:lint and ui:typecheck each peak near 9.5 GB, so any two of
       # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
@@ -659,6 +696,9 @@ jobs:
       # (React Router 8 migration RR0, RD8): no server output of the web, desktop, `tau serve`
       # or docs build holds a .wasm file, a worker bundle or a client asset. The ui check adds
       # `ui:build:serve` to the lane; its other builds are already here.
+      # `check-route-module-patch` selects `ui:check-route-module-patch` (RR8, RD4): the web,
+      # desktop and `tau serve` client builds ship React Router's route-module loader with
+      # Tau's local patch.
       - name: Run the lane's tasks
         if: steps.queue.outputs.run-id == ''
         env:
@@ -668,7 +708,7 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --parallel=1 ;;
             typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
-            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output --parallel=1 ;;
+            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch --parallel=1 ;;
             pkgcheck-*)
               # The three package-check shards deal the affected projects with a package
               # check by measured uncached `pkgcheck` seconds, with the test shards' dealer
@@ -724,19 +764,41 @@ jobs:
                 .graph.nodes as $nodes
                 | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
                 | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
+              # A project with `test:shard-<n>` targets enters the deal as its `<project>:test:shard-<n>`
+              # tasks, every one of them, in place of the project; the rest enter as projects.
+              units=$(jq -c --argjson projects "$projects" '
+                .graph.nodes as $nodes
+                | [$projects[] as $project
+                   | ([$nodes[$project].data.targets // {} | keys[] | select(test("^test:shard-[1-9][0-9]*$"))]) as $shards
+                   | if ($shards | length) > 0 then $shards[] | "\($project):\(.)" else $project end]' "$RUNNER_TEMP/test-graph.json")
               # Every lane deals the same list heaviest first to the lightest shard by
               # duration, so the shards partition it and the slowest suites land apart.
-              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3)
+              # `--shards` is the number of `test-<n>` rows in the matrix above.
+              shard=$(echo "$units" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 6)
               if [ -z "$shard" ]; then
                 echo "No affected test projects in this shard."
                 exit 0
               fi
-              echo "Shard projects: $shard"
+              echo "Shard projects and tasks: $shard"
+              projects=$(echo "$shard" | tr ',' '\n' | grep -v ':' | paste -sd, - || true)
+              tasks=$(echo "$shard" | tr ',' '\n' | grep ':' || true)
+              : > "$RUNNER_TEMP/affected-test.log"
+              status=0
               # Streamed, not `static`: Nx holds a static task's output until the task ends and then
               # prints only its first 64–128 KiB into a pipe, so a long suite lost its Vitest summary and
               # every failing test's name (F3; `ui:test` in queue runs 43990460984, 44048796415,
               # 44050273147 and 44062740359 stopped mid-run in both the job log and this file).
-              pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
+              if [ -n "$projects" ]; then
+                pnpm nx run-many -t test --projects "$projects" --parallel=1 --outputStyle=stream 2>&1 | tee -a "$RUNNER_TEMP/affected-test.log" || status=1
+              fi
+              # A project's dealt shard tasks run in one `run-many`, and every project's run even when
+              # another failed, so a failed shard hides no other result.
+              for project in $(echo "$tasks" | cut -d: -f1 | sort -u); do
+                targets=$(echo "$tasks" | grep "^$project:" | cut -d: -f2- | paste -sd' ' -)
+                # shellcheck disable=SC2086 # one word per target
+                pnpm nx run-many -t $targets --projects "$project" --parallel=1 --outputStyle=stream 2>&1 | tee -a "$RUNNER_TEMP/affected-test.log" || status=1
+              done
+              exit "$status"
               ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
@@ -1041,9 +1103,36 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Compute reuse qualification (audit R5): the cheap subset of the Replicad qualification matrix, run whenever the
+  # plan's input check selects it. It asserts reuse-off GLB hashes, byte parity with reuse on across cache histories,
+  # multi-thread WASM parity and the per-step work counts pinned in
+  # `apps/runtime-e2e/src/compute-baseline/qualification-baselines.json`; timings are recorded, never asserted. Only
+  # this target runs here; runtime-e2e's other suites stay quarantined.
+  compute-qualify:
+    name: Compute reuse qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.compute-qualify == 'true' }}
+    permissions:
+      contents: 'read'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Run the qualification subset
+        timeout-minutes: 40
+        # The plan selected the lane through the target; the one project that declares it runs.
+        run: pnpm nx run-many -t compute-qualify-ci --parallel=1 --outputStyle=stream
+
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (browser, GeoSpec example contracts, CLI
-  # end-to-end, the end-to-end ratchet, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
+  # end-to-end, the end-to-end ratchet, compute reuse qualification, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
   # rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected fails it. Viewer parity is
   # planned on pull requests and pushes only (VP-1), so on a pull request that touches its inputs this check, which the
   # queue's auto-merge waits for, holds the pull request until parity passes. It waits for every
@@ -1076,6 +1165,7 @@ jobs:
         shell,
         formal-nightly,
         e2e-queue,
+        compute-qualify,
       ]
     if: ${{ github.event_name == 'merge_group' && always() || !cancelled() }}
     runs-on: ubuntu-latest
@@ -1108,6 +1198,8 @@ jobs:
           FORMAL_NIGHTLY_RESULT: ${{ needs.formal-nightly.result }}
           E2E_QUEUE_REQUIRED: ${{ needs.plan.outputs.e2e-queue }}
           E2E_QUEUE_RESULT: ${{ needs.e2e-queue.result }}
+          COMPUTE_QUALIFY_REQUIRED: ${{ needs.plan.outputs.compute-qualify }}
+          COMPUTE_QUALIFY_RESULT: ${{ needs.compute-qualify.result }}
           EVENT: ${{ github.event_name }}
           REUSED: ${{ needs.plan.outputs.reused }}
           DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -1134,6 +1226,7 @@ jobs:
           if [ "$SHELL_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$SHELL_RESULT" = success; fi
           if [ "$FORMAL_NIGHTLY_REQUIRED" = true ] && [ "$EVENT" = merge_group ]; then test "$FORMAL_NIGHTLY_RESULT" = success; fi
           if [ "$E2E_QUEUE_REQUIRED" = true ]; then test "$E2E_QUEUE_RESULT" = success; fi
+          if [ "$COMPUTE_QUALIFY_REQUIRED" = true ]; then test "$COMPUTE_QUALIFY_RESULT" = success; fi
 
   # Merge-queue fail-fast (CI throughput review, merge-queue ejection review MQ-7). The queue builds five
   # entries at a time, and removes a failed entry and rebuilds every entry behind it only once the failed
@@ -1290,6 +1383,15 @@ jobs:
     name: Fail fast (e2e-queue)
     needs: [e2e-queue]
     if: ${{ failure() && github.event_name == 'merge_group' && needs.e2e-queue.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-compute-qualify:
+    name: Fail fast (compute-qualify)
+    needs: [compute-qualify]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.compute-qualify.result == 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: *fail-fast-permissions
@@ -1860,8 +1962,14 @@ jobs:
         with:
           save-pnpm-store: 'true'
 
-  api:
-    name: API tests (Postgres + MinIO)
+  # The API lane, in two shards on standard runners, each with its own PostgreSQL, Redis and MinIO: as one job
+  # it ended at 10.2 / 12.2 min (p50 / p90, 60 green queue runs), past the 10 min lane budget (Brain
+  # research/ci-structural-decomposition-blueprint.md, ST-3). Each shard runs its Vitest `--shard` half of every
+  # affected API suite; shard 1 adds the git end-to-end tier (about 140 s) and shard 2 the server modes, billing
+  # composition, edit bench, live-harness guards, migration injection and session cookie cases (about 110 s).
+  # `API tests (Postgres + MinIO)` below is the required check: it passes only when both shards passed.
+  api-shard:
+    name: API tests (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     # Writes the remote cache on `main` pushes and in `main`'s merge queue, like the affected lanes; pull requests read.
     environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
@@ -1872,6 +1980,10 @@ jobs:
       pull-requests: 'read'
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}
+    strategy:
+      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      matrix:
+        shard: [1, 2]
     steps:
       # Two commits in a queue run, full history otherwise (see `plan`): the suites step
       # selects its projects with `nx affected`.
@@ -1907,6 +2019,9 @@ jobs:
       # dependents' (`api` and `api-e2e` depend on every one), not every API suite.
       # `nx affected` ignores `--projects`, so the tag is selected by excluding every
       # project but it: `--exclude '*,!tag:scope:api'`.
+      # `--shard=<n>/2` reaches every suite's `vitest`, which sorts the suite's files by path hash and runs the
+      # n-th half, so the two shards run every file of every suite once (scripts/src/api-shard-union.test.ts).
+      # `--passWithNoTests` lets a suite with a single file run it in one shard and nothing in the other.
       # `--parallel=1`: the suites share this lane's one PostgreSQL, and concurrent suites
       # contend on it (DC-2 measured a 70,000-row purge suite going from 60 s to 120 s
       # beside two others); one at a time keeps each suite's timing its own. `DATABASE_URL`
@@ -1923,9 +2038,10 @@ jobs:
       - name: Run API suites (real PostgreSQL + MinIO)
         env:
           DATABASE_URL: postgresql://dev_user:dev_password@localhost:5432/tau_dev
-        run: pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1
+        run: pnpm nx affected -t test --exclude '*,!tag:scope:api' --parallel=1 -- --shard=${{ matrix.shard }}/2 --passWithNoTests
 
       - name: Qualify API development and production servers
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:server-modes
 
       # The Tau agent plane left the API at W3-CUT-2 (2026-09-02); the surviving
@@ -1934,14 +2050,17 @@ jobs:
       # agent-observability code, on the launcher's own disposable PostgreSQL 17.
       # postgres:17-alpine pinned by digest; the billing-e2e job's step says how to refresh it.
       - name: Pull the billing foundation PostgreSQL image
+        if: matrix.shard == 2
         run: |
           docker pull postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
           docker tag postgres@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac postgres:17-alpine
 
       - name: Run the API's billing composition contracts
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:billing-composition
 
       - name: Run deterministic file-edit qualification (edit bench)
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:models -- app/testing/edit-bench/edit-bench.test.ts
 
       # Hermetic guards on the live provider harness, which the credentialed live
@@ -1949,6 +2068,7 @@ jobs:
       # and a prompt a model refuses as a jailbreak never reaches a provider
       # (docs/research/grok-4-7-live-suite-refusal-blueprint.md).
       - name: Run the live-harness guards
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:models -- app/testing/live/live-assertions.test.ts app/testing/live/live-gateway.harness.test.ts
 
       # Testing policy §13 for the durable migration the release command applies:
@@ -1956,12 +2076,14 @@ jobs:
       # no-op. Lives under `app/testing/**`, so it runs through the same target as
       # the edit bench and needs the PostgreSQL this lane starts.
       - name: Run the durable-migration failure injection
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:models -- app/testing/git-storage-migration.integration.test.ts
 
       # Auth session cookie blueprint, harness H2: the cookie cache over the real
       # AuthModule, PostgreSQL and Redis (cases 2, 4, 5, 17 and 24). Lives under
       # `app/testing/**`, so it runs through `test:models` like the edit bench.
       - name: Run the session cookie cache cases on PostgreSQL
+        if: matrix.shard == 2
         run: pnpm nx run-many -t test:models -- app/testing/session-cache.billing.integration.test.ts
 
       # Charter S2, end to end: two real API processes over one MinIO and one
@@ -1970,14 +2092,28 @@ jobs:
       # boots either process.
       # Since DC1 the tier is two API processes and two tau-storage workers.
       - name: Run the git end-to-end tier (two API processes, two storage workers, one object store)
+        if: matrix.shard == 1
         run: pnpm nx run-many -t test:git
 
       # DC1 (review FR20): no API or storage log line of the tier may carry a grant,
       # a receipt signature or a presigned `X-Amz-Signature`/`X-Amz-Credential`.
       # The same checker runs over a captured staging sample.
       - name: Check the git tier's logs for signed tokens
-        if: ${{ !cancelled() && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
+        if: ${{ !cancelled() && matrix.shard == 1 && hashFiles('out/test-results/api-e2e-git/*.log') != '' }}
         run: cat out/test-results/api-e2e-git/*.log | node apps/api/scripts/check-storage-log-sample.mts /dev/stdin
+
+  # The required check `API tests (Postgres + MinIO)` (main ruleset), and the job `staging.yml` and the gate read:
+  # it passes only when both API shards passed, and is skipped exactly when they were.
+  api:
+    name: API tests (Postgres + MinIO)
+    runs-on: ubuntu-latest
+    needs: [plan, api-shard]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.api == 'true' }}
+    steps:
+      - name: Require both API shards
+        env:
+          SHARDS_RESULT: ${{ needs.api-shard.result }}
+        run: test "$SHARDS_RESULT" = success
 
   # Credential-free database and Stripe adapter contracts, including fork PRs. Runs when
   # `api-billing` or a project it depends on is affected, on pull requests, in the merge

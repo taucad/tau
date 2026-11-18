@@ -550,9 +550,11 @@ export const createApplyTreeEffects = (
       let failed = true;
       const heldAt = workerTimings.now();
       try {
+        const manifest = closure === undefined ? undefined : targetFiles.get('tau.json')?.content;
         release = onApplyingTree?.(place, [...removedPaths, ...writtenPaths].sort(), {
           purpose,
           ...(closure === undefined ? {} : { closure }),
+          ...(manifest === undefined ? {} : { manifest }),
         });
         if (closure !== undefined) {
           const arriving = new Set(writtenPaths);
@@ -568,6 +570,8 @@ export const createApplyTreeEffects = (
                   arriving: arriving.has(path),
                 };
               }),
+              /* A read of a file this write removes waits until it is gone, never answering the old tree's bytes. */
+              { removing: removedPaths },
             );
           } catch (error) {
             /* An index that cannot open leaves the reading at treeReady until the write ends: late, never wrong. */
@@ -907,6 +911,13 @@ export const createApplyTreeEffects = (
               ...(materialization.purpose === undefined ? {} : { purpose: materialization.purpose }),
             });
           }
+          /*
+           * Whole again: what the failed write still owed refused until now, and may answer as the disk (I7). A
+           * rollback that held the tree ended it already; one that did not, or none, ends it here.
+           */
+          await useFileSystem(place, async (live) => {
+            live.endExpectation?.();
+          });
           /* Told after the rollback, not before: a rollback that landed left the checkout whole (L5). */
           tell(false);
         } catch (recoveryError) {

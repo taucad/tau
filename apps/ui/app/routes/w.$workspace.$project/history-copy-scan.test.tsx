@@ -26,7 +26,7 @@ import { RevisionOutcomes } from '#routes/w.$workspace.$project/revision-outcome
 import { turnRevisionDetail, turnRevisionLabel } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 import type { TurnRevisionState } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { projectSyncIndicator } from '#components/nav/project-sync-status.js';
 import { selectProjectFacts } from '#hooks/use-sidebar-status.js';
 import type { ProjectSidebarRow } from '#hooks/use-sidebar-status.js';

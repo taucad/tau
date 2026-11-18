@@ -11,7 +11,7 @@ import {
 } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 import type { TurnRevisionFacts } from '#routes/w.$workspace.$project/chat-turn-revision-state.js';
 import type { TurnRevisionLog } from '#machines/chat-projection.logic.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 
 const revision: RevisionCard = {
   revisionId: 'rev-5',

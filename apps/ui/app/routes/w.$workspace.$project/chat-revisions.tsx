@@ -90,7 +90,7 @@ import {
   useReportHistoryPaneShown,
 } from '#routes/w.$workspace.$project/revision-pane-requests.js';
 import { useRevisionGraph, useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
-import type { RevisionCard, RevisionsView } from '#hooks/use-revisions.js';
+import type { RevisionCard, RevisionsView } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import {
   useProjectRole,

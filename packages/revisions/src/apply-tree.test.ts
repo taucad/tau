@@ -37,7 +37,9 @@ import { maximumChangesetEntries } from '@taucad/filesystem';
 import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/project-core';
 
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import { createApplyTreeEffects } from '#apply-tree.js';
+import { createApplyTreeEffects, readDeferredRevisionTree } from '#apply-tree.js';
+import type { DeferredRevisionTree } from '#apply-tree.js';
+import { blobOid } from '#tree-id-memo.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
@@ -281,8 +283,8 @@ const liveCheckout: Checkout = {
   baseRevisionId: undefined,
 };
 
-/** The extracted apply primitive over the counting checkout used by the crash rows. */
-const materializer = (
+/** The extracted apply primitives over the counting checkout used by the crash rows. */
+const applyEffects = (
   checkout: RevisionFileSystem,
   prepareTarget?: Parameters<typeof createApplyTreeEffects>[0]['prepareTarget'],
   onApplyingTree?: Parameters<typeof createApplyTreeEffects>[0]['onApplyingTree'],
@@ -311,8 +313,12 @@ const materializer = (
         }
       });
     },
-  }).materializeTree;
+  });
 };
+
+/** The extracted apply primitive over the counting checkout used by the crash rows. */
+const materializer = (...dependencies: Parameters<typeof applyEffects>) =>
+  applyEffects(...dependencies).materializeTree;
 
 /** Cut the live checkout and answer the tree id the store would record. */
 const cut = async (actors: RevisionActors): Promise<string> => {
@@ -1486,6 +1492,7 @@ describe('a cold open written from its listing (STO-25)', () => {
   const opening = async (
     files: Readonly<Record<string, string>> = {},
     failRead?: (paths: readonly string[]) => boolean,
+    afterBatch?: (written: readonly string[]) => Promise<void>,
   ) => {
     const context = await project(files);
     await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
@@ -1501,6 +1508,8 @@ describe('a cold open written from its listing (STO-25)', () => {
     const remoteTree = (await context.port.readTree(remote, { largeObjects: 'local' }))!;
     const sizes = new Map(remoteTree.entries().map(({ path, content }) => [path, content.byteLength]));
     const events: string[] = [];
+    /* Once a read fails, the store stays unreadable: a rollback cannot ask it either. */
+    let unreadable = false;
     /* A slow object source: the model's bytes arrive only once the closure has landed, or after a bound. */
     const { promise: closureLanded, resolve: landClosure } = Promise.withResolvers<void>();
     const port: RevisionPort = {
@@ -1512,7 +1521,8 @@ describe('a cold open written from its listing (STO-25)', () => {
       readTree: async (id, readOptions) => {
         const paths = readOptions?.paths;
         events.push(`read ${paths === undefined ? '*' : paths.join(',')}`);
-        if (paths !== undefined && failRead?.(paths) === true) {
+        if (paths !== undefined && (unreadable || failRead?.(paths) === true)) {
+          unreadable = true;
           throw new Error('the store could not read that pack');
         }
         if (paths?.includes('model/aircraft.usda') === true && events.includes('bracket')) {
@@ -1539,6 +1549,7 @@ describe('a cold open written from its listing (STO-25)', () => {
         if (entries.some((entry) => entry.op === 'write' && entry.path === 'tau.json')) {
           landClosure();
         }
+        await afterBatch?.(entries.flatMap((entry) => (entry.op === 'write' ? [entry.path] : [])));
         return receipts;
       },
     });
@@ -1613,11 +1624,22 @@ describe('a cold open written from its listing (STO-25)', () => {
     expect(await opened.port.readRef('main')).toBe(opened.remote);
   }, 30_000);
 
-  it('should keep a file the checkout already holds as the revision does, reading it before the bracket', async () => {
+  it('should keep a file the checkout already holds as the revision does, by its blob id and unread', async () => {
     const usda = remoteFiles.find(([path]) => path === 'model/aircraft.usda')![1] as string;
     const opened = await opening({ 'model/aircraft.usda': usda });
     await run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' });
-    expect(opened.readOf('model/aircraft.usda')).toBeLessThan(opened.events.indexOf('bracket'));
+    const written = opened.events.slice(0, opened.events.indexOf('release'));
+    /* No whole-tree read: the checkout's own bytes are the blob the listing names. */
+    expect(written).not.toContain('read *');
+    const bracket = written.indexOf('bracket');
+    /* One read of the model, the work check's; the write never asks the store for it again. */
+    expect(
+      written.filter((event) => event.startsWith('read ') && event.slice(5).split(',').includes('model/aircraft.usda')),
+    ).toHaveLength(1);
+    /* The work check reads the checkout's own paths before the write; the write itself never reads the model. */
+    expect(
+      written.slice(bracket).some((event) => event.startsWith('read ') && event.includes('model/aircraft.usda')),
+    ).toBe(false);
     expect(opened.events).not.toContain('write model/aircraft.usda');
     expect(await opened.tree.readFile('model/aircraft.usda', 'utf8')).toBe(usda);
     expect(await opened.port.readRef('main')).toBe(opened.remote);
@@ -1639,4 +1661,183 @@ describe('a cold open written from its listing (STO-25)', () => {
     expect(left.filter(Boolean)).toEqual([]);
     expect(await opened.port.readRef('main')).toBeUndefined();
   }, 30_000);
+
+  it('should keep a same-size edit someone made to a landed file when the store cannot be read to roll back (I5)', async () => {
+    const [edited, original] = sources[0]!;
+    const foreign = original.replace('export', 'EXPORT');
+    const failing = sources.at(-1)![0];
+    const checkoutOf: { tree?: NodeFsProvider } = {};
+    const opened = await opening(
+      {},
+      (paths) => paths.includes(failing),
+      async (written) => {
+        /* An editor's save between two changesets, which no fence holds back. */
+        if (written.includes(edited)) {
+          await checkoutOf.tree!.writeFile(edited, foreign);
+        }
+      },
+    );
+    checkoutOf.tree = opened.tree;
+    await expect(run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).rejects.toThrow(
+      'the store could not read that pack',
+    );
+    expect(foreign).toHaveLength(original.length);
+    expect(await opened.tree.readFile(edited, 'utf8')).toBe(foreign);
+    /* Everything the write itself landed went back. */
+    expect(await opened.tree.exists(sources[1]![0])).toBe(false);
+    expect(await opened.tree.exists('tau.json')).toBe(false);
+  }, 30_000);
+
+  it('should read a tree that holds a symbolic link or a submodule whole, as before', async () => {
+    const reads: string[] = [];
+    const port: Pick<RevisionPort, 'diff' | 'listTree' | 'readTree'> = {
+      listTree: async () => [{ path: 'main.ts', oid: 'a'.repeat(40), mode: '100644', size: 2048 }],
+      diff: async () => [
+        { path: 'link', kind: 'added' },
+        { path: 'main.ts', kind: 'added' },
+        { path: 'vendor/lib', kind: 'added' },
+      ],
+      readTree: async (_id, readOptions) => {
+        reads.push(readOptions?.paths?.join(',') ?? '*');
+        return new ImmutableRevisionTree([]);
+      },
+    };
+    await expect(readDeferredRevisionTree(port, revisionId('b'.repeat(40)))).resolves.toBeUndefined();
+    expect(reads).toEqual([]);
+  });
+});
+
+describe('a deferred tree write (STO-25)', () => {
+  const encoder = new TextEncoder();
+  const manifest = serializeProjectManifest({
+    $schema: projectManifestSchemaUrl,
+    name: 'Deferred',
+    description: '',
+    tags: [],
+    assets: { main: { entryPath: 'main.ts' } },
+  });
+  /* More files than one changeset takes. */
+  const files = new Map(
+    Array.from({ length: maximumChangesetEntries + 44 }, (_, index): [string, Uint8Array<ArrayBuffer>] => [
+      `src/file-${String(index).padStart(4, '0')}.ts`,
+      encoder.encode(`export const value = ${String(index).padStart(1100, '0')};\n`),
+    ]),
+  );
+
+  /**
+   * A deferred tree over {@link files}, its manifest held.
+   *
+   * @param options - What a read does, given its paths and its call's number.
+   * @returns The tree and the reads it answered.
+   */
+  const deferredOf = (
+    options: Readonly<{
+      onRead?: (paths: readonly string[], call: number) => void;
+      answer?: (path: string, content: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>;
+    }> = {},
+  ): Readonly<{ tree: DeferredRevisionTree; reads: string[][] }> => {
+    const reads: string[][] = [];
+    return {
+      reads,
+      tree: {
+        held: new ImmutableRevisionTree([
+          ['tau.json', manifest],
+          ['main.ts', 'export const main = 1;\n'],
+        ]),
+        deferred: new Map(
+          [...files].map(([path, content]) => [
+            path,
+            { mode: '100644', size: content.byteLength, oid: blobOid(new Uint8Array(content), 'sha1') },
+          ]),
+        ),
+        read: async (paths) => {
+          reads.push([...paths]);
+          options.onRead?.(paths, reads.length);
+          return new Map(
+            paths.map((path) => [path, options.answer?.(path, files.get(path)!) ?? new Uint8Array(files.get(path)!)]),
+          );
+        },
+      },
+    };
+  };
+
+  const present = async (tree: NodeFsProvider, paths: Iterable<string>): Promise<string[]> => {
+    const held = await Promise.all([...paths].map(async (path) => ((await tree.exists(path)) ? path : undefined)));
+    return held.filter((path) => path !== undefined);
+  };
+
+  it('should stop between changesets on abort and take back what landed', async () => {
+    const context = await project({});
+    const controller = new AbortController();
+    const { tree, reads } = deferredOf({
+      onRead: (_paths, call) => {
+        if (call === 2) {
+          controller.abort(new Error('closed'));
+        }
+      },
+    });
+    await expect(
+      materializer(context.checkout)(liveCheckout, async () => tree, { signal: controller.signal }),
+    ).rejects.toThrow('closed');
+    expect(reads.length).toBeGreaterThan(1);
+    expect(await present(context.tree, ['tau.json', 'main.ts', ...files.keys()])).toEqual([]);
+  });
+
+  it('should fail and take back what landed when the store answers a file at another size', async () => {
+    const context = await project({});
+    const short = [...files.keys()].at(-1)!;
+    const { tree } = deferredOf({
+      answer: (path, content) => (path === short ? content.slice(1) : new Uint8Array(content)),
+    });
+    await expect(materializer(context.checkout)(liveCheckout, async () => tree)).rejects.toThrow(
+      `The store could not read ${short} as its tree lists it.`,
+    );
+    expect(await present(context.tree, ['tau.json', 'main.ts', ...files.keys()])).toEqual([]);
+  });
+
+  it('should replace a deferred file the checkout holds at another size, or at the same size with other bytes', async () => {
+    const [longer, shorter] = [...files.keys()];
+    const sameSize = [...files.keys()][2]!;
+    const sameSizeOther = new TextDecoder().decode(files.get(sameSize)).replace('export', 'EXPORT');
+    const context = await project({
+      [longer!]: 'old\n',
+      [shorter!]: `${'x'.repeat(4000)}\n`,
+      [sameSize]: sameSizeOther,
+    });
+    const { tree, reads } = deferredOf();
+    await materializer(context.checkout)(liveCheckout, async () => tree);
+    const landed = await Promise.all(
+      [longer!, shorter!, sameSize].map(async (path) => new Uint8Array(await context.tree.readFile(path))),
+    );
+    expect(landed).toEqual([longer!, shorter!, sameSize].map((path) => files.get(path)));
+    expect(reads.flat()).toEqual(expect.arrayContaining([longer, shorter, sameSize]));
+  });
+
+  it('should repair a torn deferred write by blob id, keeping a same-size edit made since', async () => {
+    let refusing = false;
+    let unreadable = false;
+    const context = await project({}, { ...trustedStats, failMutation: () => refusing });
+    const failing = [...files.keys()].at(-1)!;
+    const { tree } = deferredOf({
+      onRead: (paths) => {
+        if (unreadable || paths.includes(failing)) {
+          /* The store fails the write and stays unreadable, and the checkout refuses its rollback. */
+          refusing = true;
+          unreadable = true;
+          throw new Error('the store could not read that pack');
+        }
+      },
+    });
+    const effects = applyEffects(context.checkout);
+    await expect(effects.materializeTree(liveCheckout, async () => tree)).rejects.toThrow(
+      'could not be restored completely',
+    );
+    refusing = false;
+    const [edited] = [...files.keys()];
+    const foreign = new TextDecoder().decode(files.get(edited!)).replace('export', 'EXPORT');
+    await context.tree.writeFile(edited!, foreign);
+    await expect(effects.repairTornCheckout(liveCheckout)).resolves.toBe(true);
+    expect(await context.tree.readFile(edited!, 'utf8')).toBe(foreign);
+    expect(await present(context.tree, ['tau.json', 'main.ts', ...[...files.keys()].slice(1)])).toEqual([]);
+  });
 });

@@ -23,6 +23,7 @@ import { revisionTreeFiles } from '#algorithms/revision-tree.js';
 import { lfsPointerFor, maximumPointerBytes, readLfsPointer } from '#lfs.js';
 import type { LfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
+import { blobOid } from '#tree-id-memo.js';
 import { declaredPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { isAttributesPath } from '#workspace-config.js';
 import type { AttributesReading } from '#workspace-config.js';
@@ -43,7 +44,14 @@ import type {
 type HeldRelease = { release?: ((outcome?: ApplyingTreeOutcome) => void) | undefined };
 
 /** One file a write lands: its bytes when held, its size alone while deferred (read as it lands). */
-type TargetFile = Readonly<{ path: string; mode: FileMode; size: number; content?: Uint8Array<ArrayBuffer> }>;
+type TargetFile = Readonly<{
+  path: string;
+  mode: FileMode;
+  size: number;
+  content?: Uint8Array<ArrayBuffer>;
+  /** A deferred file's blob id, which is how the write knows its bytes once it has dropped them. */
+  oid?: string;
+}>;
 
 /**
  * Recover a checkout an apply died in: put back every backup sibling whose
@@ -138,18 +146,23 @@ export type MaterializeTarget =
  * `held` carries the bytes a write must know before its bracket opens — the
  * manifest and the files it names, every attributes file and every file small
  * enough to be a large object's pointer — and `deferred` every other file by
- * its mode and the size its bytes have. The write reads a deferred file's
- * bytes from `read` as it lands it, a bounded batch at a time, the entry
- * closure first, so no whole tree's bytes are ever held at once.
+ * its mode, the size its bytes have and its blob id. The write reads a
+ * deferred file's bytes from `read` as it lands it, a bounded changeset at a
+ * time after the entry closure, and knows a deferred file in the checkout by
+ * its blob id, never by asking the store again.
  *
  * @public
  */
 export type DeferredRevisionTree = Readonly<{
   held: ImmutableRevisionTree;
-  deferred: ReadonlyMap<string, Readonly<{ mode: FileMode; size: number }>>;
-  /** The bytes of `paths` (deferred ones), by path; a path it lacks fails the write. */
+  deferred: ReadonlyMap<string, Readonly<{ mode: FileMode; size: number; oid: string }>>;
+  /** The bytes of `paths` (deferred ones), by path, stopped only by the signal given; a path it lacks fails the write. */
   read: (paths: readonly string[], signal?: AbortSignal) => Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>>;
 }>;
+
+/* Whether bytes are the blob a deferred file names: its id, in the format the id is written in. */
+const isBlob = (content: Uint8Array<ArrayBuffer>, oid: string): boolean =>
+  blobOid(content, oid.length === 64 ? 'sha256' : 'sha1') === oid;
 
 /**
  * Whether a target is known by its structure, its bytes read as it lands.
@@ -176,16 +189,26 @@ const bytesOfTree = (tree: ImmutableRevisionTree): Map<string, Uint8Array<ArrayB
  * @param revision - The revision whose tree is wanted.
  * @param options - Cancellation for every read, now and as the write lands.
  * @returns The deferred tree, or `undefined` when the store cannot list the
- *   tree with every file's size (the caller reads it whole).
+ *   tree with every file's size, or the tree holds an entry that is no file
+ *   (a symbolic link or a submodule): the caller reads it whole.
  * @public
  */
 export const readDeferredRevisionTree = async (
-  port: Pick<RevisionPort, 'listTree' | 'readTree'>,
+  port: Pick<RevisionPort, 'diff' | 'listTree' | 'readTree'>,
   revision: RevisionId,
   options: Readonly<{ signal?: AbortSignal }> = {},
 ): Promise<DeferredRevisionTree | undefined> => {
   const listing = await port.listTree?.(revision);
   if (listing === undefined || listing.some(({ size }) => size === undefined)) {
+    return undefined;
+  }
+  /*
+   * A listing names regular and executable files only. A tree that also holds
+   * a symbolic link or a submodule is read whole, which refuses it as before,
+   * rather than written without them for the next cut to record as deleted.
+   */
+  const every = await port.diff({ from: undefined, to: revision });
+  if (every.length !== listing.length) {
     return undefined;
   }
   const listed = new Map(listing.map((file) => [file.path, file]));
@@ -224,8 +247,9 @@ export const readDeferredRevisionTree = async (
     held: new ImmutableRevisionTree(
       [...held].map(([path, content]): RevisionTreeInput => [path, content, listed.get(path)!.mode]),
     ),
-    deferred: new Map(rest.map(({ path, mode, size }) => [path, Object.freeze({ mode, size: size! })])),
-    read: async (paths: readonly string[], readSignal?: AbortSignal) => read(paths, readSignal ?? signal),
+    deferred: new Map(rest.map(({ path, mode, size, oid }) => [path, Object.freeze({ mode, size: size!, oid })])),
+    /* Only the signal a caller passes: a rollback's read never inherits the open's cancellation. */
+    read: async (paths: readonly string[], readSignal?: AbortSignal) => read(paths, readSignal),
   });
 };
 
@@ -257,35 +281,32 @@ const readDeferred = async (
 };
 
 /**
- * A deferred tree whose files the checkout already holds at their size read
- * up front: compared by bytes, as any held file is, so a write never rewrites
- * or takes back a file it would leave as it is.
+ * A deferred tree whose files the checkout already holds, as their blob ids
+ * say, held with the checkout's own bytes: nothing is read from the store, and
+ * a write never rewrites or takes back a file it would leave as it is. A file
+ * the checkout holds otherwise stays deferred, and is changed.
  *
  * @param target - The deferred tree.
  * @param before - The checkout as captured under the fence.
- * @param signal - Stops the read.
  * @returns The tree with those files held.
  */
-const resolveDeferred = async (
-  target: DeferredRevisionTree,
-  before: ImmutableRevisionTree,
-  signal: AbortSignal | undefined,
-): Promise<DeferredRevisionTree> => {
+const resolveDeferred = (target: DeferredRevisionTree, before: ImmutableRevisionTree): DeferredRevisionTree => {
   const beforeFiles = revisionTreeFiles(before);
-  const overlapping = [...target.deferred]
-    .filter(([path, { size }]) => beforeFiles.get(path)?.content.byteLength === size)
-    .map(([path]) => path);
-  if (overlapping.length === 0) {
+  const kept = [...target.deferred].filter(([path, { size, oid }]) => {
+    const current = beforeFiles.get(path)?.content;
+    return current?.byteLength === size && isBlob(current, oid);
+  });
+  if (kept.length === 0) {
     return target;
   }
-  const contents = await readDeferred(target, overlapping, signal);
+  const beforeHeld = new Set(kept.map(([path]) => path));
   return Object.freeze({
     ...target,
     held: new ImmutableRevisionTree([
       ...target.held.entries().map(({ path, content, mode }): RevisionTreeInput => [path, content, mode]),
-      ...overlapping.map((path): RevisionTreeInput => [path, contents.get(path)!, target.deferred.get(path)!.mode]),
+      ...kept.map(([path, { mode }]): RevisionTreeInput => [path, beforeFiles.get(path)!.content, mode]),
     ]),
-    deferred: new Map([...target.deferred].filter(([path]) => !contents.has(path))),
+    deferred: new Map([...target.deferred].filter(([path]) => !beforeHeld.has(path))),
   });
 };
 
@@ -335,7 +356,10 @@ const targetOf = (
       ...target.held
         .entries()
         .map((entry): [string, TargetFile] => [entry.path, { ...entry, size: entry.content.byteLength }]),
-      ...[...target.deferred].map(([path, { mode, size }]): [string, TargetFile] => [path, { path, mode, size }]),
+      ...[...target.deferred].map(([path, { mode, size, oid }]): [string, TargetFile] => [
+        path,
+        { path, mode, size, oid },
+      ]),
     ]),
   };
 };
@@ -738,24 +762,22 @@ export const createApplyTreeEffects = (
         const object = sourced.get(path);
         return object === undefined ? content : { largeObject: object.oid, size: object.size };
       };
-      /* Deferred files whose bytes read back as the store's once they landed, while those bytes were in hand. */
-      const readBack = new Set<string>();
       /**
        * Write `files` as bounded changesets. A held tree's go out as
        * `splitChangeset` bounds them. A deferred file counts at its size, and
        * each changeset's deferred bytes are read from the store as it is
-       * reached — the next one's while it lands — then read back once landed
-       * and dropped, so at most two changesets' bytes are ever held.
+       * reached — the next one's while it lands — and dropped once it has
+       * landed: while landing, at most two changesets' deferred bytes are in
+       * hand. The closing capture, which reads the checkout whole as every
+       * write's does, verifies them by their blob ids.
        *
        * @param files - The files, in landing order.
        * @param entryFor - The changeset entry that writes one file's bytes.
-       * @param writtenAt - The path that entry writes (a staged sibling, or the file's own).
        * @returns Every file's receipt, in order.
        */
       const landInChunks = async (
         files: readonly TargetFile[],
         entryFor: (file: TargetFile, content: Uint8Array<ArrayBuffer>) => ChangesetEntry,
-        writtenAt: (file: TargetFile) => string,
       ): Promise<ChangesetEntryReceipt[]> => {
         if (deferred === undefined) {
           return applyChangesets(live, splitChangeset(files.map((file) => entryFor(file, file.content!))), signal);
@@ -815,20 +837,6 @@ export const createApplyTreeEffects = (
               live,
               [chunk.map((file) => entryFor(file, file.content ?? contents.get(file.path) ?? new Uint8Array()))],
               signal,
-            );
-            /* Compared while the store's bytes are in hand: the closing re-read checks a deferred file's size and mode. */
-            // oxlint-disable-next-line no-await-in-loop -- read back before this changeset's bytes are dropped.
-            await Promise.all(
-              chunk.map(async (file, position) => {
-                const content = contents.get(file.path);
-                if (content === undefined || landed[position]?.outcome !== 'applied' || sourced.has(file.path)) {
-                  return;
-                }
-                const back = await entryOf(live, writtenAt(file));
-                if (back !== undefined && equalBytes(back.content, content)) {
-                  readBack.add(file.path);
-                }
-              }),
             );
             receipts.push(...landed);
           }
@@ -966,7 +974,6 @@ export const createApplyTreeEffects = (
               mode: file.mode,
               create: true,
             }),
-            ({ path }) => path,
           );
           noteLanded(
             createdReceipts,
@@ -1007,7 +1014,6 @@ export const createApplyTreeEffects = (
                 mode: file.mode,
                 create: true,
               }),
-              ({ path }) => stagedAt.get(path)!,
             );
             noteLanded(
               stagedReceipts,
@@ -1102,13 +1108,12 @@ export const createApplyTreeEffects = (
         const verified =
           reread === undefined
             ? await writtenEntries(live, { paths: writtenPaths, targetFiles, sourced })
-            : new Map(
-                reread
-                  .entries()
-                  .map((entry): [string, VerifiedEntry] => [
-                    entry.path,
-                    { size: entry.content.byteLength, content: entry.content, mode: entry.mode },
-                  ]),
+            : /* The capture's own records, uncopied: a deferred file's blob id is memoised on them for the cut that follows. */
+              new Map(
+                [...revisionTreeFiles(reread)].map(([path, { content, mode }]): [string, VerifiedEntry] => [
+                  path,
+                  { size: content.byteLength, content, mode },
+                ]),
               );
         const unverified = [
           ...removedPaths.filter((path) => verified.has(path)),
@@ -1128,15 +1133,17 @@ export const createApplyTreeEffects = (
                 applied.mode !== wanted.mode
               );
             }
-            if (wanted?.content === undefined) {
-              /* A deferred file's bytes were compared as it landed (`readBack`); its size and mode are checked here. */
+            if (wanted?.oid !== undefined) {
+              /* A deferred file's bytes are no longer in hand: the capture's are its blob, by the id the tree names. */
               return (
-                applied === undefined ||
-                wanted === undefined ||
-                !readBack.has(path) ||
+                applied?.content === undefined ||
                 applied.size !== wanted.size ||
-                applied.mode !== wanted.mode
+                applied.mode !== wanted.mode ||
+                !isBlob(applied.content, wanted.oid)
               );
+            }
+            if (wanted?.content === undefined) {
+              return true;
             }
             return (
               applied?.content === undefined ||
@@ -1168,76 +1175,44 @@ export const createApplyTreeEffects = (
 
   /**
    * The deferred files a write landed: those the checkout holds at their size
-   * and mode whose bytes are the store's. A batch the store cannot read is
-   * decided by size and mode alone — the read may be what failed the write,
-   * and a file this write landed must still be taken back.
+   * and mode whose bytes are the blob the tree names. Nothing is read from the
+   * store, so a rollback never depends on the read that may have failed the
+   * write; a file anyone else wrote there since is never the write's, and is
+   * kept.
    *
    * @param target - The deferred tree.
-   * @param currentFiles - The checkout as it is now.
+   * @param current - The checkout as it is now.
    * @returns The deferred paths whose file is the target's.
    */
-  const landedDeferred = async (
-    target: DeferredRevisionTree,
-    currentFiles: ReadonlyMap<string, RevisionTreeEntry>,
-  ): Promise<Set<string>> => {
-    const candidates = [...target.deferred].filter(([path, { mode, size }]) => {
-      const current = currentFiles.get(path);
-      return current !== undefined && current.mode === mode && current.content.byteLength === size;
-    });
-    const batches: string[][] = [];
-    let bytes = 0;
-    for (const [path, { size }] of candidates) {
-      if (
-        batches.length === 0 ||
-        bytes + size > maximumChangesetBytes ||
-        batches.at(-1)!.length >= maximumChangesetEntries
-      ) {
-        batches.push([]);
-        bytes = 0;
-      }
-      batches.at(-1)!.push(path);
-      bytes += size;
-    }
-    const landed = new Set<string>();
-    for (const batch of batches) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- one bounded batch of the store's bytes at a time.
-        const contents = await readDeferred(target, batch, undefined);
-        for (const path of batch) {
-          if (equalBytes(currentFiles.get(path)!.content, contents.get(path)!)) {
-            landed.add(path);
-          }
-        }
-      } catch (error) {
-        console.warn(
-          '[revisions] the store could not read files a failed write landed; taking them back by size',
-          error,
-        );
-        for (const path of batch) {
-          landed.add(path);
-        }
-      }
-    }
-    return landed;
+  const landedDeferred = (target: DeferredRevisionTree, current: ImmutableRevisionTree): Set<string> => {
+    const currentFiles = revisionTreeFiles(current);
+    return new Set(
+      [...target.deferred]
+        .filter(([path, { mode, size, oid }]) => {
+          const held = currentFiles.get(path);
+          return held?.mode === mode && held.content.byteLength === size && isBlob(held.content, oid);
+        })
+        .map(([path]) => path),
+    );
   };
 
-  const recoveryTree = async (
+  const recoveryTree = (
     before: ImmutableRevisionTree,
     target: ImmutableRevisionTree | DeferredRevisionTree,
     current: ImmutableRevisionTree,
-  ): Promise<ImmutableRevisionTree> => {
+  ): ImmutableRevisionTree => {
     const deferred = isDeferredRevisionTree(target) ? target : undefined;
     const beforeFiles = new Map(before.entries().map((entry) => [entry.path, entry]));
     const targetFiles = new Map(
       (deferred?.held ?? (target as ImmutableRevisionTree)).entries().map((entry) => [entry.path, entry]),
     );
     const currentFiles = new Map(current.entries().map((entry) => [entry.path, entry]));
-    const landed = deferred === undefined ? new Set<string>() : await landedDeferred(deferred, currentFiles);
+    const landed = deferred === undefined ? new Set<string>() : landedDeferred(deferred, current);
     const affected = new Set([...beforeFiles.keys(), ...targetFiles.keys(), ...(deferred?.deferred.keys() ?? [])]);
     for (const path of affected) {
       const beforeEntry = beforeFiles.get(path);
       const targetEntry = targetFiles.get(path);
-      /* A deferred file is never the bytes `before` held there: one it held at that size was read up front (`resolveDeferred`). */
+      /* A deferred file is never the bytes `before` held there: one it held was held up front (`resolveDeferred`). */
       if (
         deferred?.deferred.has(path) === true
           ? !landed.has(path)
@@ -1274,7 +1249,7 @@ export const createApplyTreeEffects = (
   /**
    * The host's preparation of a target, before any byte lands. A deferred
    * tree's manifest is held, so preparing it is preparing its held files;
-   * then each deferred file the checkout already holds at its size is read.
+   * then each deferred file the checkout already holds, by its blob id, is held.
    *
    * @param place - The checkout being written.
    * @param target - The tree it must carry.
@@ -1293,7 +1268,7 @@ export const createApplyTreeEffects = (
     signal?.throwIfAborted();
     return deferred === undefined
       ? prepared
-      : { ...prepared, tree: await resolveDeferred({ ...deferred, held: prepared.tree }, before, signal) };
+      : { ...prepared, tree: resolveDeferred({ ...deferred, held: prepared.tree }, before) };
   };
 
   const materializeTree = async <Result = void>(
@@ -1337,7 +1312,7 @@ export const createApplyTreeEffects = (
         };
         try {
           const current = await capture(place, before);
-          const recovery = await recoveryTree(before, recoveryTarget, current);
+          const recovery = recoveryTree(before, recoveryTarget, current);
           if ((await checkoutTreeId(place.id, current)) !== (await checkoutTreeId(place.id, recovery))) {
             await applyTree(place, recovery, {
               from: current,
@@ -1381,7 +1356,7 @@ export const createApplyTreeEffects = (
       if (torn.get(place.id) !== left) {
         return;
       }
-      await applyTree(place, await recoveryTree(left.before, left.target, current), { from: current, purpose: 'tree' });
+      await applyTree(place, recoveryTree(left.before, left.target, current), { from: current, purpose: 'tree' });
       torn.delete(place.id);
     });
     return true;

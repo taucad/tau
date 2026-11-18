@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -183,6 +184,29 @@ describe('the compute worker seam', () => {
       0,
     );
     expect(empty).toEqual({ data: new Uint8Array(0), oid: digestHex('sha1', encoder.encode('tree 0\0')) });
+  });
+
+  it('never allocates for the size an entry declares before its body has inflated to it', async () => {
+    // A 1 MiB body declaring 1000 MiB passed the deflate-ratio bound and allocated 1000 MiB before it was refused:
+    // in a browser, a RangeError that judged nothing, not the corrupt entry it was (SP6-import review).
+    const compute = createInlineCompute();
+    const body = new Uint8Array(randomBytes(1024 * 1024));
+    const deflated = await compute.deflate(body);
+    const before = process.memoryUsage().arrayBuffers;
+    let peak = before;
+    const sample = setInterval(() => {
+      peak = Math.max(peak, process.memoryUsage().arrayBuffers);
+    }, 1);
+    try {
+      const refusing = compute.inflateObject('blob', deflated, 1000 * 1024 * 1024);
+      /* Whatever ran before the first wait has allocated what it allocates up front. */
+      peak = Math.max(peak, process.memoryUsage().arrayBuffers);
+      const refusal = await refusing.catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(CorruptBytesError);
+    } finally {
+      clearInterval(sample);
+    }
+    expect(peak - before).toBeLessThan(16 * 1024 * 1024);
   });
 
   it('refuses an entry that is not zlib or inflates to another size than it declares, typed and with nothing left running', async () => {

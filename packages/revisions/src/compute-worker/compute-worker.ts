@@ -208,16 +208,19 @@ const frameEncoder = new TextEncoder();
 const deflateMaximumRatio = 1032;
 
 /*
- * One zlib stream inflated into the end of `framed` from `at`, which it must
- * fill exactly: a stream that runs past it is stopped there, never read on.
- * Every refusal is a CorruptBytesError, and the stream's write side is
- * settled before it is thrown, so nothing rejects unobserved.
+ * One zlib stream inflated behind `head`, to exactly `declared` bytes. Nothing
+ * is allocated on the declared size alone: the chunks the stream produces are
+ * held until it ends, a stream that runs past `declared` is stopped there, and
+ * the frame is allocated only once the stream has produced exactly that much,
+ * so a size the body never reaches costs no more than the body. Every refusal
+ * is a CorruptBytesError, and the stream's write side is settled before it is
+ * thrown, so nothing rejects unobserved.
  */
-const inflateInto = async (
+const inflateFramed = async (
   compressed: Uint8Array<ArrayBuffer>,
-  framed: Uint8Array<ArrayBuffer>,
-  at: number,
-): Promise<void> => {
+  head: Uint8Array<ArrayBuffer>,
+  declared: number,
+): Promise<Uint8Array<ArrayBuffer>> => {
   const transform = new DecompressionStream('deflate');
   const writer = transform.writable.getWriter();
   /* Settles with the write side's failure, never rejects: it is awaited on every path below. */
@@ -231,15 +234,16 @@ const inflateInto = async (
     }
   })();
   const reader = transform.readable.getReader();
-  let filled = at;
+  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+  let inflated = 0;
   try {
     // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after another.
     for (let read = await reader.read(); !read.done; read = await reader.read()) {
-      if (read.value.byteLength > framed.byteLength - filled) {
+      if (read.value.byteLength > declared - inflated) {
         throw new CorruptBytesError('The entry inflates past the size it declares.');
       }
-      framed.set(read.value, filled);
-      filled += read.value.byteLength;
+      chunks.push(read.value);
+      inflated += read.value.byteLength;
     }
     const failed = await writing;
     if (failed !== undefined) {
@@ -253,9 +257,17 @@ const inflateInto = async (
       ? new CorruptBytesError('The bytes are not a zlib stream.', { cause: error })
       : error;
   }
-  if (filled !== framed.byteLength) {
+  if (inflated !== declared) {
     throw new CorruptBytesError('The entry inflates to a size other than the one it declares.');
   }
+  const framed = new Uint8Array(head.byteLength + declared);
+  framed.set(head);
+  let at = head.byteLength;
+  for (const chunk of chunks) {
+    framed.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return framed;
 };
 
 /**
@@ -278,15 +290,13 @@ export const createInlineCompute = (): ComputeWorker => {
   return Object.freeze({
     inflate,
     inflateObject: async (type, compressed, declared) => {
-      /* A size no body this long can inflate to is refused before anything is allocated for it. */
+      /* A size no body this long can inflate to is refused before the body is inflated at all. */
       if (!Number.isSafeInteger(declared) || declared < 0 || declared > compressed.byteLength * deflateMaximumRatio) {
         throw new CorruptBytesError('The entry declares a size its body cannot inflate to.');
       }
-      /* Inflated straight behind its frame: hashed without a copy, and handed back as a view past the frame. */
+      /* Inflated behind its frame: hashed without a further copy, and handed back as a view past the frame. */
       const head = frameEncoder.encode(`${type} ${String(declared)}\0`);
-      const framed = new Uint8Array(head.byteLength + declared);
-      framed.set(head);
-      await inflateInto(compressed, framed, head.byteLength);
+      const framed = await inflateFramed(compressed, head, declared);
       return { data: framed.subarray(head.byteLength), oid: await hashHex('sha1', framed) };
     },
     deflate: async (raw) => through(new CompressionStream('deflate'), raw),

@@ -18,6 +18,7 @@ Tau's OS sandbox launcher, process tree and contained shell provider. Private li
 - `src/shell/{shell-baseline,shell-environment,shell-identity,shell-provider}.ts`: the stateless `./shell/baseline`, `./shell/environment`, `./shell/identity` and `./shell/provider` subpaths, which `@taucad/shell-service` imports instead of the `./shell` barrel so `@taucad/host`'s bundle carries neither the SRT provider nor its native dependencies
 - `src/shell/srt-supervisor.ts`: the supervisor entry (`./shell/srt-supervisor`), the one module with top-level side effects (`sideEffects` in `package.json`)
 - `scripts/shell-conformance-vm.sh`, `scripts/shell-conformance-guest.sh`: the Linux shell conformance guests
+- `scripts/build-store-guard.mts`, `scripts/build-windows-sandbox.mts`: build and stage the Rust executables the desktop ships (`desktop:prepare-store-guard-linux`, `desktop:prepare-windows-sandbox`), with their NOTICE from `scripts/rust-payload.mts`; `scripts/windows-executable.mts` is the Windows helper's ship gate (`sandbox:test:scripts`)
 - `specs/shell-custody/`: the `formal:tla` model of shell custody
 - `package.json`, `project.json`
 

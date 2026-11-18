@@ -24,6 +24,8 @@ const hintByCode: Record<string, string> = {
   CONNECTION_ENDED: 'Pooler closed connection — verify Supavisor/PgBouncer state',
   CONNECTION_CLOSED: 'Connection closed before first query — verify provider is not paused',
   CONNECTION_DESTROYED: 'Connection destroyed — verify provider failover / maintenance window',
+  // From 4.1, postgres.js rejects a transaction the server ended with the server's own FATAL, not CONNECTION_CLOSED.
+  '57P01': 'Server terminated the session — verify provider failover / maintenance window',
   '42501': 'Insufficient privilege — GRANT CREATE ON DATABASE … TO <role>',
   '42P06': 'Schema exists, owned by another role — ALTER SCHEMA … OWNER TO <role>',
   ERR_TLS_CERT_ALTNAME_INVALID: 'TLS certificate hostname mismatch — verify DATABASE_URL host or sslmode',

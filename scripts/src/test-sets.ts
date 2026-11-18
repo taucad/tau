@@ -21,6 +21,7 @@ export const browserTests = ['src/canvas-vite.config.test.ts', 'src/reference-ht
  */
 export const workspaceTests = [
   'src/affected-selection.test.ts',
+  'src/api-shard-union.test.ts',
   'src/billing-stripe-lanes.test.ts',
   'src/check-standalone-project.test.ts',
   'src/check-viewer-shell-parity.test.ts',

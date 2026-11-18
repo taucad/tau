@@ -172,6 +172,7 @@ describe('shell split graph', () => {
       'libs/shell-service/src/shell/shell-environment.ts',
       'libs/shell-service/src/shell/shell-git-view.ts',
       'libs/shell-service/src/shell/shell-grant.ts',
+      'libs/shell-service/src/shell/shell-module-cache.ts',
       'libs/shell-service/src/shell/shell-output.ts',
       'libs/shell-service/src/shell/shell-service.ts',
     ]);

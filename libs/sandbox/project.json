@@ -36,6 +36,45 @@
         "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-store-guard.mts --test"
       }
     },
+    "build:windows-sandbox": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/windows-sandbox/src/**/*",
+        "{projectRoot}/windows-sandbox/examples/**/*",
+        "{projectRoot}/windows-sandbox/Cargo.toml",
+        "{projectRoot}/windows-sandbox/Cargo.lock",
+        "{projectRoot}/windows-sandbox/rust-toolchain.toml",
+        "{projectRoot}/windows-sandbox/.cargo/config.toml",
+        "{projectRoot}/scripts/build-windows-sandbox.mts",
+        "{projectRoot}/scripts/rust-payload.mts",
+        "{projectRoot}/scripts/windows-executable.mts"
+      ],
+      "outputs": [
+        "{projectRoot}/windows-sandbox/target/x86_64-pc-windows-msvc/release/tau-windows-sandbox.exe",
+        "{projectRoot}/windows-sandbox/target/x86_64-pc-windows-msvc/release/examples/tau-worker-probe.exe",
+        "{workspaceRoot}/out/windows-sandbox/win32-x64"
+      ],
+      "metadata": {
+        "description": "Build the Windows shell sandbox helper (windows-sandbox/, Rust, static CRT) as tau-windows-sandbox.exe for x86_64-pc-windows-msvc, refuse it unless it is an x64 console executable that imports no Visual C++ runtime DLL and answers `status`, and stage it with its NOTICE and manifest under out/windows-sandbox/win32-x64. It also builds the conformance row's stand-in native worker (examples/tau-worker-probe.exe), which is never staged or installed. Windows x64 only: it links against the MSVC toolchain. Elsewhere use `cargo check --target x86_64-pc-windows-msvc` in the crate."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register libs/sandbox/scripts/build-windows-sandbox.mts"
+      }
+    },
+    "test:windows-sandbox": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/windows-sandbox/**/*", "!{projectRoot}/windows-sandbox/target/**/*"],
+      "metadata": {
+        "description": "The Windows sandbox helper's portable unit tests (frame codec, spec validation, journal format, path checks, CLI). They run on any host; the Win32 code behind cfg(windows) is exercised by the Windows conformance row."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/libs/sandbox/windows-sandbox",
+        "command": "cargo test --locked"
+      }
+    },
     "size": {
       "dependsOn": ["build", "build:store-guard"],
       "inputs": [
@@ -49,8 +88,20 @@
         }
       ]
     },
+    "test:scripts": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/scripts/**/*.mts"],
+      "metadata": {
+        "description": "The staging scripts' own checks, on any host: the Windows helper's ship gate (an x64 console executable importing no Visual C++ runtime DLL) against synthetic PE images."
+      },
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register --test libs/sandbox/scripts/windows-executable.test.mts"
+      }
+    },
     "test": {
-      "dependsOn": ["test:store-guard"]
+      "dependsOn": ["test:store-guard", "test:scripts"]
     },
     "test:shell-conformance": {
       "executor": "nx:run-commands",
@@ -67,13 +118,18 @@
         "{workspaceRoot}/out/test-results/shell-conformance/*/receipt.verdict.json"
       ],
       "metadata": {
-        "description": "The native shell conformance rows (T02, E rows a provider owns): the real sandbox provider and the machine's own Bash, positive controls before negatives, network negatives judged by canaries outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Cacheable only under the shell environment fingerprint (scripts/src/shell-evidence.ts, CF-1): the hash covers the source closure and the row's OS, kernel, Bash, runner image, sandbox runtime and node-pty, and is a fresh nonce unless the run asked for reuse, so candidate, drift and promotion runs never hit. A hit restores the receipt that first proved the verdict and its verdict record; the workflow's uncached stamp step says so."
+        "description": "The native shell conformance rows (T02, E rows a provider owns): the real sandbox provider and the machine's own Bash, positive controls before negatives, network negatives judged by canaries outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Cacheable only under the shell environment fingerprint (scripts/src/shell-evidence.ts, CF-1): the hash covers the source closure and the row's OS, kernel, Bash, runner image, sandbox runtime and node-pty, and is a fresh nonce unless the run asked for reuse, so candidate, drift and promotion runs never hit. A hit restores the receipt that first proved the verdict and its verdict record; the workflow's uncached stamp step says so. On win32 run the `windows` configuration (WIN-X64): the Windows provider and PowerShell rows of shell.conformance.windows.test.ts, in a command cmd.exe parses; it fails, never skips, off Windows or without the helper's elevated setup."
       },
       "options": {
         "cwd": "{workspaceRoot}/libs/sandbox",
         "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell.conformance.test.ts && node \"$NX_WORKSPACE_ROOT/scripts/src/shell-evidence.ts\" record",
         "env": {
           "TAU_SHELL_CONFORMANCE": "1"
+        }
+      },
+      "configurations": {
+        "windows": {
+          "command": "node ../../node_modules/vitest/vitest.mjs run --config vitest.config.ts src/shell/shell.conformance.windows.test.ts && node ../../scripts/src/shell-evidence.ts record"
         }
       }
     },

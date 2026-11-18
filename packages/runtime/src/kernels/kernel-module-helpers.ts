@@ -177,6 +177,9 @@ export function registerKernelModule(
 /** Stands in for a worker's module-registry scope in bundle code that outlives the worker. */
 const portableRegistryScope = 'tau-registry-scope';
 
+/** The start of a registry lookup under one scope, as `createKernelModuleRegistryExpression` prints it; only these are rewritten. */
+const registryLookup = (scope: string): string => `${KERNEL_MODULES_KEY}.get(${JSON.stringify(scope).slice(0, -1)}:`;
+
 /**
  * Bundle code with this worker's module-registry scope replaced by a placeholder, for storing.
  *
@@ -194,7 +197,9 @@ export function portableKernelModuleCode(
   bundler: Pick<KernelServices['bundler'], 'registryScope'>,
 ): string {
   const { registryScope } = bundler;
-  return registryScope === undefined ? code : code.replaceAll(`${registryScope}:`, `${portableRegistryScope}:`);
+  return registryScope === undefined
+    ? code
+    : code.replaceAll(registryLookup(registryScope), registryLookup(portableRegistryScope));
 }
 
 /**
@@ -207,7 +212,9 @@ export function portableKernelModuleCode(
  */
 export function bindKernelModuleCode(code: string, bundler: Pick<KernelServices['bundler'], 'registryScope'>): string {
   const { registryScope } = bundler;
-  return registryScope === undefined ? code : code.replaceAll(`${portableRegistryScope}:`, `${registryScope}:`);
+  return registryScope === undefined
+    ? code
+    : code.replaceAll(registryLookup(portableRegistryScope), registryLookup(registryScope));
 }
 
 /**

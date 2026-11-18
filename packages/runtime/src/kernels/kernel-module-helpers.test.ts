@@ -109,6 +109,28 @@ describe('portable kernel module code', () => {
     );
     expect(bindKernelModuleCode(code, { registryScope: 'worker-a' })).toBe(code);
   });
+
+  it('leaves a user string literal that names the placeholder unchanged across a restore', () => {
+    const bundled = [
+      'const replicad = globalThis.__KERNEL_MODULES__.get("worker-a:replicad");',
+      'export const label = "tau-registry-scope:not-a-module";',
+    ].join('\n');
+    const restored = bindKernelModuleCode(portableKernelModuleCode(bundled, { registryScope: 'worker-a' }), {
+      registryScope: 'worker-b',
+    });
+
+    expect(restored).toContain('export const label = "tau-registry-scope:not-a-module";');
+    expect(restored).toContain('__KERNEL_MODULES__.get("worker-b:replicad")');
+  });
+
+  it('keys two programs that differ only in placeholder text differently', () => {
+    const placeholder = 'export const label = "tau-registry-scope:x";';
+    const scoped = 'export const label = "worker-a:x";';
+
+    expect(portableKernelModuleCode(placeholder, { registryScope: 'worker-a' })).not.toBe(
+      portableKernelModuleCode(scoped, { registryScope: 'worker-a' }),
+    );
+  });
 });
 
 describe('toBuiltinModulePackage', () => {

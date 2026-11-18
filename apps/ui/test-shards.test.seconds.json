@@ -315,8 +315,6 @@
     "app/hooks/draft.machine.test-d.ts": 6.6,
     "app/hooks/draft.machine.test.ts": 6,
     "app/hooks/object-store.worker.test.ts": 0.9,
-    "app/hooks/project-manager.machine.test.ts": 0.3,
-    "app/hooks/project-manager.machine.totality.test.ts": 0.6,
     "app/hooks/rpc-handlers.test-d.ts": 6.6,
     "app/hooks/rpc-handlers.test.ts": 1,
     "app/hooks/run-elsewhere-clock.test.ts": 1.5,

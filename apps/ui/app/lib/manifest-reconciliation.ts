@@ -3,7 +3,10 @@
  *
  * The manifest observation reads `tau.json` and finds the project it holds equal to those bytes, or reloads it. Each
  * equal finding is recorded here as the SHA-256 of the bytes read, and dropped as soon as the project is no longer
- * those bytes' (a reload, an issue, the observation's end). The revision host publishes the SHA-256 of the
+ * those bytes' (a reload, an issue, the observation's end). A finding is also recorded from a project load's own bytes
+ * when the observation starts on the very project that load parsed from them (identity, not equality, and only with no
+ * manifest issue; `createManifestObservationLogic`), so the first view need not wait for the observation's first read
+ * (STO-25 SP6). The revision host publishes the SHA-256 of the
  * `tau.json` a tree write landed with its entry closure (`entryManifest`); a model surface renders from the first view
  * only while the two are the same digest, so it never renders the main entry of a manifest the tree does not hold
  * (I7).

@@ -25,8 +25,15 @@ export type ProjectOpenTimer = Readonly<{
    * A tree read that fetched names the transport that served it; the latest is kept.
    */
   fetchedFromNetwork: (transport?: LfsTransport) => void;
-  /** The project's repository is checked out and its editor and file tree are usable; the first call counts. */
+  /**
+   * The project's first view is on screen; the first call counts. During a Tau Cloud open the page says so when its
+   * route shows the tree, editor and composer; otherwise the applied checkout stands for it. The mark is timed now and
+   * sent once the open's cache is known: at once when a network fetch is already known, otherwise at the next
+   * `fetchedFromNetwork`, `cacheKnown` or `fullyFetched`.
+   */
   firstView: () => void;
+  /** Whether the open fetched from the network is known (its checkout is applied): a first view held for it is sent. */
+  cacheKnown: () => void;
   /** Every large object of the checkout is in the local store; the first call after `firstView` counts. */
   fullyFetched: () => void;
 }>;
@@ -34,12 +41,22 @@ export type ProjectOpenTimer = Readonly<{
 /**
  * Time one hosted project's open, from its revision root opening (STO-25).
  *
- * `first_view` is the repository checked out, so the editor and file tree are
- * usable, and is sent then; `fully_fetched` is every large object local, so
- * the viewer can render, and is sent when the background fill completes.
- * `cache` is cold when any large object of the open came from the network,
- * as far as was known at that mark. A fill that fails, or a root released
- * before its fill completes, sends no `fully_fetched`.
+ * `first_view` is the project's first view on screen, timed then: during a Tau
+ * Cloud open, the moment the page's route shows the file tree, editor and
+ * composer (the page says so); otherwise, or when the page never says, the
+ * applied checkout (the repository checked out, the definition before STO-25
+ * SP6). `fully_fetched` is every large object local, so the viewer can render,
+ * and is sent when the background fill completes. `cache` is cold when any
+ * large object of the open came from the network. During a Tau Cloud open the
+ * first view shows while the apply still writes, before the open can know
+ * whether it fetched, so its mark waits for that word (a fetch, or the applied
+ * checkout) and keeps the time it was shown.
+ *
+ * Opens that send nothing: a fill that fails, or a root released before its
+ * fill completes, sends no `fully_fetched`. An open that fails or is released
+ * after its first view showed but before its cache is known sends no
+ * `first_view` either: the wire's `cache` is `cold` or `warm` only, and an
+ * unknown cache must not be reported as either.
  *
  * @param options - The clock, and where each mark goes.
  * @returns The timer.
@@ -51,34 +68,49 @@ export const createProjectOpenTimer = (
   const now = options.now ?? Date.now;
   const startedAt = now();
   let cold = false;
-  let viewed = false;
+  /* When the first view showed, from the timer's creation; `undefined` until it has. */
+  let viewedAfter: number | undefined;
+  let viewSent = false;
   let fetched = false;
   let transport: LfsTransport | undefined;
-  const mark = (phase: ProjectOpenPhase): void => {
+  const mark = (phase: ProjectOpenPhase, durationMilliseconds: number): void => {
     options.report({
       phase,
       cache: cold ? 'cold' : 'warm',
       ...(cold && transport !== undefined ? { transport } : {}),
-      durationMilliseconds: Math.max(0, now() - startedAt),
+      durationMilliseconds,
     });
+  };
+  /* The held first view goes out once the cache is known, with the time it was shown. */
+  const sendView = (): void => {
+    if (viewedAfter !== undefined && !viewSent) {
+      viewSent = true;
+      mark('first_view', viewedAfter);
+    }
   };
   return Object.freeze({
     fetchedFromNetwork: (served?: LfsTransport) => {
       if (!fetched) {
         cold = true;
         transport = served ?? transport;
+        sendView();
       }
     },
     firstView: () => {
-      if (!viewed) {
-        viewed = true;
-        mark('first_view');
+      if (viewedAfter === undefined) {
+        viewedAfter = Math.max(0, now() - startedAt);
+        if (cold) {
+          sendView();
+        }
       }
     },
+    cacheKnown: sendView,
     fullyFetched: () => {
-      if (viewed && !fetched) {
+      if (viewedAfter !== undefined && !fetched) {
+        /* Every object is local: whatever the open fetched is known. */
+        sendView();
         fetched = true;
-        mark('fully_fetched');
+        mark('fully_fetched', Math.max(0, now() - startedAt));
       }
     },
   });
@@ -99,11 +131,11 @@ export const isHostedCheckoutApplied = (status: Pick<RevisionStatusProjection, '
 /**
  * Mark an open's boundaries from one status its root published.
  *
- * `first_view` is the applied checkout. The large objects are filled after it
- * ("open the UI, model waits"), and the status carries `largeObjects` until
- * the last placeholder is written — published before the checkout reads as
- * applied — so an applied checkout without it is `fully_fetched`. A checkout
- * that opened with objects still to download is a cold open.
+ * The applied checkout is a first view when the page has not said one showed earlier ({@link ProjectOpenTimer}'s
+ * `firstView`), and it is where the cache is known: the large objects are filled after the apply ("open the UI,
+ * model waits"), and the status carries `largeObjects` until the last placeholder is written — published before the
+ * checkout reads as applied — so an applied checkout without it is `fully_fetched`. A checkout that opened with
+ * objects still to download is a cold open.
  *
  * @param timer - The project's open timer.
  * @param status - A status the project's root published.
@@ -120,6 +152,7 @@ export const markProjectOpen = (
     return;
   }
   timer.firstView();
+  timer.cacheKnown();
   if (status.largeObjects === undefined) {
     timer.fullyFetched();
   }

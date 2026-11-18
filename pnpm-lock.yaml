@@ -4119,6 +4119,9 @@ importers:
 
   apps/libs/revisions-ui:
     dependencies:
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.104.2(react@19.3.1)
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../../packages/agent-host
@@ -4147,6 +4150,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
+      vitest-mock-extended:
+        specifier: 'catalog:'
+        version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
 
   apps/libs/settings-ui:
     dependencies:

@@ -552,7 +552,7 @@ vi.mock('#chat-clients/use-project-name-client.js', () => ({
   useProjectNameClient: () => ({ generate: mockGenerateProjectName }),
 }));
 
-vi.mock('#hooks/project-manager.machine.js', async () => {
+vi.mock('@taucad/files-ui/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({

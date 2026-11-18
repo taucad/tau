@@ -10,7 +10,7 @@ import type { RevisionFailureSubject } from '@taucad/ui-core/lib/revision-failur
 import type { BranchOperation } from '@taucad/revisions';
 import type { RevisionToast } from '@taucad/revisions-ui/types/revision-worker-protocol';
 import { useRevisions } from '#hooks/use-revisions.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 import {
   needsDecision,

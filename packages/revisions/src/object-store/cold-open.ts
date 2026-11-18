@@ -12,6 +12,10 @@
  *    walked, each batch while the one before it is kept — and kept in local
  *    packs of at most the repack ceiling, indexed from what was written (no
  *    `indexPack`), each whole entry with the deflated bytes it was read as.
+ *    What is known before any of it is read — the tips, each listing's trees
+ *    (their ids hashed from its entries) and blobs, and their delta bases —
+ *    is read ahead under a byte budget, so those waves wait on no round trip
+ *    of their own.
  * 4. Older history stays on the server: the heads' commits are the store's
  *    shallow boundary, the store reads history through by Range while the
  *    catalogue's links last, and a later fetch brings what is new.
@@ -24,9 +28,11 @@
  */
 
 import type { ComputeWorker } from '#compute-worker/compute-worker.js';
+import { frameObject } from '#git-objects.js';
+import { concatBytes, digestHex, hexToBytes } from '#object-hash.js';
 import type { ObjectSource, ObjectStore } from '#object-store/object-store.js';
 import { openRemotePack } from '#object-store/remote-pack.js';
-import type { RemotePack, RemotePackCounters } from '#object-store/remote-pack.js';
+import type { ReadAhead, RemotePack, RemotePackCounters } from '#object-store/remote-pack.js';
 import { readTreeEntries } from '#object-store/tree-codec.js';
 import type { CopiedObject, StoredObject } from '#pack-reader/pack-reader.js';
 
@@ -148,6 +154,12 @@ export type ColdOpenOptions = Readonly<{
   batchBytes?: number;
   /** Objects read per wave, whatever their size; 2048 by default. */
   batchObjects?: number;
+  /**
+   * Stored bytes read ahead of the walk: the tips, each listing's trees and
+   * blobs, and their delta bases, held until the open ends; 32 MiB by
+   * default, 0 for none.
+   */
+  readAheadBytes?: number;
   signal?: AbortSignal;
 }>;
 
@@ -188,6 +200,69 @@ const sourceOver = (
   });
 
 const textDecoder = new TextDecoder();
+const textEncoder = new TextEncoder();
+
+/* A directory of a listing: its files' entries and its subdirectories. */
+type ListedDirectory = {
+  files: Array<Readonly<{ name: string; mode: string; oid: string }>>;
+  dirs: Map<string, ListedDirectory>;
+};
+
+/* Git's entry order: byte-wise by name, a directory sorting as `name/`. */
+const byGitOrder = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): number => {
+  for (let at = 0; at < Math.min(left.length, right.length); at += 1) {
+    if (left[at] !== right[at]) {
+      return left[at]! - right[at]!;
+    }
+  }
+  return left.length - right.length;
+};
+
+/*
+ * The ids of a listing's trees, hashed from its entries as git writes them,
+ * shallowest first: what the walk will ask for, known before any tree is
+ * read. A listing whose modes are not spelled as stored names ids no pack
+ * holds; those are read as the walk reaches them, and every tree read is still
+ * checked against its id.
+ */
+const listedTrees = (listing: HeadListing): string[] => {
+  const root: ListedDirectory = { files: [], dirs: new Map() };
+  for (const entry of listing.entries) {
+    const segments = entry.path.split('/');
+    let directory = root;
+    for (const segment of segments.slice(0, -1)) {
+      let child = directory.dirs.get(segment);
+      if (child === undefined) {
+        child = { files: [], dirs: new Map() };
+        directory.dirs.set(segment, child);
+      }
+      directory = child;
+    }
+    directory.files.push({ name: segments.at(-1)!, mode: entry.mode, oid: entry.oid });
+  }
+  const levels: string[][] = [];
+  const hash = (directory: ListedDirectory, depth: number): string => {
+    const entries = [
+      ...directory.files.map((file) => ({ ...file, key: textEncoder.encode(file.name) })),
+      ...[...directory.dirs].map(([name, child]) => ({
+        name,
+        mode: '40000',
+        oid: hash(child, depth + 1),
+        key: textEncoder.encode(`${name}/`),
+      })),
+    ].sort((left, right) => byGitOrder(left.key, right.key));
+    const body = concatBytes(
+      ...entries.map((entry) =>
+        concatBytes(textEncoder.encode(`${entry.mode} ${entry.name}\0`), hexToBytes(entry.oid)),
+      ),
+    );
+    const oid = digestHex('sha1', frameObject('tree', body));
+    (levels[depth] ??= []).push(oid);
+    return oid;
+  };
+  hash(root, 0);
+  return levels.flat();
+};
 
 /* The tree under a commit's body. */
 const treeOf = (commit: StoredObject): string | undefined =>
@@ -262,6 +337,8 @@ type Importer = Readonly<{
   /* A whole entry's deflated body is kept as it is: it inflated to the checked object. */
   keep: (objects: ReadonlyMap<string, CopiedObject>) => Promise<void>;
   sizeOf: (oid: string) => number;
+  /* Fetch `oids` and their bases ahead of the reads that want them, in order while the budget lasts. */
+  readAhead: (oids: readonly string[]) => ReadAhead;
   limits: Readonly<{ batchBytes: number; batchObjects: number }>;
   stage: Stage;
   /* Set once either side of an import running side by side fails: the other reads and keeps nothing more. */
@@ -509,20 +586,13 @@ const importTrees = async (
   await bothSettled(importer, walkTrees, keepListed);
 };
 
-/*
- * The tips (each ref's object and the commit a tag peels to), read and
- * staged; then the trees of every tip commit — a branch's and the one a tag
- * peels to alike — and every tip tree; then the blobs: the listings' where
- * every walked commit has one, else the trees' as well. The tips are kept
- * last, after everything they name. Answers the commits brought without their
- * history.
- */
-const importHeads = async (
-  references: Catalogue['refs'],
+/* {@link importHeads} once its read-ahead is asked for. */
+const importHeadsAhead = async (
   listings: readonly HeadListing[],
   importer: Importer,
+  known: Readonly<{ tips: readonly string[]; listed: readonly string[] }>,
 ): Promise<string[]> => {
-  const tips = references.flatMap((entry) => [entry.oid, ...(entry.peeled === undefined ? [] : [entry.peeled])]);
+  const { tips } = known;
   const tipObjects = new Map<string, StoredObject>();
   await readBatches([...new Set(tips)], importer, async (objects) => {
     for (const [oid, object] of objects) {
@@ -543,16 +613,50 @@ const importHeads = async (
    */
   const walked = [...tipObjects].filter(([, object]) => object.type === 'commit').map(([oid]) => oid);
   const tipTrees = [...tipObjects].filter(([, object]) => object.type === 'tree').map(([oid]) => oid);
-  const listed = new Set(listings.map((listing) => listing.commit));
+  const listedCommits = new Set(listings.map((listing) => listing.commit));
   const roots = [...walked.flatMap((commit) => treeOf(tipObjects.get(commit)!) ?? []), ...tipTrees];
   await importTrees(roots, importer, {
-    walked: tipTrees.length > 0 || walked.some((commit) => !listed.has(commit)),
-    listed: listings.flatMap((listing) =>
-      listing.entries.filter((entry) => entry.size !== undefined).map((entry) => entry.oid),
-    ),
+    walked: tipTrees.length > 0 || walked.some((commit) => !listedCommits.has(commit)),
+    listed: known.listed,
   });
   await keepStaged(importer);
   return walked;
+};
+
+/*
+ * The tips (each ref's object and the commit a tag peels to), read and
+ * staged; then the trees of every tip commit — a branch's and the one a tag
+ * peels to alike — and every tip tree; then the blobs: the listings' where
+ * every walked commit has one, else the trees' as well. The tips are kept
+ * last, after everything they name. Answers the commits brought without their
+ * history.
+ */
+const importHeads = async (
+  references: Catalogue['refs'],
+  listings: readonly HeadListing[],
+  importer: Importer,
+): Promise<string[]> => {
+  const tips = references.flatMap((entry) => [entry.oid, ...(entry.peeled === undefined ? [] : [entry.peeled])]);
+  const listed = listings.flatMap((listing) =>
+    listing.entries.filter((entry) => entry.size !== undefined).map((entry) => entry.oid),
+  );
+  /*
+   * Everything named before anything is read — the tips, each listing's trees and its blobs — is asked for in one
+   * wave, so the tips, the walk's levels and the blob batches find their bytes held or landing.
+   */
+  const ahead = importer.readAhead(
+    await unheld(importer.store, [
+      ...tips,
+      ...listings.flatMap((listing) => [listing.tree, ...listedTrees(listing)]),
+      ...listed,
+    ]),
+  );
+  try {
+    return await importHeadsAhead(listings, importer, { tips, listed });
+  } finally {
+    /* Nothing it started runs on after the import, and nothing it held is kept past it. */
+    await ahead.release();
+  }
 };
 
 /* A catalogue opened: its refs in the asked-for families, its packs by Range and its listings. */
@@ -670,6 +774,23 @@ const importerOver = (
     },
     /* The listing's size where it names one, else the stored entry's (a delta's own, not its target's). */
     sizeOf: (oid) => listedSizes.get(oid) ?? Math.max(0, ...packs.map((pack) => pack.entryBytes(oid) ?? 0)),
+    readAhead: (oids) => {
+      /* Each id from the first pack that holds it, as a read takes it; one budget for every pack. */
+      const budget = { bytes: options.readAheadBytes ?? 32 * 1024 * 1024 };
+      const byPack = packs.map((): string[] => []);
+      for (const oid of oids) {
+        const at = packs.findIndex((pack) => pack.entryBytes(oid) !== undefined);
+        byPack[at]?.push(oid);
+      }
+      const reads = packs.flatMap((pack, at) =>
+        byPack[at]!.length === 0 ? [] : [pack.readAhead(byPack[at]!, budget)],
+      );
+      return {
+        release: async () => {
+          await Promise.all(reads.map(async (read) => read.release()));
+        },
+      };
+    },
     limits: { batchBytes: options.batchBytes ?? 16 * 1024 * 1024, batchObjects: options.batchObjects ?? 2048 },
     stage: { entries: new Map(), held: { objects: 0, bytes: 0 }, peak: { objects: 0, bytes: 0 } },
     halt: { stopped: false },

@@ -188,6 +188,93 @@ describe('openRemotePack', () => {
     expect(reads).toBe(32);
   });
 
+  it('serves a call from what a read-ahead holds or is landing, and asks again once it is released', async () => {
+    const objects = blobs(20);
+    const built = await buildPack(objects, inline);
+    let reads = 0;
+    const pack = await openRemotePack({
+      name: `pack-${built.checksum}`,
+      size: built.pack.byteLength,
+      index: await indexBuiltPack(built, inline),
+      compute: inline,
+      fetchRange: async (offset, length) => {
+        reads += 1;
+        await new Promise((resolve) => {
+          setTimeout(resolve, 2);
+        });
+        return built.pack.slice(offset, offset + length);
+      },
+    });
+    const budget = { bytes: built.pack.byteLength };
+    const ahead = pack.readAhead(
+      objects.map((object) => object.oid),
+      budget,
+    );
+    /* Asked while the read-ahead is still landing: it waits for it rather than ask again. */
+    const read = await pack.readMany(objects.map((object) => object.oid));
+    expect([...read.values()].map((object) => object.data)).toStrictEqual(objects.map((object) => object.data));
+    /* The entries in one run, and the trailer beside them. */
+    expect(reads).toBe(2);
+    expect(pack.counters.waves).toBe(1);
+    await ahead.release();
+    await pack.readMany([objects[3]!.oid]);
+    expect(reads).toBe(3);
+  });
+
+  it('spends its budget in the order asked, and stops at the first entry past it', async () => {
+    const objects = blobs(10);
+    const built = await buildPack(objects, inline);
+    const asked: Array<readonly [number, number]> = [];
+    const pack = await openRemotePack({
+      name: `pack-${built.checksum}`,
+      size: built.pack.byteLength,
+      index: await indexBuiltPack(built, inline),
+      compute: inline,
+      fetchRange: async (offset, length) => {
+        asked.push([offset, offset + length]);
+        return built.pack.slice(offset, offset + length);
+      },
+    });
+    const sorted = built.entries.toSorted((left, right) => left.offset - right.offset);
+    const firstTwo = pack.entryBytes(sorted[0]!.oid)! + pack.entryBytes(sorted[1]!.oid)!;
+    const budget = { bytes: firstTwo + 1 };
+    const ahead = pack.readAhead(
+      sorted.map((entry) => entry.oid),
+      budget,
+    );
+    await ahead.release();
+    expect(budget.bytes).toBe(1);
+    const trailerAt = built.pack.byteLength - 20;
+    expect(asked.filter(([start]) => start < trailerAt)).toEqual([[sorted[0]!.offset, sorted[0]!.offset + firstTwo]]);
+  });
+
+  it('fails only the call waiting on a read-ahead that failed, and the next call asks again', async () => {
+    const objects = blobs(4);
+    const built = await buildPack(objects, inline);
+    let failing = true;
+    const pack = await openRemotePack({
+      name: `pack-${built.checksum}`,
+      size: built.pack.byteLength,
+      index: await indexBuiltPack(built, inline),
+      compute: inline,
+      fetchRange: async (offset, length) => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 2);
+        });
+        if (failing) {
+          throw new Error('The connection was reset.');
+        }
+        return built.pack.slice(offset, offset + length);
+      },
+    });
+    const ahead = pack.readAhead([objects[0]!.oid], { bytes: built.pack.byteLength });
+    await expect(pack.readMany([objects[0]!.oid])).rejects.toThrow('reset');
+    await ahead.release();
+    failing = false;
+    const read = await pack.readMany([objects[0]!.oid]);
+    expect(read.get(objects[0]!.oid)?.data).toStrictEqual(objects[0]!.data);
+  });
+
   it("refuses an object whose bytes are another object's", async () => {
     const objects = blobs(2);
     const built = await buildPack(objects, inline);

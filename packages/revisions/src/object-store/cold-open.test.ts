@@ -460,6 +460,46 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     expect(written.some((index) => index.offsetOf(hosted.main) !== undefined)).toBe(true);
   });
 
+  it('keeps a tree, commit or tag it read whole as the bytes it read, deflating only what it resolved from a delta', async () => {
+    // The trees and tips waited in the stage by their bodies alone and were deflated again when kept: the last step
+    // of the open, after every blob (SP6-import).
+    const compute = countingCompute();
+    let deflated = 0;
+    const counting: ComputeWorker = {
+      ...compute,
+      deflate: async (raw) => {
+        deflated += 1;
+        return compute.deflate(raw);
+      },
+    };
+    const store = await emptyStore(counting, 'kept-as-read');
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: serve(hosted).fetch, store, compute: counting });
+    expect(opened).toBeDefined();
+    const packDirectory = join(hosted.directory, '.git', 'objects', 'pack');
+    const packFiles = await readdir(packDirectory);
+    const indexFile = packFiles.find((name) => name.endsWith('.idx'))!;
+    /* `verify-pack -v` gives a delta's line a depth and a base: seven fields. */
+    const deltas = new Set(
+      lines(hosted.git('verify-pack', '-v', join(packDirectory, indexFile)))
+        .map((line) => line.split(/\s+/u))
+        .filter((fields) => fields.length === 7)
+        .map((fields) => fields[0]!),
+    );
+    const closure = new Set([
+      hosted.main,
+      hosted.tag,
+      hosted.tagged,
+      ...lines(hosted.git('rev-list', '--objects', '--no-walk', hosted.main, hosted.tagged)).map(
+        (line) => line.split(' ')[0]!,
+      ),
+      ...lines(hosted.git('ls-tree', '-r', '-t', hosted.main)).map((line) => line.split(/\s+/u)[2]!),
+      ...lines(hosted.git('ls-tree', '-r', '-t', hosted.tagged)).map((line) => line.split(/\s+/u)[2]!),
+      hosted.git('rev-parse', `${hosted.main}^{tree}`),
+      hosted.git('rev-parse', `${hosted.tagged}^{tree}`),
+    ]);
+    expect(deflated).toBe([...closure].filter((oid) => deltas.has(oid)).length);
+  });
+
   it('asks every pack Range past the HTTP cache, so parallel ranges of one pack are not serialised', async () => {
     // Chrome's HTTP cache holds one cache entry lock per URL, so parallel Range reads of one pack link waited on
     // each other: 10 in parallel took 2,057 ms against 230 ms uncached (speed phase SP0).

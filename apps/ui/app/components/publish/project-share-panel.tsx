@@ -314,7 +314,7 @@ const getSnapshotCopy = (state: 'unpublished' | 'published-current' | 'published
   }
 
   if (state === 'published-current') {
-    return 'This link is up to date. People who open it see your latest changes.';
+    return 'People who open the link see the published version.';
   }
 
   return 'Publish a version of this project to Tau Cloud and get a link to it.';
@@ -677,6 +677,8 @@ type TauShareOptions = {
   readonly entryPath: string;
   readonly isActive: boolean;
   readonly signIn: string;
+  /** Whether the pane also offers a direct link, which needs no account. */
+  readonly offersDirectLink: boolean;
 };
 
 /**
@@ -689,7 +691,16 @@ type TauShareOptions = {
  * @returns What the pane draws for the method.
  */
 function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
-  const { projectId, projectName, projectDescription, projectUpdatedAt, entryPath, isActive, signIn } = options;
+  const {
+    projectId,
+    projectName,
+    projectDescription,
+    projectUpdatedAt,
+    entryPath,
+    isActive,
+    signIn,
+    offersDirectLink,
+  } = options;
   /*
    * Publishing is the project's own `publish.machine`, invoked by the revision
    * root in the file-manager worker (A38, S32). This panel holds no actor: it
@@ -934,7 +945,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
               )}
             >
               {signInRequired
-                ? 'Tau Cloud links are saved to your Tau account. No account? Use a direct link instead.'
+                ? `Tau Cloud links are saved to your Tau account.${offersDirectLink ? ' No account? Use a direct link instead.' : ''}`
                 : 'Check your connection, then try again.'}
             </div>
             <div className='flex justify-end'>
@@ -1211,6 +1222,7 @@ export function useProjectShareSource(properties: Omit<ProjectSharePanelProps, '
     entryPath,
     isActive: shareMethod === 'tau',
     signIn,
+    offersDirectLink: Boolean(collectSnapshot),
   });
 
   return useMemo((): ShareSource => {

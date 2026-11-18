@@ -62,11 +62,14 @@ export function PublicationAccessPanel({
     try {
       await Promise.all(
         pendingEmails.map(async (email) => {
+          // A network failure is named by its address too, never by the transport's message.
           const response = await fetch(endpoint, {
             method: 'POST',
             credentials: 'include',
             headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
             body: JSON.stringify({ email }),
+          }).catch(() => {
+            throw new Error(email);
           });
 
           // The failure ends at the toast below and is never reported, so no request id is recorded on it.
@@ -77,7 +80,7 @@ export function PublicationAccessPanel({
       );
       setPendingEmails([]);
       await onGrantsChanged();
-      toast.success('Invite sent');
+      toast.success('Invited. They can now open the link.');
     } catch (error) {
       const failedEmail = error instanceof Error ? error.message : 'a person';
       toast.error(`Couldn't invite ${failedEmail}. Try again.`);
@@ -101,9 +104,8 @@ export function PublicationAccessPanel({
 
       await onGrantsChanged();
       toast.success('Access removed');
-    } catch (error) {
-      const failedEmail = error instanceof Error ? error.message : 'that person';
-      toast.error(`Couldn't remove access for ${failedEmail}. Try again.`);
+    } catch {
+      toast.error(`Couldn't remove access for ${grant.recipientEmail}. Try again.`);
     } finally {
       setMutating(false);
     }

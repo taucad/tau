@@ -670,6 +670,8 @@ describe('ProjectSharePanel', () => {
 
     expect(await screen.findByText('Sign in to create a Tau Cloud link.')).toBeInTheDocument();
     expect(screen.getByText(/saved to your tau account/i)).toBeInTheDocument();
+    // Without a snapshot collector the pane offers no direct link, so it does not suggest one.
+    expect(screen.queryByText(/use a direct link/i)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
       '/auth/sign-in?redirectTo=%2F%3Fworkbench%3Dshare%26shareProvider%3Dtau',

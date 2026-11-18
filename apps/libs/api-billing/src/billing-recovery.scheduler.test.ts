@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BillingRecoveryScheduler } from '#billing-recovery.scheduler.js';
+import { BillingRecoveryScheduler, recoveryBatchDeadlineMilliseconds } from '#billing-recovery.scheduler.js';
 import type { BillingRecoveryMetrics } from '#billing-recovery.scheduler.js';
 import type { CreditLedgerService } from '#credit-ledger.service.js';
 import type { LlmRecoveryResult } from '#credit-ledger.types.js';
@@ -28,11 +28,13 @@ const fakeMetrics = () => {
 const scheduler = (
   recoverDueLlmOperations: CreditLedgerService['recoverDueLlmOperations'],
   metrics = fakeMetrics(),
+  batchDeadlineMilliseconds?: number,
 ): BillingRecoveryScheduler =>
   new BillingRecoveryScheduler({ recoverDueLlmOperations }, metrics as unknown as BillingRecoveryMetrics, {
     environment: 'prod-eu',
     intervalMilliseconds: 1,
     limit: 100,
+    ...(batchDeadlineMilliseconds === undefined ? {} : { batchDeadlineMilliseconds }),
   });
 
 describe('BillingRecoveryScheduler', () => {
@@ -142,6 +144,58 @@ describe('BillingRecoveryScheduler', () => {
         },
       ],
     ]);
+  });
+
+  it('should report a batch that never settles as a failed batch and still drain the other pool', async () => {
+    const metrics = fakeMetrics();
+    const recover = vi
+      .fn<CreditLedgerService['recoverDueLlmOperations']>()
+      .mockReturnValueOnce(
+        new Promise(() => {
+          /* A wedged driver: the batch never settles. */
+        }),
+      )
+      .mockResolvedValue({ ...idle, claimed: 1, resolved: 1 });
+
+    const pass = await scheduler(recover, metrics, 10).runOnce();
+
+    expect(recover).toHaveBeenCalledTimes(2);
+    expect(pass).toMatchObject({ failed: 1, fullBatch: false });
+    expect(pass.batches[0]).toMatchObject({
+      pool: 'primary',
+      outcome: 'failed',
+      failureKind: 'RecoveryBatchDeadlineError',
+      failureMessage: 'Recovery batch did not settle within 10 ms',
+    });
+    expect(pass.batches[1]).toMatchObject({ pool: 'helper', claimed: 1, resolved: 1, failed: 0 });
+    expect(metrics.billingWorkerPasses.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.worker': 'recovery',
+      outcome: 'error',
+    });
+  });
+
+  it('should drop the late failure of a batch that outlived its deadline', async () => {
+    let failLate: (error: Error) => void = () => undefined;
+    const late = new Promise<never>((_resolve, reject) => {
+      failLate = reject;
+    });
+    const recover = vi
+      .fn<CreditLedgerService['recoverDueLlmOperations']>()
+      .mockReturnValueOnce(late)
+      .mockResolvedValue(idle);
+    const pass = await scheduler(recover, fakeMetrics(), 10).runOnce();
+
+    failLate(new Error('Controlled late connection loss'));
+    // An unhandled rejection here fails the run.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+
+    expect(pass.batches[0]).toMatchObject({ outcome: 'failed', failureKind: 'RecoveryBatchDeadlineError' });
+  });
+
+  it('should default the batch deadline under the one-minute claim lease', () => {
+    expect(recoveryBatchDeadlineMilliseconds).toBe(30_000);
   });
 
   it('should keep polling after a failed pass until it is destroyed', async () => {

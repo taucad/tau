@@ -156,6 +156,8 @@
 \* unchanged, so no action or verdict changes.
 \* DC-10 files-ui slice 5 (2026-11-17): `project-route-intent.tsx` takes `project-url.utils` from `@taucad/files-ui`;
 \* only the import moved. No action or verdict changes.
+\* DC-10 revisions-ui slice 2 (2026-11-18): `project-live-sessions.tsx` takes the `RevisionCommands` type from
+\* `@taucad/revisions-ui`; only the import moved. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

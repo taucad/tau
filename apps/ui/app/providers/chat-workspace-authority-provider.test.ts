@@ -23,7 +23,7 @@ import {
   waitForRootedBridgeOpener,
 } from '#providers/chat-workspace-authority-provider.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
-import type { WorkerRevisionCommand, WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
+import type { WorkerRevisionCommand, WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
 const hookState = vi.hoisted(() => ({
   projectId: 'project_test',

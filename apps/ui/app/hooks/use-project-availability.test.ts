@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
-import type { RevisionClient } from '#types/revision-client.types.js';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 import {
   chatsOpen,
   filePaneAvailability,

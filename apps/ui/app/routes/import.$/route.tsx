@@ -14,7 +14,7 @@ import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
 import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
 import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
-import { importDiskMachine } from '#machines/import-disk.machine.js';
+import { importDiskMachine } from '@taucad/publish-ui/machines/import-disk.machine';
 import { ImportChannelError, createFromStagedImport, openImportSession } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
 import type { ImportSession } from '@taucad/ui-core/machines/import-staging';
@@ -75,7 +75,6 @@ import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {
   title: 'Import',
-  enableOverflowY: true,
 };
 
 const readSplatPath = (params: Record<string, string | undefined>): string => params['*'] ?? '';
@@ -324,7 +323,7 @@ export default function ImportRoute(): React.JSX.Element {
       routeActiveRef.current = false;
     };
   }, [holdHostGrants]);
-  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ includeDeleted: true });
+  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ scope: 'all' });
   const presentLocationError = useProjectCreationLocationError();
   const [linkedSelection, setLinkedSelection] = useState<GithubRepositorySelection>();
   const [linkedMainFile, setLinkedMainFile] = useState('');
@@ -520,6 +519,7 @@ export default function ImportRoute(): React.JSX.Element {
           const session = await importSession();
           return session.plan(source, signal === undefined ? undefined : { signal });
         },
+        pickMainFile: findMainFile,
       },
       inspect,
     },

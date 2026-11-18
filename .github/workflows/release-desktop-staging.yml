@@ -254,10 +254,26 @@ jobs:
     secrets:
       NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
+  # T-REH.2 (desktop resilient startup blueprint, I2): the operator rehearsal with its profile produced by the newest
+  # published staging release's unpackaged build and opened by this candidate, on the candidate's own commit before its
+  # tag exists, after the shell gate and beside the packaged suite (an Ubuntu runner, so it adds no macOS time). A red
+  # rehearsal means no candidate this time, as a red packaged suite does.
+  rehearsal:
+    name: Rehearsal gate
+    needs: [prerelease, shell]
+    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/desktop-rehearsal-gate.yml
+    with:
+      ref: ${{ needs.prerelease.outputs.sha }}
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
+
   tag:
     name: Tag the staging desktop candidate
-    needs: [prerelease, shell, packaged, benchmarks]
-    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success'
+    needs: [prerelease, shell, packaged, benchmarks, rehearsal]
+    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success' && needs.rehearsal.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -309,6 +325,7 @@ jobs:
 
           Shell conformance gate: run ${RUN_ID}
           Packaged desktop gate: run ${RUN_ID}
+          Rehearsal gate (T-REH.2): run ${RUN_ID}
           NOTES
           sed -i 's/^          //' "$RUNNER_TEMP/notes.md"
           # A draft, because a published release is immutable (go-live DEL-20):

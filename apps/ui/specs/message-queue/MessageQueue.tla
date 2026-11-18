@@ -141,6 +141,9 @@
 \* WP5 (composer image formats): the store and the composer draft provide the image step from the app's
 \* attachment image actor, and a queued image carries its declared type for the intake counter only; admission,
 \* delivery, persistence and the queue barrier are unchanged.
+\* Composer drop zone and converting slot: the chat pane and Home hero forward dropped files to the composer's
+\* existing drop handler, and the draft lists images still being converted as placeholder slots. Draft, admission,
+\* delivery, persistence and the queue barrier are unchanged. No action or verdict changes.
 \* SP2g (change-event netting): the store's watch of a chat's foreign segment directory also refolds on a
 \* summary of that directory or any ancestor (the project root included), as the coalescer now delivers scoped
 \* `directoryChanged` resets; a refold only re-reads segments, so admission, delivery, persistence and the queue
@@ -151,6 +154,13 @@
 \* account may not continue it (re-read on an account switch), and with the stop's reason on Stop or the turn
 \* host's unmount, which is checked again after the catalog wait. The composer disables
 \* send meanwhile. Admission still decides once, so delivery order, persistence and the queue barrier are unchanged.
+\* A15d (early input, on PL6's hand-off): while the chat's record is unread (read through a selector, never a
+\* snapshot in the component), the composer takes a painted draft through `hydrateDraft`, which skips a touched draft.
+\* PL6's queued submit is shown until it is sent or cancelled, and Escape cancels it as an edit does. An Enter queued on
+\* a painted draft nobody edited waits for the composer's record (the chat's, or Home's own) and is replayed only when
+\* the record holds that text and nothing more;
+\* otherwise it is cancelled and never sent. A send still enters the queue only through the composer's submit, so
+\* admission, delivery, persistence and the queue barrier are unchanged, and no action or verdict changes.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

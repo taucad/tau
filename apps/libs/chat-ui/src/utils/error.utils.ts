@@ -2,6 +2,7 @@ import { errorCategory, errorCategories } from '@taucad/types/constants';
 import type { ErrorCategory, ChatError } from '@taucad/types';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import { isRecord } from '@taucad/utils/schema';
+import { pageHeadlineOf } from '#utils/chat-error-card.js';
 
 type DecodedProviderError = {
   readonly httpStatus?: number;
@@ -87,6 +88,27 @@ function tryParseChatError(message: string): ChatError | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * A failed run named in the page's own words, for a surface that has one line for it, such as the sidebar row and the
+ * screen-reader sentence it describes the row with. A coded refusal is a card, not prose: its message is the gateway's
+ * or the host's sentence, which the page never repeats (IS3), so the line says the card's own title, or the category's
+ * title when that names more than "Error". An uncoded failure is the page's or the host's plain text and reads as is.
+ *
+ * @param text - The failure as the run's terminal row or the chat's machine recorded it.
+ * @returns The line, or `undefined` when only "the run failed" can be said.
+ * @public
+ */
+export function chatFailureSentence(text: string | undefined): string | undefined {
+  if (text === undefined || text.trim() === '') {
+    return undefined;
+  }
+  const coded = tryParseChatError(text);
+  if (coded === undefined) {
+    return text;
+  }
+  return pageHeadlineOf(coded.code) ?? (coded.category === errorCategory.generic ? undefined : coded.title);
 }
 
 function tryDecodeProviderError(message: string): DecodedProviderError | undefined {

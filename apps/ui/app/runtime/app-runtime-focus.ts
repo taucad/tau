@@ -16,7 +16,8 @@
  * - `flush`: runs the leave flush of the session being left: it asks the session (`flushAsked`, A7c), whose `project`
  *   child writes what its runtime owes with nothing mounted, and answers with the session's `flushSettled` under the same
  *   id. A session that leaves the live set first ran its own close flush, which covers the leave.
- * - `module`: loads the session module (`loadProjectWorkspace`) and answers `moduleLoaded`.
+ * - `module`: loads the session module (`openProjectWorkspace`, which warms the layout beside it) and answers
+ *   `moduleLoaded`.
  * - `route`: hands focus's `chatShown` and `cloudOpenTaken` to the route boundary (`project-route-intent.tsx`), the
  *   only sink of `navigate` (D15 named boundary 1).
  *
@@ -102,7 +103,7 @@ export type FocusComposition = Readonly<{
 /** What the focus composition takes. @public */
 export type FocusCompositionOptions = Readonly<{
   library: FocusLibrarySource;
-  /** The session module's import (`loadProjectWorkspace`). */
+  /** The session module's import (`openProjectWorkspace`). */
   loadModule: () => Promise<unknown>;
 }>;
 

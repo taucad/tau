@@ -4,23 +4,9 @@ import * as target from '#support/external-target.js';
 
 type Point = readonly [number, number, number];
 type ProjectedPoint = { x: number; y: number; visible: boolean };
-type RenderFrame = { anchorFrameId: string; originMeters: Point; metersPerRenderUnit: number };
 type SectionCut =
   | { id: string; kind: 'plane'; plane: 'xy' | 'xz' | 'yz'; offset: number; isFlipped: boolean }
   | { id: string; kind: 'revolution'; axis: 'x' | 'y' | 'z'; start: number; sweep: number };
-
-type SectionViewBridgeWindow = Window & {
-  __TAU_SECTION_VIEW_TEST__?: {
-    setSectionCuts(cuts: ReadonlyArray<{ kind: 'plane'; plane: 'xy' | 'xz' | 'yz' }>): string[];
-    selectSectionCut(id: string | undefined): void;
-    getSectionState(): { cuts: SectionCut[] };
-    projectSectionHandle(kind: 'plane', cutId: string): ProjectedPoint | undefined;
-    setCamera(camera: { position: Point; target?: Point; fov?: number; zoom?: number }): void;
-    getRenderFrame(): RenderFrame;
-    setRenderFrame(renderFrame: RenderFrame): void;
-    projectWorldPoint(point: Point): ProjectedPoint;
-  };
-};
 
 type SampleBox = Readonly<{ left: number; top: number; right: number; bottom: number }>;
 /**
@@ -64,10 +50,8 @@ async function waitForTwoAnimationFrames(): Promise<void> {
   );
 }
 
-async function readCuts(): Promise<SectionCut[]> {
-  return target.evaluate(
-    () => (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getSectionState().cuts,
-  );
+async function readCuts(): Promise<readonly SectionCut[]> {
+  return target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__!.getSectionState().cuts);
 }
 
 async function readPlaneOffset(cutId: string): Promise<number | undefined> {
@@ -77,11 +61,7 @@ async function readPlaneOffset(cutId: string): Promise<number | undefined> {
 }
 
 async function projectArrow(cutId: string): Promise<ProjectedPoint | undefined> {
-  return target.evaluate(
-    (id) =>
-      (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.projectSectionHandle('plane', id),
-    cutId,
-  );
+  return target.evaluate((id) => globalThis.__TAU_SECTION_VIEW_TEST__!.projectSectionHandle('plane', id), cutId);
 }
 
 /** Cuts on `plane` through the bounds centre and selects the cut, so its push-pull arrow is drawn. */
@@ -91,7 +71,7 @@ async function selectPlaneCut(
 ): Promise<string> {
   const cutId = await target.evaluate(
     ({ nextPlane, nextCamera }) => {
-      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
       if (!bridge) {
         throw new Error('Section view e2e bridge is not installed.');
       }
@@ -126,7 +106,7 @@ async function readArrow(
   const ahead = fixtureCenter.map((value, index) => (index === axisIndex ? offset : value) + normal[index]! * 0.01);
   const handle = await projectArrow(cutId);
   const axisPoint = await target.evaluate(
-    (point) => (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.projectWorldPoint(point),
+    (point) => globalThis.__TAU_SECTION_VIEW_TEST__!.projectWorldPoint(point),
     ahead as unknown as Point,
   );
   if (!handle?.visible) {
@@ -307,7 +287,7 @@ describe('Section view controls', () => {
 
       await target.evaluate(
         (origin) => {
-          const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+          const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
           const frame = bridge.getRenderFrame();
           bridge.setRenderFrame({
             anchorFrameId: frame.anchorFrameId,
@@ -388,7 +368,7 @@ describe('Section view controls', () => {
       await openSectionControlFixture(backend);
       // Straight down: the XY tile faces the camera in the middle of the picker, and the others stand edge on.
       await target.evaluate(() => {
-        const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+        const bridge = globalThis.__TAU_SECTION_VIEW_TEST__!;
         bridge.setCamera({ position: [0, 0, 0.2], target: [0, 0, 0.025], fov: 38, zoom: 1 });
         bridge.setSectionCuts([{ kind: 'plane', plane: 'yz' }]);
       });

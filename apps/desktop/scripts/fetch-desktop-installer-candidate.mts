@@ -64,12 +64,12 @@ export const admitInstallerCandidate = (options: {
     })
     .parse(api(`actions/runs/${runId}/artifacts?per_page=100`));
   const scope = z.enum(['all', 'linux', 'macos', 'windows']).parse(options.scope);
-  // Windows consumer acceptance uses the existing all-platform candidate producer.
+  // Each platform scope admits only its own platform candidate (D-H5).
   const name = {
     all: 'desktop-installer-candidate',
     linux: 'desktop-linux-installer-candidate',
     macos: 'desktop-macos-installer-candidate',
-    windows: 'desktop-installer-candidate',
+    windows: 'desktop-windows-installer-candidate',
   }[scope];
   const matches = list.artifacts.filter((entry) => entry.name === name);
   const artifact = matches[0];

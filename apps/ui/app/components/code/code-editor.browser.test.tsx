@@ -1,10 +1,10 @@
-import { editorSyntaxFixtures } from '#lib/editor-syntax.fixtures.js';
+import { editorSyntaxFixtures } from '@taucad/editor-ui/lib/editor-syntax.fixtures';
 import { StateEffect } from '@codemirror/state';
 import { showTooltip } from '@codemirror/view';
 import { openLintPanel, setDiagnostics } from '@codemirror/lint';
 import { gotoLine, openSearchPanel } from '@codemirror/search';
-import { definitionProvider } from '#components/code/editor-definition.js';
-import { renderTypeScriptDocumentation } from '#components/code/editor-documentation.js';
+import { definitionProvider } from '@taucad/editor-ui/components/code/editor-definition';
+import { renderTypeScriptDocumentation } from '@taucad/editor-ui/components/code/editor-documentation';
 import '#styles/global.css';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -17,18 +17,22 @@ import {
   selectedCompletion,
   startCompletion,
 } from '@codemirror/autocomplete';
-import { CodeEditor } from '#components/code/code-editor.client.js';
-import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
-import { jsonDepthHighlighting } from '#components/code/json-depth-highlighting.js';
-import { EditorDocument } from '#lib/editor-document.js';
-import { EditorDiagnostics } from '#lib/editor-diagnostics.js';
-import type { EditorDiagnostic } from '#lib/editor-diagnostics.js';
-import { storeDiagnostics } from '#components/code/editor-lint.js';
-import { EditorDocumentSession, maxBackgroundDocuments } from '#lib/editor-document-session.js';
-import { clearEditorNavigation, registerEditorView, requestEditorNavigation } from '#lib/editor-navigation-service.js';
+import { CodeEditor } from '@taucad/editor-ui/components/code/code-editor.client';
+import { EditorPanePlaceholder } from '@taucad/editor-ui/components/code/editor-pane-placeholder';
+import { jsonDepthHighlighting } from '@taucad/editor-ui/components/code/json-depth-highlighting';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
+import { EditorDiagnostics } from '@taucad/editor-ui/lib/editor-diagnostics';
+import type { EditorDiagnostic } from '@taucad/editor-ui/lib/editor-diagnostics';
+import { storeDiagnostics } from '@taucad/editor-ui/components/code/editor-lint';
+import { EditorDocumentSession, maxBackgroundDocuments } from '@taucad/editor-ui/lib/editor-document-session';
+import {
+  clearEditorNavigation,
+  registerEditorView,
+  requestEditorNavigation,
+} from '@taucad/editor-ui/lib/editor-navigation-service';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { EditorNavigationTarget } from '#lib/editor-language-environment.js';
-import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
+import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
 import { Theme, ThemeProvider } from '#hooks/use-theme.js';
 import type { EditorView } from '@codemirror/view';
 

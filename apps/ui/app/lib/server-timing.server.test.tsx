@@ -49,6 +49,11 @@ vi.mock('#lib/model-catalog.server.js', async (loadOriginal) => {
       const cached = await read(reportState);
       return cached === undefined ? undefined : original.dehydrateModelCatalog(cached);
     },
+    // `/` is the Home shell's path (PL4), whose root loader stamps the same cache's catalog.
+    prefetchShellModelCatalog: async (reportState?: ModelCatalogServer.ModelCatalogStateReporter) => {
+      const cached = await read(reportState);
+      return cached === undefined ? undefined : original.dehydrateModelCatalog({ ...cached, fetchedAt: 0 });
+    },
   };
 });
 

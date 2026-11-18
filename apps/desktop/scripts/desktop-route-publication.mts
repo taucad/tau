@@ -28,13 +28,14 @@ export const desktopManifestDigest = (manifest: DesktopArtifactManifest): string
     .digest('hex');
 
 /**
- * Explicitly selected publication scope the publisher workflows accept. `all` keeps the original admission. `macos`
- * and `linux` are platform scopes (D-H5, operator ruling 2026-11-10: each platform is promoted on its own receipts from
- * its own candidate): `macos` must carry exactly the Apple silicon ZIP and DMG, `linux` exactly the linux-x64 APT and
- * AppImage routes, and neither any other architecture's or platform's artifact. Intel is excluded by operator ruling
- * until a GPU-capable Intel Mac host can qualify it.
+ * Explicitly selected publication scope the publisher workflows accept. `all` keeps the original admission. `macos`,
+ * `windows` and `linux` are platform scopes (D-H5, operator ruling 2026-11-10: each platform is promoted on its own
+ * receipts from its own candidate; Windows joined on 2026-11-17): `macos` must carry exactly the Apple silicon ZIP and
+ * DMG, `windows` exactly the win32-x64 NSIS installer and ZIP, `linux` exactly the linux-x64 APT and AppImage routes, and
+ * none any other architecture's or platform's artifact. Intel is excluded by operator ruling until a GPU-capable Intel
+ * Mac host can qualify it.
  */
-export const desktopPublicationScopes = ['all', 'macos', 'linux'] as const;
+export const desktopPublicationScopes = ['all', 'macos', 'windows', 'linux'] as const;
 export type DesktopPublicationScope = (typeof desktopPublicationScopes)[number];
 /** Route admission and publication accept the same scopes. */
 export const desktopAdmissionScopes = desktopPublicationScopes;
@@ -47,6 +48,13 @@ const platformScopes = {
     routes: ['macos-zip'],
     kinds: ['macos-dmg', 'macos-zip'],
     refusal: (channel: string) => `Mac-only publication requires exactly ${channel} ZIP and DMG for Apple silicon`,
+  },
+  windows: {
+    name: 'Windows-only',
+    target: 'win32-x64',
+    routes: ['windows-nsis'],
+    kinds: ['windows-nsis', 'windows-zip'],
+    refusal: () => 'Windows-only publication requires exactly the NSIS installer and ZIP for win32-x64',
   },
   linux: {
     name: 'Linux-only',
@@ -118,15 +126,16 @@ export const desktopCandidateRoutes = (
 
 /**
  * Clean-host (operator VM) acceptance state of one admitted route. `pending` is admitted only for a Mac-only (`macos`
- * scope) publication on either channel: the operator ruled that CI evidence suffices on staging (2026-10-26) and in
- * production (2026-11-13, clean-host acceptance by hand on the live release). It is published as such and never
- * presented as clean-host qualified.
+ * scope) or Windows-only (`windows` scope) publication on either channel: the operator ruled that CI evidence suffices
+ * for Mac on staging (2026-10-26) and in production (2026-11-13, clean-host acceptance by hand on the live release),
+ * and for the beta Windows route until its Windows 11 clean-host run (2026-11-17T08:27Z). It is published as such and
+ * never presented as clean-host qualified; a later VM receipt promotes it to `passed`.
  */
 export type DesktopCleanHostQualification = 'passed' | 'pending';
 
 /**
  * Require real CI evidence for every route of the explicitly selected scope, and operator VM evidence for every route
- * except where a Mac-only publication explicitly records clean-host acceptance as pending. A VM receipt that is
+ * except where a Mac-only or Windows-only publication explicitly records clean-host acceptance as pending. A VM receipt that is
  * present must still be complete, unambiguous and release-trusted; it is never silently ignored.
  */
 export const qualifyDesktopScopedRoutes = (
@@ -150,8 +159,9 @@ export const qualifyDesktopScopedRoutes = (
   ) {
     throw new Error(`${platformScopes[scope].name} publication cannot admit another platform route`);
   }
-  // Only a Mac-only publication may record clean-host acceptance as pending; `all` and Linux always need VM receipts.
-  const cleanHostMayBePending = scope === 'macos';
+  // Only a Mac-only or Windows-only publication may record clean-host acceptance as pending; `all` and Linux always
+  // need VM receipts.
+  const cleanHostMayBePending = scope === 'macos' || scope === 'windows';
   return {
     manifest,
     routes: routes.map(({ route, target }) => {
@@ -209,8 +219,9 @@ export type DesktopInstallerCatalog = {
     route: keyof typeof catalogKinds;
     target: DesktopReleaseTarget;
     /**
-     * `vm: true` is clean-host (operator VM) acceptance; `vm: 'pending'` marks a Mac route admitted on CI evidence
-     * alone (Mac-only scope, either channel), which consumers must never treat as clean-host qualified.
+     * `vm: true` is clean-host (operator VM) acceptance; `vm: 'pending'` marks a Mac or Windows route admitted on CI
+     * evidence alone (Mac-only or Windows-only scope, either channel), which consumers must never treat as clean-host
+     * qualified.
      */
     qualification: { ci: true; vm: true | 'pending'; trust: 'release' };
     artifacts: Array<{ kind: DesktopArtifactKind; name: string; sha256: string; size: number }>;
@@ -299,12 +310,15 @@ export const desktopLaneManifestKey = (tag: string, lane: DesktopPublicationScop
 
 const routeKey = ({ route, target }: { route: string; target: string }): string => `${route}:${target}`;
 
+/** Platform lanes in their fixed composed-catalog order. */
+export const desktopPlatformLanes = ['macos', 'windows', 'linux'] as const satisfies readonly DesktopPlatformLane[];
+
 /** Compose platform catalogs: each carries exactly its platform's routes, on one channel, in a fixed lane order. */
 export const composeDesktopInstallerCatalog = (
   channel: 'production' | 'staging',
   platforms: Partial<Record<DesktopPlatformLane, DesktopInstallerCatalog>>,
 ): DesktopComposedInstallerCatalog => {
-  const entries = (['macos', 'linux'] as const).flatMap((lane) => {
+  const entries = desktopPlatformLanes.flatMap((lane) => {
     const catalog = platforms[lane];
     if (!catalog) {
       return [];
@@ -344,7 +358,7 @@ const catalogDocument = z.union([
       channel: z.enum(['production', 'staging']),
       platforms: z.array(
         z.object({
-          lane: z.enum(['macos', 'linux']),
+          lane: z.enum(desktopPlatformLanes),
           catalog: z.object({ routes: z.array(z.object({ route: z.string(), target: z.string() })) }),
         }),
       ),
@@ -420,6 +434,7 @@ export const createDesktopRouteDescriptor = (options: {
     size: artifact.size,
     sha512: artifact.sha512,
     issuedAt: options.issuedAt,
+    // Clients from this release on ignore expiresAt. Installed 0.4.0 AppImage clients still require a window of at most 7 days.
     expiresAt: new Date(issued + 7 * 24 * 60 * 60 * 1000).toISOString(),
   };
   if (options.route === 'windows-nsis') {

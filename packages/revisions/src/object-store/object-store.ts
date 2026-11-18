@@ -33,7 +33,7 @@ import type {
   PackReader,
   StoredObject,
 } from '#pack-reader/pack-reader.js';
-import { buildPack, createPackBuilder, indexBuiltPack } from '#object-store/pack-writer.js';
+import { createPackBuilder, indexBuiltPack } from '#object-store/pack-writer.js';
 import type { PackBuilder } from '#object-store/pack-writer.js';
 
 /** The files a Git store lives in: a rooted view's private store, or a provider's own primitives. */
@@ -232,6 +232,13 @@ export type ObjectStoreOptions = Readonly<{
   packCeilingBytes?: number;
 }>;
 
+/**
+ * An object to keep, by its id, with the zlib body it was inflated from when
+ * the caller holds it and checked the object against its id: that body is
+ * written as it is, never deflated again.
+ */
+export type ImportedObject = Readonly<{ oid: string; compressed?: Uint8Array<ArrayBuffer> } & StoredObject>;
+
 /** One object to store loose: its id when the caller already computed it, else this store hashes it. */
 export type LooseObject = Readonly<{ type: GitObjectKind; data: Uint8Array<ArrayBuffer>; oid?: string }>;
 
@@ -254,9 +261,12 @@ export type ObjectStore = Readonly<{
   /**
    * Keep objects read elsewhere — a pack on the server — in packs of at most
    * the repack ceiling, indexed from what was written, never by `indexPack`.
-   * Objects already held are skipped. Answers the packs written.
+   * Objects already held are skipped. An object that carries `compressed`
+   * (the zlib body it was inflated from, already checked against its id, as
+   * a whole entry of the server's pack is) is written with that body as it
+   * is; any other is deflated. Answers the packs written.
    */
-  importObjects: (objects: Iterable<Readonly<{ oid: string } & StoredObject>>) => Promise<string[]>;
+  importObjects: (objects: Iterable<ImportedObject>) => Promise<string[]>;
   /**
    * Read through to a source for an object this store lacks. What it answers
    * is held beside the store in a byte-bounded cache, never written into it:
@@ -791,21 +801,36 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     return publishPack(pack, packIndex, checksum);
   };
 
-  const importObjects = async (objects: Iterable<Readonly<{ oid: string } & StoredObject>>): Promise<string[]> => {
+  const importObjects = async (objects: Iterable<ImportedObject>): Promise<string[]> => {
+    const asked = [...new Map([...objects].map((object) => [object.oid, object])).values()];
+    /* Every lookup at once: an import asks for hundreds, and each may touch a loose file. */
+    const held = await Promise.all(asked.map(async (object) => has(object.oid)));
     const names: string[] = [];
-    let batch: Array<Readonly<{ oid: string } & StoredObject>> = [];
+    let batch: ImportedObject[] = [];
     let bytes = 0;
     const flush = async (): Promise<void> => {
       if (batch.length > 0) {
-        const built = await buildPack(batch, compute);
+        /* Deflated side by side; a body that is already a whole entry's is copied, not deflated again. */
+        const bodies = await Promise.all(
+          batch.map(async (object) => object.compressed ?? compute.deflate(object.data)),
+        );
+        const builder = createPackBuilder(compute);
+        for (const [at, object] of batch.entries()) {
+          builder.addCompressed({
+            oid: object.oid,
+            type: object.type,
+            size: object.data.byteLength,
+            compressed: bodies[at]!,
+          });
+        }
+        const built = await builder.finish();
         names.push(await publishPack(built.pack, await indexBuiltPack(built, compute), built.checksum));
       }
       batch = [];
       bytes = 0;
     };
-    for (const object of objects) {
-      // oxlint-disable-next-line no-await-in-loop -- held objects are skipped one lookup at a time.
-      if (!(await has(object.oid))) {
+    for (const [at, object] of asked.entries()) {
+      if (!held[at]) {
         if (bytes > 0 && bytes + object.data.byteLength > bounds.maxPackBytes) {
           // oxlint-disable-next-line no-await-in-loop -- one bounded pack written before the next is filled.
           await flush();

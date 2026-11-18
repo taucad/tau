@@ -1,5 +1,5 @@
 import { redirect } from 'react-router';
-import { settingsSectionSchema } from '#hooks/use-settings-dialog.js';
+import { settingsSectionSchema } from '@taucad/settings-ui/components/settings/settings-section';
 import type { Route } from './+types/route.js';
 
 /**

@@ -1,3 +1,4 @@
+import { frameHintKey } from '#lib/frame-hint.js';
 import { chatComposerTrayClassName } from '@taucad/chat-ui/components/chat-input-styles';
 import { ChatMessageQueue } from '#components/chat/chat-message-queue.js';
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -49,6 +50,9 @@ import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { flagParameter } from '@taucad/ui-core/utils/search-parameter.codecs';
 import { ArchivedChats } from '#routes/w.$workspace.$project/archived-chats.js';
+import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
+import { useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
+import type { WaitClock } from '@taucad/ui/hooks/use-wait-clock';
 
 // One conversational turn per virtual row, sized only by its content.
 const TurnGroup = memo(function ({
@@ -131,6 +135,110 @@ const virtuosoComponents = {
   Header: ChatHistoryHeader,
   EmptyPlaceholder: ChatHistoryEmptyPlaceholder,
 };
+
+/** One transcript wait as the header indicator times it. */
+type TranscriptWait = Readonly<{ active: boolean; startedAt: number; isGesture: boolean }>;
+
+/** The parts of the Navigation API read here; absent where the browser has none. */
+type HistoryEntryNavigation = Readonly<{
+  activation?: Readonly<{ entry?: Readonly<{ key: string }> }>;
+  currentEntry?: Readonly<{ key: string }>;
+}>;
+
+/**
+ * Whether the page is on the history entry its document loaded, as the Navigation API says: a `replaceState` keeps the
+ * entry's key, so the route's rewrites (the chat query, canonical slugs) leave it the same entry.
+ *
+ * @returns `true` on the document's own entry, `false` on another, `undefined` where the API is missing.
+ */
+const isOnDocumentEntry = (): boolean | undefined => {
+  const { navigation } = globalThis as { navigation?: HistoryEntryNavigation };
+  const loaded = navigation?.activation?.entry?.key;
+  return loaded === undefined ? undefined : loaded === navigation?.currentEntry?.key;
+};
+
+/**
+ * Whether the page is still on the project its document loaded: the route open the document began with, whose waits
+ * are timed from navigation start (0). A client navigation to another project has its own start.
+ *
+ * @returns `true` while the document's own project is the current one.
+ */
+const isOnDocumentProject = (): boolean => {
+  /* The history entry first: the route corrects the URL's slugs to the canonical ones with `replaceState`, which keeps
+   * the entry but changes the project's path. */
+  const isDocumentEntry = isOnDocumentEntry();
+  if (isDocumentEntry !== undefined) {
+    return isDocumentEntry;
+  }
+  const [entry] = globalThis.performance.getEntriesByType('navigation');
+  if (entry === undefined) {
+    return false;
+  }
+  /* Without the Navigation API, the project's path: the chat query rewrite keeps it, a slug correction does not. */
+  const opened = frameHintKey(new URL(entry.name).pathname);
+  return opened !== undefined && opened === frameHintKey(globalThis.location.pathname);
+};
+
+/**
+ * The wait clocks whose document open is over: a lane held a settled transcript, or a lane on the document's project
+ * unmounted after the page left that project, so a lane mounted loading again (a return from Home or another project,
+ * the lane reopened over another chat) is a later wait, timed from its own start. Keyed by clock, which is the document's performance clock in the application.
+ */
+const endedDocumentOpens = new WeakSet<WaitClock>();
+
+/**
+ * Whether a lane mounting now is part of the document's own open: the page is on the project the document loaded, and
+ * has not left it since.
+ *
+ * @param clock - The wait clock the lane reads.
+ * @returns `true` during the open.
+ */
+const isDocumentOpen = (clock: WaitClock): boolean => !endedDocumentOpens.has(clock) && isOnDocumentProject();
+
+const startTranscriptWait = (clock: WaitClock, isFirst: boolean): Omit<TranscriptWait, 'active'> => {
+  if (isFirst && isDocumentOpen(clock)) {
+    return { startedAt: 0, isGesture: false };
+  }
+  const { navigator } = globalThis;
+  const activation = 'userActivation' in navigator ? navigator.userActivation : undefined;
+  return { startedAt: clock.now(), isGesture: activation?.isActive ?? false };
+};
+
+/**
+ * When the chat's current transcript wait started (loading states UX blueprint, § Chat lane; one clock per wait, never
+ * per mount): a lane that mounts loading during the document's own open counts from navigation start, so its
+ * indicator shows 1,000 ms after it whenever the lane mounted; every later wait (a chat switch, a reload of the log)
+ * counts from now. Read in render with React's "information from previous renders" pattern: no effect, no timer.
+ *
+ * @param active - Whether the transcript is loading now.
+ * @returns The wait's start on the wait clock, and whether a person's gesture started it.
+ */
+function useTranscriptWaitStart(active: boolean): Omit<TranscriptWait, 'active'> {
+  const clock = useWaitClockSource();
+  const [tracked, setTracked] = useState<TranscriptWait>(() => ({ active, ...startTranscriptWait(clock, true) }));
+  /* A lane unmounted once the page has left the document's project (to Home, to another project) ends the open. */
+  useEffect(
+    () => () => {
+      if (!isOnDocumentProject()) {
+        endedDocumentOpens.add(clock);
+      }
+    },
+    [clock],
+  );
+  /* So does a transcript a lane holds settled: a lane mounted loading later on the same entry (the lane reopened over
+   * another chat, a replace to it) is a later wait, timed from its own start. */
+  useEffect(() => {
+    if (!active) {
+      endedDocumentOpens.add(clock);
+    }
+  }, [active, clock]);
+  let current = tracked;
+  if (tracked.active !== active) {
+    current = active ? { active, ...startTranscriptWait(clock, false) } : { ...tracked, active };
+    setTracked(current);
+  }
+  return { startedAt: current.startedAt, isGesture: current.isGesture };
+}
 
 type ChatHistoryProps = {
   readonly className?: string;
@@ -243,6 +351,7 @@ const ExpandedChatHistory = memo(function ({
 
   const groups = useChatSelector((state) => state.turnGroups);
   const transcript = useChatSelector((state) => state.transcript);
+  const transcriptWait = useTranscriptWaitStart(transcript === 'loading');
   const reservesTaskList = useChatSelector((state) => state.rememberedComposerTrays.includes('todo'));
 
   const renderItem = useCallback(
@@ -289,90 +398,108 @@ const ExpandedChatHistory = memo(function ({
               />
             )}
           >
-            {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
-            {/* The one header row: name, rename in place, chat menu, close. */}
-            <FloatingPanelContentHeader className='gap-1'>
-              <ChatTitleBar
-                closeButton={
-                  <FloatingPanelClose
-                    label='Close Chat'
-                    icon={XIcon}
-                    tooltipContent={(isOpen) => (
-                      <div className='flex items-center gap-2'>
-                        {isOpen ? 'Close' : 'Open'} Chat
-                        <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
-                      </div>
-                    )}
-                  />
-                }
-              />
-            </FloatingPanelContentHeader>
-
-            {/* Main chat content area */}
-            <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
-              <Virtuoso
-                ref={virtuosoRef}
-                data={groups}
-                context={transcript}
-                initialTopMostItemIndex={initialChatTurn}
-                itemContent={renderItem}
-                computeItemKey={computeItemKey}
-                scrollerRef={followLatestOutput.scrollerRef}
-                followOutput={followLatestOutput.followOutput}
-                /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
-                 * follows it only once it is measured, so render a little past the foot. Without this a turn sent
-                 * from a short viewport (the phone sheet at half) is never followed, and its reply or failure stays
-                 * folded away below (I5). */
-                increaseViewportBy={appendedTurnOverscan}
-                totalListHeightChanged={followLatestOutput.totalListHeightChanged}
-                className='mt-1 min-h-0 min-w-0 flex-1'
-                atBottomStateChange={handleAtBottomStateChange}
-                components={virtuosoComponents}
-              />
-            </AtReferenceProvider>
-            {/*
-          A refusal on an empty chat has to land somewhere (I12, W19-b).
-
-          `ChatError` rides the last `TurnGroup`, and a submit that fails before
-          the user message is appended — the durable workspace refusing the
-          turn — leaves no group for it to ride. The person then saw nothing at
-          all: their text still in the composer, no row, no banner. One banner
-          at a time: while there are turns, the group above owns it.
-        */}
-            {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
-            {/* Chat input area. The agent's task list and its questions share one
-              tray directly above the composer; the task list is keyed by chat so
-              its fold never carries across chats (D8, agent questions D8). */}
-            <div
-              ref={composerAnchor}
-              role='region'
-              aria-label='Chat composer'
-              className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
-            >
-              <ScrollDownButton
-                hasContent={messageIds.length > 0}
-                isVisible={!atBottom}
-                onScrollToBottom={scrollToBottom}
-              />
-              <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
-              <div className={cn(chatComposerTrayClassName, reservedTrayClassName)}>
-                <ChatTodoList
-                  key={activeChatId}
-                  reserveHeight={reservesTaskList}
-                  isTranscriptLoading={transcript === 'loading'}
+            {/* The whole pane takes files and Tau drags for its composer (`useChatDropZone`): dropping on the
+                transcript attaches exactly what dropping on the composer does. */}
+            <div data-chat-drop-zone='' className='relative flex min-h-0 flex-1 flex-col'>
+              {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
+              {/* The one header row: name, rename in place, chat menu, close. */}
+              <FloatingPanelContentHeader className='gap-1'>
+                <ChatTitleBar
+                  closeButton={
+                    <FloatingPanelClose
+                      label='Close Chat'
+                      icon={XIcon}
+                      tooltipContent={(isOpen) => (
+                        <div className='flex items-center gap-2'>
+                          {isOpen ? 'Close' : 'Open'} Chat
+                          <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
+                        </div>
+                      )}
+                    />
+                  }
                 />
-                <ChatMessageQueue key={`${activeChatId}:messages`} />
-                <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
+                {/* The header's indicator slot (U7, F6): words from 1,000 ms into the transcript's wait, kept 500 ms. The
+                 * slot hangs below the header over the empty feed and takes no layout, so no header control moves when
+                 * the words appear. The feed carries `aria-busy`; a load that is part of the route open is seen, not
+                 * announced. */}
+                <div className='pointer-events-none absolute inset-x-0 top-full z-10 flex justify-center pt-2'>
+                  <WaitIndicator
+                    active={transcript === 'loading'}
+                    label='Loading chat'
+                    slowLabel='Still loading chat'
+                    startedAt={transcriptWait.startedAt}
+                    live={transcriptWait.isGesture}
+                    variant='pill'
+                  />
+                </div>
+              </FloatingPanelContentHeader>
+
+              {/* Main chat content area */}
+              <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
+                <Virtuoso
+                  ref={virtuosoRef}
+                  data={groups}
+                  context={transcript}
+                  initialTopMostItemIndex={initialChatTurn}
+                  itemContent={renderItem}
+                  computeItemKey={computeItemKey}
+                  scrollerRef={followLatestOutput.scrollerRef}
+                  followOutput={followLatestOutput.followOutput}
+                  /* A turn appended at the end starts at the viewport's foot, outside the rendered range: Virtuoso
+                   * follows it only once it is measured, so render a little past the foot. Without this a turn sent
+                   * from a short viewport (the phone sheet at half) is never followed, and its reply or failure stays
+                   * folded away below (I5). */
+                  increaseViewportBy={appendedTurnOverscan}
+                  totalListHeightChanged={followLatestOutput.totalListHeightChanged}
+                  className='mt-1 min-h-0 min-w-0 flex-1'
+                  atBottomStateChange={handleAtBottomStateChange}
+                  components={virtuosoComponents}
+                />
+              </AtReferenceProvider>
+              {/*
+            A refusal on an empty chat has to land somewhere (I12, W19-b).
+
+            `ChatError` rides the last `TurnGroup`, and a submit that fails before
+            the user message is appended — the durable workspace refusing the
+            turn — leaves no group for it to ride. The person then saw nothing at
+            all: their text still in the composer, no row, no banner. One banner
+            at a time: while there are turns, the group above owns it.
+          */}
+              {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
+              {/* Chat input area. The agent's task list and its questions share one
+                tray directly above the composer; the task list is keyed by chat so
+                its fold never carries across chats (D8, agent questions D8). */}
+              <div
+                ref={composerAnchor}
+                role='region'
+                aria-label='Chat composer'
+                className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
+              >
+                <ScrollDownButton
+                  hasContent={messageIds.length > 0}
+                  isVisible={!atBottom}
+                  onScrollToBottom={scrollToBottom}
+                />
+                <ChatMessagePlanning key={activeChatId} className='mb-3 px-3' />
+                <div className={cn(chatComposerTrayClassName, reservedTrayClassName)}>
+                  <ChatTodoList
+                    key={activeChatId}
+                    reserveHeight={reservesTaskList}
+                    isTranscriptLoading={transcript === 'loading'}
+                  />
+                  <ChatMessageQueue key={`${activeChatId}:messages`} />
+                  <ChatQuestionQueue key={`${activeChatId}:questions`} onDismissFocus={focusComposer} />
+                </div>
+                <ChatTextarea
+                  ref={chatTextareaRef}
+                  enableMobileCollapse={isMobile}
+                  mode='main'
+                  enableAutoFocus={false}
+                  /* The workspace frame served this composer's native input; adopt it at the reveal (PL6). */
+                  handOff={composerHandOff}
+                  onSubmit={onSubmit}
+                />
               </div>
-              <ChatTextarea
-                ref={chatTextareaRef}
-                enableMobileCollapse={isMobile}
-                mode='main'
-                enableAutoFocus={false}
-                /* The workspace frame served this composer's native input; adopt it at the reveal (PL6). */
-                handOff={composerHandOff}
-                onSubmit={onSubmit}
-              />
             </div>
           </FloatingPanelContent>
         </FloatingPanel>

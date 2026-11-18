@@ -43,6 +43,7 @@ const zeroScope = [
   new URL('hooks/use-revision-status.ts', import.meta.url),
   new URL('hooks/use-sessions.tsx', import.meta.url),
   new URL('hooks/use-wait-start.ts', import.meta.url),
+  new URL('lib/frame-hint-draft.ts', import.meta.url),
   new URL('lib/frame-hint.ts', import.meta.url),
   new URL('machines/focus.machine.ts', import.meta.url),
   new URL('machines/focus.route-state.ts', import.meta.url),

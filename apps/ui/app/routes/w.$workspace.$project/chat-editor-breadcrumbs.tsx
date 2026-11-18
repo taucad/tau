@@ -5,7 +5,7 @@ import { Badge } from '@taucad/ui/components/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useProject } from '#hooks/use-project.js';
-import { useFileTreeEntry } from '#hooks/use-file-tree.js';
+import { useFileTreeEntry } from '@taucad/files-ui/hooks/use-file-tree';
 import { fileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import type { FileProvenanceLabel } from '@taucad/ui-core/lib/file-provenance-labels';
 import { FileExtensionIcon } from '@taucad/ui-kit/icons/file-extension-icon';
@@ -14,9 +14,9 @@ import { OmniScroller } from '@taucad/ui-kit/components/omni-scroller';
 import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
-import { virtualDeclarationRoot } from '#lib/virtual-declarations.js';
-import { symbolGlyph } from '#components/code/editor-completion-icon.js';
-import type { EditorSymbolCrumb } from '#components/code/editor-language-features.js';
+import { virtualDeclarationRoot } from '@taucad/editor-ui/lib/virtual-declarations';
+import { symbolGlyph } from '@taucad/editor-ui/components/code/editor-completion-icon';
+import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
 import { cn } from '@taucad/ui/utils/cn';
 
 /** Every crumb, file or symbol, shares one height, text size and icon size, like VS Code's breadcrumbs. */

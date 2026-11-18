@@ -26,10 +26,12 @@ import { maximumChangesetEntries } from '#changeset.js';
  * clone from the root's store, and answers its verified id (EQ13); version 12
  * adds the import of a source a person chose on the host (W7.4): its listing
  * and preview by an opaque grant, and `importCopy`, which copies its files into
- * a root host-side and answers the facts hashed from what landed (D12, I6).
+ * a root host-side and answers the facts hashed from what landed (D12, I6);
+ * version 13 adds `describe`, the facts of the host's disk a client needs before
+ * it can honour the provider contract, such as whether files keep a mode.
  * @public
  */
-export const nodeFsProtocolVersion = 12;
+export const nodeFsProtocolVersion = 13;
 
 /**
  * Most watch events one frame carries. The host sends what one native callback reported as one frame, so a bulk
@@ -226,6 +228,8 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('rename'), from: z.string(), to: z.string() }),
   z.object({ ...rooted, op: z.literal('watch'), request: watchRequestSchema }),
   z.object({ ...versioned, op: z.literal('unwatch') }),
+  /* Rootless: a fact of the host's disk, the same for every root it serves. */
+  z.object({ ...versioned, op: z.literal('describe') }),
   /* Rootless: a granted source is the host's to resolve, whatever root the import lands in. */
   /* One page of a directory: a reply carries a bounded number of rows, so a huge directory is never one frame. */
   z.object({
@@ -362,10 +366,19 @@ export const nodeFsResultSchemas = {
   rename: z.undefined(),
   watch: z.undefined(),
   unwatch: z.undefined(),
+  describe: z.object({ fileModes: z.boolean() }),
   importSourceList: z.object({ rows: z.array(importSourceRowSchema).max(maximumImportSourceRows), more: z.boolean() }),
   importSourceRead: bytesSchema,
   importCopy: z.array(importCopyReceiptSchema),
 } as const satisfies Record<NodeFsRequest['op'], z.ZodType>;
+
+/**
+ * What a node filesystem host reports about its own disk. `fileModes`: files
+ * there keep a Git executable bit, so a provider rooted on it may expose
+ * `getFileMode` and `setFileMode`; a Windows disk has none.
+ * @public
+ */
+export type NodeFsHostDescription = z.infer<(typeof nodeFsResultSchemas)['describe']>;
 
 /**
  * Parse a frame received from the peer, rejecting a version mismatch with a

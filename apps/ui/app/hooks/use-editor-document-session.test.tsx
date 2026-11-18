@@ -7,7 +7,7 @@ import { lfsPointerFor } from '@taucad/revisions';
 import type { EditorLanguageEnvironment } from '#lib/editor-language-environment.js';
 import { revisionClients } from '#services/revision-client-registry.js';
 import type { RevisionClient } from '#types/revision-client.types.js';
-import type * as EditorDocumentSessionModule from '#lib/editor-document-session.js';
+import type * as EditorDocumentSessionModule from '@taucad/editor-ui/lib/editor-document-session';
 import { slowWriteMilliseconds } from '#workbench-records/record-health.js';
 
 const editorRef = vi.hoisted(() => ({ send: vi.fn() }));
@@ -27,7 +27,7 @@ const records = vi.hoisted(() => ({
   waiting: false,
   settled: undefined as PromiseWithResolvers<void> | undefined,
 }));
-vi.mock('#lib/editor-document-session.js', async (importOriginal) => {
+vi.mock('@taucad/editor-ui/lib/editor-document-session', async (importOriginal) => {
   const original = await importOriginal<typeof EditorDocumentSessionModule>();
   return {
     ...original,
@@ -272,7 +272,7 @@ describe('EditorDocumentSessionProvider language reads (D9, W4 review 3)', () =>
 
 describe('EditorDocumentSessionProvider owed text (A7e)', () => {
   it('should record text the page has not confirmed on disk when it goes, under the published scope', async () => {
-    const { editorTextDebts, setEditorTextScope } = await import('#lib/editor-document-session.js');
+    const { editorTextDebts, setEditorTextScope } = await import('@taucad/editor-ui/lib/editor-document-session');
     const scope = { workspace: 'w', actorId: 'usr_1' };
     setEditorTextScope('p', scope);
     const environment = await mountEnvironment();

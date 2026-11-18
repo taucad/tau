@@ -28,7 +28,7 @@ import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-s
 import type { TurnOutcomeNotice } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { consumeRevisionReveal, requestRevisionReveal } from '@taucad/project-workspace/utils/revision-reveal';
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
-import type { EditorDocument } from '#lib/editor-document.js';
+import type { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import type * as UseFeatureModule from '#flags/use-feature.js';
 
 const projectSnapshot = { context: { project: { syncChats: true } } };
@@ -60,12 +60,12 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 }));
 /* CodeMirror and syntax highlighting are the editor's, not this pane's: the conflict rows are
  * asserted by their verbs and the bytes they hand back (P43). */
-vi.mock('#components/code/code-editor.client.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/code-editor.client', () => ({
   CodeEditor: ({ document }: { readonly document: EditorDocument }) => (
     <pre data-testid='conflict-buffer'>{document.text}</pre>
   ),
 }));
-vi.mock('#components/code/diff-viewer.js', () => ({
+vi.mock('@taucad/editor-ui/components/code/diff-viewer', () => ({
   DiffViewer: ({
     originalContent,
     modifiedContent,

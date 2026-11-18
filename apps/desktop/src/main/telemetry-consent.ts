@@ -52,3 +52,42 @@ export const writeRendererTelemetryConsent = (path: string, consent: RendererTel
   writeFileSync(staging, JSON.stringify({ consent }));
   renameSync(staging, path);
 };
+
+/** The control frame that tells the services host the renderer's resolved consent. */
+export type TelemetryConsentFrame = Readonly<{ type: 'telemetryConsent'; consent: RendererTelemetryConsent }>;
+
+/** What main's consent relay needs: its state file, the services host's control post and a warning log. */
+export type RendererTelemetryConsentRelayOptions = Readonly<{
+  path: string;
+  publish: (frame: TelemetryConsentFrame) => void;
+  warn: (event: string, detail: Readonly<Record<string, unknown>>) => void;
+}>;
+
+/**
+ * Relay the renderer's resolved consent to the services host, whose desktop project hosts report sync attempts only
+ * under `granted` (runtime observability PR-7 follow-up, AR-W6-02). The persisted value is published at once, so a
+ * launch whose page has not loaded yet keeps the last decision; every accepted change is persisted, then published.
+ * The broker replays the latest control frame onto a respawned utility.
+ *
+ * @param options - The state file, the publish and the log.
+ * @returns `accept`, for each consent the trusted renderer sends; a value that is not a resolved consent is ignored.
+ */
+export const createRendererTelemetryConsentRelay = (
+  options: RendererTelemetryConsentRelayOptions,
+): Readonly<{ accept: (consent: unknown) => void }> => {
+  options.publish({ type: 'telemetryConsent', consent: readRendererTelemetryConsent(options.path) });
+  return {
+    accept(consent) {
+      if (!isRendererTelemetryConsent(consent)) {
+        return;
+      }
+      try {
+        writeRendererTelemetryConsent(options.path, consent);
+      } catch (error) {
+        options.warn('telemetry-consent.write-failed', { message: String(error) });
+      }
+      /* Published even when persisting failed: this session still follows the renderer. */
+      options.publish({ type: 'telemetryConsent', consent });
+    },
+  };
+};

@@ -325,6 +325,9 @@ if os.environ['TAU_VM_MODE'] == 'tooling':
 if os.environ['TAU_VM_MODE'] == 'clean-host':
     names += ['TAU_DESKTOP_ACCEPTANCE_KIND', 'TAU_GCP_HOST_TEMPLATE', 'TAU_GCP_HOST_INSTANCE', 'TAU_GCP_HOST_ZONE']
 values = {name: os.environ[name] for name in names}
+# Optional: route qualification's T-B22.4 recovery rows set it; every other caller runs the A-B-C chain.
+if os.environ['TAU_VM_MODE'] == 'qualification' and os.environ.get('TAU_QUALIFICATION_SCENARIO'):
+    values['TAU_QUALIFICATION_SCENARIO'] = os.environ['TAU_QUALIFICATION_SCENARIO']
 values['TAU_VM_MODE'] = os.environ['TAU_VM_MODE']
 with open(sys.argv[1], 'x') as output:
     json.dump(values, output)
@@ -340,7 +343,7 @@ PYENV
 import glob, os, sys, tarfile
 root = os.path.expanduser('~/tau/out/route-qualification')
 with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as output:
-    for pattern in ['qualification-*.json', 'renderer-*.json', 'renderer-*.png', 'mirror-trust.json', 'route-receipts.json', 'software-ci-evidence.json']:
+    for pattern in ['qualification-*.json', 'renderer-*.json', 'renderer-*.png', 'mirror-trust.json', 'route-receipts.json', 'recovery-receipt.json', 'software-ci-evidence.json']:
         for path in glob.glob(os.path.join(root, pattern)):
             if os.path.isfile(path) and not os.path.islink(path):
                 output.add(path, arcname=os.path.basename(path), recursive=False)

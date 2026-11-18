@@ -1,4 +1,5 @@
 import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
+import { draftHintReaderSource } from '#lib/frame-hint-draft.js';
 
 /**
  * The hand-off contract (progressive loading architecture P4), as DOM: a native input in the document accepts text
@@ -11,7 +12,16 @@ import { pageProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-per
  * the input, or by {@link installHandOffTracker} for an input the bundle created. The two are one recorder in two
  * spellings, and a parity test holds them to the same state over every event sequence.
  *
- * This module imports only the timing recorder, so a route can serve the native input without the rich surface.
+ * A surface that queues a send can also draw it (A15d, C10): inside a box marked {@link handOffBoxAttribute} the
+ * recorder marks the box while a send is queued ({@link queuedSendAttribute}) and while the input holds text
+ * ({@link earlyTextAttribute}), writes {@link queuedSendStatus} into the box's status slot, and cancels the send on
+ * Escape as on an edit. A box that also carries {@link draftHintAttribute} has the served input paint the stored draft
+ * (the draft hint) into an empty input before first paint, as prefilled text rather than an edit; only the served
+ * script paints, since an input the bundle creates is past first paint. Outside such a box Escape still cancels a
+ * queued send, and nothing is drawn.
+ *
+ * This module imports only the timing recorder and the draft hint's reader, so a route can serve the native input
+ * without the rich surface.
  *
  * @module
  */
@@ -26,6 +36,10 @@ export type HandOffState = {
   submitQueued: boolean;
   /** `performance.now()` of the first frame the input was drawn and could take text, once that frame has run. */
   acceptedAt: number | undefined;
+  /** The stored draft the served script painted into the input (A15d), set only when it painted one. */
+  prefill?: string;
+  /** The chat the painted draft belongs to, or `''`; set with {@link HandOffState.prefill}. */
+  prefillChat?: string;
 };
 
 /** A native input that carries its own record. */
@@ -52,10 +66,39 @@ export type HandOffSnapshot = {
   readonly direction: 'forward' | 'backward' | 'none';
   readonly scrollTop: number;
   readonly submitQueued: boolean;
+  /** The text is the stored draft the served page painted (A15d), unedited: not an edit, so the record still wins. */
+  readonly prefilled?: boolean;
+  /** The chat a painted draft belongs to, where the hint names one. */
+  readonly prefilledChatId?: string;
 };
 
 /** The User Timing mark the recorder leaves at the first frame a native input could take text; the harness reads it. */
 export const inputAcceptedMarkName = 'tau.input.accepted';
+
+/** Marks the box a surface draws its queued send in (A15d): the recorder marks it and writes its status. */
+export const handOffBoxAttribute = 'data-hand-off-box';
+/** Set on the box while a send is queued; Send shows its pending state. */
+export const queuedSendAttribute = 'data-queued-send';
+/** Set on the box while the input holds text, typed or painted, so Send is not drawn as refusing. */
+export const earlyTextAttribute = 'data-early-text';
+/** On the box: the served input paints the stored draft (the draft hint) into an empty input before first paint. */
+export const draftHintAttribute = 'data-draft-hint';
+/** The box's status slot, which says a queued send aloud. */
+export const queuedSendStatusSlot = 'queued-send-status';
+/** What a queued send's status says, before and after adoption. */
+export const queuedSendStatus = 'Send queued. Press Escape to cancel.';
+
+/*
+ * The box's part of a queuing recorder (A15d), in the served spelling: `bx` finds the marked box where the input is
+ * now (a slot can move it), `q` sets the queued send and draws it, `tx` marks text. Fixed source: no interpolated
+ * input.
+ */
+const boxScript =
+  `const bx=()=>input.closest('[${handOffBoxAttribute}]');const b0=bx();` +
+  `if(b0&&b0.hasAttribute('${draftHintAttribute}')&&input.value===''){const h=(${draftHintReaderSource})(location);if(h.text!==''){input.value=h.text;state.prefill=h.text;state.prefillChat=h.chatId}}` +
+  `const q=(v)=>{state.submitQueued=v;const box=bx();if(!box)return;const st=box.querySelector('[data-slot=${queuedSendStatusSlot}]');if(st)st.textContent=v?${JSON.stringify(queuedSendStatus)}:'';if(v)box.setAttribute('${queuedSendAttribute}','');else box.removeAttribute('${queuedSendAttribute}')};` +
+  `const tx=()=>{const box=bx();if(!box)return;if(input.value.trim()==='')box.removeAttribute('${earlyTextAttribute}');else box.setAttribute('${earlyTextAttribute}','')};tx();` +
+  `input.addEventListener('input',()=>{tx();if(bx())q(false)});`;
 
 /** Where the served script finds its input: the element just before it, or the one textarea inside that element. */
 export type HandOffScriptTarget = 'previous-sibling' | 'within-previous-sibling';
@@ -70,14 +113,16 @@ const scriptBody = (target: string, queueSubmit: boolean): string =>
   `input.addEventListener('compositionstart',()=>{state.composing=true});` +
   `input.addEventListener('compositionend',()=>{state.composing=false});` +
   (queueSubmit
-    ? `input.addEventListener('keydown',(event)=>{if(event.key!=='Enter'||event.shiftKey||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.keyCode===229||(typeof matchMedia==='function'&&matchMedia('(pointer: coarse)').matches))return;event.preventDefault();state.submitQueued=input.value.trim()!==''});`
+    ? boxScript +
+      `input.addEventListener('keydown',(event)=>{if(event.key==='Escape'){if(state.submitQueued)q(false);return}if(event.key!=='Enter'||event.shiftKey||event.altKey||event.ctrlKey||event.metaKey||event.isComposing||event.keyCode===229||(typeof matchMedia==='function'&&matchMedia('(pointer: coarse)').matches))return;event.preventDefault();` +
+      `q(input.value.trim()!=='')});`
     : '') +
   `const mark=()=>{if(input.getClientRects().length===0)return false;const time=performance.now();state.acceptedAt=time;try{if(performance.getEntriesByName('${inputAcceptedMarkName}','mark').length===0)performance.mark('${inputAcceptedMarkName}',{startTime:time})}catch{}return true};` +
   `requestAnimationFrame(()=>{try{if(mark()||typeof ResizeObserver!=='function')return;const observer=new ResizeObserver(()=>{if(mark())observer.disconnect()});observer.observe(input)}catch{}})}catch{}})()`;
 
 /**
  * The inline script served right after a native input. It has no interpolated input: its source is fixed per target
- * and option.
+ * and option, and each served spelling's CSP hash is listed in `#lib/inline-script-hashes`.
  *
  * @param target - Where the input is, relative to the script.
  * @param options - The surface's recorder choices.
@@ -140,6 +185,23 @@ const markAcceptedNextFrame = (element: HTMLElement, state: HandOffState): void 
   });
 };
 
+/** Draw a queued send in its box, as the served script does: the box's mark and its status slot's words. */
+const drawQueuedSend = (box: Element | undefined, isQueued: boolean): void => {
+  if (box === undefined) {
+    return;
+  }
+  const status = box.querySelector(`[data-slot=${queuedSendStatusSlot}]`);
+  if (status !== null) {
+    status.textContent = isQueued ? queuedSendStatus : '';
+  }
+  box.toggleAttribute(queuedSendAttribute, isQueued);
+};
+
+/** Mark the box while the input holds text, as the served script does. */
+const markText = (element: HTMLTextAreaElement, box: Element | undefined): void => {
+  box?.toggleAttribute(earlyTextAttribute, element.value.trim() !== '');
+};
+
 /**
  * Record an input the bundle created, as the served script records a served one. Idempotent: an input that already
  * carries a record, from the script or an earlier call, keeps it.
@@ -165,7 +227,26 @@ export const installHandOffTracker = (element: HandOffElement, options: HandOffO
     state.composing = false;
   });
   if (options.queueSubmit) {
+    /* Found where the input is now: a slot can move it to another placeholder's box. */
+    const boxOf = (): Element | undefined => element.closest(`[${handOffBoxAttribute}]`) ?? undefined;
+    const setQueued = (isQueued: boolean): void => {
+      state.submitQueued = isQueued;
+      drawQueuedSend(boxOf(), isQueued);
+    };
+    markText(element, boxOf());
+    element.addEventListener('input', () => {
+      markText(element, boxOf());
+      if (boxOf() !== undefined) {
+        setQueued(false);
+      }
+    });
     element.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        if (state.submitQueued) {
+          setQueued(false);
+        }
+        return;
+      }
       if (
         event.key !== 'Enter' ||
         event.shiftKey ||
@@ -181,7 +262,7 @@ export const installHandOffTracker = (element: HandOffElement, options: HandOffO
         return;
       }
       event.preventDefault();
-      state.submitQueued = element.value.trim() !== '';
+      setQueued(element.value.trim() !== '');
     });
   }
   markAcceptedNextFrame(element, state);
@@ -208,9 +289,14 @@ export const isHandOffComposing = (element: HandOffElement): boolean =>
 export const captureHandOff = (element: HandOffElement, focusedHint?: boolean): HandOffSnapshot => {
   const focused = element.isConnected ? document.activeElement === element : focusedHint === true;
   const active = document.activeElement;
+  /* A painted draft nobody edited is not an edit (A15d): only text the person typed overrides the record. */
+  const prefill = element.tauHandOff?.prefill;
+  const isPrefilled =
+    prefill !== undefined && prefill !== '' && element.value === prefill && element.tauHandOff?.edited !== true;
+  const prefillChat = element.tauHandOff?.prefillChat;
   return {
     text: element.value,
-    edited: element.tauHandOff?.edited === true || element.value !== element.defaultValue,
+    edited: element.tauHandOff?.edited === true || (element.value !== element.defaultValue && !isPrefilled),
     focused,
     focusUnclaimed: !focused && (active === null || active === document.body),
     start: element.selectionStart,
@@ -218,6 +304,12 @@ export const captureHandOff = (element: HandOffElement, focusedHint?: boolean): 
     direction: element.selectionDirection,
     scrollTop: element.scrollTop,
     submitQueued: element.tauHandOff?.submitQueued === true && element.value.trim() !== '',
+    ...(isPrefilled
+      ? {
+          prefilled: true,
+          ...(prefillChat === undefined || prefillChat === '' ? {} : { prefilledChatId: prefillChat }),
+        }
+      : {}),
   };
 };
 

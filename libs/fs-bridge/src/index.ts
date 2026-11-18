@@ -17,6 +17,7 @@ export {
 
 export type {
   BridgeChangeEventBus,
+  BridgeRootStatusEvents,
   ChangeEventCoalescer,
   CoalescerFactory,
   ExposeFileSystemHandle,
@@ -96,9 +97,13 @@ export { observeFileSystemBridgeCrossings } from '#filesystem-bridge-crossings.j
 
 export type { FileSystemBridgeCrossings, FileSystemBridgeCrossingsObserver } from '#filesystem-bridge-crossings.js';
 
-export { slowFileSystemBridgeCalls, slowFileSystemBridgeCallThreshold } from '#filesystem-bridge-slow-calls.js';
+export {
+  fileSystemBridgeActivity,
+  slowFileSystemBridgeCalls,
+  slowFileSystemBridgeCallThreshold,
+} from '#filesystem-bridge-slow-calls.js';
 
-export type { SlowFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
+export type { FileSystemBridgeActivityTotals, SlowFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
 
 export { computeEventRelay } from '#filesystem-bridge-compute-events.js';
 

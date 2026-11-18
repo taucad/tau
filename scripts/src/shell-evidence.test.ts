@@ -64,6 +64,34 @@ const linuxProbe = (env: Record<string, string | undefined> = {}): Probe => ({
   },
 });
 
+const pwsh = String.raw`C:\Program Files\PowerShell\7\pwsh.exe`;
+const windowsPowerShell = String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`;
+
+/** A windows-2025 x64 runner with PowerShell 7 and every probe answering; node-pty ships only ConPTY there. */
+const windowsProbe = (overrides: Partial<Probe> & { env?: Record<string, string | undefined> } = {}): Probe => ({
+  ...macProbe(),
+  platform: 'win32',
+  arch: 'x64',
+  kernel: () => '10.0.26100 Windows Server 2025 Datacenter',
+  run: (file, args) =>
+    file.endsWith('cmd.exe') ? 'Microsoft Windows [Version 10.0.26100.4652]' : `${file} ${args.join(' ')} 7.5.4`,
+  digest: (path) => {
+    if (path.endsWith('pty.node') && !path.endsWith('conpty.node')) {
+      throw new Error('ENOENT');
+    }
+    return `digest-of-${path}`;
+  },
+  ...overrides,
+  env: {
+    ...macEnvironment,
+    TAU_SHELL_CONFORMANCE_ROW: 'WIN-X64',
+    ImageOS: 'win25',
+    SystemRoot: String.raw`C:\Windows`,
+    ProgramFiles: String.raw`C:\Program Files`,
+    ...overrides.env,
+  },
+});
+
 const digestOf = (fingerprint: Fingerprint): string =>
   fingerprint.ok ? fingerprint.digest : `refused: ${fingerprint.reason}`;
 
@@ -97,6 +125,50 @@ describe('shell environment fingerprint', () => {
       base,
     );
     expect(digestOf(collectFingerprint(linuxProbe({ TAU_SHELL_CONFORMANCE_BWRAP: '/usr/bin/bwrap' })))).not.toBe(base);
+  });
+
+  it('covers the Windows build, the PowerShell under test and ConPTY on the Windows row', () => {
+    const fingerprint = collectFingerprint(windowsProbe());
+    expect(fingerprint).toMatchObject({
+      ok: true,
+      fields: {
+        row: 'WIN-X64',
+        runnerImage: 'win25 20261102.0101.1',
+        os: 'Microsoft Windows [Version 10.0.26100.4652]',
+        powershell: expect.stringContaining(`${pwsh} `) as unknown,
+        nodePty: expect.stringMatching(/conpty\.node$/u) as unknown,
+      },
+    });
+    expect(fingerprint.ok && Object.keys(fingerprint.fields)).not.toContain('bash');
+    const base = digestOf(fingerprint);
+    expect(base).not.toBe(
+      digestOf(collectFingerprint(macProbe({ arch: 'x64', env: { TAU_SHELL_CONFORMANCE_ROW: 'MAC-X' } }))),
+    );
+    const otherBuild = windowsProbe({
+      run: (file, args) =>
+        file.endsWith('cmd.exe') ? 'Microsoft Windows [Version 10.0.26100.4946]' : `${file} ${args.join(' ')} 7.5.4`,
+    });
+    expect(digestOf(collectFingerprint(otherBuild))).not.toBe(base);
+    expect(digestOf(collectFingerprint(windowsProbe({ env: { ImageVersion: '20261109.0101.1' } })))).not.toBe(base);
+  });
+
+  it('falls back to Windows PowerShell 5.1 when PowerShell 7 is not installed, as the provider does', () => {
+    const base = windowsProbe();
+    const fingerprint = collectFingerprint(
+      windowsProbe({
+        digest: (path) => {
+          if (path === pwsh) {
+            throw new Error('ENOENT');
+          }
+          return base.digest(path);
+        },
+      }),
+    );
+    expect(fingerprint).toMatchObject({
+      ok: true,
+      fields: { powershell: expect.stringContaining(`${windowsPowerShell} `) as unknown },
+    });
+    expect(digestOf(fingerprint)).not.toBe(digestOf(collectFingerprint(base)));
   });
 
   it.each([
@@ -137,6 +209,30 @@ describe('shell environment fingerprint', () => {
     ['a Linux guest names no image', linuxProbe({ TAU_SHELL_GUEST_IMAGE: undefined })],
     ['a Linux row names no bubblewrap', linuxProbe({ TAU_SHELL_CONFORMANCE_BWRAP: '' })],
     ['a Linux guest is the wrong release', linuxProbe({ TAU_SHELL_CONFORMANCE_ROW: 'LNX-D' })],
+    ['the Windows row runs on macOS', macProbe({ env: { TAU_SHELL_CONFORMANCE_ROW: 'WIN-X64' } })],
+    ['a Windows row has no system paths', windowsProbe({ env: { SystemRoot: undefined } })],
+    [
+      'a Windows row has no PowerShell',
+      windowsProbe({
+        digest: (path) => {
+          if (path.endsWith('.exe')) {
+            throw new Error('ENOENT');
+          }
+          return 'x';
+        },
+      }),
+    ],
+    [
+      'the Windows build cannot be read',
+      windowsProbe({
+        run: (file) => {
+          if (file.endsWith('cmd.exe')) {
+            throw new Error('cmd.exe printed nothing');
+          }
+          return '7.5.4';
+        },
+      }),
+    ],
   ])('fails closed with a nonce when %s', (_, probe) => {
     const fingerprint = collectFingerprint(probe);
     expect(fingerprint.ok).toBe(false);

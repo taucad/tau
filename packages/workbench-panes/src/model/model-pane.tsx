@@ -59,24 +59,41 @@ function unitMinimumBodySize(rootFontSize: number): number {
   return Math.max(144, Math.ceil(81 + 3 * rootFontSize));
 }
 
+/** The smallest body of the Properties section, in px. */
+const propertiesMinimumBodySize = 160;
+
 /**
- * Raise or lower each entry section's floor to {@link unitMinimumBodySize} for the current root font size. Setting a
- * section's size makes the Paneview clamp it again, so a section now under its floor grows and the others give way.
+ * Set each section's floor: an entry section's is {@link unitMinimumBodySize} for the current root font size, the
+ * Properties section's {@link propertiesMinimumBodySize}. When the Paneview is too short to hold every header over
+ * those floors (the phone sheet at half), the floors shrink in proportion until it does, so no section header is clipped
+ * off the bottom and each body scrolls instead (#2291). Setting a section's size makes the Paneview clamp it again, so
+ * a section now under its floor grows and the others give way.
  *
  * @param api - The Paneview, once it is ready.
  * @param entryPaths - The entry sections to fit.
  */
-function fitUnitMinimumBodySizes(api: PaneviewApi | undefined, entryPaths: readonly string[]): void {
+function fitMinimumBodySizes(api: PaneviewApi | undefined, entryPaths: readonly string[]): void {
   if (!api) {
     return;
   }
-  const minimumBodySize = unitMinimumBodySize(readRootFontSize());
-  for (const entryPath of entryPaths) {
-    const panel = api.getPanel(entryPath);
+  const unitFloor = unitMinimumBodySize(readRootFontSize());
+  const floors = new Map<string, number>([
+    ...entryPaths.map((entryPath): [string, number] => [entryPath, unitFloor]),
+    ['properties', propertiesMinimumBodySize],
+  ]);
+  const wanted = [...floors.values()].reduce((sum, floor) => sum + floor, 0);
+  const room = api.height - paneviewHeaderSize * floors.size;
+  const scale = api.height > 0 && room < wanted ? Math.max(0, room) / wanted : 1;
+  const changed = [...floors].flatMap(([id, floor]) => {
+    const panel = api.getPanel(id);
+    const minimumBodySize = Math.floor(floor * scale);
     if (!(panel instanceof PaneviewPanel) || panel.minimumBodySize === minimumBodySize) {
-      continue;
+      return [];
     }
     panel.minimumBodySize = minimumBodySize;
+    return [panel];
+  });
+  for (const panel of changed) {
     panel.api.setSize({ size: panel.size });
   }
 }
@@ -122,19 +139,23 @@ export function ModelPane({ onRequestOpen }: { readonly onRequestOpen?: () => vo
   );
   useEffect(() => reveal?.subscribe(revealComponent), [reveal, revealComponent]);
   const filterRef = useRef<HTMLDivElement>(null);
+  const sectionsRef = useRef<HTMLDivElement>(null);
   const paneviewApiRef = useRef<PaneviewApi | undefined>(undefined);
   // The filter's height is in rem, so it resizes exactly when the root font size does (browser text size, zoom
-  // settings): the entry sections' floors follow it in the same frame, before the enlarged rows paint clipped.
+  // settings): the entry sections' floors follow it in the same frame, before the enlarged rows paint clipped. The
+  // sections' own box resizes with the sheet or panel that holds them, which the floors also fit.
   useEffect(() => {
     const filter = filterRef.current;
-    if (!filter || typeof ResizeObserver === 'undefined') {
+    const sections = sectionsRef.current;
+    if (!filter || !sections || typeof ResizeObserver === 'undefined') {
       return;
     }
     const entryPaths = units.map(({ entryPath }) => entryPath);
     const observer = new ResizeObserver(() => {
-      fitUnitMinimumBodySizes(paneviewApiRef.current, entryPaths);
+      fitMinimumBodySizes(paneviewApiRef.current, entryPaths);
     });
     observer.observe(filter);
+    observer.observe(sections);
     return () => {
       observer.disconnect();
     };
@@ -156,7 +177,7 @@ export function ModelPane({ onRequestOpen }: { readonly onRequestOpen?: () => vo
           }}
         />
       </PaneSearchRegion>
-      <div className='min-h-0 flex-1 overflow-hidden'>
+      <div ref={sectionsRef} className='min-h-0 flex-1 overflow-hidden'>
         {units.length === 0 ? (
           <ExplorerEmptyState />
         ) : (
@@ -286,7 +307,7 @@ function ModelPaneview({
         headerComponent: 'propertiesHeader',
         headerSize: paneviewHeaderSize,
         isExpanded: initial.isExpanded,
-        minimumBodySize: 160,
+        minimumBodySize: propertiesMinimumBodySize,
         size: initial.size,
         params: {
           selected: visibleSelection,

@@ -103,7 +103,7 @@ import type { ChangeEvent } from '@taucad/types';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
 import { logWorkerTimings } from '@taucad/ui-core/lib/worker-timing-report';
 import { randomUuid } from '@taucad/utils/id';
-import { createFileSystemBridgePort } from '@taucad/fs-bridge';
+import { createFileSystemBridgePort, fileSystemBridgeActivity } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
 import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
@@ -2174,6 +2174,15 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         /* Round 27: a pull this device cannot make for the chats is refused, so its host stops waiting for one. */
         revisions: { actor, turns, pullsChats },
         openTools: ({ filesystem }) => createFileSystemBridgePort(filesystem),
+        /* W8 diagnostics: each admission's phases and the bridge calls it waited on, ids and milliseconds only,
+         * through the console the desktop's diagnostics log already forwards (debug, so a browser hides it). */
+        admissionTiming: {
+          activity: { bridge: fileSystemBridgeActivity },
+          report: (timing) => {
+            // oxlint-disable-next-line no-console -- Bounded operational evidence for the host's existing diagnostic sink.
+            console.debug(`[turn-placement] ${JSON.stringify(timing)}`);
+          },
+        },
       });
       return session;
     },
@@ -2339,10 +2348,16 @@ export type WorkerRevisionRegistryOptions = Readonly<{
    * exists. The worker holds the box; the rule itself lives in
    * `@taucad/revisions` so both legs and the integration pins read the one
    * implementation (W12 review R7).
+   *
+   * `telemetryConsent` reads the page's last `telemetryConsent` frame for this
+   * project, for the port's own load reporters (`observability.projectOpen`,
+   * `observability.lfsFetch`): only `granted` reports, and never said reports
+   * nothing (runtime observability PR-7 follow-up, AR-W6-02).
    */
   createPort: (
     projectId: string,
     credential: () => GitRemoteCredential | undefined,
+    telemetryConsent: () => ReportingConsent | undefined,
   ) => RevisionPort | Promise<RevisionPort>;
   /**
    * Offer one project's last push again under `keepalive`, for `pagehide` (W13).
@@ -2596,7 +2611,11 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
       createWorkerProjectRevisions({
         projectId,
         attention,
-        port: await options.createPort(projectId, () => writeCredential ?? credential),
+        port: await options.createPort(
+          projectId,
+          () => writeCredential ?? credential,
+          () => telemetryConsent,
+        ),
         ...(options.createCandidatePort === undefined
           ? {}
           : {

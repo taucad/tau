@@ -20,8 +20,10 @@
  * in neither set, and a `.tsx` or `use-*.ts` file listed in `modules`, where its actors would go uncounted. Test files
  * are never scanned. Lanes edit the manifest, never this test.
  *
- * End state (A10, reached): one line, `.start()` at 1 in `apps/ui/app/runtime/app-runtime-provider.tsx`, in
- * `components`: the runtime's one start after hydration (charter D5, D15 boundary 2). A second line needs a ruling.
+ * End state (A10, reached): `.start()` at 1 in `apps/ui/app/runtime/app-runtime-provider.tsx`, in `components`: the
+ * runtime's one start after hydration (charter D5, D15 boundary 2). One accepted line arrived on main after the
+ * programme's lanes: `setTimeout` at 1 in `runtime/file-manager-host.ts`, Home's file service start deadline (#2422,
+ * desktop resilient startup WP2), a page-time bound kept off the runtime's clock. Another line needs a ruling.
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -55,8 +57,11 @@ type OwnershipManifest = Readonly<{
 const testFilePattern = /\.(?:test|spec)(?:-d)?\./u;
 /** A component or hook module: it belongs in `components`, where actor creation and starts are counted. */
 const componentFilePattern = /(?:\.tsx|(?:^|\/)use-[^/]*\.ts)$/u;
-/** The one line the programme leaves (A10): the runtime's start after hydration. */
-const endStateCounts = { 'apps/ui/app/runtime/app-runtime-provider.tsx#.start()': 1 } as const;
+/** The lines left at A10: the runtime's start after hydration, and Home's file service start deadline (#2422). */
+const endStateCounts = {
+  'apps/ui/app/runtime/app-runtime-provider.tsx#.start()': 1,
+  'apps/ui/app/runtime/file-manager-host.ts#setTimeout': 1,
+} as const;
 const sourceFilePattern = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 
 function calleeName(node: ts.CallExpression): string | undefined {
@@ -452,7 +457,7 @@ describe('app state ownership ratchet', () => {
     expect(problems, problems.join('\n')).toEqual([]);
   }, 60_000);
 
-  it('should hold the end state: the runtime start after hydration is the one line left (A10)', () => {
+  it('should hold the end state: the runtime start after hydration and the file service start deadline (A10)', () => {
     const manifest = JSON.parse(
       readFileSync(fileURLToPath(new URL('app-state-ownership.ratchet.json', import.meta.url)), 'utf8'),
     ) as OwnershipManifest;

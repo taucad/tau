@@ -29,7 +29,7 @@ import { owedRecordWrites } from '#workbench-records/owed-writes.js';
 import type { EnvironmentDesktopQuit, EnvironmentHost, UnloadSequencer } from '#runtime/environment.js';
 import { createFocusComposition } from '#runtime/app-runtime-focus.js';
 import type { FocusHandle } from '#runtime/app-runtime-focus.js';
-import { loadProjectWorkspace } from '#lib/project-workspace-warmup.js';
+import { openProjectWorkspace } from '#lib/project-workspace-warmup.js';
 import { onDesktopQuitRequested, reportDesktopQuiesced } from '@taucad/files-ui/filesystem/desktop-bridge';
 import { createFileManagerHost } from '#runtime/file-manager-host.js';
 import type {
@@ -85,7 +85,7 @@ export type AppRuntimeOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'ins
     environment?: () => EnvironmentHost | undefined;
     /** The desktop quit seam `environment` listens to; the desktop bridge's by default. */
     desktopQuit?: EnvironmentDesktopQuit;
-    /** The session module's import focus waits for; `loadProjectWorkspace` by default. */
+    /** The session module's import focus waits for; `openProjectWorkspace` by default, which warms the layout beside it. */
     loadSessionModule?: () => Promise<unknown>;
     /**
      * The product analytics client the file manager's workspace telemetry captures through (D15). The client entry
@@ -104,6 +104,11 @@ export type AppRuntimeOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' | 'ins
      * the runtime by default; a test passes the one it inspects.
      */
     queryClient?: QueryClient;
+    /**
+     * This page load was started in safe mode (`?safe=1` on the web; D0): the shell shows the safe-mode bar. It is a
+     * property of one page load and is never stored.
+     */
+    safeMode?: boolean;
   }>;
 
 /** The Home read of an idle runtime: it never settles, so the host stays `resolving`. */
@@ -165,6 +170,9 @@ const runtimeServices = new WeakMap<AppRuntime, AppRuntimeServices>();
 
 /* Each runtime's lease store, by runtime; the composition writes one per runtime it creates. */
 const runtimeLeases = new WeakMap<AppRuntime, LeaseStore>();
+
+/* The runtimes created in safe mode (D0). */
+const safeModeRuntimes = new WeakSet<AppRuntime>();
 
 /* Development only: a rejected event is a machine that did not expect it (MC-R4). */
 const warnRejectedChatEvent = (rejection: EventRejection): void => {
@@ -368,15 +376,20 @@ const createSessionRuntimeOpener = (
 export const createAppRuntime = ({
   environment,
   desktopQuit = desktopBridgeQuit,
-  loadSessionModule = loadProjectWorkspace,
+  loadSessionModule = openProjectWorkspace,
   analytics = noAnalytics,
   loadHomeBackend,
   idleFileManagers = false,
   queryClient = createRootQueryClient(),
+  safeMode = false,
   ...options
 }: AppRuntimeOptions = {}): AppRuntime => {
   const readHome = idleFileManagers ? neverReadHome : loadHomeBackend;
-  const host = createFileManagerHost({ analytics, ...(readHome === undefined ? {} : { loadHomeBackend: readHome }) });
+  const host = createFileManagerHost({
+    analytics,
+    safeMode,
+    ...(readHome === undefined ? {} : { loadHomeBackend: readHome }),
+  });
   const table = createLeaseTable();
   /* Row L7: the library's delete asks the registry and the chat store, both built after it, so it reads them late. */
   const composed: { runtime?: AppRuntime; chatSessions?: ChatSessionStore; rootFiles?: RootFileFacade } = {};
@@ -579,6 +592,9 @@ export const createAppRuntime = ({
   });
   composed.runtime = runtime;
   runtimeLeases.set(runtime, store);
+  if (safeMode) {
+    safeModeRuntimes.add(runtime);
+  }
   return runtime;
 };
 
@@ -691,6 +707,15 @@ export const selectRuntimeLeases = (runtime: AppRuntime): LeaseStore => {
  */
 export const selectRuntimeIdleFileManagers = (runtime: AppRuntime): boolean | undefined =>
   runtimeFiles.get(runtime)?.idleFileManagers;
+
+/**
+ * Whether a runtime was created for a page load started in safe mode (D0).
+ *
+ * @param runtime - An app runtime.
+ * @returns Whether this page load is in safe mode.
+ * @public
+ */
+export const selectRuntimeSafeMode = (runtime: AppRuntime): boolean => safeModeRuntimes.has(runtime);
 
 /** The file manager for `/`, which the root spawned with itself and never replaces. @public */
 export const selectRootFiles = (snapshot: SnapshotFrom<typeof appRuntimeMachine>): FileManagerRef =>

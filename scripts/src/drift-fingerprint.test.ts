@@ -38,6 +38,7 @@ const baseline: Fingerprint = {
     'ubuntu-24.04-arm': 'ubuntu24 20261102.2',
     'macos-26': 'macos26 20261101.1',
     'macos-26-intel': 'macos26 20261101.2',
+    'windows-2025': 'win25 20261102.3',
   },
   guests: { ubuntu: 'a'.repeat(64), ubuntu2604: 'b'.repeat(64), debian: 'c'.repeat(64) },
 };
@@ -81,6 +82,7 @@ describe('compare', () => {
     ['ubuntu-24.04-arm', ['native-hosts.yml']],
     ['macos-26', ['shell-conformance.yml']],
     ['macos-26-intel', ['shell-conformance.yml', 'native-hosts.yml']],
+    ['windows-2025', ['shell-conformance.yml']],
   ])('should dispatch the workflows whose rows run on %s when its image moves', (runner, expected) => {
     const current = { ...baseline, runners: { ...baseline.runners, [runner]: 'moved 1' } };
     const drift = compare(baseline, current);
@@ -97,8 +99,8 @@ describe('compare', () => {
   });
 
   it('should refuse a runner that feeds no drift workflow', () => {
-    const current = { ...baseline, runners: { ...baseline.runners, 'windows-2025': 'x' } };
-    expect(() => compare(baseline, current)).toThrow('runner windows-2025 feeds no drift workflow');
+    const current = { ...baseline, runners: { ...baseline.runners, 'windows-2022': 'x' } };
+    expect(() => compare(baseline, current)).toThrow('runner windows-2022 feeds no drift workflow');
   });
 
   it('should refuse a fingerprint with an empty value', () => {

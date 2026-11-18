@@ -32,6 +32,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
+import { promises as fsPromises } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 
@@ -62,6 +63,7 @@ import {
   localMachineFacet,
   machineAgentGrants,
   machineRouteGrants,
+  observeAdmissionRefusals,
   openMachineHostIdentity,
   openSecretVault,
   readProjectId,
@@ -78,6 +80,14 @@ import type {
   ProjectHostActor,
   ProjectHostOptions,
 } from '@taucad/host';
+import {
+  admissionRefusalReporter,
+  createNodeHostTelemetry,
+  machineOperationReporter,
+  preparationReporter,
+  reportingPrepareKernel,
+} from '@taucad/host/telemetry';
+import type { NodeHostTelemetry, ReportingConsent } from '@taucad/host/telemetry';
 import { createChannelServer, wrapMessagePortMain } from '@taucad/rpc';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
@@ -329,6 +339,22 @@ export type ServicesHostOptions = {
    * first-use download runs, and these are the kernels it takes. Absent, the agent has no `prepare_kernel`.
    */
   readonly nativeKernels?: Readonly<{ prepare: HostPrepareKernel; preparable: readonly HostPreparableKernel[] }>;
+  /**
+   * Runtime telemetry (T19): the API this utility reports to, the app's release and the CLI config directory that
+   * holds `tau telemetry on|off`. Reports go under route `desktop`, only under the renderer's consent as main relays it
+   * (`telemetryConsent`), so `unknown` and `denied` send nothing. Absent, the machine host's operations and refused
+   * admissions and the agent's `prepare_kernel` are not reported.
+   */
+  readonly runtimeTelemetry?: Readonly<{
+    apiOrigin: string;
+    release: string;
+    configDir: string;
+    /** The build's `tauTelemetryHostCloudBuild`. */
+    cloudBuild: boolean;
+    /** The environment the device preference is read from; `process.env` unless a test names another. */
+    env?: Readonly<Record<string, string | undefined>>;
+    fetch?: typeof globalThis.fetch;
+  }>;
   /** Reply to main once one project launcher has fully stopped. */
   readonly agentHostReleased?: (requestId: string, error?: string) => void;
   /** Reply to main with one binding ceremony's outcome, or why it failed. */
@@ -440,6 +466,18 @@ const heldImportGrant = (entry: unknown): HeldImportGrant | undefined => {
     : undefined;
 };
 
+/** One admitted root: its canonical spelling once known, and whether finding it ran out of time. */
+type TrustedRoot = { canonical?: string; isSettled: boolean; readonly settled: PromiseWithResolvers<void> };
+
+/**
+ * How long a port request that names an admitted root by a spelling not matched
+ * yet waits for the background `realpath` calls before it is refused.
+ */
+const trustedRootSettleMilliseconds = 2000;
+
+/** Background `realpath` calls of admitted roots in flight at once (blueprint D8). */
+const maxTrustedRootCanonicalisations = 2;
+
 export const createServicesHost = (options: ServicesHostOptions = {}): ServicesHost => {
   const machinesEnabled = isMachinesFeatureEnabled(process.env['TAU_MACHINES_ENABLED']);
   const log =
@@ -482,7 +520,48 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
            * unrelated files. */
           authorityIdentity: () => 'desktop',
         });
-  const trustedRoots = new Set<string>();
+  /**
+   * Admitted roots by the spelling main published, each with its canonical
+   * spelling once a background `realpath` settles (blueprint D8, B30). A root
+   * on a mount that stopped answering is never canonicalised on a request's
+   * path, so it cannot stall a request for another root.
+   */
+  const trustedRoots = new Map<string, TrustedRoot>();
+  const canonicalisation = { active: 0, queue: [] as Array<() => void> };
+  const releaseCanonicalisationSlot = (): void => {
+    const next = canonicalisation.queue.shift();
+    if (next === undefined) {
+      canonicalisation.active -= 1;
+      return;
+    }
+    next();
+  };
+  const settleCanonical = async (stored: string, entry: TrustedRoot): Promise<void> => {
+    try {
+      entry.canonical = await fsPromises.realpath(stored);
+    } catch {
+      /* Unresolvable now: a request matches the stored spelling only. */
+    } finally {
+      /* The slot is held until `realpath` returns: a hung call
+       * holds a libuv thread, and at most two may (blueprint D1). */
+      releaseCanonicalisationSlot();
+      entry.isSettled = true;
+      entry.settled.resolve();
+    }
+  };
+  const canonicaliseInBackground = (stored: string, entry: TrustedRoot): void => {
+    const start = (): void => {
+      // async-iife: bootstrap -- canonicalisation runs behind requests, which never wait for it.
+      void settleCanonical(stored, entry);
+    };
+    if (canonicalisation.active < maxTrustedRootCanonicalisations) {
+      canonicalisation.active += 1;
+      start();
+    } else {
+      canonicalisation.queue.push(start);
+    }
+  };
+
   const candidateRoots = new Map<string, number>();
   /**
    * The large-object store each root lands objects from (W11.3): a project's
@@ -563,6 +642,42 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let sessionPrincipal: string | undefined;
   /** The signed-in account's display name, sent with its id; the Terminal's git commits under both. */
   let sessionPrincipalName: string | undefined;
+  /**
+   * The renderer's resolved telemetry consent as desktop main relays it (`telemetryConsent` frame, AR-W6-02). Read per
+   * settled sync attempt, so a change applies to every open project; until main says it, `unknown` sends nothing.
+   */
+  let telemetryConsent: ReportingConsent = 'unknown';
+  /**
+   * T19: the utility's runtime reporter, under route `desktop`: one `machine` entry per new machine operation, one
+   * `admit` entry per refused machine admission and one `prepare` entry per settled agent preparation. Consent is the
+   * renderer's, read at every record and send; the bearer and principal are main's, read per identity check.
+   */
+  const telemetryTarget = options.runtimeTelemetry;
+  const runtimeTelemetry: NodeHostTelemetry | undefined =
+    telemetryTarget === undefined
+      ? undefined
+      : createNodeHostTelemetry({
+          route: 'desktop',
+          release: telemetryTarget.release,
+          apiOrigin: telemetryTarget.apiOrigin,
+          configDir: telemetryTarget.configDir,
+          env: telemetryTarget.env ?? process.env,
+          cloudBuild: telemetryTarget.cloudBuild,
+          /*
+           * Main already read the principal from `get-session` and sends it with the bearer. A bearer main published
+           * before its `get-session` answered is not signed out: entries stay held until the principal, and with it
+           * the account's usage-metrics preference, resolves.
+           */
+          readIdentity: async () =>
+            authToken === undefined
+              ? { kind: 'signed-out' }
+              : sessionPrincipal === undefined
+                ? { kind: 'unresolved', reason: 'session-failed' }
+                : { kind: 'signed-in', authorization: `Bearer ${authToken}`, principalId: sessionPrincipal },
+          rendererConsent: () => telemetryConsent,
+          platform: process.platform,
+          ...(telemetryTarget.fetch === undefined ? {} : { fetch: telemetryTarget.fetch }),
+        });
   let agentHostConfig: AgentHostConfig | undefined;
   /* One machine host per utility lifetime: opened on the first machines
    * concern or ceremony, surviving every renderer reload, closed on quiesce.
@@ -631,11 +746,67 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (!isAbsolute(root)) {
       return false;
     }
+    /* Until its background `realpath` settles, the exact spelling main
+     * published is admitted as is: its physical spelling can differ (Windows
+     * short names such as `C:\\Users\\RUNNER~1`, macOS `/var` → `/private/var`).
+     * Once settled, the physical target is checked against the settled
+     * canonical spelling, so a retargeted link is refused. */
+    const published = trustedRoots.get(resolve(root));
+    if (published !== undefined && !published.isSettled) {
+      return true;
+    }
     const candidate = canonicalPath(root);
+    const spelled = resolve(root);
     /* Descendants are admitted because projects live inside Home
      * (`userData/home/<project>`); the `sep` suffix keeps `…/home-evil` from
      * matching `…/home`. */
-    return [...trustedRoots].some((trusted) => candidate === trusted || candidate.startsWith(trusted + sep));
+    const isWithin = (path: string, trusted: string): boolean => path === trusted || path.startsWith(trusted + sep);
+    /* A root is matched by the spelling main published and, once its background
+     * `realpath` settles, by its canonical spelling. No root is canonicalised on
+     * a request's path ahead of need: a hung mount would hold this event loop
+     * (blueprint D8). */
+    for (const [stored, entry] of trustedRoots) {
+      if (isWithin(candidate, stored) || (entry.canonical !== undefined && isWithin(candidate, entry.canonical))) {
+        return true;
+      }
+      /* A request that names the root by its published, non-canonical spelling
+       * before that root has settled (an 8.3 `RUNNER~1` profile on Windows,
+       * `/var` for `/private/var` on macOS). Its own `realpath` above has just
+       * answered on the same mount, so the root is canonicalised here, and the
+       * comparison stays physical: a symlink under the root that leaves it is
+       * still refused. */
+      if (entry.canonical === undefined && isWithin(spelled, stored) && isWithin(candidate, canonicalPath(stored))) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * Whether a port request's root is admitted, waiting a bounded time for the
+   * background `realpath` calls when no spelling matches yet: main names a
+   * project by its realpath when it mints a port, which can arrive right after
+   * the roots that admit it. The wait is asynchronous, so no request for
+   * another root waits on it.
+   */
+  const unsettledTrustedRoots = (): TrustedRoot[] =>
+    [...trustedRoots.values()].filter((entry) => entry.canonical === undefined && !entry.isSettled);
+  const isTrustedRootSettled = async (root: string, isTrusted: (candidate: string) => boolean): Promise<boolean> => {
+    if (isTrusted(root)) {
+      return true;
+    }
+    const pending = unsettledTrustedRoots().map(async (entry) => entry.settled.promise);
+    if (pending.length === 0) {
+      return false;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, trustedRootSettleMilliseconds);
+      timer.unref();
+    });
+    await Promise.race([Promise.all(pending), deadline]);
+    clearTimeout(timer);
+    return isTrusted(root);
   };
 
   const terminals = createTerminalConcern({
@@ -761,7 +932,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * @returns Project roots by id; an id two folders share names both.
    */
   const scanProjectRoots = async (): Promise<ReadonlyMap<string, readonly string[]>> => {
-    const children = await Promise.all([...trustedRoots].map(async (root) => childDirectories(root)));
+    const children = await Promise.all([...trustedRoots.keys()].map(async (root) => childDirectories(root)));
     const found = new Map<string, string[]>();
     for (const [root, id] of await Promise.all(
       children.flat().map(async (root) => [root, await readProjectId(providerForAgentRoot(root))] as const),
@@ -807,7 +978,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   const openMachineHost = async (storeRoot: string): Promise<MachineHostServices> => {
     const identity = await openMachineHostIdentity(storeRoot);
-    const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
+    const authority = createHostAdmissionAuthority({ hostId: identity.hostId });
+    /* T19: each refused admission is one `admit` entry; the refusal itself is the authority's own. */
+    const admission =
+      runtimeTelemetry === undefined
+        ? authority
+        : observeAdmissionRefusals(authority, admissionRefusalReporter(runtimeTelemetry));
     /* Main's allowlist forwards `TAU_SECRET_VAULT`, so automated runs keep
      * codes out of the person's keychain. Codes saved before the vault stay
      * readable from this directory's `secrets.json`. */
@@ -845,6 +1021,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       onError: (error) => {
         log('machines.error', error instanceof Error ? error.message : String(error), 'warn');
       },
+      ...(runtimeTelemetry === undefined ? {} : { onOperation: machineOperationReporter(runtimeTelemetry) }),
     });
     log('machine-host-opened', { hostId: identity.hostId });
     return { host, admission, identity, secrets, providers };
@@ -1130,11 +1307,24 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       systemSkillBundles,
       ...(nativeKernels === undefined
         ? {}
-        : { prepareKernel: nativeKernels.prepare, preparableKernels: nativeKernels.preparable }),
+        : {
+            /* T19: each settled preparation the agent asks for is one `prepare` entry. */
+            prepareKernel:
+              runtimeTelemetry === undefined
+                ? nativeKernels.prepare
+                : reportingPrepareKernel(nativeKernels.prepare, preparationReporter(runtimeTelemetry)),
+            preparableKernels: nativeKernels.preparable,
+          }),
       apiBaseUrl: config.tauApiUrl,
       syncTelemetryPlacement: 'desktop',
+      /* PR-7 follow-up (AR-W6-02): sync attempts under the renderer's one consent rule, read per attempt. */
+      syncTelemetryConsent: () => telemetryConsent,
       /* B1: every revision this host records names the desktop app as its leg. */
       via: 'desktop',
+      /* W8 diagnostics: each turn admission's phases and the Git it waited on, ids and milliseconds only. */
+      admissionTimed: (timing) => {
+        log('turn-admission-timed', timing);
+      },
       tauCredential: () => {
         const token = authToken;
         return token === undefined ? undefined : { apiBaseUrl: config.tauApiUrl, authorization: `Bearer ${token}` };
@@ -1383,7 +1573,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       case 'allowRoots': {
         trustedRoots.clear();
         for (const root of (frame['roots'] as readonly string[] | undefined) ?? []) {
-          trustedRoots.add(canonicalPath(root));
+          const stored = resolve(root);
+          const entry: TrustedRoot = { isSettled: false, settled: Promise.withResolvers<void>() };
+          trustedRoots.set(stored, entry);
+          canonicaliseInBackground(stored, entry);
         }
         log('roots-updated', { count: trustedRoots.size });
         terminals.revokeUntrusted();
@@ -1416,6 +1609,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             ? frame['principalName']
             : undefined;
         log('credential-updated', { present: authToken !== undefined });
+        return;
+      }
+      case 'telemetryConsent': {
+        /* Main relays the renderer's resolved consent (AR-W4-03c); anything unrecognised reads as `unknown`. */
+        const { consent } = frame;
+        telemetryConsent = consent === 'granted' || consent === 'denied' ? consent : 'unknown';
+        log('telemetry-consent-updated', { consent: telemetryConsent });
         return;
       }
       case 'quiesce': {
@@ -1666,7 +1866,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     /* Main already refused an ungranted root before minting the port; this is
      * the utility's own copy of the same check, because the utility is the
      * process that actually opens the files. */
-    if (typeof requested !== 'string' || !isTrustedRoot(requested)) {
+    if (
+      typeof requested !== 'string' ||
+      (!isTrustedRoot(requested) &&
+        (unsettledTrustedRoots().length === 0 || !(await isTrustedRootSettled(requested, isTrustedRoot))))
+    ) {
       log('agent-host.untrusted-root', { workspaceRoot: requested });
       port.close();
       return;
@@ -1817,6 +2021,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
      * effect, and closing drains its queue before the writer lock is released. */
     await settleAll([closeMachineHost()], failures);
     await settleAll([stopAuthority()], failures);
+    /* Bounded by `nodeShutdownWait`; never rejects. */
+    await runtimeTelemetry?.shutdown();
     if (failures.length > 0) {
       throw new AggregateError(failures, 'The services host could not quiesce every accepted operation.');
     }
@@ -1846,6 +2052,53 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     } catch (error) {
       log('dispose-close-failed', error instanceof Error ? error.message : String(error));
     }
+  };
+
+  /** Serve the kernel utility's filesystem over one transferred port, for an admitted project root. */
+  const serveRuntimeFileSystemConcern = (port: UtilityPort, context: Record<string, unknown> | undefined): void => {
+    const requested = context?.['workspaceRoot'];
+    if (typeof requested !== 'string' || !isInternalRoot(requested) || internalChannel === undefined) {
+      /* Warn, not info: the kernel utility answers a refused filesystem
+       * handshake by closing every port it received, and all the agent
+       * ever reads is that its runtime died. */
+      log('runtime-fs.untrusted-root', { workspaceRoot: requested }, 'warn');
+      port.close();
+      return;
+    }
+    /* The kernel utility executes project code the agent wrote, so it reads
+     * the agent's view of the checkout and never the working copy: the
+     * control plane is absent from it and the records Tau keeps itself are
+     * read-only (invariant CI1, W14). */
+    const lifecycle = drainingRuntimeFileSystem(executorViewFor(requested));
+    const server = serveRuntimeFileSystem(lifecycle.handlers, port);
+    let stopped: Promise<void> | undefined;
+    const stopRuntimeFileSystem = async (): Promise<void> => {
+      lifecycle.stopAdmission();
+      await lifecycle.drain();
+      server.dispose();
+      runtimeFileSystemDisposers.delete(disposer);
+    };
+    const drain = async (): Promise<void> => {
+      stopped ??= stopRuntimeFileSystem();
+      await stopped;
+    };
+    const disposer: RuntimeFileSystemDisposer = {
+      drain,
+      force(): void {
+        lifecycle.stopAdmission();
+        server.dispose();
+        runtimeFileSystemDisposers.delete(disposer);
+      },
+    };
+    runtimeFileSystemDisposers.add(disposer);
+    port.on('close', () => {
+      try {
+        disposer.force();
+      } catch (error) {
+        log('runtime-fs-dispose-failed', error instanceof Error ? error.message : String(error));
+      }
+    });
+    log('runtime-fs-served', { workspaceRoot: resolve(requested) });
   };
 
   return {
@@ -1977,48 +2230,21 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         }
         case 'runtimeFileSystem': {
           const requested = context?.['workspaceRoot'];
-          if (typeof requested !== 'string' || !isInternalRoot(requested) || internalChannel === undefined) {
-            /* Warn, not info: the kernel utility answers a refused filesystem
-             * handshake by closing every port it received, and all the agent
-             * ever reads is that its runtime died. */
-            log('runtime-fs.untrusted-root', { workspaceRoot: requested }, 'warn');
-            port.close();
+          if (typeof requested === 'string' && unsettledTrustedRoots().length > 0 && !isInternalRoot(requested)) {
+            /* No spelling matches yet: wait, bounded, for the background `realpath` calls (D8). */
+            const settleThenServe = async (): Promise<void> => {
+              await isTrustedRootSettled(requested, isInternalRoot);
+              if (disposed) {
+                port.close();
+                return;
+              }
+              serveRuntimeFileSystemConcern(port, context);
+            };
+            // async-iife: bootstrap -- a port request is answered when its root's spelling settles.
+            void settleThenServe();
             return;
           }
-          /* The kernel utility executes project code the agent wrote, so it reads
-           * the agent's view of the checkout and never the working copy: the
-           * control plane is absent from it and the records Tau keeps itself are
-           * read-only (invariant CI1, W14). */
-          const lifecycle = drainingRuntimeFileSystem(executorViewFor(requested));
-          const server = serveRuntimeFileSystem(lifecycle.handlers, port);
-          let stopped: Promise<void> | undefined;
-          const stopRuntimeFileSystem = async (): Promise<void> => {
-            lifecycle.stopAdmission();
-            await lifecycle.drain();
-            server.dispose();
-            runtimeFileSystemDisposers.delete(disposer);
-          };
-          const drain = async (): Promise<void> => {
-            stopped ??= stopRuntimeFileSystem();
-            await stopped;
-          };
-          const disposer: RuntimeFileSystemDisposer = {
-            drain,
-            force(): void {
-              lifecycle.stopAdmission();
-              server.dispose();
-              runtimeFileSystemDisposers.delete(disposer);
-            },
-          };
-          runtimeFileSystemDisposers.add(disposer);
-          port.on('close', () => {
-            try {
-              disposer.force();
-            } catch (error) {
-              log('runtime-fs-dispose-failed', error instanceof Error ? error.message : String(error));
-            }
-          });
-          log('runtime-fs-served', { workspaceRoot: resolve(requested) });
+          serveRuntimeFileSystemConcern(port, context);
           return;
         }
         case 'agentHost': {

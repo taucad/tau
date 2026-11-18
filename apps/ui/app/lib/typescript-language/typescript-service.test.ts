@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EditorDocument } from '#lib/editor-document.js';
+import { EditorDocument } from '@taucad/editor-ui/lib/editor-document';
 import { TypeAcquisitionController } from '#lib/typescript-language/type-acquisition.js';
 import { createTypeScriptService, TypeScriptService } from '#lib/typescript-language/typescript-service.js';
 import type { TypeScriptWorkerPort } from '#lib/typescript-language/typescript-service.js';

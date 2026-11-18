@@ -27,7 +27,7 @@ vi.mock('#services/project-agent-host-registration.js', () => ({
 /** The session module's import, held until a row lets it settle (U1). */
 const workspaceChunk = vi.hoisted(() => ({ settle: undefined as (() => void) | undefined }));
 vi.mock('#lib/project-workspace-warmup.js', () => ({
-  loadProjectWorkspace: async () =>
+  openProjectWorkspace: async () =>
     new Promise<void>((resolve) => {
       workspaceChunk.settle = resolve;
     }),

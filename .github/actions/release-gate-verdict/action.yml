@@ -1,0 +1,88 @@
+name: 'Release gate verdict'
+description: >-
+  Reads the release gate verdict (`release-gate.yml`, CI throughput review RG-1) for one commit from trusted
+  runs. With `require`, fails unless it is green, and with `dispatch` starts the gate on demand for a
+  commit that has none.
+
+# The release gate names each run `Release gate <sha>` and records one verdict job, `Release gate verdict
+# (<sha>)`. Only a run of `main`'s copy counts: one started by `workflow_run` (which always runs the default
+# branch's file) or a dispatch from `main`. A dispatch from another branch may run a changed copy of the
+# gate, so it never counts.
+#
+# Outcomes, in order: a green verdict passes; a gate run still queued or running blocks and names it; a red
+# verdict blocks and names it (it is never re-run here: a red gate is a finding); otherwise, with
+# `dispatch`, the gate is dispatched from `main` for the commit and the step blocks naming the new run.
+# Nothing polls or waits on a timer: the caller is dispatched again once the gate has passed.
+
+inputs:
+  sha:
+    description: 'Full commit sha'
+    required: true
+  github-token:
+    description: 'A token that may read Actions runs (and dispatch workflows, with `dispatch`)'
+    required: true
+  require:
+    description: "'true' fails the step unless a green verdict exists; 'false' only reports"
+    required: false
+    default: 'false'
+  dispatch:
+    description: "'true' dispatches the gate for a commit with no verdict and no gate run in progress"
+    required: false
+    default: 'false'
+outputs:
+  run-id:
+    description: 'The release gate run whose verdict passed for the commit, or empty'
+    value: ${{ steps.find.outputs.run-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Read the release gate verdict
+      id: find
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+        SERVER: ${{ github.server_url }}
+        SHA: ${{ inputs.sha }}
+        REQUIRE: ${{ inputs.require }}
+        DISPATCH: ${{ inputs.dispatch }}
+      run: |
+        set -euo pipefail
+        [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::A release gate verdict is looked up by a full commit sha, not '$SHA'."; exit 1; }
+        # Trusted runs of the gate on this commit, newest first: "<id> <status> <conclusion>".
+        runs=$(gh api "repos/${GH_REPO}/actions/workflows/release-gate.yml/runs?per_page=100" \
+          --jq ".workflow_runs[] | select(.display_title == \"Release gate ${SHA}\") | select(.head_branch == \"main\" or .event == \"workflow_run\") | \"\(.id) \(.status) \(.conclusion)\"")
+        pending=''
+        red=''
+        while read -r run status conclusion; do
+          [ -n "$run" ] || continue
+          if [ "$status" != completed ]; then
+            pending=${pending:-$run}
+            continue
+          fi
+          verdict=$(gh api --paginate "repos/${GH_REPO}/actions/runs/${run}/jobs?per_page=100" \
+            | jq -r --arg name "Release gate verdict ($SHA)" '.jobs[] | select(.name == $name) | .conclusion' | head -n 1)
+          if [ "$verdict" = success ]; then
+            echo "Release gate passed on ${SHA} in run ${run}."
+            echo "run-id=${run}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$verdict" = failure ]; then red=${red:-$run}; fi
+        done <<< "$runs"
+        [ "$REQUIRE" = true ] || { echo "No green release gate on ${SHA}."; exit 0; }
+        if [ -n "$pending" ]; then
+          echo "::error::The release gate on ${SHA} is still running: ${SERVER}/${GH_REPO}/actions/runs/${pending}. Run this again once it passes."
+          exit 1
+        fi
+        if [ -n "$red" ]; then
+          echo "::error::The release gate failed on ${SHA}: ${SERVER}/${GH_REPO}/actions/runs/${red}. Fix the finding on a new commit, or dispatch release-gate.yml from main with ref ${SHA} once a flake's cause is fixed."
+          exit 1
+        fi
+        if [ "$DISPATCH" != true ]; then
+          echo "::error::No release gate verdict on ${SHA}. Dispatch release-gate.yml from main with ref ${SHA}, then run this again once it passes."
+          exit 1
+        fi
+        gh workflow run release-gate.yml --repo "$GH_REPO" --ref main -f ref="$SHA"
+        echo "::error::No release gate verdict on ${SHA}, so the gate was started: ${SERVER}/${GH_REPO}/actions/workflows/release-gate.yml (run \"Release gate ${SHA}\"). Run this again once it passes."
+        exit 1

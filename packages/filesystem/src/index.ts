@@ -185,7 +185,7 @@ export {
 } from '#content-metadata.js';
 export type { ContentFactsSource, MeasuredContentFacts } from '#content-metadata.js';
 
-export { MountTable } from '#mount-table.js';
+export { MountTable, homeRootUnavailableCode, rootDeadlineCode, rootStateForError } from '#mount-table.js';
 export type {
   MountConfig,
   MountConfigCommon,
@@ -195,6 +195,10 @@ export type {
   CheckoutRootConfig,
   ProjectRootConfig,
   ProjectRootConfiguration,
+  ProjectRootConfigurationResult,
+  RootState,
+  RootStatus,
+  SkippedConfigurationEntry,
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
   PermanentDeleteProjectDirectoryInput,

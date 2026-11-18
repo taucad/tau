@@ -11,8 +11,10 @@ import {
   chatComposerShellClassName,
 } from '@taucad/chat-ui/components/chat-input-styles';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { queuedSendStatus } from '#components/hand-off/hand-off.js';
 import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
-import type { Editor } from '@tiptap/core';
+import type { Editor, JSONContent } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus, TriangleAlert } from 'lucide-react';
 import { useDictation } from '#components/dictation/use-dictation.js';
@@ -43,7 +45,9 @@ import { ChatTextareaBorderBeam } from '@taucad/chat-ui/components/chat-textarea
 import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
-import type { DraftAttachment } from '#hooks/draft.machine.js';
+import { ChatDropOverlay, useChatDropZone } from '#components/chat/chat-drop-zone.js';
+import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
+import type { DraftAttachment, PendingDraftImage } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useAgentHostPlacements } from '#hooks/use-cad-agent-config.js';
 import { ChatEditor } from '@taucad/chat-ui/components/tiptap/chat-editor';
@@ -64,15 +68,31 @@ import type { ChatContextReference } from '@taucad/chat-ui/components/chat-conte
 
 /** One identity for "no skills", so an unavailable catalog does not re-derive the slash items each render. */
 const noSkills: SkillsCatalogState['commands'] = [];
+/** One identity for "nothing converting", so the memoised rail is not re-rendered for a new empty list. */
+const noPendingImages: readonly PendingDraftImage[] = [];
 
-const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
-  image: 'Add files',
-  viewer: 'Add screenshot',
-  reference: 'Add reference',
-};
+/**
+ * What becomes of an Enter queued on a painted draft nobody edited, decided by the draft's owner from the chat's record
+ * (ruling 2026-11-17T03:28Z): wait while the record is unread, send when it holds the painted text, or cancel and show
+ * the record's text.
+ */
+export type PaintedSendVerdict =
+  | { readonly kind: 'wait' }
+  | { readonly kind: 'send' }
+  | { readonly kind: 'cancel'; readonly recordText: string };
+
+/** What the status says once a queued send on a painted draft is cancelled because the saved draft differs. */
+export const paintedSendCancelledStatus = 'Queued send cancelled: the saved draft differs.';
 
 type ChatTextareaDesktopProperties = {
   readonly earlyInput?: EarlyChatInput;
+  /** For an Enter queued on a painted draft: whether it waits, is sent or is cancelled (see {@link PaintedSendVerdict}). */
+  readonly paintedSendVerdict?: PaintedSendVerdict;
+  /**
+   * Called once `earlyInput` is in the editor, so its owner does not hand it over again. Returns whether a painted
+   * draft becomes the draft (its owner's record is not read yet and holds nothing), so the editor keeps it.
+   */
+  readonly onEarlyInputAdopted?: () => boolean;
   readonly className?: string;
   readonly enableAutoFocus?: boolean;
   readonly enableContextActions?: boolean;
@@ -91,6 +111,8 @@ type ChatTextareaDesktopProperties = {
   readonly isSubmitting: boolean;
   readonly canResume?: boolean;
   readonly isAttaching: boolean;
+  /** Images still converting or storing; the rail holds their thumbnail slots. */
+  readonly pendingImages?: readonly PendingDraftImage[];
   readonly inputText: string;
   readonly attachments: readonly DraftAttachment[];
   readonly attachmentDirectory: AttachmentDirectories;
@@ -124,9 +146,9 @@ type ChatTextareaDesktopProperties = {
   // Handlers (all must be stable references to prevent tooltip re-render loops)
   readonly handleSubmit: (finalizedText?: string, references?: readonly CadReference[]) => Promise<void>;
   readonly handleCancelClick: () => void;
-  readonly handleDragOver: (event: React.DragEvent) => void;
+  readonly handleDragOver: (event: ChatDragEvent) => void;
   readonly handleDragLeave: () => void;
-  readonly handleDrop: (event: React.DragEvent) => Promise<void>;
+  readonly handleDrop: (event: ChatDragEvent) => Promise<void>;
   readonly handlePaste: (event: ClipboardPasteEvent) => boolean;
   readonly handleFileSelect: () => void;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -155,6 +177,26 @@ export const acpCommandToSlashCommand = (
   };
 };
 
+/** Drag feedback: over the whole area when the composer takes its drops there, else over its own box. */
+function ChatDropFeedback({
+  dragKind,
+  dropZone,
+  className,
+}: {
+  readonly dragKind: ChatTextareaDragKind | undefined;
+  readonly dropZone: HTMLElement | undefined;
+  readonly className: string;
+}): React.ReactNode {
+  if (dragKind === undefined) {
+    return null;
+  }
+  return dropZone === undefined ? (
+    <ChatDropOverlay kind={dragKind} className={className} />
+  ) : (
+    createPortal(<ChatDropOverlay kind={dragKind} />, dropZone)
+  );
+}
+
 /**
  * At rest a collapsible composer is one row; anything in flight — focus, a
  * draft, dictation, a send, a drag — unfolds it. The container variants
@@ -170,6 +212,7 @@ const isComposerAtRest = (input: {
   readonly dragKind: ChatTextareaDragKind | undefined;
   readonly inputText: string;
   readonly attachments: readonly DraftAttachment[];
+  readonly pendingImages: readonly PendingDraftImage[];
 }): boolean =>
   input.enableMobileCollapse === true &&
   input.isFocused !== true &&
@@ -177,7 +220,8 @@ const isComposerAtRest = (input: {
   !input.isSubmitting &&
   input.dragKind === undefined &&
   input.inputText.trim().length === 0 &&
-  input.attachments.length === 0;
+  input.attachments.length === 0 &&
+  input.pendingImages.length === 0;
 
 /**
  * Why Send refuses, in the words its tooltip and description use (F14).
@@ -205,6 +249,20 @@ const sendRefusalOf = (input: {
   }
   return input.isSubmitDisabled ? 'Not ready to send yet' : undefined;
 };
+
+/**
+ * A native input's text as the editor's document: one paragraph per line, as the editor reports its text back.
+ *
+ * @param text - The text.
+ * @returns The document.
+ */
+const plainTextDocument = (text: string): JSONContent => ({
+  type: 'doc',
+  content: text.split('\n').map((line) => ({
+    type: 'paragraph',
+    ...(line === '' ? {} : { content: [{ type: 'text', text: line }] }),
+  })),
+});
 
 /**
  * Whether a send queued in the native input (P4) may go now: Send would send, and the chat has an agent to send with.
@@ -238,6 +296,8 @@ const isQueuedSendPermitted = (
  */
 export const ChatTextareaDesktop = memo(function ({
   earlyInput,
+  onEarlyInputAdopted,
+  paintedSendVerdict: ownerPaintedSendVerdict,
   className,
   enableAutoFocus = true,
   enableContextActions = true,
@@ -253,6 +313,7 @@ export const ChatTextareaDesktop = memo(function ({
   isSubmitting,
   canResume = false,
   isAttaching,
+  pendingImages = noPendingImages,
   inputText,
   attachments,
   attachmentDirectory,
@@ -325,13 +386,27 @@ export const ChatTextareaDesktop = memo(function ({
   /* P4: Enter pressed in the native input before this existed is one send, made once the editor holds the adopted
    * text and sending is permitted (below). Any edit cancels it, as one in the native input would. */
   const queuedSubmitRef = useRef(earlyInput?.submitQueued === true);
+  /* A15d (C10, the operator's ruling of 2026-11-13T13:14Z, item 5): the queued send is visible until it is sent or
+   * cancelled — Send shows it pending and its status says so — and Escape cancels it, as an edit does. */
+  const [isQueuedSubmitShown, setIsQueuedSubmitShown] = useState(earlyInput?.submitQueued === true);
+  const cancelQueuedSubmit = useCallback((): void => {
+    queuedSubmitRef.current = false;
+    setIsQueuedSubmitShown(false);
+  }, []);
+  /* A painted draft that changed under its queued Enter before the send could go (Home's record read after adoption
+   * with another text or an attachment): the Enter was not for this draft, so it is cancelled, and says so. */
+  const [isPaintedDraftReplaced, setIsPaintedDraftReplaced] = useState(false);
+  const cancelReplacedPaintedSend = useCallback((): void => {
+    queuedSubmitRef.current = false;
+    setIsPaintedDraftReplaced(true);
+  }, []);
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
-      queuedSubmitRef.current = false;
+      cancelQueuedSubmit();
       unconfirmedTextsRef.current.push(content.text);
       setDraftText(content.text);
     },
-    [setDraftText],
+    [cancelQueuedSubmit, setDraftText],
   );
 
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Tiptap initializes after the composer hooks.
@@ -357,10 +432,10 @@ export const ChatTextareaDesktop = memo(function ({
   useLayoutEffect(() => {
     /* Another chat's draft, in the same mounted composer: an Enter queued for the previous chat is not for this one. */
     if (latestDraftOwner.current !== draftActorRef) {
-      queuedSubmitRef.current = false;
+      cancelQueuedSubmit();
     }
     latestDraftOwner.current = draftActorRef;
-  }, [draftActorRef]);
+  }, [cancelQueuedSubmit, draftActorRef]);
   const dictation = useDictation(insertTranscript, draftActorRef);
   /* The chips' structured references travel beside the text only when the draft has some. */
   const submitWithReferences = useCallback(
@@ -397,7 +472,7 @@ export const ChatTextareaDesktop = memo(function ({
   }, [dictation.cancel, dictation.phase, onEscapePressed]);
 
   const chatEditor = useChatEditor({
-    initialText: earlyInput?.edited ? earlyInput.text : undefined,
+    initialText: earlyInput?.edited === true || earlyInput?.prefilled === true ? earlyInput.text : undefined,
     onSubmit: submitWithDictation,
     onEscape: escapeWithDictation,
     onUpdate: handleEditorUpdate,
@@ -423,6 +498,9 @@ export const ChatTextareaDesktop = memo(function ({
   }, [editor]);
 
   const rehydratedTokensRef = useRef(knownTokens);
+  /* A painted draft goes into the editor as plain text (Home's `initialText`, or the handover below): when the draft
+   * delivers that text, its tokens are built into chips once, as a restored draft's are. */
+  const paintedTextRef = useRef(earlyInput?.prefilled === true ? earlyInput.text : undefined);
   useEffect(() => {
     if (!editor) {
       return undefined;
@@ -438,6 +516,10 @@ export const ChatTextareaDesktop = memo(function ({
     }
     const tokensChanged = rehydratedTokensRef.current !== knownTokens;
     rehydratedTokensRef.current = knownTokens;
+    const isPaintedText = inputText !== '' && paintedTextRef.current === inputText;
+    if (isPaintedText) {
+      paintedTextRef.current = undefined;
+    }
     if (inputText === '') {
       if (current.text !== '') {
         editor.commands.clearContent(false);
@@ -453,14 +535,19 @@ export const ChatTextareaDesktop = memo(function ({
     /* Same text is a no-op (typing must not move the caret) unless tokens that arrived
      * late (catalog, agent commands) now resolve to more chips — a restored draft rehydrates. */
     const chipCount = segments.filter((segment) => segment.type === 'chip').length;
-    if (inputText === current.text && (!tokensChanged || chipCount <= current.contextChips.length)) {
+    if (inputText === current.text && (!(tokensChanged || isPaintedText) || chipCount <= current.contextChips.length)) {
       return undefined;
     }
     /* F20: each chip's node view calls `flushSync`, which React refuses inside
      * its own commit, so the content lands in a microtask after it. */
     let isCurrent = true;
     queueMicrotask(() => {
-      if (isCurrent && !editor.isDestroyed) {
+      if (!isCurrent || editor.isDestroyed) {
+        return;
+      }
+      /* The editor may hold this text by now (a painted draft written at its handover, with its caret): nothing to do. */
+      const latest = extractContent(editor);
+      if (latest.text !== inputText || chipCount > latest.contextChips.length) {
         editor.commands.setContent(buildEditorContentJson(segments), {
           emitUpdate: false,
         });
@@ -546,12 +633,31 @@ export const ChatTextareaDesktop = memo(function ({
       document.removeEventListener('focusin', endHandover);
     };
   }, [isHandoverOutlined]);
-  /* The editor takes the native input's selection and focus in the commit that replaces it, before the
+  const handedOverRef = useRef<EarlyChatInput | undefined>(undefined);
+  /* The editor takes the native input's text, selection and focus in the commit that replaces it, before the
    * browser can deliver another key: anything later (a microtask, a frame) lets keys typed during the
-   * handover land on the page and vanish. Its text is already in place (`initialText`). */
+   * handover land on the page and vanish. On Home its text is already in place (`initialText`); the project
+   * route's served input is handed over once its lane is revealed, after this editor exists, so the edit is
+   * written into the editor here, as an edit, so the draft follows it. */
   useLayoutEffect(() => {
-    if (!editor || !earlyInput) {
+    if (!editor || !earlyInput || handedOverRef.current === earlyInput) {
       return;
+    }
+    handedOverRef.current = earlyInput;
+    const isPaintedDraftTaken = onEarlyInputAdopted?.() ?? false;
+    if (earlyInput.edited && extractContent(editor).text !== earlyInput.text) {
+      editor.commands.setContent(plainTextDocument(earlyInput.text), { emitUpdate: true });
+    } else if (
+      (isPaintedDraftTaken || inputText === earlyInput.text) &&
+      earlyInput.prefilled &&
+      extractContent(editor).text === ''
+    ) {
+      /* A painted draft stays in the box while the draft takes it (`onEarlyInputAdopted`), not written as an edit, so
+       * the chat's record still wins when it lands (P-a: nothing leaves and comes back on arrival). A record already
+       * read with the same text is written now too, rather than in the draft sync's microtask, so the painted caret
+       * and selection are carried below. */
+      editor.commands.setContent(plainTextDocument(earlyInput.text), { emitUpdate: false });
+      paintedTextRef.current = earlyInput.text;
     }
     if (!(earlyInput.focused || (enableAutoFocus && !earlyInput.edited && earlyInput.focusUnclaimed))) {
       return;
@@ -561,7 +667,8 @@ export const ChatTextareaDesktop = memo(function ({
       // Focus is already elsewhere: there is nothing left to hand over.
       return;
     }
-    if (earlyInput.edited) {
+    /* A painted draft carries its caret and selection too, while the editor holds that text (P-a). */
+    if (earlyInput.edited || (earlyInput.prefilled && extractContent(editor).text === earlyInput.text)) {
       const position = (offset: number): number => offset + 1 + earlyInput.text.slice(0, offset).split('\n').length - 1;
       const from = position(earlyInput.start);
       const to = position(earlyInput.end);
@@ -574,11 +681,22 @@ export const ChatTextareaDesktop = memo(function ({
     }
     // Tiptap's `focus` command waits a frame; the next key may already be on its way, so focus the view now.
     editor.view.focus();
-  }, [editor, earlyInput, enableAutoFocus]);
+  }, [editor, earlyInput, enableAutoFocus, onEarlyInputAdopted, inputText]);
 
   /* The queued send (above): an edit in the native input after its Enter had already cancelled it (`submitQueued` is
    * false then). It waits, still queued, while sending is not permitted, and carries the editor's text, since the
    * draft this composer was rendered with can still be the previous one; it also waits for a model and dictation. */
+  /* The draft's owner decides from its record (the chat's, or Home's); Home also cancels at adoption, on its early
+   * input, when the draft already holds another text. */
+  const paintedSendVerdict: PaintedSendVerdict | undefined =
+    earlyInput?.paintedSendCancelled === undefined
+      ? ownerPaintedSendVerdict
+      : { kind: 'cancel', recordText: earlyInput.paintedSendCancelled.recordText };
+  /* An Enter on a painted draft the record does not hold is cancelled (shown as such while the queue was still live),
+   * never sent; one the record holds waits for the record to be read. */
+  const isPaintedSendCancelled =
+    (paintedSendVerdict?.kind === 'cancel' || isPaintedDraftReplaced) && isQueuedSubmitShown;
+  const isQueuedSendShown = isQueuedSubmitShown && !isPaintedSendCancelled;
   const isQueuedSubmitPermitted = isQueuedSendPermitted({
     dictationPhase: dictation.phase,
     sendBlockReason,
@@ -588,13 +706,61 @@ export const ChatTextareaDesktop = memo(function ({
     execution,
   });
   useEffect(() => {
-    if (!editor || !queuedSubmitRef.current || !isQueuedSubmitPermitted) {
+    if (!editor || !queuedSubmitRef.current) {
+      return;
+    }
+    if (paintedSendVerdict?.kind === 'cancel') {
+      queuedSubmitRef.current = false;
+      /* The record's text shows, not the painted one: a record with another draft already put it in the draft, and
+       * one with none leaves the painted text there until this. */
+      if (extractContent(editor).text !== paintedSendVerdict.recordText) {
+        editor.commands.setContent(plainTextDocument(paintedSendVerdict.recordText), { emitUpdate: false });
+        setDraftText(paintedSendVerdict.recordText);
+      }
+      return;
+    }
+    if (paintedSendVerdict?.kind === 'wait' || !isQueuedSubmitPermitted) {
+      return;
+    }
+    const content = extractContent(editor);
+    if (
+      earlyInput?.prefilled === true &&
+      !earlyInput.edited &&
+      (content.text !== earlyInput.text || attachments.length > 0)
+    ) {
+      // oxlint-disable-next-line react/set-state-in-effect -- the editor (Tiptap) is the external system read here, and only it holds the draft the Enter would send.
+      cancelReplacedPaintedSend();
       return;
     }
     queuedSubmitRef.current = false;
-    const content = extractContent(editor);
-    void submitWithReferences(content.text, cadReferencesOfChips(content.contextChips));
-  }, [editor, isQueuedSubmitPermitted, submitWithReferences]);
+    /* Shown as queued until the send it replays has gone: Send's own pending state follows it. */
+    const replay = async (): Promise<void> => {
+      try {
+        await submitWithReferences(content.text, cadReferencesOfChips(content.contextChips));
+      } finally {
+        setIsQueuedSubmitShown(false);
+      }
+    };
+    void replay();
+  }, [
+    editor,
+    isQueuedSubmitPermitted,
+    paintedSendVerdict,
+    setDraftText,
+    submitWithReferences,
+    earlyInput,
+    attachments,
+    cancelReplacedPaintedSend,
+  ]);
+
+  const cancelQueuedSubmitOnEscape = useCallback(
+    (event: React.KeyboardEvent): void => {
+      if (event.key === 'Escape' && queuedSubmitRef.current) {
+        cancelQueuedSubmit();
+      }
+    },
+    [cancelQueuedSubmit],
+  );
 
   useEffect(() => {
     // With an early input, focus is the native input's to hand over (above), not the mount's.
@@ -680,9 +846,25 @@ export const ChatTextareaDesktop = memo(function ({
     dragKind,
     inputText,
     attachments,
+    pendingImages,
   });
   /* F19: the beam follows the box's corners. */
   const radius = mode === 'edit' ? 'rounded-lg' : 'rounded-2xl';
+  const dropZone = useChatDropZone({
+    isEnabled: mode === 'main',
+    containerReference,
+    onDragOver: handleDragOver,
+    onDragLeave: handleDragLeave,
+    onDrop: handleDrop,
+  });
+  /* With an area to take its drops, the area's listeners are the only ones, so a drop lands once. */
+  const boxDropHandlers = useMemo(
+    () =>
+      dropZone === undefined
+        ? { onDragOver: handleDragOver, onDragLeave: handleDragLeave, onDrop: handleDrop }
+        : undefined,
+    [dropZone, handleDragOver, handleDragLeave, handleDrop],
+  );
 
   return (
     // Outer wrapper is purely a positioning context for the beam overlay
@@ -704,17 +886,18 @@ export const ChatTextareaDesktop = memo(function ({
           className,
         )}
         data-collapsed={isCollapsed ? '' : undefined}
+        data-queued-send={isQueuedSendShown ? '' : undefined}
+        onKeyDownCapture={cancelQueuedSubmitOnEscape}
         onFocus={handleTextareaFocus}
         onBlur={handleTextareaBlur}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        {...boxDropHandlers}
       >
         {/* Only a session's chat can hold a kernel this runtime cannot run. */}
         <ChatKernelFallbackNotice />
         {/* Attachments */}
         <ChatTextareaAttachmentRail
           attachments={attachments}
+          pendingImages={pendingImages}
           directory={attachmentDirectory}
           blockReason={sendBlockReason}
           blockReasonId={blockReasonId}
@@ -742,16 +925,15 @@ export const ChatTextareaDesktop = memo(function ({
           />
         </div>
 
-        {/* Drag and drop feedback */}
-        {dragKind ? (
-          <div className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-primary/10 backdrop-blur-xs'>
-            <p className='rounded-md border bg-background/50 px-2 font-medium text-primary'>
-              {dragOverlayCopy[dragKind]}
-            </p>
-          </div>
-        ) : null}
+        <ChatDropFeedback dragKind={dragKind} dropZone={dropZone} className={radius} />
 
         <DictationFeedback transcript={dictation.transcript} />
+        {/* Present from mount for an input that queued a send, so the status is read when it changes. */}
+        {earlyInput?.submitQueued === true ? (
+          <span role='status' className='sr-only'>
+            {isQueuedSendShown ? queuedSendStatus : isPaintedSendCancelled ? paintedSendCancelledStatus : ''}
+          </span>
+        ) : null}
         <ChatTextareaBar
           dictationControl={dictationControl}
           skillsRecovery={skillsRecovery}

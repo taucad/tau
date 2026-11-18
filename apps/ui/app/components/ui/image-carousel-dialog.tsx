@@ -254,6 +254,7 @@ function ImageCarouselDialog({
           ) : null}
           <DialogContent
             {...dialogProps}
+            scroll='contained'
             onInteractOutside={(event) => {
               if (isImageCarouselOverlayControlEvent(event)) {
                 event.preventDefault();

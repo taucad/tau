@@ -7,6 +7,8 @@ import { commands, page } from 'vitest/browser';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import type { Ask } from '@taucad/chat';
+import type { ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { ChatDragEvent } from '#components/chat/chat-drop-zone.js';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { storedRef } from '@taucad/chat-ui/utils/attachment.test-utils';
 
@@ -62,7 +64,10 @@ vi.doMock('#components/chat/chat-agent-sheet.js', () => ({
 vi.doMock('#components/chat/chat-kernel-selector.js', () => ({
   KernelPreferenceSelector: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
 }));
-vi.doMock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => <span className='size-4' /> }));
+vi.doMock('@taucad/ui-kit/icons/svg-icon', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  SvgIcon: () => <span className='size-4' />,
+}));
 vi.doMock('#components/files/file-link.js', () => ({
   FileLink: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
@@ -71,10 +76,12 @@ declare module 'vitest/internal/browser' {
   // oxlint-disable-next-line typescript/consistent-type-definitions -- Augments the installed browser command registry.
   interface BrowserCommands {
     composerPointer(coarse: boolean): Promise<void>;
+    composerReducedMotion(reduce: boolean): Promise<void>;
   }
 }
 
 const { ChatTextareaDesktop } = await import('#components/chat/chat-textarea-desktop.js');
+const { chatDragKindOf } = await import('#components/chat/chat-drop-zone.js');
 const { QuestionCard } = await import('#components/chat/question-card.js');
 const { ChatTextareaSkeleton } = await import('@taucad/chat-ui/components/chat-textarea-skeleton');
 type ComposerProps = ComponentProps<typeof ChatTextareaDesktop>;
@@ -126,46 +133,49 @@ const scenarios = [
   { name: 'new project', props: { enableContextActions: false, enableKernelSelector: false } },
 ] satisfies Array<{ name: string; props: Partial<ComposerProps> }>;
 
+/** The props every composer here starts from; a test overrides what it is about. */
+// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
+const composerDefaults = (containerReference: React.RefObject<HTMLDivElement | null>): ComposerProps => ({
+  enableAutoFocus: false,
+  dragKind: undefined,
+  isSubmitting: false,
+  isAttaching: false,
+  inputText: '',
+  attachments: [],
+  attachmentDirectory: undefined,
+  sendBlockReason: undefined,
+  attachmentAccept: 'image/png,application/pdf',
+  attachmentInputSupported: true,
+  status: 'ready',
+  formattedCancelKeyCombination: '⌘.',
+  treeService: undefined,
+  chats: [],
+  setDraftText: noop,
+  fileInputReference: createRef<HTMLInputElement>(),
+  containerReference,
+  focusEditorRef: { current: undefined },
+  addContextChipsRef: { current: undefined },
+  addContextReferencesRef: { current: undefined },
+  handleSubmit: asyncNoop,
+  handleCancelClick: noop,
+  handleDragOver: noop,
+  handleDragLeave: noop,
+  handleDrop: asyncNoop,
+  handlePaste: () => false,
+  handleFileSelect: noop,
+  handleFileChange: noop,
+  handleAddImage: noop,
+  onScreenshotAction: noop,
+  handleTextareaBlur: noop,
+  removeAttachment: noop,
+});
+
 const renderComposer = (props: Partial<ComposerProps>) => {
   const containerReference = createRef<HTMLDivElement>();
   const view = render(
     <TooltipProvider>
       <section aria-label='Composer' className='p-4'>
-        <ChatTextareaDesktop
-          enableAutoFocus={false}
-          dragKind={undefined}
-          isSubmitting={false}
-          isAttaching={false}
-          inputText=''
-          attachments={[]}
-          attachmentDirectory={undefined}
-          sendBlockReason={undefined}
-          attachmentAccept='image/png,application/pdf'
-          attachmentInputSupported
-          status='ready'
-          formattedCancelKeyCombination='⌘.'
-          treeService={undefined}
-          chats={[]}
-          setDraftText={noop}
-          fileInputReference={createRef<HTMLInputElement>()}
-          containerReference={containerReference}
-          focusEditorRef={{ current: undefined }}
-          addContextChipsRef={{ current: undefined }}
-          addContextReferencesRef={{ current: undefined }}
-          handleSubmit={asyncNoop}
-          handleCancelClick={noop}
-          handleDragOver={noop}
-          handleDragLeave={noop}
-          handleDrop={asyncNoop}
-          handlePaste={() => false}
-          handleFileSelect={noop}
-          handleFileChange={noop}
-          handleAddImage={noop}
-          onScreenshotAction={noop}
-          handleTextareaBlur={noop}
-          removeAttachment={noop}
-          {...props}
-        />
+        <ChatTextareaDesktop {...composerDefaults(containerReference)} {...props} />
       </section>
     </TooltipProvider>,
   );
@@ -873,5 +883,287 @@ describe('desktop composer stays as it was', () => {
     const hint = [...tooltip.querySelectorAll('span')].find((span) => span.className.includes('tracking-'))!;
     expect(getComputedStyle(hint).display).not.toBe('none');
     expect(tooltip.textContent).toContain('Send');
+  });
+});
+
+/** An element's box, as plain numbers to compare. */
+const boxOf = (element: Element): Record<'x' | 'y' | 'width' | 'height', number> => {
+  const { x, y, width, height } = element.getBoundingClientRect();
+  return { x, y, width, height };
+};
+
+/** WCAG contrast of two computed colours, read back through a canvas so any CSS colour space works. */
+const contrastRatio = (foreground: string, background: string): number => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = 1;
+  const context = canvas.getContext('2d')!;
+  const luminance = (color: string): number => {
+    context.clearRect(0, 0, 1, 1);
+    context.fillStyle = color;
+    context.fillRect(0, 0, 1, 1);
+    const channels = context.getImageData(0, 0, 1, 1).data;
+    const linear = [channels[0], channels[1], channels[2]].map((channel) => {
+      const value = channel! / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    return linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722;
+  };
+  const first = luminance(foreground);
+  const second = luminance(background);
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+};
+
+/** The composer as the chat pane holds it: drag state lives in the composer's handlers, as `useChatTextareaLogic`'s. */
+function PaneComposer({
+  onDropFiles,
+  ...props
+}: Partial<ComposerProps> & { readonly onDropFiles: (files: readonly File[]) => void }): React.JSX.Element {
+  const containerReference = useRef<HTMLDivElement>(null);
+  const [dragKind, setDragKind] = useState<ChatTextareaDragKind | undefined>(undefined);
+  return (
+    <ChatTextareaDesktop
+      {...composerDefaults(containerReference)}
+      dragKind={dragKind}
+      handleDragOver={(event: ChatDragEvent) => {
+        event.preventDefault();
+        setDragKind(chatDragKindOf(event.dataTransfer.types));
+      }}
+      handleDragLeave={() => {
+        setDragKind(undefined);
+      }}
+      handleDrop={async (event: ChatDragEvent) => {
+        event.preventDefault();
+        setDragKind(undefined);
+        onDropFiles([...event.dataTransfer.files]);
+      }}
+      {...props}
+    />
+  );
+}
+
+const renderPane = (onDropFiles: (files: readonly File[]) => void = noop) =>
+  render(
+    <TooltipProvider>
+      <section
+        aria-label='Chat pane'
+        data-chat-drop-zone=''
+        className='relative flex h-[600px] w-[480px] flex-col justify-end gap-4 bg-background p-2'
+      >
+        <p className='px-3'>The bracket now has two 6 mm holes, 40 mm apart.</p>
+        <PaneComposer onDropFiles={onDropFiles} />
+      </section>
+    </TooltipProvider>,
+  );
+
+const fileDrag = (type: 'dragenter' | 'dragover' | 'dragleave' | 'drop', file?: File, relatedTarget?: Element) => {
+  const dataTransfer = new DataTransfer();
+  if (file) {
+    dataTransfer.items.add(file);
+  }
+  return new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer, relatedTarget: relatedTarget ?? null });
+};
+
+describe('the whole chat pane is the drop target', () => {
+  it.each(['light', 'dark'] as const)(
+    'should outline the whole pane with inward-fading edges and centre the copy, in %s mode',
+    async (theme) => {
+      await page.viewport(800, 720);
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+      renderPane();
+      const pane = screen.getByRole('region', { name: 'Chat pane' });
+      const transcript = screen.getByText(/two 6 mm holes/u);
+      const editor = await screen.findByRole('textbox');
+      const before = boxOf(editor);
+      const photo = new File([new Uint8Array(8)], 'bracket.heic', { type: 'image/heic' });
+
+      act(() => {
+        transcript.dispatchEvent(fileDrag('dragenter', photo));
+        transcript.dispatchEvent(fileDrag('dragover', photo));
+      });
+
+      const labels = screen.getAllByText('Add files');
+      expect(labels).toHaveLength(1);
+      const label = labels[0]!;
+      const overlay = label.parentElement!;
+      const paneBounds = pane.getBoundingClientRect();
+      expect(boxOf(overlay)).toEqual(boxOf(pane));
+      const labelBounds = label.getBoundingClientRect();
+      expect((labelBounds.left + labelBounds.right) / 2).toBeCloseTo((paneBounds.left + paneBounds.right) / 2, 0);
+      expect((labelBounds.top + labelBounds.bottom) / 2).toBeCloseTo((paneBounds.top + paneBounds.bottom) / 2, 0);
+
+      const style = getComputedStyle(overlay);
+      expect(style.borderTopWidth).toBe('2px');
+      expect(style.boxShadow).toContain('inset');
+      /* No fill: a fully transparent background. */
+      expect(style.backgroundColor.replaceAll(' ', '')).toMatch(/,0\)$/u);
+      expect(style.backdropFilter).toBe('none');
+      expect(style.pointerEvents).toBe('none');
+      /* Non-text contrast (1.4.11) of the outline, and text contrast (1.4.3) of the label. */
+      const paneBackground = getComputedStyle(pane).backgroundColor;
+      expect(contrastRatio(style.borderTopColor, paneBackground)).toBeGreaterThanOrEqual(3);
+      const labelStyle = getComputedStyle(label);
+      expect(contrastRatio(labelStyle.color, labelStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+      /* Nothing under the drag moves. */
+      expect(boxOf(editor)).toEqual(before);
+
+      await page.screenshot({
+        element: pane,
+        path: `../../../../../out/test-results/composer/pane-drag-${theme}.png`,
+      });
+    },
+  );
+
+  it('should attach a file dropped on the transcript once, as a drop on the composer would', async () => {
+    await page.viewport(800, 720);
+    const onDropFiles = vi.fn();
+    renderPane(onDropFiles);
+    const transcript = screen.getByText(/two 6 mm holes/u);
+    const photo = new File([new Uint8Array(8)], 'bracket.heic', { type: 'image/heic' });
+
+    act(() => {
+      transcript.dispatchEvent(fileDrag('dragover', photo));
+    });
+    const drop = fileDrag('drop', photo);
+    await act(async () => {
+      transcript.dispatchEvent(drop);
+    });
+
+    expect(drop.defaultPrevented).toBe(true);
+    expect(onDropFiles).toHaveBeenCalledExactlyOnceWith([photo]);
+    expect(screen.queryByText('Add files')).toBeNull();
+  });
+
+  it('should attach a file dropped on the composer once, not once for the box and once for the pane', async () => {
+    await page.viewport(800, 720);
+    const onDropFiles = vi.fn();
+    renderPane(onDropFiles);
+    const editor = await screen.findByRole('textbox');
+    const photo = new File([new Uint8Array(8)], 'bracket.png', { type: 'image/png' });
+
+    act(() => {
+      editor.dispatchEvent(fileDrag('dragover', photo));
+    });
+    await act(async () => {
+      editor.dispatchEvent(fileDrag('drop', photo));
+    });
+
+    expect(onDropFiles).toHaveBeenCalledExactlyOnceWith([photo]);
+  });
+
+  it('should keep the target while the drag crosses into the composer, and release it on leaving the pane', () => {
+    renderPane();
+    const transcript = screen.getByText(/two 6 mm holes/u);
+    const editor = screen.getByRole('textbox');
+    const photo = new File([new Uint8Array(8)], 'bracket.png', { type: 'image/png' });
+
+    act(() => {
+      transcript.dispatchEvent(fileDrag('dragover', photo));
+      transcript.dispatchEvent(fileDrag('dragleave', photo, editor));
+    });
+    expect(screen.getByText('Add files')).toBeVisible();
+
+    act(() => {
+      transcript.dispatchEvent(fileDrag('dragleave', photo, document.body));
+    });
+    expect(screen.queryByText('Add files')).toBeNull();
+  });
+
+  it('should leave a text selection dragged across the transcript alone', () => {
+    renderPane();
+    const transcript = screen.getByText(/two 6 mm holes/u);
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData('text/plain', 'two 6 mm holes');
+    const drag = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer });
+
+    act(() => {
+      transcript.dispatchEvent(drag);
+    });
+
+    expect(drag.defaultPrevented).toBe(false);
+    expect(screen.queryByText('Add files')).toBeNull();
+  });
+});
+
+describe('a converting image holds its thumbnail slot', () => {
+  afterEach(async () => {
+    await commands.composerReducedMotion(false);
+  });
+
+  it.each(['light', 'dark'] as const)(
+    'should draw the placeholder as the thumbnail it becomes, with nothing moving when it lands, in %s mode',
+    async (theme) => {
+      await page.viewport(600, 720);
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+      const { containerReference, rerender } = renderComposer({
+        attachments: [image],
+        pendingImages: [{ isConverting: true }],
+      });
+      const placeholder = screen.getByRole('status');
+      expect(placeholder).toHaveAttribute('aria-busy', 'true');
+      expect(placeholder).toHaveTextContent('Converting image…');
+      const thumbnail = screen.getByRole('button', { name: 'Open uploaded image 1' });
+      const slot = placeholder.getBoundingClientRect();
+      const stored = thumbnail.getBoundingClientRect();
+      expect([slot.width, slot.height, slot.top]).toEqual([stored.width, stored.height, stored.top]);
+      expect(getComputedStyle(placeholder).borderRadius).toBe(getComputedStyle(thumbnail).borderRadius);
+      const skeleton = placeholder.querySelector<HTMLElement>('[data-slot=skeleton]')!;
+      expect(getComputedStyle(skeleton).animationName).not.toBe('none');
+      const composerHeight = containerReference.current!.getBoundingClientRect().height;
+
+      await page.screenshot({
+        element: screen.getByRole('region', { name: 'Composer' }),
+        path: `../../../../../out/test-results/composer/converting-${theme}.png`,
+      });
+
+      rerender(
+        <TooltipProvider>
+          <section aria-label='Composer' className='p-4'>
+            <ChatTextareaDesktop {...composerDefaults(containerReference)} attachments={[image, image]} />
+          </section>
+        </TooltipProvider>,
+      );
+      expect(screen.queryByRole('status')).toBeNull();
+      const landed = screen.getByRole('button', { name: 'Open uploaded image 2' }).getBoundingClientRect();
+      expect([landed.width, landed.height, landed.left, landed.top]).toEqual([
+        slot.width,
+        slot.height,
+        slot.left,
+        slot.top,
+      ]);
+      expect(containerReference.current!.getBoundingClientRect().height).toBe(composerHeight);
+    },
+  );
+
+  it('should keep the composer height when the only pending image lands', async () => {
+    await page.viewport(600, 720);
+    const { containerReference, rerender } = renderComposer({ pendingImages: [{ isConverting: true }] });
+    const slot = screen.getByRole('status').getBoundingClientRect();
+    const composerHeight = containerReference.current!.getBoundingClientRect().height;
+
+    rerender(
+      <TooltipProvider>
+        <section aria-label='Composer' className='p-4'>
+          <ChatTextareaDesktop {...composerDefaults(containerReference)} attachments={[image]} />
+        </section>
+      </TooltipProvider>,
+    );
+
+    const thumbnail = screen.getByRole('button', { name: 'Open uploaded image 1' });
+    // An inline-level thumbnail sits on its wrapper's text line, and the line's descender space adds height under it
+    // that the skeleton tile does not have; with an <img> inside, that grew the composer when the image landed.
+    expect(getComputedStyle(thumbnail).display).toBe('block');
+    const item = thumbnail.parentElement!.getBoundingClientRect();
+    expect([item.height, item.top]).toEqual([slot.height, slot.top]);
+    expect(containerReference.current!.getBoundingClientRect().height).toBe(composerHeight);
+  });
+
+  it('should hold the skeleton still under reduced motion', async () => {
+    await commands.composerReducedMotion(true);
+    renderComposer({ pendingImages: [{ isConverting: true }] });
+    const skeleton = screen.getByRole('status').querySelector<HTMLElement>('[data-slot=skeleton]')!;
+
+    expect(globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+    expect(getComputedStyle(skeleton).animationName).toBe('none');
   });
 });

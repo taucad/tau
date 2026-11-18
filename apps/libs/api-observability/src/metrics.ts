@@ -219,24 +219,6 @@ export class MetricsService {
     unit: TauMetrics.storageTransferBytes.unit,
   });
 
-  // Client-reported metrics (ingested via TelemetryController)
-  public readonly kernelExecutionDuration = this.clientMeter.createHistogram(TauMetrics.kernelExecutionDuration.name, {
-    description: TauMetrics.kernelExecutionDuration.description,
-    unit: TauMetrics.kernelExecutionDuration.unit,
-    advice: { explicitBucketBoundaries: [...TauMetrics.kernelExecutionDuration.buckets] },
-  });
-
-  public readonly kernelExecutions = this.clientMeter.createCounter(TauMetrics.kernelExecutions.name, {
-    description: TauMetrics.kernelExecutions.description,
-    unit: TauMetrics.kernelExecutions.unit,
-  });
-
-  public readonly kernelExportDuration = this.clientMeter.createHistogram(TauMetrics.kernelExportDuration.name, {
-    description: TauMetrics.kernelExportDuration.description,
-    unit: TauMetrics.kernelExportDuration.unit,
-    advice: { explicitBucketBoundaries: [...TauMetrics.kernelExportDuration.buckets] },
-  });
-
   // --- Billing / credit ledger (C11/C12) ---
 
   public readonly billingAttemptResolutions = this.apiMeter.createCounter(TauMetrics.billingAttemptResolutions.name, {

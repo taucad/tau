@@ -5,14 +5,29 @@ import {
   clientMetricEntrySchema,
   ingestPayloadSchema,
   IngestEntryName,
+  retiredIngestEntryNames,
+  retiredIngestEntrySchema,
   kernelIds,
   tauToolNames,
 } from '#ingest.js';
 
 describe('IngestEntryName', () => {
-  it('should define canonical entry name constants', () => {
-    expect(IngestEntryName.KERNEL_CREATE_GEOMETRY).toBe('observability.createGeometry');
-    expect(IngestEntryName.KERNEL_EXPORT_GEOMETRY).toBe('observability.exportGeometry');
+  it('should not name a retired entry', () => {
+    for (const name of retiredIngestEntryNames) {
+      expect(Object.values(IngestEntryName)).not.toContain(name);
+    }
+  });
+});
+
+describe('retiredIngestEntrySchema', () => {
+  it.each(retiredIngestEntryNames)('should admit %s by name and strip what it carries', (name) => {
+    const entry = { name, duration: 5, detail: { status: 'error', error: 'Kernel crash' } };
+    expect(retiredIngestEntrySchema.parse(entry)).toEqual({ name });
+  });
+
+  it('should not admit a live or unknown entry name', () => {
+    expect(retiredIngestEntrySchema.safeParse({ name: IngestEntryName.AGENT_TURN }).success).toBe(false);
+    expect(retiredIngestEntrySchema.safeParse({ name: 'unknown.metric' }).success).toBe(false);
   });
 });
 
@@ -23,22 +38,8 @@ describe('kernelIds', () => {
 });
 
 describe('clientMetricEntrySchema', () => {
-  it('should accept a valid createGeometry entry', () => {
-    const entry = {
-      name: 'observability.createGeometry',
-      duration: 123.45,
-      detail: { status: 'success' },
-    };
-    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
-  });
-
-  it('should accept a valid exportGeometry entry', () => {
-    const entry = {
-      name: 'observability.exportGeometry',
-      duration: 50,
-      detail: { status: 'success', exportFormat: 'step' },
-    };
-    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
+  it.each(retiredIngestEntryNames)('should no longer accept the retired %s entry', (name) => {
+    expect(clientMetricEntrySchema.safeParse({ name, duration: 5, detail: { status: 'success' } }).success).toBe(false);
   });
 
   it('should accept a large-object fetch of counts only, and refuse one that names an object', () => {
@@ -126,31 +127,18 @@ describe('clientMetricEntrySchema', () => {
     expect(clientMetricEntrySchema.safeParse({ ...entry, duration: -1 }).success).toBe(false);
   });
 
-  it('should accept an entry without detail', () => {
-    const entry = { name: 'observability.createGeometry', duration: 10 };
-    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
-  });
-
-  it.each([IngestEntryName.KERNEL_CREATE_GEOMETRY, IngestEntryName.KERNEL_EXPORT_GEOMETRY])(
-    'should reject free-text error detail on %s',
-    (name) => {
-      expect(
-        clientMetricEntrySchema.safeParse({ name, duration: 5, detail: { status: 'error', error: 'Kernel crash' } })
-          .success,
-      ).toBe(false);
-    },
-  );
-
   it('should reject an entry with unknown name', () => {
     expect(() => clientMetricEntrySchema.parse({ name: 'unknown.metric', duration: 1 })).toThrow();
   });
 
   it('should reject an entry with negative duration', () => {
-    expect(() => clientMetricEntrySchema.parse({ name: 'observability.createGeometry', duration: -1 })).toThrow();
+    const detail = { direction: 'push', outcome: 'ok', placement: 'browser' };
+    expect(() => clientMetricEntrySchema.parse({ name: IngestEntryName.SYNC_ATTEMPT, duration: -1, detail })).toThrow();
   });
 
   it('should reject an entry missing duration', () => {
-    expect(() => clientMetricEntrySchema.parse({ name: 'observability.createGeometry' })).toThrow();
+    const detail = { direction: 'push', outcome: 'ok', placement: 'browser' };
+    expect(() => clientMetricEntrySchema.parse({ name: IngestEntryName.SYNC_ATTEMPT, detail })).toThrow();
   });
 
   it('should reject an entry missing name', () => {
@@ -162,8 +150,12 @@ describe('ingestPayloadSchema', () => {
   it('should accept a valid payload with multiple entries', () => {
     const payload = {
       entries: [
-        { name: 'observability.createGeometry', duration: 100, detail: { status: 'success' } },
-        { name: 'observability.exportGeometry', duration: 50, detail: { status: 'success', exportFormat: 'stl' } },
+        {
+          name: IngestEntryName.SYNC_ATTEMPT,
+          duration: 100,
+          detail: { direction: 'push', outcome: 'ok', placement: 'browser' },
+        },
+        { name: IngestEntryName.PROJECT_OPEN, duration: 50, detail: { phase: 'first_view', cache: 'warm' } },
       ],
     };
     expect(ingestPayloadSchema.parse(payload)).toEqual(payload);

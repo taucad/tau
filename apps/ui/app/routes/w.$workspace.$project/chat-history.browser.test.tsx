@@ -84,7 +84,7 @@ vi.doMock('#hooks/use-chat.js', () => ({
   },
   useChatContext: () => ({ activeChatId: 'chat_tray', persistenceActorRef: undefined }),
 }));
-vi.doMock('#hooks/use-file-content.js', () => ({
+vi.doMock('@taucad/files-ui/hooks/use-file-content', () => ({
   useFileContent: () => readChatSession().todoList,
 }));
 vi.doMock('#chat-clients/use-cad-chat-client.js', () => ({

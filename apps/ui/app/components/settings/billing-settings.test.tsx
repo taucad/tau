@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactQuery from '@tanstack/react-query';
 import { BillingSettings } from '#components/settings/billing-settings.js';
+import { DeploymentSettingsProvider } from '#components/settings/deployment-settings-provider.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const createPortalAction = vi.hoisted(() => vi.fn());
@@ -76,7 +77,9 @@ const renderSettings = () =>
   render(
     <MemoryRouter>
       <TooltipProvider>
-        <BillingSettings />
+        <DeploymentSettingsProvider>
+          <BillingSettings />
+        </DeploymentSettingsProvider>
       </TooltipProvider>
     </MemoryRouter>,
   );

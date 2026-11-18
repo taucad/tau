@@ -779,8 +779,11 @@ describe('deferred whole-action publication (D1)', () => {
       readonly value: number;
       readonly signal?: AbortSignal;
       readonly label?: string;
+      readonly hold?: string;
     }) =>
-      onCapability(host.capability(input.signal ?? signal)).evaluate({
+      onCapability(
+        host.capability(input.signal ?? signal, undefined, input.hold === undefined ? undefined : { hold: input.hold }),
+      ).evaluate({
         action: action(input.value),
         codec,
         policy: 'best-effort',
@@ -918,6 +921,50 @@ describe('deferred whole-action publication (D1)', () => {
 
     await vi.waitFor(() => {
       expect(settled.map(({ status }) => status)).toEqual(['stored']);
+    });
+  });
+
+  describe('transient frames (R4)', () => {
+    it('should never publish a transient frame on its own, even after delivery and drain', async () => {
+      const { host, settled, encoded, evaluate } = createDeferredHost();
+      await evaluate({ value: 20, hold: 'doc:1' });
+      host.permitPublication();
+      await nextMacrotask();
+      expect(encoded).toHaveLength(0);
+      await host.drain();
+      expect(encoded).toHaveLength(0);
+      expect(settled).toEqual([
+        { actionDigest: await digestAction({ action: action(20) }), status: 'dropped', reason: 'undelivered' },
+      ]);
+    });
+
+    it('should publish a held frame once when a commit adopts it, although the frame was superseded', async () => {
+      const { host, settled, encoded, evaluate } = createDeferredHost();
+      const frame = new AbortController();
+      await evaluate({ value: 21, hold: 'doc:1', signal: frame.signal });
+      await evaluate({ value: 22, hold: 'doc:2' });
+      frame.abort();
+      host.permitPublication();
+      await nextMacrotask();
+      expect(encoded).toHaveLength(0);
+      host.releaseHeld('doc:1');
+      host.permitPublication();
+      await vi.waitFor(() => {
+        expect(settled.map(({ status }) => status)).toEqual(['stored']);
+      });
+      expect(encoded).toEqual(['brep-21']);
+    });
+
+    it('should drop held frames before committed results when the queue is full', async () => {
+      const { settled, evaluate } = createDeferredHost({ idle: () => false });
+      await evaluate({ value: 30 });
+      for (const value of [31, 32, 33, 34]) {
+        // oxlint-disable-next-line no-await-in-loop -- each frame completes before the next, as in a drag.
+        await evaluate({ value, hold: `doc:${String(value)}` });
+      }
+      expect(settled).toEqual([
+        { actionDigest: await digestAction({ action: action(31) }), status: 'dropped', reason: 'queue-full' },
+      ]);
     });
   });
 

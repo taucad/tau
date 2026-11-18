@@ -30,6 +30,7 @@
   },
   "modules": {
     "files": [
+      "apps/ui/app/lib/frame-hint-draft.ts",
       "apps/ui/app/lib/frame-hint.ts",
       "apps/ui/app/machines/focus.machine.ts",
       "apps/ui/app/machines/focus.route-state.ts",
@@ -68,6 +69,7 @@
       "apps/ui/app/runtime/leases.ts",
       "apps/ui/app/runtime/observability/report-to-api.ts",
       "apps/ui/app/runtime/picogk-browser-assets.ts",
+      "apps/ui/app/runtime/project-library-chat-logs.ts",
       "apps/ui/app/runtime/project-library-commands.ts",
       "apps/ui/app/runtime/project-library-observations.ts",
       "apps/ui/app/runtime/project-library-storage.ts",
@@ -80,6 +82,7 @@
       "apps/ui/app/runtime/project-runtime.session.ts",
       "apps/ui/app/runtime/project-runtime.ts",
       "apps/ui/app/runtime/project-runtime.view-records.ts",
+      "apps/ui/app/runtime/root-configuration.ts",
       "apps/ui/app/runtime/root-query-client.ts",
       "apps/ui/app/runtime/runtime-debug.worker.ts",
       "apps/ui/app/runtime/runtime.worker.ts",
@@ -102,6 +105,7 @@
     ]
   },
   "counts": {
-    "apps/ui/app/runtime/app-runtime-provider.tsx#.start()": 1
+    "apps/ui/app/runtime/app-runtime-provider.tsx#.start()": 1,
+    "apps/ui/app/runtime/file-manager-host.ts#setTimeout": 1
   }
 }

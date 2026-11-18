@@ -68,7 +68,10 @@ describe('explicit record push refusals', () => {
     const { push, effects } = await setup();
     push.mockResolvedValue({ refs: [] });
     const result = await effects.pushRecordSet({ ...input, retryRejected: false });
-    expect(result?.get(name)).toMatchObject({ status: 'rejected', reason: 'The remote said nothing about this ref.' });
+    expect(result?.get(name)).toMatchObject({
+      status: 'rejected',
+      reason: 'Couldn’t back up this project’s chats. Tau will try again.',
+    });
     expect(push).toHaveBeenCalledTimes(1);
   });
 

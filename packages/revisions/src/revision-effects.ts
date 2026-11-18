@@ -1173,10 +1173,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           : 'origin';
     const url = input.url ?? (input.kind === 'tau' ? options.remoteUrl?.(input.projectId) : undefined);
     if (url === undefined) {
-      throw new RevisionPortError(
-        'INVALID_TRANSPORT',
-        'This host does not know where this project’s Tau Cloud repository is.',
-      );
+      throw new RevisionPortError('INVALID_TRANSPORT', 'Couldn’t find this project on Tau Cloud. Try again.');
     }
     return { name, url };
   };
@@ -1657,10 +1654,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const url = options.remoteUrl?.(projectId);
     if (url === undefined) {
-      throw new RevisionPortError(
-        'INVALID_TRANSPORT',
-        'This host does not know where this project’s Tau Cloud repository is.',
-      );
+      throw new RevisionPortError('INVALID_TRANSPORT', 'Couldn’t find this project on Tau Cloud. Try again.');
     }
     await port.setRemote({ name: tauRemoteName, url });
     return tauRemoteName;
@@ -4616,7 +4610,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       signal.throwIfAborted();
       const updated = await port.updateRef({ name: `refs/heads/${input.branch}`, expectedHead: expected, head });
       if (updated.status !== 'updated') {
-        throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
+        throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} changed while backing up.`);
       }
       return undefined;
     }
@@ -4689,7 +4683,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
           const updated = await port.updateRef({ name: branch, expectedHead: expected, head });
           if (updated.status !== 'updated') {
-            throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
+            throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} changed while backing up.`);
           }
         },
       });
@@ -6584,7 +6578,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             'INVALID_TRANSPORT',
             refused.reason === 'leaseLost'
               ? 'Someone else changed this project in the cloud. Open it again before publishing.'
-              : `The cloud refused this project: ${refused.reason ?? 'no reason given'}`,
+              : 'Couldn’t back up this project before publishing. Try again.',
           );
         }
         pushSequence += 1;
@@ -6853,7 +6847,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
             /* Storage is the one refusal that is not a failed connection: the
              * files are named and `remote.machine` owns the list (D16, P19). */
-            const message = error instanceof Error ? error.message : 'History could not be backed up.';
+            const message = error instanceof Error ? error.message : 'Couldn’t back up this project’s history.';
             if (error instanceof LfsQuotaError) {
               overQuota = error.refusal.paths;
               quotaMessage = error.refusal.message;
@@ -7352,7 +7346,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                   name: chatRefName(id),
                   status: 'rejected',
                   head: ref.head,
-                  reason: 'Chat synchronization could not establish this device’s record identity.',
+                  reason: 'Couldn’t back up this project’s chats.',
                 }));
               }
             }

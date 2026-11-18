@@ -62,6 +62,39 @@ describe('createLfsClient batch validation', () => {
     ).rejects.toThrow(/invalid LFS batch entry/u);
   });
 
+  /* Tier 2a (R-2): a server may put the quota marker in front of the batch's sentence; the marker is a key, never words a person reads. */
+  it('reads a storage refusal’s sentence without the quota marker, and keeps a sentence that has none', async () => {
+    const oid = 'c'.repeat(64);
+    const refusing = (body: string): RevisionHttpClient => ({
+      request: async () => ({ ...response(body), statusCode: 413, statusMessage: 'Payload Too Large' }),
+    });
+    const refusalFor = async (body: string): Promise<unknown> => {
+      try {
+        await createLfsClient({ url: 'https://api.tau.test/git', http: refusing(body) }).upload({
+          pointers: [{ oid, size: 1 }],
+          read: async () => encoder.encode('x'),
+        });
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    };
+    const sentence = 'This push needs more room than your 1 GB storage plan has left, so it was not backed up.';
+
+    await expect(
+      refusalFor(JSON.stringify({ message: `Tau: storage quota exceeded — ${sentence}`, files: [{ oid }] })),
+    ).resolves.toMatchObject({ name: 'LfsQuotaError', refusal: { message: sentence, oids: [oid] } });
+    await expect(refusalFor(JSON.stringify({ message: sentence }))).resolves.toMatchObject({
+      refusal: { message: sentence },
+    });
+    await expect(refusalFor(JSON.stringify({ message: 'Tau: storage quota exceeded' }))).resolves.toMatchObject({
+      refusal: { message: 'This project doesn’t fit in its backup.' },
+    });
+    await expect(refusalFor('{}')).resolves.toMatchObject({
+      refusal: { message: 'This project doesn’t fit in its backup.' },
+    });
+  });
+
   it('checks both the declared size and hash of a downloaded object', async () => {
     const oid = 'b'.repeat(64);
     const http: RevisionHttpClient = {

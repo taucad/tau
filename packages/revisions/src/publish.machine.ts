@@ -171,7 +171,7 @@ const unsupported = async (): Promise<never> => {
 };
 
 const reason = (error: unknown): string =>
-  error instanceof Error ? error.message : 'This project could not be published.';
+  error instanceof Error ? error.message : 'Couldn’t publish to Tau Cloud. Try again.';
 
 type PublishEnqueue = EnqueueObject<PublishMachineEvent, PublishMachineEmitted>;
 
@@ -219,7 +219,7 @@ const existingVersion = (context: PublishMachineContext): RevisionTag | undefine
 const republished = (draft: PublishDraft | undefined, tags: readonly RevisionTag[]): RevisionTag | undefined =>
   draft?.version === undefined ? undefined : tags.find((tag) => tag.number === draft.version);
 
-const notOnThisDevice = 'That version is not on this device yet. Sync this project, then publish it again.';
+const notOnThisDevice = 'That version isn’t on this device yet. Get the latest changes, then publish it again.';
 
 /* The tag `pushing` and `publishing` name once `tagging` has made it: `v<number>`,
  * as `versionTagName` spells it (a machine imports no value from the port). */
@@ -435,7 +435,7 @@ const publishMachineDefinition = setup({
           if (context.parentRef === undefined) {
             return {
               target: 'error',
-              context: failWith(context, enq, 'This project has no sync to push it to the cloud.'),
+              context: failWith(context, enq, 'Back this project up to Tau Cloud before publishing.'),
             };
           }
           enq.sendTo(context.parentRef, {
@@ -468,7 +468,7 @@ const publishMachineDefinition = setup({
               enq,
               event.outcome === 'conflicted'
                 ? 'Someone else changed this project in the cloud. Open it, resolve the conflict, then publish again.'
-                : 'This project has not reached the cloud yet. Try publishing again when you are back online.',
+                : 'This project isn’t backed up to Tau Cloud yet. Publish again when you’re back online.',
             ),
           };
         },

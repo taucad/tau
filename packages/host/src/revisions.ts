@@ -748,7 +748,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           registerRemoteProject: async (id: string) => {
             const credential = options.tauCredential?.();
             if (credential === undefined) {
-              throw new Error('This host is not signed in to Tau Cloud.');
+              throw new Error('Sign in with `tau auth login` to back up to Tau Cloud.');
             }
             /* B4c: a GitHub-linked project says so, as the browser's registration does (K4). */
             await registerProjectOverHttp(
@@ -764,7 +764,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
           publishPublication: async (input: PublishPublicationActorInput) => {
             const credential = options.tauCredential?.();
             if (credential === undefined) {
-              throw new Error('This host is not signed in to Tau Cloud.');
+              throw new Error('Sign in with `tau auth login` to back up to Tau Cloud.');
             }
             return publishOverHttp(apiBaseUrl, { kind: 'bearer', authorization: credential.authorization }, input);
           },
@@ -2531,7 +2531,7 @@ export const openProjectRevisions = async (
     const scheduler = actor.getSnapshot().children.sync;
     const backedUp: RevisionBackupOutcome =
       scheduler === undefined
-        ? { backup: 'failed', reason: 'This project has no sync running.' }
+        ? { backup: 'failed', reason: 'This project isn’t being backed up.' }
         : await backUp(actor, scheduler, 'This version is saved here and was not backed up yet.');
     return Object.freeze({ tag: made, ...backedUp });
   };
@@ -2618,7 +2618,7 @@ export const openProjectRevisions = async (
           resolve(
             Object.freeze({
               status: 'refused',
-              reason: status.remote.error ?? 'Tau Cloud refused this project.',
+              reason: status.remote.error ?? 'Couldn’t open this project from Tau Cloud.',
             }),
           );
           return;
@@ -2649,7 +2649,7 @@ export const openProjectRevisions = async (
               reason:
                 status.sync.state === 'conflicted'
                   ? 'This project has work of its own that Tau Cloud does not have.'
-                  : (status.sync.error ?? 'Tau Cloud did not finish opening this project.'),
+                  : (status.sync.error ?? 'Couldn’t finish opening this project from Tau Cloud.'),
             }),
           );
         }

@@ -402,7 +402,7 @@ describe('publishMachine', () => {
 
     expect(actor.getSnapshot().matches('error')).toBe(true);
     expect(emitted).toStrictEqual([
-      { type: 'toast.error', requestId: 'pub-1', message: 'This project has no sync to push it to the cloud.' },
+      { type: 'toast.error', requestId: 'pub-1', message: 'Back this project up to Tau Cloud before publishing.' },
     ]);
     actor.stop();
   });

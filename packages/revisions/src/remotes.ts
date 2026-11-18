@@ -14,7 +14,7 @@
  * kind's UI; the data model already holds it.
  */
 
-import { isIncompleteRepositoryRefusal, isStorageRefusal } from '#refusal-markers.js';
+import { isIncompleteRepositoryRefusal, isStorageRefusal, refusalCodeLineDetail } from '#refusal-markers.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { Remote, RemoteKind, RevisionPortErrorCode } from '#revision-port.js';
 import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
@@ -407,7 +407,12 @@ const retryAfterMilliseconds = (header: string | undefined): number | undefined 
 };
 
 /** What a remote answered, however this leg learned it. */
-type RemoteRefusal = Readonly<{ status?: number; code?: string; message?: string }>;
+/**
+ * What one remote refusal said: its status, the `code` of its JSON envelope,
+ * its sentence, and the hook's machine-readable `Tau-Code:` line (`detail`),
+ * which is never part of the sentence.
+ */
+type RemoteRefusal = Readonly<{ status?: number; code?: string; message?: string; detail?: string }>;
 
 /** The `code` values this classifier will hand back untouched when it finds one. */
 const remoteErrorCodes: ReadonlySet<string> = new Set<RevisionPortErrorCode>([
@@ -473,6 +478,10 @@ const gitHookSideband = /^(?:error: )?(?:pre-receive )?hook declined(?: to updat
  * `WWW-Authenticate` by asking for a user name, so with prompts disabled the
  * *absence* of a status and the presence of that refusal is the 401.
  *
+ * A `Tau-Code:` line on the sideband is the hook's key for the refusal, not a
+ * sentence: it is read into `detail` and left out of the message, so with no
+ * such line the message is exactly the hook's sentences.
+ *
  * @param stderr - Everything the command wrote to its error stream.
  * @returns The status and sentence, as far as they can be read.
  */
@@ -489,12 +498,15 @@ const gitStderrRefusal = (stderr: string): RemoteRefusal => {
         /repository .* not found|Repository not found/iu.test(stderr)
         ? '404'
         : undefined);
-  const said = [...stderr.matchAll(/^remote: (?<said>.+)$/gmu)]
+  const lines = [...stderr.matchAll(/^remote: (?<said>.+)$/gmu)]
     .map((match) => (match.groups?.['said'] ?? '').trim())
     .filter((line) => line !== '' && !gitHookSideband.test(line));
+  const detail = lines.map((line) => refusalCodeLineDetail(line)).find((read) => read !== undefined);
+  const said = lines.filter((line) => refusalCodeLineDetail(line) === undefined);
   return {
     ...(status === undefined ? {} : { status: Number(status) }),
     ...(said.length === 0 ? {} : { message: said.join(' ') }),
+    ...(detail === undefined ? {} : { detail }),
   };
 };
 
@@ -548,7 +560,8 @@ export const refMoved = (remoteName: string, reason: string, said: readonly stri
  *
  * Narrow on purpose: every other per-ref status git reports is already the
  * server's or git's own words, and a sideband line beside one of those is
- * progress rather than a refusal.
+ * progress rather than a refusal. The hook's `Tau-Code:` line is a key, never
+ * part of the sentence, on this leg as in `gitStderrRefusal`.
  *
  * @internal
  * @param reported - What the per-ref status said.
@@ -558,7 +571,7 @@ export const refMoved = (remoteName: string, reason: string, said: readonly stri
 export const remoteRefusalSaid = (reported: string, said: readonly string[]): string => {
   const sentence = said
     .map((line) => line.trim())
-    .filter((line) => line !== '' && !gitHookSideband.test(line))
+    .filter((line) => line !== '' && !gitHookSideband.test(line) && refusalCodeLineDetail(line) === undefined)
     .join(' ');
   return sentence !== '' && /hook declined/iu.test(reported) ? sentence : reported;
 };
@@ -578,19 +591,19 @@ const refusalSentence = (code: RevisionPortErrorCode, remote: string | undefined
        * Git remote is anonymous, and a host such as GitLab answers a private
        * or missing repository with 401. */
       return remote?.startsWith('github-')
-        ? 'The remote rejected the saved credentials.'
-        : 'This remote asked for a sign-in Tau does not have, or has no repository at this address.';
+        ? 'GitHub didn’t accept Tau’s saved sign-in. Connect GitHub again in Tau.'
+        : 'This Git host asked for a sign-in Tau doesn’t have, or there’s no repository at this address.';
     }
     case 'REMOTE_UNAUTHORIZED': {
-      return 'This remote did not accept this device; sign in again.';
+      return 'Sign in again to keep backing up.';
     }
     case 'REMOTE_NOT_ENTITLED': {
       return 'Syncing files to Tau Cloud is a paid plan feature.';
     }
     case 'REMOTE_FORBIDDEN': {
       return remote?.startsWith('github-')
-        ? 'GitHub refused access to this repository for the connected account.'
-        : 'This remote refused this device.';
+        ? 'The connected GitHub account can’t open this repository.'
+        : 'You don’t have access to this project’s backup.';
     }
     case 'REMOTE_NOT_FOUND': {
       return 'This remote has no repository at this address for your account.';
@@ -599,16 +612,16 @@ const refusalSentence = (code: RevisionPortErrorCode, remote: string | undefined
       return 'This repository moved to a new address.';
     }
     case 'REMOTE_QUOTA_EXCEEDED': {
-      return 'This project is over its storage plan.';
+      return 'This project doesn’t fit in its backup.';
     }
     case 'REMOTE_REJECTED': {
-      return 'The remote refused this update; this project will catch up and try again.';
+      return 'Couldn’t back up the latest changes. Tau will get the newer changes and try again.';
     }
     case 'REMOTE_DAMAGED': {
-      return 'This project’s cloud copy is damaged and needs repair before it can be backed up.';
+      return 'This project’s backup on Tau Cloud is damaged and needs repair before it can back up again.';
     }
     default: {
-      return 'This remote is busy; this project will try again.';
+      return 'Your backup is busy. Tau will try again.';
     }
   }
 };
@@ -836,7 +849,7 @@ export const publishFailureMessage = (status: number, code?: string): string => 
   if (status === 413 || code === 'PAYLOAD_TOO_LARGE') {
     return 'This version is larger than a shared link may be.';
   }
-  return 'Tau Cloud could not publish this project. Try again.';
+  return 'Couldn’t publish to Tau Cloud. Try again.';
 };
 
 /**
@@ -870,7 +883,7 @@ export const publishOverHttp = async (
   const body = (await response.json()) as Readonly<{ id?: string; urls?: Readonly<{ share?: string; view?: string }> }>;
   const url = body.urls?.share ?? body.urls?.view;
   if (body.id === undefined || url === undefined) {
-    throw new Error('Tau Cloud answered without a link for this publication.');
+    throw new Error('Couldn’t create the link. Try again.');
   }
   return { publicationId: body.id, url };
 };
@@ -993,15 +1006,15 @@ export const registerProjectFailureMessage = (status: number, code?: string, mes
     }
   }
   if (status === 404) {
-    return 'Tau Cloud has no project with this id for your account.';
+    return 'This project isn’t on Tau Cloud for this account.';
   }
   if (status === 429) {
-    return 'Too many projects registered today. Try again tomorrow.';
+    return 'You’ve started backing up too many projects today. Try again tomorrow.';
   }
   if (status === 400) {
-    return 'This project id cannot name a Tau Cloud repository.';
+    return 'Couldn’t back up this project to Tau Cloud. Email support@tau.new.';
   }
-  return 'Tau Cloud could not register this project. Try again.';
+  return 'Couldn’t start backing up to Tau Cloud. Try again.';
 };
 
 /**
@@ -1035,7 +1048,7 @@ export const remoteCarriesLargeObjects = (remote: Remote): boolean =>
  * @public
  */
 export const lfsRemoteUnsupportedMessage = (paths: readonly string[]): string =>
-  `Large files cannot be backed up to a Git remote: ${[...paths].toSorted().join(', ')}. Connect Tau Cloud instead, or remove them from the project.`;
+  `Large files can’t be backed up to this Git host: ${[...paths].toSorted().join(', ')}. Back up to Tau Cloud instead, or remove them from the project.`;
 
 /**
  * What the page told a browser host about reaching a third-party remote.

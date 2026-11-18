@@ -1125,7 +1125,7 @@ describe('syncMachine', () => {
       expect(harness.effects.running('push')).toBe(1);
     });
     harness.effects.settle('push', {
-      error: Object.assign(new Error('Large files cannot be backed up to a Git remote: part.step.'), {
+      error: Object.assign(new Error('Large files can’t be backed up to this Git host: part.step.'), {
         code: 'LFS_REMOTE_UNSUPPORTED',
       }),
     });
@@ -1249,7 +1249,7 @@ describe('syncMachine', () => {
             remote: 'github-42',
             head: 'h-old',
             expected: undefined,
-            reason: 'The remote refused this ref.',
+            reason: 'Couldn’t back up part of this project. Try again.',
             recordedAt: 1,
           },
         ],
@@ -3595,7 +3595,7 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
 
     /* Nothing catches `feature` up until the person decides its conflict. */
     expect(selectSyncFacet(harness.actor.getSnapshot(), ['feature']).error).toBe(
-      'feature waits on your decision; its revisions back up once you choose.',
+      'feature is waiting for your decision. It backs up once you choose.',
     );
     /* Another branch's waiting conflict says nothing about `feature`. */
     expect(selectSyncFacet(harness.actor.getSnapshot(), ['other']).error).toBe(

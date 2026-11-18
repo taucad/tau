@@ -34,3 +34,6 @@ export {
 
 export { readGltfNamingSummary } from '#gltf-naming-testing.utils.js';
 export { mapZupMillimetersToYupMeters, readCoordinateEvidence } from '#coordinate-testing.utils.js';
+
+export { installHandleLedger, summarizeLeaks } from '#oc-handle-ledger.utils.js';
+export type { HandleLedger, HandleLedgerEntry } from '#oc-handle-ledger.utils.js';

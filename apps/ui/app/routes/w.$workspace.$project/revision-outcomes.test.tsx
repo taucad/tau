@@ -17,7 +17,7 @@ import {
   useTurnOutcomes,
 } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { revisionFailureCopy } from '@taucad/ui-core/lib/revision-failure-copy';
-import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
+import type { WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
 const listeners = new Set<(event: WorkerRevisionEvent) => void>();
 const publish = (event: WorkerRevisionEvent): void => {

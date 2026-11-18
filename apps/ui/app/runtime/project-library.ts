@@ -27,6 +27,7 @@ import { createActor, waitFor } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic, AnyActorRef, SnapshotFrom } from 'xstate';
 import type { QueryClient } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
+import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
@@ -34,15 +35,19 @@ import type { ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem'
 import { getChatRecencyAt } from '@taucad/chat-ui/utils/chat-recency.utils';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
-import { projectManagerMachine } from '#hooks/project-manager.machine.js';
+import { projectManagerMachine } from '@taucad/files-ui/machines/project-manager.machine';
+import { createObjectStoreWorker } from '#hooks/object-store-worker.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
-import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
+import {
+  selectWorkspaceConnectionState,
+  workspaceConnectionMachine,
+} from '@taucad/files-ui/machines/workspace-connection.machine';
 import type {
   PreparedWorkspaceCatalog,
   RegisteredWorkspace,
   WorkspaceConnectionServices,
   WorkspaceConnectionState,
-} from '#hooks/workspace-connection.machine.js';
+} from '@taucad/files-ui/machines/workspace-connection.machine';
 import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
 import {
   checkHandlePermission,
@@ -51,6 +56,8 @@ import {
   isNodeWorkspace,
   subscribeProjectRootConfigurationChanges,
 } from '@taucad/files-ui/filesystem/handle-store';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { isWorkspaceOverlapError } from '@taucad/ui-core/filesystem/workspace-errors';
 import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
@@ -70,27 +77,32 @@ import type {
 } from '@taucad/files-ui/types/pending-project-operation.types';
 import {
   applyDiscovery,
+  buildDiscoveryOnlyListing,
   buildProjectListing,
   classifyMissingProject,
   commitPendingProjectOperation,
   ensureProjectLibraryState,
   planDiscovery,
   presentWorkspaceRows,
+  readProjectLibraryStateFromDisk,
   recoveryRowOf,
   rememberChatPlacement,
   replayOutcomeOf,
   scanDiscovery,
-} from '#runtime/project-library-storage.js';
-import type { DiscoveryScan, ProjectLibraryFileManager, ProjectListing } from '#runtime/project-library-storage.js';
+} from '@taucad/files-ui/runtime/project-library-storage';
+import type { DiscoveryScan, ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
+import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 import {
   createDiscoveryObservation,
   createMetadataObservation,
   createMetadataReadOwner,
-} from '#runtime/project-library-observations.js';
-import type { LibraryRecords } from '#runtime/project-library-observations.js';
+} from '@taucad/files-ui/runtime/project-library-observations';
+import type { LibraryRecords } from '@taucad/files-ui/runtime/project-library-observations';
+import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
+import { reportProjectLibraryWorkerFailed } from '#lib/file-service-reports.js';
 import { ProjectCommands } from '#runtime/project-library-commands.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
-import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
+import { WorkspaceCommands } from '@taucad/files-ui/runtime/project-library-workspace';
 import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 
 /** What the library takes from the runtime's composition. @public */
@@ -143,7 +155,7 @@ export type ProjectLibraryChatPorts = Readonly<{
 }>;
 
 /** The root file facade as the library reads it: its value now, and its changes (A4b). @public */
-export type ProjectLibraryRootFiles = ProjectLibraryObservable<ProjectLibraryFileManager>;
+export type ProjectLibraryRootFiles = ProjectLibraryObservable<ProjectLibraryFacade>;
 
 /** The route's answer about one project's access (`getProjectRouteAccess`). @public */
 export type ProjectRouteAccess = Exclude<AccessAnswer, Readonly<{ status: 'error' }>>;
@@ -240,6 +252,40 @@ const until = async <Ref extends AnyActorRef>(
   });
 };
 
+/**
+ * The names a local database open fails with when it cannot be opened at all, as opposed to a read that failed once
+ * (desktop resilient startup blueprint B5, B31): a newer version, an upgrade another tab blocks, the open deadline,
+ * and a damaged or unreadable backing store. A transaction on a closing connection (`InvalidStateError`) is a read
+ * that failed once, not a database that cannot open.
+ */
+const localDatabaseUnavailableNames = new Set([
+  'VersionError',
+  'StorageUpgradeBlockedError',
+  'DatabaseOpenTimeoutError',
+  'UnknownError',
+]);
+
+/** Whether `error` says a local database cannot be opened. */
+const isLocalDatabaseUnavailable = (error: unknown): boolean =>
+  error instanceof Error && localDatabaseUnavailableNames.has(error.name);
+
+/**
+ * A mutation refused because the library's database cannot be opened: creating, trashing or moving a project writes
+ * a journal row, so it waits until the database is back (desktop resilient startup blueprint D1, R7).
+ *
+ * @public
+ */
+export class LocalDatabaseUnavailableError extends Error {
+  public override readonly name = 'LocalDatabaseUnavailableError';
+
+  public constructor(cause: unknown) {
+    super(
+      "Tau's local database is unavailable, so projects can't be created or changed until it is reset or Tau is updated. Your files are safe.",
+      { cause },
+    );
+  }
+}
+
 /** A rejection as an `Error`: a thrown non-error travels as its cause. */
 const asError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error), { cause: error });
@@ -279,14 +325,14 @@ export class ProjectLibrary {
 
   readonly #rootFiles: () => ProjectLibraryRootFiles | undefined;
   /** The root facade's current value, once the library follows it. */
-  #fileManager: ProjectLibraryFileManager | undefined;
+  #fileManager: ProjectLibraryFacade | undefined;
   #unfollowRootFiles: (() => void) | undefined;
   #stopped = false;
   readonly #bound = Promise.withResolvers<void>();
   /** Counts record replacements, so a read can tell the records it ran on were replaced while it ran. */
   #replacements = 0;
   /** The chat store and its read owner over the facade's record client. */
-  #records: LibraryRecords | undefined;
+  #records: LibraryRecords<ChatStorage> | undefined;
   readonly #changed = new Topic<void>({ name: 'project-library' });
   readonly #filesChanged = new Topic<void>({ name: 'project-library-files' });
   readonly #bindingChanged = new Topic<void>({ name: 'project-library-binding' });
@@ -327,11 +373,22 @@ export class ProjectLibrary {
   }: ProjectLibraryOptions) {
     this.queryClient = queryClient;
     this.#rootFiles = rootFiles ?? (() => undefined);
-    this.projectManager = createActor(projectManagerMachine, options);
+    this.projectManager = createActor(projectManagerMachine, {
+      ...options,
+      input: {
+        startObjectStore() {
+          const worker = createObjectStoreWorker();
+          return { worker, wrappedWorker: wrap<ObjectStoreWorker>(worker) };
+        },
+        reportFault: reportAppRuntimeFault,
+        reportWorkerFailed: reportProjectLibraryWorkerFailed,
+      },
+    });
     const connection: WorkspaceConnectionServices = {
       registerWorkspace: async (selection, signal) => this.#registerWorkspace(selection, signal),
       mountWorkspace: async (_workspace, selection, signal) => this.#mountWorkspace(selection, signal),
       prepareWorkspaceCatalog: async (workspace, signal) => this.#prepareWorkspaceCatalog(workspace, signal),
+      reportFault: reportAppRuntimeFault,
     };
     this.workspaceConnection = createActor(workspaceConnectionMachine, { ...options, input: connection });
     const host = {
@@ -848,23 +905,19 @@ export class ProjectLibrary {
 
   /** The listing the library shows: a current pass, enriched, read again whenever the epoch moved under it. */
   public readonly getProjectListing = async (options?: { includeDeleted?: boolean }): Promise<ProjectListing> => {
-    // Captured before awaiting: only a caller that waited for the bootstrap pass may reuse its listing; a later
-    // explicit refresh runs discovery.
-    let reuse = !this.#bootstrapped;
-    await this.#ensureBootstrap();
-    /* oxlint-disable no-await-in-loop -- A filesystem event may invalidate the generation during listing enrichment. */
-    for (;;) {
-      const pass = await this.#requestPass({ reuse });
-      reuse = false;
-      const listing = await this.#buildListing(pass.result);
-      if (!selectEpochCurrent(this.discovery.getSnapshot(), pass.epoch)) {
-        continue;
+    try {
+      return await this.#getLibraryListing(options);
+    } catch (error) {
+      /* R7, B5: the library's database cannot be opened, so its journal and rows are out of reach; Home's projects
+       * are on disk and list from discovery alone. Any other failure is the listing's own. */
+      if (!this.#isLibraryUnavailable()) {
+        throw error;
       }
+      const listing = await this.#discoveryOnlyListing();
       return options?.includeDeleted
         ? listing
         : { ...listing, projects: listing.projects.filter((project) => project.library.deletedAt === undefined) };
     }
-    /* oxlint-enable no-await-in-loop */
   };
 
   /**
@@ -920,22 +973,15 @@ export class ProjectLibrary {
    * @returns The answer; a port that rejected rejects with its message.
    */
   public readonly routeAccess = async (projectId: string): Promise<ProjectRouteAccess> => {
-    this.#startRecovery();
-    const requestId = this.#nextRequestId('access');
-    return new Promise<ProjectRouteAccess>((resolve, reject) => {
-      const subscription = this.access.on('accessAnswered', (event) => {
-        if (event.requestId !== requestId) {
-          return;
-        }
-        subscription.unsubscribe();
-        if (event.answer.status === 'error') {
-          reject(new Error(event.answer.message));
-        } else {
-          resolve(event.answer);
-        }
-      });
-      this.access.send({ type: 'accessAsked', requestId, projectId });
-    });
+    try {
+      return await this.#libraryRouteAccess(projectId);
+    } catch (error) {
+      /* R7, B5: with the library's database unopenable, a project the file service verifies still opens. */
+      if (!this.#isLibraryUnavailable()) {
+        throw error;
+      }
+      return this.#routeAccessWithoutLibrary(projectId);
+    }
   };
 
   /**
@@ -951,6 +997,12 @@ export class ProjectLibrary {
     { gated }: Readonly<{ gated: boolean }>,
   ): Promise<LibraryMutation> => {
     this.#startRecovery();
+    /* R7: a mutation writes a journal row, so it is refused, with the database message, while the library's
+     * database cannot be opened. Wait only for the journal's first read; the gate below waits for rows. */
+    const read = await until(this.recovery, (snapshot) => !snapshot.matches('loading'));
+    if (read.matches('loadFailed') && this.#isLibraryUnavailable()) {
+      throw new LocalDatabaseUnavailableError(this.#journalError);
+    }
     const requestId = this.#nextRequestId('mutation');
     let journaled = false;
     if (gated) {
@@ -1056,7 +1108,7 @@ export class ProjectLibrary {
    * Adopt the facade's value: a change of the record client builds the chat store and its read owner again, and a
    * change of what the observations read rebuilds them.
    */
-  #adopt(fileManager: ProjectLibraryFileManager): void {
+  #adopt(fileManager: ProjectLibraryFacade): void {
     const previous = this.#fileManager;
     if (previous === fileManager) {
       return;
@@ -1357,6 +1409,74 @@ export class ProjectLibrary {
     await this.#passSettled();
   }
 
+  /** The listing through the library: its journal, its discovery pass and its rows. */
+  async #getLibraryListing(options?: { includeDeleted?: boolean }): Promise<ProjectListing> {
+    // Captured before awaiting: only a caller that waited for the bootstrap pass may reuse its listing; a later
+    // explicit refresh runs discovery.
+    let reuse = !this.#bootstrapped;
+    await this.#ensureBootstrap();
+    /* oxlint-disable no-await-in-loop -- A filesystem event may invalidate the generation during listing enrichment. */
+    for (;;) {
+      const pass = await this.#requestPass({ reuse });
+      reuse = false;
+      const listing = await this.#buildListing(pass.result);
+      if (!selectEpochCurrent(this.discovery.getSnapshot(), pass.epoch)) {
+        continue;
+      }
+      return options?.includeDeleted
+        ? listing
+        : { ...listing, projects: listing.projects.filter((project) => project.library.deletedAt === undefined) };
+    }
+    /* oxlint-enable no-await-in-loop */
+  }
+
+  /** Route access through the library's machines (row L8). */
+  async #libraryRouteAccess(projectId: string): Promise<ProjectRouteAccess> {
+    this.#startRecovery();
+    const requestId = this.#nextRequestId('access');
+    return new Promise<ProjectRouteAccess>((resolve, reject) => {
+      const subscription = this.access.on('accessAnswered', (event) => {
+        if (event.requestId !== requestId) {
+          return;
+        }
+        subscription.unsubscribe();
+        if (event.answer.status === 'error') {
+          reject(new Error(event.answer.message));
+        } else {
+          resolve(event.answer);
+        }
+      });
+      this.access.send({ type: 'accessAsked', requestId, projectId });
+    });
+  }
+
+  /** Whether the library's database could not be opened: its journal read failed with an open failure. */
+  #isLibraryUnavailable(): boolean {
+    return isLocalDatabaseUnavailable(this.#journalError);
+  }
+
+  /** The listing a pass of the file service gives with no library database (R7). */
+  async #discoveryOnlyListing(): Promise<ProjectListing> {
+    const fileManager = await this.#facade();
+    const discovery = await fileManager.client.listProjectManifests();
+    return buildDiscoveryOnlyListing(fileManager.recordFiles, discovery);
+  }
+
+  /**
+   * Route access with no library database (R7): a project the file service verifies opens with its state read from
+   * its own files; anything else is not reachable until the database is back.
+   */
+  async #routeAccessWithoutLibrary(projectId: string): Promise<ProjectRouteAccess> {
+    const fileManager = await this.#facade();
+    const verification = await fileManager.client.verifyProjectRoute({ projectId });
+    if (verification.status !== 'verified') {
+      return { status: 'unavailable' };
+    }
+    const project = { ...verification.project.manifest, id: verification.project.projectId };
+    const state = await readProjectLibraryStateFromDisk(fileManager.recordFiles, projectId);
+    return state.deletedAt === undefined ? { status: 'ready', project } : { status: 'trashed', project };
+  }
+
   async #buildListing(discovery: ProjectDiscoveryResult): Promise<ProjectListing> {
     const [fileManager, worker] = await Promise.all([this.#facade(), this.getReadiedWorker()]);
     return buildProjectListing({ recordFiles: fileManager.recordFiles, worker }, discovery, () => this.#recoveries());
@@ -1369,7 +1489,17 @@ export class ProjectLibrary {
       const connection =
         selection.backend === 'webaccess'
           ? await createWorkspace(selection.handle)
-          : await createNodeWorkspace(selection.path);
+          : await createNodeWorkspace(selection.path).catch(async (error: unknown) => {
+              /* R6: main granted the folder when it was picked; a refused folder must not stay in the grant file. */
+              if (isWorkspaceOverlapError(error)) {
+                await desktopBridge()
+                  ?.directories?.disconnect(selection.path)
+                  .catch((revokeError: unknown) => {
+                    console.warn('Could not release the refused folder', revokeError);
+                  });
+              }
+              throw error;
+            });
       signal.throwIfAborted();
       if (this.workspaceCommands.connectionTrace) {
         this.workspaceCommands.connectionTrace.workspaceId = connection.workspaceId;
@@ -1435,13 +1565,13 @@ export class ProjectLibrary {
   }
 
   /** The root facade, once there is one: a call made earlier waits, and reads the one current then. */
-  async #facade(): Promise<ProjectLibraryFileManager> {
+  async #facade(): Promise<ProjectLibraryFacade> {
     this.followRootFiles();
     await this.#bound.promise;
     return this.#fileManager!;
   }
 
-  async #currentRecords(): Promise<LibraryRecords> {
+  async #currentRecords(): Promise<LibraryRecords<ChatStorage>> {
     this.followRootFiles();
     await this.#bound.promise;
     return this.#records!;
@@ -1452,7 +1582,7 @@ export class ProjectLibrary {
    * records it ran on were replaced (a new root worker) is asked once more of the records that serve next: the chat
    * store would otherwise keep a session whose history never loaded. Only reads are asked again.
    */
-  async #read<T>(call: (records: LibraryRecords) => Promise<T>): Promise<T> {
+  async #read<T>(call: (records: LibraryRecords<ChatStorage>) => Promise<T>): Promise<T> {
     const records = await this.#currentRecords();
     const replacements = this.#replacements;
     try {
@@ -1474,6 +1604,8 @@ export class ProjectLibrary {
     if (!snapshot.context.wrappedWorker) {
       throw new Error(`${label} not initialized`);
     }
-    return snapshot.context.wrappedWorker;
+    /* The machine holds the store it was handed as the library's contract; its only producer is this library's
+     * `startObjectStore`, which wraps the app's object-store worker. */
+    return snapshot.context.wrappedWorker as Remote<ObjectStoreWorker>;
   }
 }

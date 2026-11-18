@@ -2,11 +2,12 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { LargeObjectsFacet, ProjectReadiness, RevisionStatusProjection } from '@taucad/revisions';
-import type { RevisionClient } from '#types/revision-client.types.js';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 import {
   chatsOpen,
   filePaneAvailability,
   modelAvailability,
+  modelFirstViewOpens,
   pendingOpenReadiness,
   pendingPathSet,
   projectAvailability,
@@ -15,6 +16,7 @@ import {
   surfaceReadiness,
   useFilePaneAvailability,
   useLargeObjectPending,
+  useModelAvailability,
   useOpenedLargeObjectPending,
   usePathLanded,
   useProjectAvailability,
@@ -25,6 +27,8 @@ import { useProject } from '#hooks/use-project.js';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
 import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
+import { noteManifestReconciled } from '#lib/manifest-reconciliation.js';
+import { sha256Bytes } from '@taucad/utils/hash';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: vi.fn() }));
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: vi.fn(), useRevisionClient: vi.fn() }));
@@ -576,5 +580,137 @@ describe('a file pane’s own landing', () => {
     pendingOpen('entryReady', ['README.md']);
     expect(renderHook(() => usePathLanded('lib/gear.ts')).result.current).toBe(false);
     expect(renderHook(() => usePathLanded(undefined)).result.current).toBe(false);
+  });
+});
+
+/*
+ * STO-25 gap 1: the viewer, Parameters and the model panel render from the open's first view, not after the whole
+ * apply and the intent. Only while the project holds the manifest the write landed (the host's `entryManifest` and
+ * the manifest observation's finding name the same bytes), so the main entry of the open's placeholder manifest is
+ * never rendered (I7); every other file the render reads waits for the write to land it (Rule 33).
+ */
+describe('a model surface during a Tau Cloud open', () => {
+  const landed = 'a'.repeat(64);
+  const placeholder = 'b'.repeat(64);
+  const applying = status({ state: 'pending', pullPhase: 'applying' });
+  const opens = (
+    projection: RevisionStatusProjection,
+    readiness: ProjectReadiness,
+    options: Readonly<{
+      entryManifest?: string;
+      reconciled?: string;
+      canOpen?: boolean;
+      surface?: 'viewer' | 'export';
+    }>,
+  ): boolean =>
+    modelFirstViewOpens({
+      surface: options.surface ?? 'viewer',
+      project: projectAvailability(true, projection, { canOpen: options.canOpen ?? true }),
+      firstView: projectAvailability(true, projection, {
+        canOpen: options.canOpen ?? true,
+        firstView: { surface: 'viewer', readiness },
+      }),
+      status: options.entryManifest === undefined ? {} : { entryManifest: options.entryManifest },
+      reconciled: options.reconciled,
+    });
+
+  it('opens at the first view once the project holds the manifest the write landed', () => {
+    expect(opens(applying, 'entryReady', { entryManifest: landed, reconciled: landed })).toBe(true);
+    expect(modelAvailability('ready', { readiness: 'entryReady', firstView: true }, ['tau.json', 'main.ts'])).toBe(
+      'ready',
+    );
+  });
+  it('waits while the project still holds the placeholder manifest, or the landed one is not named yet', () => {
+    expect(opens(applying, 'entryReady', { entryManifest: landed, reconciled: placeholder })).toBe(false);
+    expect(opens(applying, 'entryReady', { entryManifest: landed })).toBe(false);
+    expect(opens(applying, 'entryReady', { reconciled: landed })).toBe(false);
+  });
+  it('waits for the entry closure to land', () => {
+    expect(opens(applying, 'treeReady', { entryManifest: landed, reconciled: landed })).toBe(false);
+    expect(modelAvailability('ready', { readiness: 'treeReady', firstView: true }, ['tau.json', 'main.ts'])).toBe(
+      'filesChecking',
+    );
+  });
+  it('lets a failed open and an account refusal win, whatever has landed', () => {
+    for (const failed of [status({ state: 'failed' }), status({ state: 'queued', reason: 'offline' })]) {
+      expect(opens(failed, 'entryReady', { entryManifest: landed, reconciled: landed })).toBe(false);
+    }
+    expect(opens(applying, 'entryReady', { entryManifest: landed, reconciled: landed, canOpen: false })).toBe(false);
+  });
+  it('leaves export and print to the whole apply (D10)', () => {
+    expect(opens(applying, 'entryReady', { entryManifest: landed, reconciled: landed, surface: 'export' })).toBe(false);
+  });
+  it('waits again once a retry’s write lands its own closure, then opens on it', () => {
+    /* A failed write's manifest is never named by the host, and its retry fetches first. */
+    expect(opens(status({ state: 'pending', pullPhase: 'fetching' }), 'entryReady', { reconciled: landed })).toBe(
+      false,
+    );
+    expect(opens(applying, 'treeReady', { reconciled: landed })).toBe(false);
+    expect(opens(applying, 'entryReady', { entryManifest: landed, reconciled: landed })).toBe(true);
+  });
+  it('still waits on a large object its own closure reads', () => {
+    expect(
+      modelAvailability(
+        'ready',
+        { readiness: 'entryReady', largeObjects: { phase: 'fetching', paths: ['main.ts'] }, firstView: true },
+        ['tau.json', 'main.ts'],
+      ),
+    ).toBe('files');
+  });
+  it('is nothing to a project with no open owed', () => {
+    const project = projectAvailability(false, applying);
+    expect(
+      modelFirstViewOpens({
+        surface: 'viewer',
+        project,
+        firstView: project,
+        status: { entryManifest: landed },
+        reconciled: landed,
+      }),
+    ).toBe(false);
+  });
+
+  it('swaps from the placeholder manifest to the landed one in the hook, never rendering the placeholder', async () => {
+    const encoder = new TextEncoder();
+    const real = encoder.encode('{"assets":{"main":{"entryPath":"model/main.ts"}}}');
+    const stub = encoder.encode('{"assets":{"main":{"entryPath":"main.scad"}}}');
+    const projectId = 'project-model-1';
+    const projection = {
+      ...applying,
+      remote: { kind: 'tau', phase: 'connected' },
+      readiness: 'entryReady',
+      entryManifest: await sha256Bytes(real),
+    } as unknown as RevisionStatusProjection;
+    vi.mocked(useProject).mockReturnValue({
+      projectId,
+      mainEntryPath: 'main.scad',
+      viewRecords: new Map(),
+      geometryUnits: new Map(),
+    } as unknown as ReturnType<typeof useProject>);
+    vi.mocked(useTauCloudIntent).mockReturnValue('open');
+    vi.mocked(canOpenCloudProject).mockReturnValue(true);
+    vi.mocked(useRevisionStatus).mockReturnValue(projection);
+    const { result } = renderHook(() => useModelAvailability());
+    expect(result.current).toBe('preparing');
+    /* The observation found the project equal to the placeholder's bytes: still not the tree's. */
+    act(() => {
+      noteManifestReconciled(projectId, stub);
+    });
+    await act(async () => {
+      await sha256Bytes(stub);
+    });
+    expect(result.current).toBe('preparing');
+    act(() => {
+      noteManifestReconciled(projectId, real);
+    });
+    await vi.waitFor(() => {
+      expect(result.current).toBe('ready');
+    });
+    expect(renderHook(() => useModelAvailability('export')).result.current).toBe('preparing');
+    /* A reload begins: the project is no longer known to be those bytes'. */
+    act(() => {
+      noteManifestReconciled(projectId, undefined);
+    });
+    expect(result.current).toBe('preparing');
   });
 });

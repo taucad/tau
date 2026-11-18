@@ -29,7 +29,7 @@
       },
       "options": {
         "cwd": "{workspaceRoot}/packages/host",
-        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/acp/acp-live.integration.test.ts",
+        "command": "vitest run --config vitest.config.ts src/acp/acp-live.integration.test.ts",
         "env": {
           "TAU_ACP_LIVE": "1"
         }
@@ -90,6 +90,14 @@
       "options": {
         "command": "node --import @oxc-node/core/register packages/host/scripts/qualify-x1c.mts"
       }
+    },
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/libs/tau-examples/src/kernels/replicad/bench-vise/**/*"
+      ]
     }
   }
 }

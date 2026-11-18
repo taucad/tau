@@ -17,6 +17,7 @@ const baseConfig: UserConfig = {
     'src/image-probe.ts',
     'src/attachment-media.ts',
     'src/origin-answer.utils.ts',
+    'src/deployment-mode.utils.ts',
   ],
   sourcemap: false,
   clean: ['dist'],

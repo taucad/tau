@@ -20,14 +20,15 @@ import { eventSchemas } from '@taucad/ui-core/lib/xstate.lib';
 import { Topic } from '@taucad/events';
 import type { GitRemoteCredential, RemoteFacet, RevisionStatusProjection, SyncFacet } from '@taucad/revisions';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
-import { githubCredentialRenewDelay, revisionClientTestApi, useRevisionCommands } from '#hooks/use-revision-status.js';
-import type { RevisionClient } from '#types/revision-client.types.js';
+import { githubCredentialRenewDelay } from '@taucad/revisions-ui/hooks/use-revision-status';
+import { revisionClientTestApi, useRevisionCommands } from '#hooks/use-revision-status.js';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { GithubRequestError } from '#lib/github-connections.js';
 import type * as GithubConnectionsModule from '#lib/github-connections.js';
 import { githubProjectBinding } from '@taucad/ui-core/lib/github-project-binding';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
-import type { WorkerRevisionCommand } from '#machines/file-manager.worker.revisions.js';
+import type { WorkerRevisionCommand } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
 const projectId = 'alpha';
 const connectionId = '00000000-0000-4000-8000-000000000001';

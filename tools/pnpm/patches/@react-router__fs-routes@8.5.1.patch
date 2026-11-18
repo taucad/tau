@@ -1,0 +1,14 @@
+diff --git a/dist/index.js b/dist/index.js
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -221,7 +221,9 @@
+ 	return filepath;
+ }
+ function findRouteModuleForFolder(appDirectory, filepath, ignoredFileRegex) {
+-	let relativePath = path.relative(appDirectory, filepath);
++	// tau patch: normalize like findRouteModuleForFile. On Windows the raw `..\..\app\routes\x` of an out-of-tree
++	// rootDirectory (apps/ui/desktop) matches the default `**/.*` ignore, so every folder route was dropped.
++	let relativePath = normalizeSlashes(path.relative(appDirectory, filepath));
+ 	if (ignoredFileRegex.some((regex) => regex.test(relativePath))) return null;
+ 	let routeRouteModule = findFile(filepath, "route", routeModuleExts);
+ 	let routeIndexModule = findFile(filepath, "index", routeModuleExts);

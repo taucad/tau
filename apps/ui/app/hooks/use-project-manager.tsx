@@ -6,8 +6,12 @@ import type { Project, ProjectManifest } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
-import type { projectManagerMachine } from '#hooks/project-manager.machine.js';
-import type { WorkspaceBindingRepairResult } from '@taucad/files-ui/filesystem/handle-store';
+import type { projectManagerMachine } from '@taucad/files-ui/machines/project-manager.machine';
+import type {
+  FolderEvidence,
+  RelinkTarget,
+  WorkspaceBindingRepairResult,
+} from '@taucad/files-ui/filesystem/handle-store';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
 import type { AppUiPreferences, ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import type { PendingProjectRecovery } from '@taucad/files-ui/types/pending-project-operation.types';
@@ -24,14 +28,14 @@ import {
   selectMetadataObservationError,
   selectMetadataObservationErrors,
 } from '#runtime/project-library.js';
-import type { ProjectListing } from '#runtime/project-library-storage.js';
+import type { ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
 import type { ProjectLibrary, ProjectRouteAccess } from '#runtime/project-library.js';
 import type { CreatedProject, CreateProjectOptions, ImportStagingTarget } from '#runtime/project-library-commands.js';
-import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
+import type { ConnectedWorkspace } from '@taucad/files-ui/runtime/project-library-workspace';
 import { selectRuntimeProjectLibrary } from '#runtime/app-runtime.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { prepareFirstProjectTour } from '#components/tour/first-project-tour.js';
-import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 
 type ProjectManagerContextType = {
   discoveryObservationError: string | undefined;
@@ -99,6 +103,8 @@ type ProjectManagerContextType = {
   /** Drop a pending operation the user has given up on (DF11). */
   discardRecovery: (operationId: string) => Promise<void>;
   assertWorkspaceMutationAllowed: (workspaceId: string) => Promise<void>;
+  /** Read what a folder picked for Locate holds; reads only (blueprint D2). */
+  readFolderEvidence: (target: RelinkTarget) => Promise<FolderEvidence>;
   getAppUiPreferences: () => Promise<AppUiPreferences>;
   setProjectDisclosure: (projectId: string, expanded: boolean | undefined) => Promise<AppUiPreferences | undefined>;
   // Chat methods
@@ -225,6 +231,7 @@ export function ProjectManagerProvider({
     repairWorkspaceBindings,
     chooseProjectDirectory,
     assertWorkspaceMutationAllowed,
+    readFolderEvidence,
   } = workspaceCommands;
 
   /** The chat store over the facade's current record client, read when a command runs. */
@@ -467,6 +474,7 @@ export function ProjectManagerProvider({
       recoveries,
       discardRecovery,
       assertWorkspaceMutationAllowed,
+      readFolderEvidence,
       getAppUiPreferences,
       setProjectDisclosure,
       createChat,
@@ -527,6 +535,7 @@ export function ProjectManagerProvider({
     recoveries,
     discardRecovery,
     assertWorkspaceMutationAllowed,
+    readFolderEvidence,
     getAppUiPreferences,
     setProjectDisclosure,
     createChat,

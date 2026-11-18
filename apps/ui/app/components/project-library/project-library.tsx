@@ -68,7 +68,10 @@ import { WaitIndicator } from '@taucad/ui/components/wait-indicator';
 import { useWaitClock, useWaitClockSource } from '@taucad/ui/hooks/use-wait-clock';
 import type { WaitIndicatorTiming } from '@taucad/ui/utils/wait-timing';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
-import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
+import type {
+  ProjectDiscoveryConflict,
+  WorkspaceBindingRepairGroup,
+} from '@taucad/files-ui/runtime/project-library-storage';
 import { ProjectCard, ProjectCardMedia } from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
@@ -800,7 +803,7 @@ export function ProjectLibrary({
       )}
 
       {recoveries.length > 0 && (
-        <div role='group' className='mb-6 space-y-2' aria-label='Project recovery'>
+        <div id='project-recovery' role='group' className='mb-6 space-y-2' aria-label='Project recovery'>
           {recoveries.map((recovery) => (
             <div
               key={recovery.operationId}

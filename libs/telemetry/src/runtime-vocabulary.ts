@@ -6,6 +6,7 @@ export const runtimeKernelIds = [
   'assimp',
   'brep',
   'build123d',
+  'cadmpeg',
   'gltf',
   'jscad',
   'manifold',
@@ -33,7 +34,7 @@ export const middlewareIds = [
 export const bundlerIds = ['esbuild', 'rolldown'] as const;
 
 /** Transcoder plugin ids (`TranscoderPlugin.id`). @public */
-export const transcoderIds = ['assimp', 'gltf', 'heif', 'raster', 'render', 'slicer', 'svg'] as const;
+export const transcoderIds = ['assimp', 'cadmpeg', 'gltf', 'heif', 'raster', 'render', 'slicer', 'svg'] as const;
 
 /** Job provider ids (`JobProviderIdentity.id`). @public */
 export const jobProviderIds = ['tau.calculix.container', 'tau.openfoam.container'] as const;
@@ -43,10 +44,13 @@ export const machineProviderIds = ['bambu', 'bambu-a1-mini', 'grbl', 'makera-car
 
 /** Export formats: every kernel export-map extension and every transcoder edge target. @public */
 export const exportFormats = [
+  '3dm',
   '3mf',
   'csv',
   'dae',
+  'f3d',
   'fbx',
+  'fcstd',
   'gcode.3mf',
   'glb',
   'gltf',
@@ -55,6 +59,7 @@ export const exportFormats = [
   'obj',
   'ply',
   'png',
+  'sldprt',
   'step',
   'stl',
   'txt',
@@ -67,6 +72,7 @@ export const exportFormats = [
 
 /** File formats: every kernel extension, every transcoder edge source and every export format. @public */
 export const fileFormats = [
+  '3dm',
   '3mf',
   'ac',
   'amf',
@@ -75,21 +81,27 @@ export const fileFormats = [
   'bmp',
   'brep',
   'bvh',
+  'catpart',
   'cob',
   'cs',
   'csv',
   'dae',
   'dxf',
+  'f3d',
+  'f3z',
   'fbx',
+  'fcstd',
   'gcode.3mf',
   'gif',
   'glb',
   'gltf',
   'heic',
   'heif',
+  'iam',
   'ifc',
   'iges',
   'igs',
+  'ipt',
   'jpeg',
   'js',
   'json',
@@ -105,9 +117,15 @@ export const fileFormats = [
   'ogex',
   'ply',
   'png',
+  'pvz',
   'py',
+  'sab',
+  'sat',
   'scad',
+  'sldprt',
+  'smb',
   'smd',
+  'smt',
   'step',
   'stl',
   'stp',
@@ -175,6 +193,10 @@ export const conversionEdges = [
   'png→jpeg',
   'png→png',
   'png→webp',
+  'step→3dm',
+  'step→f3d',
+  'step→fcstd',
+  'step→sldprt',
   'svg→png',
   'svg→webp',
   'tiff→jpeg',

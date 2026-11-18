@@ -146,7 +146,7 @@ const mockDuplicate = vi.fn<
   return pendingDuplicate;
 });
 
-vi.mock('#hooks/project-manager.machine.js', async () => {
+vi.mock('@taucad/files-ui/machines/project-manager.machine', async () => {
   const xstate = await import('xstate');
   return {
     projectManagerMachine: xstate.setup({}).createMachine({

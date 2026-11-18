@@ -17,6 +17,11 @@ const mocks = vi.hoisted(() => {
   return {
     model: 'ready' as ModelAvailability,
     project: 'ready' as ProjectAvailability,
+    /* The availability of the surfaces the first view opens (tree, editor, chats); `undefined` follows `project`. */
+    firstView: undefined as ProjectAvailability | undefined,
+    surfaces: [] as Array<string | undefined>,
+    cloudOpenPending: false,
+    firstViewShown: vi.fn(),
     facet: undefined as LargeObjectsFacet | undefined,
     status: { projectId: 'project-0', checkoutId: 'checkout-1', readiness: 'filled' as ProjectReadiness },
     remote: facetOf({ phase: 'connected', reason: undefined, error: undefined }),
@@ -28,11 +33,15 @@ const mocks = vi.hoisted(() => {
 vi.mock('react-router', () => ({ useLocation: () => ({ pathname: '/w/x/p', search: '' }), Link: () => null }));
 vi.mock('#hooks/use-project-availability.js', () => ({
   useLargeObjects: () => mocks.facet,
-  useProjectAvailability: () => mocks.project,
+  useProjectAvailability: (surface?: string) => {
+    mocks.surfaces.push(surface);
+    return surface === undefined ? mocks.project : (mocks.firstView ?? mocks.project);
+  },
   useModelAvailability: () => mocks.model,
+  useCloudOpenPending: () => mocks.cloudOpenPending,
 }));
 vi.mock('#hooks/use-revision-status.js', () => ({
-  useRevisionClient: () => ({ send: vi.fn() }),
+  useRevisionClient: () => ({ send: vi.fn(), firstViewShown: mocks.firstViewShown }),
   useRevisionCommands: () => ({ connectRemote: vi.fn(), syncNow: vi.fn() }),
   useRevisionStatus: () => ({ ...mocks.status, remote: mocks.remote, sync: mocks.sync, largeObjects: mocks.facet }),
 }));
@@ -70,6 +79,10 @@ describe('model wait reporting', () => {
     mocks.report.mockClear();
     mocks.model = 'ready';
     mocks.project = 'ready';
+    mocks.firstView = undefined;
+    mocks.surfaces = [];
+    mocks.cloudOpenPending = false;
+    mocks.firstViewShown.mockClear();
     mocks.facet = undefined;
     mocks.remote = { phase: 'connected', reason: undefined, error: undefined };
     mocks.sync = { state: 'idle', reason: undefined, error: undefined };
@@ -217,5 +230,39 @@ describe('model wait reporting', () => {
     const view = render(<ProjectSyncAnnouncement />);
     expect(view.container).toHaveTextContent('Couldn’t back up this project');
     expect(view.container).not.toHaveTextContent('Couldn’t open this project');
+  });
+
+  /* SP3-local 674f6460 gap 9: every pane was open at 7.5 s, but the status said "Preparing project files" until the
+   * apply ended at 18.7 s. It speaks for the first view on screen, as the panes do. */
+  it('says nothing once the first view is on screen, while the open still applies', () => {
+    mocks.project = 'preparing';
+    mocks.firstView = 'ready';
+    const view = render(<ProjectSyncAnnouncement />);
+    expect(view.container).toHaveTextContent(/^$/u);
+    expect(mocks.surfaces).toContain('chats');
+  });
+
+  it('announces the open while its first view is still preparing', () => {
+    mocks.project = 'preparing';
+    mocks.firstView = 'preparing';
+    const view = render(<ProjectSyncAnnouncement />);
+    expect(view.container).toHaveTextContent('Preparing project files');
+  });
+
+  /* STO-25 SP6 review: `first_view` is what this route shows, not the root's own readiness. */
+  it('tells the revision host when a Tau Cloud open shows its first view, and not before', () => {
+    mocks.cloudOpenPending = true;
+    mocks.project = 'preparing';
+    mocks.firstView = 'preparing';
+    const view = render(<ProjectSyncAnnouncement />);
+    expect(mocks.firstViewShown).not.toHaveBeenCalled();
+    mocks.firstView = 'ready';
+    view.rerender(<ProjectSyncAnnouncement />);
+    expect(mocks.firstViewShown).toHaveBeenCalled();
+  });
+
+  it('tells it nothing for a project with no Tau Cloud open owed', () => {
+    render(<ProjectSyncAnnouncement />);
+    expect(mocks.firstViewShown).not.toHaveBeenCalled();
   });
 });

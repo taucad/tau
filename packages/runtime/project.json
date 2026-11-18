@@ -58,6 +58,9 @@
       },
       "dependsOn": ["build"],
       "cache": false
+    },
+    "test": {
+      "inputs": ["default", "^production", "serviceEnvironment", "{workspaceRoot}/packages/plugins/*/package.json"]
     }
   }
 }

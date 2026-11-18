@@ -667,11 +667,100 @@ export function SharedWorkerGate({
   );
 }
 
+/** What the database panel says and offers for the failure that left the start without its records (D3, R7). */
+function databaseNoticeCopy(errorName: string): Readonly<{
+  description: string;
+  actions: readonly RecoveryActionId[];
+  offersRetry: boolean;
+}> {
+  switch (errorName) {
+    case 'VersionError': {
+      return {
+        description:
+          'A newer Tau opened the database this device keeps. Home is open and your files are safe. Update Tau to bring back your folders, or reset the database.',
+        actions: ['updateTau', 'resetLocalDatabase', 'resetFolderList', 'showLogs'],
+        offersRetry: false,
+      };
+    }
+    case 'StorageUpgradeBlockedError': {
+      return {
+        description:
+          'Another Tau window or tab is holding the database this device keeps. Home is open. Close the other Tau window, then try again.',
+        actions: ['showLogs'],
+        offersRetry: true,
+      };
+    }
+    default: {
+      return {
+        description:
+          "Tau couldn't open the database this device keeps. Home is open and your files are safe. Reset the database to bring back your folders; their projects return from disk.",
+        actions: ['resetLocalDatabase', 'resetFolderList', 'showLogs', 'troubleshooting'],
+        offersRetry: true,
+      };
+    }
+  }
+}
+
+/**
+ * The database panel (desktop resilient startup blueprint D1, D3, R7): the start went on with Home alone because its
+ * records could not be read, so Home is open and the folders are missing. It says so beside Home and offers the action
+ * for the cause: Update Tau for a newer database, closing the other window when one holds it, and the reset, which is
+ * the shell's quarantine on the desktop and, on the web, offered only when Home's engine mirror exists. Try again
+ * reloads the page, which opens the database afresh.
+ */
+function DatabaseNotice({ fileManagerRef }: { readonly fileManagerRef: FileManagerRef }): React.ReactNode {
+  const degraded = useSelector(fileManagerRef, (state) => state.context.degraded);
+  if (degraded?.input !== 'records') {
+    return undefined;
+  }
+  const title = "Tau's local database is unavailable";
+  const copy = databaseNoticeCopy(degraded.errorName);
+  const actions = recoveryActions(copy.actions);
+  return (
+    <div role='alert' aria-label={title} className='flex flex-wrap items-center gap-3 border-b p-4'>
+      <OctagonAlert aria-hidden className='size-4 shrink-0 text-feature' />
+      <p className='min-w-0 flex-1 text-sm'>{copy.description}</p>
+      {actions.map((action) =>
+        action.kind === 'link' ? (
+          <Button key={action.id} asChild variant='outline'>
+            <a href={action.href}>{action.label}</a>
+          </Button>
+        ) : (
+          <Button
+            key={action.id}
+            type='button'
+            variant='outline'
+            onClick={() => {
+              void action.run();
+            }}
+          >
+            {action.label}
+          </Button>
+        ),
+      )}
+      {copy.offersRetry || actions.length === 0 ? (
+        <Button
+          type='button'
+          onClick={() => {
+            globalThis.location.reload();
+          }}
+        >
+          <RefreshCw />
+          Try again
+        </Button>
+      ) : undefined}
+    </div>
+  );
+}
+
 /** Keep storage recovery inside the available page instead of displacing its shell. */
 export function HomeFileManagerNotice(): React.ReactNode {
   const fileManager = useOptionalFileManager();
   return fileManager ? (
-    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={undefined} isInline />
+    <>
+      <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={undefined} isInline />
+      <DatabaseNotice fileManagerRef={fileManager.fileManagerRef} />
+    </>
   ) : undefined;
 }
 

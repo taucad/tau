@@ -3,7 +3,7 @@ import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
 import type * as FsBridge from '@taucad/fs-bridge';
 import type * as EnvironmentConfig from '#environment.config.js';
-import type { ProjectRootConfiguration, ProjectRootConfigurationResult } from '@taucad/filesystem';
+import type { ProjectRootConfiguration, ProjectRootConfigurationResult, RootStatus } from '@taucad/filesystem';
 import { StepClock, flush } from '@taucad/xstate-testing/clock';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileTreeService } from '@taucad/fs-client/file-tree-service';
@@ -89,6 +89,7 @@ const mockUnmount = vi.fn<(prefix: string) => void>();
 const mockConfigureProjectRoots =
   vi.fn<(configuration: ProjectRootConfiguration) => Promise<ProjectRootConfigurationResult>>();
 const mockWaitForWorkerReady = vi.fn<() => Promise<void>>();
+const mockRecheckRoots = vi.fn<(storageRootKeys?: string[]) => Promise<RootStatus[]>>();
 const mockCreateFileSystemBridge = vi.fn(() => ({
   port: {
     postMessage: vi.fn(),
@@ -142,6 +143,7 @@ vi.mock('@taucad/fs-bridge', () => ({
       hello: { payload: { state: mockViewHelloState } },
       pollExternalChanges: vi.fn(async () => undefined),
       configureProjectRoots: mockConfigureProjectRoots,
+      recheckRoots: mockRecheckRoots,
       mount: mockMount,
       unmount: mockUnmount,
       getDirectoryStat: vi.fn(async () => []),
@@ -240,6 +242,7 @@ describe('fileManagerMachine', () => {
     mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
     mockGetHomeStorageBackend.mockResolvedValue('indexeddb');
     mockConfigureProjectRoots.mockResolvedValue({ roots: [], skipped: [] });
+    mockRecheckRoots.mockResolvedValue([]);
     rootConfigurationRead.degraded = undefined;
     uiReports.calls.length = 0;
     mockWorkspaceReadDirectory.mockResolvedValue([]);
@@ -2201,6 +2204,72 @@ describe('fileManagerMachine', () => {
       });
       expect(actor.getSnapshot().context.rootStatuses).toEqual(roots);
       actor.stop();
+    });
+
+    it('should re-check a lost root on window focus and every 30 s while the page is visible, not while hidden (T-B2.3)', async () => {
+      const roots: RootStatus[] = [
+        { storageRootKey: 'indexeddb', backend: 'indexeddb', state: 'available' },
+        { storageRootKey: 'node:/Users/tester/Workshop', backend: 'node', state: 'notFound', code: 'ENOENT' },
+      ];
+      mockConfigureProjectRoots.mockResolvedValue({ roots, skipped: [] });
+      mockRecheckRoots.mockResolvedValue(roots);
+      let visibility: DocumentVisibilityState = 'visible';
+      const visibilityState = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+      const clock = new StepClock();
+      const actor = createActor(fileManagerMachine, {
+        input: { rootDirectory: '/', shouldInitializeOnStart: true },
+        clock,
+      });
+      actor.start();
+      try {
+        await vi.waitFor(() => {
+          expect(actor.getSnapshot().value).toBe('ready');
+        });
+        expect(mockRecheckRoots).not.toHaveBeenCalled();
+
+        globalThis.dispatchEvent(new Event('focus'));
+        await flush();
+        expect(mockRecheckRoots).toHaveBeenCalledTimes(1);
+
+        clock.advance(29_999);
+        await flush();
+        expect(mockRecheckRoots).toHaveBeenCalledTimes(1);
+        clock.advance(1);
+        await flush();
+        expect(mockRecheckRoots).toHaveBeenCalledTimes(2);
+
+        visibility = 'hidden';
+        clock.advance(30_000);
+        await flush();
+        expect(mockRecheckRoots).toHaveBeenCalledTimes(2);
+
+        visibility = 'visible';
+        clock.advance(30_000);
+        await flush();
+        expect(mockRecheckRoots).toHaveBeenCalledTimes(3);
+      } finally {
+        actor.stop();
+        visibilityState.mockRestore();
+      }
+    });
+
+    it('should not re-check on focus when every root is available', async () => {
+      mockConfigureProjectRoots.mockResolvedValue({
+        roots: [{ storageRootKey: 'indexeddb', backend: 'indexeddb', state: 'available' }],
+        skipped: [],
+      });
+      const actor = createActor(fileManagerMachine, { input: { rootDirectory: '/', shouldInitializeOnStart: true } });
+      actor.start();
+      try {
+        await vi.waitFor(() => {
+          expect(actor.getSnapshot().value).toBe('ready');
+        });
+        globalThis.dispatchEvent(new Event('focus'));
+        await flush();
+        expect(mockRecheckRoots).not.toHaveBeenCalled();
+      } finally {
+        actor.stop();
+      }
     });
 
     it('should leave a worker that never posts ready for error at 20 000 ms, retry once by itself, and class the second miss deterministic (T-B12.1)', async () => {

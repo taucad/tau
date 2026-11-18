@@ -11,8 +11,6 @@
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { AnyShape } from 'replicad';
 import type * as ReplicadModule from 'replicad';
-import { contentDigest, digestContent } from '@taucad/cache-core';
-import type { CacheValue, ComputeAction, ContentDigest } from '@taucad/cache-core';
 import { createExportFile } from '@taucad/runtime/types';
 import type { GeometrySvg, RuntimeSpanTracer, KernelIssue, KernelStackFrame } from '@taucad/runtime/types';
 import { SourceMapConsumer } from 'source-map-js';
@@ -78,8 +76,9 @@ import type { NativeHandleEntry } from '#interface-resolution.js';
 import type { GlbResources } from '@taucad/geometry-core';
 
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
-import { createReplicadComputeReuse, replicadComputeNamespace, replicadModuleFacade } from '#replicad-compute-reuse.js';
-import type { ReplicadComputeReuseAdapter } from '#replicad-compute-reuse.js';
+import { installNativeUserBreak } from '#utils/native-user-break.js';
+import { createLiveTier, installOperationTier } from '#live-tier/live-tier.js';
+import type { LiveTier } from '#live-tier/live-tier.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
 import { replicadDetectPattern } from '#replicad.constants.js';
@@ -166,15 +165,6 @@ const replicadSourceMapUrl = new URL('sourcemaps/replicad.js.map', import.meta.u
 const replicadSingleWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/wasm')).href;
 const replicadMultiWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/multi/wasm')).href;
 
-// Content digests of the two shipped OCCT binaries. The digest of a shipped asset is a
-// build-time constant, so reading and SHA-256ing 23 MB again at every init (~20 ms of cold
-// start) only recovers these values. `asset-ownership.test.ts` recomputes both from the
-// installed binaries and fails when the dependency moves.
-const replicadWasmDigests = {
-  single: 'sha256:b35be25eee599f8476d0bd33f45fa3ec0394482fc6a9899aa38cbf1c547495d3',
-  multi: 'sha256:b00c4337d605d6f4c11492deae1e3bc14c10ab6e41126df421ac50cae4186435',
-} as const;
-
 // =============================================================================
 // WASM variant selection
 // =============================================================================
@@ -259,34 +249,6 @@ async function resolveWasm(wasm: WasmOption, logger: RuntimeLogger, tracer?: Run
   }
 }
 
-/**
- * Identify the implementation assets that participate in compute-reuse identity.
- *
- * A built-in variant resolves to its constant digest; only a caller-supplied pair has no
- * build-time identity, so it alone is read and hashed. Returns undefined when a supplied
- * asset cannot be read, which leaves compute reuse without an implementation identity.
- *
- * @param variant - Concrete variant chosen by {@link resolveWasm}.
- * @param customUrls - Caller-supplied asset URLs, empty for the built-in variants.
- * @returns The asset digests, or undefined when they could not be identified.
- */
-async function identifyImplementationAssets(
-  variant: ResolvedWasm['variant'],
-  customUrls: readonly string[],
-): Promise<readonly ContentDigest[] | undefined> {
-  if (variant !== 'custom') {
-    return [contentDigest({ value: replicadWasmDigests[variant] })];
-  }
-
-  const loaded = await Promise.all(customUrls.map(async (url) => loadBinaryFile(url)));
-  const present = loaded.filter((bytes): bytes is ArrayBuffer => bytes !== undefined);
-  if (loaded.length === 0 || present.length !== loaded.length) {
-    return undefined;
-  }
-
-  return Promise.all(present.map(async (bytes) => digestContent({ bytes: new Uint8Array(bytes) })));
-}
-
 // =============================================================================
 // Types
 // =============================================================================
@@ -303,10 +265,15 @@ type ReplicadContext = {
   libraryExportNames: Set<string>;
   tracingSummary?: OcTracingSummary;
   libraryTrace: KernelLibraryTraceHandle<ReplicadLibrary>;
-  computeReuse: ReplicadComputeReuseAdapter<ReplicadLibrary> | undefined;
-  computeProducer: ComputeAction['producer'];
-  computeEnvironment: CacheValue;
+  /** The live tier; undefined when compute reuse is switched off for this kernel. */
+  liveTier: LiveTier<BuiltModel> | undefined;
 };
+
+/** What one build delivers: the native handle and the offers derived from it. */
+type BuiltModel = { handle: NativeHandle; issues?: KernelIssue[] } & ReturnType<typeof offersFor>;
+
+/** Handles of builds delivered with the live tier installed, and of scene-table revisits (see `serializeHandle`). */
+const tierBuiltHandles = new WeakSet<NativeHandle>();
 
 type ReplicadLibrary = typeof ReplicadModule;
 
@@ -316,7 +283,7 @@ type ReplicadLibrary = typeof ReplicadModule;
  * cannot read an unexported manifest, so this pins it; `replicad-package-identity.test.ts` fails
  * when it differs from the installed package.
  */
-const replicadPackage = { name: '@taulabs/replicad', version: '1.1.0-taulabs.1' } as const;
+const replicadPackage = { name: '@taulabs/replicad', version: '1.2.0-beta.0' } as const;
 
 // Match both the public package name (`replicad/`) and the aliased pnpm path
 // (`@taulabs/replicad/`) — the package.json aliases `replicad` to the Tau fork,
@@ -503,7 +470,7 @@ export const replicadKernel = defineKernel({
   builtinModuleNames: ['replicad', '@taucad/replicad/annotations'],
   builtinPackages: {
     replicad: replicadPackage,
-    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '0.23.0-beta.1' },
+    'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '0.23.0-beta.2' },
   },
   name: 'ReplicadKernel',
   // 1.5.0: native-handle snapshots are binary BRep. The version keys every cached entry, so text
@@ -541,7 +508,8 @@ export const replicadKernel = defineKernel({
   },
   async initialize(options, runtime): Promise<ReplicadContext> {
     const replicadModule = await import('replicad');
-    const replicadLibrary = replicadModuleFacade(replicadModule);
+    // A mutable facade: the library tracer's proxies need configurable properties.
+    const replicadLibrary: ReplicadLibrary = { ...replicadModule };
     const { mangledToOriginal: exportNameMap, exportNames: libraryExportNames } = preserveExportNames(replicadModule);
 
     const { logger, tracer } = runtime;
@@ -607,6 +575,9 @@ export const replicadKernel = defineKernel({
           logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);
         }
 
+        // N1: long native booleans and meshing stop on the same abort word the exception proxy polls.
+        installNativeUserBreak(raw);
+
         // The creating kernel binds the library once (Q5): library-internal OC calls trace to it, which is
         // exact with one realm per client; every other kernel's wrapper sees only its kernel-direct calls.
         // ponytail: no unbind on last release — `replicad` keeps the stale instance until the next create rebinds it.
@@ -636,41 +607,16 @@ export const replicadKernel = defineKernel({
         logger.warn('Failed to load default font', { data: error });
       }
 
-      /* Off unless asked for: the operation adapter keeps text BRep and feeds restored operands into
-       * booleans, so its geometry depended on cache history, and it measured no speed-up (audit R2).
-       * Off constructs nothing: no asset read, no digest, no adapter (D14, I13, A5). */
-      const identifiedAssets =
-        computeReuseOption === true
-          ? await identifyImplementationAssets(
-              resolved.variant,
-              typeof wasm === 'string' ? [] : [wasm.wasmUrl, wasm.wasmBindingsUrl],
-            )
-          : undefined;
-      const assetsIdentified = identifiedAssets !== undefined;
-      const computeReuseEnabled = computeReuseOption === true && assetsIdentified;
-      const implementationAssets = identifiedAssets ?? [];
-      if (!assetsIdentified && computeReuseOption === true) {
-        logger.warn('Replicad semantic compute reuse disabled because implementation assets could not be identified.');
-      }
-      const computeProducer = {
-        id: '@taucad/replicad',
-        version: `replicad@${replicadPackage.version}|replicad-opencascadejs@0.23.0-beta.1|adapter@1`,
-        implementationAssets,
-      };
-      const computeEnvironment = {
-        wasmVariant: resolved.variant,
-        lengthUnit: 'millimeter',
-      };
-      const computeReuse = computeReuseEnabled
-        ? createReplicadComputeReuse({
-            library: replicadLibrary,
-            enabled: true,
-            producer: computeProducer,
-            environment: computeEnvironment,
-          })
-        : undefined;
+      // Explicit off constructs nothing: no tier, no cache installed, no key built (I2). A Replicad build without
+      // the operation cache seam runs without the tier.
+      const seamProbe: Partial<ReplicadLibrary> = replicadModule;
+      const seamPresent = typeof seamProbe.setOperationCache === 'function';
+      const liveTier =
+        computeReuseOption === false || !seamPresent
+          ? undefined
+          : createLiveTier<BuiltModel>({ library: replicadLibrary, releaseScene: releaseBuiltModel });
       const libraryTrace = createKernelLibraryTracer({
-        library: computeReuse?.library ?? replicadLibrary,
+        library: replicadLibrary,
         tracer,
         mode: libraryTracing,
         policy: replicadLibraryTracePolicy,
@@ -707,9 +653,7 @@ export const replicadKernel = defineKernel({
         libraryExportNames,
         tracingSummary,
         libraryTrace,
-        computeReuse,
-        computeProducer,
-        computeEnvironment,
+        liveTier,
       };
     } catch (error) {
       occt.release();
@@ -770,6 +714,19 @@ export const replicadKernel = defineKernel({
       }
       bundleSourceMap = bundleResult.sourceMap;
 
+      // The live tier only while compute reuse is on: with it off nothing is installed and no key is built (I2).
+      const documentTier =
+        runtime.compute.status === 'on' && context.liveTier ? context.liveTier.forEntry(entryPath) : undefined;
+      // R16: a build key already seen returns its scene without running any user code.
+      const revisited = documentTier?.scenes.lookup(bundleResult.code, parameters);
+      if (revisited) {
+        return tracedStep(tracer, 'replicad.scene-table-hit', () => {
+          const delivered = aliasBuiltModel(revisited);
+          tierBuiltHandles.add(delivered.handle);
+          return delivered;
+        });
+      }
+
       const buildGeometry = named('Object.createGeometry', async () => {
         const executeResult = await runtime.execute(bundleResult.code);
         if (!executeResult.success) {
@@ -782,8 +739,12 @@ export const replicadKernel = defineKernel({
             phase: 'computingGeometry',
             stage: 'brep',
           });
+          const endBuild = documentTier
+            ? installOperationTier(context.replicadLibrary, documentTier.operations)
+            : undefined;
+          let outcome: 'delivered' | 'failed' = 'failed';
           try {
-            return await context.libraryTrace.runInScope({
+            const result = await context.libraryTrace.runInScope({
               scope: 'user-main',
               operation: async () =>
                 runOcMain({
@@ -797,10 +758,26 @@ export const replicadKernel = defineKernel({
                   firstArg: context.libraryTrace.tracedLibrary,
                 }),
             });
+            outcome = result.success ? 'delivered' : 'failed';
+            return result;
           } finally {
+            endBuild?.(outcome);
             context.libraryTrace.emitSummary();
             context.tracingSummary?.flush();
-            mainSpan.end();
+            if (documentTier) {
+              const { hits, misses, stored, opaque, failureHits, evicted, entries } = documentTier.operations.stats();
+              mainSpan.end({
+                tierHits: hits,
+                tierMisses: misses,
+                tierStored: stored,
+                tierOpaque: opaque,
+                tierFailureHits: failureHits,
+                tierEvicted: evicted,
+                tierEntries: entries,
+              });
+            } else {
+              mainSpan.end();
+            }
           }
         });
 
@@ -808,8 +785,7 @@ export const replicadKernel = defineKernel({
           throw new ReplicadBuildError(mainResult.issues);
         }
 
-        const traced = context.libraryTrace.unwrap(mainResult.value);
-        const shapes = context.computeReuse ? context.computeReuse.unwrap(traced) : traced;
+        const shapes = context.libraryTrace.unwrap(mainResult.value);
 
         if (shapes === undefined) {
           runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
@@ -863,26 +839,14 @@ export const replicadKernel = defineKernel({
         return { handle, issues, ...offersFor(handle) };
       });
 
-      if (runtime.compute.status !== 'on' || !context.computeReuse) {
-        // Off arm: no scope, no recipe, no announcement, no publication tail.
-        return await buildGeometry();
+      const built = await buildGeometry();
+      if (documentTier) {
+        // Fail closed (catalogue N7): any build delivered with a tier installed shares native shapes with tier
+        // entries that a later build's destructive boolean may change in place, so it has no exact snapshot.
+        tierBuiltHandles.add(built.handle);
       }
-      const computeScope = runtime.compute.openScope({
-        namespace: replicadComputeNamespace,
-        producer: context.computeProducer,
-        environment: context.computeEnvironment,
-        discovery: { entryPath },
-        resident: context.computeReuse.resident,
-      });
-      let outcome: 'delivered' | 'failed' = 'failed';
-      try {
-        const built = await context.computeReuse.run(computeScope, buildGeometry);
-        outcome = 'delivered';
-        return built;
-      } finally {
-        // Seals metadata only; the runtime permits the tail after actual delivery.
-        computeScope.close({ outcome });
-      }
+      documentTier?.scenes.admit(bundleResult.code, parameters, aliasBuiltModel(built));
+      return built;
     } catch (error) {
       if (error instanceof ReplicadBuildError) {
         throw error;
@@ -1218,6 +1182,12 @@ export const replicadKernel = defineKernel({
   },
 
   serializeHandle({ handle }, runtime, context) {
+    if (tierBuiltHandles.has(handle)) {
+      // Catalogue N7: a destructive boolean may add parametric curves in place to native shapes a tier entry
+      // shares with this build, so its B-rep can differ from reuse off. A snapshot is published as byte-exact, so
+      // none is written: the refusal comes before any native work, and the durable cache keeps reuse-off builds.
+      throw new Error('A Replicad build made with the live tier has no exact native-handle snapshot.');
+    }
     return tracedStep(runtime.tracer, 'create.serializeNativeHandle', () =>
       serializeReplicadHandle(handle, context.replicadLibrary),
     );
@@ -1245,9 +1215,68 @@ export const replicadKernel = defineKernel({
   observedHeapBytes: (context) => context.occt.value.wasmMemory.buffer.byteLength,
 
   async onDispose(context) {
-    context.occt.release();
+    try {
+      context.liveTier?.dispose();
+    } finally {
+      context.occt.release();
+    }
   },
 });
+
+type Aliasable = { delete?: () => void; innerShape?: { delete?: () => void }; clone(): Aliasable };
+
+/**
+ * Delete the aliases a copy of a build owns. A drawing has no `delete`; its blueprint owns the native curves.
+ *
+ * @param entries - The copy's entries.
+ */
+const deleteAliases = (entries: readonly NativeHandleEntry[]): void => {
+  for (const { shape } of entries) {
+    // Typed as `AnyShape`, but a drawing entry has no `delete` at runtime.
+    const owned: Aliasable = shape;
+    if (typeof owned.delete === 'function') {
+      owned.delete();
+    } else {
+      owned.innerShape?.delete?.();
+    }
+  }
+};
+const aliasEntries = (entries: readonly NativeHandleEntry[]): NativeHandleEntry[] => {
+  const aliases: NativeHandleEntry[] = [];
+  try {
+    for (const entry of entries) {
+      aliases.push({ ...entry, shape: entry.shape.clone() });
+    }
+  } catch (error) {
+    deleteAliases(aliases);
+    throw error;
+  }
+  return aliases;
+};
+
+/**
+ * A build with new aliases of its shapes. The scene table keeps one copy and delivers another on a revisit,
+ * so nothing the runtime does with a delivered handle reaches the table (R16).
+ *
+ * @param built - The build to copy.
+ * @returns The copy, owning its aliases.
+ */
+const aliasBuiltModel = (built: BuiltModel): BuiltModel => {
+  const handle = { ...built.handle, shapes: aliasEntries(built.handle.shapes) };
+  if (tierBuiltHandles.has(built.handle)) {
+    tierBuiltHandles.add(handle);
+  }
+  return { ...built, handle };
+};
+
+/**
+ * Delete the aliases the scene table owns, once, when it evicts the scene.
+ *
+ * @param stored - The table's copy of the build.
+ */
+const releaseBuiltModel = (stored: BuiltModel): void => {
+  deleteAliases(stored.handle.shapes);
+};
 
 /**
  * Delete the shape copies an export made, as soon as the export no longer reads them (D-RT-20).

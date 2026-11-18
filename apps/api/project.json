@@ -7,7 +7,7 @@
   "targets": {
     "formal:nightly": {},
     "setup-env": {
-      "command": "if [ ! -f \"./apps/api/.env\" ]; then cp ./apps/api/.env.example ./apps/api/.env; fi"
+      "command": "node -e \"const fs = require('node:fs'); if (!fs.existsSync('apps/api/.env')) fs.copyFileSync('apps/api/.env.example', 'apps/api/.env')\""
     },
     "deploy": {
       "executor": "nx:run-commands",
@@ -93,7 +93,8 @@
       "options": {
         "command": "vitest run --config vitest.live.config.ts",
         "cwd": "{projectRoot}"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/packages/plugins/tscircuit/agent/cad-tscircuit/SKILL.md"]
     },
     "test:kernel-routing": {
       "executor": "nx:run-commands",
@@ -242,6 +243,15 @@
         "command": "node apps/api/scripts/check-private-storage.mts",
         "cwd": "{workspaceRoot}"
       }
+    },
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/infra/billing/development.commercial.json",
+        "{workspaceRoot}/apps/libs/api-*/src/**/*.ts"
+      ]
     }
   }
 }

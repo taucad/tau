@@ -3,7 +3,7 @@ import type { KernelProvider } from '@taucad/runtime';
 import type { KernelId } from '@taucad/types/constants';
 import { isKernelAllowed } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
-import { KernelTierBadge } from '#components/tier-badge.js';
+import { KernelTierBadge } from '@taucad/billing-ui/components/tier-badge';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 
 export function KernelCommercialBadge({

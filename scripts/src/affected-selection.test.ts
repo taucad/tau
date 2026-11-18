@@ -52,8 +52,10 @@ const uiLibraries = [
   'project-workspace',
   'files-ui',
   'editor-ui',
+  'revisions-ui',
   'settings-ui',
   'publish-ui',
+  'billing-ui',
   'ui-core',
 ];
 

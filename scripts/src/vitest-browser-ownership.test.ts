@@ -124,6 +124,9 @@ describe('Vitest Browser test-runner ownership', () => {
       // CDP. Browser Mode cannot own the installed app across native installer/relaunch cycles.
       'apps/desktop-e2e/scripts/qualification-renderer.mts',
       'apps/desktop-e2e/src/desktop-assimp.spec.ts',
+      // Boot recovery relaunches the built app over one profile, with switches and a missing client, and reads its
+      // recovery window; the shared launcher signs in and always loads the app page.
+      'apps/desktop-e2e/src/desktop-boot-recovery.spec.ts',
       'apps/desktop-e2e/src/desktop-build123d.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-acp.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-in-project.spec.ts',
@@ -230,6 +233,7 @@ describe('Vitest Browser test-runner ownership', () => {
     // runtime in, which Browser Mode cannot host.
     // The viewer parity workflow installs the Chromium its viewer-reference capture runs in (Vitest Browser Mode), and
     // its real-GPU check installs the same Chromium on the operator's Mac.
+    // The release gate's end-to-end rows install the three engines `ci.yml`'s e2e-queue rows do (C2b).
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
@@ -240,6 +244,7 @@ describe('Vitest Browser test-runner ownership', () => {
         '.github/workflows/picogk-browser-archive.yml',
         '.github/workflows/preview-packages.yml',
         '.github/workflows/publish.yml',
+        '.github/workflows/release-gate.yml',
         '.github/workflows/spike-publish-dry-run.yml',
         '.github/workflows/spike-s31.yml',
         '.github/workflows/spike-s32.yml',

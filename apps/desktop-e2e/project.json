@@ -64,7 +64,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
-        "command": "../../node_modules/.bin/vitest run --config vitest.unit.config.ts"
+        "command": "vitest run --config vitest.unit.config.ts"
       }
     },
     "typecheck": {
@@ -414,7 +414,7 @@
       "cache": false,
       "options": {
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
-        "command": "../../node_modules/.bin/vitest run --config vitest.record-recovery.config.ts"
+        "command": "vitest run --config vitest.record-recovery.config.ts"
       },
       "metadata": {
         "description": "Offline record recovery, direct close and quit with delayed real authority replies. Build desktop first; TAU_E2E_RECORD_PACKAGED=true selects the unsigned macOS package."
@@ -425,7 +425,7 @@
       "parallelism": false,
       "options": {
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
-        "command": "../../node_modules/.bin/vitest run --config vitest.machine-profiles.config.ts"
+        "command": "vitest run --config vitest.machine-profiles.config.ts"
       },
       "cache": false,
       "metadata": {
@@ -438,7 +438,7 @@
       "cache": false,
       "options": {
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
-        "command": "../../node_modules/.bin/vitest run --config vitest.machine-profiles.config.ts src/desktop-print-failure.spec.ts"
+        "command": "vitest run --config vitest.machine-profiles.config.ts src/desktop-print-failure.spec.ts"
       },
       "metadata": {
         "description": "Offline simulator storage failure and automatically decoded camera still in a built desktop; accepts the completed-artifact executable to verify an unsigned package."
@@ -485,7 +485,7 @@
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
-        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/project-deletion.spec.ts --maxWorkers=2",
+        "command": "vitest run --config vitest.config.ts src/project-deletion.spec.ts --maxWorkers=2",
         "env": {
           "TAU_E2E_COMPLETED_ARTIFACT": "true",
           "TAU_E2E_EXTERNAL_SERVICES": "true",

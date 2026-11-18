@@ -1,5 +1,5 @@
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { MetaFunction } from 'react-router';
 import { PageContent } from '#components/layout/page-content.js';
 import {
@@ -39,9 +39,10 @@ import { toast } from '@taucad/ui/components/sonner';
 import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
-import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
+import { folderStatusOf, useRootStatuses, workspaceStorageRootKey } from '#components/filesystem/folder-status.js';
 
 export const meta: MetaFunction = () => [{ title: 'Files · Tau' }];
 
@@ -478,7 +479,8 @@ export default function FilesRoute(): React.JSX.Element {
 }
 
 function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorageBackend }): React.JSX.Element {
-  const { scopedStorage, workspace } = useFileManager();
+  const { scopedStorage, workspace, fileManagerRef } = useFileManager();
+  const rootStatuses = useRootStatuses(fileManagerRef);
   const { projects } = useProjects();
 
   // Per-cache-key (backend | webaccess:<workspaceId>) loaded directories
@@ -486,7 +488,15 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
   const [rootLoading, setRootLoading] = useState<Record<string, boolean>>({});
   const inflightRef = useRef<Set<string>>(new Set());
 
-  const [workspaceColumns, setWorkspaceColumns] = useState<WorkspaceColumnState[]>([]);
+  const [grantedColumns, setWorkspaceColumns] = useState<WorkspaceColumnState[]>([]);
+  /* A folder with access granted shows the file service's published status, not the grant alone (D2, U3). */
+  const workspaceColumns = useMemo((): WorkspaceColumnState[] => {
+    const byKey = new Map(rootStatuses.map((root) => [root.storageRootKey, root] as const));
+    return grantedColumns.map((column) => {
+      const root = column.status === 'connected' ? byKey.get(workspaceStorageRootKey(column.workspace)) : undefined;
+      return root === undefined ? column : { ...column, status: folderStatusOf(root) };
+    });
+  }, [grantedColumns, rootStatuses]);
   const [isLoadingWorkspaces, setIsLoadingWorkspaces] = useState(true);
   const [busyWorkspaceId, setBusyWorkspaceId] = useState<string | undefined>(undefined);
   const telemetry = useWorkspaceTelemetry();
@@ -857,7 +867,7 @@ function ResolvedFilesRoute({ homeBackend }: { readonly homeBackend: HomeStorage
   return (
     <PageContent className='flex flex-col gap-4'>
       <PageHeader title='Files' />
-      {isDesktopTarget() ? <WorkspaceConnections /> : undefined}
+      {isDesktopTarget() ? <WorkspaceConnections shouldGroupNotFound /> : undefined}
 
       {/* A document page (D4.4): the columns flow and the shell scrolls; each column's tree keeps a bounded height. */}
       <div className='grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]'>

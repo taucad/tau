@@ -368,7 +368,7 @@ function AvailablePrintPanel({ isShown }: { readonly isShown: boolean }): React.
 }
 
 export const PrintPanelBody = ({ isShown = true }: { readonly isShown?: boolean }): React.JSX.Element => {
-  const availability = useModelAvailability();
+  const availability = useModelAvailability('export');
   const enabled = useFeature('machines');
   if (!enabled) {
     return <MachinesDisabled />;

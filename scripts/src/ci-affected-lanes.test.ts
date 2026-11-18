@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
@@ -64,8 +64,14 @@ const draftGuard = expression('!github.event.pull_request.draft');
 
 const isTestTarget = (target: string): boolean => /^test(?:$|[:-])/u.test(target);
 
-/** The Nx targets a shell command runs, and whether its projects are selected by `affected` there. */
-const nxTargets = (command: string): ReadonlyArray<{ readonly target: string; readonly affected: boolean }> => {
+/**
+ * The Nx targets a shell command runs, and whether its projects are selected by `affected` there. `job` is every
+ * command of the command's job: a lane deals the projects of the task graph an earlier step's `nx affected` wrote.
+ */
+const nxTargets = (
+  command: string,
+  job: string = command,
+): ReadonlyArray<{ readonly target: string; readonly affected: boolean }> => {
   const found: Array<{ target: string; affected: boolean }> = [];
   for (const [line] of command.matchAll(/\bnx\s+(?:run-many|affected)\b[^\n]*/gu)) {
     // `nx affected`, or `run-many` over a `--projects` list this script took from `nx show projects --affected`
@@ -73,7 +79,7 @@ const nxTargets = (command: string): ReadonlyArray<{ readonly target: string; re
     const affected =
       /\bnx\s+affected\b/u.test(line) ||
       (/\s--projects\s+"\$\w+"/u.test(line) &&
-        /\bnx (?:show projects --affected\b|affected\b[^\n]*\s--graph=)/u.test(command));
+        /\bnx (?:show projects --affected\b|affected\b[^\n]*\s--graph=)/u.test(job));
     const flag = /\s(?:-t|--targets?)[\s=]+(.*)/u.exec(line);
     // Targets run up to the next flag (`--parallel`, `--projects`, or `--` before forwarded arguments).
     for (const target of flag?.[1]?.split(/[\s,]+/u) ?? []) {
@@ -126,7 +132,7 @@ const testJobs = Object.entries(ci.jobs)
     name,
     definition,
     targets: (definition.steps ?? [])
-      .flatMap((step) => nxTargets(step.run ?? ''))
+      .flatMap((step) => nxTargets(step.run ?? '', (definition.steps ?? []).map(({ run }) => run ?? '').join('\n')))
       .filter(({ target }) => isTestTarget(target)),
   }))
   .filter(({ targets }) => targets.length > 0);
@@ -169,6 +175,7 @@ describe('ci.yml affected-only lanes', () => {
       desktop: { tags: ['ci:desktop'] },
       shell: { tags: ['ci:shell'], pr: 'queue', queue: 'any-touched' },
       'e2e-queue': { targets: ['test:e2e:queue'], pr: 'touched' },
+      'compute-qualify': { targets: ['compute-qualify-ci'] },
     });
   });
 
@@ -220,6 +227,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(gate?.needs).toEqual([
       'plan',
       'affected-lane',
+      'pkgcheck',
       'browser',
       'geospec-examples',
       'cli-e2e',
@@ -232,6 +240,7 @@ describe('ci.yml affected-only lanes', () => {
       'shell',
       'formal-nightly',
       'e2e-queue',
+      'compute-qualify',
     ]);
     const check = gate?.steps?.[0]?.run ?? '';
     expect(check).toContain('test "$PLAN_RESULT" = success');
@@ -244,10 +253,18 @@ describe('ci.yml affected-only lanes', () => {
     // targets that depend on the check never run for it. The build lane's `nx affected` runs it instead.
     const steps = ci.jobs['affected-lane']?.steps ?? [];
     const run = steps.find((step) => step.name === "Run the lane's tasks")?.run ?? '';
-    const build = /^\s*build\) (.*) ;;$/mu.exec(run)?.[1] ?? '';
-    expect(build).toBe(
-      'pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output --parallel=1',
+    const lane = ci.jobs['affected-lane'];
+    const targets = lane?.env?.['BUILD_TARGETS'] ?? '';
+    expect(targets).toBe(
+      'build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch',
     );
+    // Both build shards take their projects from one `nx affected` over these targets, and run them all.
+    const pins = steps.find((step) => step.id === 'pins')?.run ?? '';
+    expect(pins).toContain('build-*) pnpm nx affected -t $BUILD_TARGETS --graph="$graph" > /dev/null ;;');
+    expect(run).toContain('if [ "$kind" = build ]; then targets=$(tr \' \' \',\' <<< "$BUILD_TARGETS"); fi');
+    expect(run).toContain('pnpm nx run-many -t "$targets" --projects "$shard" --parallel=1');
+    expect(lane?.strategy?.matrix?.['lane']).toEqual(expect.arrayContaining(['build-1', 'build-2']));
+    const build = `pnpm nx affected -t ${targets} --parallel=1`;
     expect(nxTargets(build)).toContainEqual({ target: 'check-desktop-payload', affected: true });
     // The critical-path budget (PL0) runs beside it in the same lane, so a ui change is held to its budget.
     expect(nxTargets(build)).toContainEqual({ target: 'check-critical-budget', affected: true });
@@ -256,6 +273,8 @@ describe('ci.yml affected-only lanes', () => {
     // The SSR bundle budget (`ui:size`) and the server-output check (RR0) run there too.
     expect(nxTargets(build)).toContainEqual({ target: 'size', affected: true });
     expect(nxTargets(build)).toContainEqual({ target: 'check-server-output', affected: true });
+    // And the check that every client build ships the patched React Router route-module loader (RR8).
+    expect(nxTargets(build)).toContainEqual({ target: 'check-route-module-patch', affected: true });
     // The target belongs to `ui`, so `nx affected` selects it exactly when `ui` is affected, and it brings
     // the renderer and desktop main/preload builds it reads.
     const ui = JSON.parse(read('apps/ui/project.json')) as {
@@ -270,6 +289,7 @@ describe('ci.yml affected-only lanes', () => {
     expect(ui.targets['size']?.dependsOn).toEqual(['build']);
     expect(ui.targets['check-static-shells']?.dependsOn).toEqual(['build']);
     expect(ui.targets['check-server-output']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
+    expect(ui.targets['check-route-module-patch']?.dependsOn).toEqual(['build', 'build:desktop', 'build:serve']);
     const docs = JSON.parse(read('apps/docs/project.json')) as {
       targets: Record<string, { readonly dependsOn?: readonly unknown[] }>;
     };
@@ -317,6 +337,8 @@ describe('ci.yml affected-only lanes', () => {
     // The plan reads only the verdict's run id: no per-lane conclusions of the queue run.
     expect(planStep?.env?.['REUSED']).toBe(expression('steps.queue.outputs.run-id'));
     expect(Object.keys(planStep?.env ?? {}).sort()).toEqual([
+      'COMPUTE_QUALIFY_LANE_PATHS',
+      'COMPUTE_QUALIFY_LANE_PROJECTS',
       'LANE_SELECTORS',
       'NATIVE_DARWIN_LANE_PATHS',
       'QUEUE_HUBS',
@@ -523,6 +545,7 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
       ['FORMAL', 'formal', 'formal'],
       ['API', 'api', 'api'],
       ['BILLING', 'billing-e2e', 'billing'],
+      ['COMPUTE_QUALIFY', 'compute-qualify', 'compute-qualify'],
     ] as const) {
       expect(gateStep?.env?.[`${key}_REQUIRED`]).toBe(expression(`needs.plan.outputs.${output}`));
       expect(gateStep?.env?.[`${key}_RESULT`]).toBe(expression(`needs.${job}.result`));
@@ -1177,7 +1200,10 @@ describe('queue-verdict action', () => {
   });
 });
 
-describe('plan lane selection', () => {
+// Each case runs ci.yml's real plan script (bash, jq and the fixture graph) in a child process. They take 1–2 s alone,
+// but `scripts:validate-workspace-tests` runs this file beside 28 others, and on a loaded runner one case passed
+// 5 s (PR #2581, job 134621798477). The budget covers that contention; it does not wait on any race.
+describe('plan lane selection', { timeout: 30_000 }, () => {
   /** A project of the fixture graph: its root, tags, target names and any target's configuration. */
   type Node = {
     readonly root: string;
@@ -1232,6 +1258,8 @@ describe('plan lane selection', () => {
       tags: ['ci:shell'],
       targets: ['test:shell-conformance', 'formal:nightly'],
     },
+    replicad: { root: 'packages/plugins/replicad', type: 'lib' },
+    'runtime-e2e': { root: 'apps/runtime-e2e', tags: ['ci:quarantined'], targets: ['test', 'compute-qualify-ci'] },
   };
   const everything = Object.keys(nodes).filter((name) => name !== 'workspace');
 
@@ -1289,6 +1317,11 @@ describe('plan lane selection', () => {
         },
       };
       writeFileSync(join(directory, 'fixture-graph.json'), JSON.stringify(graph));
+      // The plan deals the package checks with the dealer and its snapshot, which it reads from the checkout.
+      mkdirSync(join(directory, 'scripts/src'), { recursive: true });
+      for (const file of ['test-shard-dealer.ts', 'pkgcheck-shard-durations.json']) {
+        copyFileSync(resolve(root, 'scripts/src', file), join(directory, 'scripts/src', file));
+      }
       writeFileSync(join(directory, 'affected.json'), JSON.stringify(affected));
       writeFileSync(join(directory, 'files'), files.map((file) => `${file}\n`).join(''));
       writeFileSync(join(directory, 'workspace-diff'), workspaceDiff);
@@ -1349,6 +1382,8 @@ describe('plan lane selection', () => {
           ['LANE_SELECTORS', selectors],
           ['SHELL_LANE_PATHS', planStep?.env?.['SHELL_LANE_PATHS'] ?? '[]'],
           ['NATIVE_DARWIN_LANE_PATHS', planStep?.env?.['NATIVE_DARWIN_LANE_PATHS'] ?? '[]'],
+          ['COMPUTE_QUALIFY_LANE_PROJECTS', planStep?.env?.['COMPUTE_QUALIFY_LANE_PROJECTS'] ?? '[]'],
+          ['COMPUTE_QUALIFY_LANE_PATHS', planStep?.env?.['COMPUTE_QUALIFY_LANE_PATHS'] ?? '[]'],
           ['VIEWER_PARITY_LANE_PATHS', planStep?.env?.['VIEWER_PARITY_LANE_PATHS'] ?? '[]'],
           ['VIEWER_PARITY_PINS', planStep?.env?.['VIEWER_PARITY_PINS'] ?? '[]'],
           ['QUEUE_HUBS', planStep?.env?.['QUEUE_HUBS'] ?? '[]'],
@@ -1373,6 +1408,78 @@ describe('plan lane selection', () => {
     });
     expect(status, stderr).toBe(0);
     expect(outputs).toMatchObject({ api: 'true', billing: 'true', formal: 'true', browser: 'true', 'cli-e2e': 'true' });
+  });
+
+  describe('package-check shards (ST-3, ST-4)', () => {
+    // Measured snapshot seconds: cli 333, host 218, skills 201, warehouse 148, opencascade 139, viewer 124.
+    const checked = (root: string): Node => ({ root, type: 'lib', targets: ['pkgcheck'] });
+    const graphNodes: Record<string, Node> = {
+      ...nodes,
+      cli: { ...nodes['cli']!, targets: [...(nodes['cli']?.targets ?? []), 'pkgcheck', 'readme-quickstart'] },
+      host: { ...nodes['host']!, targets: [...(nodes['host']?.targets ?? []), 'audit-public-surface'] },
+      skills: checked('packages/skills'),
+      warehouse: checked('packages/warehouse'),
+      opencascade: checked('packages/plugins/opencascade'),
+      viewer: checked('packages/viewer'),
+    };
+    type Shard = { readonly shard: number; readonly shards: number; readonly projects: string };
+    const shards = (outputs: Record<string, string>): Shard[] =>
+      JSON.parse(outputs['pkgcheck-shards'] ?? 'null') as Shard[];
+
+    it('should run one package-check job for a narrow entry', () => {
+      const { status, stderr, outputs } = plan('merge_group', {
+        affected: ['core', 'viewer'],
+        files: ['packages/viewer/src/index.ts'],
+        graphNodes,
+      });
+      expect(status, stderr).toBe(0);
+      expect(outputs['pkgcheck']).toBe('true');
+      expect(shards(outputs)).toEqual([{ shard: 1, shards: 1, projects: 'viewer' }]);
+    });
+
+    it('should choose the shard count from the measured seconds and partition the projects (C5)', () => {
+      const affected = [...everything, 'skills', 'warehouse', 'opencascade', 'viewer'];
+      const { status, stderr, outputs } = plan('merge_group', { affected, files: ['package.json'], graphNodes });
+      expect(status, stderr).toBe(0);
+      // 1,163 measured seconds at 600 s a shard: two jobs, every checked project in exactly one.
+      const matrix = shards(outputs);
+      expect(matrix.map(({ shard, shards: count }) => [shard, count])).toEqual([
+        [1, 2],
+        [2, 2],
+      ]);
+      const union = matrix.flatMap(({ projects }) => projects.split(','));
+      expect(union.toSorted()).toEqual(['cli', 'host', 'opencascade', 'skills', 'viewer', 'warehouse']);
+      expect(new Set(union).size).toBe(union.length);
+    });
+
+    it('should run no package check for an entry that affects none, on a pull request as in the queue', () => {
+      for (const event of ['merge_group', 'pull_request']) {
+        const { status, stderr, outputs } = plan(event, {
+          affected: ['core'],
+          files: ['packages/core/x.ts'],
+          graphNodes,
+        });
+        expect(status, stderr).toBe(0);
+        expect(outputs['pkgcheck']).toBe('false');
+        expect(outputs['pkgcheck-shards']).toBe('[]');
+      }
+    });
+
+    it('should gate every shard in the required check', () => {
+      const job = ci.jobs['pkgcheck'];
+      expect(job?.needs).toEqual(['plan']);
+      expect(job?.if).toBe(
+        expression("!cancelled() && needs.plan.result == 'success' && needs.plan.outputs.pkgcheck == 'true'"),
+      );
+      expect(job?.strategy?.matrix?.['shard']).toBe(expression('fromJSON(needs.plan.outputs.pkgcheck-shards)'));
+      const gate = ci.jobs['affected']?.steps?.[0];
+      expect(gate?.env?.['PKGCHECK_REQUIRED']).toBe(expression('needs.plan.outputs.pkgcheck'));
+      expect(gate?.env?.['PKGCHECK_RESULT']).toBe(expression('needs.pkgcheck.result'));
+      expect(gate?.run).toContain('if [ "$PKGCHECK_REQUIRED" = true ]; then test "$PKGCHECK_RESULT" = success; fi');
+      expect(planScript).toContain(
+        '--max-shards 4 --shard-seconds 600 --durations scripts/src/pkgcheck-shard-durations.json',
+      );
+    });
   });
 
   it('should leave a touched-rule lane to the queue on a pull request that affects it only through a dependency', () => {
@@ -1554,6 +1661,38 @@ describe('plan lane selection', () => {
     const queue = plan('merge_group', { affected: [], files: ['libs/tau-examples/src/standalone/picogk-extra.ts'] });
     expect(queue.status, queue.stderr).toBe(0);
     expect(queue.outputs['native-darwin']).toBe('false');
+  });
+
+  it('should run the compute qualification lane only when a measured project is affected or a qualification path changed', () => {
+    // The runtime-e2e project is affected through almost any dependency; a measured project (the Replicad plugin) keeps it.
+    for (const event of ['merge_group', 'pull_request']) {
+      const measured = plan(event, {
+        affected: ['replicad', 'runtime-e2e'],
+        files: ['packages/plugins/replicad/src/a.ts'],
+      });
+      expect(measured.status, measured.stderr).toBe(0);
+      expect(measured.outputs['compute-qualify'], event).toBe('true');
+    }
+    const harness = plan('pull_request', {
+      affected: ['runtime-e2e'],
+      files: ['apps/runtime-e2e/src/compute-baseline/qualification-baselines.json'],
+    });
+    expect(harness.status, harness.stderr).toBe(0);
+    expect(harness.outputs['compute-qualify']).toBe('true');
+    const model = plan('merge_group', {
+      affected: ['core', 'runtime-e2e'],
+      files: ['libs/tau-examples/src/kernels/replicad/six-axis-arm/main.ts'],
+    });
+    expect(model.outputs['compute-qualify']).toBe('true');
+    // Affected only through an unmeasured dependency, or a sibling suite of the project: no lane.
+    const unrelated = plan('merge_group', { affected: ['core', 'runtime-e2e'], files: ['packages/core/src/index.ts'] });
+    expect(unrelated.status, unrelated.stderr).toBe(0);
+    expect(unrelated.outputs['compute-qualify']).toBe('false');
+    const sibling = plan('pull_request', {
+      affected: ['runtime-e2e'],
+      files: ['apps/runtime-e2e/src/host-relay.test.ts'],
+    });
+    expect(sibling.outputs['compute-qualify']).toBe('false');
   });
 
   it.each([
@@ -1739,7 +1878,7 @@ describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {
 
   it('should take ref, projects and seed as workflow_call inputs and give each caller its own group', () => {
     const inputs = nightly.on.workflow_call?.inputs ?? {};
-    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'seed']);
+    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'seed', 'uncached']);
     expect(inputs['ref']).toMatchObject({ type: 'string', required: true });
     expect(inputs['projects']).toMatchObject({ type: 'string', required: false });
     expect(inputs['seed']).toMatchObject({ type: 'string', required: false });

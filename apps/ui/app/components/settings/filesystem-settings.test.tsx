@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectFileSystemConfig, Workspace, WorkspaceConnection } from '@taucad/files-ui/filesystem/handle-store';
-import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
+import type { ConnectedWorkspace } from '@taucad/files-ui/runtime/project-library-workspace';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
 
 vi.mock('@taucad/files-ui/filesystem/use-persistent-storage-status', () => ({
@@ -30,6 +30,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
+    fileManagerRef: mockFileManagerRef,
     workspace: {
       syncProjectRoots: vi.fn(),
       replaceWorkspaceHandle: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 
 const {
   mockAssertWorkspaceMutationAllowed,
+  mockFileManagerRef,
   mockCheckHandlePermission,
   mockConnectWorkspace,
   mockCreateWorkspace,
@@ -57,6 +59,20 @@ const {
   mockWorkspaceCreated,
 } = vi.hoisted(() => ({
   mockAssertWorkspaceMutationAllowed: vi.fn(),
+  /* The root file manager, as far as the folder rows read it: started, with Home's root status published, and not in
+   * `error`. One snapshot object, as an actor returns until it changes, so a selector over it settles. */
+  mockFileManagerRef: {
+    snapshot: {
+      status: 'active',
+      matches: () => false,
+      context: { rootStatuses: [{ storageRootKey: 'opfs:origin', backend: 'opfs', state: 'available' }] },
+    },
+    getSnapshot() {
+      return this.snapshot;
+    },
+    subscribe: () => ({ unsubscribe: () => undefined }),
+    send: vi.fn(),
+  },
   mockCheckHandlePermission: vi.fn(),
   mockConnectWorkspace: vi.fn<() => Promise<ConnectedWorkspace | undefined>>(),
   mockCreateWorkspace: vi.fn<(handle: FileSystemDirectoryHandle) => Promise<WorkspaceConnection>>(),

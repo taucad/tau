@@ -153,6 +153,24 @@ function codedErrorCard({
   const rawDetail = error.raw ? tryFormatJson(error.raw) : undefined;
   const raw = rawDetail === undefined ? {} : { raw: rawDetail };
 
+  /* I1: the host could not learn whether this server funds model calls, so this attempt made none. The host's own
+   * instruction wins when it sends one (a recorded mode this build cannot read, a host that cannot fund the run). */
+  if (category === 'deploymentUnknown') {
+    const hostInstruction = error.message.trim();
+    return (
+      <ChatErrorServiceUnavailable
+        className={className}
+        resumable={resumable}
+        title="Couldn't confirm how this server bills model calls"
+        description={
+          hostInstruction === ''
+            ? 'The app could not confirm how this Tau server bills model calls, so this attempt made none. Check your connection, then resume.'
+            : hostInstruction
+        }
+      />
+    );
+  }
+
   if (category === 'providerAccount') {
     return <ChatErrorProviderAccount className={className} description={error.message} details={error.details} />;
   }

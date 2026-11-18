@@ -164,6 +164,14 @@ const startStubRelay = async (): Promise<URL> => {
   return new URL(`http://127.0.0.1:${String(await listen(server))}`);
 };
 
+/** The deployment answer a self-host API publishes (`GET /v1/deployment`): runs take the unfunded transport. */
+const selfHostDeploymentAnswer = JSON.stringify({
+  version: 1,
+  edition: 'self-host',
+  billing: { funded: false },
+  maxAgeSeconds: 300,
+});
+
 /**
  * A gateway that holds every turn until the test releases it.
  *
@@ -181,6 +189,11 @@ const startStubGateway = async (): Promise<{
   let gate = Promise.withResolvers<void>();
   const firstTurnHeld = Promise.withResolvers<void>();
   const server = createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/v1/deployment') {
+      /* Answered at once: these tests drive the run channel, not billing, so the API says self-host. */
+      response.writeHead(200, { 'content-type': 'application/json' }).end(selfHostDeploymentAnswer);
+      return;
+    }
     response.on('error', () => {
       /* The daemon aborts this request when a run is cancelled; that is the
        * outcome under test, not a fixture failure. */

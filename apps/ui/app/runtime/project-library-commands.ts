@@ -73,8 +73,9 @@ import {
   resolveWorkspaceForWrite,
   routeBindsLocator,
   writeProjectLibraryFile,
-} from '#runtime/project-library-storage.js';
-import type { PersistentStorageRoot, ProjectLibraryFileManager } from '#runtime/project-library-storage.js';
+} from '@taucad/files-ui/runtime/project-library-storage';
+import type { PersistentStorageRoot } from '@taucad/files-ui/runtime/project-library-storage';
+import type { ProjectLibraryFacade } from '#runtime/file-manager-facade.js';
 
 /** What a duplicate's name ends with. */
 const copySuffix = ' (Copy)';
@@ -271,7 +272,7 @@ export type ProjectLibraryChatSessions = Pick<
 
 /** What the commands take from the library: its binding, worker, discovery, journal and listing. */
 export type ProjectCommandsHost = Readonly<{
-  facade: () => Promise<ProjectLibraryFileManager>;
+  facade: () => Promise<ProjectLibraryFacade>;
   chatStore: () => ChatStorage | undefined;
   readChats: <Value>(
     operation: (source: ChatStorage) => Promise<Value>,
@@ -747,7 +748,7 @@ export class ProjectCommands {
     if (chats.length === 0) {
       return { lost: () => false, release: () => undefined };
     }
-    const { leaseSettledChatLogs } = await import('#runtime/project-library-chat-logs.js');
+    const { leaseSettledChatLogs } = await import('@taucad/files-ui/runtime/project-library-chat-logs');
     return leaseSettledChatLogs({
       projectId,
       chats,

@@ -24,7 +24,7 @@ import {
   prepareAccountClosure,
 } from '#lib/billing-lifecycle-client.js';
 import { useFinancialSession } from '#providers/financial-session-provider.js';
-import { IconLine, supportEmail } from '#components/billing/billing-primitives.js';
+import { IconLine, supportEmail } from '@taucad/billing-ui/components/billing/billing-primitives';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 

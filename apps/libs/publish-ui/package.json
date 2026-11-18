@@ -28,12 +28,16 @@
   "exports": {
     "./components/publish/publication-access-panel": "./src/components/publish/publication-access-panel.tsx",
     "./components/publish/publication-email-tags": "./src/components/publish/publication-email-tags.tsx",
+    "./components/share/github-gist-management": "./src/components/share/github-gist-management.tsx",
+    "./components/share/github-gist-services": "./src/components/share/github-gist-services.tsx",
     "./components/share/parsed-publication": "./src/components/share/parsed-publication.ts",
     "./components/share/paused-model-gate": "./src/components/share/paused-model-gate.tsx",
     "./components/share/publication-lock-screen": "./src/components/share/publication-lock-screen.tsx",
     "./components/share/shared-project-password": "./src/components/share/shared-project-password.tsx",
     "./components/share/use-view-ping": "./src/components/share/use-view-ping.ts",
+    "./lib/github-url": "./src/lib/github-url.ts",
     "./machines/import-disk.machine": "./src/machines/import-disk.machine.ts",
+    "./machines/import-github.machine": "./src/machines/import-github.machine.ts",
     "./machines/unzip.machine": "./src/machines/unzip.machine.ts",
     "./machines/zip.machine": "./src/machines/zip.machine.ts",
     "./package.json": "./package.json"
@@ -50,7 +54,9 @@
     "vitest-mock-extended": "catalog:"
   },
   "dependencies": {
+    "@tanstack/react-query": "catalog:",
     "@taucad/filesystem": "workspace:*",
+    "@taucad/revisions": "workspace:*",
     "@taucad/share": "workspace:*",
     "@taucad/ui": "workspace:*",
     "@taucad/ui-core": "workspace:*",

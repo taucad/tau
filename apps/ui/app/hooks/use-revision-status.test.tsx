@@ -20,11 +20,8 @@ import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceF
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { createCheckoutRoutes, createWorkerRevisionRegistry } from '#machines/file-manager.worker.revisions.js';
 import { describeRevisionFailure } from '@taucad/ui-core/lib/revision-failure-copy';
-import type {
-  RevisionToast,
-  WorkerProjectRevisions,
-  WorkerRevisionResponse,
-} from '#machines/file-manager.worker.revisions.js';
+import type { WorkerProjectRevisions } from '#machines/file-manager.worker.revisions.js';
+import type { RevisionToast, WorkerRevisionResponse } from '@taucad/revisions-ui/types/revision-worker-protocol';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { startEnvironmentHost } from '#runtime/environment.fixture.js';
 import type { EnvironmentHostFixture } from '#runtime/environment.fixture.js';
@@ -824,6 +821,19 @@ describe('the page client of the worker revision root', () => {
       { command: 'focus', focused: true },
       { command: 'focus', focused: true },
     ]);
+    revisionClient.close();
+  });
+
+  it('should hold a first view the page shows until the client opens, then say it on the port (STO-25)', () => {
+    const { worker, messages } = controlledWorker();
+    const revisionClient = getRevisionClient({ projectId, worker });
+    const shownFrames = (): unknown[] =>
+      messages.filter((message) => (message as { command?: string }).command === 'firstViewShown');
+    revisionClient.firstViewShown?.();
+    expect(shownFrames()).toEqual([]);
+
+    revisionClient.open();
+    expect(shownFrames()).toEqual([{ command: 'firstViewShown' }]);
     revisionClient.close();
   });
 

@@ -39,12 +39,20 @@ import {
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { ActionButton, disclosureMotion } from '@taucad/ui/components/actions';
-import { NamePopover } from '#components/revisions/name-popover.js';
-import { RevisionRegion } from '#components/revisions/revision-region.js';
-import { graphGeometry, gutterWidth, layoutRevisionGraph } from '#components/revisions/revision-graph-layout.js';
-import type { GraphNode, GraphRow, MarkerKind } from '#components/revisions/revision-graph-layout.js';
-import { HistoryGraph, HistoryLanesContext, useRowBoxes } from '#components/revisions/revision-graph-view.js';
-import type { BranchSlot } from '#components/revisions/revision-graph-view.js';
+import { NamePopover } from '@taucad/revisions-ui/components/revisions/name-popover';
+import { RevisionRegion } from '@taucad/revisions-ui/components/revisions/revision-region';
+import {
+  graphGeometry,
+  gutterWidth,
+  layoutRevisionGraph,
+} from '@taucad/revisions-ui/components/revisions/revision-graph-layout';
+import type { GraphNode, GraphRow, MarkerKind } from '@taucad/revisions-ui/components/revisions/revision-graph-layout';
+import {
+  HistoryGraph,
+  HistoryLanesContext,
+  useRowBoxes,
+} from '@taucad/revisions-ui/components/revisions/revision-graph-view';
+import type { BranchSlot } from '@taucad/revisions-ui/components/revisions/revision-graph-view';
 import { conflictLinesOf, historyLanesOf, listedBranchesOf } from '#routes/w.$workspace.$project/history-lanes.js';
 import type { HistoryFilter, HistoryLanes } from '#routes/w.$workspace.$project/history-lanes.js';
 import { LaneStepRow, laneGraphRowOf, pendingStepsOf } from '#routes/w.$workspace.$project/history-lanes-rows.js';
@@ -58,7 +66,7 @@ import {
   timelineRowContent,
   timelineRowHover,
   timelineMarker,
-} from '#components/revisions/revision-timeline.js';
+} from '@taucad/revisions-ui/components/revisions/revision-timeline';
 import { RevisionRow, isAutosave, nextVersionNumber } from '#routes/w.$workspace.$project/revision-marker.js';
 import { ConflictDecision } from '#routes/w.$workspace.$project/revision-branches.js';
 import type { ConflictMaterialization } from '#routes/w.$workspace.$project/revision-branches.js';
@@ -82,7 +90,7 @@ import {
   useReportHistoryPaneShown,
 } from '#routes/w.$workspace.$project/revision-pane-requests.js';
 import { useRevisionGraph, useRevisions, useRevisionsOnLine, useWithRestoreTargets } from '#hooks/use-revisions.js';
-import type { RevisionCard, RevisionsView } from '#hooks/use-revisions.js';
+import type { RevisionCard, RevisionsView } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import {
   useProjectRole,

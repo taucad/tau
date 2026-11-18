@@ -34,7 +34,7 @@ import {
 import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions';
 import { DiffViewer } from '@taucad/editor-ui/components/code/diff-viewer';
 import { ActionButton } from '@taucad/ui/components/actions';
-import { NamePopover } from '#components/revisions/name-popover.js';
+import { NamePopover } from '@taucad/revisions-ui/components/revisions/name-popover';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { resolveHighlightLanguageForPath } from '@taucad/ui-core/lib/code-language-resolution';

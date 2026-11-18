@@ -40,7 +40,7 @@ vi.mock('#lib/tau-cloud-intent.js', () => ({
     },
   },
 }));
-vi.mock('#services/revision-client-registry.js', () => {
+vi.mock('@taucad/revisions-ui/services/revision-client-registry', () => {
   /* One client object, as the registry holds one per project. */
   const client = {
     status: () => ({ sync: { state: harness.syncState }, remote: { kind: 'tau', phase: 'connected' } }),

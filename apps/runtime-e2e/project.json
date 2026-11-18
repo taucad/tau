@@ -66,10 +66,18 @@
     "native-turbofan": {
       "executor": "nx:run-commands",
       "cache": false,
-      "dependsOn": [{ "projects": ["cli"], "target": "build" }],
+      "dependsOn": [
+        {
+          "projects": ["cli"],
+          "target": "build"
+        }
+      ],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "node --import @oxc-node/core/register ../../packages/cli/dist/bin/tau.mjs prepare picogk && GEOSPEC_TURBOFAN_NATIVE=1 vitest run src/picogk-turbofan-native.test.ts"
+        "command": "node --import @oxc-node/core/register ../../packages/cli/dist/bin/tau.mjs prepare picogk && vitest run src/picogk-turbofan-native.test.ts",
+        "env": {
+          "GEOSPEC_TURBOFAN_NATIVE": "1"
+        }
       }
     },
     "example-health": {
@@ -112,6 +120,36 @@
         "cwd": "{projectRoot}"
       },
       "cache": false
+    },
+    "compute-qualify-ci": {
+      "command": "vitest run src/compute-baseline/compute-qualification.test.ts src/compute-baseline/identity-tracer.test.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "metadata": {
+        "description": "Compute reuse qualification, CI subset (audit R5): reuse-off GLB hashes and per-step counts against the pins, byte parity with reuse on, ten cache histories, multi-thread parity and the identity tracer's effect model."
+      }
+    },
+    "compute-qualify": {
+      "command": "node --import @oxc-node/core/register src/compute-baseline/harness/qualify-driver.mts --pairs 2",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "metadata": {
+        "description": "Full compute reuse qualification campaign: seven models, matrix, scrub, agent loop, history gate and stop latency, arms alternated in pairs. Writes out/reports/compute-qualify/<stamp>."
+      }
+    },
+    "compute-qualify-summarize": {
+      "command": "node --import @oxc-node/core/register src/compute-baseline/harness/qualify-summarize.mts --pins src/compute-baseline/qualification-baselines.json",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "metadata": {
+        "description": "Summarize a qualification campaign directory (pass it after --): parity, history gate, counts, stop latency, timings and drift against the pins."
+      }
     },
     "benchmark": {
       "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-kernels.mts",

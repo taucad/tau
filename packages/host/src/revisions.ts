@@ -570,16 +570,18 @@ const registryAnswered = async (actor: ProjectRevisionsActor): Promise<void> => 
  * @example <caption>Launcher 1, placing every turn</caption>
  * ```typescript
  * import { createGatewayModelTransport } from '@taucad/agent-host';
- * import type { ToolRegistry } from '@taucad/agent-host';
+ * import type { DeploymentModeAnswer, ToolRegistry } from '@taucad/agent-host';
  * import { createAgentLauncher } from '@taucad/agent-host/launcher';
  * import { createNodeChatStore } from '@taucad/agent-host/node';
  * import { createProjectRevisions } from '@taucad/host';
  *
  * declare const toolRegistry: ToolRegistry;
+ * // The API's deployment answer for the gateway's origin (`GET /v1/deployment`), fetched and cached by the host.
+ * declare const deployment: (signal: AbortSignal) => Promise<DeploymentModeAnswer>;
  * const revisions = createProjectRevisions({ workspaceRoot: '/srv/project', projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' });
  * const launcher = createAgentLauncher({
  *   chats: createNodeChatStore({ workspaceRoot: '/srv/project' }),
- *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/' }),
+ *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/', billing: { deployment } }),
  *   credential: () => ({ mode: 'session' }),
  *   systemPrompt: 'You are Tau.',
  *   toolRegistry,

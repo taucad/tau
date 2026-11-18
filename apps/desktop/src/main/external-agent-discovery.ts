@@ -94,6 +94,11 @@ export type ExternalAgentDiscovery = {
    * share one discovery. Never rejects.
    */
   list(): Promise<readonly ExternalAgentDescriptor[]>;
+  /**
+   * The adapter the last successful discovery advertised for an agent id, as discovered (before main's account
+   * variables are added for the utility); `undefined` for an agent it refused or never saw.
+   */
+  adapterOf(agentId: string): AcpAdapter | undefined;
 };
 
 const profileOrder = (id: string): number => {
@@ -196,5 +201,6 @@ export const createExternalAgentDiscovery = (options: ExternalAgentDiscoveryOpti
       inFlight = run();
       return inFlight;
     },
+    adapterOf: (agentId) => current?.agents.find((adapter) => adapter.id === agentId),
   };
 };

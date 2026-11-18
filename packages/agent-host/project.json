@@ -9,7 +9,7 @@
     "formal:nightly": {
       "dependsOn": [{ "target": "formal:nightly:fresh" }],
       "options": {
-        "command": "node tools/formal/src/cli.ts nightly --without-check packages/agent-host && vitest run --root packages/agent-host src/host/chat-run.conformance.test.ts src/launchers/leadership/leadership.machine.conformance.test.ts",
+        "command": "node tools/formal/src/cli.ts nightly --without-check --without-mutants packages/agent-host && vitest run --root packages/agent-host src/host/chat-run.conformance.test.ts src/launchers/leadership/leadership.machine.conformance.test.ts",
         "env": {
           "FORMAL_FRESH_TRACES": "20000",
           "FORMAL_SIMULATED": "out/test-results/formal/packages/agent-host/simulated"
@@ -34,6 +34,7 @@
       }
     },
     "formal:nightly:check": {},
+    "formal:nightly:mutants": {},
     "build": {
       "executor": "nx:run-commands",
       "dependsOn": ["^build"],

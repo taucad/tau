@@ -7,13 +7,14 @@
  * steps (`scanDiscovery`, `planDiscovery`, `applyDiscovery`), the commit of a pending project operation
  * (`commitPendingProjectOperation`), the reads route access makes, and the listing a pass is enriched into. Each takes
  * the root file manager's facade, which still comes from React through the library's binding until A4b builds it
- * over `rootFiles`. Nothing here holds state: the sequencing and the fences are the machines'.
+ * over `rootFiles`. Nothing here holds state: the sequencing and the fences are the machines'. The facade, the
+ * object-store worker and the chat store arrive as arguments typed by `#types/project-library-io.types`, which the
+ * app's concrete values satisfy.
  *
  * @module
  */
 import { declaresManifest } from '@taucad/project-workspace/utils/project-manifest-equivalence';
 import type { QueryClient } from '@tanstack/react-query';
-import type { Remote } from 'comlink';
 import { z } from 'zod';
 import { serializeProjectManifest } from '@taucad/types';
 import type {
@@ -34,8 +35,6 @@ import type { AttachmentStore } from '@taucad/chat-ui/db/attachment-store';
 import { WorkspaceDirectoryRequiredError } from '@taucad/ui-core/filesystem/workspace-errors';
 import { allocateProjectDirectorySlug } from '@taucad/ui-core/utils/project-directory.utils';
 import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
-import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
-import type { useFileManager } from '#hooks/use-file-manager.js';
 import {
   applyProjectFileSystemConfigChanges,
   checkHandlePermission,
@@ -48,38 +47,26 @@ import {
   pinHomeStorageBackend,
   requestHomeStoragePersistence,
   setProjectFileSystemConfig,
-} from '@taucad/files-ui/filesystem/handle-store';
-import type {
-  ProjectFileSystemConfig,
-  WorkspaceBindingRepair,
-  WorkspaceEntry,
-} from '@taucad/files-ui/filesystem/handle-store';
-import { directoryPicker } from '@taucad/files-ui/constants/browser.constants';
-import { nodeHomeRoot } from '@taucad/files-ui/filesystem/desktop-bridge';
-import { metaConfig } from '#constants/meta.constants.js';
-import type { ChatStorage } from '#types/storage.types.js';
+} from '#filesystem/handle-store.js';
+import type { ProjectFileSystemConfig, WorkspaceBindingRepair, WorkspaceEntry } from '#filesystem/handle-store.js';
+import { directoryPicker } from '#constants/browser.constants.js';
+import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 import type {
   PendingProjectOperation,
   PendingProjectRecovery,
   PendingProjectRecoveryReason,
   PendingProjectStorage,
-} from '@taucad/files-ui/types/pending-project-operation.types';
-import type { ProjectLibraryEntry, ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
-import { projectSlugsOf } from '@taucad/files-ui/utils/project-url.utils';
-import type { DiscoveryPlan, DiscoveryWrites } from '@taucad/files-ui/machines/library-discovery.machine';
-import type { RecoveryRowInput, ReplayOutcome } from '@taucad/files-ui/machines/library-recovery.machine';
-
-/** The root file manager's facade, as `FileManagerScope` builds it in React until A4b (D15 ruling, A2). @public */
-export type ProjectLibraryFileManager = Pick<
-  ReturnType<typeof useFileManager>,
-  | 'client'
-  | 'recordFiles'
-  | 'workspace'
-  | 'scopedStorage'
-  | 'workerChangeChannel'
-  | 'watchRecordFile'
-  | 'readDuplicateProjectFiles'
->;
+} from '#types/pending-project-operation.types.js';
+import type { ProjectLibraryEntry, ProjectLibraryState } from '#types/project-library.types.js';
+import { projectSlugsOf } from '#utils/project-url.utils.js';
+import type { DiscoveryPlan, DiscoveryWrites } from '#machines/library-discovery.machine.js';
+import type { RecoveryRowInput, ReplayOutcome } from '#machines/library-recovery.machine.js';
+import type {
+  ProjectLibraryChatRecords,
+  ProjectLibraryFileManager,
+  ProjectLibraryObjectStore,
+} from '#types/project-library-io.types.js';
 
 export type ProjectDiscoveryConflict =
   | Extract<ProjectDiscoveryEntry, { status: 'adoption-required' }>
@@ -227,7 +214,8 @@ export type PersistentStorageRoot =
   | { readonly backend: 'node'; readonly path?: string };
 
 /**
- * The worker's own derivation, bound to this app shell's database prefix —
+ * The worker's own derivation, bound to the app shell's database prefix (`appMetaConfig`, the value the app hands its
+ * file-manager worker) —
  * never a second implementation: the blocking decision in discovery compares
  * these keys across the worker boundary (R12).
  */
@@ -241,7 +229,7 @@ const nodeRootPath = (path: string): { readonly path?: string } => (path === nod
 export const persistentStorageRootKey = (root: PersistentStorageRoot): string =>
   resolveStorageRootKey(
     root.backend === 'node' ? { backend: 'node', path: root.path ?? nodeHomeRoot() } : root,
-    metaConfig.databasePrefix,
+    appMetaConfig.databasePrefix,
   );
 
 /** The persisted route that binds a project id to exactly this discovered directory. */
@@ -472,8 +460,8 @@ const assertProjectAbsentAfterDelete = async (
 /** What committing a pending operation reads and writes through. */
 export type CommitIo = Readonly<{
   fileManager: ProjectLibraryFileManager;
-  worker: Remote<ObjectStoreWorker>;
-  chatStore: ChatStorage;
+  worker: ProjectLibraryObjectStore;
+  chatStore: ProjectLibraryChatRecords;
   queryClient: QueryClient;
 }>;
 
@@ -761,7 +749,7 @@ export const planDiscovery = async (
  */
 export const applyDiscovery = async (
   fileManager: ProjectLibraryFileManager,
-  worker: () => Promise<Remote<ObjectStoreWorker>>,
+  worker: () => Promise<ProjectLibraryObjectStore>,
   { writes, stopped }: Readonly<{ writes: DiscoveryWrites; stopped: () => boolean }>,
 ): Promise<Readonly<{ skipped: boolean }>> => {
   const { deletes } = writes;
@@ -790,7 +778,7 @@ export const applyDiscovery = async (
  */
 export const ensureProjectLibraryState = async (
   recordFiles: ProjectLibraryFileClient,
-  worker: Remote<ObjectStoreWorker>,
+  worker: ProjectLibraryObjectStore,
   projectId: string,
 ): Promise<ProjectLibraryState> => {
   const existing = await worker.getProjectLibraryState(projectId);
@@ -856,7 +844,7 @@ export const classifyMissingProject = async (
 
 const ensureProjectLibraryStates = async (
   recordFiles: ProjectLibraryFileClient,
-  worker: Remote<ObjectStoreWorker>,
+  worker: ProjectLibraryObjectStore,
   projectIds: readonly string[],
 ): Promise<ReadonlyMap<string, ProjectLibraryState>> => {
   const states = await worker.getProjectLibraryStates(projectIds);
@@ -963,7 +951,7 @@ export const deriveWorkspaceBindingRepairs = async (
 
 /** Enrich a pass's listing into what the library shows: library rows, slugs, conflicts, recoveries and repairs. */
 export const buildProjectListing = async (
-  { recordFiles, worker }: Readonly<{ recordFiles: ProjectLibraryFileClient; worker: Remote<ObjectStoreWorker> }>,
+  { recordFiles, worker }: Readonly<{ recordFiles: ProjectLibraryFileClient; worker: ProjectLibraryObjectStore }>,
   discovery: ProjectDiscoveryResult,
   recoveries: () => readonly PendingProjectRecovery[],
 ): Promise<ProjectListing> => {

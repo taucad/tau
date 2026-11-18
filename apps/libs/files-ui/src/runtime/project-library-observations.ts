@@ -18,9 +18,9 @@ import { ObservationService } from '@taucad/fs-client/observation-service';
 import type { QueryClient } from '@tanstack/react-query';
 import { createCallbackLogic } from 'xstate';
 import type { WatchEvent } from '@taucad/filesystem';
-import type { ChatStorage } from '#types/storage.types.js';
-import type { LibraryDiscoveryEvent } from '@taucad/files-ui/machines/library-discovery.machine';
-import type { ProjectLibraryFileManager, ProjectListing } from '#runtime/project-library-storage.js';
+import type { LibraryDiscoveryEvent } from '#machines/library-discovery.machine.js';
+import type { ProjectListing } from '#runtime/project-library-storage.js';
+import type { ProjectLibraryFileManager } from '#types/project-library-io.types.js';
 
 /*
  * Discovery and chat membership watch only their kinds (charter D18): the
@@ -55,21 +55,24 @@ export const chatMetadataWatchRequest = {
   ],
 };
 
-/** Admits the chat-record reads the metadata observation fences, and settles the ones it holds. */
-export type MetadataReadOwner = Readonly<{
+/**
+ * Admits the chat-record reads the metadata observation fences over `Source` (the app's chat store), and settles the
+ * ones it holds.
+ */
+export type MetadataReadOwner<Source> = Readonly<{
   /** The observation's per-project watches serve project-scoped reads; the returned call disconnects them. */
   connect: (project: (id: string) => ObservationService<void>) => () => void;
   /** Hold reads until the observation is ready again. */
   hold: () => void;
   ready: () => void;
   fail: (error: Error) => void;
-  read: <Value>(operation: (source: ChatStorage) => Promise<Value>, projectId?: string) => Promise<Value>;
+  read: <Value>(operation: (source: Source) => Promise<Value>, projectId?: string) => Promise<Value>;
   /** Settles once the reads in flight (for one project, or all) have. */
   settle: (projectId?: string) => Promise<void>;
 }>;
 
 /** Retain actual owner I/O, whose lifetime Query cancellation cannot shorten. */
-export function createMetadataReadOwner(source: ChatStorage): MetadataReadOwner {
+export function createMetadataReadOwner<Source>(source: Source): MetadataReadOwner<Source> {
   const pending = new Map<Promise<unknown>, string | undefined>();
   let registration = Promise.withResolvers<Error | undefined>();
   let connection = Promise.withResolvers<{
@@ -100,7 +103,7 @@ export function createMetadataReadOwner(source: ChatStorage): MetadataReadOwner 
       previous.resolve(undefined);
       registration.resolve(error);
     },
-    async read<Value>(operation: (source: ChatStorage) => Promise<Value>, projectId?: string): Promise<Value> {
+    async read<Value>(operation: (source: Source) => Promise<Value>, projectId?: string): Promise<Value> {
       const owner = await connection.promise;
       owner.signal.throwIfAborted();
       const observation = projectId === undefined ? undefined : owner.project(projectId);
@@ -182,7 +185,7 @@ export function createMetadataReadOwner(source: ChatStorage): MetadataReadOwner 
 }
 
 /** The chat store over the facade's record client, and the read owner its metadata reads wait on. */
-export type LibraryRecords = Readonly<{ chatStore: ChatStorage; readOwner: MetadataReadOwner }>;
+export type LibraryRecords<Store> = Readonly<{ chatStore: Store; readOwner: MetadataReadOwner<Store> }>;
 
 /** What the observations read from the library that runs them; host objects, held in their closures only (D4). */
 export type LibraryObservationHost = Readonly<{
@@ -190,7 +193,7 @@ export type LibraryObservationHost = Readonly<{
   /** The root file facade's current value, once the library follows it. */
   fileManager: () => ProjectLibraryFileManager | undefined;
   /** The records over the facade's record client, if any. */
-  records: () => LibraryRecords | undefined;
+  records: () => LibraryRecords<unknown> | undefined;
   /** Called after the facade or its records changed. */
   subscribeBinding: (listener: () => void) => () => void;
   /** Called when the library asks the manifest watch to invalidate (a root moved under the listing). */

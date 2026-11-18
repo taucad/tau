@@ -658,7 +658,7 @@ const reportExportOpened = reportTourActionOnMount('build');
 export function ConverterPanelBody(
   props: { readonly downloadOnly?: boolean; readonly isShown?: boolean } = {},
 ): ReactElement {
-  const availability = useModelAvailability();
+  const availability = useModelAvailability('export');
   return availability === 'ready' ? (
     <ConverterPanelBodyContent {...props} />
   ) : (

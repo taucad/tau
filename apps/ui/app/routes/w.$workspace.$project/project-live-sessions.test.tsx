@@ -135,6 +135,7 @@ type RevisionStatus = Readonly<{
     chats?: 'ready' | 'pending';
     hasAppliedRemote?: boolean;
   }>;
+  entryManifest?: string;
 }>;
 
 /** One project's revision client: the session's close cut, the focus long poll and what the lifecycle sends it. */
@@ -1110,6 +1111,20 @@ describe('ProjectSessionBinding relays (A0.2 item 7)', () => {
     await flushTasks();
 
     expect(retrySpyOf(projectA)).toHaveBeenCalled();
+  });
+
+  /* STO-25: the model renders from the first view once the manifest is read again after the closure landed it. */
+  it('should retry the manifest observation once a cloud open’s write names the tau.json it landed', async () => {
+    tauCloudIntent.set(projectA, 'open');
+    await openAndRender([projectA], { projectId: projectA });
+    expect(retrySpyOf(projectA)).not.toHaveBeenCalled();
+
+    act(() => {
+      revisionClientOf(projectA).setStatus({ entryManifest: 'a'.repeat(64) });
+    });
+    await flushTasks();
+
+    expect(retrySpyOf(projectA)).toHaveBeenCalledOnce();
   });
 
   it('should open one revision client per live project from its session, and cut the close through it (S27, A7b)', async () => {

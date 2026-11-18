@@ -83,6 +83,7 @@ catalog:
   '@nestjs/platform-fastify': ^11.2.4
   '@nestjs/terminus': ^11.1.1
   '@nestjs/testing': ^11.1.27
+  '@netlify/vite-plugin-react-router': 4.0.0
   '@nx/devkit': 22.7.12
   '@nx/eslint': 22.7.12
   '@nx/eslint-plugin': 22.7.12
@@ -253,7 +254,7 @@ catalog:
   oxc-transform-react: 0.148.0
   pdf-parse: 2.4.5
   polygon-clipping: ^0.15.7
-  replicad: npm:@taulabs/replicad@1.1.0-taulabs.1
+  replicad: npm:@taulabs/replicad@1.2.0-beta.0
   replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.1
   publint: ^0.3.21
   qrcode-terminal: ^0.12.0

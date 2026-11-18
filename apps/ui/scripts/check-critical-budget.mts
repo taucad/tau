@@ -27,6 +27,12 @@
  * the next step never fetches a viewer, three.js, kernel, wasm or worker asset. It also reports what each warm-up
  * prefetches once idle, after the warming page's own interactive tier.
  *
+ * The service worker's precache list (PL7, shell invariant 8, `scripts/build-service-worker.ts`): it equals the list
+ * generated from the registry (each answered class's document, its references and its interactive tier), so nothing
+ * was added by hand; it holds each guarded class's measured closure; no entry is a wasm file, a worker or runtime
+ * asset, or a chunk holding any heavy module family; hashed `/assets/*` entries carry no revision, every other entry
+ * carries one, and none carries an `integrity`. It also reports the precache's size.
+ *
  * "No split route module" (React Router 8 migration B8, RR6): no route's client loader, action, middleware or hydrate
  * fallback is split into a chunk of its own ({@link findSplitRouteModules}).
  *
@@ -36,9 +42,10 @@
  *
  * Exit codes:
  *   0  Every class within budget, no early kernel and no split route module
- *   1  A budget, heavy-family, early-kernel, warm-manifest or split-route-module violation, or a missing build output
+ *   1  A budget, heavy-family, early-kernel, warm-manifest, precache or split-route-module violation, or a missing
+ *      build output
  */
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +55,9 @@ import { criticalRouteClasses, heavyFamilyOfModuleId } from '#scripts/critical-p
 import { rootKeys, staticClosure } from '#scripts/interactive-closure.ts';
 import type { ViteManifest } from '#scripts/interactive-closure.ts';
 /* oxlint-disable no-restricted-imports -- Native Node scripts read the registry without bundler aliases. */
-import { routeClasses } from '../app/lib/route-classes.ts';
+import { routeClasses, workerRouteClasses } from '../app/lib/route-classes.ts';
+import { collectPrecacheFiles, isHashedUrl, precacheListFile } from './precache-list.ts';
+import type { ClientBuildView, PrecacheDocument } from './precache-list.ts';
 import { isWarmableHref, parseWarmManifest, warmHrefs, warmManifestFile } from '../app/lib/warm-manifest.ts';
 import type { WarmManifest } from '../app/lib/warm-manifest.ts';
 /* oxlint-enable no-restricted-imports */
@@ -335,6 +344,95 @@ export const findWarmManifestProblems = (input: {
   return problems;
 };
 
+/** One entry of the precache list as the build wrote it; anything beyond `url` and `revision` is a violation. */
+export type WrittenPrecacheEntry = Readonly<{
+  url: string;
+  // oxlint-disable-next-line typescript/no-restricted-types -- Workbox's precache wire value for "no revision".
+  revision?: string | null;
+  integrity?: string;
+}>;
+
+/** The violations of one precache entry: a deferred-tier, wasm, worker or runtime file, or a wrong revision. */
+const precacheEntryProblems = (
+  entry: WrittenPrecacheEntry,
+  input: Readonly<{
+    manifest: ViteManifest;
+    chunks: ReadonlyMap<string, ModuleIdManifestChunk>;
+    assets: ReadonlySet<string>;
+  }>,
+): string[] => {
+  const problems: string[] = [];
+  const file = entry.url.replace(/^\//u, '');
+  const owners = file.endsWith('.css')
+    ? Object.values(input.manifest).flatMap((chunk) => (chunk.css?.includes(file) === true ? [chunk.file] : []))
+    : [file];
+  const heavy = owners
+    .flatMap((owner) => input.chunks.get(owner)?.modules ?? [])
+    .find((module) => heavyFamilyOfModuleId(module.id) !== undefined);
+  if (file.endsWith('.wasm') || (input.assets.has(file) && /\.[cm]?js$/u.test(file))) {
+    problems.push(`precache: ${entry.url} is a wasm, worker or runtime asset`);
+  } else if (heavy !== undefined) {
+    problems.push(
+      `precache: ${entry.url} belongs with the ${heavyFamilyOfModuleId(heavy.id)?.name ?? ''} module ${heavy.id}`,
+    );
+  }
+  const hashed = isHashedUrl(entry.url);
+  if (hashed && entry.revision !== null) {
+    problems.push(`precache: ${entry.url} is hashed by name but carries a revision`);
+  } else if (!hashed && typeof entry.revision !== 'string') {
+    problems.push(`precache: ${entry.url} carries no content revision`);
+  }
+  if (Object.keys(entry).some((key) => key !== 'url' && key !== 'revision')) {
+    problems.push(`precache: ${entry.url} carries ${Object.keys(entry).join(', ')}; only url and revision are allowed`);
+  }
+  return problems;
+};
+
+/**
+ * The service worker precache list's violations (shell invariant 8).
+ *
+ * @param input - The written list (`undefined` when missing), the list the registry generates for this build, each
+ *   guarded class's measured closure, the classes the worker answers, and the build manifests.
+ * @returns One message per violation; empty when the list holds.
+ */
+export const findPrecacheProblems = (input: {
+  entries: readonly WrittenPrecacheEntry[] | undefined;
+  expected: readonly string[];
+  closures: ReadonlyMap<string, readonly string[]>;
+  workerClassIds: readonly string[];
+  manifest: ViteManifest;
+  moduleIds: ModuleIdManifest;
+}): string[] => {
+  if (input.entries === undefined) {
+    return [`precache: build/${precacheListFile} is missing`];
+  }
+  const listed = new Set(input.entries.map((entry) => entry.url));
+  const expected = new Set(input.expected);
+  const problems = [
+    ...[...expected]
+      .filter((url) => !listed.has(url))
+      .map((url) => `precache: ${url} is generated from the registry but not in the worker's list`),
+    ...[...listed]
+      .filter((url) => !expected.has(url))
+      .map((url) => `precache: ${url} is in the worker's list but not generated from the registry`),
+  ];
+  for (const [id, closure] of input.closures) {
+    if (input.workerClassIds.includes(id)) {
+      problems.push(
+        ...closure
+          .filter((file) => !listed.has(`/${file}`))
+          .map((file) => `precache: ${id}'s interactive tier holds /${file}, which the worker does not precache`),
+      );
+    }
+  }
+  const context = {
+    manifest: input.manifest,
+    chunks: new Map(input.moduleIds.chunks.map((chunk) => [chunk.fileName, chunk])),
+    assets: new Set(input.moduleIds.assets.map((asset) => asset.fileName)),
+  };
+  return [...problems, ...input.entries.flatMap((entry) => precacheEntryProblems(entry, context))];
+};
+
 /**
  * Which variant a build is: each `#cloud/…` boundary module resolves to its `.cloud` or its `.self-host` file.
  *
@@ -473,6 +571,40 @@ const main = (): void => {
   problems.push(...findEarlyKernelPreloads({ preloads: documentPreloads(), moduleIds }));
   problems.push(...findSplitRouteModules(readRouterManifest()));
 
+  const precacheListPath = join(appDirectory, 'build', precacheListFile);
+  const precache = existsSync(precacheListPath) ? readJson<WrittenPrecacheEntry[]>(precacheListPath) : undefined;
+  const workerClasses = workerRouteClasses().filter(
+    (workerClass) => variant === 'cloud' || workerClass.routeClass.id !== 'offline-shell',
+  );
+  const clientView: ClientBuildView = {
+    readText: (relativePath) =>
+      existsSync(join(clientDirectory, relativePath))
+        ? readFileSync(join(clientDirectory, relativePath), 'utf8')
+        : undefined,
+    exists: (relativePath) => existsSync(join(clientDirectory, relativePath)),
+    manifest,
+  };
+  const precacheDocuments: PrecacheDocument[] = workerClasses.map((workerClass) => ({
+    document: workerClass.document,
+    roots: workerClass.routeClass.interactive ?? [],
+  }));
+  problems.push(
+    ...findPrecacheProblems({
+      entries: precache,
+      expected: collectPrecacheFiles(precacheDocuments, clientView),
+      closures,
+      workerClassIds: workerClasses.map((workerClass) => workerClass.routeClass.id),
+      manifest,
+      moduleIds,
+    }),
+  );
+  if (precache !== undefined) {
+    const bytes = precache.reduce((total, entry) => total + brotliSize(entry.url.slice(1)), 0);
+    console.info(
+      `Service worker precache (${variant}): ${formatBytes(bytes)} brotli in ${precache.length} entries, for ${workerClasses.map((workerClass) => workerClass.routeClass.id).join(', ')}`,
+    );
+  }
+
   const warm = parseWarmManifest(readJson<unknown>(join(clientDirectory, warmManifestFile)));
   problems.push(...findWarmManifestProblems({ warm, closures, manifest, moduleIds }));
   if (warm !== undefined) {
@@ -502,7 +634,9 @@ const main = (): void => {
     console.error(problems.join('\n'));
     process.exit(1);
   }
-  console.info('Critical budget OK; no document preloads a kernel, wasm or worker asset; no route module is split');
+  console.info(
+    'Critical budget OK; no document preloads a kernel, wasm or worker asset; the precache holds no deferred-tier asset; no route module is split',
+  );
 };
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

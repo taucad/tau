@@ -1,0 +1,47 @@
+---
+title: Native CAD Files
+description: Open SolidWorks, CATIA, Inventor, Fusion, FreeCAD, Rhino, ACIS and Creo View files in Tau, on your device, and see what did not carry over.
+docType: reference
+icon: 'lucide:file-box text-purple'
+wordBudgetOverride: 450
+---
+
+# Native CAD Files
+
+Tau opens part files from other CAD applications without a round trip through STEP. Drop one on [Import](https://tau.new/import) to start a project with it as the main file, add it to a project's file tree, or drop it on [Convert](https://tau.new/convert) to view it and export a mesh.
+
+## Formats
+
+| Extension  | Format                     |
+| ---------- | -------------------------- |
+| `.sldprt`  | SolidWorks part            |
+| `.catpart` | CATIA V5 part              |
+| `.ipt`     | Autodesk Inventor part     |
+| `.iam`     | Autodesk Inventor assembly |
+| `.f3d`     | Autodesk Fusion archive    |
+| `.f3z`     | Autodesk Fusion bundle     |
+| `.fcstd`   | FreeCAD document           |
+| `.3dm`     | Rhino model                |
+| `.sat`     | ACIS text                  |
+| `.sab`     | ACIS binary                |
+| `.smt`     | ShapeManager text          |
+| `.smb`     | ShapeManager binary        |
+| `.pvz`     | Creo View package          |
+
+An assembly opens as its geometry; its structure is not kept yet. STEP, IGES and mesh files open through their own importers.
+
+## On your device
+
+Conversion runs on your device, in the browser or in Tau Desktop. The file is not uploaded to convert it. The open source [cadmpeg](https://github.com/cadmpeg/cadmpeg) engine reads the file, and Tau meshes the result like a STEP file.
+
+## Warnings
+
+A file can hold data that Tau cannot show yet, such as sketches, feature history, PMI or appearances. Tau opens the geometry and reports each item it left out as a warning: in a project, the viewer bar counts them and lists each one; in Convert, the count sits under the filename and expands to the list. A file the engine cannot read fails with the engine's reason instead of opening part of it.
+
+## Native export
+
+Writing native files is experimental, and Tau does not offer it yet. With the engine version Tau ships, the SolidWorks, Fusion and Rhino writers refuse the models Tau makes with an `UNSUPPORTED_FORMAT` error, and the FreeCAD writer only rewrites a FreeCAD document, so Tau shows no export it cannot finish. A native file exports as glTF or another mesh format for now.
+
+## Trademarks
+
+SolidWorks, CATIA, Autodesk Inventor, Autodesk Fusion, FreeCAD, Rhino, ACIS, ShapeManager and Creo View are trademarks of their owners. Tau names them only to say which files it opens. Tau and cadmpeg are not affiliated with, endorsed by or sponsored by any of these vendors.

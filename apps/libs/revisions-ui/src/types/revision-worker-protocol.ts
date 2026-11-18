@@ -368,7 +368,10 @@ export type WorkerRevisionRequest =
   | Readonly<{ command: 'focus'; focused: boolean; id?: number }>
   /* The page's resolved telemetry consent (runtime observability PR-7, AR-W6-02): a port frame, said on every new
    * port and on every change, because only the page can resolve it. The sync attempt reporter reads it. */
-  | Readonly<{ command: 'telemetryConsent'; consent: ReportingConsent; id?: number }>;
+  | Readonly<{ command: 'telemetryConsent'; consent: ReportingConsent; id?: number }>
+  /* The page's word that a Tau Cloud open's first view is on screen (STO-25): a port frame, because only the page
+   * knows what it shows. The host's open timer reads it. */
+  | Readonly<{ command: 'firstViewShown'; id?: number }>;
 
 /**
  * What one correlated command answered.

@@ -5,7 +5,7 @@ import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router';
-import { Check, Globe, Link2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Check, Cloud, Link2, RefreshCw, ShieldCheck } from 'lucide-react';
 import { sharePasswordLimits } from '@taucad/share/artifact';
 import { formatShareUrl } from '@taucad/share/locator';
 import type { ShareLocator } from '@taucad/share/locator';
@@ -100,7 +100,7 @@ const shareMethodDescriptors = shareProviderRegistry.descriptors.filter(
  * A method named by the link (a GitHub return, a sign-in return) or chosen in
  * this panel wins; otherwise the one this person chose last time (R8), as long
  * as the panel still offers it; otherwise a direct link. A panel that cannot
- * collect a snapshot offers only the web link.
+ * collect a snapshot offers only the Tau Cloud link.
  *
  * @param chosen - The method named by the link or picked in this panel.
  * @param remembered - The stored preference, unvalidated.
@@ -123,7 +123,7 @@ const resolveShareMethod = (
 };
 
 const DirectIcon: ShareMethodIcon = Link2;
-const WebIcon: ShareMethodIcon = Globe;
+const TauCloudIcon: ShareMethodIcon = Cloud;
 const GithubIcon: ShareMethodIcon = ({ className }) => <SvgIcon id='github' className={className} aria-hidden />;
 
 const noUnits = (): readonly WorkbenchUnit[] => [];
@@ -310,14 +310,14 @@ const getSnapshotState = (
 
 const getSnapshotCopy = (state: 'unpublished' | 'published-current' | 'published-stale'): string => {
   if (state === 'published-stale') {
-    return 'Your project has unpublished changes. People with this link see the previous shared snapshot.';
+    return "You've changed this project since you published it. People who open the link still see the published version.";
   }
 
   if (state === 'published-current') {
-    return 'People with the link see the current shared snapshot.';
+    return 'This link is up to date. People who open it see your latest changes.';
   }
 
-  return 'Publish a snapshot to create a shareable viewer link.';
+  return 'Publish a version of this project to Tau Cloud and get a link to it.';
 };
 
 type PortableMethod = Exclude<ShareMethod, 'tau'>;
@@ -680,12 +680,12 @@ type TauShareOptions = {
 };
 
 /**
- * The Tau web link: the project's own `publish.machine` and its publication envelope.
+ * The Tau Cloud link: the project's own `publish.machine` and its publication envelope.
  *
  * Its state lives with the panel rather than in the method's body, so a draft survives choosing another method and
  * coming back, as it did before the pane moved into `@taucad/workbench-panes`.
  *
- * @param options - The project, whether the web-link method is the one shown, and the sign-in link.
+ * @param options - The project, whether the Tau Cloud link method is the one shown, and the sign-in link.
  * @returns What the pane draws for the method.
  */
 function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
@@ -786,7 +786,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
         }
       } catch {
         if (!cancelled) {
-          toast.error('Could not copy link');
+          toast.error("Couldn't copy the link. Try again.");
         }
       }
 
@@ -871,9 +871,9 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       }
 
       await loadEnvelope();
-      toast.success('Visibility updated');
+      toast.success('Link access updated');
     } catch {
-      toast.error('Could not update visibility');
+      toast.error("Couldn't change who can open the link. Try again.");
     } finally {
       setVisibilityMutating(false);
     }
@@ -906,11 +906,11 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   return () => {
     if (envelopeFailure === 'absent') {
       return (
-        <SharePaneFrame isDisabled={busy} description='This project has no copy in Tau Cloud.'>
+        <SharePaneFrame isDisabled={busy} description="This project isn't on Tau Cloud.">
           <div className='flex flex-col gap-4'>
             <div className='rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground'>
-              Its Tau Cloud copy was deleted, so it has no web link. Share it with a Direct link or a GitHub Gist, or
-              duplicate the project to publish a new copy.
+              A Tau Cloud link needs the project to be on Tau Cloud. Use a direct link or a GitHub Gist instead, or
+              duplicate the project and share the copy.
             </div>
           </div>
         </SharePaneFrame>
@@ -922,9 +922,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       return (
         <SharePaneFrame
           isDisabled={busy || visibilityMutating}
-          description={
-            signInRequired ? 'Sign in to persist this project with Tau.' : 'Web links are unavailable right now.'
-          }
+          description={signInRequired ? 'Sign in to create a Tau Cloud link.' : "Couldn't reach Tau Cloud."}
         >
           <div className='flex flex-col gap-4'>
             <div
@@ -936,8 +934,8 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
               )}
             >
               {signInRequired
-                ? 'A Tau account keeps this web link available over time.'
-                : 'Check your connection and try again.'}
+                ? 'Tau Cloud links are saved to your Tau account. No account? Use a direct link instead.'
+                : 'Check your connection, then try again.'}
             </div>
             <div className='flex justify-end'>
               {signInRequired ? (
@@ -1012,7 +1010,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                   setPublishingAnother(true);
                 }}
               >
-                Publish another version
+                Publish new version
               </Button>
               <Button type='button' disabled={busy || visibilityMutating} onClick={handleRepublish}>
                 {busy ? (
@@ -1035,10 +1033,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
     }
 
     return (
-      <SharePaneFrame
-        isDisabled={busy}
-        description={`${getSnapshotCopy('unpublished')} The version you name is backed up to the cloud and served from there.`}
-      >
+      <SharePaneFrame isDisabled={busy} description={getSnapshotCopy('unpublished')}>
         <div className='flex flex-col gap-4'>
           <div className='flex flex-col gap-4'>
             <div className='flex flex-col gap-2'>
@@ -1058,7 +1053,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                 ))}
               </datalist>
               <p className='text-xs text-muted-foreground'>
-                People who open your link see this version. A version is permanent: publishing later changes makes a new
+                People who open the link see this version. A version is permanent. To share later changes, publish a new
                 one.
               </p>
             </div>
@@ -1086,7 +1081,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
               />
             </div>
             <div className='flex flex-col gap-2'>
-              <Label>Visibility</Label>
+              <Label>Who can open the link</Label>
               <RadioGroup
                 value={effectiveVisibility}
                 disabled={busy}
@@ -1105,7 +1100,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                       !canCreatePrivateShares && 'text-muted-foreground',
                     )}
                   >
-                    Private (only you and people you share with)
+                    Only people you invite
                   </Label>
                   {canCreatePrivateShares || !isPlanResolved ? undefined : (
                     <button
@@ -1122,7 +1117,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
                 <div className='flex items-center gap-2'>
                   <RadioGroupItem value='public' id='share-vis-public' />
                   <Label htmlFor='share-vis-public' className='font-normal pointer-coarse:min-h-6'>
-                    Public
+                    Anyone with the link
                   </Label>
                 </div>
               </RadioGroup>
@@ -1130,7 +1125,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
             {effectiveVisibility === 'private' ? (
               <PublicationEmailTagsField
                 id='share-shared-emails'
-                label='Share with specific emails (optional)'
+                label='Invite people by email (optional)'
                 emails={sharedEmails}
                 disabled={busy}
                 placeholder='teammate@example.com'
@@ -1164,7 +1159,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
 
 /**
  * The Share pane's source over this project: the direct link and GitHub Gist when a snapshot can be collected, and
- * the Tau web link, with the method choice remembered in a cookie (R8).
+ * the Tau Cloud link, with the method choice remembered in a cookie (R8).
  *
  * @param properties - The project and how to collect its snapshot.
  * @returns The source.
@@ -1226,7 +1221,7 @@ export function useProjectShareSource(properties: Omit<ProjectSharePanelProps, '
             kind: 'custom',
             id: 'tau',
             label: descriptor.label,
-            icon: WebIcon,
+            icon: TauCloudIcon,
             render: renderTau,
           },
         ];

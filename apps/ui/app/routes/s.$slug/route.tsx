@@ -252,7 +252,7 @@ export const PortableShareSurface = (): React.JSX.Element => {
                 }
               : { kind: 'none' },
           );
-          setSourceLabel(`${passwordProtected ? 'Password-protected ' : ''}${provider.descriptor.label}`);
+          setSourceLabel(`${provider.descriptor.label}${passwordProtected ? ' · Password-protected' : ''}`);
           if (passwordProtected) {
             globalThis.history.replaceState(
               globalThis.history.state,

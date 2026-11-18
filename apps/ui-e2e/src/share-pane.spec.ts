@@ -46,7 +46,7 @@ test('keeps one movable Share pane, restores it, and resolves an unencrypted Dir
   /* The methods are one "Share with" picker (#765), not tabs: it shows the chosen method and lists all three. */
   await target.click(shareMethodPicker('Direct link'));
   await target.expectVisible(selectors.getByRole('option', { name: 'Direct link' }));
-  await target.expectVisible(selectors.getByRole('option', { name: 'Web link' }));
+  await target.expectVisible(selectors.getByRole('option', { name: 'Tau Cloud link' }));
   await target.expectVisible(selectors.getByRole('option', { name: 'GitHub Gist' }));
   await target.keyboardPress('Escape');
   await target.expectCount(selectors.getByRole('option', { name: 'GitHub Gist' }), 0);

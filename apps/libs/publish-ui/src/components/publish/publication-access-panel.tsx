@@ -77,10 +77,10 @@ export function PublicationAccessPanel({
       );
       setPendingEmails([]);
       await onGrantsChanged();
-      toast.success('Access updated');
+      toast.success('Invite sent');
     } catch (error) {
-      const failedEmail = error instanceof Error ? error.message : 'a recipient';
-      toast.error(`Could not share with ${failedEmail}`);
+      const failedEmail = error instanceof Error ? error.message : 'a person';
+      toast.error(`Couldn't invite ${failedEmail}. Try again.`);
     } finally {
       setMutating(false);
     }
@@ -100,10 +100,10 @@ export function PublicationAccessPanel({
       }
 
       await onGrantsChanged();
-      toast.success('Access revoked');
+      toast.success('Access removed');
     } catch (error) {
-      const failedEmail = error instanceof Error ? error.message : 'that recipient';
-      toast.error(`Could not revoke ${failedEmail}`);
+      const failedEmail = error instanceof Error ? error.message : 'that person';
+      toast.error(`Couldn't remove access for ${failedEmail}. Try again.`);
     } finally {
       setMutating(false);
     }
@@ -113,7 +113,7 @@ export function PublicationAccessPanel({
     <div className='flex flex-col gap-4'>
       <div className='flex items-center justify-between gap-3 rounded-md border px-3 py-2'>
         <div className='min-w-0'>
-          <p className='text-sm font-medium'>Shared link</p>
+          <p className='text-sm font-medium'>Link</p>
           <p className='truncate text-xs text-muted-foreground'>{shareUrl}</p>
         </div>
         <CopyButton getText={() => shareUrl} readyToCopyText='Copy link' copiedText='Copied' size='sm' />
@@ -121,10 +121,7 @@ export function PublicationAccessPanel({
 
       <div className='flex items-center justify-between rounded-md border px-3 py-2'>
         <div className='min-w-0'>
-          <p className='text-sm font-medium'>General access</p>
-          <p className='text-xs text-muted-foreground'>
-            {visibility === 'public' ? 'Anyone with the link can view.' : 'Only you and the people you add can view.'}
-          </p>
+          <p className='text-sm font-medium'>Who can open the link</p>
         </div>
         <Select
           value={visibility}
@@ -133,12 +130,12 @@ export function PublicationAccessPanel({
             void onVisibilityChange(value as 'private' | 'public');
           }}
         >
-          <SelectTrigger className='w-36' aria-label='General access'>
+          <SelectTrigger className='w-52' aria-label='Who can open the link'>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value='private'>Private</SelectItem>
-            <SelectItem value='public'>Public</SelectItem>
+            <SelectItem value='private'>Only people you invite</SelectItem>
+            <SelectItem value='public'>Anyone with the link</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -147,7 +144,7 @@ export function PublicationAccessPanel({
         <div className='flex flex-col gap-2'>
           <PublicationEmailTagsField
             id='publication-access-emails'
-            label='Share with emails'
+            label='Invite people by email'
             emails={pendingEmails}
             disabled={controlsDisabled}
             placeholder='teammate@example.com'
@@ -163,7 +160,7 @@ export function PublicationAccessPanel({
             }}
           >
             {mutating ? <Loader className='size-4' /> : null}
-            <span>Add access</span>
+            <span>Invite</span>
           </Button>
         </div>
       ) : null}
@@ -172,13 +169,13 @@ export function PublicationAccessPanel({
         <div className='flex items-center justify-between'>
           {/* Who can open this link; the project's own members are People with access, below it (C2). */}
           <Heading level={3} variant='label'>
-            Who can view this link
+            People invited to this link
           </Heading>
           {loading ? <Loader className='size-4 text-muted-foreground' /> : null}
         </div>
         {grants.length === 0 && !loading ? (
           <p className='rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground'>
-            No additional emails have access.
+            No one is invited yet.
           </p>
         ) : (
           <div className='max-h-56 overflow-y-auto rounded-md border'>
@@ -191,7 +188,7 @@ export function PublicationAccessPanel({
                   <p className='truncate text-sm'>{grant.recipientEmail}</p>
                   <p className='text-xs text-muted-foreground'>
                     Can view
-                    {grant.notDelivered === true ? ' · Not delivered' : ''}
+                    {grant.notDelivered === true ? ' · Email not delivered' : ''}
                   </p>
                 </div>
                 <Tooltip>
@@ -201,7 +198,7 @@ export function PublicationAccessPanel({
                       size='icon'
                       variant='ghost'
                       disabled={controlsDisabled}
-                      aria-label={`Revoke ${grant.recipientEmail}`}
+                      aria-label={`Remove access for ${grant.recipientEmail}`}
                       onClick={() => {
                         void handleRevoke(grant);
                       }}
@@ -209,7 +206,7 @@ export function PublicationAccessPanel({
                       <Trash2 className='size-4' aria-hidden />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side='left'>Revoke access</TooltipContent>
+                  <TooltipContent side='left'>Remove access</TooltipContent>
                 </Tooltip>
               </div>
             ))}

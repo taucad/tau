@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Environment variables of the scripts under test. */
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -214,7 +215,7 @@ describe('tools/ci-image/Dockerfile', () => {
   it("should run setup-nx's default Node.js", () => {
     const node = setupNx.inputs['node-version']?.default;
     expect(node).toMatch(/^\d+\.\d+\.\d+$/u);
-    expect(dockerfile).toMatch(new RegExp(`^ARG NODE_IMAGE=node:${node?.replaceAll('.', '\\.')}-`, 'mu'));
+    expect(dockerfile).toMatch(new RegExp(`^ARG NODE_IMAGE=node:${node?.replaceAll('.', String.raw`\.`)}-`, 'mu'));
   });
 
   it('should bake no npm configuration, token or node_modules', () => {
@@ -246,7 +247,8 @@ describe('tools/ci-image key and resolution', () => {
   });
 
   /** A copy of the files the scripts read, so a test can change them. */
-  const checkout = (lock: Lock = { image, digests: {} }): string => {
+  const checkout = (pinned?: Lock): string => {
+    const lock = pinned ?? { image, digests: {} };
     const directory = mkdtempSync(join(tmpdir(), 'ci-image-'));
     temporary.push(directory);
     for (const path of [
@@ -267,43 +269,43 @@ describe('tools/ci-image key and resolution', () => {
     return directory;
   };
 
-  const run = (directory: string, script: string, args: readonly string[] = [], env: NodeJS.ProcessEnv = {}) => {
-    const result = spawnSync('bash', [join(directory, 'tools/ci-image', script), ...args], {
+  const run = (directory: string, [script, ...args]: readonly string[], env: NodeJS.ProcessEnv = {}) => {
+    const result = spawnSync('bash', [join(directory, 'tools/ci-image', script ?? ''), ...args], {
       encoding: 'utf8',
       env: { ...process.env, CI_IMAGE_ARCH: 'x64', TAU_CI_IMAGE: '', ...env },
     });
     return { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr };
   };
 
-  const keyOf = (directory: string): string => run(directory, 'image-key.sh', ['key']).stdout;
+  const keyOf = (directory: string): string => run(directory, ['image-key.sh', 'key']).stdout;
   const digest = `sha256:${'a'.repeat(64)}`;
 
   it("should key the image by the lockfile's hash, Node.js, the OS and the architecture", () => {
     const directory = checkout();
     const node = setupNx.inputs['node-version']?.default ?? '';
     expect(keyOf(directory)).toMatch(
-      new RegExp(`^lock-[\\da-f]{16}-node${node.replaceAll('.', '\\.')}-linux-x64$`, 'u'),
+      new RegExp(`^lock-[\\da-f]{16}-node${node.replaceAll('.', String.raw`\.`)}-linux-x64$`, 'u'),
     );
-    expect(run(directory, 'image-key.sh', ['key'], { CI_IMAGE_ARCH: 'arm64' }).stdout).toMatch(/-linux-arm64$/u);
+    expect(run(directory, ['image-key.sh', 'key'], { CI_IMAGE_ARCH: 'arm64' }).stdout).toMatch(/-linux-arm64$/u);
     const before = keyOf(directory);
     writeFileSync(join(directory, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\nimporters: {}\n");
     expect(keyOf(directory)).not.toBe(before);
-    expect(run(directory, 'image-key.sh').status).toBe(2);
+    expect(run(directory, ['image-key.sh']).status).toBe(2);
   });
 
   it('should change the recipe when the Dockerfile changes and keep it otherwise', () => {
     const directory = checkout();
-    const recipe = run(directory, 'image-key.sh', ['recipe']).stdout;
+    const recipe = run(directory, ['image-key.sh', 'recipe']).stdout;
     expect(recipe).toMatch(/^[\da-f]{16}$/u);
-    expect(run(directory, 'image-key.sh', ['recipe']).stdout).toBe(recipe);
+    expect(run(directory, ['image-key.sh', 'recipe']).stdout).toBe(recipe);
     writeFileSync(join(directory, 'tools/ci-image/Dockerfile'), `${dockerfile}\n# changed\n`);
-    expect(run(directory, 'image-key.sh', ['recipe']).stdout).not.toBe(recipe);
+    expect(run(directory, ['image-key.sh', 'recipe']).stdout).not.toBe(recipe);
   });
 
   it('should resolve the pinned digest for the current key', () => {
     const key = keyOf(checkout());
     const directory = checkout({ image, digests: { [key]: { digest, recipe: '0'.repeat(16) } } });
-    expect(run(directory, 'resolve.sh')).toMatchObject({ status: 0, stdout: `key=${key}\nimage=${image}@${digest}` });
+    expect(run(directory, ['resolve.sh'])).toMatchObject({ status: 0, stdout: `key=${key}\nimage=${image}@${digest}` });
   });
 
   it('should fall back to no image when the lockfile has no pinned image yet', () => {
@@ -311,7 +313,7 @@ describe('tools/ci-image key and resolution', () => {
       image,
       digests: { [`lock-${'0'.repeat(16)}-node24.20.0-linux-x64`]: { digest, recipe: '0'.repeat(16) } },
     });
-    const result = run(directory, 'resolve.sh');
+    const result = run(directory, ['resolve.sh']);
     expect(result.status).toBe(0);
     expect(result.stdout.split('\n').at(-1)).toBe('image=');
     expect(result.stderr).toContain('No CI job image is pinned');
@@ -320,8 +322,8 @@ describe('tools/ci-image key and resolution', () => {
   it('should fall back to no image for a malformed digest or when switched off', () => {
     const key = keyOf(checkout());
     const malformed = checkout({ image, digests: { [key]: { digest: 'latest', recipe: '0'.repeat(16) } } });
-    expect(run(malformed, 'resolve.sh').stdout.split('\n').at(-1)).toBe('image=');
+    expect(run(malformed, ['resolve.sh']).stdout.split('\n').at(-1)).toBe('image=');
     const pinned = checkout({ image, digests: { [key]: { digest, recipe: '0'.repeat(16) } } });
-    expect(run(pinned, 'resolve.sh', [], { TAU_CI_IMAGE: 'off' }).stdout.split('\n').at(-1)).toBe('image=');
+    expect(run(pinned, ['resolve.sh'], { TAU_CI_IMAGE: 'off' }).stdout.split('\n').at(-1)).toBe('image=');
   });
 });

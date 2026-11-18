@@ -50,12 +50,16 @@ import { noAccentHoverRule } from './rules/no-accent-hover.js';
 import { noButtonSizeOverrideRule } from './rules/no-button-size-override.js';
 import { noRawHeadingTypeRule } from './rules/no-raw-heading-type.js';
 import { noRaisedOverlayLayerRule } from './rules/no-raised-overlay-layer.js';
+import { noPluginDefaultExportRule } from './rules/no-plugin-default-export.js';
+import { noPluginDefaultImportRule } from './rules/no-plugin-default-import.js';
+import { requirePluginPackageBindingRule } from './rules/require-plugin-package-binding.js';
+import { noKernelTypeAssertionRule } from './rules/no-kernel-type-assertion.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.31.0',
+    version: '1.32.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -101,6 +105,10 @@ const plugin = {
     'no-button-size-override': noButtonSizeOverrideRule,
     'no-raw-heading-type': noRawHeadingTypeRule,
     'no-raised-overlay-layer': noRaisedOverlayLayerRule,
+    'no-plugin-default-export': noPluginDefaultExportRule,
+    'no-plugin-default-import': noPluginDefaultImportRule,
+    'require-plugin-package-binding': requirePluginPackageBindingRule,
+    'no-kernel-type-assertion': noKernelTypeAssertionRule,
   },
 };
 

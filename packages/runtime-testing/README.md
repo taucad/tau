@@ -83,6 +83,7 @@ The caller owns a client returned by `createTestRuntimeClient`. Always call `shu
 | Geometry results         | `extractGltfFromResult`, `extractGltfFromExportResult`, `getSignedVolumeFromGlb`, `createGeometryVariant`, `createGeometryTestHelpers`          |
 | Material/color evidence  | `colorParityCases`, `expectLinearBaseColor`, `getAllMaterialBaseColors`, `getMaterialAlphaMode`, `getMaterialBaseColor`                         |
 | Coordinates and naming   | `readCoordinateEvidence`, `mapZupMillimetersToYupMeters`, `readGltfNamingSummary`                                                               |
+| Plugin entry contract    | `assertPluginContractSurface`, type `PluginContractSurfaceInput`                                                                                |
 
 The package root contains the runtime and geometry helpers above. Browser renderer capture has a separate `@taucad/runtime-testing/browser/three-renderer-output` entry so package-root imports do not load Three.
 

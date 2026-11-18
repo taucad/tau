@@ -176,7 +176,7 @@ import { finalizeExportArtifactSet } from '#framework/export-artifact-finalizer.
 import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 import { loadWasmBinary } from '#framework/wasm-loader.js';
 import { realmResources } from '#framework/realm-resources.js';
-import { releaseKernelModuleScope } from '#kernels/kernel-module-helpers.js';
+import { portableKernelModuleCode, releaseKernelModuleScope } from '#kernels/kernel-module-helpers.js';
 
 type FileSystemProxy = WorkerFileSystemProxy;
 
@@ -7716,8 +7716,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     let codeHash = this.bundleCodeHashes.get(bundle);
     if (codeHash === undefined) {
       /* Built-in shims name this worker's random module-registry scope; it routes the same exports
-       * in every worker, so the key reads it as one placeholder and two workers share their keys. */
-      codeHash = sha256String(bundle.code.replaceAll(`${this.registryScope}:`, 'tau-registry-scope:'));
+       * in every worker, so the key reads the portable form and two workers share their keys. */
+      codeHash = sha256String(portableKernelModuleCode(bundle.code, { registryScope: this.registryScope }));
       this.bundleCodeHashes.set(bundle, codeHash);
     }
     return { type: 'bundle', entryPath, codeHash: await codeHash };
@@ -8675,13 +8675,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     scope: 'build' | 'source' = 'build',
   ): Promise<string> {
     const contentHashSpan = this.tracer.startSpan('deps.content-hash');
-    /* A covered file enters a build key by path only; its bundle dependency carries the content (R24).
-     * A `source` key (a parameter description, which records every file's digest) keeps the bytes. */
-    const keyed = dependencies.map((dependency) =>
-      scope === 'build' && dependency.type === 'file' && this.bundleCoveredFiles.has(dependency)
-        ? { type: dependency.type, path: dependency.path }
-        : dependency,
-    );
+    /* A build key keys covered files by path; their bundle dependency carries the content (R24).
+     * A source key (a description's revision, which may be persisted) is exactly the file identity:
+     * file bytes, no bundle dependency. */
+    const keyed =
+      scope === 'source'
+        ? dependencies.filter((dependency) => dependency.type !== 'bundle')
+        : dependencies.map((dependency) =>
+            dependency.type === 'file' && this.bundleCoveredFiles.has(dependency)
+              ? { type: dependency.type, path: dependency.path }
+              : dependency,
+          );
     const hex = await sha256String(canonicalJson(keyed));
     contentHashSpan.end();
     return hex;

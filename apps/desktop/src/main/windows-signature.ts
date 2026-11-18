@@ -43,8 +43,11 @@ export const validateWindowsSignature = (
 
 const execute = promisify(execFile);
 // File names are process data, never PowerShell source. ConvertTo-Json failure is fatal.
+// With stderr redirected, Windows PowerShell 5.1 writes progress records (such as "Preparing modules
+// for first use") to stderr as CLIXML; they are not errors, so the progress stream is silenced.
 const verificationScript = `
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 $s = Get-AuthenticodeSignature -LiteralPath $env:TAU_SIGNATURE_FILE
 if ($null -eq $s.SignerCertificate) { throw 'Missing signer certificate' }
 $t = $null
@@ -103,7 +106,7 @@ export const verifyWindowsSignature = async (options: {
     },
   );
   if (stderr.trim()) {
-    throw new Error('Windows signature verification reported a tool error');
+    throw new Error(`Windows signature verification reported a tool error: ${stderr.trim().slice(0, 1000)}`);
   }
   validateWindowsSignature(JSON.parse(stdout), { ...options, timestampRequired: options.timestampRequired ?? true });
 };

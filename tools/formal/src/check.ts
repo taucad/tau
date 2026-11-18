@@ -8,6 +8,8 @@ import { checkLean, leanMutantChecker } from '#lean.js';
 import type { MutantShard } from '#mutant-shard.js';
 import { findMutantFiles, runMutants } from '#mutants.js';
 import { sanitizeLog } from '#sanitize.js';
+import type { Shard } from '#shard.js';
+import { dealRuns, readRunSeconds } from '#shard.js';
 import type { JavaResult } from '#tlc.js';
 import { compressTrace, runApalacheCase, runJava, runTlcCase, sanyCommand } from '#tlc.js';
 import type { FormalContext, LocatedTools } from '#toolchain.js';
@@ -178,12 +180,21 @@ const planDirectory = (
   return { jobs: [...sany, ...configJobs, ...graphJobs, ...logJobs, ...apalacheJobs], problems };
 };
 
+/**
+ * Runs `jobs` (all of them, or the indices in `startOrder`, which start in that order) and returns
+ * their records and failures in `jobs` order.
+ */
 const runJobs = async (
   jobs: readonly Job[],
   log: (line: string) => void,
+  startOrder: readonly number[] = jobs.map((_job, index) => index),
 ): Promise<{ records: RunRecord[]; failures: string[] }> => {
-  const results = await Promise.all(
-    jobs.map(async (job) => {
+  const started = await Promise.all(
+    startOrder.map(async (index) => {
+      const job = jobs[index];
+      if (job === undefined) {
+        throw new Error(`no job ${String(index)}`);
+      }
       const { outcome, result } = await job.run();
       const mismatch = job.expectation
         ? compareOutcome(job.expectation, outcome)
@@ -204,9 +215,10 @@ const runJobs = async (
           log(`     ${line}`);
         }
       }
-      return { record, failure: mismatch ? `${job.name}: ${mismatch}` : undefined };
+      return { index, record, failure: mismatch ? `${job.name}: ${mismatch}` : undefined };
     }),
   );
+  const results = started.toSorted((left, right) => left.index - right.index);
   return {
     records: results.map((entry) => entry.record),
     failures: results.flatMap((entry) => (entry.failure ? [entry.failure] : [])),
@@ -215,7 +227,12 @@ const runJobs = async (
 
 export const writeSummary = (
   context: FormalContext,
-  { projectRoot, tier, family }: { readonly projectRoot: string; readonly tier: string; readonly family?: string },
+  {
+    projectRoot,
+    tier,
+    family,
+    shard,
+  }: { readonly projectRoot: string; readonly tier: string; readonly family?: string; readonly shard?: Shard },
   report: CheckReport,
 ): string => {
   const directory = path.join(
@@ -224,6 +241,7 @@ export const writeSummary = (
     path.relative(context.root, projectRoot),
     tier,
     ...(family === undefined ? [] : [family]),
+    ...(shard === undefined ? [] : [`shard-${String(shard.index)}-of-${String(shard.count)}`]),
   );
   mkdirSync(directory, { recursive: true });
   const file = path.join(directory, 'summary.json');
@@ -246,6 +264,13 @@ export type CheckOptions = {
    * policy § 6). Without it the check reads every `expected.json` under `specs/`.
    */
   readonly family?: string;
+  /**
+   * One of several runners: the check plans every run of the tier as without it, deals them to
+   * `count` shards by the measured seconds in `run-seconds.json` (`dealRuns`), and runs only shard
+   * `index`'s, longest first. The shards partition the runs, so all of them together run every run
+   * once; each writes its summary under `<tier>/shard-<index>-of-<count>/`.
+   */
+  readonly shard?: Shard;
   readonly log?: (line: string) => void;
   readonly tools?: LocatedTools;
 };
@@ -309,11 +334,15 @@ const checkLeanProject = (
 /** `formal check --tier pr|nightly|lean <projectRoot>`: SANY, every config and log case of the tier, against `expected.json`. */
 export const checkProject = async (context: FormalContext, options: CheckOptions): Promise<number> => {
   const log = options.log ?? ((line: string) => process.stdout.write(`${line}\n`));
-  const { family } = options;
+  const { family, shard } = options;
   const target = `${path.relative(context.root, options.projectRoot)}:formal:${options.tier === 'pr' ? 'tla' : options.tier}${family === undefined ? '' : `:${family}`}`;
   if (options.tier === 'lean') {
     if (family !== undefined) {
       log(`${target}: --family selects a TLA+ family; the lean tier has none`);
+      return 2;
+    }
+    if (shard !== undefined) {
+      log(`${target}: --shard deals TLA+ runs; the lean tier has none`);
       return 2;
     }
     return checkLeanProject(context, options, { log, target });
@@ -347,17 +376,35 @@ export const checkProject = async (context: FormalContext, options: CheckOptions
   for (const problem of problems) {
     log(`FAIL ${problem}`);
   }
-  const { records, failures } = await runJobs(
-    plans.flatMap((plan) => plan.jobs),
-    log,
-  );
+  const planned = plans.flatMap((plan) => plan.jobs);
+  // A shard's runs, heaviest first; the records keep plan order.
+  const mine = shard
+    ? (dealRuns(
+        planned.map((job) => job.name),
+        shard.count,
+        readRunSeconds(),
+      )[shard.index - 1] ?? [])
+    : undefined;
+  const inPlanOrder = mine?.toSorted((left, right) => left - right);
+  const jobs = inPlanOrder ? inPlanOrder.flatMap((index) => planned[index] ?? []) : planned;
+  // Within a shard the longest runs start first, so no long run waits behind short ones for a JVM.
+  const startOrder = mine && inPlanOrder ? mine.map((index) => inPlanOrder.indexOf(index)) : undefined;
+  const { records, failures } = await runJobs(jobs, log, startOrder);
   const report: CheckReport = { records, failures: [...problems, ...failures] };
   const summary = writeSummary(
     context,
-    { projectRoot: options.projectRoot, tier: options.tier, ...(family === undefined ? {} : { family }) },
+    {
+      projectRoot: options.projectRoot,
+      tier: options.tier,
+      ...(family === undefined ? {} : { family }),
+      ...(shard === undefined ? {} : { shard }),
+    },
     report,
   );
-  log(`${target}: ${records.length} runs, ${report.failures.length} failures; ${path.relative(context.root, summary)}`);
+  const runs = shard
+    ? `shard ${String(shard.index)}/${String(shard.count)}: ${records.length} of ${planned.length} runs`
+    : `${records.length} runs`;
+  log(`${target}: ${runs}, ${report.failures.length} failures; ${path.relative(context.root, summary)}`);
   return report.failures.length === 0 ? 0 : 1;
 };
 

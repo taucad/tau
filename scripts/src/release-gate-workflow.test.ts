@@ -155,12 +155,33 @@ describe('release-gate.yml', () => {
     expect(formal?.if).toBe("needs.reuse.result == 'success' && needs.reuse.outputs.run-id == ''");
   });
 
-  it('should name the verdict by its commit and pass only on a reuse or a green sweep and matrix', () => {
+  it('should run full viewer parity on the candidate, uncached, beside the sweep (VP-1)', () => {
+    const job = gate.jobs['viewer-parity'];
+    expect(job?.uses).toBe('./.github/workflows/viewer-parity.yml');
+    expect(job?.needs).toEqual(['reuse']);
+    expect(job?.with).toEqual({ ref: expression('needs.reuse.outputs.ref'), uncached: true });
+    expect(job?.if).toBe("needs.reuse.result == 'success' && needs.reuse.outputs.run-id == ''");
+    expect(job).not.toHaveProperty('secrets');
+    // The called workflow gates every fixture: no fixture filter on the gate, and no secret or cache server.
+    const parityText = read('.github/workflows/viewer-parity.yml');
+    const parity = load(parityText) as Workflow;
+    expect(parity.jobs['gate']?.steps?.find((step) => step.name === 'Run the parity gate')?.env).toEqual({
+      TAU_E2E_WEBGPU_PROFILE: 'software',
+    });
+    expect(parityText).not.toContain('secrets.');
+    expect(parityText).not.toContain('NX_SELF_HOSTED_REMOTE_CACHE');
+    expect(parity.env).toMatchObject({ NX_SKIP_NX_CACHE: 'true', NX_NO_CLOUD: 'true' });
+    expect(parity.jobs['fixtures']?.steps?.find((step) => step.id === 'cache')?.if).toBe(
+      expression('!inputs.uncached'),
+    );
+  });
+
+  it('should name the verdict by its commit and pass only on a reuse or a green sweep, matrix and parity', () => {
     const { verdict } = gate.jobs;
     expect(verdict?.name).toBe(
       `Release gate verdict (${expression('inputs.ref || github.event.workflow_run.head_sha')})`,
     );
-    expect(verdict?.needs).toEqual(['reuse', 'sweep', 'formal']);
+    expect(verdict?.needs).toEqual(['reuse', 'sweep', 'formal', 'viewer-parity']);
     const script = verdict?.steps?.[0]?.run ?? '';
     const judge = (env: Record<string, string>): number | undefined =>
       spawnSync('bash', ['-c', script], { env: { PATH: process.env['PATH'] ?? '', ...env } }).status ?? undefined;
@@ -169,13 +190,24 @@ describe('release-gate.yml', () => {
       ['REUSED', ''],
       ['SWEEP_RESULT', 'success'],
       ['FORMAL_RESULT', 'success'],
+      ['VIEWER_PARITY_RESULT', 'success'],
     ]);
     expect(judge(green)).toBe(0);
     expect(judge({ ...green, SWEEP_RESULT: 'failure' })).not.toBe(0);
     expect(judge({ ...green, FORMAL_RESULT: 'cancelled' })).not.toBe(0);
     expect(judge({ ...green, FORMAL_RESULT: 'skipped' })).not.toBe(0);
+    expect(judge({ ...green, VIEWER_PARITY_RESULT: 'failure' })).not.toBe(0);
+    expect(judge({ ...green, VIEWER_PARITY_RESULT: 'skipped' })).not.toBe(0);
     expect(judge({ ...green, REUSE_RESULT: 'failure' })).not.toBe(0);
-    expect(judge({ ...green, REUSED: '42', SWEEP_RESULT: 'skipped', FORMAL_RESULT: 'skipped' })).toBe(0);
+    expect(
+      judge({
+        ...green,
+        REUSED: '42',
+        SWEEP_RESULT: 'skipped',
+        FORMAL_RESULT: 'skipped',
+        VIEWER_PARITY_RESULT: 'skipped',
+      }),
+    ).toBe(0);
   });
 });
 

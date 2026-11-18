@@ -62,17 +62,6 @@ export const viewerRenderProfile = {
     /** Smallest `'viewport'` radius, in device pixels. */
     radiusMinimumDevicePixels: 4,
     /**
-     * Hard-slab depth acceptance as a multiple of the world-space radius. Only headless captures use it: nanoraster's
-     * GTAO keeps the slab. The viewer's GTAO uses the smooth falloff below instead.
-     */
-    thicknessRatio: 1 / 0.09,
-    /**
-     * Headless captures' GTAO distance attenuation. nanoraster keeps the hard slab, so captures keep the production
-     * profile measured with it (slab plus attenuation 1) until nanoraster gains the smooth falloff; slab with H2's 0.5
-     * was never measured. Capture bytes therefore do not change with H2.
-     */
-    slabDistanceFalloff: 1,
-    /**
      * Where a GTAO horizon sample stops counting, as a multiple of the world-space radius, by its 3D distance from the
      * pixel (XeGTAO's smooth falloff, replacing three's hard thickness slab, which cut flank shading off on a line).
      * Profile H2 of the AO thickness run (Tau Brain

@@ -945,6 +945,11 @@
     "reason": "reads workspace-root configuration or inventory"
   },
   {
+    "file": "scripts/src/formal-nightly-workflow.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
     "file": "scripts/src/formal-plugin-target.test.ts",
     "target": "tools/formal.plugin.js",
     "reason": "imports another project's source by relative path instead of its package"
@@ -953,6 +958,11 @@
     "file": "scripts/src/formal-nightly-mutants-workflow.test.ts",
     "target": "nx.json",
     "reason": "reads workspace-root configuration or inventory"
+  },
+  {
+    "file": "scripts/src/formal-toolchain-cache-workflow.test.ts",
+    "target": ".github/actions/setup-formal/action.yml",
+    "reason": "reads the composite action whose cache steps it checks; .github is not an Nx project"
   },
   {
     "file": "scripts/src/prepare-geospec-test-consumer.ts",
@@ -1098,5 +1108,10 @@
     "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
     "target": "apps/desktop/scripts/desktop-receipt-provenance.mts",
     "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
+  },
+  {
+    "file": "packages/agent-host/src/log/chat-ledger.differential.test.ts",
+    "target": "out/test-results/formal/packages/agent-host/lean",
+    "reason": "lists the fresh-differential corpus directory this test writes, to clear the files no other part writes"
   }
 ]

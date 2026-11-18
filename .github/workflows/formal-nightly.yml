@@ -17,6 +17,13 @@ name: Formal nightly
 # one when it is unset (the schedule and a dispatch). A caller passes `seed`, any string (a commit sha, a
 # run id), as `TAU_FORMAL_SEED`; the run step derives `FORMAL_SEED` from the first 32 bits of its SHA-256,
 # so the same landing commit always replays the same seed, and the log prints it for a local replay.
+#
+# Speed (CI throughput review, formal speed, 2026-11-17): a `formal:nightly:check` tier runs on four runners, each
+# with the runner's own cap of two JVMs (FM-R15), and the queue's run is Nx-cached. Its configs and Apalache commands
+# read no seed, so the same specs, tools and toolchain give the same verdict; only the merge queue's call (`ci.yml`
+# passes the read token, and the job runs in `nx-cache-write` there) reads and writes that cache. The release gate
+# passes no token and the schedule writes none, so the gate always checks afresh. `formal:nightly` stays uncached:
+# its seed is the commit's.
 
 on:
   schedule:
@@ -35,6 +42,10 @@ on:
       seed:
         description: Seed source, any string; FORMAL_SEED is derived from it (default a random seed per tool)
         type: string
+        required: false
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:
+        description: Read token of the Nx remote cache (the merge queue's call passes it; the release gate does not)
         required: false
 
 # The schedule and a dispatch run one at a time; each caller's run (the queue, the release gate) has its own group.
@@ -55,13 +66,18 @@ jobs:
   # each job has 120 for headroom over a single 60-minute budget. The per-project
   # durations size the queue lane and the release-gate matrix (RG-1) that follow.
   # A project with a `formal:nightly:check` target runs its nightly configs and Apalache there, in a
-  # job of its own (`agent-host`, run 43178267338: 32 min of configs, 17 for the rest).
+  # job of its own (`agent-host`, run 43178267338: 32 min of configs, 17 for the rest). That tier is split
+  # into `CHECK_SHARDS` jobs: each plans every run, deals them by the measured seconds in
+  # tools/formal/run-seconds.json (`formal check --shard k/N`) and runs its own share, so every run is in
+  # exactly one shard, and the caller's required check needs every shard to pass. agent-host's 46 runs
+  # measure 2,797 JVM-seconds (job 134332529778, 23.7 min on one runner at two JVMs); on four runners the
+  # slowest shard is its longest config, `TurnSettlement.two-turns.cfg` at 392 s.
   # A project with a `formal:nightly:mutants` target runs its mutant matrix there, split into
   # `MUTANT_SHARDS` jobs (ST-3, lane budget): each re-runs the same-seed simulation, deals the mutants
   # by the measured seconds in tools/formal/mutant-seconds.json (`formal nightly --mutants-only --shard
-  # k/N`, a control and its mutants together) and runs its own share, so every mutant is in exactly one
-  # shard, and the caller's required check needs every shard to pass. agent-host's 75 mutants measure
-  # 17.3 min in series; three shards hold about 5.8 min each.
+  # k/N`, a control and its mutants together) and runs its own share on the runner's slot pool, so every
+  # mutant is in exactly one shard, and the caller's required check needs every shard to pass. agent-host's
+  # 75 mutants measure 17.3 min in series; three shards hold about 5.8 min each.
   projects:
     name: List the formal nightly projects
     runs-on: ubuntu-latest
@@ -87,6 +103,7 @@ jobs:
         id: list
         env:
           REQUESTED: ${{ inputs.projects || '' }}
+          CHECK_SHARDS: 4
           MUTANT_SHARDS: 3
         run: |
           # `pipefail` so a failing `nx` call fails the step. `tail -1` keeps the JSON array and drops Nx's log lines.
@@ -110,8 +127,10 @@ jobs:
           tiers='[]'
           for target in formal:nightly formal:nightly:check formal:nightly:mutants; do
             selected=$(pnpm nx show projects --with-target "$target" --json | tail -1)
-            # One job per project and target; a `formal:nightly:mutants` tier is one job per shard.
+            # One job per project and target; a `formal:nightly:check` or `formal:nightly:mutants` tier is one
+            # job per shard.
             shards=1
+            if [ "$target" = formal:nightly:check ]; then shards=$CHECK_SHARDS; fi
             if [ "$target" = formal:nightly:mutants ]; then shards=$MUTANT_SHARDS; fi
             tiers=$(jq -c --arg target "$target" --argjson projects "$selected" --argjson requested "$projects" \
               --argjson shards "$shards" \
@@ -130,6 +149,10 @@ jobs:
     needs: projects
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # Writes the Nx remote cache only in `main`'s merge queue, like the Formal models lane; there the cached
+    # `formal:nightly:check` shards are reused by a later landing with the same inputs. Every other call has no
+    # environment and so no write token.
+    environment: ${{ (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')) && 'nx-cache-write' || null }}
     permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
       actions: 'read'
       contents: 'read'
@@ -169,7 +192,8 @@ jobs:
             export FORMAL_SEED
             echo "FORMAL_SEED=$FORMAL_SEED from seed source $TAU_FORMAL_SEED"
           fi
-          # A shard's `--shard k/N` reaches the formal runner, which runs only that shard's share.
+          # A shard's `--shard k/N` reaches the formal runner, which runs only that shard's share, and is part
+          # of the task's Nx hash.
           shard=()
           if [ -n "$SHARD" ]; then shard=(--shard="$SHARD"); fi
           pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream "${shard[@]}"

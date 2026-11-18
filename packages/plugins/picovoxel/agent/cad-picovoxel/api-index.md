@@ -1,6 +1,6 @@
 # picovoxel API index
 
-picovoxel 0.1.0-beta.9 · 968 symbols · extracted by TypeScript 5.9.3.
+picovoxel 0.1.0-beta.9 · 1025 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
@@ -16,11 +16,14 @@ AddBeamOptions (interface) [lines 5-19] [6 members]
 Bounds (interface) [lines 21-26] [2 members] — An axis-aligned box in millimetres
   Bounds.min (property)
   Bounds.max (property)
-CreatePicoOptions (interface) [lines 28-29] — `createPico` options
-CreatePicoRuntimeOptions (interface) [lines 31-38] [2 members] — Options that shape a runtime
+ConsumeOptions (interface) [lines 28-31] [1 members] — The opt-in for an operation that uses up its receiver
+  ConsumeOptions.consume (property)
+CreatePicoOptions (interface) [lines 33-34] — `createPico` options
+CreatePicoRuntimeOptions (interface) [lines 36-46] [3 members] — Options that shape a runtime
   CreatePicoRuntimeOptions.wasm (property) — Emscripten Module overrides forwarded to instantiation
   CreatePicoRuntimeOptions.wasmModule (property) — A compiled `WebAssembly.Module` of this entry's wasm (`pico.wasm` for the…
-CreatePicoSessionOptions (interface) [lines 40-61] [7 members] — Options that shape a session
+  CreatePicoRuntimeOptions.pager (property) — The grid pager, on by default
+CreatePicoSessionOptions (interface) [lines 48-69] [7 members] — Options that shape a session
   CreatePicoSessionOptions.voxelSize (property) — Voxel edge length in millimetres
   CreatePicoSessionOptions.memoryWarningBytes (property) — Native-memory warning threshold in bytes (default 1 GiB)
   CreatePicoSessionOptions.lane (property) — The session's lane, a policy claim about every value it…
@@ -28,11 +31,15 @@ CreatePicoSessionOptions (interface) [lines 40-61] [7 members] — Options that 
   CreatePicoSessionOptions.serialLattice (property) — Routes lattice rendering down the serial C#-identical `Voxels::RenderLattice` loop instead…
   CreatePicoSessionOptions.registry (property)
   CreatePicoSessionOptions.now (property)
-FromStlOptions (interface) [lines 63-72] [3 members]
+Footprint (interface) [lines 71-81] [3 members] — Runtime-wide memory
+  Footprint.heapBytes (property) — Bytes of wasm linear memory (the heap's current size, at…
+  Footprint.farBytes (property) — Bytes the far store holds on its host, RAM or…
+  Footprint.pager (property) — The pager's figures
+FromStlOptions (interface) [lines 83-92] [3 members]
   FromStlOptions.unit (property) — 'auto' honours the UNITS= header, defaulting to mm
   FromStlOptions.scale (property) — Post-scale applied after unit conversion
   FromStlOptions.offset (property) — Post-offset in mm, applied last
-Lattice (interface) [lines 74-99] [7 members]
+Lattice (interface) [lines 94-119] [7 members]
   Lattice.addSphere (method)
   Lattice.addBeam (method)
   Lattice.toVoxels (method) — Renders the lattice into a fresh voxel field
@@ -40,7 +47,7 @@ Lattice (interface) [lines 74-99] [7 members]
   Lattice.handle (property) — Raw ABI handle — escape hatch
   Lattice.dispose (method) — Optional
   Lattice.[Symbol.dispose] (method)
-MemoryUsage (interface) [lines 101-119] [9 members]
+MemoryUsage (interface) [lines 121-139] [9 members]
   MemoryUsage.total (property)
   MemoryUsage.voxels (property)
   MemoryUsage.meshes (property)
@@ -50,7 +57,7 @@ MemoryUsage (interface) [lines 101-119] [9 members]
   MemoryUsage.vectorFields (property)
   MemoryUsage.vdbFiles (property)
   MemoryUsage.metadata (property)
-Mesh (interface) [lines 121-192] [17 members]
+Mesh (interface) [lines 141-217] [18 members]
   Mesh.vertices (property) — Vertex positions, xyz triples in mm
   Mesh.triangles (property) — Triangle corner indices, triples
   Mesh.vertexCount (property)
@@ -63,12 +70,16 @@ Mesh (interface) [lines 121-192] [17 members]
   Mesh.toVoxels (method) — Voxelizes the (closed) mesh
   Mesh.shellVoxels (method) — Offset in ALL directions from a not-necessarily-closed mesh
   Mesh.toStl (method) — Binary STL bytes with the UNITS= header convention
+  Mesh.streamStl (method) — Streams the binary STL of this mesh to `write` in…
   Mesh.toGlb (method) — GLB container (positions + indices)
   Mesh.lane (property) — Value provenance, inherited from the producing voxels/mesh chain
   Mesh.handle (property) — Raw ABI handle — escape hatch
-  Mesh.dispose (method) — Optional
+  Mesh.dispose (method) — Frees the mesh now
   Mesh.[Symbol.dispose] (method)
-Metadata (interface) [lines 194-226] [9 members]
+MeshChunk (interface) [lines 219-226] [2 members] — One batch of the uniform mesh
+  MeshChunk.vertices (property) — The batch's new vertices, xyz triples in mm
+  MeshChunk.triangles (property) — The batch's triangles as corner triples indexing the WHOLE mesh's…
+Metadata (interface) [lines 228-260] [9 members]
   Metadata.count (property) — Number of entries in the table
   Metadata.names (method) — Every entry name, index order
   Metadata.typeOf (method)
@@ -78,7 +89,33 @@ Metadata (interface) [lines 194-226] [9 members]
   Metadata.handle (property) — Raw ABI handle — escape hatch
   Metadata.dispose (method) — Optional
   Metadata.[Symbol.dispose] (method)
-Pico (interface) [lines 228-310] [24 members]
+OffsetOptions (interface) [lines 262-272] [3 members] — Options for {@link Voxels.offset} and {@link Voxels.smoothen}
+  OffsetOptions.distance (property) — Millimetres
+  OffsetOptions.fastRenorm (property) — See {@link Voxels.offset}
+  OffsetOptions.fastSweeping (property) — Opt-in sweep engine, `fast` (docs/lanes.md)
+PagerOptions (interface) [lines 274-301] [8 members] — `createPico({ pager })`
+  PagerOptions.budgetBytes (property) — Resident grid bytes (Σ `memUsage` of live Voxels) allowed at…
+  PagerOptions.codec (property) — Frame codec (default `'lz4'`)
+  PagerOptions.mode (property) — `'pipelined'` (default on picovoxel/multi) overlaps coding on the pool with…
+  PagerOptions.arena (property) — The encode arena, taken once when the runtime starts —…
+  PagerOptions.store (property) — Where parked grids go
+  PagerOptions.storeMaxBytes (property) — Size bound of the store in bytes (default unbounded for…
+  PagerOptions.directory (property) — `'disk'` only
+  PagerOptions.minParkBytes (property)
+PagerStats (interface) [lines 303-333] [12 members] — What the pager has done, for memory reports
+  PagerStats.budgetBytes (property)
+  PagerStats.codec (property)
+  PagerStats.mode (property)
+  PagerStats.store (property)
+  PagerStats.residentBytes (property) — Σ `memUsage` of resident grids
+  PagerStats.parkedGrids (property)
+  PagerStats.parkedBytes (property) — Σ `memUsage` the parked grids had when parked
+  PagerStats.imageBytes (property) — Bytes of park images in the far store
+  PagerStats.farBytes (property) — Bytes the far store holds on its host (RAM or…
+  PagerStats.arenaBytes (property) — Heap the encode arena holds
+  PagerStats.parks (property)
+  PagerStats.restores (property)
+Pico (interface) [lines 335-425] [26 members]
   Pico.voxelSize (property)
   Pico.lane (property) — The RESOLVED session lane (never `'auto'`
   Pico.name (property)
@@ -99,20 +136,22 @@ Pico (interface) [lines 228-310] [24 members]
   Pico.meshFromStl (method) — Binary STL bytes to a mesh (UNITS= header honoured on…
   Pico.memory (property) — PicoGK-side memory usage in bytes, per object type
   Pico.allocated (property) — PicoGK's own per-type allocation counters — the leak oracle
+  Pico.footprint (property) — Runtime-wide heap and far-store bytes (see {@link Footprint})
   Pico.module (property) — Escape hatch
   Pico.handle (property) — Escape hatch
+  Pico.scope (method) — Runs `build` and disposes every object it created except what…
   Pico.dispose (method) — Deterministic teardown
   Pico.[Symbol.dispose] (method)
-PicoRuntime (interface) [lines 312-324] [3 members] — One instantiated wasm module — plus, on `picovoxel/multi`, its warm…
+PicoRuntime (interface) [lines 427-439] [3 members] — One instantiated wasm module — plus, on `picovoxel/multi`, its warm…
   PicoRuntime.createPico (method) — Opens a session on this runtime
   PicoRuntime.dispose (method) — Disposes every open session, then terminates the pthread pool
   PicoRuntime.[Symbol.dispose] (method)
-PicoWasmOverrides (interface) [lines 326-339] [4 members] — The Emscripten Module overrides picovoxel forwards to its glue
+PicoWasmOverrides (interface) [lines 441-454] [4 members] — The Emscripten Module overrides picovoxel forwards to its glue
   PicoWasmOverrides.locateFile (property) — Returns the URL of the wasm file (a filesystem path…
   PicoWasmOverrides.mainScriptUrlOrBlob (property) — The pthread worker script (`picovoxel/multi/worker`), loaded by every worker as…
   PicoWasmOverrides.instantiateWasm (property) — Instantiates the module yourself
   PicoWasmOverrides.wasmBinary (property) — The wasm file's bytes, compiled in place of fetching the…
-PolyLine (interface) [lines 341-375] [10 members]
+PolyLine (interface) [lines 456-490] [10 members]
   PolyLine.addVertex (method) — Appends one vertex
   PolyLine.addVertices (method) — Appends many vertices
   PolyLine.vertices (property) — All vertices, index order
@@ -123,7 +162,7 @@ PolyLine (interface) [lines 341-375] [10 members]
   PolyLine.handle (property) — Raw ABI handle — escape hatch
   PolyLine.dispose (method) — Optional
   PolyLine.[Symbol.dispose] (method)
-ScalarField (interface) [lines 377-416] [9 members]
+ScalarField (interface) [lines 492-531] [9 members]
   ScalarField.set (method) — Sets (and activates) the value at a position in mm
   ScalarField.get (method) — Value at the position, or null when the position holds…
   ScalarField.remove (method)
@@ -133,31 +172,43 @@ ScalarField (interface) [lines 377-416] [9 members]
   ScalarField.bounds (method) — Bounding box of active voxels in mm (dims × voxel…
   ScalarField.signedDistanceAt (method) — Stored values are voxel-unit signed distance
   ScalarField.clone (method)
-ScalarFieldSlice (interface) [lines 418-425] [3 members]
+ScalarFieldSlice (interface) [lines 533-540] [3 members]
   ScalarFieldSlice.width (property)
   ScalarFieldSlice.height (property)
   ScalarFieldSlice.data (property) — Raw field values, row-major
-ShellOptions (interface) [lines 427-441] [6 members]
+ShellOptions (interface) [lines 542-556] [6 members]
   ShellOptions.offset (property)
   ShellOptions.inner (property)
   ShellOptions.outer (property)
   ShellOptions.smoothInner (property)
   ShellOptions.fastRenorm (property) — See `offset({ fastRenorm })`
   ShellOptions.fastSweeping (property) — See `offset({ fastSweeping })`
-SurfaceNormalFieldOptions (interface) [lines 443-455] [4 members]
+StreamMeshOptions (interface) [lines 558-562] [1 members] — Options for {@link Voxels.streamMesh}
+  StreamMeshOptions.batchLeaves (property) — The most surface leaves (8³ voxels each) one batch owns
+StreamMeshResult (interface) [lines 564-569] [2 members] — What {@link Voxels.streamMesh} returns once every chunk has been delivered
+  StreamMeshResult.vertexCount (property)
+  StreamMeshResult.triangleCount (property)
+StreamStlOptions (interface) [lines 571-581] [3 members] — Options for `Mesh.streamStl` and `Voxels.streamStl`
+  StreamStlOptions.includeHeader (property) — Hand the 84-byte header to the sink as the first…
+  StreamStlOptions.chunkTriangles (property) — The most triangle records in one chunk (50 bytes each)
+  StreamStlOptions.acceptLane (property) — As `ToStlOptions.acceptLane`
+StreamStlResult (interface) [lines 583-590] [2 members] — What a streamed STL export returns once every chunk has…
+  StreamStlResult.header (property) — The finished 84-byte header (`PicoGK UNITS=mm`, the lane stamp for…
+  StreamStlResult.triangleCount (property) — Triangles written
+SurfaceNormalFieldOptions (interface) [lines 592-604] [4 members]
   SurfaceNormalFieldOptions.surfaceThresholdVx (property) — Active values with |sd| above this (voxel units) are skipped…
   SurfaceNormalFieldOptions.directionFilter (property) — Keep only normals within the tolerance of this direction (C#…
   SurfaceNormalFieldOptions.directionFilterTolerance (property) — Allowed |1 - dot| deviation, 0..1 (C# `fDirectionFilterTolerance`)
   SurfaceNormalFieldOptions.scaleBy (property) — Component-wise scale applied to stored normals (C# `vecScaleBy`)
-ToMeshOptions (interface) [lines 457-464] [2 members] — Options for {@link Voxels.toMesh}
+ToMeshOptions (interface) [lines 606-613] [2 members] — Options for {@link Voxels.toMesh}
   ToMeshOptions.adaptivity (property) — OpenVDB mesh adaptivity in `[0, 1)`
   ToMeshOptions.relax (property) — Run OpenVDB's `relaxDisorientedTriangles` pass after adaptive merging
-ToStlOptions (interface) [lines 466-477] [4 members]
+ToStlOptions (interface) [lines 615-626] [4 members]
   ToStlOptions.unit (property)
   ToStlOptions.scale (property) — Scale applied while still in mm, after offset
   ToStlOptions.offset (property) — Offset in mm, applied first
   ToStlOptions.acceptLane (property) — Acknowledges, for this one export, that the geometry has non-exact…
-VdbFile (interface) [lines 479-517] [10 members]
+VdbFile (interface) [lines 628-666] [10 members]
   VdbFile.fieldCount (property)
   VdbFile.fields (method) — Name + type of every field, index order
   VdbFile.add (method) — Adds a field under `name`
@@ -168,18 +219,21 @@ VdbFile (interface) [lines 479-517] [10 members]
   VdbFile.handle (property) — Raw ABI handle — escape hatch
   VdbFile.dispose (method) — Optional
   VdbFile.[Symbol.dispose] (method)
-VectorField (interface) [lines 519-535] [5 members]
+VectorField (interface) [lines 668-684] [5 members]
   VectorField.set (method)
   VectorField.get (method)
   VectorField.remove (method)
   VectorField.traverse (method) — Visits every active value
   VectorField.clone (method)
-VoxelSlice (interface) [lines 537-547] [4 members]
+VoxelSlice (interface) [lines 686-696] [4 members]
   VoxelSlice.width (property)
   VoxelSlice.height (property)
   VoxelSlice.data (property) — Row-major samples
   VoxelSlice.background (property) — The native background (outside-narrow-band) value of the raw sdf data
-Voxels (interface) [lines 549-752] [40 members]
+
+## Interfaces (2) — `api-interfaces-2.md`
+
+Voxels (interface) [lines 5-211] [42 members]
   Voxels.clone (method) — An independent copy of this field
   Voxels.union (method) — Pure union
   Voxels.subtract (method) — Pure subtraction of every operand
@@ -213,111 +267,111 @@ Voxels (interface) [lines 549-752] [40 members]
   Voxels.sliceOrigin (method) — Real-world origin of slice `index` in mm
   Voxels.getSlice (method) — One slice image
   Voxels.toMesh (method) — Triangle mesh of the zero level set
+  Voxels.streamStl (method) — Streams the binary STL of the uniform mesh — the…
+  Voxels.streamMesh (method) — Streams the uniform mesh as indexed batches
   Voxels.toScalarField (method)
   Voxels.metadata (property)
   Voxels.memUsage (property)
   Voxels.lane (property) — Value provenance
   Voxels.handle (property) — Raw ABI handle — escape hatch
-  Voxels.dispose (method) — Optional
+  Voxels.dispose (method) — Frees the grid now
   Voxels.[Symbol.dispose] (method)
-BeamThickness (interface) [lines 754-764] [3 members] — Beam thickness for a given point in space (C# `IBeamThickness`)
+VoxelsStreamStlOptions (interface) [lines 213-214] — Options for {@link Voxels.streamStl}
+BeamThickness (interface) [lines 216-226] [3 members] — Beam thickness for a given point in space (C# `IBeamThickness`)
   BeamThickness.beamThickness (method)
   BeamThickness.updateCell (method)
   BeamThickness.setBoundingVoxels (method)
-CellArray (interface) [lines 766-770] [1 members] — A collection of unit cells (C# `ICellArray`)
+CellArray (interface) [lines 228-232] [1 members] — A collection of unit cells (C# `ICellArray`)
   CellArray.unitCells (method)
-CoordinateTrafo (interface) [lines 772-776] [1 members] — Coordinate transformation ahead of a raw TPMS lookup (C# `ICoordinateTrafo`)
+CoordinateTrafo (interface) [lines 234-238] [1 members] — Coordinate transformation ahead of a raw TPMS lookup (C# `ICoordinateTrafo`)
   CoordinateTrafo.apply (method)
-LatticeType (interface) [lines 778-782] [1 members] — Beam-connecting logic for one unit cell (C# `ILatticeType`)
+LatticeType (interface) [lines 240-244] [1 members] — Beam-connecting logic for one unit cell (C# `ILatticeType`)
   LatticeType.addCell (method)
-RawTpmsPattern (interface) [lines 784-788] [1 members] — Raw TPMS surface equation (C# `IRawTPMSPattern`)
+RawTpmsPattern (interface) [lines 246-250] [1 members] — Raw TPMS surface equation (C# `IRawTPMSPattern`)
   RawTpmsPattern.signedDistance (method)
-SplittingLogic (interface) [lines 790-794] [1 members] — Turns a raw signed distance + wall thickness into the…
+SplittingLogic (interface) [lines 252-256] [1 members] — Turns a raw signed distance + wall thickness into the…
   SplittingLogic.advancedSignedDistance (method)
-UnitCell (interface) [lines 796-806] [3 members] — A lattice unit cell (C# `IUnitCell`, preview dropped)
+UnitCell (interface) [lines 258-268] [3 members] — A lattice unit cell (C# `IUnitCell`, preview dropped)
   UnitCell.cornerPoints (method)
   UnitCell.cellCentre (method)
   UnitCell.cellBounding (method)
-Cylindrical (interface) [lines 808-815] [3 members] — A cylindrical coordinate (C# `Cylindrical`)
+Cylindrical (interface) [lines 270-277] [3 members] — A cylindrical coordinate (C# `Cylindrical`)
   Cylindrical.r (property)
   Cylindrical.phi (property)
   Cylindrical.z (property)
-Frame (interface) [lines 817-830] [4 members] — A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`)
+Frame (interface) [lines 279-292] [4 members] — A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`)
   Frame.pos (property) — Origin of the frame in world coordinates (C# `vecPos`)
   Frame.lx (property) — Local X axis in world coordinates (C# `vecLx`)
   Frame.ly (property) — Local Y axis in world coordinates (C# `vecLy`)
   Frame.lz (property) — Local Z axis in world coordinates (C# `vecLz`)
-Polar (interface) [lines 832-837] [2 members] — A polar coordinate (C# `PicoGK.Numerics.Polar`)
+Polar (interface) [lines 294-299] [2 members] — A polar coordinate (C# `PicoGK.Numerics.Polar`)
   Polar.r (property)
   Polar.phi (property)
-
-## Interfaces (2) — `api-interfaces-2.md`
-
-Spherical (interface) [lines 5-12] [3 members] — A spherical coordinate (C# `Spherical`)
+Spherical (interface) [lines 301-308] [3 members] — A spherical coordinate (C# `Spherical`)
   Spherical.r (property)
   Spherical.phi (property)
   Spherical.theta (property)
-Implicit (interface) [lines 14-20] [2 members]
+Implicit (interface) [lines 310-316] [2 members]
   Implicit.sdf (property) — C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
   Implicit.expression (property) — The same field as a tape expression for the parallel…
-LatticeBaseShape (interface) [lines 22-26] [1 members] — C# `ILatticeBaseShape`
+LatticeBaseShape (interface) [lines 318-322] [1 members] — C# `ILatticeBaseShape`
   LatticeBaseShape.latConstruct (method)
-LatticeManifoldOptions (interface) [lines 28-42] [5 members]
+LatticeManifoldOptions (interface) [lines 324-338] [5 members]
   LatticeManifoldOptions.length (property) — Required for the Frame form
   LatticeManifoldOptions.radius (property)
   LatticeManifoldOptions.maxOverhangAngle (property) — Degrees
   LatticeManifoldOptions.extendBothSides (property) — Extend the teardrop in -Z as well (C# `bExtendBothSides =…
   LatticeManifoldOptions.minPrintableRadius (property) — C# `fMinPrintableRadius = 0.1`
-MeshBaseShape (interface) [lines 44-48] [1 members] — C# `IMeshBaseShape`
+MeshBaseShape (interface) [lines 340-344] [1 members] — C# `IMeshBaseShape`
   MeshBaseShape.mshConstruct (method)
-PipeSegmentOptions (interface) [lines 50-65] [6 members]
+PipeSegmentOptions (interface) [lines 346-361] [6 members]
   PipeSegmentOptions.length (property) — Required for the Frame form
   PipeSegmentOptions.innerRadius (property)
   PipeSegmentOptions.outerRadius (property)
   PipeSegmentOptions.startOrMid (property) — START_END
   PipeSegmentOptions.endOrRange (property) — START_END
   PipeSegmentOptions.method (property)
-SpineBaseShape (interface) [lines 67-71] [1 members] — C# `ISpineBaseShape`
+SpineBaseShape (interface) [lines 363-367] [1 members] — C# `ISpineBaseShape`
   SpineBaseShape.spinePoint (method)
-Spline (interface) [lines 73-77] [1 members] — ShapeKernel `ISpline`
+Spline (interface) [lines 369-373] [1 members] — ShapeKernel `ISpline`
   Spline.points (method)
-SurfaceBaseShape (interface) [lines 79-83] [1 members] — C# `ISurfaceBaseShape`
+SurfaceBaseShape (interface) [lines 375-379] [1 members] — C# `ISurfaceBaseShape`
   SurfaceBaseShape.surfacePoint (method)
-TangentOptions (interface) [lines 85-93] [4 members]
+TangentOptions (interface) [lines 381-389] [4 members]
   TangentOptions.startTangentStrength (property)
   TangentOptions.endTangentStrength (property)
   TangentOptions.relativeStartStrength (property)
   TangentOptions.relativeEndStrength (property)
-FromCliResult (interface) [lines 95-103] [4 members]
+FromCliResult (interface) [lines 391-399] [4 members]
   FromCliResult.unitsHeader (property)
   FromCliResult.date (property)
   FromCliResult.headerLayerCount (property)
   FromCliResult.warnings (property)
-SdfImage (interface) [lines 105-112] [3 members]
+SdfImage (interface) [lines 401-408] [3 members]
   SdfImage.width (property)
   SdfImage.height (property)
   SdfImage.data (property) — Row-major samples, negative inside
-Slice (interface) [lines 114-122] [3 members]
+Slice (interface) [lines 410-418] [3 members]
   Slice.z (property) — Layer height position in mm (first layer at one layerHeight,…
   Slice.contours (property)
   Slice.lane (property) — Value provenance of the sliced voxels (`'exact'` or absent =…
-SliceContour (interface) [lines 124-130] [2 members]
+SliceContour (interface) [lines 420-426] [2 members]
   SliceContour.points (property) — Flat [x0, y0, x1, y1, …] loop in mm
   SliceContour.winding (property) — Solid boundaries are CCW, holes CW (upstream contract)
-SliceStack (interface) [lines 132-143] [3 members]
+SliceStack (interface) [lines 428-439] [3 members]
   SliceStack.slices (property)
   SliceStack.bounds (property) — XY bounds over every contour + Z from first/last layer
   SliceStack.lane (property) — Value provenance (`'exact'` or absent = exact)
-SliceVoxelsOptions (interface) [lines 145-154] [3 members]
+SliceVoxelsOptions (interface) [lines 441-450] [3 members]
   SliceVoxelsOptions.layerHeight (property) — Layer height in mm
   SliceVoxelsOptions.useAbsoluteXY (property) — Keep absolute XY coordinates instead of the bbox-relative default
   SliceVoxelsOptions.onProgress (property) — Monotonic 0→1
-ToCliOptions (interface) [lines 156-167] [4 members]
+ToCliOptions (interface) [lines 452-463] [4 members]
   ToCliOptions.units (property) — Units in mm per CLI unit (1 = mm, upstream…
   ToCliOptions.emptyFirstLayer (property) — Emit an intentionally-empty first layer so readers can infer layer…
   ToCliOptions.date (property) — Header date string
   ToCliOptions.onProgress (property)
-ToSvgOptions (interface) [lines 169-177] [3 members]
+ToSvgOptions (interface) [lines 465-473] [3 members]
   ToSvgOptions.solid (property) — Filled single-path rendering (holes via winding) instead of stroked outlines
   ToSvgOptions.strokeWidth (property)
   ToSvgOptions.viewBox (property) — Override the viewBox [minX, minY, width, height]
@@ -349,35 +403,38 @@ GetSliceOptions (type) [lines 88-98] [1 members]
 Mat4 (type) [lines 100-101] — 4x4 transform, column-major in System.Numerics order (row-vector convention
 MetadataType (type) [lines 103-103]
 MetadataValue (type) [lines 105-105]
-PicoErrorCode (type) [lines 107-108] — The `code` of a {@link PicoError}
-SdfExpression (type) [lines 110-111] — A serializable SDF
-SdfFunction (type) [lines 113-114] — Signed distance in millimetres at (x, y, z) — scalars,…
-SdfOperator (type) [lines 116-116]
-SliceAxis (type) [lines 118-118]
-SliceMode (type) [lines 120-121] — Slice modes are pure post-processing over the native narrow-band floats
-StlUnit (type) [lines 123-123]
-TransformOptions (type) [lines 125-130]
-VdbFieldType (type) [lines 132-132]
-Vec3 (type) [lines 134-135] — A 3D coordinate or direction, `[x, y, z]`, in millimetres…
-Overhang (type) [lines 137-142] [1 members] — Normalized overhang severity 0..1 (C# `PicoGK.Numerics.Overhang`)
+PagerCodec (type) [lines 107-108] — How park frames are compressed
+PagerMode (type) [lines 110-111] — How park and restore use the thread pool
+PicoErrorCode (type) [lines 113-114] — The `code` of a {@link PicoError}
+SdfExpression (type) [lines 116-117] — A serializable SDF
+SdfFunction (type) [lines 119-120] — Signed distance in millimetres at (x, y, z) — scalars,…
+SdfOperator (type) [lines 122-122]
+SliceAxis (type) [lines 124-124]
+SliceMode (type) [lines 126-127] — Slice modes are pure post-processing over the native narrow-band floats
+StlChunkSink (type) [lines 129-130] — Receives one chunk of a streamed STL
+StlUnit (type) [lines 132-132]
+TransformOptions (type) [lines 134-139]
+VdbFieldType (type) [lines 141-141]
+Vec3 (type) [lines 143-144] — A 3D coordinate or direction, `[x, y, z]`, in millimetres…
+Overhang (type) [lines 146-151] [1 members] — Normalized overhang severity 0..1 (C# `PicoGK.Numerics.Overhang`)
   Overhang.[overhangBrand] (property)
-Quat (type) [lines 144-145] — A rotation quaternion as [x, y, z, w] (System.Numerics `Quaternion`…
-Rad (type) [lines 147-152] [1 members] — An angle in radians (C# `PicoGK.Numerics.Rad`)
+Quat (type) [lines 153-154] — A rotation quaternion as [x, y, z, w] (System.Numerics `Quaternion`…
+Rad (type) [lines 156-161] [1 members] — An angle in radians (C# `PicoGK.Numerics.Rad`)
   Rad.[radBrand] (property)
-Vec2 (type) [lines 154-155] — A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
-CylindricalDirection (type) [lines 157-157]
-FrameType (type) [lines 159-159]
-ModulationCoord (type) [lines 161-161]
-ModulationLine (type) [lines 163-163]
-PipeSegmentMethod (type) [lines 165-165]
-PolygonPreset (type) [lines 167-167]
-RandomSource (type) [lines 169-170] — A uniform [0, 1) source (the C# `Random.NextDouble` role)
-RatioFunc (type) [lines 172-172]
-SplineEnds (type) [lines 174-174]
-SuperShapePreset (type) [lines 176-176]
-SurfaceRatioFunc (type) [lines 178-178]
-VertexTransformation (type) [lines 180-181] — Point-wise vertex transformation applied during construction (C# `fnVertexTransformation`)
-ContourWinding (type) [lines 183-183]
+Vec2 (type) [lines 163-164] — A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
+CylindricalDirection (type) [lines 166-166]
+FrameType (type) [lines 168-168]
+ModulationCoord (type) [lines 170-170]
+ModulationLine (type) [lines 172-172]
+PipeSegmentMethod (type) [lines 174-174]
+PolygonPreset (type) [lines 176-176]
+RandomSource (type) [lines 178-179] — A uniform [0, 1) source (the C# `Random.NextDouble` role)
+RatioFunc (type) [lines 181-181]
+SplineEnds (type) [lines 183-183]
+SuperShapePreset (type) [lines 185-185]
+SurfaceRatioFunc (type) [lines 187-187]
+VertexTransformation (type) [lines 189-190] — Point-wise vertex transformation applied during construction (C# `fnVertexTransformation`)
+ContourWinding (type) [lines 192-192]
 
 ## Classes — `api-classes.md`
 

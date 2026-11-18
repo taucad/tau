@@ -5,7 +5,13 @@ import type { EarlyChatInput } from '#components/chat/chat-early-input.js';
 import { describeHandOffContract } from '#testing/hand-off-contract.js';
 
 const send = vi.hoisted(() => vi.fn());
-vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => ({ draftActorRef: { send } }) }));
+/* A15d (H-e): Home's adopter reads the draft it hydrates a painted draft into; here an empty one. */
+const draftActorRef = {
+  send,
+  getSnapshot: () => ({ context: { draftText: '', draftAttachments: [] } }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => ({ draftActorRef }) }));
 
 /* Home's composer (P4's first surface): the rich composer's chunk is the held adopter. */
 let mounts = 0;
@@ -27,7 +33,8 @@ describeHandOffContract('Home composer', {
   ),
   mounts: () => mounts,
   adopted: () => adopted,
-  queuesSubmit: false,
+  /* A15d (H-f): Enter before adoption is one queued send on Home too. */
+  queuesSubmit: true,
   reset: () => {
     mounts = 0;
     adopted = undefined;

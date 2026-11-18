@@ -4027,6 +4027,9 @@ importers:
 
   apps/libs/publish-ui:
     dependencies:
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.104.2(react@19.3.1)
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../../packages/filesystem

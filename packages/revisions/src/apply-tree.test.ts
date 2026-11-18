@@ -15,12 +15,14 @@
  * batches built from the primitives counted here.
  */
 
+import { createHash } from 'node:crypto';
 import fs, { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor } from 'xstate';
+import { writeBlob, writeCommit, writeTree } from 'isomorphic-git';
 
 import { AbstractFileSystemProvider } from '@taucad/filesystem/backend';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -39,7 +41,7 @@ import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/proj
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createApplyTreeEffects, readDeferredRevisionTree } from '#apply-tree.js';
 import type { DeferredRevisionTree } from '#apply-tree.js';
-import { blobOid } from '#tree-id-memo.js';
+import { blobOid, blobOidYielding } from '#tree-id-memo.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { lfsPointerFor } from '#lfs.js';
@@ -1839,5 +1841,84 @@ describe('a deferred tree write (STO-25)', () => {
     await expect(effects.repairTornCheckout(liveCheckout)).resolves.toBe(true);
     expect(await context.tree.readFile(edited!, 'utf8')).toBe(foreign);
     expect(await present(context.tree, ['tau.json', 'main.ts', ...[...files.keys()].slice(1)])).toEqual([]);
+  });
+});
+
+describe('hashing a deferred file without holding the thread (STO-25)', () => {
+  const sample = (length: number): Uint8Array<ArrayBuffer> =>
+    new Uint8Array(new ArrayBuffer(length)).map((_, index) => index % 251);
+  const gitBlobId = (algorithm: 'sha1' | 'sha256', content: Uint8Array<ArrayBuffer>): string =>
+    createHash(algorithm)
+      .update(`blob ${String(content.length)}\0`)
+      .update(content)
+      .digest('hex');
+
+  it('should hash with the JS hasher a megabyte at a time, letting the event loop in, to git’s own id', async () => {
+    const content = sample(3 * 1024 * 1024 + 7);
+    let served = false;
+    /* A read queued behind the hash: it runs at the hash's first turn, not after the whole file. */
+    setTimeout(() => {
+      served = true;
+    }, 0);
+    const hashing = blobOidYielding(content, 'sha1', false);
+    expect(served).toBe(false);
+    const oid = await hashing;
+    expect(served).toBe(true);
+    expect(oid).toBe(gitBlobId('sha1', content));
+    await expect(blobOidYielding(sample(70_001), 'sha256', false)).resolves.toBe(gitBlobId('sha256', sample(70_001)));
+  });
+
+  it('should take WebCrypto’s digest where the realm has it, memoised for the next cut', async () => {
+    const content = sample(2 * 1024 * 1024);
+    const digest = vi.fn(async (algorithm: AlgorithmIdentifier, data: BufferSource) =>
+      crypto.subtle.digest(algorithm, data),
+    );
+    const oid = await blobOidYielding(content, 'sha1', { digest });
+    expect(oid).toBe(gitBlobId('sha1', content));
+    expect(digest).toHaveBeenCalledTimes(1);
+    /* The same bytes again, or a cut asking synchronously, hash nothing. */
+    await expect(blobOidYielding(content, 'sha1', { digest })).resolves.toBe(oid);
+    expect(blobOid(content, 'sha1')).toBe(oid);
+    expect(digest).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a store tree with a symbolic link or a submodule (STO-25)', () => {
+  it('should be read whole, the listing’s files counted against every entry the store holds', async () => {
+    const context = await project({});
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const gitdir = join(roots.at(-1)!, '.git');
+    const git = { fs: { promises: fs }, gitdir };
+    const encoder = new TextEncoder();
+    const main = encoder.encode('export const main = 1;\n'.repeat(100));
+    const mainOid = await writeBlob({ ...git, blob: main });
+    const linkOid = await writeBlob({ ...git, blob: encoder.encode('main.ts') });
+    const file = { mode: '100644', path: 'main.ts', oid: mainOid, type: 'blob' } as const;
+    const signature = { name: 'Tau', email: 'noreply@tau.new', timestamp: 1_790_000_000, timezoneOffset: 0 };
+    const commitOf = async (tree: string): Promise<string> =>
+      writeCommit({ ...git, commit: { message: 'tree\n', tree, parent: [], author: signature, committer: signature } });
+    const plain = await commitOf(await writeTree({ ...git, tree: [file] }));
+    const mixed = await commitOf(
+      await writeTree({
+        ...git,
+        tree: [
+          file,
+          { mode: '120000', path: 'link', oid: linkOid, type: 'blob' },
+          { mode: '160000', path: 'vendor', oid: 'c'.repeat(40), type: 'commit' },
+        ],
+      }),
+    );
+    /* Sizes as a cold open's head listing gives them; the store's own diff names every entry. */
+    const port: RevisionPort = {
+      ...context.port,
+      listTree: async (id) => {
+        const listing = await context.port.listTree!(id);
+        return listing?.map((entry) => ({ ...entry, size: main.byteLength }));
+      },
+    };
+    const listed = await port.listTree!(revisionId(mixed));
+    expect(listed?.map(({ path }) => path)).toEqual(['main.ts']);
+    await expect(readDeferredRevisionTree(port, revisionId(plain))).resolves.toBeDefined();
+    await expect(readDeferredRevisionTree(port, revisionId(mixed))).resolves.toBeUndefined();
   });
 });

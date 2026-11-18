@@ -12,8 +12,9 @@
  *
  * It reports, per run, milliseconds from the fast-forward's start to: the
  * bracket opening (`onApplyingTree`), `tau.json` landed, the entry file
- * landed, and the write's end, plus the bracket-to-closure interval and how
- * long the store's tree reads took.
+ * landed, and the write's end, plus the bracket-to-closure interval, how
+ * long the store's tree reads took, and the longest the event loop went
+ * without a turn while the write ran (`longestBlock`).
  *
  * Run from `packages/revisions`:
  * `node --import @oxc-node/core/register src/test/open-apply-bench.ts --store=<bare repo> --sizes=<file> --runs=3`
@@ -23,7 +24,7 @@
 import { cp, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { performance } from 'node:perf_hooks';
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { createActor } from 'xstate';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { BatchEntry, BatchOptions, BatchReceipt } from '@taucad/filesystem';
@@ -58,7 +59,7 @@ const sizes = new Map(
 const median = (samples: readonly number[]): number =>
   Math.round([...samples].toSorted((left, right) => left - right)[Math.floor(samples.length / 2)]!);
 
-type Marks = { bracket?: number; manifest?: number; entry?: number; end?: number; reads: number };
+type Marks = { bracket?: number; manifest?: number; entry?: number; end?: number; reads: number; stall?: number };
 
 const once = async (): Promise<Marks> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-open-apply-bench-'));
@@ -135,6 +136,9 @@ const once = async (): Promise<Marks> => {
         marks.bracket ??= performance.now() - started;
       },
     });
+    /* The longest the event loop went without a turn while the write ran: the longest synchronous block. */
+    const loop = monitorEventLoopDelay({ resolution: 5 });
+    loop.enable();
     started = performance.now();
     await new Promise<void>((resolve, reject) => {
       const running = createActor(actors.sync.fastForward as Parameters<typeof createActor>[0], {
@@ -157,6 +161,8 @@ const once = async (): Promise<Marks> => {
       running.start();
     });
     marks.end = performance.now() - started;
+    loop.disable();
+    marks.stall = loop.max / 1e6;
     return marks;
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -178,6 +184,7 @@ for (let run = 0; run < runs; run += 1) {
       bracketToClosure: Math.round(closure - (marks.bracket ?? Number.NaN)),
       end: Math.round(marks.end ?? Number.NaN),
       treeReads: Math.round(marks.reads),
+      longestBlock: Math.round(marks.stall ?? Number.NaN),
     }),
   );
 }
@@ -190,6 +197,7 @@ console.log(
     bracketToClosure: of((marks) => Math.max(marks.manifest ?? 0, marks.entry ?? 0) - (marks.bracket ?? 0)),
     end: of((marks) => marks.end),
     treeReads: of((marks) => marks.reads),
+    longestBlock: of((marks) => marks.stall),
   }),
 );
 /* A finished open leaves its fill retrying against a remote this harness does not have. */

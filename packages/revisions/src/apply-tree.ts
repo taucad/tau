@@ -23,7 +23,7 @@ import { revisionTreeFiles } from '#algorithms/revision-tree.js';
 import { lfsPointerFor, maximumPointerBytes, readLfsPointer } from '#lfs.js';
 import type { LfsPointer } from '#lfs.js';
 import { equalBytes } from '#object-hash.js';
-import { blobOid } from '#tree-id-memo.js';
+import { blobOidYielding } from '#tree-id-memo.js';
 import { declaredPlaceholders, UnstoredLargeObjectsError } from '#large-object-fill.js';
 import { isAttributesPath } from '#workspace-config.js';
 import type { AttributesReading } from '#workspace-config.js';
@@ -161,8 +161,27 @@ export type DeferredRevisionTree = Readonly<{
 }>;
 
 /* Whether bytes are the blob a deferred file names: its id, in the format the id is written in. */
-const isBlob = (content: Uint8Array<ArrayBuffer>, oid: string): boolean =>
-  blobOid(content, oid.length === 64 ? 'sha256' : 'sha1') === oid;
+/**
+ * The paths whose bytes are the blob each names (by the format its id is
+ * written in), one file at a time and never holding the thread: the
+ * file-manager worker that runs a write also answers reads (STO-25). Each id
+ * is memoised on the bytes, so a later cut of the same capture hashes nothing.
+ *
+ * @param candidates - Each path, the bytes it holds and the blob id it should be.
+ * @returns The paths that are.
+ */
+const blobsAmong = async (
+  candidates: Iterable<readonly [path: string, content: Uint8Array<ArrayBuffer>, oid: string]>,
+): Promise<Set<string>> => {
+  const matching = new Set<string>();
+  for (const [path, content, oid] of candidates) {
+    // oxlint-disable-next-line no-await-in-loop -- one file's digest at a time bounds what is in flight.
+    if ((await blobOidYielding(content, oid.length === 64 ? 'sha256' : 'sha1')) === oid) {
+      matching.add(path);
+    }
+  }
+  return matching;
+};
 
 /**
  * Whether a target is known by its structure, its bytes read as it lands.
@@ -290,12 +309,18 @@ const readDeferred = async (
  * @param before - The checkout as captured under the fence.
  * @returns The tree with those files held.
  */
-const resolveDeferred = (target: DeferredRevisionTree, before: ImmutableRevisionTree): DeferredRevisionTree => {
+const resolveDeferred = async (
+  target: DeferredRevisionTree,
+  before: ImmutableRevisionTree,
+): Promise<DeferredRevisionTree> => {
   const beforeFiles = revisionTreeFiles(before);
-  const kept = [...target.deferred].filter(([path, { size, oid }]) => {
-    const current = beforeFiles.get(path)?.content;
-    return current?.byteLength === size && isBlob(current, oid);
-  });
+  const same = await blobsAmong(
+    [...target.deferred].flatMap(([path, { size, oid }]) => {
+      const current = beforeFiles.get(path)?.content;
+      return current?.byteLength === size ? [[path, current, oid] as const] : [];
+    }),
+  );
+  const kept = [...target.deferred].filter(([path]) => same.has(path));
   if (kept.length === 0) {
     return target;
   }
@@ -1115,6 +1140,16 @@ export const createApplyTreeEffects = (
                   { size: content.byteLength, content, mode },
                 ]),
               );
+        /* A deferred file's bytes are no longer in hand: the capture's must be its blob, by the id the tree names. */
+        const deferredBlobs = await blobsAmong(
+          writtenPaths.flatMap((path) => {
+            const applied = verified.get(path);
+            const wanted = targetFiles.get(path);
+            return wanted?.oid !== undefined && applied?.content !== undefined && applied.size === wanted.size
+              ? [[path, applied.content, wanted.oid] as const]
+              : [];
+          }),
+        );
         const unverified = [
           ...removedPaths.filter((path) => verified.has(path)),
           ...writtenPaths.filter((path) => {
@@ -1134,13 +1169,7 @@ export const createApplyTreeEffects = (
               );
             }
             if (wanted?.oid !== undefined) {
-              /* A deferred file's bytes are no longer in hand: the capture's are its blob, by the id the tree names. */
-              return (
-                applied?.content === undefined ||
-                applied.size !== wanted.size ||
-                applied.mode !== wanted.mode ||
-                !isBlob(applied.content, wanted.oid)
-              );
+              return !deferredBlobs.has(path) || applied?.mode !== wanted.mode;
             }
             if (wanted?.content === undefined) {
               return true;
@@ -1184,30 +1213,28 @@ export const createApplyTreeEffects = (
    * @param current - The checkout as it is now.
    * @returns The deferred paths whose file is the target's.
    */
-  const landedDeferred = (target: DeferredRevisionTree, current: ImmutableRevisionTree): Set<string> => {
+  const landedDeferred = async (target: DeferredRevisionTree, current: ImmutableRevisionTree): Promise<Set<string>> => {
     const currentFiles = revisionTreeFiles(current);
-    return new Set(
-      [...target.deferred]
-        .filter(([path, { mode, size, oid }]) => {
-          const held = currentFiles.get(path);
-          return held?.mode === mode && held.content.byteLength === size && isBlob(held.content, oid);
-        })
-        .map(([path]) => path),
+    return blobsAmong(
+      [...target.deferred].flatMap(([path, { mode, size, oid }]) => {
+        const held = currentFiles.get(path);
+        return held?.mode === mode && held.content.byteLength === size ? [[path, held.content, oid] as const] : [];
+      }),
     );
   };
 
-  const recoveryTree = (
+  const recoveryTree = async (
     before: ImmutableRevisionTree,
     target: ImmutableRevisionTree | DeferredRevisionTree,
     current: ImmutableRevisionTree,
-  ): ImmutableRevisionTree => {
+  ): Promise<ImmutableRevisionTree> => {
     const deferred = isDeferredRevisionTree(target) ? target : undefined;
     const beforeFiles = new Map(before.entries().map((entry) => [entry.path, entry]));
     const targetFiles = new Map(
       (deferred?.held ?? (target as ImmutableRevisionTree)).entries().map((entry) => [entry.path, entry]),
     );
     const currentFiles = new Map(current.entries().map((entry) => [entry.path, entry]));
-    const landed = deferred === undefined ? new Set<string>() : landedDeferred(deferred, current);
+    const landed = deferred === undefined ? new Set<string>() : await landedDeferred(deferred, current);
     const affected = new Set([...beforeFiles.keys(), ...targetFiles.keys(), ...(deferred?.deferred.keys() ?? [])]);
     for (const path of affected) {
       const beforeEntry = beforeFiles.get(path);
@@ -1268,7 +1295,7 @@ export const createApplyTreeEffects = (
     signal?.throwIfAborted();
     return deferred === undefined
       ? prepared
-      : { ...prepared, tree: resolveDeferred({ ...deferred, held: prepared.tree }, before) };
+      : { ...prepared, tree: await resolveDeferred({ ...deferred, held: prepared.tree }, before) };
   };
 
   const materializeTree = async <Result = void>(
@@ -1312,7 +1339,7 @@ export const createApplyTreeEffects = (
         };
         try {
           const current = await capture(place, before);
-          const recovery = recoveryTree(before, recoveryTarget, current);
+          const recovery = await recoveryTree(before, recoveryTarget, current);
           if ((await checkoutTreeId(place.id, current)) !== (await checkoutTreeId(place.id, recovery))) {
             await applyTree(place, recovery, {
               from: current,
@@ -1356,7 +1383,7 @@ export const createApplyTreeEffects = (
       if (torn.get(place.id) !== left) {
         return;
       }
-      await applyTree(place, recoveryTree(left.before, left.target, current), { from: current, purpose: 'tree' });
+      await applyTree(place, await recoveryTree(left.before, left.target, current), { from: current, purpose: 'tree' });
       torn.delete(place.id);
     });
     return true;

@@ -16,7 +16,7 @@
 import type { ImmutableRevisionTree } from '#algorithms/index.js';
 import { revisionTreeFiles } from '#algorithms/revision-tree.js';
 import type { RevisionTreeFile } from '#algorithms/revision-tree.js';
-import { bytesToHex, concatBytes, digest, hexToBytes } from '#object-hash.js';
+import { bytesToHex, concatBytes, createDigest, digest, hexToBytes } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
 
 const textEncoder = new TextEncoder();
@@ -38,6 +38,65 @@ export const blobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFormat):
   held[format] ??= bytesToHex(digest(format, frameObject('blob', content)));
   blobOids.set(content, held);
   return held[format];
+};
+
+/** Bytes the JS hasher takes per run before it yields: a few milliseconds of work, never a stall. */
+const hashRunBytes = 1024 * 1024;
+/** Bytes copied per run into the buffer WebCrypto digests, before a yield. */
+const copyRunBytes = 8 * 1024 * 1024;
+
+/* A turn of the event loop: a read or a render waiting behind a hash runs here. */
+const yieldTurn = async (): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+
+/**
+ * One blob's object id without holding the thread (STO-25): WebCrypto's digest
+ * where the realm has it, which runs off the JavaScript thread, else the JS
+ * hasher a megabyte at a time with a turn of the event loop between runs.
+ * Answered and recorded in the same memo as {@link blobOid}, so a later cut of
+ * the same bytes hashes nothing.
+ *
+ * @param content - The tree's own bytes for one file.
+ * @param format - The object format.
+ * @param subtle - The WebCrypto digest to use, or `false` for the JS hasher; the realm's own when absent.
+ * @returns The blob id.
+ * @internal
+ */
+export const blobOidYielding = async (
+  content: Uint8Array<ArrayBuffer>,
+  format: ObjectFormat,
+  subtle: Pick<SubtleCrypto, 'digest'> | false = (globalThis as { crypto?: Crypto }).crypto?.subtle ?? false,
+): Promise<string> => {
+  const held = blobOids.get(content)?.[format];
+  if (held !== undefined) {
+    return held;
+  }
+  const header = textEncoder.encode(`blob ${String(content.length)}\0`);
+  let oid: string;
+  if (subtle === false) {
+    const hasher = createDigest(format);
+    hasher.update(header);
+    for (let offset = 0; offset < content.length; offset += hashRunBytes) {
+      hasher.update(content.subarray(offset, offset + hashRunBytes));
+      // oxlint-disable-next-line no-await-in-loop -- a turn between runs is the point.
+      await yieldTurn();
+    }
+    oid = bytesToHex(hasher.finish());
+  } else {
+    /* One buffer for the digest, filled a few megabytes at a time: a large file's copy is no stall either. */
+    const framed = new Uint8Array(new ArrayBuffer(header.length + content.length));
+    framed.set(header);
+    for (let offset = 0; offset < content.length; offset += copyRunBytes) {
+      framed.set(content.subarray(offset, offset + copyRunBytes), header.length + offset);
+      // oxlint-disable-next-line no-await-in-loop -- a turn between runs is the point.
+      await yieldTurn();
+    }
+    oid = bytesToHex(new Uint8Array(await subtle.digest(format === 'sha1' ? 'SHA-1' : 'SHA-256', framed)));
+  }
+  recordBlobOid(content, format, oid);
+  return oid;
 };
 
 /**

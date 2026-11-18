@@ -63,116 +63,164 @@ const wordsToBytes = (words: readonly number[]): Uint8Array<ArrayBuffer> => {
   return output;
 };
 
-/**
- * One-shot SHA-1 (FIPS 180-4).
- *
- * @param input - Message bytes.
- * @returns The 20 digest bytes.
- */
-const sha1 = (input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
-  const bytes = padded(input);
-  const schedule = new Uint32Array(80);
-  let h0 = 0x67452301;
-  let h1 = 0xefcdab89;
-  let h2 = 0x98badcfe;
-  let h3 = 0x10325476;
-  let h4 = 0xc3d2e1f0;
+/* A digest's running state and the message schedule it reuses for every block. */
+type BlockWork = Readonly<{ state: Uint32Array; schedule: Uint32Array }>;
 
-  for (let offset = 0; offset < bytes.length; offset += 64) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset + offset, 64);
-    for (let index = 0; index < 16; index += 1) {
-      schedule[index] = view.getUint32(index * 4, false);
-    }
-    for (let index = 16; index < 80; index += 1) {
-      schedule[index] = rotateLeft(
-        schedule[index - 3]! ^ schedule[index - 8]! ^ schedule[index - 14]! ^ schedule[index - 16]!,
-        1,
-      );
-    }
-    let a = h0;
-    let b = h1;
-    let c = h2;
-    let d = h3;
-    let e = h4;
-    for (let index = 0; index < 80; index += 1) {
-      const f =
-        index < 20 ? (b & c) | (~b & d) : index < 40 ? b ^ c ^ d : index < 60 ? (b & c) | (b & d) | (c & d) : b ^ c ^ d;
-      const k = index < 20 ? 0x5a827999 : index < 40 ? 0x6ed9eba1 : index < 60 ? 0x8f1bbcdc : 0xca62c1d6;
-      const next = (rotateLeft(a, 5) + f + e + k + schedule[index]!) >>> 0;
-      e = d;
-      d = c;
-      c = rotateLeft(b, 30);
-      b = a;
-      a = next;
-    }
-    h0 = (h0 + a) >>> 0;
-    h1 = (h1 + b) >>> 0;
-    h2 = (h2 + c) >>> 0;
-    h3 = (h3 + d) >>> 0;
-    h4 = (h4 + e) >>> 0;
+/* One 64-byte block of SHA-1 into its five-word state (FIPS 180-4). */
+const sha1Block = ({ state, schedule }: BlockWork, view: DataView, offset: number): void => {
+  for (let index = 0; index < 16; index += 1) {
+    schedule[index] = view.getUint32(offset + index * 4, false);
   }
-  return wordsToBytes([h0, h1, h2, h3, h4]);
+  for (let index = 16; index < 80; index += 1) {
+    schedule[index] = rotateLeft(
+      schedule[index - 3]! ^ schedule[index - 8]! ^ schedule[index - 14]! ^ schedule[index - 16]!,
+      1,
+    );
+  }
+  let a = state[0]!;
+  let b = state[1]!;
+  let c = state[2]!;
+  let d = state[3]!;
+  let e = state[4]!;
+  for (let index = 0; index < 80; index += 1) {
+    const f =
+      index < 20 ? (b & c) | (~b & d) : index < 40 ? b ^ c ^ d : index < 60 ? (b & c) | (b & d) | (c & d) : b ^ c ^ d;
+    const k = index < 20 ? 0x5a827999 : index < 40 ? 0x6ed9eba1 : index < 60 ? 0x8f1bbcdc : 0xca62c1d6;
+    const next = (rotateLeft(a, 5) + f + e + k + schedule[index]!) >>> 0;
+    e = d;
+    d = c;
+    c = rotateLeft(b, 30);
+    b = a;
+    a = next;
+  }
+  state[0] = (state[0]! + a) >>> 0;
+  state[1] = (state[1]! + b) >>> 0;
+  state[2] = (state[2]! + c) >>> 0;
+  state[3] = (state[3]! + d) >>> 0;
+  state[4] = (state[4]! + e) >>> 0;
+};
+
+/* One 64-byte block of SHA-256 into its eight-word state (FIPS 180-4). */
+const sha256Block = ({ state, schedule }: BlockWork, view: DataView, offset: number): void => {
+  for (let index = 0; index < 16; index += 1) {
+    schedule[index] = view.getUint32(offset + index * 4, false);
+  }
+  for (let index = 16; index < 64; index += 1) {
+    const x = schedule[index - 15]!;
+    const y = schedule[index - 2]!;
+    const s0 = rotateRight(x, 7) ^ rotateRight(x, 18) ^ (x >>> 3);
+    const s1 = rotateRight(y, 17) ^ rotateRight(y, 19) ^ (y >>> 10);
+    schedule[index] = (schedule[index - 16]! + s0 + schedule[index - 7]! + s1) >>> 0;
+  }
+  let a = state[0]!;
+  let b = state[1]!;
+  let c = state[2]!;
+  let d = state[3]!;
+  let e = state[4]!;
+  let f = state[5]!;
+  let g = state[6]!;
+  let h = state[7]!;
+  for (let index = 0; index < 64; index += 1) {
+    const sigma1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
+    const choice = (e & f) ^ (~e & g);
+    const first = (h + sigma1 + choice + sha256RoundConstants[index]! + schedule[index]!) >>> 0;
+    const sigma0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
+    const majority = (a & b) ^ (a & c) ^ (b & c);
+    const second = (sigma0 + majority) >>> 0;
+    h = g;
+    g = f;
+    f = e;
+    e = (d + first) >>> 0;
+    d = c;
+    c = b;
+    b = a;
+    a = (first + second) >>> 0;
+  }
+  state[0] = (state[0]! + a) >>> 0;
+  state[1] = (state[1]! + b) >>> 0;
+  state[2] = (state[2]! + c) >>> 0;
+  state[3] = (state[3]! + d) >>> 0;
+  state[4] = (state[4]! + e) >>> 0;
+  state[5] = (state[5]! + f) >>> 0;
+  state[6] = (state[6]! + g) >>> 0;
+  state[7] = (state[7]! + h) >>> 0;
 };
 
 /**
- * One-shot SHA-256 (FIPS 180-4).
+ * An incremental digest in one object format: bytes go in as they come and
+ * the digest comes out once, the same bytes {@link digest} answers for their
+ * concatenation. What lets a caller hash a large file a run at a time and
+ * yield between runs.
  *
- * @param input - Message bytes.
- * @returns The 32 digest bytes.
+ * @internal
  */
-const sha256 = (input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
-  const bytes = padded(input);
-  const schedule = new Uint32Array(64);
-  const hash = Uint32Array.from([
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-  ]);
+export type IncrementalDigest = Readonly<{
+  update: (input: Uint8Array<ArrayBuffer>) => void;
+  finish: () => Uint8Array<ArrayBuffer>;
+}>;
 
-  for (let offset = 0; offset < bytes.length; offset += 64) {
-    const view = new DataView(bytes.buffer, bytes.byteOffset + offset, 64);
-    for (let index = 0; index < 16; index += 1) {
-      schedule[index] = view.getUint32(index * 4, false);
+/**
+ * Start an incremental digest.
+ *
+ * @param format - Recorded repository object format.
+ * @returns The digest, empty.
+ * @internal
+ */
+export const createDigest = (format: ObjectFormat): IncrementalDigest => {
+  const isSha1 = assertObjectFormat(format) === 'sha1';
+  const state = isSha1
+    ? Uint32Array.from([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0])
+    : Uint32Array.from([
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+      ]);
+  const work: BlockWork = { state, schedule: new Uint32Array(isSha1 ? 80 : 64) };
+  const block = isSha1 ? sha1Block : sha256Block;
+  /* Bytes short of a whole block, carried to the next update. */
+  const pending = new Uint8Array(new ArrayBuffer(64));
+  const pendingView = new DataView(pending.buffer);
+  let pendingLength = 0;
+  let total = 0;
+  const update = (input: Uint8Array<ArrayBuffer>): void => {
+    total += input.length;
+    let offset = 0;
+    if (pendingLength > 0) {
+      const taken = Math.min(64 - pendingLength, input.length);
+      pending.set(input.subarray(0, taken), pendingLength);
+      pendingLength += taken;
+      offset = taken;
+      if (pendingLength < 64) {
+        return;
+      }
+      block(work, pendingView, 0);
+      pendingLength = 0;
     }
-    for (let index = 16; index < 64; index += 1) {
-      const x = schedule[index - 15]!;
-      const y = schedule[index - 2]!;
-      const s0 = rotateRight(x, 7) ^ rotateRight(x, 18) ^ (x >>> 3);
-      const s1 = rotateRight(y, 17) ^ rotateRight(y, 19) ^ (y >>> 10);
-      schedule[index] = (schedule[index - 16]! + s0 + schedule[index - 7]! + s1) >>> 0;
+    const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
+    for (; offset + 64 <= input.length; offset += 64) {
+      block(work, view, offset);
     }
-    let a = hash[0]!;
-    let b = hash[1]!;
-    let c = hash[2]!;
-    let d = hash[3]!;
-    let e = hash[4]!;
-    let f = hash[5]!;
-    let g = hash[6]!;
-    let h = hash[7]!;
-    for (let index = 0; index < 64; index += 1) {
-      const sigma1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
-      const choice = (e & f) ^ (~e & g);
-      const first = (h + sigma1 + choice + sha256RoundConstants[index]! + schedule[index]!) >>> 0;
-      const sigma0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
-      const majority = (a & b) ^ (a & c) ^ (b & c);
-      const second = (sigma0 + majority) >>> 0;
-      h = g;
-      g = f;
-      f = e;
-      e = (d + first) >>> 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (first + second) >>> 0;
+    pending.set(input.subarray(offset), 0);
+    pendingLength = input.length - offset;
+  };
+  const finish = (): Uint8Array<ArrayBuffer> => {
+    /* Merkle–Damgård padding: `0x80`, zeroes, then the big-endian bit length. */
+    const tail = padded(pending.slice(0, pendingLength));
+    const bitLength = BigInt(total) * 8n;
+    const tailView = new DataView(tail.buffer);
+    tailView.setUint32(tail.length - 8, Number(bitLength >> 32n), false);
+    tailView.setUint32(tail.length - 4, Number(bitLength & 0xffff_ffffn), false);
+    for (let offset = 0; offset < tail.length; offset += 64) {
+      block(work, tailView, offset);
     }
-    hash[0] = (hash[0]! + a) >>> 0;
-    hash[1] = (hash[1]! + b) >>> 0;
-    hash[2] = (hash[2]! + c) >>> 0;
-    hash[3] = (hash[3]! + d) >>> 0;
-    hash[4] = (hash[4]! + e) >>> 0;
-    hash[5] = (hash[5]! + f) >>> 0;
-    hash[6] = (hash[6]! + g) >>> 0;
-    hash[7] = (hash[7]! + h) >>> 0;
-  }
-  return wordsToBytes([...hash]);
+    return wordsToBytes([...state]);
+  };
+  return Object.freeze({ update, finish });
+};
+
+/* One-shot digests: one update of the whole message. */
+const oneShot = (format: ObjectFormat, input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
+  const hasher = createDigest(format);
+  hasher.update(input);
+  return hasher.finish();
 };
 
 /**
@@ -210,7 +258,7 @@ export const objectIdByteLength = (format: ObjectFormat): number => (assertObjec
  * @public
  */
 export const digest = (format: ObjectFormat, input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
-  assertObjectFormat(format) === 'sha1' ? sha1(input) : sha256(input);
+  oneShot(format, input);
 
 /**
  * Render digest bytes as lowercase hexadecimal.

@@ -903,8 +903,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   private readonly supersededBundleCode = new Map<string, string>();
 
-  /** Kernels (`id@version`) whose `resolve` has answered from the bundler: their sources reach them only as bundle output. */
-  private readonly bundleSourcedKernels = new Set<string>();
+  /** Entries whose dependencies the bundler facade resolved, so a discovery can tell the kernel's resolve was the bundler's. */
+  private readonly bundlerResolvedEntries = new Set<string>();
+
+  /** Every built-in module name registered with the bundlers, for the per-entry banner scope (`bundleModuleScope`). */
+  private readonly registeredModuleNames = new Set<string>();
 
   /** Currently watched dependency paths. Used for incremental watch-set diffing. */
   private watchedPaths = new Set<string>();
@@ -2975,7 +2978,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       dependencyContext,
       owner: operationOwner,
     });
-    const dependencyHash = await this.computeDependencyHash(dependencies);
+    /* A description records each source file's digest (`identity.sourceFiles`, `sourceRevision`), so
+     * both its in-process and its durable key stay on the bytes, never on the bundle (R24). */
+    const dependencyHash = await this.computeDependencyHash(dependencies, 'source');
     depsSpan.end();
     const parameterMiddlewareKey = canonicalJson(
       resolvedArray.map(({ id, middleware, options }) => ({
@@ -2995,13 +3000,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       parameterMiddlewareKey,
       dependencyHash,
       canonicalJson(resolution),
-      /* The build key ignores comments in bundled sources (R24), but a description carries the exact
-       * revision it read (`sourceRevision`), so the in-process replay is keyed on the bytes. */
-      canonicalJson(
-        dependencies.flatMap((dependency) =>
-          dependency.type === 'file' ? [[dependency.path, dependency.contentHash]] : [],
-        ),
-      ),
     ].join('|');
     const cached = this.parameterResultCache;
     if (cached?.key === parameterCacheKey) {
@@ -7557,10 +7555,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       entryPath: ownerFilePath,
     };
     const discoveryRuntime = this.createRuntime();
+    this.bundlerResolvedEntries.delete(ownerFilePath);
     const depsResult = await this.onGetDependenciesForOwner(owner, discoverInput, discoveryRuntime);
+    const resolvedByBundler = this.bundlerResolvedEntries.delete(ownerFilePath);
     const unresolvedPaths = [...new Set(depsResult.unresolved.map((path) => assertRootedPath(path)))];
     const rootedPaths = [...new Set(depsResult.resolved.map((path) => assertRootedPath(path)))];
     const bundleDependency = await this.bundleDependencyFor({
+      resolvedByBundler,
       owner,
       entryPath: ownerFilePath,
       rootedPaths,
@@ -7661,13 +7662,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /**
    * The bundle that stands in for the resolved sources' content in the build key (R24), when there is one.
    *
-   * A kernel whose `resolve` answered from `runtime.bundler` reads its sources only through the
-   * bundle's output, so the output's digest decides behaviour: a comment or a reformat that prints
-   * the same bundle keeps the key, and anything that changes the code changes it. The bundle must
-   * name exactly the resolved paths; anything else (a kernel that resolves on its own, a failed
-   * bundle, a discovery that did not go through the bundler) keeps hashing raw content.
+   * Only a kernel that declares `sourceIdentity: 'bundle'`, and whose resolve just answered through
+   * `runtime.bundler.resolveDependencies`, qualifies: it reads its sources only
+   * through the bundle's output, so the output's digest decides behaviour, and a comment or a
+   * reformat that prints the same bundle keeps the key. The bundle must also name exactly the
+   * resolved paths; anything else (a failed bundle, a resolve that is not the bundler's) keeps
+   * hashing raw content.
    *
    * @param input - The discovery to key.
+   * @param input.resolvedByBundler - Whether the kernel's resolve answered through `runtime.bundler.resolveDependencies`.
    * @param input.owner - The operation owner whose kernel resolved the paths.
    * @param input.entryPath - The rooted entry path.
    * @param input.rootedPaths - The resolved dependency paths, in discovery order.
@@ -7675,31 +7678,25 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @returns The bundle dependency, or `undefined` to key on raw content.
    */
   private async bundleDependencyFor(input: {
+    resolvedByBundler: boolean;
     owner: OperationOwner;
     entryPath: string;
     rootedPaths: readonly string[];
     runtime: KernelRuntime;
   }): Promise<BundleDependency | undefined> {
-    const { owner, entryPath, rootedPaths, runtime } = input;
-    const kernelId = owner.binding?.kernelId;
-    if (kernelId === undefined) {
+    const { resolvedByBundler, owner, entryPath, rootedPaths, runtime } = input;
+    if (!resolvedByBundler || this.kernelSourceIdentity(owner) !== 'bundle') {
       return undefined;
     }
-    const kernelKey = `${kernelId}@${owner.binding?.kernelVersion ?? ''}`;
-    let bundle = this.bundleResultCache.get(entryPath);
-    // Discovery that skipped `resolve` (import detection) bundles nothing; a kernel already seen to
-    // resolve through the bundler bundles here what its describe and evaluate are about to bundle.
-    if (bundle === undefined && this.bundleSourcedKernels.has(kernelKey)) {
-      bundle = await runtime.bundler.bundle(entryPath);
-    }
-    if (!bundle?.success) {
+    // The bundle its describe and evaluate are about to read; built here when resolve did not.
+    const bundle = this.bundleResultCache.get(entryPath) ?? (await runtime.bundler.bundle(entryPath));
+    if (!bundle.success) {
       return undefined;
     }
     const bundled = new Set(bundle.dependencies.map((path) => assertRootedPath(path)));
     if (bundled.size !== rootedPaths.length || !rootedPaths.every((path) => bundled.has(path))) {
       return undefined;
     }
-    this.bundleSourcedKernels.add(kernelKey);
     let codeHash = this.bundleCodeHashes.get(bundle);
     if (codeHash === undefined) {
       /* Built-in shims name this worker's random module-registry scope; it routes the same exports
@@ -7708,6 +7705,29 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this.bundleCodeHashes.set(bundle, codeHash);
     }
     return { type: 'bundle', entryPath, codeHash: await codeHash };
+  }
+
+  /**
+   * What the build key reads for an owner's sources: the selected kernel's declared
+   * `sourceIdentity`. A worker without kernel definitions keys raw files.
+   *
+   * @param _owner - The operation owner.
+   * @returns `'bundle'` only for a kernel that opted in.
+   */
+  protected kernelSourceIdentity(_owner: OperationOwner): 'files' | 'bundle' {
+    return 'files';
+  }
+
+  /**
+   * Which registered built-in modules an entry's bundle binds as script globals, or `undefined`
+   * for all of them. A worker that knows which kernel registered each module narrows it to the
+   * entry's kernel, so the bundle (and the key over it) does not depend on what else loaded.
+   *
+   * @param _entryPath - The entry being bundled.
+   * @returns A predicate over module names, or `undefined` for every registered module.
+   */
+  protected bundleModuleScope(_entryPath: string): ((name: string) => boolean) | undefined {
+    return undefined;
   }
 
   /** Resolve only the dependencies declared by one middleware execution list. */
@@ -7887,7 +7907,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         const extension = KernelWorker.getFileExtension(entryPath);
         const bundler = await this.ensureBundlerForExtension(extension);
 
-        const bundleResult = await bundler.definition.bundle({ entryPath }, { signal }, bundler.ctx);
+        const scope = this.bundleModuleScope(entryPath);
+        const globals = scope ? [...this.registeredModuleNames].filter((name) => scope(name)).toSorted() : undefined;
+        const bundleResult = await bundler.definition.bundle(
+          { entryPath, ...(globals === undefined ? {} : { globals }) },
+          { signal },
+          bundler.ctx,
+        );
         signal.throwIfAborted();
         bundleSpan.end(bundler.id === undefined ? undefined : { 'bundler.id': bundler.id });
         this.bundleResultCache.set(entryPath, bundleResult);
@@ -7901,6 +7927,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return bundleResult;
       },
       resolveDependencies: async (entryPath: string): Promise<GetDependenciesResult> => {
+        this.bundlerResolvedEntries.add(entryPath);
         const cached = this.bundleResultCache.get(entryPath);
         if (cached) {
           return {
@@ -7917,6 +7944,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
       registryScope: this.registryScope,
       registerModule: (name: string, entry: BuiltinModule): void => {
+        this.registeredModuleNames.add(name);
         if (this.loadedBundlers.size > 0) {
           for (const bundler of new Set(this.loadedBundlers.values())) {
             bundler.definition.registerModule({ name, module: entry }, bundler.ctx);
@@ -8596,11 +8624,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }));
   }
 
-  private async computeDependencyHash(dependencies: readonly Dependency[]): Promise<string> {
+  private async computeDependencyHash(
+    dependencies: readonly Dependency[],
+    scope: 'build' | 'source' = 'build',
+  ): Promise<string> {
     const contentHashSpan = this.tracer.startSpan('deps.content-hash');
-    // A covered file enters the key by path only; its bundle dependency carries the content (R24).
+    /* A covered file enters a build key by path only; its bundle dependency carries the content (R24).
+     * A `source` key (a parameter description, which records every file's digest) keeps the bytes. */
     const keyed = dependencies.map((dependency) =>
-      dependency.type === 'file' && this.bundleCoveredFiles.has(dependency)
+      scope === 'build' && dependency.type === 'file' && this.bundleCoveredFiles.has(dependency)
         ? { type: dependency.type, path: dependency.path }
         : dependency,
     );

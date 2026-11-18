@@ -145,6 +145,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return true;
   }
 
+  /** The kernel that registered each built-in module during its initialize, by module name. */
+  private readonly moduleOwners = new Map<string, string>();
+
   private readonly runtime: AnyRuntimeDefinition;
   private readonly loadedKernels = new Map<string, LoadedKernel>();
   private activeKernelId: string | undefined;
@@ -204,6 +207,28 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   // =====================================================================
   // Protected overrides (must precede private methods per linter rules)
   // =====================================================================
+
+  protected override kernelSourceIdentity(owner: OperationOwner): 'files' | 'bundle' {
+    return this.lookupKernelForOwner(owner)?.definition.sourceIdentity ?? 'files';
+  }
+
+  /**
+   * An entry's bundle binds the globals of its selected kernel's modules and of modules no kernel
+   * claimed at initialize, never another kernel's.
+   *
+   * @param entryPath - The entry being bundled.
+   * @returns The module filter, or `undefined` before the entry has a kernel.
+   */
+  protected override bundleModuleScope(entryPath: string): ((name: string) => boolean) | undefined {
+    const selected = this.selectionCache.get(entryPath)?.id;
+    if (selected === undefined) {
+      return undefined;
+    }
+    return (name) => {
+      const owner = this.moduleOwners.get(name);
+      return owner === undefined || owner === selected;
+    };
+  }
 
   protected override async onInitialize(
     _input: { options: RuntimeWorkerOptions },
@@ -1263,7 +1288,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     this.logger.trace(`Initializing kernel: ${kernel.entry.id}`);
 
     try {
-      kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
+      const { bundler } = runtime;
+      kernel.ctx = await kernel.definition.initialize(kernel.options, {
+        ...runtime,
+        bundler: {
+          ...bundler,
+          registerModule: (name, entry) => {
+            this.moduleOwners.set(name, kernel.entry.id);
+            bundler.registerModule(name, entry);
+          },
+        },
+      });
     } catch (error) {
       // A typed refusal (e.g. KERNEL_REALM_CONFLICT) reaches the client as is; name the refusing kernel on a copy,
       // since one rejected realm creation may reach several kernels.

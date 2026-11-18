@@ -143,6 +143,7 @@ Key patterns:
 - `render` reads the handle and must not mutate it or re-evaluate source. It returns content; the runtime attaches the declared MIME type. `export` returns at least one file with `nonemptyExportFiles` and can use an open MIME type.
 - `services.bundler.registerModule(name, { code, version })`, `services.bundler.bundle(entryPath)` and `services.execute(code)` are available for JS/TS kernels. Services are operation-scoped; backend state stays in the context returned by `initialize`.
 - `describe` returns `createKernelSuccess({ parameters: declaration })` or `createKernelError(issues)`. `resolve` returns runtime paths.
+- Build-key source identity: leave `sourceIdentity` unset (`'files'`, every resolved file's bytes) unless the kernel's `resolve` returns `services.bundler.resolveDependencies(entryPath)` and every hook reads the model's sources only as `services.bundler.bundle(entryPath)` output (the code it executes; the source map for error locations only). Then declare `sourceIdentity: 'bundle'`: a comment-only or formatting-only edit reuses the previous build. A kernel that reads a source file itself, like the template's `evaluate`, must keep `'files'`, or a comment it reads would replay a stale build.
 - Pair `serializeHandle` and `deserializeHandle` for retained handles; snapshots must be structured-cloneable. Use `releaseHandle` for per-handle resources and `onDispose` for backend teardown.
 - Throw an `Error` with `.issues` for fatal backend failures so the framework returns structured issues; keep backend payloads in `initialize()` and its context rather than module-level caches.
 - Follow `docs/policy/geometry-naming-policy.md` for shape labels, glTF nodes/meshes, scenes, selectors, diagnostics and export artifact names.
@@ -356,6 +357,7 @@ If `apps/api` changed: `NX_DAEMON=false ./node_modules/.bin/nx run-many -t lint 
 - Reached into `@taucad/runtime`'s `#` internals → use the `@taucad/runtime/kernel` author surface
 - Backend payload cached at module scope → breaks payload isolation and the generated `hostTarget` guard
 - Missing `builtinModuleNames` for JS/TS kernels → transitive import detection fails
+- `sourceIdentity: 'bundle'` on a kernel that reads raw source text → a comment edit replays the stale build; keep the default `'files'`
 - Catalog `mainFile` inconsistent with the kernel's `extensions` → extension→kernel mapping misroutes files; the host coverage tests catch it
 - Local mock helpers instead of the shared testing utils → maintenance burden
 - Imported a removed `@taucad/runtime/testing` or `@taucad/geometry-core/testing` subpath → use `@taucad/runtime-testing`

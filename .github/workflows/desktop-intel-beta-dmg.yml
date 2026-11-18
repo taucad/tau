@@ -4,7 +4,7 @@ name: Intel Mac beta DMG
 # outside the qualified installer catalog: it is never in `latest/installers.json`, qualification or promote-routes.
 # It wraps the same signed, notarized Intel app as the release's `Tau-macos-x64.zip` (desktop-installer-candidate.mts
 # verifies the exact archive, its identity and its staple before signing), and publishes
-# `releases/<tag>/Tau-macos-x64.dmg` plus `latest/Tau-macos-x64.dmg` while the tag is the channel's promoted release.
+# `releases/<tag>/Tau-macos-x64.dmg` plus `latest/Tau-macos-x64.dmg` while the channel's Intel update feed serves that tag.
 # Run it after a full release build (production `desktop@*` tags always package Intel).
 on:
   workflow_dispatch:

@@ -9,9 +9,6 @@
       "plugin": "./tools/copy-files-from-to.plugin.ts"
     },
     {
-      "plugin": "./tools/test-shards.plugin.ts"
-    },
-    {
       "plugin": "./tools/pkgcheck.plugin.ts"
     },
     {

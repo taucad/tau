@@ -146,7 +146,7 @@ describe('deal', () => {
 
 describe('parseDurations', () => {
   it('accepts the checked-in snapshot and its project names are real projects', () => {
-    // A `project:test:shard-<k>` unit is a split-by-file part (test-shards-union.test.ts checks those); every
+    // A `project:test:shard-<k>` unit is a split-by-file part (its project's test-shards.test.ts checks it); every
     // whole project the snapshot weighs must still be a test project.
     for (const project of Object.keys(snapshot.seconds).filter((unit) => !unit.includes(':'))) {
       expect(broad).toContain(project);

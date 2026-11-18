@@ -13,6 +13,45 @@
         "cwd": "{projectRoot}"
       }
     },
-    "formal:nightly": {}
+    "formal:nightly": {},
+    "test:shard-1": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": ["default", "^production", "serviceEnvironment"],
+      "metadata": {
+        "description": "Shard 1 of 3 of revisions:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 3 shards together run every file of revisions:test exactly once (test-shards.test.ts); revisions:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=1/3"
+      }
+    },
+    "test:shard-2": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": ["default", "^production", "serviceEnvironment"],
+      "metadata": {
+        "description": "Shard 2 of 3 of revisions:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 3 shards together run every file of revisions:test exactly once (test-shards.test.ts); revisions:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=2/3"
+      }
+    },
+    "test:shard-3": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "inputs": ["default", "^production", "serviceEnvironment"],
+      "metadata": {
+        "description": "Shard 3 of 3 of revisions:test for the CI test lanes: the files test-shards.test.sequencer.ts deals to it by measured seconds (test-shards.test.seconds.json). The 3 shards together run every file of revisions:test exactly once (test-shards.test.ts); revisions:test itself still runs them all."
+      },
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=3/3"
+      }
+    }
   }
 }

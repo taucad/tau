@@ -1,8 +1,6 @@
 {
-  "$comment": "Splits revisions:test into test:shard-<k> targets by file (tools/test-shards.plugin.ts), so the affected test lanes of ci.yml deal its 410 s suite as three parts (tau-brain research/ci-structural-decomposition-blueprint.md ST-3). `include` is Vitest's default test and type-test include; `seconds` are each file's seconds in one uncached `vitest run --reporter=json` of the whole suite on a 4-core Linux host at its default worker count (2026-11-18); a file not listed weighs defaultSeconds, the median file. Only the ratios matter: they balance the parts. Refresh when a listed file's seconds move by more than a quarter or a file over 30 s is added.",
+  "$comment": "Uncached seconds per revisions test file for the CI test shards (test-shards.test.sequencer.ts): each file's seconds in one uncached `vitest run --reporter=json` of the whole suite on a 4-core Linux host at its default worker count (2026-11-18, 410 s). A file not listed weighs defaultSeconds, the median file. Only the ratios matter: they balance the shards. Refresh when a listed file's seconds move by more than a quarter or a file over 30 s is added.",
   "measuredAt": "2026-11-18",
-  "shards": 3,
-  "include": ["**/*.{test,spec}.?(c|m)[jt]s?(x)", "**/*.{test,spec}-d.?(c|m)[jt]s?(x)"],
   "defaultSeconds": 1,
   "seconds": {
     "src/apply-tree.test.ts": 42,

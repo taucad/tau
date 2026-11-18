@@ -1035,16 +1035,6 @@
     "reason": "reads a Tau example from tau-examples as a fixture or source"
   },
   {
-    "file": "scripts/src/test-shards-union.test.ts",
-    "target": "packages/revisions/test-shards.json",
-    "reason": "reads another project's source text to assert on or extract from it"
-  },
-  {
-    "file": "scripts/src/test-shards-union.test.ts",
-    "target": "tools/test-shards.plugin.js",
-    "reason": "imports another project's source by relative path instead of its package"
-  },
-  {
     "file": "scripts/src/tsgo-plugin-target.test.ts",
     "target": ".",
     "reason": "reads workspace-root configuration or inventory"

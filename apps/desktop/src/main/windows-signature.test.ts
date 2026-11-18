@@ -8,7 +8,7 @@ const signature = {
   path,
   status: 'Valid',
   signatureType: 'Authenticode',
-  isOSBinary: false,
+  osBinary: false,
   subject: publisher,
   embeddedSubject: publisher,
   timestamp: 'CN=Trusted Timestamp',
@@ -59,7 +59,7 @@ describe('Windows Authenticode verdict', () => {
     path: componentPath,
     status: 'Valid',
     signatureType: 'Catalog',
-    isOSBinary: true,
+    osBinary: true,
     subject: 'CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US',
     embeddedSubject: publisher,
     timestamp: null,
@@ -76,12 +76,16 @@ describe('Windows Authenticode verdict', () => {
 
   it('should reject a catalog verdict where only Tau binaries are admitted', () => {
     expect(() => {
-      validateWindowsSignature(windowsComponent, { path: componentPath, publisher, timestampRequired: true });
+      validateWindowsSignature(windowsComponent, {
+        path: componentPath,
+        publisher,
+        timestampRequired: true,
+      });
     }).toThrow();
   });
 
   it.each([
-    { ...windowsComponent, isOSBinary: false },
+    { ...windowsComponent, osBinary: false },
     { ...windowsComponent, signatureType: 'Authenticode' },
     {
       ...windowsComponent,
@@ -94,7 +98,10 @@ describe('Windows Authenticode verdict', () => {
       embeddedSubject: 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US',
     },
     { ...windowsComponent, status: 'HashMismatch' },
-    { ...windowsComponent, path: String.raw`D:\a\tau\tau\out\installer-output\app\Tau.exe` },
+    {
+      ...windowsComponent,
+      path: String.raw`D:\a\tau\tau\out\installer-output\app\Tau.exe`,
+    },
   ])('should reject a Windows component verdict that is not an OS catalog over a Tau signature: %j', (value) => {
     expect(() => {
       validateWindowsSignature(value, componentExpected);

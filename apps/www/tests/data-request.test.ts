@@ -1,8 +1,7 @@
 /**
- * Client navigations through React Router's own request handler, with the site's routes and future flags. Under
- * `v8_passThroughRequests` (the React Router 8 behaviour, blueprint B4) a loader's `request.url` is the raw
- * `/<path>.data?_routes=…` request, so every page loader must read the page's URL from its `url` argument; reading
- * `request.url` answered every client navigation with a 404 payload.
+ * Client navigations through React Router's own request handler, with the site's routes. React Router 8 passes a
+ * loader the raw `/<path>.data?_routes=…` request as `request.url` (blueprint B4), so every page loader must read the
+ * page's URL from its `url` argument; reading `request.url` answered every client navigation with a 404 payload.
  */
 import {
   createRequestHandler,
@@ -37,7 +36,7 @@ for (const route of pageRoutes) {
   serverRoutes[route.id] = { ...route, parentId: 'root' };
 }
 
-/** The site's page routes under a root, as the server build holds them, with the site's future flags. */
+/** The site's page routes under a root, as the server build holds them. */
 const handler = createRequestHandler(
   {
     entry: { module: { default: () => new Response('document') } },
@@ -71,13 +70,7 @@ const handler = createRequestHandler(
     },
     publicPath: '/',
     assetsBuildDirectory: 'build/client',
-    future: {
-      /* eslint-disable @typescript-eslint/naming-convention -- React Router's flag names. */
-      v8_middleware: false,
-      v8_trailingSlashAwareDataRequests: config.future.v8_trailingSlashAwareDataRequests,
-      v8_passThroughRequests: config.future.v8_passThroughRequests,
-      /* eslint-enable @typescript-eslint/naming-convention -- The flag names end here. */
-    },
+    future: {},
     ssr: true,
     isSpaMode: false,
     prerender: [],
@@ -87,9 +80,8 @@ const handler = createRequestHandler(
 );
 
 /**
- * The `.data` path the client asks for at `pathname`: React Router's `singleFetchUrl` under the site's
- * trailing-slash-aware data requests, which the test below holds on. A path ending in `/` gets `<path>_.data`, so `/`
- * gets `/_.data`.
+ * The `.data` path the client asks for at `pathname`: React Router 8's `singleFetchUrl`, trailing-slash aware. A path
+ * ending in `/` gets `<path>_.data`, so `/` gets `/_.data`.
  */
 const dataRequestPath = (pathname: string): string =>
   pathname.endsWith('/') ? `${pathname}_.data` : `${pathname}.data`;
@@ -116,12 +108,11 @@ const loadedPath = (results: Awaited<ReturnType<typeof navigate>>): string | und
   Object.values(results).find((result) => result.data?.path !== undefined)?.data?.path;
 
 describe('client navigation', () => {
-  test('passes loaders the raw request, as React Router 8 does', () => {
-    expect(config.future.v8_passThroughRequests).toBe(true);
+  test('sets no React Router 7 `v8_*` flag, which React Router 8 rejects', () => {
+    expect('future' in config).toBe(false);
   });
 
   test("names data requests trailing-slash aware, as React Router 8 does, so the home's is `/_.data`", () => {
-    expect(config.future.v8_trailingSlashAwareDataRequests).toBe(true);
     expect(dataRequestPath('/')).toBe('/_.data');
     expect(dataRequestPath('/pricing/')).toBe('/pricing/_.data');
   });

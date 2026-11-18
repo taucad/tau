@@ -6,7 +6,7 @@ import type { Project, ProjectManifest } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
-import type { projectManagerMachine } from '#hooks/project-manager.machine.js';
+import type { projectManagerMachine } from '@taucad/files-ui/machines/project-manager.machine';
 import type { WorkspaceBindingRepairResult } from '@taucad/files-ui/filesystem/handle-store';
 import { removeChatPermission, seedChatPermission } from '#hooks/use-permission-mode.js';
 import type { AppUiPreferences, ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
@@ -27,11 +27,11 @@ import {
 import type { ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
 import type { ProjectLibrary, ProjectRouteAccess } from '#runtime/project-library.js';
 import type { CreatedProject, CreateProjectOptions, ImportStagingTarget } from '#runtime/project-library-commands.js';
-import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
+import type { ConnectedWorkspace } from '@taucad/files-ui/runtime/project-library-workspace';
 import { selectRuntimeProjectLibrary } from '#runtime/app-runtime.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { prepareFirstProjectTour } from '#components/tour/first-project-tour.js';
-import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 
 type ProjectManagerContextType = {
   discoveryObservationError: string | undefined;

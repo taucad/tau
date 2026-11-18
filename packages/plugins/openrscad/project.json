@@ -11,7 +11,8 @@
       "options": {
         "cwd": "{workspaceRoot}",
         "command": "vitest run --config packages/plugins/openrscad/e2e/vitest.config.ts"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/libs/tau-examples/src/kernels/openscad/kitchen-sink/main.scad"]
     }
   }
 }

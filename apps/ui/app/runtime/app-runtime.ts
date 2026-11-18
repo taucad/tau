@@ -50,7 +50,7 @@ import { ProjectLibrary, selectLibraryRevision } from '#runtime/project-library.
 import { createRootFileFacade } from '#runtime/file-manager-facade.js';
 import type { RootFileFacade } from '#runtime/file-manager-facade.js';
 import { buildWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import {
   createSessionRootSync,
   createSessionsRegistryLogic,

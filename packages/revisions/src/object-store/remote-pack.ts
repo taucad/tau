@@ -525,16 +525,28 @@ export const openRemotePack = async (options: RemotePackOptions): Promise<Remote
           /* A whole entry keeps its deflated body: the object it inflated to is checked below, so a store keeps
            * those bytes as they are rather than deflate the object again. */
           const copied = await reader.readForCopy(oid);
-          /* Each object is checked against its id: the index and the trailer vouch for the pack, not the transfer. */
-          if (copied !== undefined && (await compute.sha1(frameObject(copied.type, copied.data))) !== oid) {
+          if (copied === undefined) {
+            return [oid, undefined] as const;
+          }
+          /*
+           * Each object is checked against its id: the index and the trailer vouch for the pack, not the transfer. A
+           * whole entry was hashed as it was inflated; a delta's target is hashed here.
+           */
+          const hashed = copied.oid ?? (await compute.sha1(frameObject(copied.type, copied.data)));
+          if (hashed !== oid) {
             throw new TypeError(`A Range read of ${name} answered other bytes for ${oid}.`);
           }
           /* A body cut out of a wider read is copied, so no object pins the whole Range read behind it. */
-          const compressed = copied?.compressed;
-          const object =
-            compressed === undefined || compressed.byteLength === compressed.buffer.byteLength
-              ? copied
-              : { ...copied!, compressed: new Uint8Array(compressed) };
+          const { compressed } = copied;
+          const object: CopiedObject =
+            compressed === undefined
+              ? { type: copied.type, data: copied.data }
+              : {
+                  type: copied.type,
+                  data: copied.data,
+                  compressed:
+                    compressed.byteLength === compressed.buffer.byteLength ? compressed : new Uint8Array(compressed),
+                };
           return [oid, object] as const;
         }),
       );

@@ -126,8 +126,12 @@ export type PackReaderOptions = Readonly<{
   readBase: (oid: string, depth: number) => Promise<StoredObject | undefined>;
 }>;
 
-/** One object read for a repack: a whole entry's deflated body comes with it, to copy verbatim. */
-export type CopiedObject = StoredObject & Readonly<{ compressed?: Uint8Array<ArrayBuffer> }>;
+/**
+ * One object read for a repack: a whole entry's deflated body comes with it,
+ * to copy verbatim, and the id its bytes hash to, for the reader to compare
+ * with the id it asked for (a delta's is not hashed by the read).
+ */
+export type CopiedObject = StoredObject & Readonly<{ compressed?: Uint8Array<ArrayBuffer>; oid?: string }>;
 
 /** One pack's objects, read entry by entry. */
 export type PackReader = Readonly<{
@@ -300,6 +304,22 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
     return inflated;
   };
 
+  const inflateObject = async (
+    type: GitObjectKind,
+    compressed: Uint8Array<ArrayBuffer>,
+    declared: number,
+  ): Promise<Readonly<{ data: Uint8Array<ArrayBuffer>; oid: string }>> => {
+    try {
+      return await compute.inflateObject(type, compressed, declared);
+    } catch (error) {
+      /* As {@link inflateExactly}: only a verdict on the bytes is a corrupt entry. */
+      if (error instanceof CorruptBytesError) {
+        throw new TypeError(`A pack entry in ${path} does not inflate to the object it declares.`, { cause: error });
+      }
+      throw error;
+    }
+  };
+
   const entryAt = async (offset: number, depth: number, keepCompressed = false): Promise<CopiedObject> => {
     if (depth > maximumDeltaDepth) {
       throw new TypeError(`A delta chain in ${path} is longer than ${String(maximumDeltaDepth)}.`);
@@ -312,8 +332,13 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
     let at = bodyAt;
     if (kind in kinds) {
       const compressed = entry.subarray(at);
+      if (keepCompressed) {
+        /* Inflated and hashed in one call: the object crosses back once, with the id its bytes are. */
+        const { data, oid } = await inflateObject(kinds[kind]!, compressed, declared);
+        return { type: kinds[kind]!, data, compressed, oid };
+      }
       const data = await inflateExactly(compressed, declared);
-      return keepCompressed ? { type: kinds[kind]!, data, compressed } : { type: kinds[kind]!, data };
+      return { type: kinds[kind]!, data };
     }
     if (kind !== ofsDelta && kind !== refDelta) {
       throw new TypeError(`A pack entry has an unknown type ${String(kind)}.`);

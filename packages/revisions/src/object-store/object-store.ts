@@ -1043,7 +1043,8 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     if (object === undefined) {
       throw new TypeError(`A repack could not read ${oid}.`);
     }
-    if ((await compute.sha1(framedOf(object.type, object.data))) !== oid) {
+    /* A whole entry was hashed as it was inflated; anything else is hashed here. */
+    if ((object.oid ?? (await compute.sha1(framedOf(object.type, object.data)))) !== oid) {
       throw new TypeError(`A repack read ${oid} and found another object's bytes.`);
     }
     if (object.data.byteLength > budget.left) {

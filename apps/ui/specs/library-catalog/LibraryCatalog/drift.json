@@ -123,10 +123,10 @@
     "apps/libs/files-ui/src/runtime/project-library-workspace.ts": "981e178325a054e6aa2227654357e92cc5fc5970c0f9dbcbf4edf5ee18b3e69d",
     "apps/ui/app/hooks/use-project-manager.tsx": "5052f86d673914853a9427e33fea8044b0a4ca84e3ddc25f2877d8eb88f0d04d",
     "apps/ui/app/runtime/project-library-commands.ts": "ef1d460989325ce9eefe29ac97c727f550fd76511451aee27c37d1622ee61b17",
-    "apps/ui/app/runtime/project-library.ts": "b873a70190298a4c03b0cb031e0287ffe5511a3b06daf2bc33e955b256061343"
+    "apps/ui/app/runtime/project-library.ts": "0763f1f19b5cc171aca405b550f9f325e411aac372e35528b83f6714c0ab7aed"
   },
   "specs": {
-    "LibraryCatalog.tla": "58f61f19cd7480e55efdefd6305748fa4f73469eb82e42d2e6eca3dfb0ae69d9"
+    "LibraryCatalog.tla": "35e9c1a51519921d86ae48b0b102ce27310d1e2a3c22d35d9056d4b3e5700c45"
   },
   "tables": {
     "LibraryCatalog.access-match-by-id.cfg": "fa8c2041269d69be90b1366264d3d52b207f03d852ffa0b5928fa52d3ab2821e",

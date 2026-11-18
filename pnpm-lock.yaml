@@ -2047,6 +2047,9 @@ importers:
       '@taucad/build123d':
         specifier: workspace:*
         version: link:../../packages/plugins/build123d
+      '@taucad/cadmpeg':
+        specifier: workspace:*
+        version: link:../../packages/plugins/cadmpeg
       '@taucad/carvera':
         specifier: workspace:*
         version: link:../../packages/plugins/carvera
@@ -2146,6 +2149,9 @@ importers:
       '@taulabs/openrscad-engine':
         specifier: 'catalog:'
         version: 0.11.0-beta.5
+      cadmpeg-ts:
+        specifier: 0.1.0-beta.1
+        version: 0.1.0-beta.1
       electron-updater:
         specifier: 'catalog:'
         version: 6.8.11
@@ -3500,6 +3506,9 @@ importers:
       '@taucad/build123d':
         specifier: workspace:*
         version: link:../../../packages/plugins/build123d
+      '@taucad/cadmpeg':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/cadmpeg
       '@taucad/desktop-terminal':
         specifier: workspace:*
         version: link:../desktop-terminal
@@ -4677,6 +4686,9 @@ importers:
       '@taucad/bundler-core':
         specifier: workspace:*
         version: link:../../packages/core/bundler
+      '@taucad/cadmpeg':
+        specifier: workspace:*
+        version: link:../../packages/plugins/cadmpeg
       '@taucad/camera':
         specifier: workspace:*
         version: link:../../packages/camera
@@ -5908,6 +5920,9 @@ importers:
       '@taucad/bundler-core':
         specifier: workspace:*
         version: link:../core/bundler
+      '@taucad/cadmpeg':
+        specifier: workspace:*
+        version: link:../plugins/cadmpeg
       '@taucad/camera':
         specifier: workspace:*
         version: link:../camera
@@ -6598,6 +6613,28 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
+  packages/plugins/cadmpeg:
+    dependencies:
+      '@taucad/brep':
+        specifier: workspace:*
+        version: link:../brep
+      '@taucad/geometry-core':
+        specifier: workspace:*
+        version: link:../../core/geometry
+      cadmpeg-ts:
+        specifier: 0.1.0-beta.1
+        version: 0.1.0-beta.1
+    devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -18087,6 +18124,112 @@ packages:
   cacheable-request@7.0.4:
     resolution: {integrity: sha512-v+p6ongsrp0yTGbJXjgxPow2+DL93DASP4kXCDKb8/bwRtt9OEF3whggkkDkGNzgcWy2XaF4a8nZglC7uElscg==}
     engines: {node: '>=8'}
+
+  cadmpeg-ts-android-arm-eabi@0.1.0-beta.1:
+    resolution: {integrity: sha512-soHutHEam64pnLFanN30O+CEa4tTcWyX47yOj+07GgWVvyHvkGR8b39Z1/C2lTu09DfAI9XQCInpNVgD5cwLKA==}
+    engines: {node: '>=22.13.0'}
+    cpu: [arm]
+    os: [android]
+
+  cadmpeg-ts-android-arm64@0.1.0-beta.1:
+    resolution: {integrity: sha512-G4iiQ7/AhI3081vy7kbM1dKk0VTVChjkShSuvXn4yw/vrs/Riuo/cVE4mrTPFE3scWMEImKVt67rsvksn+SV8Q==}
+    engines: {node: '>=22.13.0'}
+    cpu: [arm64]
+    os: [android]
+
+  cadmpeg-ts-darwin-arm64@0.1.0-beta.1:
+    resolution: {integrity: sha512-S5IXbUMQ2Ig2g2+VohDeHuYkhankVdfOS2uPquz8B1p7hG+OD2C3ICgP//6+El74SzxHOfMGNhQNOxeWT9pzhA==}
+    engines: {node: '>=22.13.0'}
+    cpu: [arm64]
+    os: [darwin]
+
+  cadmpeg-ts-darwin-x64@0.1.0-beta.1:
+    resolution: {integrity: sha512-vIc+S8ebVF8uFLW6LsT5NOn3zpzLEtZstKml3ljpeghw55UGKGHpClDyFal4bIo7XJIMCtW73sDv/y2LIxWk2A==}
+    engines: {node: '>=22.13.0'}
+    cpu: [x64]
+    os: [darwin]
+
+  cadmpeg-ts-freebsd-x64@0.1.0-beta.1:
+    resolution: {integrity: sha512-pDPUgGXR9UkeKW0woipye/Eln9w5o2wC2t6eYV27xwFwL81cbbnrgBEqmxHMfNwb3OzcOQwDrBZlniNJhawjSA==}
+    engines: {node: '>=22.13.0'}
+    cpu: [x64]
+    os: [freebsd]
+
+  cadmpeg-ts-linux-arm-gnueabihf@0.1.0-beta.1:
+    resolution: {integrity: sha512-NATTWFAdIh7RU2tZf7zcyHmsFtWGLv9hxHVc7H7po3KZaqR/Kw4Gijfk0ouNraHXaLRvFx7MznneeWi7SczXBQ==}
+    engines: {node: '>=22.13.0'}
+    cpu: [arm]
+    os: [linux]
+
+  cadmpeg-ts-linux-arm-musleabihf@0.1.0-beta.1:
+    resolution: {integrity: sha512-tjl+NVGwy+oVei6trKG7zx6b9rdLBpDoSycJJfysXpgvgFlZ/smXa8XtbaltC/uGsHx2SG/YB/XaejamOFO2YA==}
+    engines: {node: '>=22.13.0'}
+    cpu: [arm]
+    os: [linux]
+
+  cadmpeg-ts-linux-arm64-gnu@0.1.0-beta.1:
+    resolution: {integrity: sha512-u6nCDgi2JVNuy4ncG2/WuRPqFOxMuEYsHg15BUeGya4hcR72SYAfPVsj0foRJ8MsppMOWDB45sM9Pc5OSyeO7w==}
+    engines: {node: '>=22.13.0'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  cadmpeg-ts-linux-arm64-musl@0.1.0-beta.1:
+    resolution: {integrity: sha512-KFh/qSw3dTdY12JfhrkFr68zrG8LtEve4fPst7Y22VDlTRGLtk3jsp8pNNjo+D6O69sc4HZAuAamrYF+nRZzjg==}
+    engines: {node: '>=22.13.0'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  cadmpeg-ts-linux-ppc64-gnu@0.1.0-beta.1:
+    resolution: {integrity: sha512-xFaCC1+dJRPZRBxHLejFgj22sFcq3c5SMwunPsLzdgEW68cRxW7WUdvbuPXnZIqU4KcnbjcOSLPbjv9ZFah7VQ==}
+    engines: {node: '>=22.13.0'}
+    cpu: [ppc64]
+    os: [linux]
+    libc: [glibc]
+
+  cadmpeg-ts-linux-s390x-gnu@0.1.0-beta.1:
+    resolution: {integrity: sha512-5i+zOF6U+cV6j9oArTMmcDrr7UG1NboD6tdflSCS8vehlUkZUXluFV7st4Afu/GiKtwvZfohCswGpSKRyiAnQw==}
+    engines: {node: '>=22.13.0'}
+    cpu: [s390x]
+    os: [linux]
+    libc: [glibc]
+
+  cadmpeg-ts-linux-x64-gnu@0.1.0-beta.1:
+    resolution: {integrity: sha512-q/hpSvA/vs9a8Y2fLpSh4z4N/MzNsf4yWwvLl1JOlY8n2yNSSsFv4DL5Tp5gSty9XOm1TXbVVsUqRIluUfw8Eg==}
+    engines: {node: '>=22.13.0'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  cadmpeg-ts-linux-x64-musl@0.1.0-beta.1:
+    resolution: {integrity: sha512-G9kDC+FHVGXMs8PeEioqO1Qz1iCXoD5ZuE2ZlBEqTScF0G2aoMA/5hNWLcSONl1nPxJxfo9K6m5ZTpyA5djEvQ==}
+    engines: {node: '>=22.13.0'}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  cadmpeg-ts-win32-arm64-msvc@0.1.0-beta.1:
+    resolution: {integrity: sha512-hRYcPH9AR7d0az28OEexpl2OUNOTbw3wWg2SSMlnGnF1ejK7+ta64dBnBsCPBDYXR/JcFPFkMR0mHDDNjHhqyA==}
+    engines: {node: '>=22.13.0'}
+    cpu: [arm64]
+    os: [win32]
+
+  cadmpeg-ts-win32-ia32-msvc@0.1.0-beta.1:
+    resolution: {integrity: sha512-fatip9XJlmaCXqUa6SlZqcgxgDUWJgfeEd2mOjXAddCYzsiPt//0tDa3asC6s6CCDHCVlR4K3F5VJSv1Fc35Ig==}
+    engines: {node: '>=22.13.0'}
+    cpu: [ia32]
+    os: [win32]
+
+  cadmpeg-ts-win32-x64-msvc@0.1.0-beta.1:
+    resolution: {integrity: sha512-bm6lpkZCTlx1jL3xs7r56ivZr5PjsXHMZ/1B9uYGAGXibmbQExQtHlSJDp28Dbgx5GNSgwuUrP/MEgWRYujrSg==}
+    engines: {node: '>=22.13.0'}
+    cpu: [x64]
+    os: [win32]
+
+  cadmpeg-ts@0.1.0-beta.1:
+    resolution: {integrity: sha512-+qzKZnvK0lWaGEAoQRSCasttKLbN6yOMO4GgQHM/T39u1yVtM/NZsjAMpsnb3+/H49sZqFdwRL1etWHCGouw/w==}
+    engines: {node: '>=22.13.0'}
 
   calculate-cell-boundaries@0.0.19:
     resolution: {integrity: sha512-m5Dtab5kqH92WyWmyxbG/sR/ILK76xv/U5ks+MZYZ3m8q1p3E81kfTed68eUq09L5Yl1ljdtURWaTW9axh0JNQ==}
@@ -39172,6 +39315,73 @@ snapshots:
       lowercase-keys: 2.0.0
       normalize-url: 6.1.0
       responselike: 2.0.1
+
+  cadmpeg-ts-android-arm-eabi@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-android-arm64@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-darwin-arm64@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-darwin-x64@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-freebsd-x64@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-linux-arm-gnueabihf@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-linux-arm-musleabihf@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-linux-arm64-gnu@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-linux-arm64-musl@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-linux-ppc64-gnu@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-linux-s390x-gnu@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-linux-x64-gnu@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-linux-x64-musl@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-win32-arm64-msvc@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-win32-ia32-msvc@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts-win32-x64-msvc@0.1.0-beta.1:
+    optional: true
+
+  cadmpeg-ts@0.1.0-beta.1:
+    optionalDependencies:
+      cadmpeg-ts-android-arm-eabi: 0.1.0-beta.1
+      cadmpeg-ts-android-arm64: 0.1.0-beta.1
+      cadmpeg-ts-darwin-arm64: 0.1.0-beta.1
+      cadmpeg-ts-darwin-x64: 0.1.0-beta.1
+      cadmpeg-ts-freebsd-x64: 0.1.0-beta.1
+      cadmpeg-ts-linux-arm-gnueabihf: 0.1.0-beta.1
+      cadmpeg-ts-linux-arm-musleabihf: 0.1.0-beta.1
+      cadmpeg-ts-linux-arm64-gnu: 0.1.0-beta.1
+      cadmpeg-ts-linux-arm64-musl: 0.1.0-beta.1
+      cadmpeg-ts-linux-ppc64-gnu: 0.1.0-beta.1
+      cadmpeg-ts-linux-s390x-gnu: 0.1.0-beta.1
+      cadmpeg-ts-linux-x64-gnu: 0.1.0-beta.1
+      cadmpeg-ts-linux-x64-musl: 0.1.0-beta.1
+      cadmpeg-ts-win32-arm64-msvc: 0.1.0-beta.1
+      cadmpeg-ts-win32-ia32-msvc: 0.1.0-beta.1
+      cadmpeg-ts-win32-x64-msvc: 0.1.0-beta.1
 
   calculate-cell-boundaries@0.0.19(@types/react@19.2.17)(graphics-debug@0.0.100(@resvg/resvg-js@2.6.2)(@tscircuit/image-utils@0.0.10)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@5.9.3))(typescript@5.9.3):
     dependencies:

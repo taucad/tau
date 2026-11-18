@@ -412,6 +412,23 @@ catalogMode: prefer
 minimumReleaseAgeExclude:
   - '@taucad/*'
   - '@taulabs/*'
+  - cadmpeg-ts
+  - cadmpeg-ts-darwin-arm64
+  - cadmpeg-ts-darwin-x64
+  - cadmpeg-ts-win32-x64-msvc
+  - cadmpeg-ts-win32-arm64-msvc
+  - cadmpeg-ts-win32-ia32-msvc
+  - cadmpeg-ts-linux-x64-gnu
+  - cadmpeg-ts-linux-arm64-gnu
+  - cadmpeg-ts-linux-arm-gnueabihf
+  - cadmpeg-ts-linux-ppc64-gnu
+  - cadmpeg-ts-linux-s390x-gnu
+  - cadmpeg-ts-linux-x64-musl
+  - cadmpeg-ts-linux-arm64-musl
+  - cadmpeg-ts-linux-arm-musleabihf
+  - cadmpeg-ts-android-arm64
+  - cadmpeg-ts-android-arm-eabi
+  - cadmpeg-ts-freebsd-x64
   - geospec
   - geospec-engine
   - geospec-engine-darwin-arm64

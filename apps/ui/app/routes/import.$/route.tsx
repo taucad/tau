@@ -12,8 +12,8 @@ import type { MachineActors } from '@taucad/ui-core/lib/xstate.lib';
 // oxlint-disable-next-line import/extensions -- React Router generates this virtual route-type module.
 import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
-import { ImportGitHubError, importGitHubMachine } from '#machines/import-github.machine.js';
-import type { ImportArchiveEvents, ImportArchiveInput } from '#machines/import-github.machine.js';
+import { ImportGitHubError, importGitHubMachine } from '@taucad/publish-ui/machines/import-github.machine';
+import type { ImportArchiveEvents, ImportArchiveInput } from '@taucad/publish-ui/machines/import-github.machine';
 import { importDiskMachine } from '@taucad/publish-ui/machines/import-disk.machine';
 import { ImportChannelError, createFromStagedImport, openImportSession } from '@taucad/ui-core/machines/import-staging';
 import type { HostImportGrant } from '@taucad/filesystem/importer';
@@ -36,7 +36,6 @@ import { SuggestedClones } from '#routes/import.$/suggested-clones.js';
 import { UploadCard } from '#routes/import.$/upload-card.js';
 import {
   describeGitHubImport,
-  parseGitHubUrl,
   normalizeGitHubUrl,
   resolveGitHubImportTarget,
   resolveImportRoute,
@@ -44,6 +43,8 @@ import {
   findMainFile,
   handOverHostGrants,
 } from '#routes/import.$/import.utils.js';
+import { parseGitHubUrl } from '@taucad/publish-ui/lib/github-url';
+import { getGitHubClient } from '#lib/github-api.js';
 import { toast } from '@taucad/ui/components/sonner';
 import { ImportErrorView } from '#routes/import.$/import-error-view.js';
 import { ImportProcessingView } from '#routes/import.$/import-processing-view.js';
@@ -450,6 +451,7 @@ export default function ImportRoute(): React.JSX.Element {
     }),
     {
       input: {
+        githubClient: getGitHubClient(),
         owner,
         repo,
         ref,

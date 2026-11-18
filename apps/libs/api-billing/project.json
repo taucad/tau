@@ -18,7 +18,8 @@
           "projects": ["api"],
           "target": "build:billing-command"
         }
-      ]
+      ],
+      "inputs": ["default", "^default", "{workspaceRoot}/infra/billing/development.commercial.json"]
     },
     "test:billing-stripe": {
       "executor": "nx:run-commands",
@@ -58,6 +59,14 @@
           "command": "node --import @oxc-node/core/register apps/libs/api-billing/src/testing/billing-load/run.ts --profile=surge-64"
         }
       }
+    },
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/infra/billing/development.commercial.json"
+      ]
     }
   }
 }

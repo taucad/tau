@@ -81,6 +81,7 @@
     "@taucad/brep": "workspace:*",
     "@taucad/build123d": "workspace:*",
     "@taucad/bundler-core": "workspace:*",
+    "@taucad/cadmpeg": "workspace:*",
     "@taucad/camera": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/filesystem": "workspace:*",

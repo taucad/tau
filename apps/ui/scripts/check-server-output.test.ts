@@ -239,10 +239,15 @@ describe('checkBuildOutput', () => {
     ]);
   });
 
-  it('should check the server output an ssr: false build leaves behind', async () => {
-    const directory = await writeBuild(dirtyBuild);
+  it('should fail an ssr: false build that leaves a server output behind, clean or not (RR8)', async () => {
+    const dirty = await writeBuild(dirtyBuild);
+    const clean = await writeBuild(['client/index.html', 'server/index.js']);
 
-    expect(checkBuildOutput({ kind: 'spa', directory })).toHaveLength(2);
+    for (const directory of [dirty, clean]) {
+      expect(checkBuildOutput({ kind: 'spa', directory })).toEqual([
+        `${join(directory, 'server')} is left by an ssr: false build: its React Router config's buildEnd removes it (RR8)`,
+      ]);
+    }
   });
 
   it('should pass an ssr: false build without a server output and fail an ssr: true one', async () => {

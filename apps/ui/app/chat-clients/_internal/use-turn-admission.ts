@@ -18,9 +18,9 @@ import {
   isCloudProjectPending,
   tauCloudIntent,
 } from '#lib/tau-cloud-intent.js';
-import { peekRevisionClient, subscribeRevisionClients } from '#services/revision-client-registry.js';
+import { peekRevisionClient, subscribeRevisionClients } from '@taucad/revisions-ui/services/revision-client-registry';
 import { subscribeRevisionSessionUser } from '#lib/revision-actor.js';
-import type { RevisionClient } from '#types/revision-client.types.js';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 import { isFailedOpen } from '#hooks/use-project-availability.js';
 
 /**

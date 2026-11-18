@@ -11,6 +11,7 @@
     "dev": "node scripts/prepare-assets.ts --dev && react-router dev"
   },
   "dependencies": {
+    "@react-router/node": "catalog:",
     "@taucad/planetary-gearbox": "workspace:*",
     "@taucad/utils": "workspace:*",
     "three": "catalog:",

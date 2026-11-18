@@ -39,7 +39,7 @@ import { toast } from '@taucad/ui/components/sonner';
 import { getFileTreeDownloadErrorMessage } from '@taucad/files-ui/utils/file-tree-download-policy';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
-import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { zipDownloadCeiling } from '@taucad/ui-core/utils/zip-download.utils';
 

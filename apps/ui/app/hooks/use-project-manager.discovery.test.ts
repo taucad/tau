@@ -485,6 +485,74 @@ describe('useProjectManager discovery (I7, I9)', () => {
     });
   });
 
+  // ── Both local databases unopenable ──────────────────────────────────────
+
+  /*
+   * R7, B5 (the unit half of T-B5.5): Home's files are on disk, so with the library database and the handle database
+   * both unopenable the listing renders from discovery alone and a project the file service verifies opens. Creating a
+   * project writes a journal row, so it reports the database message instead.
+   */
+  describe('with both local databases unopenable', () => {
+    const named = (name: string): Error => Object.assign(new Error(`${name} while opening`), { name });
+
+    beforeEach(() => {
+      mockGetPendingProjectOperations.mockRejectedValue(named('VersionError'));
+      mockGetProjectLibraryState.mockRejectedValue(named('VersionError'));
+      mockGetAllProjectFileSystemConfigs.mockRejectedValue(named('VersionError'));
+      mockGetProjectFileSystemConfig.mockRejectedValue(named('VersionError'));
+      mockListWorkspaces.mockRejectedValue(named('VersionError'));
+    });
+
+    it('should list the projects discovery finds, from discovery alone', async () => {
+      const { result } = createHarness();
+
+      await act(async () => {
+        await expect(result.current.getProjectListing()).resolves.toMatchObject({
+          projects: [{ projectId: fakeProject.id, library: { lastActivityAt: 1_700_000_000_000 } }],
+        });
+      });
+      expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    });
+
+    it('should open a project the file service verifies', async () => {
+      mockVerifyProjectRoute.mockResolvedValue({
+        status: 'verified',
+        project: { projectId: fakeProject.id, manifest: projectToManifest(fakeProject) },
+      });
+      const { result } = createHarness();
+
+      await act(async () => {
+        await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+          status: 'ready',
+          project: { id: fakeProject.id },
+        });
+      });
+    });
+
+    it('should refuse a new project with the database message', async () => {
+      const { queryClient } = createHarness();
+
+      await act(async () => {
+        const mutation = libraryFor(queryClient).beginMutation('proj_bbbbbbbbbbbbbbbbbbbbb', { gated: false });
+        await expect(mutation).rejects.toThrow(/local database is unavailable/iu);
+        await expect(mutation).rejects.toHaveProperty('name', 'LocalDatabaseUnavailableError');
+      });
+    });
+
+    it("should keep the scan's own error when the journal reads", async () => {
+      mockGetPendingProjectOperations.mockResolvedValue([]);
+      mockGetAllProjectFileSystemConfigs.mockResolvedValue([]);
+      const broken = new TypeError('manifest unreadable');
+      mockListProjectManifests.mockRejectedValue(broken);
+      const { result } = createHarness();
+
+      await act(async () => {
+        await expect(result.current.getProjectListing()).rejects.toBe(broken);
+      });
+    });
+  });
+
   // ── Write stop ────────────────────────────────────────────────────────────
 
   describe('a pass skipped during a write stop', () => {

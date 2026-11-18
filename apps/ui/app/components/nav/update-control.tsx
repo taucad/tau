@@ -36,6 +36,7 @@ export function UpdateControl({
   icon: Icon,
   isFailed = false,
   releasePage,
+  releaseLabel = 'What’s new',
   action,
   isOpen,
   onOpenChange,
@@ -46,6 +47,8 @@ export function UpdateControl({
   readonly icon: React.ComponentType<{ readonly className?: string }>;
   readonly isFailed?: boolean;
   readonly releasePage?: string;
+  /** The link's label; **Download Tau** when the link is the download page rather than release notes. */
+  readonly releaseLabel?: string;
   readonly action?: UpdateControlAction;
   readonly isOpen: boolean;
   readonly onOpenChange: (open: boolean) => void;
@@ -99,7 +102,7 @@ export function UpdateControl({
             {releasePage ? (
               <Button asChild variant='ghost' size='xs' className='mr-auto px-1 has-[>svg]:px-1'>
                 <a href={releasePage} target='_blank' rel='noopener noreferrer'>
-                  What’s new
+                  {releaseLabel}
                   <ArrowUpRight className='size-3' />
                 </a>
               </Button>

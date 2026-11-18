@@ -1,17 +1,19 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { Workspace, WorkspaceEntry } from '@taucad/files-ui/filesystem/handle-store';
 import type { WorkspaceConnectionState } from '@taucad/files-ui/machines/workspace-connection.machine';
 import FilesRoute from '#routes/files/route.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import type { RootStatus } from '@taucad/filesystem';
 
 type ToastSuccessOptions = {
   readonly action: { readonly label: string; readonly onClick: () => void | Promise<void> };
 };
 
 const {
+  desktop,
   catalogState,
   connectionState,
   mockAssertWorkspaceMutationAllowed,
@@ -25,6 +27,11 @@ const {
 } = vi.hoisted(() => {
   const workspaceConnectionState: { current: WorkspaceConnectionState } = { current: { phase: 'idle' } };
   return {
+    desktop: {
+      grants: [] as string[],
+      rootStatuses: [] as RootStatus[],
+      workspaces: undefined as Workspace[] | undefined,
+    },
     catalogState: { extraWorkspaces: [] as Workspace[] },
     connectionState: { connected: true },
     mockAssertWorkspaceMutationAllowed: vi.fn(),
@@ -48,7 +55,17 @@ const handle = mock<FileSystemDirectoryHandle>({ name: 'Workshop' });
 const entry: WorkspaceEntry = { workspace, handle };
 
 vi.mock('#hooks/use-file-manager.js', () => {
+  const fileManagerRef = {
+    getSnapshot: () => ({
+      status: 'active',
+      matches: () => false,
+      context: { rootStatuses: desktop.rootStatuses },
+    }),
+    subscribe: () => ({ unsubscribe: () => undefined }),
+    send: vi.fn(),
+  };
   const value = {
+    fileManagerRef,
     client: {
       getZippedDirectory: vi.fn(),
       readFile: vi.fn(),
@@ -81,7 +98,16 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 vi.mock('@taucad/files-ui/filesystem/handle-store', () => ({
   checkHandlePermission: vi.fn(async () => 'granted'),
   getWorkspace: mockGetWorkspace,
-  listWorkspaces: vi.fn(async () => [workspace, ...catalogState.extraWorkspaces]),
+  listWorkspaces: vi.fn(async () => desktop.workspaces ?? [workspace, ...catalogState.extraWorkspaces]),
+  listProjectsForWorkspace: vi.fn(async () => []),
+  removeWorkspace: vi.fn(async () => true),
+  requestHandlePermission: vi.fn(async () => true),
+  subscribeProjectRootConfigurationChanges: () => () => undefined,
+}));
+
+vi.mock('@taucad/files-ui/filesystem/desktop-bridge', () => ({
+  desktopBridge: () => ({ directories: { list: async () => desktop.grants, disconnect: vi.fn() } }),
+  nodeHomeRoot: () => '/Users/tester/Library/Application Support/Tau/home',
 }));
 
 vi.mock('#utils/workspace-telemetry.utils.js', () => ({
@@ -232,5 +258,58 @@ describe('FilesRoute layout', () => {
       expect(tree.className).toMatch(/(?:^|\s)max-h-\S+/);
       expect(tree).toHaveClass('overflow-auto');
     }
+  });
+});
+
+describe('FilesRoute folders that are not found', () => {
+  const nodeWorkspace = (name: string): Workspace => ({
+    workspaceId: `wsp_${name.toLowerCase()}`,
+    name,
+    slug: name.toLowerCase(),
+    lastConnectedAt: 1,
+    path: `/Users/tester/${name}`,
+  });
+  const connected = nodeWorkspace('Workshop');
+  const lostA = nodeWorkspace('Scratch');
+  const lostB = nodeWorkspace('Archive');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    workspaceConnectionState.current = { phase: 'idle' };
+    desktop.workspaces = [lostA, connected, lostB];
+    desktop.grants = [connected.path!, lostA.path!, lostB.path!];
+    desktop.rootStatuses = [
+      { storageRootKey: `node:${connected.path!}`, backend: 'node', state: 'available' },
+      { storageRootKey: `node:${lostA.path!}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+      { storageRootKey: `node:${lostB.path!}`, backend: 'node', state: 'notFound', code: 'ENOENT' },
+    ];
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    desktop.workspaces = undefined;
+  });
+
+  it('should collapse the not-found rows into one group with Remove all below the working rows', async () => {
+    render(
+      <TooltipProvider>
+        <FilesRoute />
+      </TooltipProvider>,
+    );
+
+    const group = await screen.findByRole('button', { name: 'Folders not found (2)' });
+    expect(group).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Remove all' })).toBeEnabled();
+    const ordered = [...document.body.querySelectorAll('span, button')];
+    expect(ordered.indexOf(screen.getByText('Workshop'))).toBeLessThan(ordered.indexOf(group));
+    expect(screen.queryByText('Scratch')).not.toBeInTheDocument();
+    expect(screen.queryByText('Archive')).not.toBeInTheDocument();
+
+    fireEvent.click(group);
+
+    expect(group).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Scratch')).toBeInTheDocument();
+    expect(screen.getByText('Archive')).toBeInTheDocument();
   });
 });

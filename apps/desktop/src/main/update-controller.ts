@@ -1,8 +1,17 @@
 /** Consent and save admission shared by installer-owned and system-owned updates. */
 import type { DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
 
+import { desktopDownloadPage } from '#shared/desktop-release.js';
+import { isUpdateClockError } from '#main/update-identity.js';
 import type { AvailableUpdate, DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
 import { defaultUpdateRetry, isNewerVersion, updateCheckInterval, updateRetryDelays } from '#main/updater.js';
+
+/** What the snapshot says when the computer's clock refused the update (B25). */
+export const clockRefusalDetail =
+  'Tau couldn’t verify the update because this computer’s date and time look wrong. Check your computer’s date and time, then check again, or download Tau.';
+/** What the snapshot says when this copy's installation marker is damaged (B27). */
+export const installationMarkerDetail =
+  'This copy of Tau can’t update itself because its installation is damaged. Download Tau and install it again; your projects stay where they are.';
 
 /** Preparation may reserve files/leases; only commit may change the installed executable. */
 export type PreparedDesktopInstallation = {
@@ -12,6 +21,8 @@ export type PreparedDesktopInstallation = {
 export type PlatformUpdateBackend = {
   readonly systemManaged: boolean;
   readonly disabledReason?: string;
+  /** The installed route cannot be read (B27): every check says so, with **Download Tau**, and nothing is retried. */
+  readonly blockedReason?: 'installation-marker';
   check(): Promise<AvailableUpdate | undefined>;
   /**
    * Downloads the release the last `check` returned. `prepare` installs the last release whose download finished,
@@ -23,7 +34,7 @@ export type PlatformUpdateBackend = {
   finish(): void | Promise<void>;
 };
 export type PlatformUpdateOptions = DesktopUpdaterOptions & {
-  /** Main confirms the renderer workspace and save handler have actually become ready. */
+  /** Whether this launch counts as healthy: normal mode and `home-ready` arrived (D0). It resolves at once. */
   readonly confirmHealthy?: () => Promise<boolean>;
   /** Main invokes commit after saving/quiescing, before disposing services. Failure recovers the session. */
   readonly prepareToInstall: (commit: () => void | Promise<void>) => Promise<boolean>;
@@ -41,13 +52,15 @@ export const startPlatformUpdateController = (
   options: PlatformUpdateOptions,
   backend: PlatformUpdateBackend,
 ): DesktopUpdater => {
+  const channel = options.channel ?? 'production';
   let snapshot: DesktopUpdateSnapshot = {
     revision: 0,
     requestId: 0,
     phase: 'checking',
     currentVersion: options.currentVersion,
-    channel: options.channel ?? 'production',
+    channel,
     installOnQuit: false,
+    downloadPage: desktopDownloadPage(channel),
   };
   let offered: AvailableUpdate | undefined;
   let pending: Promise<AvailableUpdate | undefined> | undefined;
@@ -65,18 +78,29 @@ export const startPlatformUpdateController = (
   /* A CI probe is bound to one release, which a newer one must never replace. */
   const pinned = options.candidateTag !== undefined || options.expectedUpdate !== undefined;
   let status = 'Checking for updates…';
-  const publish = (phase: DesktopUpdateSnapshot['phase'], detail: string): void => {
+  /** Publish a state. A blocked reason lasts until the next state that does not carry it. */
+  const publish = (
+    phase: DesktopUpdateSnapshot['phase'],
+    detail: string,
+    blockedReason?: DesktopUpdateSnapshot['blockedReason'],
+  ): void => {
     status = detail;
     /* The renderer owns the notice's copy; `status` keeps main's wording, raw errors included, for the log. Only an
        update APT already installed is worded here, since the renderer cannot tell it from a downloaded one. */
-    const { detail: _previous, ...rest } = snapshot;
+    const { blockedReason: _previousReason, detail: _previous, ...rest } = snapshot;
     snapshot = {
       ...rest,
       revision: snapshot.revision + 1,
       phase,
       ...(phase === 'ready' && backend.systemManaged ? { detail } : {}),
+      downloadPage: desktopDownloadPage(channel, snapshot),
+      ...(blockedReason === undefined ? {} : { blockedReason }),
     };
     options.onState?.(snapshot);
+  };
+  /** Publish the current state again, as it is. */
+  const republish = (): void => {
+    publish(snapshot.phase, status, snapshot.blockedReason);
   };
   const restartWhenReady = (wanted: boolean): void => {
     installWhenReady = wanted;
@@ -103,7 +127,11 @@ export const startPlatformUpdateController = (
     restartWhenReady(false);
     snapshot = { ...snapshot, version: undefined, releasePage: undefined };
     const message = error instanceof Error ? error.message : String(error);
-    publish('error', `Update failed: ${message}. Check again to retry.`);
+    if (isUpdateClockError(error)) {
+      publish('error', clockRefusalDetail, 'clock');
+    } else {
+      publish('error', `Update failed: ${message}. Check again to retry.`);
+    }
     options.log('warn', 'updater.error', { message });
     retryLater();
   };
@@ -114,9 +142,9 @@ export const startPlatformUpdateController = (
     if (!ready) {
       /* Asked before the update is here (while it downloads, or from a failed attempt): remember the request so
        * the download's completion restarts Tau, instead of making the user come back and ask a second time. */
-      if (!backend.systemManaged && !backend.disabledReason && !installWhenReady) {
+      if (!backend.systemManaged && !backend.disabledReason && !backend.blockedReason && !installWhenReady) {
         restartWhenReady(true);
-        publish(snapshot.phase, status);
+        republish();
       }
       /* Wait for the download in flight; only a check someone asked for looks for a newer release after it. */
       await (downloading && pending ? pending : check());
@@ -226,6 +254,10 @@ export const startPlatformUpdateController = (
       if (ready) {
         await supersede();
       } else {
+        if (backend.blockedReason) {
+          publish('disabled', installationMarkerDetail, backend.blockedReason);
+          return undefined;
+        }
         if (backend.disabledReason) {
           publish('disabled', backend.disabledReason);
           return undefined;
@@ -270,7 +302,7 @@ export const startPlatformUpdateController = (
   const check = async (reveal = false): Promise<AvailableUpdate | undefined> => {
     if (reveal) {
       snapshot = { ...snapshot, requestId: snapshot.requestId + 1 };
-      publish(snapshot.phase, status);
+      republish();
     }
     if (pending) {
       /* Checks are serialized. One asked during a download is answered when that download finishes. */

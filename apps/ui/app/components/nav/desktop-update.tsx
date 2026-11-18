@@ -62,30 +62,44 @@ export function DesktopUpdateControl({
   if (!snapshot) {
     return undefined;
   }
-  const { phase } = snapshot;
+  const { phase, blockedReason } = snapshot;
   const busyLabel = busyLabels[phase];
-  const failed = phase === 'error' || phase === 'restart-blocked' || failedAction !== undefined;
-  const quiet = phase === 'current' || phase === 'checking' || phase === 'disabled' || phase === 'system-managed';
+  const failed =
+    phase === 'error' || phase === 'restart-blocked' || blockedReason !== undefined || failedAction !== undefined;
+  /* A blocked update is never quiet: the person is the only one who can fix the clock or reinstall (B25, B27). */
+  const quiet =
+    blockedReason === undefined &&
+    (phase === 'current' || phase === 'checking' || phase === 'disabled' || phase === 'system-managed');
   if (quiet && !open) {
     return undefined;
   }
   /* The user already asked to restart: the download's completion installs without a second ask. */
   const restartsWhenReady = phase === 'downloading' && snapshot.installWhenReady === true;
-  const intent = intentOf(phase);
-  const title = failedAction ? failedTitles[failedAction] : restartsWhenReady ? 'Restarts when ready' : titles[phase];
+  const blocked = blockedReason === undefined ? undefined : blockedCopy[blockedReason];
+  /* Installing after a clock refusal would only meet the same refusal; a fresh check is the retry (B25). */
+  const intent = blockedReason === 'clock' ? 'check' : intentOf(phase);
+  const title = failedAction
+    ? failedTitles[failedAction]
+    : blocked
+      ? blocked.title
+      : restartsWhenReady
+        ? 'Restarts when ready'
+        : titles[phase];
   const detail = failedAction
     ? failedAction === 'restart' || failedAction === 'move'
       ? 'Tau is still open. Try again.'
       : 'Your work isn’t affected. Try again.'
-    : restartsWhenReady
-      ? 'Tau will save your work and restart as soon as the download finishes.'
-      : phase === 'ready'
-        ? /* Main words the one case the renderer cannot tell apart: a newer Tau that APT already installed. */
-          (snapshot.detail ??
-          (snapshot.installOnQuit === false
-            ? 'Tau saves your work, then restarts to install. Quitting normally leaves the update for later.'
-            : 'Tau saves your work, then restarts to install. If you’d rather wait, it installs when you quit Tau.'))
-        : details[phase];
+    : blocked
+      ? blocked.detail
+      : restartsWhenReady
+        ? 'Tau will save your work and restart as soon as the download finishes.'
+        : phase === 'ready'
+          ? /* Main words the one case the renderer cannot tell apart: a newer Tau that APT already installed. */
+            (snapshot.detail ??
+            (snapshot.installOnQuit === false
+              ? 'Tau saves your work, then restarts to install. Quitting normally leaves the update for later.'
+              : 'Tau saves your work, then restarts to install. If you’d rather wait, it installs when you quit Tau.'))
+          : details[phase];
   /* One spinner at a time: a busy button carries its own, so the tile spins only while downloading. */
   const Icon = failed
     ? ShieldAlert
@@ -123,14 +137,15 @@ export function DesktopUpdateControl({
       detail={detail}
       icon={Icon}
       isFailed={failed}
-      releasePage={snapshot.releasePage}
+      releasePage={blocked ? snapshot.downloadPage : snapshot.releasePage}
+      releaseLabel={blocked ? 'Download Tau' : undefined}
       isOpen={open}
       action={
-        restartsWhenReady || phase === 'disabled'
+        restartsWhenReady || phase === 'disabled' || blockedReason === 'installation-marker'
           ? undefined
           : {
               /* A repeated failed action is "Try again" (UX policy). */
-              label: failedAction ? 'Try again' : labels[phase],
+              label: failedAction ? 'Try again' : blockedReason === 'clock' ? 'Check again' : labels[phase],
               variant: phase === 'error' || phase === 'current' || phase === 'system-managed' ? 'outline' : 'default',
               busy: busyLabel !== undefined,
               busyLabel,
@@ -157,6 +172,21 @@ const intentOf = (phase: Phase): FailedAction =>
       : phase === 'move-required'
         ? 'move'
         : 'check';
+
+/* The two refusals only the person can fix; both offer Download Tau in place of release notes (B25, B27). */
+const blockedCopy: Readonly<
+  Record<NonNullable<DesktopUpdateSnapshot['blockedReason']>, { title: string; detail: string }>
+> = {
+  clock: {
+    title: 'Check your date and time',
+    detail:
+      'Tau couldn’t verify the update because your computer’s date and time look wrong. Correct them, then check again.',
+  },
+  'installation-marker': {
+    title: 'This copy of Tau can’t update itself',
+    detail: 'Its installation is damaged. Download Tau and install it again; your projects stay where they are.',
+  },
+};
 
 const failedTitles: Readonly<Record<FailedAction, string>> = {
   check: 'Couldn’t check',

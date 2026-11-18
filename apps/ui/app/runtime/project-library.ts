@@ -56,6 +56,8 @@ import {
   isNodeWorkspace,
   subscribeProjectRootConfigurationChanges,
 } from '@taucad/files-ui/filesystem/handle-store';
+import { desktopBridge } from '@taucad/files-ui/filesystem/desktop-bridge';
+import { isWorkspaceOverlapError } from '@taucad/ui-core/filesystem/workspace-errors';
 import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
@@ -75,12 +77,14 @@ import type {
 } from '@taucad/files-ui/types/pending-project-operation.types';
 import {
   applyDiscovery,
+  buildDiscoveryOnlyListing,
   buildProjectListing,
   classifyMissingProject,
   commitPendingProjectOperation,
   ensureProjectLibraryState,
   planDiscovery,
   presentWorkspaceRows,
+  readProjectLibraryStateFromDisk,
   recoveryRowOf,
   rememberChatPlacement,
   replayOutcomeOf,
@@ -247,6 +251,40 @@ const until = async <Ref extends AnyActorRef>(
     });
   });
 };
+
+/**
+ * The names a local database open fails with when it cannot be opened at all, as opposed to a read that failed once
+ * (desktop resilient startup blueprint B5, B31): a newer version, an upgrade another tab blocks, the open deadline,
+ * and a damaged or unreadable backing store. A transaction on a closing connection (`InvalidStateError`) is a read
+ * that failed once, not a database that cannot open.
+ */
+const localDatabaseUnavailableNames = new Set([
+  'VersionError',
+  'StorageUpgradeBlockedError',
+  'DatabaseOpenTimeoutError',
+  'UnknownError',
+]);
+
+/** Whether `error` says a local database cannot be opened. */
+const isLocalDatabaseUnavailable = (error: unknown): boolean =>
+  error instanceof Error && localDatabaseUnavailableNames.has(error.name);
+
+/**
+ * A mutation refused because the library's database cannot be opened: creating, trashing or moving a project writes
+ * a journal row, so it waits until the database is back (desktop resilient startup blueprint D1, R7).
+ *
+ * @public
+ */
+export class LocalDatabaseUnavailableError extends Error {
+  public override readonly name = 'LocalDatabaseUnavailableError';
+
+  public constructor(cause: unknown) {
+    super(
+      "Tau's local database is unavailable, so projects can't be created or changed until it is reset or Tau is updated. Your files are safe.",
+      { cause },
+    );
+  }
+}
 
 /** A rejection as an `Error`: a thrown non-error travels as its cause. */
 const asError = (error: unknown): Error =>
@@ -867,23 +905,19 @@ export class ProjectLibrary {
 
   /** The listing the library shows: a current pass, enriched, read again whenever the epoch moved under it. */
   public readonly getProjectListing = async (options?: { includeDeleted?: boolean }): Promise<ProjectListing> => {
-    // Captured before awaiting: only a caller that waited for the bootstrap pass may reuse its listing; a later
-    // explicit refresh runs discovery.
-    let reuse = !this.#bootstrapped;
-    await this.#ensureBootstrap();
-    /* oxlint-disable no-await-in-loop -- A filesystem event may invalidate the generation during listing enrichment. */
-    for (;;) {
-      const pass = await this.#requestPass({ reuse });
-      reuse = false;
-      const listing = await this.#buildListing(pass.result);
-      if (!selectEpochCurrent(this.discovery.getSnapshot(), pass.epoch)) {
-        continue;
+    try {
+      return await this.#getLibraryListing(options);
+    } catch (error) {
+      /* R7, B5: the library's database cannot be opened, so its journal and rows are out of reach; Home's projects
+       * are on disk and list from discovery alone. Any other failure is the listing's own. */
+      if (!this.#isLibraryUnavailable()) {
+        throw error;
       }
+      const listing = await this.#discoveryOnlyListing();
       return options?.includeDeleted
         ? listing
         : { ...listing, projects: listing.projects.filter((project) => project.library.deletedAt === undefined) };
     }
-    /* oxlint-enable no-await-in-loop */
   };
 
   /**
@@ -939,22 +973,15 @@ export class ProjectLibrary {
    * @returns The answer; a port that rejected rejects with its message.
    */
   public readonly routeAccess = async (projectId: string): Promise<ProjectRouteAccess> => {
-    this.#startRecovery();
-    const requestId = this.#nextRequestId('access');
-    return new Promise<ProjectRouteAccess>((resolve, reject) => {
-      const subscription = this.access.on('accessAnswered', (event) => {
-        if (event.requestId !== requestId) {
-          return;
-        }
-        subscription.unsubscribe();
-        if (event.answer.status === 'error') {
-          reject(new Error(event.answer.message));
-        } else {
-          resolve(event.answer);
-        }
-      });
-      this.access.send({ type: 'accessAsked', requestId, projectId });
-    });
+    try {
+      return await this.#libraryRouteAccess(projectId);
+    } catch (error) {
+      /* R7, B5: with the library's database unopenable, a project the file service verifies still opens. */
+      if (!this.#isLibraryUnavailable()) {
+        throw error;
+      }
+      return this.#routeAccessWithoutLibrary(projectId);
+    }
   };
 
   /**
@@ -970,6 +997,12 @@ export class ProjectLibrary {
     { gated }: Readonly<{ gated: boolean }>,
   ): Promise<LibraryMutation> => {
     this.#startRecovery();
+    /* R7: a mutation writes a journal row, so it is refused, with the database message, while the library's
+     * database cannot be opened. Wait only for the journal's first read; the gate below waits for rows. */
+    const read = await until(this.recovery, (snapshot) => !snapshot.matches('loading'));
+    if (read.matches('loadFailed') && this.#isLibraryUnavailable()) {
+      throw new LocalDatabaseUnavailableError(this.#journalError);
+    }
     const requestId = this.#nextRequestId('mutation');
     let journaled = false;
     if (gated) {
@@ -1376,6 +1409,74 @@ export class ProjectLibrary {
     await this.#passSettled();
   }
 
+  /** The listing through the library: its journal, its discovery pass and its rows. */
+  async #getLibraryListing(options?: { includeDeleted?: boolean }): Promise<ProjectListing> {
+    // Captured before awaiting: only a caller that waited for the bootstrap pass may reuse its listing; a later
+    // explicit refresh runs discovery.
+    let reuse = !this.#bootstrapped;
+    await this.#ensureBootstrap();
+    /* oxlint-disable no-await-in-loop -- A filesystem event may invalidate the generation during listing enrichment. */
+    for (;;) {
+      const pass = await this.#requestPass({ reuse });
+      reuse = false;
+      const listing = await this.#buildListing(pass.result);
+      if (!selectEpochCurrent(this.discovery.getSnapshot(), pass.epoch)) {
+        continue;
+      }
+      return options?.includeDeleted
+        ? listing
+        : { ...listing, projects: listing.projects.filter((project) => project.library.deletedAt === undefined) };
+    }
+    /* oxlint-enable no-await-in-loop */
+  }
+
+  /** Route access through the library's machines (row L8). */
+  async #libraryRouteAccess(projectId: string): Promise<ProjectRouteAccess> {
+    this.#startRecovery();
+    const requestId = this.#nextRequestId('access');
+    return new Promise<ProjectRouteAccess>((resolve, reject) => {
+      const subscription = this.access.on('accessAnswered', (event) => {
+        if (event.requestId !== requestId) {
+          return;
+        }
+        subscription.unsubscribe();
+        if (event.answer.status === 'error') {
+          reject(new Error(event.answer.message));
+        } else {
+          resolve(event.answer);
+        }
+      });
+      this.access.send({ type: 'accessAsked', requestId, projectId });
+    });
+  }
+
+  /** Whether the library's database could not be opened: its journal read failed with an open failure. */
+  #isLibraryUnavailable(): boolean {
+    return isLocalDatabaseUnavailable(this.#journalError);
+  }
+
+  /** The listing a pass of the file service gives with no library database (R7). */
+  async #discoveryOnlyListing(): Promise<ProjectListing> {
+    const fileManager = await this.#facade();
+    const discovery = await fileManager.client.listProjectManifests();
+    return buildDiscoveryOnlyListing(fileManager.recordFiles, discovery);
+  }
+
+  /**
+   * Route access with no library database (R7): a project the file service verifies opens with its state read from
+   * its own files; anything else is not reachable until the database is back.
+   */
+  async #routeAccessWithoutLibrary(projectId: string): Promise<ProjectRouteAccess> {
+    const fileManager = await this.#facade();
+    const verification = await fileManager.client.verifyProjectRoute({ projectId });
+    if (verification.status !== 'verified') {
+      return { status: 'unavailable' };
+    }
+    const project = { ...verification.project.manifest, id: verification.project.projectId };
+    const state = await readProjectLibraryStateFromDisk(fileManager.recordFiles, projectId);
+    return state.deletedAt === undefined ? { status: 'ready', project } : { status: 'trashed', project };
+  }
+
   async #buildListing(discovery: ProjectDiscoveryResult): Promise<ProjectListing> {
     const [fileManager, worker] = await Promise.all([this.#facade(), this.getReadiedWorker()]);
     return buildProjectListing({ recordFiles: fileManager.recordFiles, worker }, discovery, () => this.#recoveries());
@@ -1388,7 +1489,17 @@ export class ProjectLibrary {
       const connection =
         selection.backend === 'webaccess'
           ? await createWorkspace(selection.handle)
-          : await createNodeWorkspace(selection.path);
+          : await createNodeWorkspace(selection.path).catch(async (error: unknown) => {
+              /* R6: main granted the folder when it was picked; a refused folder must not stay in the grant file. */
+              if (isWorkspaceOverlapError(error)) {
+                await desktopBridge()
+                  ?.directories?.disconnect(selection.path)
+                  .catch((revokeError: unknown) => {
+                    console.warn('Could not release the refused folder', revokeError);
+                  });
+              }
+              throw error;
+            });
       signal.throwIfAborted();
       if (this.workspaceCommands.connectionTrace) {
         this.workspaceCommands.connectionTrace.workspaceId = connection.workspaceId;

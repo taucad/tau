@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'electron-vite';
 import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
@@ -113,10 +114,30 @@ export const desktopExternalizedDependencies = [
   'node-pty',
 ] as const;
 
+/*
+ * The recovery window's static page (D0, R12) ships beside `index.js` as `recovery/index.html`, inside the app's own
+ * files, so main loads it with `loadFile` and needs neither `app://`, the renderer bundle nor a packaging step of its
+ * own. Its source is `resources/recovery/index.html`.
+ */
+const recoveryPage = {
+  name: 'tau-recovery-page',
+  buildStart(this: { addWatchFile(path: string): void }): void {
+    this.addWatchFile(resolve(import.meta.dirname, 'resources/recovery/index.html'));
+  },
+  generateBundle(this: { emitFile(file: { type: 'asset'; fileName: string; source: string }): string }): void {
+    this.emitFile({
+      type: 'asset',
+      fileName: 'recovery/index.html',
+      source: readFileSync(resolve(import.meta.dirname, 'resources/recovery/index.html'), 'utf8'),
+    });
+  },
+};
+
 export default defineConfig(
   electronRuntimeConfig({
     main: {
       define,
+      plugins: [recoveryPage],
       build: {
         sourcemap: 'hidden',
         externalizeDeps: {
@@ -147,10 +168,14 @@ export default defineConfig(
         outDir: 'dist/preload',
         // Sandboxed preloads can require Electron, but cannot resolve application dependencies.
         externalizeDeps: false,
+        /* The app's preload, and the recovery window's minimal one (D0). */
         lib: {
-          entry: resolve(import.meta.dirname, 'src/preload/preload.ts'),
+          entry: {
+            preload: resolve(import.meta.dirname, 'src/preload/preload.ts'),
+            'recovery-preload': resolve(import.meta.dirname, 'src/preload/recovery-preload.ts'),
+          },
           formats: ['cjs'],
-          fileName: () => 'preload.cjs',
+          fileName: (_format, entryName) => `${entryName}.cjs`,
         },
       },
     },

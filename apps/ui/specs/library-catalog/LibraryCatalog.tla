@@ -101,6 +101,12 @@
 \* lock and reading its log, instead of refusing until the project is opened. Both stay outside the model,
 \* as the registry and chat store reads did; the journal, apply and gate order is unchanged. No action or
 \* correspondence changes.
+\* Database recovery (WP9, 2026-11-17): when the journal store cannot open (`VersionError`, a blocked upgrade, an open
+\* timeout or `UnknownError`), `ProjectLibrary` lists discovery alone, answers route access from disk, and refuses a
+\* mutation before it is journaled. That state is outside the model; no action or correspondence changes.
+\* Folder states and Locate (WP3, WP4, 2026-11-17): the workspace commands read a picked folder's evidence for
+\* Locate, which re-binds a moved workspace's project bindings in one transaction, and Remove from Tau drops a lost
+\* folder's workspace row. Both act on the workspace store, outside the model; no action or correspondence changes.
 \* DC-10 files-ui slice 5 (2026-11-17): the three library machines, `project-library.types`,
 \* `pending-project-operation.types`, `project-url.utils` and `project-name.utils` moved to `@taucad/files-ui`; the
 \* four library sources only re-point (and rewrap) their imports. No action or correspondence changes.

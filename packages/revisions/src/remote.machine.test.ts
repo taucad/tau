@@ -707,7 +707,7 @@ describe('remoteMachine', () => {
       initialSync: createAsyncLogic({
         run: async (): Promise<RemoteInitialSyncActorOutput> => ({
           overQuota: ['models/bracket.step'],
-          message: 'This project is over its storage plan.',
+          message: 'This project doesn’t fit in its backup.',
           storage: { remainingBytes: 0, shortfallBytes: 5_242_880 },
         }),
       }),
@@ -728,7 +728,7 @@ describe('remoteMachine', () => {
     });
     expect(emitted).toStrictEqual([
       { type: 'remoteConnected', kind: 'tau', url: tauRemote.url },
-      { type: 'toast.error', message: 'This project is over its storage plan.' },
+      { type: 'toast.error', message: 'This project doesn’t fit in its backup.' },
     ]);
     actor.stop();
   });

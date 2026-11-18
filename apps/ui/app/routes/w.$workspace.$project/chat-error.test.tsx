@@ -485,6 +485,46 @@ describe('ChatError', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
+  /* I1: a run whose server's billing mode is unknown made no model call; it resumes once the server answers. The host
+   * names its own remedy when it has one (an unreadable recorded mode, a host that cannot fund the run). */
+  it('should show the host instruction for a billing mode it could not confirm and offer Resume', () => {
+    projected({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'This run was started under a billing mode this build cannot read; update Tau, then resume.',
+      code: 'DEPLOYMENT_UNKNOWN',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText("Couldn't confirm how this server bills model calls")).toBeInTheDocument();
+    expect(
+      screen.getByText('This run was started under a billing mode this build cannot read; update Tau, then resume.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Check your connection/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
+  it('should fall back to the connection copy for a billing mode refusal without a host instruction', () => {
+    /* A projected failure always carries the host's sentence; a persisted card can arrive without one. */
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: '',
+      code: 'DEPLOYMENT_UNKNOWN',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText("Couldn't confirm how this server bills model calls")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'The app could not confirm how this Tau server bills model calls, so this attempt made none. Check your connection, then resume.',
+      ),
+    ).toBeInTheDocument();
+  });
+
   /* The masked in-stream failure arrives on an HTTP 200, so its category reads
    * `generic`; only the code says the turn survived it (S1, S2, S7, S10). */
   it('should keep a lost connection concise and disclose the provider words only in Tau Debug', async () => {
@@ -791,8 +831,8 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('This chat is running on another device')).toBeInTheDocument();
-    expect(screen.getByText('Send again here once that run finishes.')).toBeInTheDocument();
+    expect(screen.getByText('This chat is running on your other device')).toBeInTheDocument();
+    expect(screen.getByText('Send again here once it finishes.')).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
@@ -805,9 +845,9 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for changes from your other device')).toBeInTheDocument();
     expect(
-      screen.getByText('This chat continues once sync brings what another device wrote. Send again then.'),
+      screen.getByText('This chat continues when the changes from your other device arrive. Send again then.'),
     ).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
@@ -920,7 +960,7 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for changes from your other device')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     expect(continueChat).toHaveBeenCalledTimes(1);
   });
@@ -1002,9 +1042,11 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Update Tau on this host')).toBeInTheDocument();
+    expect(screen.getByText('Update Tau on that computer')).toBeInTheDocument();
     expect(
-      screen.getByText('This host runs a version of Tau this page cannot talk to. Update Tau there, then try again.'),
+      screen.getByText(
+        'That computer runs a version of Tau this page can’t talk to. Update Tau there, then try again.',
+      ),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
@@ -1121,7 +1163,7 @@ describe('ChatError', () => {
     );
 
     render(<ChatErrorBanner />);
-    expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
+    expect(screen.getByText('Couldn’t reach Tau')).toBeInTheDocument();
   });
 
   it('should replay the server-category fallback when Try again is clicked', async () => {

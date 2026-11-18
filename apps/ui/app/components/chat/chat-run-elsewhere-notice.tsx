@@ -3,7 +3,7 @@ import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 
 /** The notice's title, which is also its accessible name. @public */
-export const runElsewhereTitle = 'Running on another device';
+export const runElsewhereTitle = 'Running on your other device';
 
 /**
  * This chat's run is in flight on another of the person's devices (cross-device chat handoff, XD3).
@@ -30,8 +30,8 @@ export function ChatRunElsewhereNotice(): React.JSX.Element | undefined {
       title={runElsewhereTitle}
       description={
         runElsewhere.state === 'paused'
-          ? 'This chat is waiting for an answer on another of your devices. You can send here once it finishes there.'
-          : 'This chat is replying on another of your devices. You can send here once that reply finishes.'
+          ? 'This chat is waiting for an answer on your other device. You can send here once it finishes there.'
+          : 'This chat is replying on your other device. You can send here once that reply finishes.'
       }
     />
   );

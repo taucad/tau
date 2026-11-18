@@ -117,7 +117,7 @@ export const toLibraryRows = ({
 /** What a shared row says it is. An owned row keeps its own sentence. */
 const collaborationCopy = (role: CloudProject['role']): Readonly<{ badge: string; line: string }> | undefined => {
   if (role === 'write') {
-    return { badge: 'Can edit', line: 'Shared with you. This device does not have it yet.' };
+    return { badge: 'Can edit', line: 'Shared with you. Not on this device yet.' };
   }
   if (role === 'read') {
     return { badge: 'Can view', line: 'Shared with you. You can open it but not change it.' };

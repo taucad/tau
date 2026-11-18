@@ -322,7 +322,7 @@ test('should draw the pricing page from the shared plan cards and catalogue', ()
   // Features still in development carry the coming-soon icon, and one legend under the cards explains it.
   expect(html).toContain('data-coming-soon');
   expect(html.match(/data-slot="coming-soon-legend"/gu)).toHaveLength(1);
-  expect(html).toContain('1 GB cloud backup and sync');
+  expect(html).toContain('1 GB Tau Cloud backup and sync');
   expect(html).not.toContain('US$');
   const pro = /<a\b[^>]*data-placement="pricing-pro"[^>]*>/u.exec(html)?.[0];
   expect(pro).toContain('settings=billing');

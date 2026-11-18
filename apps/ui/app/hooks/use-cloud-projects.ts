@@ -33,7 +33,7 @@ import {
 import type { DeletionReceipt, TauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
 import { holdCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 
 /** What this account may do with a project on Tau Cloud (D27). @public */
 export type ProjectRole = 'owner' | 'write' | 'read';
@@ -143,7 +143,7 @@ class CloudDeletionRequestError extends Error {
   public readonly status: number;
 
   public constructor(status: number) {
-    super(`Tau Cloud answered ${String(status)}. Check your connection and access, then try again.`);
+    super('Couldn’t delete this project from Tau Cloud. Check your connection and try again.');
     this.name = 'CloudDeletionRequestError';
     this.status = status;
   }
@@ -165,7 +165,7 @@ const fetchDeletionStatus = async (projectId: string, method: 'GET' | 'DELETE' =
   }
   const status = deletionStatusSchema.parse(await response.json());
   if (status.projectId !== projectId || (method === 'DELETE' && status.state === 'active')) {
-    throw new Error('Tau Cloud did not confirm deletion. Check its status before trying again.');
+    throw new Error('Couldn’t confirm the deletion. Close this and open it again to check before trying again.');
   }
   return status;
 };
@@ -221,13 +221,13 @@ export const useDeleteCloudProject = (): UseMutationResult<
   return useMutation({
     mutationFn: async (project: CloudProject) => {
       if (account === undefined || getRevisionSessionUser()?.id !== account || project.canDeleteCloud !== true) {
-        throw new Error('Cloud deletion is unavailable. Refresh this project’s access and try again.');
+        throw new Error('You can’t delete this project from Tau Cloud right now. Refresh the page and try again.');
       }
       await queryClient.cancelQueries({ queryKey: cloudProjectsQueryKeyFor(account), exact: true });
       try {
         return await withNamedLock(`tau:delete-cloud-project:${project.id}`, async () => {
           if (getRevisionSessionUser()?.id !== account) {
-            throw new Error('Your account changed. Refresh the project before trying again.');
+            throw new Error('You’re signed in to a different account now. Close this and start again.');
           }
           const known = getCloudDeletionState(project.id);
           if (known !== undefined) {
@@ -241,7 +241,7 @@ export const useDeleteCloudProject = (): UseMutationResult<
           try {
             if (getRevisionSessionUser()?.id !== account) {
               await saveDeletionReceipt(account, { id: project.id, name: project.name, state: 'checking' }, true);
-              throw new Error('Your account changed. Refresh the project before trying again.');
+              throw new Error('You’re signed in to a different account now. Close this and start again.');
             }
             const status = await fetchDeletionStatus(project.id, 'DELETE');
             if (status.state !== 'active') {
@@ -286,7 +286,9 @@ export class CloudProjectUnavailableError extends Error {
 export const assertCloudProjectActive = async (projectId: string): Promise<void> => {
   const account = getRevisionSessionUser()?.id;
   if (getCloudDeletionState(projectId) !== undefined) {
-    throw new CloudProjectUnavailableError('This project is being deleted from Tau Cloud. Local copies are kept.');
+    throw new CloudProjectUnavailableError(
+      'This project is being deleted from Tau Cloud. Copies on your devices are kept.',
+    );
   }
   const projects = await fetchCloudProjects();
   if (
@@ -294,7 +296,7 @@ export const assertCloudProjectActive = async (projectId: string): Promise<void>
     !projects.some((entry) => entry.id === projectId && entry.cloudState !== 'deleting') ||
     getCloudDeletionState(projectId) !== undefined
   ) {
-    throw new CloudProjectUnavailableError('This project is no longer available on Tau Cloud. Local copies are kept.');
+    throw new CloudProjectUnavailableError('This project is no longer on Tau Cloud. Copies on your devices are kept.');
   }
 };
 

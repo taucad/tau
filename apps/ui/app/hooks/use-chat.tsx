@@ -170,6 +170,8 @@ export type CombinedChatState = {
   /** Durable host facts and the current read-only attachment, not SDK stream state. */
   projection?: ChatProjection;
   attachmentStatus?: ReturnType<ReturnType<typeof useChatSessionStore>['getAttachmentStatus']>;
+  /** The host whose log the chat is attached to, which is where its refusals came from. */
+  attachedHostId?: ReturnType<ReturnType<typeof useChatSessionStore>['getAttachedHostId']>;
   isLoading: boolean;
   /** Chat-scoped execution target mirrored from durable persistence. */
   activeExecution: CadAgentExecution | undefined;
@@ -274,6 +276,7 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       persistedError: persistenceContext?.persistedError,
       projection,
       attachmentStatus: store.getAttachmentStatus(activeChatId),
+      attachedHostId: store.getAttachedHostId(activeChatId),
       isLoading: status === 'streaming',
       activeExecution: persistenceContext?.activeExecution,
       activeKernel: persistenceContext?.activeKernel,

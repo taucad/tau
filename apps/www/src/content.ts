@@ -105,8 +105,8 @@ export const storyChapters = [
     id: 'devices',
     label: 'Anywhere',
     title: 'Open it on any computer.',
-    body: 'Back the project up to Tau Cloud and open it wherever you sign in, with its files, its revision history and, unless you turn chat sync off, its chats.',
-    detail: 'Tau Cloud backup & sync · Every plan',
+    body: 'Back the project up to Tau Cloud and open it wherever you sign in, with its files, its history and its chats, unless you leave them out of the backup.',
+    detail: 'Tau Cloud backup and sync · Every plan',
   },
 ];
 
@@ -250,12 +250,12 @@ export const pricingFaq: Array<[string, string]> = [
     'Yes. Credits cost $1 per 100, and you can add from $5 to $5,000 at a time, plus tax. Purchased credits never expire.',
   ],
   [
-    'What does cloud backup and sync include?',
-    'On every plan, each project’s files and revision history back up to Tau Cloud and sync wherever you sign in. Chats travel with the project unless you turn chat sync off for it. Storage is per account: 1 GB on Free, 100 GB on Pro and a custom amount on Enterprise. You need to be signed in; while offline you keep working on your local copy.',
+    'What does Tau Cloud backup and sync include?',
+    'On every plan, each project’s files and history back up to Tau Cloud and sync wherever you sign in. Chats travel with the project unless you turn chat sync off for it. Storage is per account: 1 GB on Free, 100 GB on Pro and a custom amount on Enterprise. You need to be signed in; while offline you keep working on the copy on your device.',
   ],
   [
     'Can I back up on the Free plan?',
-    'Yes. Free includes 1 GB of cloud backup and sync, and every plan can also connect a project to a GitHub repository.',
+    'Yes. Free includes 1 GB of Tau Cloud backup and sync, and every plan can also connect a project to a GitHub repository.',
   ],
   [
     'What happens to unused Pro credits?',

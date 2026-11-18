@@ -11,9 +11,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@tauc
 import { formatCredits } from '@taucad/ui-core/utils/credits.utils';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
-import { usageColumns, usageEventId, usageEventNetAtoms } from '#routes/usage/columns.js';
-import { chatLabel, projectLabel } from '#routes/usage/activity-names.js';
-import type { ProjectNames } from '#routes/usage/activity-names.js';
+import { usageColumns, usageEventId, usageEventNetAtoms } from '@taucad/billing-ui/components/usage/columns';
+import { chatLabel, projectLabel } from '@taucad/billing-ui/components/usage/activity-names';
+import type { ProjectNames } from '@taucad/billing-ui/components/usage/activity-names';
 import { useChatName } from '#routes/usage/use-chat-name.js';
 
 const tableHooks = { useReactTable };

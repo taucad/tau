@@ -34,9 +34,11 @@ import type {
   TreeWriteWatch,
   WorkerProjectRevisions,
   WorkerRevisionRegistryOptions,
+} from '#machines/file-manager.worker.revisions.js';
+import type {
   WorkerRevisionRequest,
   WorkerRevisionResponse,
-} from '#machines/file-manager.worker.revisions.js';
+} from '@taucad/revisions-ui/types/revision-worker-protocol';
 import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { createFileSystemBridgeProxy } from '@taucad/fs-bridge';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
@@ -116,7 +118,7 @@ const finish = async (
 const harness = (
   projectIds: readonly string[],
   wrapPort = (port: RevisionPort): RevisionPort => port,
-  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock' | 'observeStatus'> & {
+  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock' | 'observeStatus' | 'firstViewShown'> & {
     onCreatePort?: (telemetryConsent: () => ReportingConsent | undefined) => void;
     observeFileEvents?: boolean;
     wrapFileSystem?: (filesystem: RootedFileSystem) => RootedFileSystem;
@@ -147,6 +149,7 @@ const harness = (
     /* The floor between mints is pinned in `@taucad/revisions`; here a verb runs as soon as the last mint published. */
     mintFloor: 0,
     ...(extra.observeStatus === undefined ? {} : { observeStatus: extra.observeStatus }),
+    ...(extra.firstViewShown === undefined ? {} : { firstViewShown: extra.firstViewShown }),
     createPort: (projectId, _credential, telemetryConsent) => {
       extra.onCreatePort?.(telemetryConsent);
       return wrapPort(
@@ -374,6 +377,21 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       expect(observed.map((entry) => entry.status)).toContainEqual(status);
     }
     expect(observed.at(-1)?.status).toEqual(root.status());
+  });
+
+  it('should tell the host when the page says its first view shows, under its own project (STO-25)', async () => {
+    const shown: string[] = [];
+    const fixture = harness(['alpha'], (port) => port, {
+      firstViewShown: (projectId) => {
+        shown.push(projectId);
+      },
+    });
+    const client = await fixture.open('alpha');
+    await client.settle();
+    expect(shown).toEqual([]);
+    client.send({ command: 'firstViewShown' });
+    await client.settle();
+    expect(shown).toEqual(['alpha']);
   });
 
   it('should start one root per opened project and stop its actor when the last port closes', async () => {
@@ -1199,8 +1217,14 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     await project.writeFile('main.scad', 'cube(30);');
     await project.writeFile('lib/a.scad', 'b();');
     const before = await root.log();
-    /* At the entryReady frame the closure reads its restored bytes, and the rest has not landed yet. */
+    /*
+     * At the entryReady frame the closure reads its restored bytes, and the rest has not landed yet: the disk (the
+     * writer's raw view) still holds the old bytes, and a reader's view holds its read until the write lands them
+     * (Rule 33), never answering the old ones (I7).
+     */
     const atEntryReady: Record<string, string> = {};
+    const disk = fixture.service.createRootedFileSystem('/projects/alpha', undefined, { placeholders: 'raw' });
+    let heldRead: Promise<string> | undefined;
     gate = async () => {
       await vi.waitFor(
         () => {
@@ -1213,7 +1237,8 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
         { timeout: 5000 },
       );
       atEntryReady['main.scad'] = await project.readFile('main.scad', 'utf8');
-      atEntryReady['lib/a.scad'] = await project.readFile('lib/a.scad', 'utf8');
+      atEntryReady['lib/a.scad'] = await disk.readFile('lib/a.scad', 'utf8');
+      heldRead = project.readFile('lib/a.scad', 'utf8');
     };
     alpha.send({ command: 'restore', revisionId: head! });
     await vi.waitFor(
@@ -1236,6 +1261,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     /* Reached while the write still held the tree, not at its end. */
     expect(statuses.find((status) => status.readiness === 'entryReady')?.applyingRoots).toEqual(['/projects/alpha']);
     expect(atEntryReady).toEqual({ 'main.scad': 'cube(20);', 'lib/a.scad': 'b();' });
+    await expect(heldRead).resolves.toBe('a();');
     expect(await project.readFile('main.scad', 'utf8')).toBe('cube(20);');
     expect(await project.readFile('lib/a.scad', 'utf8')).toBe('a();');
   });
@@ -1426,6 +1452,210 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       },
       { timeout: 10_000 },
     );
+  });
+
+  /*
+   * STO-25: the model renders from the first view once the page's manifest is the `tau.json` the write landed. The
+   * host names those bytes from the moment the closure lands until the next tree write, and never a failed write's
+   * nor its rollback's (I7).
+   */
+  it('should name the tau.json a tree write landed with its closure, never a failed write’s', async () => {
+    let failNext = false;
+    let gate: (() => Promise<void>) | undefined;
+    const fixture = harness(['alpha'], (port) => port, {
+      observeFileEvents: true,
+      wrapFileSystem: (filesystem) => ({
+        ...filesystem,
+        ...(filesystem.apply === undefined
+          ? {}
+          : {
+              apply: async (changeset) => {
+                if (changeset.entries.some((entry) => entry.op === 'write' && entry.path.startsWith('lib/'))) {
+                  const held = gate;
+                  gate = undefined;
+                  await held?.();
+                  if (failNext) {
+                    failNext = false;
+                    throw new Error('The disk went away.');
+                  }
+                }
+                return filesystem.apply!(changeset);
+              },
+            }),
+      }),
+    });
+    const manifestOf = (name: string): Uint8Array<ArrayBuffer> =>
+      serializeProjectManifest({
+        $schema: projectManifestSchemaUrl,
+        name,
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.scad' } },
+      });
+    const landedManifest = manifestOf('Alpha');
+    const digest = createHash('sha256').update(landedManifest).digest('hex');
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('tau.json', landedManifest);
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('lib/a.scad', 'a();');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    /* The checkout holds another manifest now: the restore lands `Alpha`'s again with its closure. */
+    await project.writeFile('tau.json', manifestOf('Placeholder'));
+    await project.writeFile('lib/a.scad', 'b();');
+    await settle(10);
+    const latest = (): RevisionStatusProjection | undefined =>
+      alpha.frames.findLast((frame) => frame.type === 'status')?.status;
+    /* The turn's finish applied `Alpha`'s tau.json into the checkout's own tree: an apply names no manifest. */
+    expect(alpha.frames.some((frame) => frame.type === 'status' && frame.status.entryManifest !== undefined)).toBe(
+      false,
+    );
+
+    /* A failed write landed its closure, then failed: its manifest is never named once it has. */
+    failNext = true;
+    let atEntryReady: RevisionStatusProjection | undefined;
+    gate = async () => {
+      await vi.waitFor(
+        () => {
+          atEntryReady = latest();
+          expect(atEntryReady?.readiness).toBe('entryReady');
+          expect(atEntryReady?.entryManifest).toBeDefined();
+        },
+        { timeout: 5000 },
+      );
+    };
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      () => {
+        expect(failNext).toBe(false);
+        expect(latest()?.applyingRoots).toBeUndefined();
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+    expect(atEntryReady?.entryManifest).toBe(digest);
+    expect(latest()?.entryManifest).toBeUndefined();
+
+    /* The retry names its own, and keeps naming it once the write has ended, until the next tree write. */
+    gate = async () => {
+      await vi.waitFor(
+        () => {
+          expect(latest()?.entryManifest).toBe(digest);
+          expect(latest()?.applyingRoots).toBeDefined();
+        },
+        { timeout: 5000 },
+      );
+    };
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      async () => {
+        expect(await project.readFile('lib/a.scad', 'utf8')).toBe('a();');
+        expect(latest()?.applyingRoots).toBeUndefined();
+      },
+      { timeout: 10_000 },
+    );
+    await settle(10);
+    expect(gate).toBeUndefined();
+    expect(latest()?.entryManifest).toBe(digest);
+  });
+
+  /*
+   * STO-25, I7: between a failed write's failure and its rollback, nothing it latched speaks. The capture that decides
+   * the rollback is held here; inside that window the host must already have stopped naming the write's manifest and
+   * reading its closure landed, though the write's release is still held.
+   */
+  it('should stop naming a failed write’s manifest at its failure, before its rollback begins', async () => {
+    let failNext = false;
+    let failed = false;
+    let window: (() => Promise<void>) | undefined;
+    /* The first read after the failure (the rollback's capture) waits on the window's check. */
+    const holdOnce = async (): Promise<void> => {
+      if (failed && window !== undefined) {
+        const held = window;
+        window = undefined;
+        await held();
+      }
+    };
+    const fixture = harness(['alpha'], (port) => port, {
+      observeFileEvents: true,
+      wrapFileSystem: (filesystem) => {
+        const wrapped: Record<string, unknown> = { ...filesystem };
+        for (const name of ['readdir', 'readdirEntries', 'readFile', 'stat', 'getFileMode']) {
+          const original = (filesystem as unknown as Record<string, unknown>)[name];
+          if (typeof original === 'function') {
+            wrapped[name] = async (...args: unknown[]): Promise<unknown> => {
+              await holdOnce();
+              return (original as (...parameters: unknown[]) => Promise<unknown>).apply(filesystem, args);
+            };
+          }
+        }
+        wrapped['endExpectation'] = (options?: Readonly<{ failed?: boolean }>): void => {
+          filesystem.endExpectation?.(options);
+          failed ||= options?.failed === true;
+        };
+        if (filesystem.apply !== undefined) {
+          wrapped['apply'] = async (changeset: Parameters<NonNullable<RootedFileSystem['apply']>>[0]) => {
+            if (failNext && changeset.entries.some((entry) => entry.op === 'write' && entry.path.startsWith('lib/'))) {
+              failNext = false;
+              throw new Error('The disk went away.');
+            }
+            return filesystem.apply!(changeset);
+          };
+        }
+        return wrapped as unknown as RootedFileSystem;
+      },
+    });
+    const manifest = serializeProjectManifest({
+      $schema: projectManifestSchemaUrl,
+      name: 'Alpha',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.scad' } },
+    });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('tau.json', manifest);
+    await project.writeFile('main.scad', 'cube(10);');
+    await project.writeFile('lib/a.scad', 'a();');
+    const alpha = await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const session = await root.placementSession();
+    await place(session, turnKey(1));
+    await project.writeFile('main.scad', 'cube(20);');
+    await finish(session, turnKey(1));
+    await turnFinalized(alpha, 'turn-1');
+    const head = alpha.frames.findLast((frame) => frame.type === 'status')?.status.headRevisionId;
+    await project.writeFile('tau.json', '{}');
+    await project.writeFile('lib/a.scad', 'b();');
+    await settle(10);
+    const latest = (): RevisionStatusProjection | undefined =>
+      alpha.frames.findLast((frame) => frame.type === 'status')?.status;
+
+    let inWindow: RevisionStatusProjection | undefined;
+    window = async () => {
+      /* Told at the failure itself, not by whatever publishes next. */
+      await settle(10);
+      inWindow = latest();
+    };
+    failNext = true;
+    alpha.send({ command: 'restore', revisionId: head! });
+    await vi.waitFor(
+      () => {
+        expect(window).toBeUndefined();
+        expect(latest()?.applyingRoots).toBeUndefined();
+      },
+      { timeout: 10_000 },
+    );
+    /* The window was entered while the failed write still held the root: its release came after the rollback. */
+    expect(inWindow?.applyingRoots).toBeDefined();
+    expect(inWindow?.entryManifest).toBeUndefined();
+    expect(inWindow?.readiness).toBe('treeReady');
+    expect(latest()?.entryManifest).toBeUndefined();
   });
 
   /* D10, I7: an aborted restore's tree is never read as written, and its rollback, which writes the checkout whole again, is. */

@@ -15,6 +15,8 @@ import type { AppImageInstallationIdentity } from '#main/appimage-running-identi
 class SafeAppImageUpdater extends AppImageUpdater {
   public readonly outerImagePath: string;
   private baseline: string | undefined;
+  /* Whether this launch acknowledged a healthy start; without it an update may only go forward (D8, B22). */
+  private acknowledged = false;
   private readonly installation: AppImageInstallationIdentity;
   private readonly installedVersion: string;
 
@@ -32,7 +34,8 @@ class SafeAppImageUpdater extends AppImageUpdater {
     this.installedVersion = app.getVersion();
   }
 
-  public markHealthy(document: unknown): void {
+  /** Authenticate the running image against its signed release without recording it as healthy. */
+  public authenticate(document: unknown): string {
     if (this.installation.version !== this.installedVersion) {
       throw new Error('AppImage mounted identity differs from the running application');
     }
@@ -41,22 +44,34 @@ class SafeAppImageUpdater extends AppImageUpdater {
       installation: this.installation,
       document,
     });
+    this.baseline = baseline;
+    return baseline;
+  }
+
+  /** Authenticate the running image and record it as the last healthy one. */
+  public markHealthy(document: unknown): void {
+    const baseline = this.authenticate(document);
     acknowledgeHealthyAppImage({
       current: this.outerImagePath,
       expectedCurrent: baseline,
       version: this.installedVersion,
     });
-    this.baseline = baseline;
+    this.acknowledged = true;
   }
 
   public async prepareInstallation(candidate: AppImageCandidate): Promise<AppImageInstallation> {
     if (!this.baseline) {
-      throw new Error('AppImage running release has no authenticated healthy acknowledgement');
+      throw new Error('AppImage running release has not been authenticated');
     }
     if (this.installerPath !== candidate.path) {
       throw new Error('AppImage installation must use the candidate verified by this updater');
     }
-    return prepareAppImageInstallation({ current: this.outerImagePath, expectedCurrent: this.baseline, candidate });
+    return prepareAppImageInstallation({
+      current: this.outerImagePath,
+      expectedCurrent: this.baseline,
+      candidate,
+      allowUnacknowledged: !this.acknowledged,
+    });
   }
 
   protected override doInstall(): boolean {

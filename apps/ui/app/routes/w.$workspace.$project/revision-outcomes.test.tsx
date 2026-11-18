@@ -17,7 +17,7 @@ import {
   useTurnOutcomes,
 } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { revisionFailureCopy } from '@taucad/ui-core/lib/revision-failure-copy';
-import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
+import type { WorkerRevisionEvent } from '@taucad/revisions-ui/types/revision-worker-protocol';
 
 const listeners = new Set<(event: WorkerRevisionEvent) => void>();
 const publish = (event: WorkerRevisionEvent): void => {
@@ -137,7 +137,7 @@ describe('RevisionOutcomes', () => {
     expect(errors).toEqual([
       {
         title: 'Nothing was saved for that request',
-        description: 'Tau could not save this project’s earlier edits first. Try sending that again.',
+        description: 'Couldn’t save this project’s earlier edits first. Send that again.',
       },
     ]);
     expect(`${errors[0]?.title ?? ''} ${errors[0]?.description ?? ''}`).not.toMatch(/checkout/iu);

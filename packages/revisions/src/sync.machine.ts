@@ -685,8 +685,7 @@ export const syncFailureReason = (error: unknown): SyncFailureReason => {
   }
 };
 
-const reason = (error: unknown): string =>
-  error instanceof Error ? error.message : 'This project could not be backed up.';
+const reason = (error: unknown): string => (error instanceof Error ? error.message : 'Couldn’t back up this project.');
 
 const unsupported = async (): Promise<never> => {
   await Promise.resolve();
@@ -728,7 +727,7 @@ const refusalSaid = (
     refused.ref.startsWith('refs/heads/') && refused.ref !== historyRefOf(branch)
       ? refused.ref.slice('refs/heads/'.length)
       : undefined;
-  return `${other ?? 'This branch'} changed on the remote; this project will catch up and try again.`;
+  return `${other ?? 'This branch'} changed somewhere else. Tau will get those changes and try again.`;
 };
 
 /**
@@ -881,7 +880,7 @@ const nextPending = (
             ...(entry.head === undefined ? {} : { head: entry.head }),
             ...(remote === undefined ? {} : { remote }),
             expected: leases[entry.name],
-            reason: entry.reason ?? 'The remote refused this ref.',
+            reason: entry.reason ?? 'Couldn’t back up part of this project. Try again.',
             recordedAt: now,
           },
         ]
@@ -1174,7 +1173,7 @@ const thrownOutcome = (error: unknown): SyncAttemptOutcome => {
 /* A cancelled pull may already have applied linked checkouts. Preserve that
  * result and write the retry record only after its effect returns. */
 const closeRetry = (context: SyncMachineContext): SyncContextPatch => {
-  const why = 'Closing stopped the transfer; this project will try again.';
+  const why = 'Closing stopped the backup. It continues the next time you open this project.';
   return {
     pendingFetch: false,
     pendingFlush: false,
@@ -1678,7 +1677,7 @@ const syncMachineDefinition = setup({
         return {
           target: 'queued',
           context: {
-            error: 'This device is offline; this project will be backed up when it is back online.',
+            error: 'You’re offline. This project backs up when you’re back online.',
             reason: 'offline',
           },
         };
@@ -1720,7 +1719,7 @@ const syncMachineDefinition = setup({
           return {
             target: 'queued',
             context: {
-              error: 'The remote did not answer in time; this project will try again.',
+              error: 'Backup is taking too long. Tau will try again.',
               reason: 'offline',
               chats: context.chats === 'loading' ? 'failed' : context.chats,
             },
@@ -1796,7 +1795,7 @@ const syncMachineDefinition = setup({
               }
               const conflict = {
                 conflictRef: `refs/heads/${event.output.branch}`,
-                error: 'The remote and this device changed the same files.',
+                error: 'This project changed here and somewhere else. Choose what to keep, then back up again.',
               };
               /* A re-pull that lands on the conflict already waiting (D55) is
                * not news: announcing it again toasted on every retry. */
@@ -1955,7 +1954,7 @@ const syncMachineDefinition = setup({
                 target: 'failed',
                 context: {
                   pushIds: [event.pushId],
-                  error: 'Connect to the internet before pushing.',
+                  error: 'Go online before backing up to GitHub.',
                   reason: 'offline',
                 },
               },
@@ -2246,7 +2245,7 @@ const syncMachineDefinition = setup({
       after: {
         pushDeadline: ({ context }, enq) => {
           reportPushAttempt(context, enq, { outcome: 'retry' });
-          const why = 'The remote did not answer in time; this project will try again.';
+          const why = 'Backup is taking too long. Tau will try again.';
           return {
             target: 'recording',
             context: {
@@ -2419,7 +2418,7 @@ const syncMachineDefinition = setup({
         return { context: { cutCount, requestId } };
       },
       after: {
-        mintDeadline: mintRefused('Your changes could not be saved before synchronizing; this project will try again.'),
+        mintDeadline: mintRefused('Couldn’t save your changes before backing up. Tau will try again.'),
       },
       on: {
         revisionMinted: ({ context, event }) =>
@@ -2435,7 +2434,7 @@ const syncMachineDefinition = setup({
             return {};
           }
           return context.mintRepulled
-            ? mintRefused('Your changes could not be saved before synchronizing; this project will try again.')
+            ? mintRefused('Couldn’t save your changes before backing up. Tau will try again.')
             : { target: 'opening', context: { mintRepulled: true } };
         },
         cutFailed: ({ context, event }) => (answersOurCut(context, event) ? mintRefused(event.reason) : {}),
@@ -2513,7 +2512,7 @@ const syncMachineDefinition = setup({
         enq.emit({
           type: 'syncConflict',
           ref: context.conflictRef ?? historyRefOf(context.branch),
-          reason: context.error ?? 'The remote has work this device has not seen.',
+          reason: context.error ?? 'This project changed somewhere else. Tau will get those changes first.',
         });
         return { context: settleEveryPush(context, enq, 'conflicted') };
       },
@@ -2785,7 +2784,7 @@ const facetStateOf = (value: string, withinPullWindow: boolean): SyncFacet['stat
  *
  * A lost lease is caught up by the next pull's merge, except on a branch whose
  * merge recorded a conflict: that branch moves only once the person decides,
- * so "will catch up and try again" would be false. The conflicts are the
+ * so "will get those changes and try again" would be false. The conflicts are the
  * root's (read from the conflict lines, so they survive a reload); this
  * machine keeps no copy.
  *
@@ -2799,7 +2798,7 @@ const waitingSaid = (context: SyncMachineContext, undecided: readonly string[]):
   );
   return waiting === undefined
     ? undefined
-    : `${waiting === context.branch ? 'This branch' : waiting} waits on your decision; its revisions back up once you choose.`;
+    : `${waiting === context.branch ? 'This branch' : waiting} is waiting for your decision. It backs up once you choose.`;
 };
 
 /**

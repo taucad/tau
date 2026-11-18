@@ -695,7 +695,7 @@ it.each(['live', 'linked'])(
       await result;
       expect(pushed).toBe(false);
       expect(actor.getSnapshot().children.sync?.getSnapshot().context.error).toBe(
-        'Closing stopped the transfer; this project will try again.',
+        'Closing stopped the backup. It continues the next time you open this project.',
       );
       expect(await appliedFilesystem.readFile('main.ts', 'utf8')).toBe('remote');
       expect(await context.port.readRef(branch)).toBe(head);

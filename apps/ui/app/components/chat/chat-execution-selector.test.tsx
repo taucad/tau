@@ -386,7 +386,8 @@ describe('ChatExecutionSelector', () => {
     // surfaced, never silently rerouted.
     browserHostAvailability = {
       status: 'unavailable',
-      reason: 'This project’s storage cannot hold a durable agent log.',
+      reason:
+        'The Tau agent can’t save its work in this project’s storage. Check that Tau can write to this project’s folder.',
     };
     const user = userEvent.setup();
     render(
@@ -397,7 +398,11 @@ describe('ChatExecutionSelector', () => {
 
     await user.click(screen.getByRole('button', { name: 'Select agent: Tau' }));
 
-    expect(await screen.findByText('This project’s storage cannot hold a durable agent log.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'The Tau agent can’t save its work in this project’s storage. Check that Tau can write to this project’s folder.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('says nothing while the capability probe is still pending', async () => {

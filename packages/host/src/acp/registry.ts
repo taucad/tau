@@ -199,6 +199,13 @@ export type AcpAgentProfile = {
    */
   readonly loginCommand?: string | undefined;
   /**
+   * The arguments of {@link AcpAgentProfile.loginCommand} after `cli`, as the CLI receives them.
+   *
+   * Tau's own sign-in tab starts the resolved `cli` with exactly these, never a
+   * shell line, and only after the user presses Enter (ACP agent policy rule 10).
+   */
+  readonly loginArgs?: readonly string[] | undefined;
+  /**
    * Mode ids, best first, a new chat starts in (ruling PR5): `auto`, then the
    * most permissive mode that still keeps a vendor safety boundary, so the
    * agent edits workspace files without asking but does not lift every check.
@@ -256,6 +263,7 @@ export type ReviewedAcpAgentProfile = AcpAgentProfile & {
   readonly installCommand: AcpShellCommand;
   readonly updateCommand: AcpShellCommand;
   readonly loginCommand: string;
+  readonly loginArgs: readonly string[];
   readonly defaultModePreference: readonly string[];
 };
 
@@ -314,6 +322,7 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     updateCommand: { posix: 'claude update', windows: 'claude update' },
     /* From code.claude.com/docs/en/cli-reference, read 2026-11-15. */
     loginCommand: 'claude auth login',
+    loginArgs: ['auth', 'login'],
     /* The claude-agent-acp 0.70.0 `buildAvailableModes` (dist/acp-agent.js:5393) offers `auto` only when
      * `ModelInfo.supportsAutoMode === true`; `acceptEdits` ("Auto-accept file edit operations") is
      * the most permissive mode left that still asks before commands. */
@@ -363,6 +372,7 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     /* Listed by `codex --help` on the operator's Mac, 2026-11-15. */
     updateCommand: { posix: 'codex update', windows: 'codex update' },
     loginCommand: 'codex login',
+    loginArgs: ['login'],
     /* The codex-acp 1.7.0 `AgentMode` (dist/index.js:27297-27339) offers no `auto`: `agent`
      * ("Approve for me", kind `auto_review`) is its classifier-reviewed mode and its own default,
      * then `read-only` ("Ask for approval", still workspace-write). `agent-full-access` is a bypass. */
@@ -403,6 +413,7 @@ export const acpAgentProfiles: readonly ReviewedAcpAgentProfile[] = [
     },
     updateCommand: { posix: 'grok update', windows: 'grok update' },
     loginCommand: 'grok login',
+    loginArgs: ['login'],
     /* Grok's Tau-owned permission select (`grokControlOptions`) offers `auto` only when Grok reports
      * it enabled; its other modes are `ask` (its own default) and `always-approve` (yolo). Without
      * `auto` the chat starts in `grokNoAutoFallback` (PR5 amendment, operator 2026-11-17T03:42Z). */

@@ -172,7 +172,9 @@ const reconnectCopy = (remote: RemoteFacet): string => {
     return 'GitHub needs a connected account to reach this repository. Reconnect GitHub, then pick it from your repositories.';
   }
   /* D94: every other Git remote is anonymous, so it had no saved credentials to reject. */
-  return remote.error ?? 'This remote asked for a sign-in Tau does not have, or has no repository at this address.';
+  return (
+    remote.error ?? 'This Git host asked for a sign-in Tau doesn’t have, or there’s no repository at this address.'
+  );
 };
 
 /**
@@ -258,7 +260,7 @@ const connectingCopy = (remote: RemoteFacet): string =>
   remote.phase === 'disconnecting'
     ? 'Disconnecting…'
     : remote.kind === 'tau'
-      ? 'Connecting to Tau Cloud…'
+      ? 'Starting backup to Tau Cloud…'
       : 'Connecting…';
 
 /**
@@ -274,14 +276,14 @@ const connectingCopy = (remote: RemoteFacet): string =>
  */
 const gitRemoteLabel = (url: string | undefined, github = false): string => {
   if (url === undefined) {
-    return github ? 'GitHub repository' : 'Git remote';
+    return github ? 'GitHub repository' : 'Git repository';
   }
   try {
     const parsed = new URL(url);
     const path = parsed.pathname.replaceAll(/^\/+|\/+$/gu, '').replace(/\.git$/u, '');
     return path === '' ? parsed.host : github ? path : `${parsed.host}/${path}`;
   } catch {
-    return github ? 'GitHub repository' : 'Git remote';
+    return github ? 'GitHub repository' : 'Git repository';
   }
 };
 
@@ -298,8 +300,8 @@ const gitRemoteLabel = (url: string | undefined, github = false): string => {
  */
 const authoritySentence = (githubAvailable: boolean | undefined): string =>
   githubAvailable === false
-    ? 'Advanced HTTPS remotes are anonymous, so a GitHub address here is linked read-only.'
-    : 'Advanced HTTPS remotes are anonymous, so a GitHub address here is linked read-only. Use the GitHub picker above for private or writable repositories.';
+    ? 'Tau doesn’t sign in to a repository added by address, so a GitHub address here is read-only.'
+    : 'Tau doesn’t sign in to a repository added by address, so a GitHub address here is read-only. Pick it from GitHub above for private repositories or to back up to it.';
 
 /**
  * *Available on Pro*, with the route the rest of the app already uses (N4).
@@ -377,7 +379,8 @@ function GitRemoteForm({
         at the first push.
       */}
       <p className='text-xs text-muted-foreground'>
-        GitHub repositories selected above use their Git LFS storage. Other hosts may reject large files.
+        GitHub repositories picked above keep large files in GitHub’s Git LFS storage. Other Git hosts may not accept
+        large files.
       </p>
       {problem === undefined ? undefined : (
         <p role='alert' className='text-sm'>
@@ -428,7 +431,7 @@ function MovedRepository({
       binding === undefined ? undefined : githubConnections.repository(binding.connectionId, binding.repositoryId),
   });
   const [confirming, setConfirming] = useState(false);
-  /* The confirmation's buttons unmount on *Keep*; focus returns to *Update remote*. */
+  /* The confirmation's buttons unmount on *Keep*; focus returns to *Use new address*. */
   const [kept, setKept] = useState(false);
   const moved = lookup.data !== undefined && lookup.data.cloneUrl !== binding?.repositoryUrl ? lookup.data : undefined;
   if (binding === undefined || moved === undefined) {
@@ -455,7 +458,7 @@ function MovedRepository({
               onUpdate(binding.connectionId, moved);
             }}
           >
-            Update remote
+            Use new address
           </Button>
           <Button
             size='sm'
@@ -482,7 +485,7 @@ function MovedRepository({
           setConfirming(true);
         }}
       >
-        Update remote
+        Use new address
       </Button>
     </span>
   );
@@ -621,7 +624,7 @@ export function RevisionSyncRegion({
         return <ActionButton verb='Try again' icon={RefreshCw} onClick={onSync} />;
       }
       case 'retry': {
-        return <ActionButton verb='Retry' icon={RotateCw} onClick={onRetry} />;
+        return <ActionButton verb='Try again' icon={RotateCw} onClick={onRetry} />;
       }
       default: {
         return undefined;
@@ -707,7 +710,7 @@ export function RevisionSyncRegion({
       setChangingBackup(false);
       setChoice(undefined);
     } catch (error) {
-      setConnectionError(error instanceof Error ? error.message : 'Couldn’t connect the backup. Try again.');
+      setConnectionError(error instanceof Error ? error.message : 'Couldn’t start backing up. Try again.');
     } finally {
       setCommitting(false);
     }
@@ -913,7 +916,7 @@ export function RevisionSyncRegion({
           {remote.storage === undefined || !showMeter ? undefined : (
             <div
               role='meter'
-              aria-label='Storage used against your plan'
+              aria-label='Tau Cloud storage used'
               aria-valuenow={Math.round(percentage)}
               aria-valuemin={0}
               aria-valuemax={100}
@@ -931,8 +934,8 @@ export function RevisionSyncRegion({
                 sync.online
                   ? sync.state === 'manual'
                     ? undefined
-                    : 'Finish fetching or resolving changes before pushing.'
-                  : 'Connect to the internet before pushing.'
+                    : 'Get the latest changes and choose what to keep before backing up to GitHub.'
+                  : 'Go online before backing up to GitHub.'
               }
             />
           ) : null}
@@ -953,7 +956,7 @@ export function RevisionSyncRegion({
                 }}
               >
                 <RefreshCw aria-hidden />
-                Fetch latest
+                Get latest changes
               </Button>
             ) : null}
             {branchHref === undefined ? null : (
@@ -1030,7 +1033,7 @@ export function RevisionSyncRegion({
 
         {choice === 'tau' ? (
           <>
-            <p className='text-xs text-muted-foreground'>Files and history are backed up to your Tau account.</p>
+            <p className='text-xs text-muted-foreground'>Backs up this project’s files and history.</p>
             <SwitchRow
               description='Turn off to keep chats on this device.'
               isChecked={syncChats}
@@ -1117,7 +1120,7 @@ export function RevisionSyncRegion({
 
         {pendingConnection === undefined || pendingLabel === undefined ? null : (
           <div className='flex flex-col gap-2'>
-            <p className='text-xs'>{`Replace ${connectedLabel} with ${pendingLabel}? Your history stays on this device.`}</p>
+            <p className='text-xs'>{`Replace ${connectedLabel} with ${pendingLabel}? What’s already on ${connectedLabel} stays there, and your history stays on this device.`}</p>
             <div className='flex flex-wrap items-center gap-2'>
               <Button
                 autoFocus
@@ -1156,7 +1159,7 @@ export function RevisionSyncRegion({
         <p
           role='alert'
           /* R11: named by what it asks for. An anonymous remote holds no credentials (D94). */
-          aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Remote sign-in'}
+          aria-label={isGithubRemote(remote) ? 'GitHub connection' : 'Git host sign-in'}
           className='flex items-center gap-2 text-xs'
         >
           <CloudAlert aria-hidden className='size-3.5 shrink-0 text-warning' />
@@ -1184,7 +1187,7 @@ export function RevisionSyncRegion({
               }
             }}
           >
-            Retry
+            Try again
           </Button>
         )}
       </div>
@@ -1197,7 +1200,7 @@ export function RevisionSyncRegion({
   */
   const refusedRow =
     remote.refusedReplacement === undefined || busy || changingBackup ? undefined : (
-      <div role='alert' aria-label='Backup change refused' className='flex flex-wrap items-center gap-2 text-xs'>
+      <div role='alert' aria-label='Backup not changed' className='flex flex-wrap items-center gap-2 text-xs'>
         <CircleAlert aria-hidden className='size-3.5 shrink-0 text-feature' />
         <span className='min-w-0 flex-1'>
           {`${remote.refusedReplacement.error} ${connectedLabel} is still this project’s backup.`}
@@ -1212,7 +1215,7 @@ export function RevisionSyncRegion({
 
   const connectionErrorRow =
     connectionError === undefined ? undefined : (
-      <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-xs'>
+      <div role='alert' aria-label='Couldn’t start backing up' className='flex flex-wrap items-center gap-2 text-xs'>
         <CircleAlert aria-hidden className='size-3.5 shrink-0 text-feature' />
         <span className='min-w-0 flex-1'>{connectionError}</span>
         <Button
@@ -1223,7 +1226,7 @@ export function RevisionSyncRegion({
             setChangingBackup(true);
           }}
         >
-          Retry
+          Try again
         </Button>
       </div>
     );
@@ -1259,7 +1262,7 @@ export function RevisionSyncRegion({
   */
   const connectFailureRow =
     remote.phase === 'failed' && remote.error !== undefined ? (
-      <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-xs'>
+      <div role='alert' aria-label='Couldn’t start backing up' className='flex flex-wrap items-center gap-2 text-xs'>
         <CircleAlert aria-hidden className='size-3.5 shrink-0 text-feature' />
         <span className='min-w-0 flex-1'>{remote.error}</span>
         {renderFailureAction(syncFailureAction(remote, remote, viewer) ?? 'retry', () => {
@@ -1279,7 +1282,7 @@ export function RevisionSyncRegion({
   const line = busy ? (
     <div
       role='status'
-      aria-label='Backup connection progress'
+      aria-label='Starting backup'
       aria-busy='true'
       className='flex min-w-0 flex-1 items-center gap-1.5'
     >
@@ -1333,7 +1336,7 @@ export function RevisionSyncRegion({
             )}
           </span>
           {sync.online ? undefined : (
-            <span className='text-muted-foreground'>Offline · backs up when you reconnect</span>
+            <span className='text-muted-foreground'>Offline · backs up when you’re back online</span>
           )}
           {/* A push this viewer cannot make is said on the line, not discovered after a gesture (F1). */}
           {showsAccess ? (

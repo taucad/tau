@@ -222,7 +222,7 @@ function ProjectCommandPaletteItemsReady({ paletteId }: { readonly paletteId: st
           return `Downloaded ${filename}`;
         },
         error(error) {
-          let message = `Failed to download ${filename}`;
+          let message = `Couldn’t download ${filename}`;
           if (error instanceof Error) {
             message = `${message}: ${error.message}`;
           }

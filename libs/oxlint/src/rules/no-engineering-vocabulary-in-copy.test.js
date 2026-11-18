@@ -17,7 +17,7 @@ describe('no-engineering-vocabulary-in-copy', () => {
         { name: 'reference is not ref', code: "toast.error('The referenced file is missing');" },
         { name: 'refresh is not ref', code: "toast.info('Refresh to try again');" },
         { name: 'headline is not head', code: "toast.info('Read the headline');" },
-        { name: 'Git host is the product phrase', code: "toast.error('Your Git host refused access');" },
+        { name: 'Git host is the product phrase', code: "toast.error('Your Git host asked for a sign-in');" },
         { name: 'online is not line', code: "toast.info('Back online');" },
         { name: 'non-toast call', code: "console.error('checkout');" },
         { name: 'the decision phrase', code: "toast.warning('Needs your decision on main');" },

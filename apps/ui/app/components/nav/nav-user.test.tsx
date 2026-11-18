@@ -96,7 +96,7 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
 
 vi.mock('@taucad/ui-kit/icons/svg-icon', () => ({ SvgIcon: () => <span aria-hidden /> }));
 
-vi.mock('#components/tier-badge.js', () => ({
+vi.mock('@taucad/billing-ui/components/tier-badge', () => ({
   ProBadge: () => <span>Pro</span>,
 }));
 
@@ -227,7 +227,8 @@ describe('NavUser', () => {
     render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByRole('status', { name: 'Offline' })).toBeInTheDocument();
-    expect(screen.getByText('Offline — online features unavailable')).toBeInTheDocument();
+    /* The footer tooltip and the user menu say the same sentence. */
+    expect(screen.getAllByText('You’re offline. Some features need a connection.')).toHaveLength(2);
   });
 });
 

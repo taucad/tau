@@ -43,11 +43,15 @@ publish = "build/client"
 # Temporary: current Netlify plan cannot create Builds-scoped secrets.
 NX_NO_CLOUD = "true"
 
-# The React Router plugin writes the SSR function to `.netlify/v1/functions`
-# under this base. Naming that directory makes Netlify bundle the function from
-# its real path, where its import of `build/server/server.js` resolves, as a
-# user function that outranks the copy `deploy-ui.yml` exposes as a framework
+# The React Router plugin (`@netlify/vite-plugin-react-router` 4.x) writes the
+# SSR function `react-router-server.mjs` to `.netlify/v1/functions` under this
+# base. It imports the Environment API server build `build/server/index.js` and
+# the adapter's `serverless` request handler. Naming that directory makes
+# Netlify bundle the function from its real path, where both imports resolve, as
+# a user function that outranks the copy `deploy-ui.yml` exposes as a framework
 # function through its `.netlify` link (which ships without the server build).
+# Server source maps never reach it: `ui:build` moves them to
+# `build/server-sourcemaps` (SSR bundle policy rule 5).
 [functions]
 directory = ".netlify/v1/functions"
 

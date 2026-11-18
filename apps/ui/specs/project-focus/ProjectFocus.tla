@@ -150,8 +150,14 @@
 \* that cannot be measured is swallowed there and retried by the layout's own render), so `ModuleLoaded` and the
 \* module party are unchanged and a link's warm-up still yields `ModuleAtStart = "loaded"`. The live sessions
 \* re-export the layout warm-up. No action or verdict changes.
+\* STO-25 (SP5-model): a live project's binding reads its manifest again once a tree write lands `tau.json`
+\* (`entryManifest`), so the model surfaces know from the first view which manifest the project holds. That is
+\* the session's own manifest observation, environment here; focus, the route state and the mounted live set are
+\* unchanged, so no action or verdict changes.
 \* DC-10 files-ui slice 5 (2026-11-17): `project-route-intent.tsx` takes `project-url.utils` from `@taucad/files-ui`;
 \* only the import moved. No action or verdict changes.
+\* DC-10 revisions-ui slice 2 (2026-11-18): `project-live-sessions.tsx` takes the `RevisionCommands` type from
+\* `@taucad/revisions-ui`; only the import moved. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

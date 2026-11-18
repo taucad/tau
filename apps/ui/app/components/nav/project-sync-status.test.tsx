@@ -32,7 +32,7 @@ describe('ProjectSyncStatus', () => {
         />
       </TooltipProvider>,
     );
-    expect(screen.getByRole('button', { name: 'Project sync: Downloading files…' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Downloading files…' })).toBeInTheDocument();
     rerender(
       <TooltipProvider>
         <ProjectSyncStatus sync={healthy} isCloudPending={false} onOpenDetails={vi.fn()} />
@@ -43,7 +43,7 @@ describe('ProjectSyncStatus', () => {
 
   it('should distinguish inbound, outgoing and recovery work without a three-second timeout', () => {
     expect(projectSyncIndicator(healthy, true)?.label).toBe('Preparing files…');
-    expect(projectSyncIndicator(undefined, true)?.label).toBe('Connecting to Tau Cloud…');
+    expect(projectSyncIndicator(undefined, true)?.label).toBe('Opening project…');
     expect(projectSyncIndicator({ ...healthy, pullPhase: 'fetching' }, false)?.label).toBe('Downloading files…');
     expect(projectSyncIndicator({ ...healthy, pullPhase: 'applying' }, false)?.label).toBe('Preparing files…');
     expect(projectSyncIndicator({ ...healthy, pullPhase: 'records', chats: 'loading' }, false)?.label).toBe(
@@ -55,7 +55,7 @@ describe('ProjectSyncStatus', () => {
     expect(projectSyncIndicator({ ...healthy, state: 'failed', reason: 'unauthorized' }, true)?.label).toBe(
       'Sign in to continue',
     );
-    expect(projectSyncIndicator({ ...healthy, chats: 'failed' }, false)?.label).toBe('Chats need attention');
+    expect(projectSyncIndicator({ ...healthy, chats: 'failed' }, false)?.label).toBe('Couldn’t load chats');
   });
 
   it('should expose details by keyboard and click with Escape returning focus', async () => {
@@ -70,14 +70,14 @@ describe('ProjectSyncStatus', () => {
         />
       </TooltipProvider>,
     );
-    const trigger = screen.getByRole('button', { name: 'Project sync: Downloading files…' });
+    const trigger = screen.getByRole('button', { name: 'Downloading files…' });
     await user.tab();
     expect(trigger).toHaveFocus();
     await waitFor(() => {
-      expect(screen.getByRole('tooltip')).toHaveTextContent('Bringing this project to your device.');
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Bringing this project to this device.');
     });
     await user.keyboard('{Enter}');
-    expect(screen.getByRole('dialog', { name: 'Project sync status' })).toHaveTextContent('Downloading files…');
+    expect(screen.getByRole('dialog', { name: 'Project status' })).toHaveTextContent('Downloading files…');
     await user.keyboard('{Escape}');
     await waitFor(() => {
       expect(trigger).toHaveFocus();

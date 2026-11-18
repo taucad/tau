@@ -153,11 +153,15 @@ jobs:
       # file walk does not follow links, so the link must be the doubled side.
       #
       # Through the link, the CLI also finds the React Router server function as
-      # a framework function, but traces its `build/server/server.js` import under
+      # a framework function, but traces its `build/server/index.js` import under
       # `apps/ui/apps/ui/` and ships it without the server build. So
       # `apps/ui/netlify.toml` names `.netlify/v1/functions` as the functions
       # directory too: the same file bundled from there is a user function, which
-      # outranks the framework copy and carries the server build.
+      # outranks the framework copy and carries the server build. The function
+      # (`react-router-server.mjs`, written by `@netlify/vite-plugin-react-router`
+      # 4.x) imports the server build `build/server/index.js` and, at run time,
+      # the adapter's `@netlify/vite-plugin-react-router/serverless` handler, which
+      # resolves from the workspace root's dependencies.
       - name: Point the Netlify CLI's package path at apps/ui/.netlify
         working-directory: apps/ui
         run: mkdir -p apps/ui && ln -sfn ../../.netlify apps/ui/.netlify

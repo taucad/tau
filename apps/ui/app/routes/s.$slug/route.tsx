@@ -28,7 +28,9 @@ import PublicationViewRoute, {
 } from '#components/share/tau-publication.js';
 import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
 import type { ParsedPublication } from '@taucad/publish-ui/components/share/parsed-publication';
-import { GithubGistManagement } from '#components/share/github-gist-management.js';
+import { GithubGistManagement } from '@taucad/publish-ui/components/share/github-gist-management';
+import { GithubGistServicesProvider } from '@taucad/publish-ui/components/share/github-gist-services';
+import { githubGistServices } from '#components/share/github-gist-services.js';
 import { OpenInDesktop } from '#components/desktop/open-in-desktop.js';
 import { shareProviderRegistry, withBrowserShareProviderContext } from '#lib/share-providers.js';
 import type { Route } from './+types/route.js';
@@ -384,17 +386,19 @@ export const PortableShareSurface = (): React.JSX.Element => {
       sourceLabel={resolved.parameterDiagnostic ?? sourceLabel}
       managementActions={
         parseShareSlug(slug).providerId === 'github-gist' ? (
-          <GithubGistManagement
-            locator={parseShareSlug(slug)}
-            protection={protection}
-            collectSnapshot={async () => collectOpenedSnapshot(resolved.files, publication.entryPath)}
-            onRepublished={(url) => {
-              globalThis.location.assign(url);
-            }}
-            onUnpublished={() => {
-              setUnpublished(true);
-            }}
-          />
+          <GithubGistServicesProvider value={githubGistServices}>
+            <GithubGistManagement
+              locator={parseShareSlug(slug)}
+              protection={protection}
+              collectSnapshot={async () => collectOpenedSnapshot(resolved.files, publication.entryPath)}
+              onRepublished={(url) => {
+                globalThis.location.assign(url);
+              }}
+              onUnpublished={() => {
+                setUnpublished(true);
+              }}
+            />
+          </GithubGistServicesProvider>
         ) : undefined
       }
     />

@@ -51,9 +51,9 @@ describe('tauPlanCatalog', () => {
 
   it('should advertise the storage each plan includes as a live feature, from the table the quota enforces (D16)', () => {
     const [free, pro, enterprise] = tauPlanCatalog;
-    expect(free?.features).toContainEqual({ label: '1 GB cloud backup and sync', isComingSoon: false });
-    expect(pro?.features).toContainEqual({ label: '100 GB cloud backup and sync', isComingSoon: false });
-    expect(enterprise?.features).toContainEqual({ label: 'Custom cloud backup and sync', isComingSoon: false });
+    expect(free?.features).toContainEqual({ label: '1 GB Tau Cloud backup and sync', isComingSoon: false });
+    expect(pro?.features).toContainEqual({ label: '100 GB Tau Cloud backup and sync', isComingSoon: false });
+    expect(enterprise?.features).toContainEqual({ label: 'Custom Tau Cloud backup and sync', isComingSoon: false });
     /* EQ2: a free account may connect GitHub, so Pro inherits it through "Everything in Free". */
     expect(labels(free)).toContain('GitHub connection');
     expect(labels(pro)).not.toContain('GitHub connection');

@@ -37,8 +37,13 @@ import {
   revisionId,
 } from '#algorithms/index.js';
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
-import { createApplyTreeEffects, sweepTemporarySiblings as sweepApplyLitter } from '#apply-tree.js';
-import type { MaterializeTarget } from '#apply-tree.js';
+import {
+  createApplyTreeEffects,
+  isDeferredRevisionTree,
+  readDeferredRevisionTree,
+  sweepTemporarySiblings as sweepApplyLitter,
+} from '#apply-tree.js';
+import type { DeferredRevisionTree, MaterializeTarget } from '#apply-tree.js';
 import { createLargeObjectFill, declaredPlaceholders, largeObjectPlaceholders } from '#large-object-fill.js';
 import type { AttributesReading } from '#workspace-config.js';
 import { readEntryClosure } from '#open/entry-closure.js';
@@ -1173,10 +1178,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           : 'origin';
     const url = input.url ?? (input.kind === 'tau' ? options.remoteUrl?.(input.projectId) : undefined);
     if (url === undefined) {
-      throw new RevisionPortError(
-        'INVALID_TRANSPORT',
-        'This host does not know where this project’s Tau Cloud repository is.',
-      );
+      throw new RevisionPortError('INVALID_TRANSPORT', 'Couldn’t find this project on Tau Cloud. Try again.');
     }
     return { name, url };
   };
@@ -1657,10 +1659,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     }
     const url = options.remoteUrl?.(projectId);
     if (url === undefined) {
-      throw new RevisionPortError(
-        'INVALID_TRANSPORT',
-        'This host does not know where this project’s Tau Cloud repository is.',
-      );
+      throw new RevisionPortError('INVALID_TRANSPORT', 'Couldn’t find this project on Tau Cloud. Try again.');
     }
     await port.setRemote({ name: tauRemoteName, url });
     return tauRemoteName;
@@ -2697,9 +2696,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   });
   const materializeTree: typeof applyMaterializedTree = async (place, target, materialization) => {
     if (typeof target === 'function') {
-      const checked = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
+      const checked = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree | DeferredRevisionTree> => {
         const built = await target(before);
-        validateLegacyProjectIdentity(built.get('tau.json'), options.projectId);
+        /* A deferred tree holds its manifest. */
+        validateLegacyProjectIdentity(
+          (isDeferredRevisionTree(built) ? built.held : built).get('tau.json'),
+          options.projectId,
+        );
         return built;
       };
       return applyMaterializedTree(place, checked, materialization);
@@ -3029,10 +3032,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const { fillFrom, ...materialization } = write;
     /* The generation before this write: a write refused before its bracket opened leaves that generation's word alone. */
     const generationBefore = generationOf(place.id);
+    /* What the fill reads the written tree's placeholders from: a deferred tree holds every pointer and attributes file. */
     let written: ImmutableRevisionTree | undefined;
-    const built = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
-      written = typeof target === 'function' ? await target(before) : target;
-      return written;
+    const built = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree | DeferredRevisionTree> => {
+      const tree = typeof target === 'function' ? await target(before) : target;
+      written = isDeferredRevisionTree(tree) ? tree.held : tree;
+      return tree;
     };
     /* The written tree from `fillFrom`; after a failure, whatever the checkout holds from its head. */
     const fillSoon = (tree: ImmutableRevisionTree | undefined): void => {
@@ -4616,7 +4621,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       signal.throwIfAborted();
       const updated = await port.updateRef({ name: `refs/heads/${input.branch}`, expectedHead: expected, head });
       if (updated.status !== 'updated') {
-        throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
+        throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} changed while backing up.`);
       }
       return undefined;
     }
@@ -4624,18 +4629,36 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     /* From this store alone: a large object not here yet is written as its
      * pointer, and the fill writes its bytes as they land. The pointer is
      * what the store records either way, so the checkout is clean at once.
-     * Read whole only for an unborn line (the open); a pull reads by oid diff. */
-    let whole: ImmutableRevisionTree | undefined;
-    const wholeTree = async (): Promise<ImmutableRevisionTree> => {
-      whole ??= await port.readTree(head, { largeObjects: 'local', signal });
+     * Read whole only for an unborn line (the open); a pull reads by oid diff.
+     * The open begins from the store's listing (STO-25): the write's bracket
+     * opens once the tree's structure is known, and each file's bytes are read
+     * as it lands, the entry closure first; a store that cannot list the tree
+     * with its sizes is read whole. */
+    let whole: ImmutableRevisionTree | DeferredRevisionTree | undefined;
+    const wholeTree = async (): Promise<ImmutableRevisionTree | DeferredRevisionTree> => {
+      whole ??=
+        (await readDeferredRevisionTree(port, head, { signal })) ??
+        (await port.readTree(head, { largeObjects: 'local', signal }));
       if (whole === undefined) {
         throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${head}.`);
       }
       return whole;
     };
+    /* What the tree holds at the checkout's own paths: all an unborn line's work check compares. */
+    const arrivingAt = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> => {
+      const paths = [...revisionTreeFiles(before).keys()];
+      const arriving =
+        paths.length === 0
+          ? new ImmutableRevisionTree([])
+          : await port.readTree(head, { largeObjects: 'local', paths, signal });
+      if (arriving === undefined) {
+        throw new RevisionPortError('UNKNOWN_REVISION', `The store holds no tree for ${head}.`);
+      }
+      return arriving;
+    };
     let expected: RevisionId | undefined;
     /* `validate` proves the files are `expected`'s tree, so only what the oid diff to `head` names is read (D10). */
-    const target = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree> =>
+    const target = async (before: ImmutableRevisionTree): Promise<ImmutableRevisionTree | DeferredRevisionTree> =>
       expected === undefined ? wholeTree() : treeFrom(expected, head, before);
     try {
       await writeRevisionTree(place, target, {
@@ -4655,7 +4678,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * a cloud open's placeholder manifest is not (e921b3d96). */
           const dirty =
             expectedTreeId === undefined
-              ? !holdsNoWorkBeforePull(before, await wholeTree())
+              ? !holdsNoWorkBeforePull(before, await arrivingAt(before))
               : expectedTreeId !== (await checkoutTreeId(place.id, before));
           const leases = await readLeases();
           const leased = leases.some((lease) => lease.checkoutId === place.id);
@@ -4689,7 +4712,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           }
           const updated = await port.updateRef({ name: branch, expectedHead: expected, head });
           if (updated.status !== 'updated') {
-            throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} moved while synchronizing.`);
+            throw new RevisionPortError('CHECKOUT_CONFLICT', `${input.branch} changed while backing up.`);
           }
         },
       });
@@ -6583,8 +6606,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           throw new RevisionPortError(
             'INVALID_TRANSPORT',
             refused.reason === 'leaseLost'
-              ? 'Someone else changed this project in the cloud. Open it again before publishing.'
-              : `The cloud refused this project: ${refused.reason ?? 'no reason given'}`,
+              ? 'This project changed somewhere else. Open it again before publishing.'
+              : 'Couldn’t back up this project before publishing. Try again.',
           );
         }
         pushSequence += 1;
@@ -6853,7 +6876,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
             /* Storage is the one refusal that is not a failed connection: the
              * files are named and `remote.machine` owns the list (D16, P19). */
-            const message = error instanceof Error ? error.message : 'History could not be backed up.';
+            const message = error instanceof Error ? error.message : 'Couldn’t back up this project’s history.';
             if (error instanceof LfsQuotaError) {
               overQuota = error.refusal.paths;
               quotaMessage = error.refusal.message;
@@ -7352,7 +7375,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                   name: chatRefName(id),
                   status: 'rejected',
                   head: ref.head,
-                  reason: 'Chat synchronization could not establish this device’s record identity.',
+                  reason: 'Couldn’t back up this project’s chats.',
                 }));
               }
             }

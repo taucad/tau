@@ -71,12 +71,12 @@ export function ProjectActionMenu({
                 }}
               >
                 <Cloud />
-                {isDeleting ? 'Check cloud deletion…' : 'Delete from Tau Cloud…'}
+                {isDeleting ? 'Check Tau Cloud deletion…' : 'Delete from Tau Cloud…'}
               </DropdownMenuItem>
             </>
           ) : null}
           {isCloudOnly && cloud?.canDeleteCloud !== true && !isDeleting ? (
-            <DropdownMenuItem disabled>No cloud actions available</DropdownMenuItem>
+            <DropdownMenuItem disabled>No actions available</DropdownMenuItem>
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -139,17 +139,15 @@ function CloudDeleteDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete “{project.name}” from Tau Cloud?</AlertDialogTitle>
           <AlertDialogDescription>
-            This removes its cloud history and published links, and ends collaborators’ cloud access. Copies already
-            downloaded to devices and independent forks are kept. This cannot be undone in Tau.
+            This removes its backup and published links from Tau Cloud, and people you shared it with lose access.
+            Copies already on anyone’s devices, and duplicates, are kept. This can’t be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {isCloudOnly ? (
-          <p className='text-sm'>
-            If you have not downloaded a copy elsewhere, you will no longer be able to open this project.
-          </p>
+          <p className='text-sm'>If this project isn’t on one of your devices, you won’t be able to open it again.</p>
         ) : null}
         <p className='text-xs text-muted-foreground'>
-          Cloud storage is retained internally for 30 days before cleanup. It cannot be restored in Tau.
+          Tau keeps the deleted files for at least 30 days, then removes them for good. They can’t be restored in Tau.
         </p>
         {isPending ? (
           <p role='status' aria-busy='true' className='text-sm'>
@@ -159,12 +157,12 @@ function CloudDeleteDialog({
         ) : null}
         {!isPending && account === undefined ? (
           <p role='status' className='text-sm'>
-            Waiting for your cloud session. If this persists, refresh the page before confirming deletion.
+            Checking that you’re signed in. If this takes long, refresh the page.
           </p>
         ) : null}
         {!isPending && account !== undefined && !isSessionReady ? (
           <p role='alert' className='text-sm'>
-            Your cloud account changed. Close this dialog and reopen deletion to review this project’s access.
+            You’re signed in to a different account now. Close this and start again.
           </p>
         ) : null}
         {deletion.isError ? (

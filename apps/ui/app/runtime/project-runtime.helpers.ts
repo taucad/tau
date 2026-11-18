@@ -170,12 +170,18 @@ export const createProjectManifestChangeObserver = ({
   reload,
   report,
   onSettled,
+  onReconciled,
 }: {
   readonly projectId: string;
   readonly getCurrent: () => ObservedManifestState;
   readonly reload: () => void;
   readonly report: (issue: ProjectManifestParseIssue) => void;
   readonly onSettled?: () => void;
+  /**
+   * The bytes the workspace's manifest was just found equal to; `undefined` once it is not known to be any bytes'
+   * (a reload begins, or the bytes read are reported instead).
+   */
+  readonly onReconciled?: (bytes: Uint8Array<ArrayBuffer> | undefined) => void;
 }): {
   readonly check: (input: { readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>> }) => Promise<void>;
   readonly invalidate: () => void;
@@ -188,6 +194,7 @@ export const createProjectManifestChangeObserver = ({
   const reportIssue = (issue: ProjectManifestParseIssue): void => {
     // A later return to the same bytes must reload to clear the report.
     lastObserved = undefined;
+    onReconciled?.(undefined);
     report(issue);
     onSettled?.();
   };
@@ -226,9 +233,12 @@ export const createProjectManifestChangeObserver = ({
       }
       const observed = manifestStateKey({ project: { ...read.data, id: projectId }, issue: read.issue });
       if (current.project !== undefined && manifestStateKey(current) === observed) {
+        onReconciled?.(bytes);
         onSettled?.();
         return;
       }
+      /* The workspace holds another manifest than these bytes, whether or not a reload for them is already owed. */
+      onReconciled?.(undefined);
       if (observed === lastObserved) {
         return;
       }
@@ -246,6 +256,7 @@ export const createProjectManifestChangeObserver = ({
 /**
  * Read the open route's manifest: strict, or degraded with its issue. The
  * established route binding supplies identity independently of the declaration.
+ * The bytes read come back too, so what the project was parsed from can be named.
  */
 export async function resolveScopedProjectManifest({
   contentService,
@@ -253,7 +264,11 @@ export async function resolveScopedProjectManifest({
 }: {
   readonly contentService: FileContentService;
   readonly projectId: string;
-}): Promise<{ readonly project: Project; readonly issue?: ProjectManifestParseIssue }> {
+}): Promise<{
+  readonly project: Project;
+  readonly issue?: ProjectManifestParseIssue;
+  readonly bytes: Uint8Array<ArrayBuffer>;
+}> {
   const outcome = await contentService.resolve('tau.json', { forceText: true });
   if (outcome.kind !== 'text') {
     throw new Error(`Cannot read tau.json for ${projectId}: ${outcome.kind}`);
@@ -263,5 +278,9 @@ export async function resolveScopedProjectManifest({
   if (!read.success) {
     throw new Error(`Invalid tau.json for ${projectId}: ${describeProjectManifestIssue(read.issue).join(' ')}`);
   }
-  return { project: { ...read.data, id: projectId }, ...(read.issue === undefined ? {} : { issue: read.issue }) };
+  return {
+    project: { ...read.data, id: projectId },
+    ...(read.issue === undefined ? {} : { issue: read.issue }),
+    bytes: outcome.content,
+  };
 }

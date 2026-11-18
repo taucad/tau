@@ -38,7 +38,7 @@ import type { SessionsActorRef } from '#machines/sessions.machine.js';
 import { sessionsCloseSuggestions } from '#machines/sessions.machine.js';
 import { selectProjectLiveness } from '#services/sessions-store.js';
 import type { ProjectLivenessStatus } from '#services/sessions-store.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import { useFocus, useSessions } from '#hooks/use-sessions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSidebarState } from '@taucad/chat-ui/types/chat-sidebar.types';
@@ -514,7 +514,7 @@ export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): S
     case 'failed': {
       return {
         mark: 'failed',
-        sentence: row.runtimeFailure === undefined ? 'Failed to open' : kernelFailure(row.runtimeFailure),
+        sentence: row.runtimeFailure === undefined ? 'Couldn’t open' : kernelFailure(row.runtimeFailure),
       };
     }
     case 'opening': {

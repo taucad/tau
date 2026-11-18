@@ -55,7 +55,6 @@ import {
   subscribeRevisionSalt,
   subscribeRevisionSessionUser,
 } from '#lib/revision-actor.js';
-import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import {
   isOwingEditorText,
   isRecordingEditorConflict,
@@ -72,7 +71,7 @@ import type { FlushPhase } from '#runtime/environment.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
 import type { ChatRevisionFacts } from '#services/chat-session-store.js';
-import type { RevisionClient } from '#types/revision-client.types.js';
+import type { RevisionClient, RevisionSessionUser } from '@taucad/revisions-ui/types/revision-client.types';
 
 /** A value that can change: the current value, and a listener called after each change. */
 export type SessionRevisionsObservable<T> = Readonly<{
@@ -213,7 +212,7 @@ export type SessionRevisionsCallback = (
   }>,
 ) => () => void;
 
-const withdrawnCredential = { kind: 'withdrawn', reason: 'Open this project in Tau to sync with GitHub.' } as const;
+const withdrawnCredential = { kind: 'withdrawn', reason: 'Open this project in Tau to back up to GitHub.' } as const;
 
 /** Run every step even when one throws, and report each failure, so a teardown never faults the session (D23). */
 const runIsolated = (steps: ReadonlyArray<(() => void) | undefined>, reportFault: (error: unknown) => void): void => {
@@ -812,7 +811,7 @@ export const sessionRevisionsCallback =
         try {
           await current?.quiesce();
         } catch (error) {
-          refusal = error instanceof Error ? error.message : 'The project could not finish syncing.';
+          refusal = error instanceof Error ? error.message : 'Couldn’t finish backing up this project.';
         }
         if (!stopped) {
           sendBack({

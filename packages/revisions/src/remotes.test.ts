@@ -48,6 +48,8 @@ import {
   isCeilingRefusal,
   isStorageRefusal,
   quotaRefusalMarker,
+  refusalCodeLineDetail,
+  withoutQuotaMarker,
 } from '#refusal-markers.js';
 import { syncFailureReason } from '#sync.machine.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -249,7 +251,7 @@ describe('remotes', () => {
     );
     // The refusal names files, never a count (D16, AC16).
     expect(lfsRemoteUnsupportedMessage(['models/housing.step', 'models/bracket.step'])).toBe(
-      'Large files cannot be backed up to a Git remote: models/bracket.step, models/housing.step. Connect Tau Cloud instead, or remove them from the project.',
+      'Large files can’t be backed up to this Git host: models/bracket.step, models/housing.step. Back up to Tau Cloud instead, or remove them from the project.',
     );
   });
 });
@@ -296,7 +298,7 @@ describe('remoteTransportError', () => {
   });
 
   /* D66: a repository transferred out of the App's reach answers 403 in plain
-   * text; Tau replaced that with "rejected the saved credentials". */
+   * text; Tau replaced that with "didn’t accept Tau’s saved sign-in". */
   it('keeps GitHub’s plain-text refusal as the sentence, and ignores an HTML error page', () => {
     const refused = (response: string): RevisionPortError =>
       remoteTransportError(
@@ -311,7 +313,7 @@ describe('remoteTransportError', () => {
       message: 'Write access to repository not granted.',
     });
     expect(refused('<!DOCTYPE html><html>…</html>').message).toBe(
-      'GitHub refused access to this repository for the connected account.',
+      'The connected GitHub account can’t open this repository.',
     );
   });
 
@@ -348,7 +350,7 @@ describe('remoteTransportError', () => {
 
     expect(error).toMatchObject({
       code: 'REMOTE_REAUTHORIZATION_REQUIRED',
-      message: 'The remote rejected the saved credentials.',
+      message: 'GitHub didn’t accept Tau’s saved sign-in. Connect GitHub again in Tau.',
     });
   });
 
@@ -365,7 +367,7 @@ describe('remoteTransportError', () => {
 
     expect(error).toMatchObject({
       code: 'REMOTE_REAUTHORIZATION_REQUIRED',
-      message: 'This remote asked for a sign-in Tau does not have, or has no repository at this address.',
+      message: 'This Git host asked for a sign-in Tau doesn’t have, or there’s no repository at this address.',
     });
   });
 
@@ -510,6 +512,47 @@ describe('remoteTransportError', () => {
     expect(commitRefusalMarker).toBe('Tau: refused commit');
     expect(isCommitRefusal('Tau: refused refs/heads/main — it does not fast-forward.')).toBe(false);
     expect(isCommitRefusal(undefined)).toBe(false);
+  });
+
+  /* Tier 2a (R-1): the hook's `Tau-Code:` line is a key, never part of the sentence, on either leg; with no such line nothing changes. */
+  it('leaves the hook’s code line out of the refusal’s sentence on both legs', () => {
+    const sentence = 'Tau: refused refs/heads/main — it does not fast-forward abc; fetch and merge first.';
+    const refusal = remoteTransportError(new Error('git push failed'), {
+      remote: tauRemoteName,
+      stderr: [
+        'remote: Tau-Code: GIT_PUSH_NOT_FAST_FORWARD',
+        `remote: ${sentence}`,
+        'remote: error: hook declined',
+      ].join('\n'),
+    });
+
+    expect(refusal).toMatchObject({ code: 'REMOTE_REJECTED', message: sentence });
+    expect(remoteRefusalSaid('pre-receive hook declined', ['Tau-Code: GIT_PUSH_NOT_FAST_FORWARD', sentence])).toBe(
+      sentence,
+    );
+    expect(refusalCodeLineDetail('Tau-Code: GIT_PUSH_FILE_TOO_LARGE models/a.step')).toBe(
+      'GIT_PUSH_FILE_TOO_LARGE models/a.step',
+    );
+    expect(refusalCodeLineDetail(sentence)).toBeUndefined();
+    /* A storage refusal behind a code line is still filed by its marker. */
+    const storage = remoteTransportError(new Error('git push failed'), {
+      remote: tauRemoteName,
+      stderr: ['remote: Tau-Code: GIT_PUSH_QUOTA', `remote: ${quotaRefusalMarker} — this push needs 1 byte more.`].join(
+        '\n',
+      ),
+    });
+    expect(storage).toMatchObject({
+      code: 'REMOTE_QUOTA_EXCEEDED',
+      message: `${quotaRefusalMarker} — this push needs 1 byte more.`,
+    });
+  });
+
+  /* Tier 2a (R-2): the quota marker in front of a large-file sentence is a key. */
+  it('reads a large-file sentence without the quota marker in front of it', () => {
+    expect(withoutQuotaMarker(`${quotaRefusalMarker} — This push needs more room.`)).toBe('This push needs more room.');
+    expect(withoutQuotaMarker(`${quotaRefusalMarker}: This push needs more room.`)).toBe('This push needs more room.');
+    expect(withoutQuotaMarker('This push needs more room.')).toBe('This push needs more room.');
+    expect(withoutQuotaMarker(quotaRefusalMarker)).toBe('');
   });
 
   it('keeps a 503 race-lost and an unmarked 500 retryable', () => {
@@ -781,8 +824,8 @@ describe('registerProjectFailureMessage', () => {
     expect(registerProjectFailureMessage(403, 'GIT_SYNC_NOT_ENTITLED')).toBe(
       'Syncing files to Tau Cloud is a paid plan feature.',
     );
-    expect(registerProjectFailureMessage(404)).toBe('Tau Cloud has no project with this id for your account.');
-    expect(registerProjectFailureMessage(500)).toBe('Tau Cloud could not register this project. Try again.');
+    expect(registerProjectFailureMessage(404)).toBe('This project isn’t on Tau Cloud for this account.');
+    expect(registerProjectFailureMessage(500)).toBe('Couldn’t start backing up to Tau Cloud. Try again.');
   });
 });
 
@@ -803,8 +846,8 @@ describe('publishFailureMessage', () => {
     [400, 'MISSING_ENTRY_PATH', 'This version does not contain the file this project opens with.'],
     [413, undefined, 'This version is larger than a shared link may be.'],
     [400, 'PAYLOAD_TOO_LARGE', 'This version is larger than a shared link may be.'],
-    [500, undefined, 'Tau Cloud could not publish this project. Try again.'],
-    [429, 'SOMETHING_NEW', 'Tau Cloud could not publish this project. Try again.'],
+    [500, undefined, 'Couldn’t publish to Tau Cloud. Try again.'],
+    [429, 'SOMETHING_NEW', 'Couldn’t publish to Tau Cloud. Try again.'],
   ];
 
   it.each(rows)('answers %i/%s with one sentence for every host', (status, code, message) => {

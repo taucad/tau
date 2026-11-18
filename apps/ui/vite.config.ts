@@ -13,7 +13,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
 import { defaultClientConditions, defaultServerConditions, defineConfig } from 'vite';
-import type { Plugin, UserConfig } from 'vite';
+import type { EnvironmentOptions, Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
 import { moduleIdManifest } from '@taucad/vite/module-id-manifest';
@@ -83,11 +83,16 @@ const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undef
  * packages bundle into the SSR output.
  *
  * Audit first-party sources: rg -n "new URL\(['\"]\.\..*\.(?:js|ts)['\"], import\.meta\.url\)" packages/
+ *
+ * The lists are the server environment's `resolve` options (`environments.ssr.resolve`): under React Router 8's
+ * Environment API build the top-level `ssr.external` and `ssr.noExternal` are not honoured, and
+ * `@taucad/runtime` was bundled into the server without a warning (React Router 8 migration RR5, round-2 finding 2).
+ * `scripts/check-server-output.mts` asserts the external specifiers survive in the built server.
  */
 export const uiSsrOptions = {
   noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js'],
   external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
-} as const satisfies UserConfig['ssr'];
+} as const satisfies NonNullable<EnvironmentOptions['resolve']>;
 
 /**
  * The build-target seam (charter D2), shared with `desktop/` and `serve/vite.config.ts`.
@@ -177,7 +182,6 @@ const cloudBoundarySpecifiers = new Set([
   '#cloud/commercial-features.js',
   '#cloud/environment-billing.js',
   '#cloud/financial-purge.js',
-  '#cloud/gateway-model-transport.js',
   '#cloud/nav-billing.js',
   '#cloud/kernel-commerce.js',
   '#cloud/root-billing.js',
@@ -440,7 +444,7 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
 export const createUiReactCompilerPlugin = (): Plugin => {
   const compilerPlugins = react({
     compiler: { target: '19', logDiagnostics: true },
-    // The ui-kit (UI wave A), chat-ui (UI wave B), project-workspace (UI wave C), files-ui, editor-ui, settings-ui and publish-ui (UI wave D) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
+    // The ui-kit (UI wave A), chat-ui (UI wave B), project-workspace (UI wave C), files-ui, editor-ui, revisions-ui, settings-ui, publish-ui and billing-ui (UI wave D) and ui-core (UI wave E) libraries were cut from apps/ui/app and keep the compilation they had there.
     include: [
       '**/apps/ui/app/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-kit/src/**/*.{js,jsx,ts,tsx}',
@@ -448,8 +452,10 @@ export const createUiReactCompilerPlugin = (): Plugin => {
       '**/apps/libs/project-workspace/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/files-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/editor-ui/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/revisions-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/settings-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/publish-ui/src/**/*.{js,jsx,ts,tsx}',
+      '**/apps/libs/billing-ui/src/**/*.{js,jsx,ts,tsx}',
       '**/apps/libs/ui-core/src/**/*.{js,jsx,ts,tsx}',
     ],
     exclude: [
@@ -522,7 +528,7 @@ const createSentryReleaseRecordPlugin = (buildId: number): Plugin => ({
 /** Where the web client build writes its module-id manifest (`@taucad/vite/module-id-manifest`). */
 const criticalModuleIdsPath = path.resolve(__dirname, 'build/client-module-ids.json');
 
-export default defineConfig(({ command, mode, isSsrBuild }) => {
+export default defineConfig(({ command, mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   // Deploys load the pinned host from the digest mirror; development and e2e serve a prepared bundle.
   const picogkAssets = createPicogkBrowserAssets(process.env['PICOGK_BROWSER_ASSETS_ROOT'], {
@@ -693,15 +699,40 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
         createAssetIntegrity({ receipt: false }),
       ],
     },
-    // Merged over the shared `define` for the server graph only (see `buildIdDefine`).
-    ...(isProductionBuild ? { environments: { ssr: { define: serverDefine } } } : {}),
+    /*
+     * React Router 8 builds the client and server environments from this one config (the Environment API, with
+     * shared config and plugins), so an option for one graph only is set on its environment.
+     */
+    environments: {
+      /*
+       * Chunk grouping (progressive loading PL5): every lucide icon in one chunk. Left to automatic chunking, each icon
+       * that two lazy chunks share became a chunk of its own (72 requests of Home's interactive tier, 95 of the
+       * project route's, a few hundred bytes each); together the icons are about 18 KB brotli. The client build only:
+       * the server build evaluates every icon anyway.
+       */
+      client: {
+        build: {
+          rolldownOptions: {
+            output: {
+              codeSplitting: {
+                groups: [{ name: 'icons', test: /[\\/]node_modules[\\/](?:.+[\\/])?lucide-react[\\/]/u }],
+              },
+            },
+          },
+        },
+      },
+      ssr: {
+        // Merged over the shared `define` for the server graph only (see `buildIdDefine`).
+        ...(isProductionBuild ? { define: serverDefine } : {}),
+        resolve: { ...uiSsrOptions },
+      },
+    },
     resolve: {
       alias: [
         ...uiResolveAlias,
         ...(isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : []),
       ],
     },
-    ssr: uiSsrOptions,
     optimizeDeps: {
       exclude: [...uiOptimizeDepsOptions.exclude],
       // Test mode (Vitest, the calibration preview) runs without React Router's entries; keep Vite's default crawl.
@@ -742,23 +773,6 @@ export default defineConfig(({ command, mode, isSsrBuild }) => {
         return undefined;
       },
       target: 'es2022',
-      /*
-       * Chunk grouping (progressive loading PL5): every lucide icon in one chunk. Left to automatic chunking, each icon
-       * that two lazy chunks share became a chunk of its own (72 requests of Home's interactive tier, 95 of the
-       * project route's, a few hundred bytes each); together the icons are about 18 KB brotli. The client build only:
-       * the server build evaluates every icon anyway.
-       */
-      ...(isSsrBuild === true
-        ? {}
-        : {
-            rolldownOptions: {
-              output: {
-                codeSplitting: {
-                  groups: [{ name: 'icons', test: /[\\/]node_modules[\\/](?:.+[\\/])?lucide-react[\\/]/u }],
-                },
-              },
-            },
-          }),
       /*
        * The offline shell allowlist is generated from this manifest
        * (`scripts/generate-offline-shell.ts`), so hashed filenames are never

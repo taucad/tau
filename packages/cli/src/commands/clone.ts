@@ -65,8 +65,8 @@ const listCloudProjects = async (
     throw cliError(
       response.status === 401 ? 'NO_AUTH_TOKEN' : 'PROJECTS_UNAVAILABLE',
       response.status === 401
-        ? 'Tau Cloud did not accept this token. Set TAU_AUTH_TOKEN to a current session token.'
-        : 'Tau Cloud could not list this account’s projects. Try again.',
+        ? 'This token isn’t valid for your Tau account. Set TAU_AUTH_TOKEN to a current session token.'
+        : 'Couldn’t list this account’s projects. Try again.',
       exitCodes.refused,
     );
   }

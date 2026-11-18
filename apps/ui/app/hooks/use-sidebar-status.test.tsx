@@ -18,7 +18,7 @@ import type { SessionsActorRef, SessionsProjectStatus } from '#machines/sessions
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import { useSessions } from '#hooks/use-sessions.js';
 import {
   chatStatusLabel,
@@ -53,7 +53,7 @@ vi.mock('#hooks/use-sessions.js', () => ({
     policyRefusal: undefined,
   }),
 }));
-vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: vi.fn() }));
+vi.mock('@taucad/revisions-ui/services/revision-client-registry', () => ({ peekRevisionClient: vi.fn() }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({
@@ -835,7 +835,7 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
 
     liveProject('gearbox', { state: 'failed' });
     expect(rowOf('gearbox').glyph).toBe('failed');
-    expect(expanded('gearbox')).toEqual({ mark: 'failed', sentence: 'Failed to open' });
+    expect(expanded('gearbox')).toEqual({ mark: 'failed', sentence: 'Couldn’t open' });
   });
 
   it('says whether every project is live (D12)', () => {
@@ -1297,7 +1297,8 @@ const compiledHooks = await (async () => {
     '@taucad/chat-ui/utils/error.utils': await import('@taucad/chat-ui/utils/error.utils'),
     '#machines/sessions.machine.js': await import('#machines/sessions.machine.js'),
     '#services/sessions-store.js': await import('#services/sessions-store.js'),
-    '#services/revision-client-registry.js': await import('#services/revision-client-registry.js'),
+    '@taucad/revisions-ui/services/revision-client-registry':
+      await import('@taucad/revisions-ui/services/revision-client-registry'),
     '#hooks/use-sessions.js': await import('#hooks/use-sessions.js'),
     '#hooks/chat-session-store-provider.js': await import('#hooks/chat-session-store-provider.js'),
     '@taucad/ui-core/lib/xstate.lib': await import('@taucad/ui-core/lib/xstate.lib'),

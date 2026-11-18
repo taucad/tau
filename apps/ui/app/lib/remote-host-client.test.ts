@@ -43,7 +43,7 @@ describe('remote host runtime environment', () => {
 
     expect(refusal).toBeInstanceOf(RemoteHostApiError);
     expect(refusal).toMatchObject({ code: 'BUSY' });
-    expect((refusal as Error).message).toMatch(/already running/iu);
+    expect((refusal as Error).message).toMatch(/is busy/iu);
   });
 
   /*

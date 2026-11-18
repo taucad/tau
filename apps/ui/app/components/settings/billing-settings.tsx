@@ -23,8 +23,8 @@ import {
   BillingNotice,
   BillingStatusBadge,
   formatBillingDate,
-} from '#components/billing/billing-primitives.js';
-import { MonthlyCreditsMeter } from '#components/billing/monthly-credits-meter.js';
+} from '@taucad/billing-ui/components/billing/billing-primitives';
+import { MonthlyCreditsMeter } from '@taucad/billing-ui/components/billing/monthly-credits-meter';
 import { TopupModal } from '#components/billing/topup-modal.js';
 import { PlanCards } from '#components/billing/plan-cards.js';
 import { AutoReloadSettings } from '#components/billing/auto-reload-settings.js';

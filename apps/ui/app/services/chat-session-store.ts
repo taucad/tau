@@ -1887,6 +1887,17 @@ export class ChatSessionStore {
     return this.#observed.get(chatId)?.status ?? 'unknown';
   }
 
+  /**
+   * The host whose log this chat is attached to now: where its runs ran and its refusals came from, whatever the
+   * composer is set to since. `undefined` while unattached or attached to this page's own host.
+   *
+   * @public
+   */
+  public getAttachedHostId(chatId: string): TauAgentHostId | undefined {
+    const observed = this.#observed.get(chatId);
+    return observed?.status === 'attached' ? observed.placement?.hostId : undefined;
+  }
+
   /** Exact usage can be read only after both the host log and foreign segments reached this projection. */
   public historicalUsageReady(chatId: string, projectId: string): boolean {
     const projection = this.#projectionContext(chatId);
@@ -2638,7 +2649,7 @@ export class ChatSessionStore {
         ? {
             items: after.items,
             status: 'blocked',
-            error: 'Message saved. Delivery could not be confirmed. Retry to continue.',
+            error: 'Message saved, but Tau couldn’t confirm it was delivered. Try again.',
           }
         : { items: after.items, status: 'changed' };
     });
@@ -4513,7 +4524,7 @@ export class ChatSessionStore {
             if (observed.status === 'error' || observed.status === 'closed') {
               messageQueueRef.send({
                 type: 'watchFailed',
-                error: observed.error ?? 'Queue updates disconnected. Retry to reconnect.',
+                error: observed.error ?? 'Lost the connection to your queued messages. Try again.',
               });
             }
           });

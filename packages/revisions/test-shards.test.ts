@@ -68,9 +68,11 @@ describe('revisions:test shards', () => {
     for (const name of shardTargets) {
       expect(targets[name]?.executor).toBe('nx:run-commands');
       expect(targets[name]?.cache).toBe(true);
-      // The inferred `test` takes `dependsOn` and `inputs` from nx.json's targetDefaults.
+      // `test` takes `dependsOn` from nx.json's targetDefaults; each shard declares the inputs `test` declares, so a
+      // file a shard's tests read selects and re-runs it as it does `test`.
       expect(targets[name]?.dependsOn).toEqual(['copy-assets', '^copy-assets']);
-      expect(targets[name]?.inputs).toEqual(['default', '^production', 'serviceEnvironment']);
+      expect(targets[name]?.inputs).toEqual(targets['test']?.inputs);
+      expect(targets[name]?.inputs).toContain('serviceEnvironment');
       // No coverage output: a shard never measures coverage (see the thresholds test below).
       expect(targets[name]?.outputs).toBeUndefined();
     }

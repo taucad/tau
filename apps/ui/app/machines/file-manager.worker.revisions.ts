@@ -2048,6 +2048,8 @@ export type WorkerRevisionRegistryOptions = Readonly<{
   released?: (projectId: string) => void;
   /** Told each status one project's root publishes, from its first, for the host's open telemetry (STO-25). */
   observeStatus?: (projectId: string, status: RevisionStatusProjection) => void;
+  /** Told when a page says a project's Tau Cloud open shows its first view, for the host's open telemetry (STO-25). */
+  firstViewShown?: (projectId: string) => void;
   /** One rooted provider per checkout route. */
   filesystem: (root: string) => RootedFileSystem | Promise<RootedFileSystem>;
   /**
@@ -2544,6 +2546,13 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
           /* Focus is the page's fact about its projects (F12); a reader has none to give. */
           if (!reader) {
             entry.setFocused(data.focused);
+          }
+          return;
+        }
+        if (data.command === 'firstViewShown') {
+          /* What the page shows, like focus: a reader shows nothing. */
+          if (!reader) {
+            options.firstViewShown?.(projectId);
           }
           return;
         }

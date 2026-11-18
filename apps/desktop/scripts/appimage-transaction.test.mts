@@ -38,7 +38,7 @@ const bytesB = '#!/bin/sh\nprintf "B\\n"\n';
 const digest = (bytes: string | Uint8Array<ArrayBuffer>): string => createHash('sha512').update(bytes).digest('base64');
 const child = (arguments_: string[]) =>
   spawnSync(process.execPath, [...process.execArgv, self, ...arguments_], { encoding: 'utf8' });
-const setup = (full = false) => {
+const setup = (full = false, acknowledged = true) => {
   const root = mkdtempSync(full ? '/limited/tau-appimage-' : '/tmp/tau-appimage-');
   const install = join(root, 'install');
   mkdirSync(install, { mode: 0o700 });
@@ -48,7 +48,9 @@ const setup = (full = false) => {
   writeFileSync(current, bytesA, { mode: 0o700 });
   writeFileSync(path, bytesB, { mode: 0o700 });
   writeFileSync(join(root, 'profile.json'), '{"project":"preserve","schema":1}\n');
-  acknowledgeHealthyAppImage({ current, expectedCurrent: digest(bytesA), version: '1.0.1' });
+  if (acknowledged) {
+    acknowledgeHealthyAppImage({ current, expectedCurrent: digest(bytesA), version: '1.0.1' });
+  }
   return {
     root,
     install,
@@ -245,6 +247,54 @@ const main = async (): Promise<void> => {
     passed += 4;
   } finally {
     cleanup(fixture);
+  }
+  // T-B22.2: a launch that never became healthy may still update forward when the caller says so (D8).
+  const unacknowledged = setup(false, false);
+  try {
+    const health = `${unacknowledged.current}.update-health.json`;
+    await assert.rejects(
+      prepareAppImageInstallation({
+        current: unacknowledged.current,
+        expectedCurrent: digest(bytesA),
+        candidate: unacknowledged.candidate,
+      }),
+      /must acknowledge healthy startup/u,
+    );
+    const forward = await prepareAppImageInstallation({
+      current: unacknowledged.current,
+      expectedCurrent: digest(bytesA),
+      candidate: unacknowledged.candidate,
+      allowUnacknowledged: true,
+    });
+    forward.commit();
+    assert.equal(execFileSync(unacknowledged.current, [], { encoding: 'utf8' }), 'B\n');
+    assert.equal(oldRecovery(unacknowledged.install), true, 'the image it replaced is retained');
+    assert.equal(existsSync(health), false, 'no health record is written for an unacknowledged image');
+    unchangedProfile(unacknowledged.root);
+    passed += 2;
+  } finally {
+    cleanup(unacknowledged);
+  }
+  const missingRecovery = setup();
+  try {
+    for (const name of readdirSync(missingRecovery.install).filter((entry) => entry.includes('.healthy-'))) {
+      rmSync(join(missingRecovery.install, name));
+    }
+    for (const allowUnacknowledged of [false, true]) {
+      await assert.rejects(
+        prepareAppImageInstallation({
+          current: missingRecovery.current,
+          expectedCurrent: digest(bytesA),
+          candidate: missingRecovery.candidate,
+          allowUnacknowledged,
+        }),
+        /ENOENT|Healthy AppImage recovery is unavailable/u,
+      );
+      assert.equal(readFileSync(missingRecovery.current, 'utf8'), bytesA);
+    }
+    passed += 1;
+  } finally {
+    cleanup(missingRecovery);
   }
   if (existsSync('/limited')) {
     const full = setup(true);

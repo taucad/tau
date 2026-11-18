@@ -3336,6 +3336,52 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
+  apps/libs/billing-ui:
+    dependencies:
+      '@tanstack/react-table':
+        specifier: ^8.21.3
+        version: 8.21.3(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@taucad/billing':
+        specifier: workspace:*
+        version: link:../billing
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../../libs/types
+      '@taucad/ui':
+        specifier: workspace:*
+        version: link:../../../packages/ui
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
+      '@taucad/ui-kit':
+        specifier: workspace:*
+        version: link:../ui-kit
+      date-fns:
+        specifier: 'catalog:'
+        version: 4.4.0
+      lucide-react:
+        specifier: 'catalog:'
+        version: 0.552.0(react@19.3.1)
+      react-day-picker:
+        specifier: ^10.0.1
+        version: 10.0.2(@types/react@19.2.17)(react@19.3.1)
+      recharts:
+        specifier: ^3.8.1
+        version: 3.10.1(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react-is@19.3.0)(react@19.3.1)(redux@5.0.1)
+    devDependencies:
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.6.3
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.2)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.1(react@19.3.1)
+
   apps/libs/chat-ui:
     dependencies:
       '@ai-sdk/react':
@@ -3441,6 +3487,9 @@ importers:
       '@taucad/brep':
         specifier: workspace:*
         version: link:../../../packages/plugins/brep
+      '@taucad/cadmpeg':
+        specifier: workspace:*
+        version: link:../../../packages/plugins/cadmpeg
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../../packages/plugins/gltf
@@ -3584,6 +3633,9 @@ importers:
       '@taucad/types':
         specifier: workspace:*
         version: link:../../../libs/types
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../../libs/utils
       '@taucad/zoo':
         specifier: workspace:*
         version: link:../../../packages/plugins/zoo
@@ -4021,6 +4073,9 @@ importers:
 
   apps/libs/publish-ui:
     dependencies:
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.104.2(react@19.3.1)
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../../packages/filesystem
@@ -4073,6 +4128,9 @@ importers:
 
   apps/libs/revisions-ui:
     dependencies:
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.104.2(react@19.3.1)
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../../packages/agent-host
@@ -4101,6 +4159,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.3.1(react@19.3.1)
+      vitest-mock-extended:
+        specifier: 'catalog:'
+        version: 4.0.0(typescript@5.9.3)(vitest@4.1.11)
 
   apps/libs/settings-ui:
     dependencies:
@@ -4677,6 +4738,9 @@ importers:
       '@taucad/billing':
         specifier: workspace:*
         version: link:../libs/billing
+      '@taucad/billing-ui':
+        specifier: workspace:*
+        version: link:../libs/billing-ui
       '@taucad/brep':
         specifier: workspace:*
         version: link:../../packages/plugins/brep

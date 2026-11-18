@@ -6,9 +6,9 @@ import { cn } from '@taucad/ui/utils/cn';
 import { formatCreditAtomsDisplay, monthlyCreditsFromBalance } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
-import { MonthlyCreditsMeter } from '#components/billing/monthly-credits-meter.js';
+import { MonthlyCreditsMeter } from '@taucad/billing-ui/components/billing/monthly-credits-meter';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { ProBadge } from '#components/tier-badge.js';
+import { ProBadge } from '@taucad/billing-ui/components/tier-badge';
 import type { NavRoute } from '#constants/route.constants.js';
 
 export const billingNavRoutes: NavRoute[] = [

@@ -307,6 +307,8 @@ describe('resolveScopedProjectManifest', () => {
 
     await expect(resolveScopedProjectManifest({ contentService, projectId: expected.id })).resolves.toEqual({
       project: expected,
+      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
+      bytes: expect.any(Uint8Array),
     });
     expect(contentService.resolve).toHaveBeenCalledWith('tau.json', { forceText: true });
   });
@@ -323,6 +325,8 @@ describe('resolveScopedProjectManifest', () => {
       project: current,
       /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
       issue: expect.objectContaining({ code: 'manifest-invalid' }),
+      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
+      bytes: expect.any(Uint8Array),
     });
   });
 
@@ -357,6 +361,8 @@ describe('resolveScopedProjectManifest', () => {
 
     await expect(resolveScopedProjectManifest({ contentService, projectId: expectedId })).resolves.toEqual({
       project: { ...project('Other'), id: expectedId },
+      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
+      bytes: expect.any(Uint8Array),
     });
   });
 

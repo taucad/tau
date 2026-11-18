@@ -7,7 +7,7 @@
   "targets": {
     "formal:nightly": {},
     "setup-env": {
-      "command": "if [ ! -f \"./apps/api/.env\" ]; then cp ./apps/api/.env.example ./apps/api/.env; fi"
+      "command": "node -e \"const fs = require('node:fs'); if (!fs.existsSync('apps/api/.env')) fs.copyFileSync('apps/api/.env.example', 'apps/api/.env')\""
     },
     "deploy": {
       "executor": "nx:run-commands",

@@ -27,6 +27,7 @@
 import { Topic } from '@taucad/events';
 import { ENV } from '#environment.config.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
+import type { PushEntry, PushPusher, PushRecordSnapshot } from '@taucad/revisions-ui/types/revision-push.types';
 
 /** The push-read format this client understands (`apps/api` `pushPageFormat`). */
 const pushPageFormat = 1;
@@ -36,23 +37,6 @@ const maximumPagesPerRefresh = 20;
 
 /** The ref family whose tips are History's branches (`apps/api` `pushTipPrefix`). */
 const branchRefPrefix = 'refs/heads/';
-
-/** Who pushed, as this viewer may see it: an account, or `anonymous` for a member who is not the owner (Q3). */
-export type PushPusher =
-  | Readonly<{ kind: 'account'; accountId: string; name?: string }>
-  | Readonly<{ kind: 'anonymous' }>;
-
-/** One push record, as a member reads it. @public */
-export type PushEntry = Readonly<{
-  generation: number;
-  pusher: PushPusher;
-  /** The owner's read of a push that brought an anonymous commit: the account is shown, marked as recorded anonymously. */
-  anonymous?: true;
-  /** A host device pushed it on the account's behalf ("by a cloud agent host"). */
-  viaDevice: boolean;
-  /** The commits the branches it moved now hold. */
-  tips: readonly string[];
-}>;
 
 /** One member directory entry: an id and a name. */
 export type PushMember = Readonly<{ accountId: string; name?: string; isMember: boolean }>;
@@ -232,18 +216,6 @@ type PushState = {
   again: boolean;
   lastToken: string | undefined;
 };
-
-/** What the resolver reads for one project. @public */
-export type PushRecordSnapshot = Readonly<{
-  /** The push an entry belongs to, or `undefined` for an entry no held push reaches. */
-  pushOf: (revisionId: string) => PushEntry | undefined;
-  /** Directory names by account id. */
-  nameOf: (accountId: string) => string | undefined;
-  /** Whether the account is in the directory at all. */
-  isNamed: (accountId: string) => boolean;
-  /** Current members of the project. */
-  memberCount: number;
-}>;
 
 const topic = new Topic<void>({ name: 'revision-pushes' });
 const states = new Map<string, PushState>();

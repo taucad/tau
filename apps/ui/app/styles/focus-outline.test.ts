@@ -22,6 +22,7 @@ const uiLibraries = [
   'revisions-ui',
   'settings-ui',
   'publish-ui',
+  'billing-ui',
   'ui-core',
 ] as const;
 

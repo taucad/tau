@@ -28,6 +28,8 @@
   "exports": {
     "./components/publish/publication-access-panel": "./src/components/publish/publication-access-panel.tsx",
     "./components/publish/publication-email-tags": "./src/components/publish/publication-email-tags.tsx",
+    "./components/share/github-gist-management": "./src/components/share/github-gist-management.tsx",
+    "./components/share/github-gist-services": "./src/components/share/github-gist-services.tsx",
     "./components/share/parsed-publication": "./src/components/share/parsed-publication.ts",
     "./components/share/paused-model-gate": "./src/components/share/paused-model-gate.tsx",
     "./components/share/publication-lock-screen": "./src/components/share/publication-lock-screen.tsx",
@@ -52,6 +54,7 @@
     "vitest-mock-extended": "catalog:"
   },
   "dependencies": {
+    "@tanstack/react-query": "catalog:",
     "@taucad/filesystem": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/share": "workspace:*",

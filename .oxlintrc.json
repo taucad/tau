@@ -1130,6 +1130,7 @@
         "apps/libs/revisions-ui/src/**/*.{ts,tsx}",
         "apps/libs/settings-ui/src/**/*.{ts,tsx}",
         "apps/libs/publish-ui/src/**/*.{ts,tsx}",
+        "apps/libs/billing-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
       // Tests and route entries retain the uncompiled React Router/Vitest transform paths.
@@ -1141,6 +1142,7 @@
         "apps/libs/revisions-ui/src/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/settings-ui/src/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/publish-ui/src/**/*.{test,spec}.{ts,tsx}",
+        "apps/libs/billing-ui/src/**/*.{test,spec}.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{test,spec}.{ts,tsx}",
         "apps/ui/app/root.{ts,tsx}",
         "apps/ui/app/routes/*.{ts,tsx}",
@@ -1555,11 +1557,7 @@
     },
     {
       // Current revision inversions. -- W8
-      "files": [
-        "apps/ui/app/hooks/use-restore-to-point.ts",
-        "apps/ui/app/hooks/use-revisions.test.tsx",
-        "apps/ui/app/hooks/use-revisions.ts"
-      ],
+      "files": ["apps/ui/app/hooks/use-restore-to-point.ts"],
       "rules": { "no-restricted-imports": "off" }
     },
     {
@@ -1759,6 +1757,7 @@
         "apps/libs/revisions-ui/src/**/*.{ts,tsx}",
         "apps/libs/settings-ui/src/**/*.{ts,tsx}",
         "apps/libs/publish-ui/src/**/*.{ts,tsx}",
+        "apps/libs/billing-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
       "rules": {
@@ -1777,6 +1776,7 @@
         "apps/libs/revisions-ui/src/**/*.{ts,tsx}",
         "apps/libs/settings-ui/src/**/*.{ts,tsx}",
         "apps/libs/publish-ui/src/**/*.{ts,tsx}",
+        "apps/libs/billing-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}"
       ],
       "excludeFiles": ["**/*.{test,spec}.{ts,tsx}", "**/*.test-harness.{ts,tsx}", "**/*.stories.{ts,tsx}"],
@@ -1795,6 +1795,7 @@
         "apps/libs/revisions-ui/src/**/*.{ts,tsx}",
         "apps/libs/settings-ui/src/**/*.{ts,tsx}",
         "apps/libs/publish-ui/src/**/*.{ts,tsx}",
+        "apps/libs/billing-ui/src/**/*.{ts,tsx}",
         "apps/libs/ui-core/src/**/*.{ts,tsx}",
         "packages/ui/src/**/*.{ts,tsx}"
       ],
@@ -1832,6 +1833,7 @@
         "apps/libs/revisions-ui/src/**/*.tsx",
         "apps/libs/settings-ui/src/**/*.tsx",
         "apps/libs/publish-ui/src/**/*.tsx",
+        "apps/libs/billing-ui/src/**/*.tsx",
         "apps/libs/ui-core/src/**/*.tsx",
         "packages/ui/src/**/*.tsx"
       ],

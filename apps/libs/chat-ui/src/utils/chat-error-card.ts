@@ -26,6 +26,7 @@ export type CodeCardCategory =
   | 'externalRestart'
   | 'fundedLimit'
   | 'billingRecovery'
+  | 'deploymentUnknown'
   | 'accountRestricted';
 
 type CodeCard = Readonly<{
@@ -70,6 +71,7 @@ const codeCards = {
   LEADER_VERSION_MISMATCH: { category: 'otherBuild' },
   MODEL_ATTEMPT_PENDING: { category: 'modelPending' },
   BILLING_RECOVERY_UNAVAILABLE: { category: 'billingRecovery' },
+  DEPLOYMENT_UNKNOWN: { category: 'deploymentUnknown' },
   FUNDED_OPERATION_LIMIT: { category: 'fundedLimit' },
   RUN_UNREADABLE: { category: 'update' },
   HISTORY_INVALID: { category: 'historyInvalid' },

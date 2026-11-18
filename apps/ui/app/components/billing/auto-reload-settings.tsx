@@ -13,7 +13,7 @@ import {
   BillingStatusBadge,
   SummaryList,
   SummaryRow,
-} from '#components/billing/billing-primitives.js';
+} from '@taucad/billing-ui/components/billing/billing-primitives';
 import { SettingsSectionCard } from '@taucad/settings-ui/components/settings/settings-item';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import {

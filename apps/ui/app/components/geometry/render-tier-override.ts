@@ -1,9 +1,9 @@
-import type { RenderTierOverride } from '@taucad/viewer/graphics/three/render-tier';
+import type { RenderTier, RenderTierOverride } from '@taucad/viewer/graphics/three/render-tier';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 import { ENV } from '#environment.config.js';
 import { resolveTauDebugDefault } from '#flags/flag.constants.js';
 
-const renderTierQueryValues: ReadonlyArray<RenderTierOverride['features']> = ['hardware', 'software'];
+const renderTierQueryValues: ReadonlyArray<RenderTier['rasterizer']> = ['hardware', 'software'];
 
 /**
  * Parse the test-only `renderTier` override from a URL search string: `?renderTier=hardware` makes every canvas run

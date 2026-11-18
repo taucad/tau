@@ -314,7 +314,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.5 | Apache-2.0 OR MIT |
 | [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.1 | MIT |
 | [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.1 | MIT |
-| [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 3.0.0-beta.1 | MIT |
+| [@taulabs/three-viewport-gizmo](https://github.com/taucad/three-viewport-gizmo) | 3.0.0-beta.2 | MIT |
 | [@tiptap/core](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tiptap/extension-bubble-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
 | [@tiptap/extension-floating-menu](https://github.com/ueberdosis/tiptap) | 3.31.4 | MIT |
@@ -711,8 +711,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [n8ao](https://github.com/N8python/n8ao) | 1.10.2 | ISC |
 | [nanoid](https://github.com/ai/nanoid) | 5.1.16 | MIT |
-| [nanoraster](https://github.com/taucad/nanoraster) | 0.9.0 | Apache-2.0 |
-| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.9.0 | Apache-2.0 |
+| [nanoraster](https://github.com/taucad/nanoraster) | 0.10.0 | Apache-2.0 |
+| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.10.0 | Apache-2.0 |
 | [nanostores](https://github.com/nanostores/nanostores) | 1.5.5 | MIT |
 | [ndarray](https://github.com/mikolalysenko/ndarray) | 1.1.1 | MIT |
 | [ndarray-lanczos](https://github.com/donmccurdy/ndarray-lanczos) | 0.3.0 | MIT |

@@ -43,7 +43,8 @@ export type ViewerCaptureImageOptions = {
     radiusPixels: number;
     intensity: number;
     distanceFalloff: number;
-    thicknessRatio: number;
+    falloffEndRatio: number;
+    falloffRange: number;
     denoiseDepthTolerance: number;
     samples: number;
     resolutionScale: number;
@@ -144,8 +145,9 @@ export const buildViewerCaptureImageOptions = ({
     ao: {
       radiusPixels: radiusCssPixels * pixelRatio,
       intensity: ambientOcclusion.intensity,
-      distanceFalloff: ambientOcclusion.slabDistanceFalloff,
-      thicknessRatio: ambientOcclusion.thicknessRatio,
+      distanceFalloff: ambientOcclusion.distanceFalloff,
+      falloffEndRatio: ambientOcclusion.falloffEndRatio,
+      falloffRange: ambientOcclusion.falloffRange,
       denoiseDepthTolerance: ambientOcclusion.denoiseDepthTolerance,
       samples: ambientOcclusion.samples,
       resolutionScale: ambientOcclusion.resolutionScale,

@@ -468,7 +468,7 @@ jobs:
       actions: 'read'
       pull-requests: 'read'
     strategy:
-      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         lane: [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3]
     steps:
@@ -879,7 +879,7 @@ jobs:
       contents: 'read'
       actions: 'read'
     strategy:
-      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         suite: ${{ fromJSON(needs.plan.outputs.e2e-queue-suites) }}
     env:
@@ -1240,7 +1240,7 @@ jobs:
     # for the up-to-twofold runner variance the formal nightly showed (runs 43167548945 and 43178267338).
     timeout-minutes: 20
     strategy:
-      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         shard: [1, 2, 3]
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
@@ -1950,7 +1950,7 @@ jobs:
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.cli-e2e == 'true' }}
     strategy:
-      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         shard: [1, 2]
     env:

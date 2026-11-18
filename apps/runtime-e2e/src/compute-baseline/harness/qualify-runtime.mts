@@ -8,7 +8,7 @@ import { replicadKernel } from '@taucad/replicad';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 export type QualifyRuntimeOptions = {
-  /** `off` switches the Replicad operation adapter off (the reuse-off reference). */
+  /** `off` switches the Replicad live tier off (`computeReuse: false`, the reuse-off reference). */
   readonly arm: string;
   readonly wasm: 'single' | 'multi' | 'auto';
 };

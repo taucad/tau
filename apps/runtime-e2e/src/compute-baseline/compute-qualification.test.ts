@@ -200,9 +200,9 @@ describe.each(ciModels)('compute reuse qualification: %s', (model) => {
 });
 
 /**
- * Audit F12: with the Replicad operation adapter on, spur-gearbox rendered different bytes from reuse off on every
- * rebuilt step, a comment-only edit included, and the bytes depended on what the cache held. The adapter is off
- * by default since R2 (#2503), so reuse on must render the reuse-off bytes here as everywhere else.
+ * Audit F12: with the text-BRep operation adapter on, spur-gearbox rendered different bytes from reuse off on every
+ * rebuilt step, a comment-only edit included, and the bytes depended on what the cache held. The live tier replaced
+ * the adapter and is on whenever compute reuse is, so reuse on must render the reuse-off bytes here as everywhere else.
  */
 describe('compute reuse qualification: spur-gearbox matrix parity', () => {
   const model = 'spur-gearbox';

@@ -24,7 +24,8 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/events": "workspace:*"
+    "@taucad/events": "workspace:*",
+    "@taucad/utils": "workspace:*"
   },
   "devDependencies": {
     "@taucad/types": "workspace:*",

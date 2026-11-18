@@ -26,6 +26,11 @@
 #   15:41 nightly was retired once two candidates had run them green (resume § 4, § 5b); a dispatch runs
 #   them with `benchmarks`.
 #
+# One job per project (ST-3, lane budget, operator approval 2026-11-18): each selected `test:native-darwin`
+# project runs in a darwin-arm64 job of its own, and the nuget row in another, so the slowest job is one
+# project's suites rather than all of them in series (17.4 / 20.4 min p50 / p90 in one job, 2026-11-17).
+# Every row runs as before, in exactly one job, and the caller's required check needs every job.
+#
 # When called, `ref` is set: the plan takes the rows from the caller instead of selecting them.
 name: Native darwin
 
@@ -103,6 +108,7 @@ jobs:
       pull-requests: read
     outputs:
       projects: ${{ steps.plan.outputs.projects }}
+      rows: ${{ steps.plan.outputs.rows }}
       benchmarks: ${{ steps.plan.outputs.benchmarks }}
     steps:
       - name: Checkout
@@ -130,7 +136,7 @@ jobs:
           set -o pipefail
           if [ -n "$CALLED_REF" ]; then
             echo "Native darwin-arm64 rows from the caller: ${CALLED_PROJECTS:-none}"
-            echo "projects=$CALLED_PROJECTS" >> "$GITHUB_OUTPUT"
+            list=$CALLED_PROJECTS
           else
             case "$GITHUB_EVENT_NAME" in
               workflow_dispatch) projects=$(pnpm nx show projects --with-target test:native-darwin --json | tail -1) ;;
@@ -138,8 +144,13 @@ jobs:
               *) projects='[]' ;;
             esac
             echo "Native darwin-arm64 rows: $projects"
-            echo "projects=$(jq -r 'join(",")' <<< "$projects")" >> "$GITHUB_OUTPUT"
+            list=$(jq -r 'join(",")' <<< "$projects")
           fi
+          echo "projects=$list" >> "$GITHUB_OUTPUT"
+          # One job per project: the same rows as a JSON array for the matrix.
+          rows=$(jq -cn --arg list "$list" '$list | split(",") | map(select(. != ""))')
+          echo "Native darwin-arm64 jobs: $rows"
+          echo "rows=$rows" >> "$GITHUB_OUTPUT"
           benchmarks='[]'
           if [ "$BENCHMARKS" = true ]; then
             benchmarks=$(pnpm nx show projects --with-target benchmark-native --json | tail -1)
@@ -148,18 +159,16 @@ jobs:
           echo "benchmarks=$(jq -r 'join(",")' <<< "$benchmarks")" >> "$GITHUB_OUTPUT"
 
   native-darwin:
-    name: Native kernels on darwin-arm64
+    name: Native kernels on darwin-arm64 (${{ matrix.project }})
     needs: [plan]
     # Not on a draft pull request: the row runs once it is marked ready for review.
     if: needs.plan.outputs.projects != '' && !github.event.pull_request.draft
     runs-on: macos-26
     timeout-minutes: 60
-    env:
-      # The SDK Tau's own PicoGK build pins (apps/desktop/scripts/prepare-picogk-dotnet.mts), checked by its sha512.
-      DOTNET_SDK_URL: https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.400/dotnet-sdk-10.0.400-osx-arm64.tar.gz
-      DOTNET_SDK_SHA512: e440e9a58d4ff7741c8342ac3e086fa9ee2dadc25e01c0449a88317a74cfbd63625b8092c3b2a131ae14b16ab3401e9cc470e578e4c65a72a0b5786bd2308cde
-      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
-      DOTNET_NOLOGO: '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.plan.outputs.rows) }}
     steps:
       - name: Start the row stopwatch
         run: echo "ROW_STARTED=$(date +%s)" >> "$GITHUB_ENV"
@@ -224,7 +233,7 @@ jobs:
       - name: Run the darwin-arm64 native rows
         id: rows
         env:
-          PROJECTS: ${{ needs.plan.outputs.projects }}
+          PROJECTS: ${{ matrix.project }}
           TAU_TEST_FRAME_LOG_DIR: ${{ runner.temp }}/native-darwin-frames
           TAU_GOLDEN_SUMMARY_FILE: ${{ runner.temp }}/golden-receipts.md
           # Declaration bundling exceeds Node 24's default 2 GiB heap on this runner.
@@ -252,18 +261,53 @@ jobs:
       - name: Report the row time
         if: always()
         env:
+          PROJECT: ${{ matrix.project }}
           SEED_HIT: ${{ steps.seed.outputs.cache-hit == 'true' }}
         run: |
           row=$(( $(date +%s) - ROW_STARTED ))
-          echo "::notice title=native-darwin row::${row} s from job start (seed cache hit: ${SEED_HIT})"
-          echo "native-darwin row: ${row} s from job start; seed cache hit: ${SEED_HIT}" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=native-darwin row ${PROJECT}::${row} s from job start (seed cache hit: ${SEED_HIT})"
+          echo "native-darwin row ${PROJECT}: ${row} s from job start; seed cache hit: ${SEED_HIT}" >> "$GITHUB_STEP_SUMMARY"
 
-      # The standalone nuget row runs whether or not the native rows passed, so each oracle reports
-      # on its own; it is skipped only when the job failed before the rows. The SDK is installed
-      # after the rows, and after their stopwatch, so its DOTNET_ROOT never reaches them.
+      - name: Upload the MCP and daemon logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-darwin-logs-${{ matrix.project }}
+          path: ${{ runner.temp }}/native-darwin-frames
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The standalone nuget row (charter W23, D34, I14; go-live row PRJ-1): its selection is the native rows'
+  # (ruling X60), so it runs whenever they do, in a job of its own, whether or not they pass. It runs the CLI
+  # from source and downloads PicoGK from its pinned origins, so it needs nothing the rows build.
+  nuget:
+    name: Standalone nuget projects on darwin-arm64
+    needs: [plan]
+    if: needs.plan.outputs.projects != '' && !github.event.pull_request.draft
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      # The SDK Tau's own PicoGK build pins (apps/desktop/scripts/prepare-picogk-dotnet.mts), checked by its sha512.
+      DOTNET_SDK_URL: https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.400/dotnet-sdk-10.0.400-osx-arm64.tar.gz
+      DOTNET_SDK_SHA512: e440e9a58d4ff7741c8342ac3e086fa9ee2dadc25e01c0449a88317a74cfbd63625b8092c3b2a131ae14b16ab3401e9cc470e578e4c65a72a0b5786bd2308cde
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+          save-pnpm-store: 'false'
+
+      # The SDK is installed in this job only, so its DOTNET_ROOT never reaches the native rows.
       - name: Install the .NET 10 SDK
         id: dotnet
-        if: ${{ !cancelled() && steps.rows.outcome != 'skipped' }}
         run: |
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/dotnet-sdk.tar.gz" "$DOTNET_SDK_URL"
           echo "$DOTNET_SDK_SHA512  $RUNNER_TEMP/dotnet-sdk.tar.gz" | shasum -a 512 -c -
@@ -275,15 +319,6 @@ jobs:
       - name: Check every nuget template outside Tau
         if: ${{ !cancelled() && steps.dotnet.outcome == 'success' }}
         run: node scripts/src/check-standalone-project.ts --ecosystem nuget --work "$RUNNER_TEMP/standalone"
-
-      - name: Upload the MCP and daemon logs
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: native-darwin-logs
-          path: ${{ runner.temp }}/native-darwin-frames
-          if-no-files-found: ignore
-          retention-days: 7
 
   # The two benchmark-native scripts as gates (charter D23, W15): on each desktop candidate's commit
   # and on dispatch, on a macos-26 runner of their own so a long soak never delays a row. Build123d's

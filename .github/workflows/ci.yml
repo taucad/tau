@@ -5,7 +5,8 @@ on:
     branches: [main] # Only run on pushes to main branch
   pull_request:
     # PRs vs `main`: the fast lanes (plan, workspace, the seven affected lanes and the
-    # PR-only reports); the merge queue runs everything. A draft runs nothing until it is
+    # PR-only reports); the merge queue runs everything but viewer parity, which a pull request
+    # runs when its own diff touches a parity input (VP-1). A draft runs nothing until it is
     # marked ready (`ready_for_review`). PRs targeting `production` only (trail PR): skip
     # checks — release gate is staging smoke + human merge.
     types: [opened, synchronize, reopened, ready_for_review]
@@ -143,8 +144,16 @@ jobs:
           # Native darwin rows (`native-darwin.yml`): a `test:native-darwin` project (Build123d, PicoGK, the
           # CLI) is affected; `native-darwin-projects` names the rows. NATIVE_DARWIN_LANE_PATHS select every
           # such project: that workflow and the nuget standalone oracle's sources outside the native closure,
-          # which its row's last steps read (go-live PRJ-1). Viewer parity (`viewer-parity.yml`): the project that owns the gate
-          # (`test:viewer-parity`), or one it depends on, or the workflow its target lists, changed.
+          # which its row's last steps read (go-live PRJ-1). Viewer parity (`viewer-parity.yml`, VP-1, operator ruling
+          # 2026-11-18 "PR-side + release gate"): never in the merge queue (`queue: never`, lockfile or not). A ready pull
+          # request runs it when its own diff touches a viewer-parity input (`pr: paths`): a path in VIEWER_PARITY_LANE_PATHS
+          # (the viewer and its capture code, the Three.js and camera packages it renders through, the image plugin, the
+          # render profile, the capture options, the parity scripts, manifest and committed fixtures, and the workflow), an
+          # example directory the parity manifest names as a fixture source, or a VIEWER_PARITY_PINS renderer pin in
+          # `pnpm-workspace.yaml` or its patch. Kernel code is not an input: the viewer and nanoraster draw the same GLB
+          # bytes, so a kernel change moves both sides alike; kernel tests and the GeoSpec contracts cover the geometry, and
+          # the release gate runs every fixture on every candidate. A push to `main` the queue did not prove runs it when
+          # the graph finds `tau-examples` affected; the release gate (`release-gate.yml`) runs it on every candidate.
           # Desktop lane: a `tag:ci:desktop` project (the Electron app and, after the split, its services
           # host). No job here runs it: the packaged suite runs on every staging candidate instead
           # (operator decision D-DS1 (b), `desktop-packaged.yml`), so the lane is informational and
@@ -164,14 +173,17 @@ jobs:
           # "queue": the lane runs in the merge queue only. "touched": a pull request runs the lane only
           # for the selected projects that own a file of its own diff (Nx's file-to-project map: the
           # deepest project root above the file), never for one that is affected only through a dependency.
+          # "paths": a pull request runs the lane for every project with its target when its own diff touches one of
+          # the lane's paths, and not at all otherwise (viewer parity alone has a path list).
           # `queue` is a lane's merge-queue rule, read against the entry's own diff (`HEAD^1`), so a change to a
           # hub (`agent-host`, `host`) no longer carries every slow lane behind it (merge-queue defects MQ-2).
           # "touched": the lane runs for the selected projects that own a file of the diff. "any-touched": the
           # lane runs for every selected project when the diff touches one of them, and not at all otherwise.
           # "closure": the lane runs for the selected projects whose own dependency closure holds a project the
-          # diff touches, walked without entering QUEUE_HUBS, so a hub change alone does not select them. The
-          # formal nightly tiers (the nightly, then the release gate RG-1) run every `formal:nightly` project and
-          # the candidate gate the full shell tier. A diff that touches `pnpm-lock.yaml` applies no `queue` rule.
+          # diff touches, walked without entering QUEUE_HUBS, so a hub change alone does not select them. "never": the
+          # lane never runs in the merge queue. The formal nightly tiers (the nightly, then the release gate RG-1) run
+          # every `formal:nightly` project, the release gate every viewer-parity fixture, and the candidate gate the full
+          # shell tier. A diff that touches `pnpm-lock.yaml` applies no `queue` rule but "never".
           LANE_SELECTORS: >-
             {"apps": {"type": "app"},
              "api": {"tags": ["scope:api"], "pr": "touched"},
@@ -186,7 +198,7 @@ jobs:
              "native-hosts": {"tags": ["ci:native-hosts"], "pr": "queue", "queue": "closure"},
              "native-linux": {"targets": ["test:native-linux"], "pr": "queue", "queue": "closure"},
              "native-darwin": {"targets": ["test:native-darwin"], "pr": "queue"},
-             "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "queue"},
+             "viewer-parity": {"targets": ["test:viewer-parity"], "pr": "paths", "queue": "never"},
              "desktop": {"tags": ["ci:desktop"]},
              "shell": {"tags": ["ci:shell"], "pr": "queue", "queue": "any-touched"},
              "e2e-queue": {"targets": ["test:e2e:queue"], "pr": "touched"}}
@@ -203,6 +215,29 @@ jobs:
              "apps/ui/app/constants/project.constants.ts",
              "apps/ui/app/utils/kernel-libraries.ts",
              "libs/tau-examples/src/standalone/picogk"]
+          # A file or a directory each. The manifest's example sources (`libs/tau-examples/src/kernels/<kernel>/<example>`)
+          # are read from the manifest itself, so a fixture added there is an input with no edit here.
+          VIEWER_PARITY_LANE_PATHS: >-
+            [".github/workflows/viewer-parity.yml",
+             "packages/viewer",
+             "packages/three",
+             "packages/camera",
+             "packages/plugins/image",
+             "libs/types/src/constants/viewer-render-profile.constants.ts",
+             "libs/agent-tools/src/capture",
+             "libs/tau-examples/fixtures/viewer-parity",
+             "libs/tau-examples/scripts/export-parity-fixtures.mts",
+             "libs/tau-examples/scripts/viewer-parity.ts",
+             "libs/tau-examples/scripts/viewer-parity-files.ts",
+             "libs/tau-examples/scripts/viewer-parity-render.ts",
+             "libs/tau-examples/scripts/viewer-parity.gate.test.ts",
+             "libs/tau-examples/scripts/viewer-parity.wasm.browser.test.ts",
+             "libs/tau-examples/vitest.viewer-parity.config.ts",
+             "libs/tau-examples/project.json",
+             "apps/ui/app/routes/convert/gear-8.glb"]
+          # The renderers both sides run, as package-name patterns: their `pnpm-workspace.yaml` catalog pins (nanoraster and
+          # its native addons) and three's patch. A changed pin line there, or a patch file of one, selects the lane.
+          VIEWER_PARITY_PINS: '["three", "nanoraster(-[a-z0-9-]+)?"]'
         run: |
           # `pipefail` so a failing `nx` call fails the step instead of leaving an empty
           # output behind `tail`. `tail -1` keeps the JSON array and drops Nx's log lines.
@@ -215,10 +250,12 @@ jobs:
             | ([$selectors[] | .targets[]?] - [$nodes[] | .data.targets // {} | keys[]]) as $unknown_targets
             | if ($unknown_tags + $unknown_targets) != [] then
                 error("lane selectors name a tag or target no project has: \($unknown_tags + $unknown_targets | join(", "))")
-              elif ([$selectors[] | .pr // empty] - ["queue", "touched"]) != [] then
-                error("lane selectors name a pull-request rule other than queue or touched")
-              elif ([$selectors[] | .queue // empty] - ["touched", "any-touched", "closure"]) != [] then
-                error("lane selectors name a merge-queue rule other than touched, any-touched or closure")
+              elif ([$selectors[] | .pr // empty] - ["queue", "touched", "paths"]) != [] then
+                error("lane selectors name a pull-request rule other than queue, touched or paths")
+              elif ([$selectors | to_entries[] | select(.value.pr == "paths") | .key] - ["viewer-parity"]) != [] then
+                error("only the viewer-parity lane has a pull-request path list")
+              elif ([$selectors[] | .queue // empty] - ["touched", "any-touched", "closure", "never"]) != [] then
+                error("lane selectors name a merge-queue rule other than touched, any-touched, closure or never")
               else . end
             | $selectors | map_values(. as $selector
               | [$affected[] | . as $name | $nodes[$name] | select(. != null)
@@ -251,6 +288,28 @@ jobs:
               '."native-darwin" = ([$graph[0].graph.nodes[] | select(.data.targets // {} | has("test:native-darwin")) | .name] | sort)' <<< "$lanes")
             echo "Native darwin lane paths changed: $darwin_paths"
           fi
+          # The viewer parity lane's path check, which only the pull-request "paths" rule below reads (`path_lanes`):
+          # the pull request's own files (the same diff as that rule) against VIEWER_PARITY_LANE_PATHS and the
+          # manifest's example sources, or a VIEWER_PARITY_PINS pin line of `pnpm-workspace.yaml` or its patch file.
+          path_lanes='{}'
+          if test "$GITHUB_EVENT_NAME" = pull_request; then
+            pr_base=$(git merge-base "$NX_BASE" "${NX_HEAD:-HEAD}")
+            parity_paths=$(jq -c --argjson paths "$VIEWER_PARITY_LANE_PATHS" \
+              '$paths + [.fixtures[].source | select(test("^[a-z0-9-]+/[a-z0-9-]+$")) | "libs/tau-examples/src/kernels/" + .]' \
+              libs/tau-examples/fixtures/viewer-parity/fixtures.json)
+            parity_files=$(git diff --name-only --no-renames --relative "$pr_base" "${NX_HEAD:-HEAD}" \
+              | jq -cRn --argjson paths "$parity_paths" --argjson pins "$VIEWER_PARITY_PINS" '[inputs | select(. != "")
+                  | select(. as $file | any($paths[] as $path | $file == $path or ($file | startswith($path + "/")); .)
+                      or any($pins[] as $pin | $file | test("^tools/pnpm/patches/" + $pin + "@"); .))]')
+            parity_pins=$(git diff --no-renames -U0 "$pr_base" "${NX_HEAD:-HEAD}" -- pnpm-workspace.yaml \
+              | jq -cRn --argjson pins "$VIEWER_PARITY_PINS" '[inputs | select(test("^[-+][^-+]"))
+                  | select(any($pins[] as $pin | test("^[-+]\\s+" + $pin + "(@[^:]*)?:"); .))]')
+            if [ "$parity_files" != '[]' ] || [ "$parity_pins" != '[]' ]; then
+              echo "Viewer parity inputs changed: $parity_files $parity_pins"
+              path_lanes=$(jq -c '{"viewer-parity": ([.graph.nodes[] | select(.data.targets // {} | has("test:viewer-parity")) | .name] | sort)}' \
+                "$RUNNER_TEMP/graph.json")
+            fi
+          fi
           # The merge queue applies each lane's `queue` rule to the entry's own files. A shell lane path counts as
           # touching `sandbox`, so the path checks above keep every shell project they selected.
           entry_files=$(git diff --name-only --no-renames "$NX_BASE" "${NX_HEAD:-HEAD}")
@@ -277,7 +336,15 @@ jobs:
                     elif $rule == "closure" then .value |= map(select(any(closure[]; touched)))
                     else . end)')
             jq -r --argjson selectors "$LANE_SELECTORS" \
-              'to_entries[] | select($selectors[.key].queue != null) | "Merge queue (\($selectors[.key].queue)) \(.key): \(.value | tojson)"' <<< "$lanes"
+              'to_entries[] | select($selectors[.key].queue != null and $selectors[.key].queue != "never") | "Merge queue (\($selectors[.key].queue)) \(.key): \(.value | tojson)"' <<< "$lanes"
+          fi
+          # A "never" lane leaves the merge queue whatever the entry changes, the lockfile included (viewer parity, VP-1:
+          # the pull request ran it on its own diff, and the release gate runs every fixture).
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            lanes=$(jq -c --argjson selectors "$LANE_SELECTORS" \
+              'with_entries(if $selectors[.key].queue == "never" then .value = [] else . end)' <<< "$lanes")
+            jq -r --argjson selectors "$LANE_SELECTORS" \
+              'to_entries[] | select($selectors[.key].queue == "never") | "Merge queue (never) \(.key): \(.value | tojson)"' <<< "$lanes"
           fi
           jq -r 'to_entries[] | "Affected \(.key): \(.value | tojson)"' <<< "$lanes"
           # What `nx affected` selected, for `lanes.json` below.
@@ -295,16 +362,18 @@ jobs:
           # times the queue's runner minutes when the 60-job pool was the queue's bottleneck (2026-11-10).
           # A "touched" lane runs for the projects the diff itself changes, where a deterministic failure
           # would otherwise first evict a queue entry and rebuild every entry behind it (F15). The files are
-          # Nx's own (`git diff --no-renames --relative` from the merge base of NX_BASE and NX_HEAD).
+          # Nx's own (`git diff --no-renames --relative` from the merge base of NX_BASE and NX_HEAD). A "paths" lane
+          # runs the projects the lane's path check above found (`path_lanes`), and none when it found none.
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             head=${NX_HEAD:-HEAD}
             lanes=$(git diff --name-only --no-renames --relative "$(git merge-base "$NX_BASE" "$head")" "$head" \
-              | jq -cRn --argjson lanes "$lanes" --argjson selectors "$LANE_SELECTORS" \
+              | jq -cRn --argjson lanes "$lanes" --argjson selectors "$LANE_SELECTORS" --argjson matched "$path_lanes" \
                   --slurpfile graph "$RUNNER_TEMP/graph.json" "$owner_def"'
-                [inputs | owner] as $touched
+                [inputs | select(. != "") | owner] as $touched
                 | $lanes | with_entries(.key as $lane | $selectors[$lane].pr as $rule
                   | if $rule == "queue" then .value = []
                     elif $rule == "touched" then .value |= map(. as $name | select($touched | index([$name]) != null))
+                    elif $rule == "paths" then .value = ($matched[$lane] // [])
                     else . end)')
             jq -r --argjson selectors "$LANE_SELECTORS" \
               'to_entries[] | select($selectors[.key].pr != null) | "Pull request (\($selectors[.key].pr)) \(.key): \(.value | tojson)"' <<< "$lanes"
@@ -468,7 +537,7 @@ jobs:
       actions: 'read'
       pull-requests: 'read'
     strategy:
-      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         lane: [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3]
     steps:
@@ -663,14 +732,19 @@ jobs:
                 exit 0
               fi
               echo "Shard projects: $shard"
-              pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=static 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
+              # Streamed, not `static`: Nx holds a static task's output until the task ends and then
+              # prints only its first 64–128 KiB into a pipe, so a long suite lost its Vitest summary and
+              # every failing test's name (F3; `ui:test` in queue runs 43990460984, 44048796415,
+              # 44050273147 and 44062740359 stopped mid-run in both the job log and this file).
+              pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
               ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
 
       # The full log of a full-graph run is far longer than the API's log tail, so a failed
-      # test phase repeats each failing suite's report (and the sandbox host facts the native
-      # suites depend on) as the job's last output.
+      # test phase repeats each failing test's file and name first, then each failing suite's
+      # report (and the sandbox host facts the native suites depend on), as the job's last output.
+      # The names come first and alone, so a long report can never push them out of the excerpt.
       - name: Summarize failed affected tests
         if: failure() && startsWith(matrix.lane, 'test-')
         run: |
@@ -683,6 +757,10 @@ jobs:
             && echo 'nested user namespace: ok' || echo 'nested user namespace: blocked'
           echo '::endgroup::'
           if [ -f "$RUNNER_TEMP/affected-test.log" ]; then
+            # Vitest's `FAIL  <file> > <suite> > <test>` lines, without colour, Nx's project prefix kept.
+            failing=$(sed -E 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/affected-test.log" | grep -E '(^|[[:space:]])FAIL[[:space:]]' | sort -u | head -200 || true)
+            echo 'Failing tests:'
+            echo "${failing:-No Vitest FAIL line in the test log; see the task output above.}"
             awk '/Failed Tests [0-9]+|Failed Suites [0-9]+/ { keep = 1; n = 0 }
                  keep && n < 300 { print; n++ }
                  /Test Files / { keep = 0 }' "$RUNNER_TEMP/affected-test.log"
@@ -797,9 +875,11 @@ jobs:
     secrets:
       NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
-  # The viewer parity gate (`viewer-parity.yml`), in the merge queue and on a push the queue did
-  # not prove, when the plan finds a `test:viewer-parity` project affected. The required check
-  # waits for it.
+  # The viewer parity gate (`viewer-parity.yml`, eight capture shards and one gate over every fixture), never in the
+  # merge queue (VP-1, operator ruling 2026-11-18 "PR-side + release gate"): on a ready pull request whose own diff
+  # touches a viewer-parity input, and on a push the queue did not prove when the graph finds `tau-examples` affected.
+  # The required check waits for it, so a red parity run keeps the pull request from being enqueued (auto-merge
+  # enqueues only once the pull request's checks pass). The release gate runs it on every candidate, uncached.
   viewer-parity:
     name: Viewer parity
     needs: [plan]
@@ -807,6 +887,8 @@ jobs:
     permissions:
       contents: 'read'
     uses: ./.github/workflows/viewer-parity.yml
+    with:
+      ref: ${{ github.sha }}
 
   # The shell conformance rows (`shell-conformance.yml`, semantics tier), in the merge queue only,
   # when the plan finds a `tag:ci:shell` project affected or a shell lane path changed: the affected
@@ -835,7 +917,9 @@ jobs:
   # its own 120-minute budget. The seed source is the queue commit's sha, so each landing explores a fresh
   # seed and a re-run of the same commit replays it. A pull request leaves the lane to the queue, a push to
   # `main` reuses the queue verdict, and the release gate (RG-1) runs every project with a seed of its own.
-  # The required check waits for it (CI throughput review, Q-4 step 2).
+  # The required check waits for it (CI throughput review, Q-4 step 2). It passes the read token alone, never
+  # `secrets: inherit`; the called jobs run in `nx-cache-write`, whose write token replaces it, so the queue
+  # reuses an unchanged project's cached `formal:nightly:check` shards (CI throughput review, formal speed).
   formal-nightly:
     name: Formal nightly
     needs: [plan]
@@ -848,6 +932,8 @@ jobs:
       ref: ${{ github.sha }}
       projects: ${{ needs.plan.outputs.formal-nightly-projects }}
       seed: ${{ github.sha }}
+    secrets:
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
   # The end-to-end ratchet (operator ruling 2026-11-15): every end-to-end suite that passed five consecutive
   # e2e-nightly runs (two before 2026-11-17, MQ-3) leaves the nightly for good and runs here, in the merge queue (and on a push to `main` the
@@ -870,7 +956,7 @@ jobs:
       contents: 'read'
       actions: 'read'
     strategy:
-      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         suite: ${{ fromJSON(needs.plan.outputs.e2e-queue-suites) }}
     env:
@@ -958,7 +1044,9 @@ jobs:
   # The required check. It passes only when the plan and every affected lane passed, and every
   # lane the plan selects too when this run needed it (browser, GeoSpec example contracts, CLI
   # end-to-end, the end-to-end ratchet, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
-  # rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected fails it. It waits for every
+  # rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected fails it. Viewer parity is
+  # planned on pull requests and pushes only (VP-1), so on a pull request that touches its inputs this check, which the
+  # queue's auto-merge waits for, holds the pull request until parity passes. It waits for every
   # lane, so a merge-queue run whose gate passed proves every lane it selected, which is the one
   # proof `queue-verdict` reuses on the push (Brain ci-audit 2026-11-12, F1). API tests are a
   # required check of their own as well, so the queue already waited for them; in the ten latest
@@ -1143,6 +1231,7 @@ jobs:
     permissions: *fail-fast-permissions
     steps: *fail-fast-steps
 
+  # Viewer parity never runs in the merge queue (VP-1), so this job never fires; it stays while the gate needs the lane.
   fail-fast-viewer-parity:
     name: Fail fast (viewer-parity)
     needs: [viewer-parity]
@@ -1231,7 +1320,7 @@ jobs:
     # for the up-to-twofold runner variance the formal nightly showed (runs 43167548945 and 43178267338).
     timeout-minutes: 20
     strategy:
-      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         shard: [1, 2, 3]
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
@@ -1941,7 +2030,7 @@ jobs:
     needs: [plan]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.cli-e2e == 'true' }}
     strategy:
-      fail-fast: ${{ github.event_name != 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         shard: [1, 2]
     env:

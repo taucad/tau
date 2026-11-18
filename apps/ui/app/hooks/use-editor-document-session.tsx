@@ -5,7 +5,7 @@ import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import type { FlushPhase } from '#runtime/environment.js';
 import { useProject } from '#hooks/use-project.js';
 import { getRevisionClient } from '#hooks/use-revision-status.js';
-import { peekRevisionClient } from '#services/revision-client-registry.js';
+import { peekRevisionClient } from '@taucad/revisions-ui/services/revision-client-registry';
 import { readLfsPointer } from '@taucad/revisions';
 import {
   EditorDocumentSession,

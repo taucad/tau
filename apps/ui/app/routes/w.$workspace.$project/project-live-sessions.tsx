@@ -33,7 +33,7 @@ import {
   useRevisionCommands,
   useProjectRole,
 } from '#hooks/use-revision-status.js';
-import type { RevisionCommands } from '#hooks/use-revision-status.js';
+import type { RevisionCommands } from '@taucad/revisions-ui/hooks/use-revision-status';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
 

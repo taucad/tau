@@ -194,7 +194,7 @@ export const compareWithBudget = (input: {
   return problems;
 };
 
-/** The modules route module splitting (`future.v8_splitRouteModules`) can move out of a route's own chunk. */
+/** The modules route module splitting (`splitRouteModules`, on by default in React Router 8) can move out of a route's own chunk. */
 const splitModuleFields = [
   'clientLoaderModule',
   'clientActionModule',

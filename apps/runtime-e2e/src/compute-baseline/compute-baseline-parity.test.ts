@@ -1,12 +1,12 @@
 /**
  * Q1/T1/T10: parity and work counters must FAIL on a deliberately wrong cache.
  *
- * The fault is injected at the real seam: the harness's `poison` arm answers
- * every `KernelComputeSession.lookup` with a BRep captured from an earlier
- * honest run, so the kernel restores a wrong shape through the production
- * `replicad-compute-reuse` adapter and never calls `input.compute()`
- * (`packages/plugins/replicad/src/replicad-compute-reuse.ts:228-233`). Nothing is
- * stubbed downstream of that: the render, the tessellation and the GLB are the
+ * The fault is injected at the real seam: the live tier installs its operation
+ * cache through Replicad's `setOperationCache`, and the harness's `poison` arm
+ * answers every poisonable operation there with a shape restored from a BRep
+ * captured in an earlier honest run, so the build never calls the operation's
+ * `compute()` (`harness/probe.mts`, `instrumentCache`). Nothing is stubbed
+ * downstream of that: the render, the tessellation and the GLB are the
  * production path.
  *
  * "A gate passes before the change, therefore the gate is wrong" is rejected --
@@ -71,11 +71,13 @@ afterAll(async () => {
 });
 
 describe('compute-baseline fault injection', () => {
-  it('injects a wrong cached BRep on every lookup', () => {
-    // Red-first precondition: the fault actually reached the production adapter.
+  it('injects a wrong cached BRep on every operation', () => {
+    // Red-first precondition: the fault actually reached the operation cache seam,
+    // and answered every operation the build routed through it.
     expect(honest.poisonedLookups).toBe(0);
     expect(poisoned.poisonedLookups).toBeGreaterThan(0);
-    expect(poisoned.lookups.hit).toBe(poisoned.poisonedLookups);
+    expect(poisoned.poisonedLookups).toBe(poisoned.counters['tier.operation']!.calls);
+    expect(poisoned.poisonedLookups).toBe(honest.counters['tier.operation']!.calls);
     expect(poisoned.lookups.miss).toBe(0);
   });
 
@@ -97,14 +99,14 @@ describe('compute-baseline fault injection', () => {
     expect(poisoned.records.staged).toBe(0);
     expect(poisoned.counters['native.solve']).toBeUndefined();
     expect(poisoned.spans['create.runOcMain']!.ms).toBeLessThan(honest.spans['create.runOcMain']!.ms / 2);
-    expect(poisoned.counters['brep.serialize']).toBeUndefined();
   });
 
   it('T1: the off arm performs no cache work at all', () => {
+    // `computeReuse: false` builds no tier and installs no operation cache.
     expect(off.lookups).toEqual({ hit: 0, miss: 0, session: 0, cache: 0 });
     expect(off.records.staged).toBe(0);
-    expect(off.counters['brep.serialize']).toBeUndefined();
-    expect(off.counters['brep.restore']).toBeUndefined();
+    expect(off.counters['tier.operation']).toBeUndefined();
+    expect(off.counters['native.solve']).toBeUndefined();
   });
 
   it('T1: the off arm still renders the correct geometry', () => {

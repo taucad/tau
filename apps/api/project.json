@@ -93,7 +93,8 @@
       "options": {
         "command": "vitest run --config vitest.live.config.ts",
         "cwd": "{projectRoot}"
-      }
+      },
+      "inputs": ["default", "^default", "{workspaceRoot}/packages/plugins/tscircuit/agent/cad-tscircuit/SKILL.md"]
     },
     "test:kernel-routing": {
       "executor": "nx:run-commands",
@@ -242,6 +243,15 @@
         "command": "node apps/api/scripts/check-private-storage.mts",
         "cwd": "{workspaceRoot}"
       }
+    },
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "serviceEnvironment",
+        "{workspaceRoot}/infra/billing/development.commercial.json",
+        "{workspaceRoot}/apps/libs/api-*/src/**/*.ts"
+      ]
     }
   }
 }

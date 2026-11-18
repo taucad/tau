@@ -36,13 +36,16 @@ import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor
 import { readLocalProjectOpenPerformance } from '@taucad/ui-core/lib/project-open-performance';
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
 import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
-import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
+import {
+  selectWorkspaceConnectionState,
+  workspaceConnectionMachine,
+} from '@taucad/files-ui/machines/workspace-connection.machine';
 import type {
   PreparedWorkspaceCatalog,
   RegisteredWorkspace,
   WorkspaceConnectionServices,
   WorkspaceConnectionState,
-} from '#hooks/workspace-connection.machine.js';
+} from '@taucad/files-ui/machines/workspace-connection.machine';
 import type { DirectoryPick } from '@taucad/files-ui/constants/browser.constants';
 import {
   checkHandlePermission,
@@ -89,9 +92,10 @@ import {
   createMetadataReadOwner,
 } from '@taucad/files-ui/runtime/project-library-observations';
 import type { LibraryRecords } from '@taucad/files-ui/runtime/project-library-observations';
+import { reportAppRuntimeFault } from '#runtime/app-runtime-faults.js';
 import { ProjectCommands } from '#runtime/project-library-commands.js';
 import type { ProjectLibraryChatSessions, ProjectLibrarySessions } from '#runtime/project-library-commands.js';
-import { WorkspaceCommands } from '#runtime/project-library-workspace.js';
+import { WorkspaceCommands } from '@taucad/files-ui/runtime/project-library-workspace';
 import type { WorkspaceTelemetry } from '@taucad/files-ui/utils/workspace-telemetry.utils';
 
 /** What the library takes from the runtime's composition. @public */
@@ -333,6 +337,7 @@ export class ProjectLibrary {
       registerWorkspace: async (selection, signal) => this.#registerWorkspace(selection, signal),
       mountWorkspace: async (_workspace, selection, signal) => this.#mountWorkspace(selection, signal),
       prepareWorkspaceCatalog: async (workspace, signal) => this.#prepareWorkspaceCatalog(workspace, signal),
+      reportFault: reportAppRuntimeFault,
     };
     this.workspaceConnection = createActor(workspaceConnectionMachine, { ...options, input: connection });
     const host = {

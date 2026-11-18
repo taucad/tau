@@ -5,7 +5,7 @@ import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
-import type { RevisionClient } from '#types/revision-client.types.js';
+import type { RevisionClient } from '@taucad/revisions-ui/types/revision-client.types';
 import { useTauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { canOpenCloudProject } from '#lib/tau-cloud-intent.js';
 import { followCloudOpen } from '@taucad/ui-core/lib/cloud-open-lock';

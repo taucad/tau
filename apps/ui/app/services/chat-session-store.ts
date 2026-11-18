@@ -2638,7 +2638,7 @@ export class ChatSessionStore {
         ? {
             items: after.items,
             status: 'blocked',
-            error: 'Message saved. Delivery could not be confirmed. Retry to continue.',
+            error: 'Message saved, but Tau couldn’t confirm it was delivered. Try again.',
           }
         : { items: after.items, status: 'changed' };
     });
@@ -4513,7 +4513,7 @@ export class ChatSessionStore {
             if (observed.status === 'error' || observed.status === 'closed') {
               messageQueueRef.send({
                 type: 'watchFailed',
-                error: observed.error ?? 'Queue updates disconnected. Retry to reconnect.',
+                error: observed.error ?? 'Lost the connection to your queued messages. Try again.',
               });
             }
           });

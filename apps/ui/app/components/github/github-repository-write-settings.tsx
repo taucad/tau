@@ -88,7 +88,7 @@ export function GithubRepositoryWriteSettings({
                   <p className='text-sm font-medium'>Writes from Tau</p>
                   <p className='text-xs text-muted-foreground'>
                     {enabled
-                      ? 'Enabled for this repository. Each push is a separate action.'
+                      ? 'Enabled for this repository. Tau backs up to GitHub only when you choose to.'
                       : 'Off for this repository. Reading and importing remain available.'}
                   </p>
                 </div>
@@ -116,7 +116,7 @@ export function GithubRepositoryWriteSettings({
           {onPush ? (
             <div className='flex flex-col items-start gap-2'>
               <p className='text-xs text-muted-foreground'>
-                Review your history and what is included before pushing. Enabling writes does not upload anything.
+                Review your history before backing up. Turning this on doesn’t back anything up.
               </p>
               <Button
                 disabled={!enabled || busy || pushUnavailable !== undefined}
@@ -124,12 +124,12 @@ export function GithubRepositoryWriteSettings({
                   push.mutate();
                 }}
               >
-                {push.isPending ? 'Pushing…' : 'Push to GitHub'}
+                {push.isPending ? 'Backing up…' : 'Back up to GitHub'}
               </Button>
               {pushUnavailable ? <p className='text-xs text-muted-foreground'>{pushUnavailable}</p> : null}
               {push.isSuccess ? (
                 <p role='status' className='text-xs'>
-                  Push completed.
+                  Backed up to GitHub.
                 </p>
               ) : null}
             </div>
@@ -147,7 +147,7 @@ export function GithubRepositoryWriteSettings({
             <AlertDialogTitle>Enable writes to {access.data?.fullName}?</AlertDialogTitle>
             <AlertDialogDescription>
               GitHub already permits writes for this repository. This lets Tau request write credentials until you turn
-              it off. Nothing is pushed now. Each push still needs a separate action, and protected branches apply.
+              it off. Nothing is backed up now. You choose each time, and protected branches still apply.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {change.error ? (

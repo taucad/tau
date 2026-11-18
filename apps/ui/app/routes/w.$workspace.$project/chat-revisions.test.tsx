@@ -585,7 +585,7 @@ describe('Revisions pane', () => {
     renderPane();
 
     const alert = screen.getByRole('alert', { name: 'Turn outcome' });
-    expect(alert).toHaveTextContent('Tau could not save this project’s earlier edits first.');
+    expect(alert).toHaveTextContent('Couldn’t save this project’s earlier edits first.');
     expect(alert.textContent).not.toMatch(/checkout/iu);
   });
 
@@ -1497,7 +1497,7 @@ describe('Revisions pane vocabulary and History', () => {
     expect(screen.getByRole('button', { name: /^Thicker base 1 · /u })).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('keeps a removed collaborator calm: the strip and Sync say Cloud copy unavailable and what to do (HQ3)', async () => {
+  it('keeps a removed collaborator calm: the strip and Sync say Backup unavailable and what to do (HQ3)', async () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-4', revisionNumber: 4 })];
     revisionStatusHarness.role = 'revoked';
     revisionStatusHarness.status = {
@@ -1510,13 +1510,11 @@ describe('Revisions pane vocabulary and History', () => {
     renderPane();
 
     await waitFor(() => {
-      expect(screen.getByRole('status', { name: 'History status' })).toHaveTextContent(
-        'Saved · Cloud copy unavailable',
-      );
+      expect(screen.getByRole('status', { name: 'History status' })).toHaveTextContent('Saved · Backup unavailable');
     });
     const backup = screen.getByRole('status', { name: 'Backup status' });
-    expect(backup).toHaveTextContent('Cloud copy unavailable');
-    expect(backup).toHaveTextContent('The cloud copy was deleted or your access changed.');
+    expect(backup).toHaveTextContent('Backup unavailable');
+    expect(backup).toHaveTextContent('This project was deleted from Tau Cloud, or your access changed.');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
   });

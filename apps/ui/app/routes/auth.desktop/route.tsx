@@ -81,7 +81,7 @@ type HandoffStatus = 'invalid-request' | 'awaiting-consent' | 'minting' | 'openi
 /** One sentence per state, so the card is a lookup rather than a ternary chain. */
 const handoffTitle: Record<HandoffStatus, string> = {
   'invalid-request': 'This sign-in link is not valid',
-  'awaiting-consent': 'Connect to Tau Desktop?',
+  'awaiting-consent': 'Sign in to Tau Desktop?',
   minting: 'Signing you in to Tau Desktop',
   opening: 'Opening Tau Desktop',
   'not-opened': 'Tau Desktop didn’t open',
@@ -91,7 +91,7 @@ const handoffTitle: Record<HandoffStatus, string> = {
 const handoffDescription: Record<HandoffStatus, React.ReactNode> = {
   'invalid-request': 'Start sign-in from Tau Desktop rather than opening this page directly.',
   'awaiting-consent': 'Only continue if you just started sign-in from Tau Desktop on this computer.',
-  minting: 'Hold tight while Tau hands your session to the desktop app.',
+  minting: 'Signing you in to Tau Desktop…',
   opening: (
     <>
       Your browser asks whether to open Tau. Choose <strong>Open</strong> to continue there.
@@ -213,7 +213,7 @@ export default function AuthDesktopRoute(): React.JSX.Element {
                 void handOff();
               }}
             >
-              Connect to Tau Desktop
+              Sign in to Tau Desktop
             </Button>
             <p className='text-xs text-muted-foreground'>This request expires in 5 minutes.</p>
           </CardContent>

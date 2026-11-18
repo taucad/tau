@@ -327,7 +327,7 @@ describe('opening a GitHub-bound project', () => {
 
     expect(githubToken).not.toHaveBeenCalled();
     expect(scripted.frames()).toStrictEqual([
-      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to sync with GitHub.' },
+      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to back up to GitHub.' },
     ]);
   });
 
@@ -346,7 +346,7 @@ describe('opening a GitHub-bound project', () => {
       apiBaseUrl,
       origin: 'https://github.com',
       repositoryUrl,
-      unavailable: 'Open this project in Tau to sync with GitHub.',
+      unavailable: 'Open this project in Tau to back up to GitHub.',
     });
     expect(scripted.client.close).toHaveBeenCalledOnce();
   });
@@ -400,7 +400,11 @@ describe('recovery from a refused GitHub credential (D2)', () => {
       expect(scripted.client.open).toHaveBeenCalledOnce();
     });
 
-    scripted.show({ ...githubRemote, phase: 'reconnectRequired', error: 'The remote rejected the saved credentials.' });
+    scripted.show({
+      ...githubRemote,
+      phase: 'reconnectRequired',
+      error: 'GitHub didn’t accept Tau’s saved sign-in. Connect GitHub again in Tau.',
+    });
 
     await vi.waitFor(() => {
       expect(scripted.sent()).toContainEqual({ command: 'authorizeRemote' });
@@ -432,7 +436,11 @@ describe('recovery from a refused GitHub credential (D2)', () => {
 
     scripted.show(
       { ...githubRemote, phase: 'connected' },
-      { state: 'failed', reason: 'unauthorized', error: 'The remote rejected the saved credentials.' },
+      {
+        state: 'failed',
+        reason: 'unauthorized',
+        error: 'GitHub didn’t accept Tau’s saved sign-in. Connect GitHub again in Tau.',
+      },
     );
 
     await vi.waitFor(() => {
@@ -502,7 +510,7 @@ describe('an identity change on the open client (audit R6)', () => {
       expect(githubToken).toHaveBeenCalledTimes(2);
     });
     expect(scripted.frames().slice(0, 2)).toStrictEqual([
-      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to sync with GitHub.' },
+      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to back up to GitHub.' },
       expect.objectContaining({ repositoryUrl, authorization: basic('fresh') }),
     ]);
   });
@@ -522,7 +530,7 @@ describe('an identity change on the open client (audit R6)', () => {
       apiBaseUrl,
       origin: 'https://github.com',
       repositoryUrl,
-      unavailable: 'Sign in to Tau to sync with GitHub.',
+      unavailable: 'Sign in to Tau to back up to GitHub.',
     });
     /* The signed-out session's renewal never runs. */
     await elapse(60_000);
@@ -604,7 +612,7 @@ describe('an identity change on the open client (audit R6)', () => {
     /* While the next person's mint is out, the root holds no credential of the last one's. */
     expect(scripted.frames()).toStrictEqual([
       expect.objectContaining({ authorization: basic('ada') }),
-      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to sync with GitHub.' },
+      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to back up to GitHub.' },
     ]);
     second.resolve({ accessToken: 'grace', expiresAt: expiringIn(eightHours), generation: 3 });
     await vi.waitFor(() => {
@@ -653,7 +661,7 @@ describe('an identity change on the open client (audit R6)', () => {
     await Promise.resolve();
 
     expect(scripted.frames()).toStrictEqual([
-      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to sync with GitHub.' },
+      { apiBaseUrl, origin: 'https://github.com', repositoryUrl, unavailable: 'Sign in to Tau to back up to GitHub.' },
     ]);
     expect(scripted.client.remoteCredential.mock.invocationCallOrder[0]).toBeLessThan(
       scripted.client.open.mock.invocationCallOrder[0] ?? 0,

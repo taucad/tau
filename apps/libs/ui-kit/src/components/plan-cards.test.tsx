@@ -11,7 +11,7 @@ const entries: PlanCardEntry[] = [
     tagline: 'For trying out Tau',
     priceLabel: '$0',
     priceSubLabel: '/month',
-    features: [{ label: '1 GB cloud backup and sync', isComingSoon: false }],
+    features: [{ label: '1 GB Tau Cloud backup and sync', isComingSoon: false }],
     popular: false,
   },
   {

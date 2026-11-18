@@ -137,7 +137,7 @@ describe('RevisionOutcomes', () => {
     expect(errors).toEqual([
       {
         title: 'Nothing was saved for that request',
-        description: 'Tau could not save this project’s earlier edits first. Try sending that again.',
+        description: 'Couldn’t save this project’s earlier edits first. Send that again.',
       },
     ]);
     expect(`${errors[0]?.title ?? ''} ${errors[0]?.description ?? ''}`).not.toMatch(/checkout/iu);

@@ -27,8 +27,8 @@ const comingSoon = (label: string): PlanCatalogFeature => ({ label, isComingSoon
 const backupFeature = (tier: BillingTier): PlanCatalogFeature =>
   included(
     tier === 'enterprise'
-      ? 'Custom cloud backup and sync'
-      : `${formatStorageLimit(storageLimitBytesByTier[tier])} cloud backup and sync`,
+      ? 'Custom Tau Cloud backup and sync'
+      : `${formatStorageLimit(storageLimitBytesByTier[tier])} Tau Cloud backup and sync`,
   );
 
 /**
@@ -83,7 +83,7 @@ export const tauPlanCatalog: readonly PlanCatalogEntry[] = [
       included('Purchased credits never expire'),
       included('All AI models'),
       included('All open-source CAD kernels'),
-      included('Unlimited local geometry testing'),
+      included('Unlimited geometry testing on your device'),
       included('Community support'),
       included('Export to all formats'),
       included('Public share links'),

@@ -311,7 +311,7 @@ describe('a Pro owner whose pushes are refused', () => {
       /* Settled on a quota reason first, so the pin fails only on whose words they are. */
       await expect
         .poll(async () => backupText(client), { timeout: 60_000 })
-        .toMatch(/over its storage plan|W8 POST 413/u);
+        .toMatch(/doesn’t fit in its backup|W8 POST 413/u);
       console.info(`[sync-refusals] POST-path row: ${JSON.stringify(await backupText(client))}`);
       expect(await backupText(client)).toContain(sentence);
     } finally {

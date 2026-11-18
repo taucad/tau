@@ -227,7 +227,8 @@ describe('NavUser', () => {
     render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByRole('status', { name: 'Offline' })).toBeInTheDocument();
-    expect(screen.getByText('Offline — online features unavailable')).toBeInTheDocument();
+    /* The footer tooltip and the user menu say the same sentence. */
+    expect(screen.getAllByText('You’re offline. Some features need a connection.')).toHaveLength(2);
   });
 });
 

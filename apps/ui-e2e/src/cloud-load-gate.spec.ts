@@ -309,7 +309,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       );
       await target.delay(settleWindow);
       await cloud.uiReadCloudRequestCounts(true);
-      await target.click(selectors.getByRole('button', { name: 'Retry Tau Cloud' }));
+      await target.click(selectors.getByRole('button', { name: 'Try loading Tau Cloud projects again' }));
       /* Long enough for react-query's own retries of a failed listing (1, 2 and 4 s) to be counted. */
       await target.delay(retryWatch);
       const counts = await cloud.uiReadCloudRequestCounts();
@@ -319,7 +319,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await defect(() => {
         expect(
           {
-            words: alerts.every((state) => state.text.includes('Tau Cloud projects not loaded')),
+            words: alerts.every((state) => state.text.includes('Couldn’t load Tau Cloud projects')),
             inHeader: alerts.every((state) => state.inHeader),
             gridMoved: tops.length > 1,
             retryRequests: counts.projects,
@@ -348,7 +348,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       const slow = record.cloudStates.filter((state) => state.text.includes('Still loading Tau Cloud projects'));
       await defect(() => {
         expect(
-          slow.some((state) => state.inHeader && state.t >= slowWait && state.text.includes('Retry')),
+          slow.some((state) => state.inHeader && state.t >= slowWait && state.text.includes('Try again')),
           `K-d: the Tau Cloud states shown ${JSON.stringify(record.cloudStates)}`,
         ).toBe(true);
       });

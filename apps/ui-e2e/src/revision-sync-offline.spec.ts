@@ -28,11 +28,11 @@ const backupStatus = (): Locator =>
   selectors.getByCss(`${visibleRevisionsPanel} [role="status"][aria-label="Backup status"]`);
 
 /** What the Backup line says of a GitHub link with nothing pushed yet (C1, 13ae1b6fab). */
-const notPushed = /Saved · Not pushed to GitHub/u;
+const notPushed = /Saved · Not on GitHub yet/u;
 
 /**
  * Open the Backup line's Manage, which holds the repository's writes, its push
- * and *Fetch latest* (C4, M8, dbee175fd2), unless it is open already.
+ * and *Get latest changes* (C4, M8, dbee175fd2), unless it is open already.
  */
 const openManage = async (): Promise<void> => {
   const popover = selectors.getByRole('dialog', { name: 'Manage backup' });
@@ -93,8 +93,8 @@ test('keeps GitHub read-only until approval and a separate explicit push, includ
   expect(approved.pushes).toBe(0);
   expect(approved.writeTokens).toBe(0);
   await target.screenshot(undefined, 'github-ready-to-push');
-  await target.click(selectors.getByRole('button', { name: 'Push to GitHub', exact: true }));
-  await target.expectVisible(selectors.getByText('Push completed.', { exact: true }), 60_000);
+  await target.click(selectors.getByRole('button', { name: 'Back up to GitHub', exact: true }));
+  await target.expectVisible(selectors.getByText('Backed up to GitHub.', { exact: true }), 60_000);
   const pushed = await target.commands.uiReadLinkedGithubFixture();
   expect(pushed.pushes).toBeGreaterThan(0);
   expect(pushed.commits).toBeGreaterThan(0);
@@ -120,7 +120,7 @@ test('keeps GitHub read-only until approval and a separate explicit push, includ
   await openManage();
   await target.click(selectors.getByRole('button', { name: 'Disable writes', exact: true }));
   await target.expectVisible(selectors.getByRole('button', { name: 'Enable writes', exact: true }));
-  await target.click(selectors.getByRole('button', { name: 'Fetch latest', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Get latest changes', exact: true }));
   await awaitBackup(notPushed);
   const disabled = await target.commands.uiReadLinkedGithubFixture();
   expect(disabled.writeEnabled).toBe(false);

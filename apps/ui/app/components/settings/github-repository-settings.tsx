@@ -454,7 +454,7 @@ export function GithubRepositorySettings(): React.JSX.Element {
             <SettingsRow
               title='Connect GitHub'
               description={
-                pending ? 'Finish connecting in your browser' : 'Import from and push to your GitHub repositories'
+                pending ? 'Finish connecting in your browser' : 'Import from and back up to your GitHub repositories'
               }
               control={
                 <>

@@ -43,16 +43,16 @@ describe('repository write approval and first push', () => {
   it('should require approval and then a separate push gesture', async () => {
     const push = show();
     await userEvent.click(await screen.findByRole('button', { name: 'Enable writes' }));
-    expect(screen.getByRole('alertdialog')).toHaveTextContent('Nothing is pushed now');
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Nothing is backed up now');
     expect(push).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'Enable repository writes' }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Push to GitHub' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Back up to GitHub' })).toBeEnabled();
     });
     expect(fixture.setWrite).toHaveBeenCalledWith('connection', { repositoryId: 9, enabled: true });
     expect(push).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole('button', { name: 'Push to GitHub' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Push completed');
+    await userEvent.click(screen.getByRole('button', { name: 'Back up to GitHub' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Backed up to GitHub');
     expect(push).toHaveBeenCalledOnce();
   });
   it('should cancel enablement without changing permissions or pushing', async () => {
@@ -61,14 +61,14 @@ describe('repository write approval and first push', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(fixture.setWrite).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Push to GitHub' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Back up to GitHub' })).toBeDisabled();
   });
   it('should disable writes while retaining reads', async () => {
     fixture.access.mockResolvedValue({ ...access, writeEnabled: true });
     const push = show();
     await userEvent.click(await screen.findByRole('button', { name: 'Disable writes' }));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Push to GitHub' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Back up to GitHub' })).toBeDisabled();
     });
     expect(screen.getByText('Read files and history; import branch designs.')).toBeVisible();
     expect(push).not.toHaveBeenCalled();
@@ -90,9 +90,11 @@ describe('repository write approval and first push', () => {
   });
   it('should not offer a push while the revision scheduler is fetching', async () => {
     fixture.access.mockResolvedValue({ ...access, writeEnabled: true });
-    const push = show(undefined, 'Finish fetching before pushing.');
-    expect(await screen.findByRole('button', { name: 'Push to GitHub' })).toBeDisabled();
-    expect(screen.getByText('Finish fetching before pushing.')).toBeVisible();
+    const push = show(undefined, 'Get the latest changes and choose what to keep before backing up to GitHub.');
+    expect(await screen.findByRole('button', { name: 'Back up to GitHub' })).toBeDisabled();
+    expect(
+      screen.getByText('Get the latest changes and choose what to keep before backing up to GitHub.'),
+    ).toBeVisible();
     expect(push).not.toHaveBeenCalled();
   });
 });

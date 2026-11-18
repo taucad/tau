@@ -69,10 +69,8 @@ describe('cloud deletion menu', () => {
     expect(await screen.findByRole('alertdialog', { name: 'Delete “Bracket” from Tau Cloud?' })).toBeInTheDocument();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
-    expect(
-      screen.getByText(/Copies already downloaded to devices and independent forks are kept/u),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/If you have not downloaded a copy elsewhere/u)).toBeInTheDocument();
+    expect(screen.getByText(/Copies already on anyone’s devices, and duplicates, are kept/u)).toBeInTheDocument();
+    expect(screen.getByText(/If this project isn’t on one of your devices/u)).toBeInTheDocument();
     await user.keyboard('{Escape}');
     await waitFor(() => {
       expect(trigger).toHaveFocus();
@@ -86,7 +84,7 @@ describe('cloud deletion menu', () => {
     expect(screen.getByRole('menuitem', { name: 'Restore' })).toBeInTheDocument();
     await user.click(screen.getByRole('menuitem', { name: 'Delete from Tau Cloud…' }));
     await screen.findByRole('alertdialog');
-    expect(screen.queryByText(/If you have not downloaded a copy elsewhere/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/If this project isn’t on one of your devices/u)).not.toBeInTheDocument();
   });
   it('should retain an inline refusal and retry the same project ID', async () => {
     const user = userEvent.setup();
@@ -104,7 +102,7 @@ describe('cloud deletion menu', () => {
     await user.click(screen.getByRole('button', { name: 'Actions for Bracket' }));
     await user.click(screen.getByRole('menuitem', { name: 'Delete from Tau Cloud…' }));
     await user.click(await screen.findByRole('button', { name: 'Delete from Tau Cloud' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('403');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t delete this project from Tau Cloud');
     await user.click(screen.getByRole('button', { name: 'Delete from Tau Cloud' }));
     await waitFor(() => {
       expect(request.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(2);
@@ -124,7 +122,7 @@ describe('cloud deletion menu', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Delete from Tau Cloud…' }));
     const confirm = await screen.findByRole('button', { name: 'Delete from Tau Cloud' });
     expect(confirm).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent('Waiting for your cloud session');
+    expect(screen.getByRole('status')).toHaveTextContent('Checking that you’re signed in');
     await user.click(confirm);
     expect(request).not.toHaveBeenCalled();
 
@@ -170,7 +168,7 @@ describe('cloud deletion menu', () => {
         setRevisionSessionUser({ id: 'other-owner', name: 'Other owner' });
       });
       expect(confirm).toBeDisabled();
-      expect(screen.getByRole('alert')).toHaveTextContent('Your cloud account changed');
+      expect(screen.getByRole('alert')).toHaveTextContent('You’re signed in to a different account now');
       await user.click(confirm);
       expect(request).not.toHaveBeenCalled();
       await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -190,7 +188,7 @@ describe('cloud deletion menu', () => {
     await user.click(screen.getByRole('button', { name: 'Open Bracket' }));
     expect(screen.getByRole('button', { name: 'Deleting from Tau Cloud… Bracket' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Actions for Bracket' }));
-    expect(screen.getByRole('menuitem', { name: 'Check cloud deletion…' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Check Tau Cloud deletion…' })).toBeInTheDocument();
     expect(open).not.toHaveBeenCalled();
   });
   it('should open a cloud-only card menu without opening or downloading the project', async () => {

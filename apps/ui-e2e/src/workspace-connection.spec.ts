@@ -280,7 +280,7 @@ describe('large workspace connection', () => {
     await target.click(selectors.getByRole('button', { name: 'Add Workspace' }));
     expect(await readProjectStorageState()).toEqual(empty);
     expect(await readOpfsWorkspaceMarker(workspaceName)).toBeUndefined();
-    await target.expectCount(selectors.getByText('Failed to connect workspace.'), 0);
+    await target.expectCount(selectors.getByText('Couldn’t connect the folder. Try again.'), 0);
 
     await target.evaluate(async (name) => {
       Object.defineProperty(globalThis, 'showDirectoryPicker', {

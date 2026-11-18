@@ -298,7 +298,7 @@ describe('FileSystemSettings workspace disconnect', () => {
     await act(async () => options.action.onClick());
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith('Failed to reconnect workspace.');
+      expect(mockToastError).toHaveBeenCalledWith('Couldn’t reconnect the folder. Try again.');
     });
     expect(error).toHaveBeenCalled();
   });

@@ -791,8 +791,8 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('This chat is running on another device')).toBeInTheDocument();
-    expect(screen.getByText('Send again here once that run finishes.')).toBeInTheDocument();
+    expect(screen.getByText('This chat is running on your other device')).toBeInTheDocument();
+    expect(screen.getByText('Send again here once it finishes.')).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
@@ -805,9 +805,9 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for changes from your other device')).toBeInTheDocument();
     expect(
-      screen.getByText('This chat continues once sync brings what another device wrote. Send again then.'),
+      screen.getByText('This chat continues when the changes from your other device arrive. Send again then.'),
     ).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
@@ -920,7 +920,7 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for changes from your other device')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Resume' }));
     expect(continueChat).toHaveBeenCalledTimes(1);
   });
@@ -1002,9 +1002,11 @@ describe('ChatError', () => {
 
     render(<ChatErrorBanner />);
 
-    expect(screen.getByText('Update Tau on this host')).toBeInTheDocument();
+    expect(screen.getByText('Update Tau on that computer')).toBeInTheDocument();
     expect(
-      screen.getByText('This host runs a version of Tau this page cannot talk to. Update Tau there, then try again.'),
+      screen.getByText(
+        'That computer runs a version of Tau this page can’t talk to. Update Tau there, then try again.',
+      ),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Try again' }));
@@ -1121,7 +1123,7 @@ describe('ChatError', () => {
     );
 
     render(<ChatErrorBanner />);
-    expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
+    expect(screen.getByText('Couldn’t reach Tau')).toBeInTheDocument();
   });
 
   it('should replay the server-category fallback when Try again is clicked', async () => {

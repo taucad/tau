@@ -216,6 +216,6 @@ describe('model wait reporting', () => {
     mocks.remote = { phase: 'failed', reason: 'rejected', error: 'The remote refused refs/heads/main.' };
     const view = render(<ProjectSyncAnnouncement />);
     expect(view.container).toHaveTextContent('Couldn’t back up this project');
-    expect(view.container).not.toHaveTextContent('Couldn’t download this project');
+    expect(view.container).not.toHaveTextContent('Couldn’t open this project');
   });
 });

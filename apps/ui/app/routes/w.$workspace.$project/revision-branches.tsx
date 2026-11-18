@@ -372,7 +372,7 @@ function ConflictDismissal({ conflict }: { readonly conflict: RevisionConflictFa
           <AlertDialogHeader>
             <AlertDialogTitle>{`Dismiss another device’s conflict on ${conflict.into}?`}</AlertDialogTitle>
             <AlertDialogDescription>
-              {`It is about ${names.length === 0 ? conflict.into : names.join(', ')}. ${conflict.into} is unchanged, and the device that made it keeps it and offers it again when it next syncs.`}
+              {`It is about ${names.length === 0 ? conflict.into : names.join(', ')}. ${conflict.into} is unchanged, and the device that made it keeps it and offers it again the next time it backs up.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <details className='text-xs text-muted-foreground'>

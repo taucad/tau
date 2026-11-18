@@ -354,7 +354,7 @@ export function ProjectLibrary({
         await assertCloudProjectActive(entry.id);
         await openCloudProject(entry);
       } catch (error) {
-        toast.error(`Could not open ${entry.name} from Tau Cloud`, {
+        toast.error(`Couldn’t open ${entry.name}`, {
           description: error instanceof Error ? error.message : undefined,
         });
       }
@@ -378,7 +378,7 @@ export function ProjectLibrary({
         if (trashed) {
           if (announce) {
             toast.success(`Moved ${project.name} to Trash`, {
-              description: 'Its files remain on disk and can be restored from Trash.',
+              description: 'Its files stay on this device and can be restored from Trash.',
             });
           }
           return true;
@@ -842,9 +842,9 @@ export function ProjectLibrary({
 
       {listingError && projects.length > 0 ? (
         <div role='alert' className='flex items-center justify-between gap-3 rounded-md border p-3'>
-          <span className='text-sm'>Projects could not be refreshed.</span>
+          <span className='text-sm'>Couldn’t refresh projects.</span>
           <Button size='sm' variant='outline' onClick={async () => retry()}>
-            Retry
+            Try again
           </Button>
         </div>
       ) : null}
@@ -856,11 +856,11 @@ export function ProjectLibrary({
         >
           <PackageX className='size-8 text-muted-foreground' />
           <div>
-            <div className='font-medium'>Projects could not be loaded</div>
-            <div className='text-sm text-muted-foreground'>Check the connected workspace and try again.</div>
+            <div className='font-medium'>Couldn’t load projects</div>
+            <div className='text-sm text-muted-foreground'>Check that the folder is connected, then try again.</div>
           </div>
           <Button variant='outline' onClick={async () => retry()}>
-            Retry
+            Try again
           </Button>
         </div>
       ) : (
@@ -1156,7 +1156,7 @@ function LibraryStatusSlot({
       {notice === 'offline' ? null : notice === 'failed' ? (
         <span role='alert' className='flex min-w-0 items-center gap-1.5'>
           <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />
-          <span className='truncate'>Tau Cloud projects not loaded</span>
+          <span className='truncate'>Couldn’t load Tau Cloud projects</span>
         </span>
       ) : (
         children
@@ -1169,10 +1169,10 @@ function LibraryStatusSlot({
           size='xs'
           className={cn('min-w-6 shrink-0', retry.slowDelay !== undefined && 'wait-after-slow')}
           style={retry.slowDelay === undefined ? undefined : retryRevealStyle(retry.slowDelay)}
-          aria-label='Retry Tau Cloud'
+          aria-label='Try loading Tau Cloud projects again'
           onClick={onRetryCloud}
         >
-          Retry
+          Try again
         </Button>
       )}
     </div>

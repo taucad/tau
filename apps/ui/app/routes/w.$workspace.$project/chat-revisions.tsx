@@ -104,7 +104,7 @@ import { toast } from '@taucad/ui/components/sonner';
 
 /** Sync settings live in tau.json, which Tau refuses to write while it needs repair (R4). */
 const reportSyncSettingError = (error: unknown): void => {
-  toast.error('Could not change sync settings', {
+  toast.error('Couldn’t change backup settings', {
     description: error instanceof Error ? error.message : undefined,
   });
 };

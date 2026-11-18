@@ -2290,12 +2290,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
             const { response } = await dialog.showMessageBox({
               type: 'warning',
               buttons: context.retryable
-                ? ['Retry saving', 'Keep Tau open', 'Quit anyway']
+                ? ['Try saving again', 'Keep Tau open', 'Quit anyway']
                 : ['Restore workspace', 'Quit anyway'],
               defaultId: 0,
               cancelId: context.retryable ? 1 : 0,
               message: 'Tau has not finished saving every project.',
-              detail: `${context.error ?? ''} Retry saving, or restore the app after pending saves settle. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops any running Terminal session.'}`,
+              detail: `${context.error ?? ''} Try saving again, or restore the app after pending saves finish. Quitting anyway may lose changes.${context.terminals === 0 ? '' : ' Restoring reloads each window, which also stops any running Terminal session.'}`,
             });
             done(
               context.retryable
@@ -2353,7 +2353,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
           case 'recoveryReview': {
             const { response } = await dialog.showMessageBox({
               type: 'warning',
-              buttons: installFailed ? ['Retry recovery'] : ['Retry recovery', 'Quit anyway'],
+              buttons: installFailed ? ['Try recovery again'] : ['Try recovery again', 'Quit anyway'],
               defaultId: 0,
               cancelId: 0,
               message: 'Tau is waiting to restore your workspace.',

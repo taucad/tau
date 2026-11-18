@@ -124,7 +124,7 @@ describe('describeRevisionFailure', () => {
   it('phrases a turn that recorded nothing, never in the machine’s own words', () => {
     expect(describeRevisionFailure('turn', 'BASE_CUT_FAILED')).toEqual({
       title: 'Nothing was saved for that request',
-      description: 'Tau could not save this project’s earlier edits first. Try sending that again.',
+      description: 'Couldn’t save this project’s earlier edits first. Send that again.',
     });
     expect(describeRevisionFailure('turn', 'LEASE_UNAVAILABLE').description).toContain('Another window');
     expect(describeRevisionFailure('turn', undefined).description).toBe(revisionFailureCopy.turn.fallback);
@@ -160,7 +160,7 @@ describe('describeRevisionFailure', () => {
   it('falls back per subject for a failure that carries no code at all', () => {
     expect(describeRevisionFailure('save', undefined)).toEqual({
       title: 'Couldn’t save',
-      description: 'Tau could not record this change. Reload the page and try again.',
+      description: 'Couldn’t save this change. Reload the page and try again.',
     });
     expect(describeRevisionFailure('branch', 'SOMETHING_NEW').description).toBe(revisionFailureCopy.branch.fallback);
   });
@@ -213,7 +213,7 @@ describe('a restore whose files are back but not recorded (W0 N1, M1)', () => {
 
 describe('what the Hosted Remote answers (W2a, W9)', () => {
   it.each([
-    ['backup', 'REMOTE_DAMAGED', /has to repair this project’s copy on Tau Cloud.*Nothing on this device is lost/u],
+    ['backup', 'REMOTE_DAMAGED', /has to repair this project’s backup on Tau Cloud.*Nothing on this device is lost/u],
     ['removeConflictLine', 'GIT_RATE_LIMITED', /Wait a minute, then try again/u],
     ['removeConflictLine', 'GIT_LEASE_OWNER_BUSY', /Try again in a moment/u],
     ['removeConflictLine', 'GIT_HYDRATE_BUDGET_EXHAUSTED', /Try again tomorrow/u],

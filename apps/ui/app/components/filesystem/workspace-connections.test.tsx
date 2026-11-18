@@ -179,7 +179,7 @@ describe('WorkspaceConnections', () => {
     expect(screen.getByText('Workspaces')).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'Disconnect workspace' }));
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Disconnected workspace "Tau Workspace". Your files are still on disk.',
+      'Disconnected "Tau Workspace". Your files are still in the folder.',
     );
     expect(screen.getByText('Tau Workspace')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Disconnect workspace' })).not.toBeInTheDocument();

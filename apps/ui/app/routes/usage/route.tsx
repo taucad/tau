@@ -77,7 +77,7 @@ function UsageFreshness({
     'unable-to-refresh': 'Showing saved usage; unable to refresh',
     saved:
       'snapshot' in usage
-        ? `Offline — saved usage for ${savedLabel ?? 'this account'}, last updated ${formatInstant(usage.snapshot.asOf)}. Reconnect for the latest usage.`
+        ? `Offline — saved usage for ${savedLabel ?? 'this account'}, last updated ${formatInstant(usage.snapshot.asOf)}. Go online for the latest usage.`
         : '',
     unavailable: 'No saved usage for this view',
   };

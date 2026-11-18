@@ -1062,6 +1062,13 @@ export const replicadKernel = defineKernel({
                 explicitDefaults: occtExplicitTessellationDefaults.export,
               });
               const { linearTolerance, angularTolerance } = requested;
+              // N14: with the live tier, the export composes the part meshes a render or an earlier export kept at
+              // these exact tolerances; with reuse off every export meshes, as before (I2).
+              const meshMemo =
+                runtime.compute.status === 'on' && context.liveTier
+                  ? (context.meshMemo ??= createReplicadMeshMemo({ openCascade: context.openCascade }))
+                  : undefined;
+              meshMemo?.beginRender();
               const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
                 render(namedShapes, {
                   tessellation: { linearTolerance, angularTolerance },
@@ -1069,8 +1076,11 @@ export const replicadKernel = defineKernel({
                   openCascade: context.openCascade,
                   tessellationInstancing: context.tessellationInstancing,
                   tracer: runtime.tracer,
+                  meshMemo,
                 }),
-              );
+              ).finally(() => {
+                meshMemo?.endRender();
+              });
               const temporaryShapes = renderedShapes.filter(
                 (shape): shape is GeometryReplicad => shape.format === 'replicad',
               );

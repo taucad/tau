@@ -1,8 +1,8 @@
 /* oxlint-disable typescript/no-restricted-types -- The billing wire returns explicit JSON nulls; a fixture has to be able to say so. */
 import { describe, expect, it } from 'vitest';
 import { wireUsageSnapshotSchema } from '@taucad/billing';
-import { unresolvedProjectsOption, usageFilterOptions } from '#routes/usage/use-usage-filters.js';
-import type { ProjectNames } from '#routes/usage/activity-names.js';
+import { unresolvedProjectsOption, usageFilterOptions } from '#components/usage/use-usage-filters.js';
+import type { ProjectNames } from '#components/usage/activity-names.js';
 
 const timestamp = '2026-09-12T00:00:00.000Z';
 

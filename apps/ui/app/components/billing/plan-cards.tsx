@@ -16,7 +16,7 @@ import {
 } from '#lib/billing-payment-client.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { Button } from '@taucad/ui/components/button';
-import { BillingInlineError } from '#components/billing/billing-primitives.js';
+import { BillingInlineError } from '@taucad/billing-ui/components/billing/billing-primitives';
 
 const enterpriseMailto = 'mailto:enterprise@tau.new';
 

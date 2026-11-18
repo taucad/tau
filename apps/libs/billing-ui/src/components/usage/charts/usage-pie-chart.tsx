@@ -6,9 +6,9 @@ import type { ChartConfig } from '@taucad/ui/components/chart';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageActivityPage } from '@taucad/billing';
-import { getUsageColor } from '#routes/usage/provider-colors.js';
-import { CreditUsageTooltip } from '#routes/usage/charts/credit-usage-tooltip.js';
-import { displayCredits } from '#routes/usage/credits.js';
+import { getUsageColor } from '#components/usage/provider-colors.js';
+import { CreditUsageTooltip } from '#components/usage/charts/credit-usage-tooltip.js';
+import { displayCredits } from '#components/usage/credits.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RADIAN is a constant
 const RADIAN = Math.PI / 180;

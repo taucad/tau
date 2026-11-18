@@ -2,7 +2,9 @@
  * Alert the operator when a scheduled (nightly or weekly) workflow on `main` was red, cancelled or did not run.
  *
  * `nightly-watchdog.yml` runs this once a day. It finds every workflow under `.github/workflows` with a `schedule`
- * trigger, so a new nightly is watched without editing this file, and reads each one's newest `schedule` run on `main`.
+ * trigger, so a new nightly is watched without editing this file, and reads each one's newest `schedule` run on `main`
+ * (and any red one of the last 24 hours behind it, for a workflow scheduled more than once a day, such as the release
+ * gate).
  * A daily cron must have a run created in the last 36 hours (GitHub starts scheduled runs up to about 7 hours late under load: on 2026-11-07 the 03:17 crons were created at 10:03), a weekly cron (day-of-week set) in the last 8 days. A run
  * that is still in progress is reported as pending, not as a failure. When anything is red, cancelled or missing it
  * sends one Grafana IRM formatted-webhook alert, so the operator gets a phone push without a GitHub issue (operator
@@ -103,6 +105,39 @@ export const judge = (workflow: ScheduledWorkflow, run: ScheduledRun | undefined
     return { workflow, state: 'ok', detail: run.conclusion, url: run.html_url };
   }
   return { workflow, state: 'failed', detail: run.conclusion ?? 'no conclusion', url: run.html_url };
+};
+
+/** How far back a red scheduled run behind a newer one is still reported: one watchdog day, so none is reported twice. */
+export const recentWindow = 24 * hour;
+
+/**
+ * Judge one workflow from its scheduled runs on `main`, newest first. The newest run decides, except that a run
+ * created in the last {@link recentWindow} that completed red or cancelled reports the workflow failed even when a
+ * newer run passed or is still running: a workflow scheduled more than once a day (the release gate's three daily
+ * runs, CI scaling review C3) cannot hide a red run behind a later green one.
+ */
+export const judgeRuns = (workflow: ScheduledWorkflow, runs: readonly ScheduledRun[], now: Date): Verdict => {
+  const newest = judge(workflow, runs[0], now);
+  if (newest.state === 'failed' || newest.state === 'missing') {
+    return newest;
+  }
+  const red = runs
+    .slice(1)
+    .find(
+      (run) =>
+        now.getTime() - Date.parse(run.created_at) <= recentWindow &&
+        run.status === 'completed' &&
+        !(run.conclusion && passing.has(run.conclusion)),
+    );
+  if (red) {
+    return {
+      workflow,
+      state: 'failed',
+      detail: `${red.conclusion ?? 'no conclusion'} (an earlier run of the last 24 h; the newest is ${newest.detail})`,
+      url: red.html_url,
+    };
+  }
+  return newest;
 };
 
 /** Grafana IRM formatted-webhook fields. */
@@ -265,12 +300,13 @@ const candidateVerdicts = async (repository: string, token: string, now: Date): 
   return judgeCandidates({ tags, runs, jobsOf: (run) => jobs.get(run.id) ?? [], now });
 };
 
-const newestScheduledRun = async (
+/** The newest scheduled runs of a workflow on `main`, newest first: enough to cover a day of several crons. */
+const recentScheduledRuns = async (
   repository: string,
   file: string,
   token: string,
-): Promise<ScheduledRun | undefined> => {
-  const url = `https://api.github.com/repos/${repository}/actions/workflows/${encodeURIComponent(file)}/runs?event=schedule&branch=main&per_page=1`;
+): Promise<readonly ScheduledRun[]> => {
+  const url = `https://api.github.com/repos/${repository}/actions/workflows/${encodeURIComponent(file)}/runs?event=schedule&branch=main&per_page=10`;
   const response = await fetch(url, {
     headers: {
       authorization: `Bearer ${token}`,
@@ -282,7 +318,7 @@ const newestScheduledRun = async (
     throw new Error(`${file}: GitHub API ${response.status}`);
   }
   const body = (await response.json()) as { readonly workflow_runs: readonly ScheduledRun[] };
-  return body.workflow_runs[0];
+  return body.workflow_runs;
 };
 
 const main = async (args: readonly string[]): Promise<number> => {
@@ -308,7 +344,7 @@ const main = async (args: readonly string[]): Promise<number> => {
   const verdicts = [
     ...(await Promise.all(
       workflows.map(async (workflow) =>
-        judge(workflow, await newestScheduledRun(repository, workflow.file, token), now),
+        judgeRuns(workflow, await recentScheduledRuns(repository, workflow.file, token), now),
       ),
     )),
     ...(await candidateVerdicts(repository, token, now)),

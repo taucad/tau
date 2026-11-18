@@ -5,8 +5,8 @@
  * `@taucad/revisions-ui`'s ({@link createRevisionHistoryHooks}). What only this
  * app can reach is handed in here, once: the open project, the revision client
  * and projection from `use-revision-status`, the chat session store whose
- * settlements name each turn's revision, the who-resolver of
- * `lib/revision-actor` (session, push record and the debug flag) and the push
+ * settlements name each turn's revision, the library's who-resolver over
+ * `lib/revision-actor`'s context (session, push record and the debug flag) and the push
  * records of `lib/revision-pushes` (`window.ENV`'s API origin). App suites mock
  * this module and the ones it binds, so its path stays; the types and
  * `revisionPageSize` are imported from the library itself.
@@ -16,7 +16,8 @@ import { useMemo } from 'react';
 import { createRevisionHistoryHooks } from '@taucad/revisions-ui/hooks/use-revisions';
 import type { RevisionAuthorship } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useProject } from '#hooks/use-project.js';
-import { revisionWho, useRevisionWhoContext } from '#lib/revision-actor.js';
+import { revisionWho } from '@taucad/revisions-ui/lib/revision-who';
+import { useRevisionWhoContext } from '#lib/revision-actor.js';
 import { holdRevisionGraph, refreshPushRecords } from '#lib/revision-pushes.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';

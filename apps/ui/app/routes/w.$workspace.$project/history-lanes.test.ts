@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RevisionConflictFacet, RevisionGraph } from '@taucad/revisions';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { conflictLinesOf, historyLanesOf } from '#routes/w.$workspace.$project/history-lanes.js';
 import type { HistoryFilter, HistoryLanes } from '#routes/w.$workspace.$project/history-lanes.js';
 import { conflictLine, lanesScenarios, lidConflict } from '#routes/w.$workspace.$project/history-lanes.test-harness.js';

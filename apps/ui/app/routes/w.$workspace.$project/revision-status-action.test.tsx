@@ -18,7 +18,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
 import { revisionAccessibleName, selectRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
 import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocabulary.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 

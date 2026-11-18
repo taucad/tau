@@ -235,7 +235,8 @@ describe('release-gate.yml', () => {
 
   it("should run every scope:api project's tests against ci.yml's service containers (C2a)", () => {
     const api = gate.jobs['api'] ?? {};
-    const ciApi = (load(read('.github/workflows/ci.yml')) as Workflow).jobs['api'] ?? {};
+    // The API suites run in ci.yml's `api-shard` matrix (two Vitest halves); `api` is only the required fan-in.
+    const ciApi = (load(read('.github/workflows/ci.yml')) as Workflow).jobs['api-shard'] ?? {};
     expect(api.needs).toEqual(['reuse']);
     expect(api.if).toBe(uncachedJobIf);
     expect(stepUsing(api, 'actions/checkout@')?.with).toEqual(gatedCheckout);

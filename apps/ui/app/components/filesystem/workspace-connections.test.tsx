@@ -410,7 +410,7 @@ describe('WorkspaceConnections', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Remove from Tau' }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Your files are still in the folder');
+    expect(await screen.findByRole('status')).toHaveTextContent('Your files are still on disk');
     await waitFor(() => {
       expect(screen.queryByText('Tau Workspace')).not.toBeInTheDocument();
     });

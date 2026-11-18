@@ -4,6 +4,7 @@ export default defineConfig({
   // Mirrors apps/desktop/vitest.config.ts: the desktop build's constants for a self-host build.
   define: {
     tauCloudBuildEnabled: 'false',
+    tauTelemetryHostCloudBuild: 'false',
     tauDesktopHostBuild: '""',
   },
   test: {

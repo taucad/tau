@@ -575,6 +575,12 @@ export type RunLifecycleEvent = LogEventBase & {
   readonly storageDurability?: StorageDurabilityClass | undefined;
   readonly detail?: RunFailureDetail | undefined;
   /**
+   * The billing mode the run started under (`funded` or `unfunded`, D1, I3), on the `admitted` row, or on a `running`
+   * row of a run admitted without one. Every attempt of the run keeps it. A string, not a union, for the reason
+   * `stopReason` states: a value this build does not know is carried, and the run is refused rather than re-asked.
+   */
+  readonly deployment?: string | undefined;
+  /**
    * Why the executor stopped, in its own vocabulary, on a terminal marker.
    *
    * A string, not a union: an external runner's reasons belong to the protocol

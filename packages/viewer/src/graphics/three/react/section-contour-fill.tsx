@@ -15,8 +15,14 @@ import { gltfEdgeColorDarkMode, gltfEdgeColorLightMode } from '#graphics/three/o
 import { useOverlayDepthRestorer } from '#graphics/three/scene-overlay.jsx';
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import { sceneTag, sceneTagData } from '#graphics/three/utils/scene-tags.js';
-import { sectionCapStencilDebugUserDataKey } from '#graphics/three/utils/section-cap-stencil-debug.js';
-import type { SectionCapStencilDiagnostics } from '#graphics/three/utils/section-cap-stencil-debug.js';
+import {
+  sectionCapOutlineDebugUserDataKey,
+  sectionCapStencilDebugUserDataKey,
+} from '#graphics/three/utils/section-cap-stencil-debug.js';
+import type {
+  SectionCapOutlineDebugControl,
+  SectionCapStencilDiagnostics,
+} from '#graphics/three/utils/section-cap-stencil-debug.js';
 import { createSectionLoopCaps } from '#graphics/three/utils/section-loop-caps.js';
 import type { SectionLoopCapFace, SectionLoopCapSource } from '#graphics/three/utils/section-loop-caps.js';
 import { createSectionOpenBackFaces } from '#graphics/three/utils/section-open-back-faces.js';
@@ -359,6 +365,9 @@ export function SectionContourFills({
       };
     });
     gl.getDrawingBufferSize(drawingBufferSize);
+    const outlineControl = isTauDebugEnabled
+      ? (root.userData[sectionCapOutlineDebugUserDataKey] as SectionCapOutlineDebugControl | undefined)
+      : undefined;
     // Without a post owner the model's pass left the canvas depth, and this is a no-op.
     restoreDepth();
     const stats = caps.render(gl, {
@@ -366,7 +375,7 @@ export function SectionContourFills({
       pieces: committed.cutSet.pieces,
       sources,
       stripes: { stripeFrequency, stripeWidth: sectionCapLineWidthCssPixels * gl.getPixelRatio() },
-      outlineWidthPixels: gltfEdgeLineWidth * gl.getPixelRatio(),
+      outlineWidthPixels: outlineControl?.hidden === true ? 0 : gltfEdgeLineWidth * gl.getPixelRatio(),
       viewportHeightPixels: drawingBufferSize.y,
     });
     const loopDiagnostics = loopCaps.diagnostics();

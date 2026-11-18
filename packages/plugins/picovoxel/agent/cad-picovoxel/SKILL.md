@@ -22,7 +22,7 @@ Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` t
 - Prefer voxel booleans, offsets, ShapeKernel and LatticeLibrary over manual triangles. Output is mesh, not BRep.
 - Prefer an `SdfExpression` (`['max', ['abs', 'x'], ['abs', 'y']]`) over a JS `sdf` callback: expressions fill in parallel, callbacks run serially.
 - Stylised characters (mascots, chess pieces, toy creatures) are one blended SDF field: read [characters-reference.md](characters-reference.md) for the smooth-union and ellipsoid helpers.
-- Dispose large intermediates after their last use.
+- Free each large intermediate at its last use: the garbage collector cannot free a grid in the middle of one synchronous `main()`. Call `dispose()`, pass `{ consume: true }` to a boolean or offset whose receiver is finished (`a.union(b, { consume: true })`), or build a stage in `pico.scope(() => …)`, which frees everything the stage created except what it returns.
 - The viewer shows a fast preview; exports and GeoSpec checks replay the model exactly, so they can differ by about one voxel. Never request `lane: 'fast'` for manufacturing exports.
 
 Route TypeScript PicoGK requests here; native C# `main.cs` uses desktop `cad-picogk`.
@@ -84,7 +84,7 @@ interface Pico
   readonly handle: bigint
   // Deterministic teardown
   dispose(): void;
-  // … 14 more members in the API reference: lane, name, version, buildInfo, voxelToMm, mmToVoxel, createPolyLine, vdbVoxelSize, voxelsFromVdb, meshFromStl, memory, allocated, module, [Symbol.dispose]
+  // … 16 more members in the API reference: lane, name, version, buildInfo, voxelToMm, mmToVoxel, createPolyLine, vdbVoxelSize, voxelsFromVdb, meshFromStl, memory, allocated, footprint, module, scope, [Symbol.dispose]
 
 CreateVoxelsOptions:
   | { shape: 'empty' }
@@ -204,29 +204,23 @@ VdbFieldType: 'voxels' | 'scalarField' | 'vectorField' | 'unsupported'
 interface Voxels
   // Pure union
   union(...others: Voxels[]): Voxels;
+  union(...operands: [...others: Voxels[], options: ConsumeOptions]): Voxels;
   // Pure subtraction of every operand
   subtract(...others: Voxels[]): Voxels;
+  subtract(...operands: [...others: Voxels[], options: ConsumeOptions]): Voxels;
   // Pure intersection
-  intersect(other: Voxels): Voxels;
+  intersect(other: Voxels, options?: ConsumeOptions): Voxels;
   // Pure surface offset
-  offset(options: {
-      distance: number;
-      fastRenorm?: boolean;
-      fastSweeping?: boolean;
-    }): Voxels;
+  offset(options: OffsetOptions): Voxels;
   // In, 2× out, in again
-  smoothen(options: {
-      distance: number;
-      fastRenorm?: boolean;
-      fastSweeping?: boolean;
-    }): Voxels;
+  smoothen(options: OffsetOptions): Voxels;
   // Over-offset composition
   fillet(options: {
       rounding: number;
       finalSurfaceDistance?: number;
       fastRenorm?: boolean;
       fastSweeping?: boolean;
-    }): Voxels;
+    } & ConsumeOptions): Voxels;
   // Everything outside the box is trimmed away (cube-mesh intersect, as C#)
   trim(bounds: Bounds): Voxels;
   // Projects the slice at startZ through endZ (mm)
@@ -253,9 +247,22 @@ interface Voxels
   readonly metadata: Metadata
   // Raw ABI handle — escape hatch
   readonly handle: bigint
-  // Optional
+  // Frees the grid now
   dispose(): void;
-  // … 24 more members in the API reference: clone, equals, isEmpty, doubleOffset, shell, withMesh, withLattice, withImplicit, gridHash, densifyInterior, isInside, surfaceNormal, closestPointOnSurface, raycastToSurface, raycastBatch, closestPointsOnSurface, dimensions, sliceCount, sliceOrigin, getSlice, toScalarField, memUsage, lane, [Symbol.dispose]
+  // … 26 more members in the API reference: clone, equals, isEmpty, doubleOffset, shell, withMesh, withLattice, withImplicit, gridHash, densifyInterior, isInside, surfaceNormal, closestPointOnSurface, raycastToSurface, raycastBatch, closestPointsOnSurface, dimensions, sliceCount, sliceOrigin, getSlice, streamStl, streamMesh, toScalarField, memUsage, lane, [Symbol.dispose]
+
+// The opt-in for an operation that uses up its receiver
+interface ConsumeOptions
+  consume?: boolean
+
+// Options for {@link Voxels.offset} and {@link Voxels.smoothen}
+interface OffsetOptions extends ConsumeOptions
+  // Millimetres
+  distance: number
+  // See {@link Voxels.offset}
+  fastRenorm?: boolean
+  // Opt-in sweep engine, `fast` (docs/lanes.md)
+  fastSweeping?: boolean
 
 // Options for {@link Voxels.toMesh}
 interface ToMeshOptions
@@ -285,6 +292,10 @@ interface Metadata
 MetadataType: 'string' | 'float' | 'vector' | 'unknown'
 
 MetadataValue: string | number | Vec3
+
+declare class PicoError extends Error
+  code: PicoErrorCode
+  constructor(code: PicoErrorCode, message: string, options?: ErrorOptions);
 ```
 
 ### `picovoxel/shapekernel`
@@ -432,13 +443,15 @@ declare class Frames implements Spline
 
 FrameType: 'cylindrical' | 'spherical' | 'z' | 'minRotation'
 
-// Implicit genus-2 surface
-declare class ImplicitGenus implements Implicit
-  // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  readonly sdf: SdfFunction
-  // The same field as a tape expression for the parallel fill
-  readonly expression: SdfExpression
-  constructor(gap: number);
+// BSpline-based control point spline, open or closed ends (C# `ControlPointSpline`)
+declare class ControlPointSpline implements Spline
+  constructor(controlPoints: readonly Vec3[], degree?: number, ends?: SplineEnds);
+  // Render with the given sample count (C# `aGetPoints`)
+  points(samples?: number): Vec3[];
+  // Sample dynamically at a length ratio (C# `vecGetPointAt`)
+  pointAt(lengthRatio: number): Vec3;
+
+SplineEnds: 'open' | 'closed'
 ```
 
 ### `picovoxel/numerics`
@@ -464,25 +477,11 @@ vec3: {
   readonly isFinite: (v: Vec3) => boolean
   // … 11 more members in the API reference: unitY, one, lengthSquared, distanceSquared, distance, lerp, stripZ, transformed, mirrored, almostEqual, almostZero
 }
-
-// `Frame` factories and operations (C# `Frame3d` surface
-frame: {
-  // The world coordinate system (C# `frmWorld`)
-  readonly world: Frame
-  // Local point (2D points lie in the frame's XY plane) → world (C# `vecPtToWorld`)
-  readonly ptToWorld: (f: Frame, local: Vec2 | Vec3) => Vec3
-  // World point → local coordinates (C# `vecPtFromWorld`)
-  readonly ptFromWorld: (f: Frame, world: Vec3) => Vec3
-  // … 22 more members in the API reference: fromPos, fromZX, fromMat4, dirToWorld, dirFromWorld, compose, inverse, movedLocal, movedLocalX, movedLocalY, movedLocalZ, movedWorld, movedWorldX, movedWorldY, movedWorldZ, rotatedWorld, repositioned, toMat4, composeWithScale, asRigid, interpolate, equals
-}
-
-// A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
-Vec2: readonly [number, number]
 ```
 
 ## API reference
 
-To read any other signature, find its name in `api-index.md`, which lists all 968 symbols by file with the lines that hold each, and read that range of the named file.
+To read any other signature, find its name in `api-index.md`, which lists all 1025 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-interfaces.md` — Interfaces
 - `api-interfaces-2.md` — Interfaces (2)

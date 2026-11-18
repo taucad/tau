@@ -1,0 +1,62 @@
+name: Formal toolchain cache
+
+# Seeds the formal toolchain cache from `main` (CI throughput review, formal speed). `setup-formal` restores an entry
+# keyed by the tool selection and `tools/formal/toolchain.lock`, and saves none except here: a pull request or
+# merge-queue job can read only its own ref's entries and `main`'s, so the entries each queue job saved under its
+# own ref were never read again, and the restore missed in every sampled queue job. Each push to `main` looks every
+# selection up and provisions and saves only a missing one, so a re-pin, or an entry the cache evicted, is seeded
+# again by the next push. A hit costs a lookup and no download.
+#
+# The matrix lists every `tools` selection a workflow passes to `setup-formal`
+# (scripts/src/formal-toolchain-cache-workflow.test.ts); `key` is the selection with dashes, as the action writes it.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    name: Seed the formal toolchain cache (${{ matrix.selection.tools }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: # Required for nrwl/nx-set-shas (in setup-nx) to read workflow runs
+      actions: 'read'
+      contents: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        selection:
+          - { tools: 'tlc', key: 'tlc' }
+          - { tools: 'tlc,lean', key: 'tlc-lean' }
+          - { tools: 'tlc,apalache', key: 'tlc-apalache' }
+          - { tools: 'tlc,lean,apalache', key: 'tlc-lean-apalache' }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Look up the saved toolchain cache
+        id: lookup
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: node_modules/.cache/formal
+          key: formal-${{ runner.os }}-${{ runner.arch }}-${{ matrix.selection.key }}-${{ hashFiles('tools/formal/toolchain.lock') }}
+          lookup-only: true
+
+      - name: Setup Nx Environment
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Provision, verify and save the toolchains
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: ${{ matrix.selection.tools }}
+          save-cache: 'true'

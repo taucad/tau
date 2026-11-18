@@ -3,7 +3,8 @@
  * The shell service's admission, approval, bounds and outcomes, driven through the deterministic fake provider
  * (testing contract, layering rule 2). Nothing here proves containment: the conformance rows run the real provider.
  */
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,12 +12,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HostToolApproval, HostToolApprovalRecord, InterruptResolution } from '@taucad/agent-host';
 import { createFakeShellProvider } from '@taucad/sandbox/shell';
-import type { FakeShellScript, ShellExecutable, ShellLaunch } from '@taucad/sandbox/shell';
+import type { FakeShellScript, ShellExecutable, ShellExit, ShellLaunch } from '@taucad/sandbox/shell';
 
 import { isShellError, shellLimits } from '#shell/shell-contract.js';
 import { createShellGitView } from '#shell/shell-git-view.js';
 import type { PermissionMode, ShellApprovalPayload, ShellInput, ShellOutput } from '#shell/shell-contract.js';
-import { createShellService, probeHostShell, shellApprovalKey } from '#shell/shell-service.js';
+import { createPowerShellModuleCacheSchedule } from '#shell/shell-module-cache.js';
+import type { PowerShellModuleCache } from '#shell/shell-module-cache.js';
+import {
+  buildPowerShellModuleCache,
+  createShellService,
+  powerShellModuleCacheSchedule,
+  probeHostShell,
+  shellApprovalKey,
+} from '#shell/shell-service.js';
 import type { ShellCheckout, ShellServiceOptions } from '#shell/shell-service.js';
 
 /* The real git view, wrapped so one case can make writing it fail. */
@@ -1050,11 +1059,20 @@ describe('probeHostShell (D1, I2)', () => {
     sessionDirectory: sessions,
   });
 
-  it('answers sandbox-unavailable on Windows without starting anything', async () => {
-    const options = probeOptions(() => ({ status: 'started', exit: { exitCode: 0 } }), 'win32');
+  it('answers shell-missing on Windows without a fixed-path PowerShell, starting nothing', async () => {
+    const options = {
+      ...probeOptions(() => ({ status: 'started', exit: { exitCode: 0 } }), 'win32'),
+      environment: {},
+    };
+    await expect(probeHostShell(options)).resolves.toMatchObject({ status: 'unavailable', code: 'shell-missing' });
+    expect(options.provider.launches).toEqual([]);
+  });
+
+  it('answers platform-unsupported on a platform with no sandbox, starting nothing', async () => {
+    const options = probeOptions(() => ({ status: 'started', exit: { exitCode: 0 } }), 'freebsd');
     await expect(probeHostShell(options)).resolves.toMatchObject({
       status: 'unavailable',
-      code: 'sandbox-unavailable',
+      code: 'platform-unsupported',
     });
     expect(options.provider.launches).toEqual([]);
   });
@@ -1088,4 +1106,181 @@ describe('probeHostShell (D1, I2)', () => {
       });
     },
   );
+});
+
+describe('the PowerShell module analysis cache (Windows)', () => {
+  const powershell: ShellExecutable = {
+    kind: 'powershell',
+    path: String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+    realPath: String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`,
+    digest: 'sha256:ab12',
+  };
+  /** A build that writes the cache where its environment points, as PowerShell does. */
+  const writes =
+    (bytes: string, exit?: ShellExit) =>
+    (launch: ShellLaunch): FakeShellScript => {
+      const target = launch.environment['PSModuleAnalysisCachePath'];
+      if (target !== undefined && bytes !== '') {
+        writeFileSync(target, bytes);
+      }
+      return { status: 'started', exit: exit ?? { exitCode: 0 } };
+    };
+  type BuildOptions = Parameters<typeof buildPowerShellModuleCache>[0];
+  const buildOptions = (
+    script: (launch: ShellLaunch) => FakeShellScript,
+    platform: NodeJS.Platform = 'win32',
+  ): BuildOptions & Readonly<{ provider: ReturnType<typeof createFakeShellProvider> }> => ({
+    provider: createFakeShellProvider(script),
+    executable: powershell,
+    platform,
+    environment: { SystemRoot: String.raw`C:\Windows` },
+    appDataRoots: [appData],
+    sessionBase: sessions,
+  });
+  const running = (): AbortSignal => new AbortController().signal;
+
+  it('builds it once, in a launch that reaches only its own private roots, and finds it after', async () => {
+    const options = buildOptions(writes('analysis'));
+    const cache = await buildPowerShellModuleCache(options, running());
+
+    expect(cache).toStrictEqual({
+      directory: join(sessions, 'tau-powershell-cache', 'v2-ab12'),
+      file: join(sessions, 'tau-powershell-cache', 'v2-ab12', 'ModuleAnalysisCache'),
+    });
+    await expect(readFile(cache!.file, 'utf8')).resolves.toBe('analysis');
+    const [build] = options.provider.launches;
+    expect(build).toMatchObject({
+      executablePath: powershell.path,
+      commandId: 'shell:module-cache',
+      network: { domains: [] },
+      stdio: { kind: 'pipes' },
+      filesystem: { readable: [], denied: [appData] },
+    });
+    const { writable } = build!.filesystem;
+    expect(writable).toHaveLength(2);
+    expect(build!.environment['PSModuleAnalysisCachePath']).toBe(join(writable[1]!, 'ModuleAnalysisCache'));
+    /* The build's private roots are gone and its receipt released; only the store remains. */
+    await expect(readdir(sessions)).resolves.toStrictEqual(['tau-powershell-cache']);
+    expect(options.provider.executions.size).toBe(0);
+
+    const again = buildOptions(writes('other'));
+    await expect(buildPowerShellModuleCache(again, running())).resolves.toStrictEqual(cache);
+    expect(again.provider.launches).toHaveLength(0);
+  });
+
+  it('keeps no cache from a build that failed, wrote nothing or was stopped', async () => {
+    for (const script of [
+      writes('analysis', { exitCode: 1 }),
+      writes('analysis', { signal: 'SIGKILL' }),
+      writes(''),
+      (): FakeShellScript => ({ status: 'sandbox-unavailable', message: 'busy' }),
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one build at a time, as on Windows.
+      await expect(buildPowerShellModuleCache(buildOptions(script), running())).resolves.toBeUndefined();
+    }
+    await expect(readdir(sessions)).resolves.toStrictEqual([]);
+  });
+
+  it('stops a build when a launch claims the sandbox or its deadline passes, keeping nothing', async () => {
+    /* A build that never exits by itself: it ends only when its launch is stopped. */
+    const endless = (launch: ShellLaunch): FakeShellScript => {
+      writes('partial')(launch);
+      return { status: 'started' };
+    };
+    const claimed = new AbortController();
+    const stopped = buildPowerShellModuleCache(buildOptions(endless), claimed.signal);
+    claimed.abort();
+    await expect(stopped).resolves.toBeUndefined();
+    await expect(buildPowerShellModuleCache(buildOptions(endless), running(), 10)).resolves.toBeUndefined();
+    await expect(readdir(sessions)).resolves.toStrictEqual([]);
+  });
+
+  it('schedules nothing for Bash or off Windows, and grants a cache already in the store from the first launch', async () => {
+    await expect(
+      powerShellModuleCacheSchedule({ ...buildOptions(writes('analysis')), executable }),
+    ).resolves.toBeUndefined();
+    await expect(powerShellModuleCacheSchedule(buildOptions(writes('analysis'), 'linux'))).resolves.toBeUndefined();
+    const unbuilt = await powerShellModuleCacheSchedule(buildOptions(writes('a')));
+    expect(unbuilt?.current()).toBeUndefined();
+
+    await buildPowerShellModuleCache(buildOptions(writes('analysis')), running());
+    const options = buildOptions(writes('other'));
+    const schedule = await powerShellModuleCacheSchedule(options);
+    expect(schedule?.current()?.directory).toBe(join(sessions, 'tau-powershell-cache', 'v2-ab12'));
+    schedule?.start();
+    await schedule?.settled();
+    expect(options.provider.launches).toHaveLength(0);
+  });
+
+  it('grants the built cache to every later agent and Terminal launch read-only', async () => {
+    const cache = {
+      directory: join(base, 'cache', 'v2-ab12'),
+      file: join(base, 'cache', 'v2-ab12', 'ModuleAnalysisCache'),
+    };
+    const { service, provider } = harness(() => ({ status: 'started', exit: { exitCode: 0 } }), {
+      powerShellModuleCache: createPowerShellModuleCacheSchedule({ initial: cache, build: async () => undefined }),
+    });
+    await service.run(call({ command: 'true' }));
+    const opened = await service.openTerminal({
+      projectRoot: project,
+      size: { columns: 80, rows: 24 },
+      signal: new AbortController().signal,
+    });
+    if (opened.status === 'opened') {
+      await opened.session.exited;
+    }
+    expect(provider.launches).toHaveLength(2);
+    for (const { filesystem } of provider.launches) {
+      expect(filesystem.readable).toContain(cache.directory);
+      expect(filesystem.readOnly).toContain(cache.directory);
+      expect(filesystem.writable).not.toContain(cache.directory);
+    }
+    const plain = harness();
+    await plain.service.run(call({ command: 'true' }));
+    expect(plain.provider.launches[0]!.filesystem.readable).not.toContain(cache.directory);
+  });
+
+  it('builds after startup recovery, stops the build for a launch that then runs uncached, and grants it once built', async () => {
+    const cache: PowerShellModuleCache = {
+      directory: join(base, 'cache', 'v2-ab12'),
+      file: join(base, 'cache', 'v2-ab12', 'ModuleAnalysisCache'),
+    };
+    const steps: string[] = [];
+    let builds = 0;
+    const build = vi.fn(
+      async (signal: AbortSignal): Promise<PowerShellModuleCache | undefined> =>
+        new Promise((resolve) => {
+          builds += 1;
+          steps.push(`build ${String(builds)}`);
+          if (builds > 1) {
+            resolve(cache);
+            return;
+          }
+          signal.addEventListener('abort', () => {
+            steps.push('build stopped');
+            resolve(undefined);
+          });
+        }),
+    );
+    const schedule = createPowerShellModuleCacheSchedule({ build, idleDelay: 0 });
+    const { service, provider } = harness(
+      () => {
+        steps.push('launch');
+        return { status: 'started', exit: { exitCode: 0 } };
+      },
+      { powerShellModuleCache: schedule },
+    );
+    await vi.waitFor(() => {
+      expect(build).toHaveBeenCalledOnce();
+    });
+    await service.run(call({ command: 'true' }));
+    expect(steps.slice(0, 3)).toStrictEqual(['build 1', 'build stopped', 'launch']);
+    expect(provider.launches[0]!.filesystem.readable).not.toContain(cache.directory);
+    await vi.waitFor(() => {
+      expect(schedule.current()).toStrictEqual(cache);
+    });
+    await service.run(call({ command: 'true' }));
+    expect(provider.launches[1]!.filesystem.readable).toContain(cache.directory);
+    expect(build).toHaveBeenCalledTimes(2);
+  });
 });

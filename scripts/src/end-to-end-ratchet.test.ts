@@ -68,8 +68,8 @@ describe('ci.yml end-to-end ratchet lane (operator ruling 2026-11-15)', () => {
     'ui-e2e:test:e2e:non-isolated',
   ];
 
-  it('should plan the lane from test:e2e:queue, in the merge queue only', () => {
-    expect(laneSelectors['e2e-queue']).toEqual({ targets: ['test:e2e:queue'], pr: 'queue' });
+  it('should plan the lane from test:e2e:queue, in the merge queue and for a pull request that touches the project', () => {
+    expect(laneSelectors['e2e-queue']).toEqual({ targets: ['test:e2e:queue'], pr: 'touched' });
     expect(planScript).toContain('e2e_queue=$(flag e2e-queue)');
     expect(planScript).toContain('echo "e2e-queue-suites=$e2e_queue_suites"');
     expect(ci.jobs['plan']?.outputs?.['e2e-queue-suites']).toBe(expression('steps.plan.outputs.e2e-queue-suites'));

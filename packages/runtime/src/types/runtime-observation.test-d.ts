@@ -19,9 +19,9 @@ const facts = { queue: 0, execution: 1, cold: false, reuse: 'computed' } as cons
 describe('operation observation types', () => {
   it('should refuse a value on unknown demand', () => {
     const guessed: ResourceLimitDetails = {
-      limit: 'occt.export.triangles',
-      unit: '{triangle}',
-      maximum: 8_000_000,
+      limit: 'picovoxel.tape.instructions',
+      unit: '{instruction}',
+      maximum: 65_536,
       // @ts-expect-error -- `value` does not exist on the unknown branch
       demand: { kind: 'unknown', value: 0 },
       origin: 'default',

@@ -201,6 +201,9 @@ describe('static-shell routing on Netlify (PL3)', () => {
     ['a look-alike file', '/w.data'],
     ['Home', '/'],
     ["Home's data request", '/_root.data'],
+    ["Home's trailing-slash data request", '/_.data'],
+    ["a project's trailing-slash data request", '/w/home/bracket-v2/_.data'],
+    ["a workspace's trailing-slash data request", '/w/home/_.data'],
     ['the library', '/projects'],
     ['a new project', '/projects/new'],
     ['a publication', '/s/abc123'],
@@ -309,8 +312,17 @@ describe('the Home shell behind the marketing edge function (PL4)', () => {
       expect(redirectMatches(rule.from, new URL('https://tau.new/')), rule.from).toBe(false);
       expect(redirectMatches(rule.from, new URL('https://www.tau.new/')), rule.from).toBe(false);
     }
-    // `/`, `/_root.data` and `/?…` reach the function as before whenever the edge function passes them on.
-    for (const href of ['/', '/?app', '/_root.data', '/_root.data?_routes=root,routes/_index', '/index.html']) {
+    // `/`, the root data request by either name and `/?…` reach the function as before whenever the edge function
+    // passes them on.
+    for (const href of [
+      '/',
+      '/?app',
+      '/_root.data',
+      '/_root.data?_routes=root,routes/_index',
+      '/_.data',
+      '/_.data?_routes=root,routes/_index',
+      '/index.html',
+    ]) {
       expect(route(href), href).toStrictEqual({ kind: 'function' });
     }
     expect(staticShellFor('/')).toBeUndefined();

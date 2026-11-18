@@ -170,18 +170,23 @@ const lightingSchema = z.union([
     })
     .meta({ title: 'Directional lights' }),
 ]);
-// `thicknessRatio`, `denoiseDepthTolerance`, `samples` and `resolutionScale` are nanoraster's viewer-parity GTAO
+// `falloffEndRatio`, `falloffRange`, `denoiseDepthTolerance`, `samples` and `resolutionScale` are nanoraster's viewer-parity GTAO
 // controls (Tau charter W2), bounded as nanoraster bounds them.
 const aoSchema = z
   .object({
     radiusPixels: pixels().min(1).max(128).optional(),
     intensity: ratio().min(0).max(8).optional(),
     distanceFalloff: ratio().min(0.01).max(1).optional(),
-    thicknessRatio: ratio()
+    falloffEndRatio: ratio()
       .min(0.1)
       .max(100)
       .optional()
-      .describe('GTAO depth acceptance as a multiple of the world-space sampling radius'),
+      .describe('GTAO smooth-falloff end, by 3D sample distance, as a multiple of the world-space sampling radius'),
+    falloffRange: ratio()
+      .min(0.01)
+      .max(1)
+      .optional()
+      .describe('Fraction of the falloff end over which a sample weight falls from 1 to 0'),
     denoiseDepthTolerance: ratio()
       .min(0.01)
       .max(10)

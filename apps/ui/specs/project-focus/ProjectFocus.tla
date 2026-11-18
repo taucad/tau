@@ -154,6 +154,8 @@
 \* (`entryManifest`), so the model surfaces know from the first view which manifest the project holds. That is
 \* the session's own manifest observation, environment here; focus, the route state and the mounted live set are
 \* unchanged, so no action or verdict changes.
+\* DC-10 files-ui slice 5 (2026-11-17): `project-route-intent.tsx` takes `project-url.utils` from `@taucad/files-ui`;
+\* only the import moved. No action or verdict changes.
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 CONSTANTS Projects,          \* the projects the person can navigate to

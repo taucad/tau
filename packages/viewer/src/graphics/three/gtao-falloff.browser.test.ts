@@ -11,7 +11,7 @@ import { gtao } from '#graphics/three/gtao-node.js';
 const size = 256;
 const radius = 1;
 const floorDistance = 30 * radius;
-// Three r184's hard slab: the viewer's `thicknessRatio` 1 / 0.09 radii of view depth.
+// Three r184's hard slab: the viewer's former `thicknessRatio`, 1 / 0.09 radii of view depth.
 const oldSlabRatio = 1 / 0.09;
 
 it.each(['webgpu', 'webgl'] as const)(

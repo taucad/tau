@@ -892,8 +892,9 @@ describe('ci.yml shell lane (shell split blueprint PR 4)', () => {
         }
       }
     }
-    // Six macOS steps: the sandbox, the service, the host's two targets and the two Terminal targets.
-    expect(guarded).toBe(6);
+    // Six macOS steps (the sandbox, the service, the host's two targets and the two Terminal targets) and the
+    // Windows helper build.
+    expect(guarded).toBe(7);
     expect(shellText).not.toMatch(/fromJSON\(inputs\./u);
   });
 

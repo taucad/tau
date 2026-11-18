@@ -34,3 +34,6 @@ export {
 
 export { readGltfNamingSummary } from '#gltf-naming-testing.utils.js';
 export { mapZupMillimetersToYupMeters, readCoordinateEvidence } from '#coordinate-testing.utils.js';
+
+export { assertPluginContractSurface } from '#plugin-contract-testing.utils.js';
+export type { PluginContractSurfaceInput } from '#plugin-contract-testing.utils.js';

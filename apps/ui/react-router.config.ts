@@ -1,7 +1,13 @@
 import type { Config } from '@react-router/dev/config';
-import { resolveTauCloudBuildEnabled } from './build-environment.ts';
+import {
+  resolveServiceWorkerKillSwitch,
+  resolveTauCloudBuildEnabled,
+  serviceWorkerKillSwitchVariable,
+} from './build-environment.ts';
 
 const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
+/** `TAU_SERVICE_WORKER_KILL_SWITCH=true`: `buildEnd` writes the retiring worker instead of the web app's (PL7). */
+const serviceWorkerKillSwitch = resolveServiceWorkerKillSwitch(process.env[serviceWorkerKillSwitchVariable]);
 
 /**
  * Concurrency for parallel prerender requests. React Router defaults to 1
@@ -110,14 +116,17 @@ export default {
     const { workerRouteClasses } = await import('./app/lib/route-classes');
     const worker = await buildServiceWorker({
       buildDirectory: reactRouterConfig.buildDirectory,
-      workerSourcePath: `${reactRouterConfig.appDirectory}/offline/service-worker.ts`,
+      workerSourcePath: `${reactRouterConfig.appDirectory}/offline/${serviceWorkerKillSwitch ? 'service-worker-kill-switch.ts' : 'service-worker.ts'}`,
       // `/usage` is a cloud route: a self-host build neither prerenders nor precaches it.
       classes: workerRouteClasses().filter(
         (workerClass) => tauCloudEnabled || workerClass.routeClass.id !== 'offline-shell',
       ),
+      killSwitch: serviceWorkerKillSwitch,
     });
     console.log(
-      `Service worker: ${String(worker.entries.length)} precache entries, ${String(Math.round(worker.bytes / 1024))} KiB`,
+      serviceWorkerKillSwitch
+        ? `Service worker: kill switch (${serviceWorkerKillSwitchVariable}=true), retires installed workers, precaches nothing`
+        : `Service worker: ${String(worker.entries.length)} precache entries, ${String(Math.round(worker.bytes / 1024))} KiB`,
     );
   },
   prerender: {

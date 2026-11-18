@@ -1,8 +1,12 @@
 /**
  * The messages between the web app's service worker (`service-worker.ts`) and its pages
- * (`pwa-registration.ts`, `use-pwa.ts`): a module of its own, importing nothing, so the page's
- * interactive tier carries only these names.
+ * (`pwa-registration.ts`, `use-pwa.ts`), and the cache-name prefix the worker and its kill switch
+ * (`service-worker-retire.ts`) share: a module of its own, importing nothing, so the page's
+ * interactive tier carries only these names and the kill switch's worker bundles nothing else.
  */
+
+/** The cache-name prefix of every cache the worker owns (`setCacheNameDetails`). */
+export const cachePrefix = 'tau';
 
 /** `type` of the message the page sends a waiting worker to activate it (workbox-window's `messageSkipWaiting`). */
 export const skipWaitingMessageType = 'SKIP_WAITING';

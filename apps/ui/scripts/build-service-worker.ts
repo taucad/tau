@@ -15,6 +15,9 @@
  * entry stale; no entry carries an `integrity`. The list is also written beside the client output
  * (`build/service-worker-precache.json`, never served) for the build checks and `verify-shipped-assets.mts`.
  *
+ * With the kill switch on (`TAU_SERVICE_WORKER_KILL_SWITCH=true`, `build-environment.ts`) it writes the retiring worker
+ * (`app/offline/service-worker-kill-switch.ts`) at the same URL instead, and an empty precache list.
+ *
  * PL11 (`@vite-pwa/react-router`'s `buildSW`) would replace only this file: the worker source and its tests stay.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -40,13 +43,46 @@ export const serviceWorkerFile = 'service-worker.js';
  * @param options - The build directory (`build`, holding `client/`), the worker source and the classes it answers.
  * @returns The precache list and its size, for build logging.
  */
+/**
+ * Bundle a worker source into one classic script with the modules it imports (Workbox's runtime modules for the web
+ * app's worker).
+ *
+ * @param source - The worker source.
+ * @param outfile - Where the script is written.
+ */
+export const bundleServiceWorker = async (source: string, outfile: string): Promise<void> => {
+  await bundle({
+    entryPoints: [source],
+    bundle: true,
+    // A classic worker script: module service workers are still not universal.
+    format: 'iife',
+    target: 'es2022',
+    minify: true,
+    legalComments: 'none',
+    // Workbox's development logging and assertions are compiled out.
+    define: { 'process.env.NODE_ENV': '"production"' },
+    outfile,
+    logLevel: 'warning',
+  });
+};
+
 export const buildServiceWorker = async (options: {
   readonly buildDirectory: string;
   readonly workerSourcePath: string;
   readonly classes: readonly WorkerRouteClass[];
+  /**
+   * The kill switch (`TAU_SERVICE_WORKER_KILL_SWITCH`, `build-environment.ts`): `workerSourcePath` is the retiring
+   * worker (`app/offline/service-worker-kill-switch.ts`), bundled as it is, and the precache list is empty.
+   */
+  readonly killSwitch?: boolean;
 }): Promise<{ readonly entries: readonly PrecacheEntry[]; readonly bytes: number }> => {
   const clientDirectory = join(options.buildDirectory, 'client');
   const resolvePath = (relativePath: string): string => join(clientDirectory, relativePath);
+  if (options.killSwitch === true) {
+    await bundleServiceWorker(options.workerSourcePath, resolvePath(serviceWorkerFile));
+    writeFileSync(join(options.buildDirectory, precacheListFile), '[]\n');
+    return { entries: [], bytes: 0 };
+  }
   const manifestPath = resolvePath('.vite/manifest.json');
   if (!existsSync(manifestPath)) {
     throw new Error(
@@ -71,19 +107,7 @@ export const buildServiceWorker = async (options: {
   const staging = mkdtempSync(join(tmpdir(), 'tau-service-worker-'));
   try {
     const bundled = join(staging, serviceWorkerFile);
-    await bundle({
-      entryPoints: [options.workerSourcePath],
-      bundle: true,
-      // A classic worker script: module service workers are still not universal.
-      format: 'iife',
-      target: 'es2022',
-      minify: true,
-      legalComments: 'none',
-      // Workbox's development logging and assertions are compiled out.
-      define: { 'process.env.NODE_ENV': '"production"' },
-      outfile: bundled,
-      logLevel: 'warning',
-    });
+    await bundleServiceWorker(options.workerSourcePath, bundled);
     const { count, warnings } = await injectManifest({
       swSrc: bundled,
       swDest: resolvePath(serviceWorkerFile),

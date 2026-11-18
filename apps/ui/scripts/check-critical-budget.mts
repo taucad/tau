@@ -31,7 +31,8 @@
  * generated from the registry (each answered class's document, its references and its interactive tier), so nothing
  * was added by hand; it holds each guarded class's measured closure; no entry is a wasm file, a worker or runtime
  * asset, or a chunk holding any heavy module family; hashed `/assets/*` entries carry no revision, every other entry
- * carries one, and none carries an `integrity`. It also reports the precache's size.
+ * carries one, and none carries an `integrity`. It also reports the precache's size. A build with the kill switch
+ * (`TAU_SERVICE_WORKER_KILL_SWITCH=true`, read here as the build read it) must list nothing.
  *
  * "No split route module" (React Router 8 migration B8, RR6): no route's client loader, action, middleware or hydrate
  * fallback is split into a chunk of its own ({@link findSplitRouteModules}).
@@ -56,6 +57,7 @@ import { rootKeys, staticClosure } from '#scripts/interactive-closure.ts';
 import type { ViteManifest } from '#scripts/interactive-closure.ts';
 /* oxlint-disable no-restricted-imports -- Native Node scripts read the registry without bundler aliases. */
 import { routeClasses, workerRouteClasses } from '../app/lib/route-classes.ts';
+import { resolveServiceWorkerKillSwitch, serviceWorkerKillSwitchVariable } from '../build-environment.ts';
 import { collectPrecacheFiles, isHashedUrl, precacheListFile } from './precache-list.ts';
 import type { ClientBuildView, PrecacheDocument } from './precache-list.ts';
 import { isWarmableHref, parseWarmManifest, warmHrefs, warmManifestFile } from '../app/lib/warm-manifest.ts';
@@ -402,9 +404,16 @@ export const findPrecacheProblems = (input: {
   workerClassIds: readonly string[];
   manifest: ViteManifest;
   moduleIds: ModuleIdManifest;
+  /** The kill switch build (`TAU_SERVICE_WORKER_KILL_SWITCH=true`): its retiring worker precaches nothing. */
+  killSwitch?: boolean;
 }): string[] => {
   if (input.entries === undefined) {
     return [`precache: build/${precacheListFile} is missing`];
+  }
+  if (input.killSwitch === true) {
+    return input.entries.map(
+      (entry) => `precache: ${entry.url} is listed, but the kill switch worker precaches nothing`,
+    );
   }
   const listed = new Set(input.entries.map((entry) => entry.url));
   const expected = new Set(input.expected);
@@ -572,6 +581,7 @@ const main = (): void => {
   problems.push(...findSplitRouteModules(readRouterManifest()));
 
   const precacheListPath = join(appDirectory, 'build', precacheListFile);
+  const killSwitch = resolveServiceWorkerKillSwitch(process.env[serviceWorkerKillSwitchVariable]);
   const precache = existsSync(precacheListPath) ? readJson<WrittenPrecacheEntry[]>(precacheListPath) : undefined;
   const workerClasses = workerRouteClasses().filter(
     (workerClass) => variant === 'cloud' || workerClass.routeClass.id !== 'offline-shell',
@@ -596,9 +606,12 @@ const main = (): void => {
       workerClassIds: workerClasses.map((workerClass) => workerClass.routeClass.id),
       manifest,
       moduleIds,
+      killSwitch,
     }),
   );
-  if (precache !== undefined) {
+  if (killSwitch) {
+    console.info(`Service worker precache (${variant}): none, the build ships the kill switch`);
+  } else if (precache !== undefined) {
     const bytes = precache.reduce((total, entry) => total + brotliSize(entry.url.slice(1)), 0);
     console.info(
       `Service worker precache (${variant}): ${formatBytes(bytes)} brotli in ${precache.length} entries, for ${workerClasses.map((workerClass) => workerClass.routeClass.id).join(', ')}`,

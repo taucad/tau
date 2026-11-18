@@ -27,3 +27,27 @@ export const resolveTauCloudBuildEnabled = (value: string | undefined): boolean 
   }
   throw new Error('TAU_CLOUD_ENABLED must be exactly true or false.');
 };
+
+/** The build variable that ships the service worker kill switch ({@link resolveServiceWorkerKillSwitch}). */
+export const serviceWorkerKillSwitchVariable = 'TAU_SERVICE_WORKER_KILL_SWITCH';
+
+/**
+ * The service worker kill switch (progressive loading PL7): `TAU_SERVICE_WORKER_KILL_SWITCH=true` at build time ships,
+ * at `/service-worker.js`, a worker that takes every open page, deletes the web app's worker's caches and unregisters
+ * (`app/offline/service-worker-retire.ts`) instead of the web app's worker, and pages that register nothing. One deploy
+ * with it set retires a bad worker from every browser that loads a page; one deploy without it restores the worker.
+ * Unset or `false` builds the web app's worker. Read by `react-router.config.ts` (which worker `buildEnd` writes),
+ * `vite.config.ts` (whether pages register) and `scripts/check-critical-budget.mts` (an empty precache list).
+ *
+ * @param value - The variable's value.
+ * @returns Whether the kill switch is on.
+ */
+export const resolveServiceWorkerKillSwitch = (value: string | undefined): boolean => {
+  if (value === undefined || value === '' || value === 'false') {
+    return false;
+  }
+  if (value === 'true') {
+    return true;
+  }
+  throw new Error(`${serviceWorkerKillSwitchVariable} must be exactly true or false.`);
+};

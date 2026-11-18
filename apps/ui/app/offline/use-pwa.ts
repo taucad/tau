@@ -10,6 +10,11 @@
  *
  * Web builds only: `TAU_SERVICE_WORKER` is defined by `apps/ui/vite.config.ts` alone, so the desktop (`tau://`) and
  * `tau serve --ui` bundles, which boot offline from their packaged index fallback, never register anything.
+ *
+ * **Kill switch.** A build with `TAU_SERVICE_WORKER_KILL_SWITCH=true` (`TAU_SERVICE_WORKER` is `retired`) registers
+ * nothing: its `/service-worker.js` is the retiring worker (`service-worker-kill-switch.ts`). The page only asks an
+ * existing registration to check for it (`registration.update()`), so a page that loaded without the old worker (a
+ * forced reload) still retires it; a page the old worker served gets it from the browser's own update check.
  */
 import { useEffect } from 'react';
 import { useLocation } from 'react-router';
@@ -30,6 +35,26 @@ export const registerIdleLimit = 10_000;
  */
 export const isServiceWorkerBuild = (): boolean =>
   import.meta.env.PROD && import.meta.env.TAU_SERVICE_WORKER === 'enabled' && !isDesktopTarget();
+
+/**
+ * Whether this bundle ships the kill switch: a production web bundle whose `/service-worker.js` retires the worker.
+ *
+ * @returns `true` in a production web bundle built with `TAU_SERVICE_WORKER_KILL_SWITCH=true`.
+ */
+export const isServiceWorkerRetiredBuild = (): boolean =>
+  import.meta.env.PROD && import.meta.env.TAU_SERVICE_WORKER === 'retired' && !isDesktopTarget();
+
+/**
+ * Ask an existing registration to fetch the retiring worker (kill switch). Never registers.
+ */
+const checkForRetiringWorker = async (): Promise<void> => {
+  try {
+    const registration = await globalThis.navigator.serviceWorker.getRegistration();
+    await registration?.update();
+  } catch {
+    // Offline or refused: the browser's next update check fetches the retiring worker.
+  }
+};
 
 /** Project workspace routes: `/w/{workspace}/{project}` and its sub-routes. */
 export const isWorkspacePath = (pathname: string): boolean => pathname.startsWith('/w/');
@@ -98,7 +123,16 @@ export function useServiceWorker(): void {
   const { pathname } = useLocation();
   const inWorkspace = isWorkspacePath(pathname);
   useEffect(() => {
-    if (!isServiceWorkerBuild() || !('serviceWorker' in globalThis.navigator)) {
+    if (!('serviceWorker' in globalThis.navigator)) {
+      return;
+    }
+    if (isServiceWorkerRetiredBuild()) {
+      return afterLoadAndIdle(() => {
+        // async-iife: bootstrap -- retiring must never block the view the visitor came for.
+        void checkForRetiringWorker();
+      });
+    }
+    if (!isServiceWorkerBuild()) {
       return;
     }
     let stop: (() => void) | undefined;

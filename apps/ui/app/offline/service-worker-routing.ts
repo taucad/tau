@@ -18,14 +18,11 @@
  */
 import { homeAppEntry, workerRouteClasses } from '#lib/route-classes.js';
 import type { WorkerRouteClass } from '#lib/route-classes.js';
-import { serviceWorkerMessageType } from '#offline/pwa-messages.js';
+import { cachePrefix, serviceWorkerMessageType } from '#offline/pwa-messages.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
 /** Milliseconds a network-first document waits for the network before the precached one answers (B5's bound). */
 export const navigationNetworkTimeout = 3000;
-
-/** The cache-name prefix of every cache the worker owns (`setCacheNameDetails`). */
-export const cachePrefix = 'tau';
 
 /** The runtime cache {@link cacheOnFirstUse} fills. */
 export const assetCacheName = `${cachePrefix}-assets`;

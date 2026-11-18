@@ -376,4 +376,22 @@ describe('findPrecacheProblems (PL7, shell invariant 8)', () => {
     ).toEqual(["precache: home's interactive tier holds /assets/root-c.js, which the worker does not precache"]);
     expect(check(undefined)).toEqual(['precache: build/service-worker-precache.json is missing']);
   });
+
+  it('should require an empty written list from a kill switch build', () => {
+    const killSwitch = (entries: readonly WrittenPrecacheEntry[] | undefined): string[] =>
+      findPrecacheProblems({
+        entries,
+        expected,
+        closures,
+        workerClassIds: ['home'],
+        manifest,
+        moduleIds,
+        killSwitch: true,
+      });
+    expect(killSwitch([])).toEqual([]);
+    expect(killSwitch([entry('/__shell/home/index.html')])).toEqual([
+      'precache: /__shell/home/index.html is listed, but the kill switch worker precaches nothing',
+    ]);
+    expect(killSwitch(undefined)).toEqual(['precache: build/service-worker-precache.json is missing']);
+  });
 });

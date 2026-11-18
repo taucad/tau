@@ -33,7 +33,6 @@ import { CacheFirst, NetworkFirst } from 'workbox-strategies';
 import {
   answerNavigation,
   assetCacheName,
-  cachePrefix,
   installMessage,
   isCachedOnFirstUse,
   navigationCandidate,
@@ -41,7 +40,7 @@ import {
   retiredCachePrefix,
   retryUnpinnedMiss,
 } from '#offline/service-worker-routing.js';
-import { skipWaitingMessageType } from '#offline/pwa-messages.js';
+import { cachePrefix, skipWaitingMessageType } from '#offline/pwa-messages.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
 /** The worker global, as far as this file uses it (the DOM library has no `ServiceWorkerGlobalScope`). */

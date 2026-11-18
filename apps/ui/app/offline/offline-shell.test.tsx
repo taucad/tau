@@ -123,6 +123,35 @@ describe('OfflineShell', () => {
     expect(document.body.textContent).toContain('Not enough storage to save this page for offline use.');
   });
 
+  /* The kill switch (TAU_SERVICE_WORKER_KILL_SWITCH=true): pages register nothing and ask an installed worker's
+   * registration to fetch the retiring one, inside a project workspace too. */
+  it('should only ask an installed registration for the retiring worker in a kill switch build', async () => {
+    vi.stubEnv('TAU_SERVICE_WORKER', 'retired');
+    const update = vi.fn<() => Promise<ServiceWorkerRegistration>>();
+    const registration = mock<ServiceWorkerRegistration>({ update });
+    update.mockResolvedValue(registration);
+    getRegistration.mockResolvedValue(registration);
+    readyState = 'complete';
+
+    renderShell('/w/acme/bracket');
+    await settle();
+
+    expect(register).not.toHaveBeenCalled();
+    expect(getRegistration).toHaveBeenCalledOnce();
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it('should do nothing in a kill switch build when no worker is installed', async () => {
+    vi.stubEnv('TAU_SERVICE_WORKER', 'retired');
+    readyState = 'complete';
+
+    renderShell();
+    await settle();
+
+    expect(register).not.toHaveBeenCalled();
+    expect(getRegistration).toHaveBeenCalledOnce();
+  });
+
   it('should register nothing outside a production web build', async () => {
     vi.stubEnv('TAU_SERVICE_WORKER', undefined);
     readyState = 'complete';

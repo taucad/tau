@@ -2,7 +2,7 @@
 
 The revisions feature of the Tau UI app: the History branch graph's layout and renderer, the timeline row styles, the Revisions pane region, the naming popover, the History entry title rule, the revision compute worker, the page's revision clients over the worker port protocol, who made each entry, and the history hooks every revision surface reads. None of them read app state: what only the app can reach is injected. Private and source-consumed (`scope:ui type:app-lib layer:feature`): `apps/ui` imports it; it imports only app-libs and packages, never `apps/ui`.
 
-Cut from `apps/ui/app/{components/revisions,lib,machines}` in UI wave D (CI decomposition blueprint, Part 3 P2 row D, the `revisions-ui` row). It grows as the modules it waits on leave the app.
+Cut from `apps/ui/app/{components/revisions,lib,machines}` so the revisions feature builds and tests apart from the app. It grows as the modules it waits on leave the app.
 
 ## Entrypoints
 

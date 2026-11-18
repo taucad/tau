@@ -465,7 +465,7 @@ vi.mock('#hooks/use-project-slug-route.js', () => ({
         : { status: 'resolved', value: project },
   useCanonicalProjectUrlCorrection: () => undefined,
 }));
-vi.mock('#services/revision-client-registry.js', () => ({ peekRevisionClient: () => revisionClient }));
+vi.mock('@taucad/revisions-ui/services/revision-client-registry', () => ({ peekRevisionClient: () => revisionClient }));
 vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useRevisionClient: () => revisionClient,

@@ -4061,12 +4061,21 @@ importers:
 
   apps/libs/revisions-ui:
     dependencies:
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:../../../packages/agent-host
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../../../libs/events
       '@taucad/revisions':
         specifier: workspace:*
         version: link:../../../packages/revisions
       '@taucad/ui':
         specifier: workspace:*
         version: link:../../../packages/ui
+      '@taucad/ui-core':
+        specifier: workspace:*
+        version: link:../ui-core
     devDependencies:
       '@testing-library/jest-dom':
         specifier: 'catalog:'

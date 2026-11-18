@@ -45,6 +45,7 @@ import { Topic } from '@taucad/events';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { RevisionRowWho, RevisionUserActor } from '@taucad/revisions';
 import { randomUuid } from '@taucad/utils/id';
+import type { RevisionSessionUser } from '@taucad/revisions-ui/types/revision-client.types';
 import { ENV } from '#environment.config.js';
 import { useFeature } from '#flags/use-feature.js';
 import { recordApiRequestId } from '#lib/api-request-id.js';
@@ -115,17 +116,6 @@ export const useAnonymousRevisions = (workspace: string): boolean =>
     () => getAnonymousRevisions(workspace),
     () => false,
   );
-
-/**
- * The signed-in person, as much of them as a revision records.
- *
- * No account address: a revision's author travels with every push and export,
- * so it is `<id>@users.noreply.tau.new` unless a linked forge supplies its own
- * no-reply identity (D33).
- *
- * @public
- */
-export type RevisionSessionUser = Readonly<{ id: string; name?: string }>;
 
 const sessionTopic = new Topic<void>({ name: 'revision-session-user' });
 let sessionUser: RevisionSessionUser | undefined;

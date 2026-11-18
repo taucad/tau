@@ -18,7 +18,11 @@ import type {
   RevisionStatusProjection,
 } from '@taucad/revisions';
 import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
-import type { BranchCreated, RevisionToast, WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
+import type {
+  BranchCreated,
+  RevisionToast,
+  WorkerRevisionEvent,
+} from '@taucad/revisions-ui/types/revision-worker-protocol';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
 const emptyStatus = (): RevisionStatusProjection => ({

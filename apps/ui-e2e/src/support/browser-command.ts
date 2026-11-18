@@ -791,6 +791,24 @@ const realModelCatalog = async (contextWindow?: number): Promise<unknown[]> => {
 };
 
 /**
+ * Answer the page's `/v1/deployment` as a self-host API does (W4 of the unified model transport): runs take the
+ * unfunded transport. For stacks whose API is absent, where the agent host would otherwise read the answer as unknown
+ * and refuse every run before its first model call.
+ */
+const routeSelfHostDeployment = async (session: Session): Promise<void> => {
+  await session.context.route(/\/v1\/deployment(?:\?|$)/u, async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'access-control-allow-origin': new URL(testBaseURL).origin,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ version: 1, edition: 'self-host', billing: { funded: false }, maxAgeSeconds: 300 }),
+    });
+  });
+};
+
+/**
  * Answer the page's `/v1/models` with `catalog`, as the API would to this origin's credentialed fetch, after
  * `latency` milliseconds.
  */
@@ -1315,6 +1333,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   // models catalog is control-plane and is stubbed with the real catalog rows
   // so provider-aware wire gating sees genuine provider ids without a live API.
   await routeModelCatalog(session, await realModelCatalog(options.contextWindow));
+  await routeSelfHostDeployment(session);
   session.agentHostGatewayServer = server;
   const address = server.address();
   if (!address || typeof address === 'string') {

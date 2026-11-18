@@ -31,7 +31,12 @@ import { PaymentMethod } from '@taucad/ui-kit/components/payment-method';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@taucad/ui/components/dialog';
-import { IconLine, SummaryList, SummaryRow, supportEmail } from '#components/billing/billing-primitives.js';
+import {
+  IconLine,
+  SummaryList,
+  SummaryRow,
+  supportEmail,
+} from '@taucad/billing-ui/components/billing/billing-primitives';
 
 const presetsCents = [1000, 2500, 5000, 10_000] as const;
 const minCents = topupPrincipalBoundsMinor.minimum;

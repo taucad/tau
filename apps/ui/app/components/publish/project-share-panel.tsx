@@ -34,7 +34,9 @@ import { toast } from '@taucad/ui/components/sonner';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
-import { GithubGistManagement } from '#components/share/github-gist-management.js';
+import { GithubGistManagement } from '@taucad/publish-ui/components/share/github-gist-management';
+import { GithubGistServicesProvider } from '@taucad/publish-ui/components/share/github-gist-services';
+import { githubGistServices } from '#components/share/github-gist-services.js';
 import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import { versionNumberOfTag } from '@taucad/revisions';
 import type { PublishDraft, PublishFacet, PublishVisibility } from '@taucad/revisions';
@@ -553,14 +555,16 @@ function useGithubGistExtension(
     actions: (
       <>
         {publication && githubStatus === 'connected' ? (
-          <GithubGistManagement
-            locator={publication.locator}
-            protection={publication.protection}
-            collectSnapshot={collectSnapshot}
-            onRepublished={setShareUrl}
-            onUnpublished={forgetPublication}
-            surface='editor'
-          />
+          <GithubGistServicesProvider value={githubGistServices}>
+            <GithubGistManagement
+              locator={publication.locator}
+              protection={publication.protection}
+              collectSnapshot={collectSnapshot}
+              onRepublished={setShareUrl}
+              onUnpublished={forgetPublication}
+              surface='editor'
+            />
+          </GithubGistServicesProvider>
         ) : null}
         {browserConsent === 'waiting' ? (
           <Button type='button' variant='ghost' onClick={cancelBrowserConsent}>

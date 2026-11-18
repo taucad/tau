@@ -124,6 +124,9 @@ describe('Vitest Browser test-runner ownership', () => {
       // CDP. Browser Mode cannot own the installed app across native installer/relaunch cycles.
       'apps/desktop-e2e/scripts/qualification-renderer.mts',
       'apps/desktop-e2e/src/desktop-assimp.spec.ts',
+      // Boot recovery relaunches the built app over one profile, with switches and a missing client, and reads its
+      // recovery window; the shared launcher signs in and always loads the app page.
+      'apps/desktop-e2e/src/desktop-boot-recovery.spec.ts',
       'apps/desktop-e2e/src/desktop-build123d.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-acp.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-in-project.spec.ts',

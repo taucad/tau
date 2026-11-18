@@ -18,7 +18,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 }));
 
 const { useChatName } = await import('#routes/usage/use-chat-name.js');
-const { chatLabel } = await import('#routes/usage/activity-names.js');
+const { chatLabel } = await import('@taucad/billing-ui/components/usage/activity-names');
 
 const wrapper = ({ children }: { readonly children: React.ReactNode }): React.JSX.Element => (
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>

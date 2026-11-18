@@ -71,6 +71,26 @@ describe('web boot watchdog', () => {
     expect(strip().hidden).toBe(true);
   });
 
+  it('should keep the hidden strip out of layout even when no stylesheet loaded', () => {
+    loadDocument();
+    /* An inline display on the element that carries `hidden` would override it and show the strip at once. */
+    expect(strip().style.display).toBe('');
+    expect(getComputedStyle(strip()).display).toBe('none');
+  });
+
+  it('should reveal the strip when it reaches the document only after the deadline', () => {
+    const source = buildBootWatchdogScript();
+    if (source === undefined) {
+      throw new Error('The web build emits the watchdog script');
+    }
+    /* The head script runs while the body is still streaming. */
+    runInlineScript(source);
+    vi.advanceTimersByTime(20_000);
+    document.body.innerHTML = bootWatchdogStripHtml;
+    vi.advanceTimersByTime(1000);
+    expect(strip().hidden).toBe(false);
+  });
+
   it('should emit no script on the desktop target', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
 

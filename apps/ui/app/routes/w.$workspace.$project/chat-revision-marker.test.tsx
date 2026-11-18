@@ -12,7 +12,7 @@ import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.j
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
 import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
-import type { RevisionCard, RevisionsView } from '#hooks/use-revisions.js';
+import type { RevisionCard, RevisionsView } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';

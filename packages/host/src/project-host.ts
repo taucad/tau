@@ -730,11 +730,14 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
  * @example <caption>A project host over a daemon's authority</caption>
  * ```typescript
  * import { createGatewayModelTransport } from '@taucad/agent-host';
+ * import type { DeploymentModeAnswer } from '@taucad/agent-host';
  * import { createProjectHost } from '@taucad/host';
  * import type { ProjectFileSystem, ProjectHostRuntimeClient } from '@taucad/host';
  *
  * declare const fileSystem: ProjectFileSystem;
  * declare const runtimeClient: (root: string) => Promise<ProjectHostRuntimeClient>;
+ * // The API's deployment answer for the gateway's origin (`GET /v1/deployment`), fetched and cached by the host.
+ * declare const deployment: (signal: AbortSignal) => Promise<DeploymentModeAnswer>;
  *
  * const project = createProjectHost({
  *   workspaceRoot: '/work/bracket',
@@ -742,7 +745,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
  *   fileSystem,
  *   runtimeClient,
  *   systemPrompt: 'You are Tau.',
- *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/' }),
+ *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/', billing: { deployment } }),
  *   credential: () => ({ mode: 'session' }),
  *   onRevisionEvent: () => undefined,
  * });

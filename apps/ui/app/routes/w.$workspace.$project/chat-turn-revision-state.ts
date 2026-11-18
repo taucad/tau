@@ -1,4 +1,4 @@
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import type { TurnRevisionLog } from '#machines/chat-projection.logic.js';
 
 /** The revision a turn started from, as far as the placement says. @public */

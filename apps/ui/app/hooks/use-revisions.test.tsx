@@ -15,7 +15,6 @@ import type { ReactNode } from 'react';
 import type { RevisionGraphRow, RevisionLogRequest, RevisionRow } from '@taucad/revisions';
 import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import {
-  revisionPageSize,
   useRevisionCards,
   useRevisionChanges,
   useRevisionChangesSince,
@@ -24,7 +23,8 @@ import {
   useRevisions,
   useTurnRevision,
 } from '#hooks/use-revisions.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import { revisionPageSize } from '@taucad/revisions-ui/hooks/use-revisions';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
 import { resetPushRecords } from '#lib/revision-pushes.js';

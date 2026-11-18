@@ -24,7 +24,7 @@ import {
   selectMetadataObservationError,
   selectMetadataObservationErrors,
 } from '#runtime/project-library.js';
-import type { ProjectListing } from '#runtime/project-library-storage.js';
+import type { ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
 import type { ProjectLibrary, ProjectRouteAccess } from '#runtime/project-library.js';
 import type { CreatedProject, CreateProjectOptions, ImportStagingTarget } from '#runtime/project-library-commands.js';
 import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';

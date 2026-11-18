@@ -1,6 +1,6 @@
 # replicad API index
 
-replicad 1.1.0-taulabs.1 · 804 symbols · extracted by TypeScript 5.9.3.
+replicad 1.2.0-beta.0 · 838 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
@@ -8,129 +8,133 @@ Every symbol appears here exactly once. The heading above each block names the f
 
 asDir (function) [lines 5-6]
 asPnt (function) [lines 8-9]
-complexExtrude (function) [lines 11-13]
+bypassOperationCache (function) [lines 11-13] — Runs `fn` as library-internal work
 createAssembly (function) [lines 15-16]
-deserializeDrawing (function) [lines 18-20] — Deserializes a drawing from a string
-deserializeShape (function) [lines 22-23]
-downcast (function) [lines 25-26]
-draw (function) [lines 28-30] — Creates a drawing pen to programatically draw in 2D
-drawCircle (function) [lines 32-35] — Creates the `Drawing` of a circle
-drawEllipse (function) [lines 37-40] — Creates the `Drawing` of an ellipse
-drawFaceOutline (function) [lines 42-44] — Creates the `Drawing` out of a face
-drawPolysides (function) [lines 46-49] — Creates the `Drawing` of an polygon in a defined plane
-drawProjection (function) [lines 51-57] — Creates the `Drawing` of a projection of a shape on…
-drawRoundedRectangle (function) [lines 59-65] — Creates the `Drawing` of a rectangle with (optional) rounded corners
-drawSingleCircle (function) [lines 67-70] — Creates the `Drawing` of a circle as one single curve
-drawSingleEllipse (function) [lines 72-75] — Creates the `Drawing` of an ellipse as one single curve
-drawText (function) [lines 77-84] — Creates the `Drawing` of a text, in a defined font…
-exportSTEP (function) [lines 86-90]
-genericSweep (function) [lines 92-94]
-getSingleFace (function) [lines 96-97]
-importSTEP (function) [lines 99-101] — Creates a new shapes from a STEP file (as a…
-importSTL (function) [lines 103-106] — Creates a new shapes from a STL file (as a…
-importSTLAsMesh (function) [lines 108-111] — Imports an STL file (as a Blob or a File)…
-intersect2D (function) [lines 113-114]
-isPoint (function) [lines 116-117]
-isProjectionPlane (function) [lines 119-120]
-isShape3D (function) [lines 122-123]
-isWire (function) [lines 125-126]
-iterTopo (function) [lines 128-129]
-loadFont (function) [lines 131-134] — Import a font in the text system
-lookFromPlane (function) [lines 136-137]
-makeDirVector (function) [lines 139-140]
-makePlane (function) [lines 142-146]
-makePln (function) [lines 148-149]
-makeProjectedEdges (function) [lines 151-155]
-makeSolid (function) [lines 157-160] — Welds faces and shells into a single shell and then…
-measureArea (function) [lines 162-164] — Measure the area of a shape
-measureDistanceBetween (function) [lines 166-168] — Measure the distance between two shapes
-measureLength (function) [lines 170-172] — Measure the length of a shape
-measureShapeLinearProperties (function) [lines 174-175]
-measureShapeSurfaceProperties (function) [lines 177-178]
-measureShapeVolumeProperties (function) [lines 180-181]
-measureVolume (function) [lines 183-185] — Measure the volume of a shape
-mirror (function) [lines 187-188]
-resolveDirection (function) [lines 190-191]
-rotate (function) [lines 193-194]
-scale (function) [lines 196-197]
-sketchText (function) [lines 199-209] — Creates the `Sketches` of a text, in a defined font…
-textBlueprints (function) [lines 211-218] — Creates the `Blueprints` of a text, in a defined font…
-translate (function) [lines 220-221]
-twistExtrude (function) [lines 223-225]
-weldShellsAndFaces (function) [lines 227-231] — Welds faces and shells into a single shell
-addHolesInFace (function) [lines 233-234]
-assembleWire (function) [lines 236-237]
-atShapeExtremum (function) [lines 239-251] — Creates a predicate for a finder's `when` method that selects…
-axis2d (function) [lines 253-254]
-backMost (function) [lines 256-261] — Creates a predicate selecting elements touching the shape's minimum Y…
-basicFaceExtrusion (function) [lines 263-264]
-bottomMost (function) [lines 266-270] — Creates a predicate selecting elements touching the shape's minimum Z…
-cast (function) [lines 272-273]
-combineFinderFilters (function) [lines 275-281] — Combine a set of finder filters (defined with radius) to…
-compoundShapes (function) [lines 283-284]
-createNamedPlane (function) [lines 286-287]
-cut2D (function) [lines 289-290]
-cutBlueprints (function) [lines 292-293]
-drawParametricFunction (function) [lines 295-303] — Creates the `Drawing` of parametric function
-drawPointsInterpolation (function) [lines 305-310] — Creates the `Drawing` by interpolating points as a curve
-drawRectangle (function) [lines 312-316]
-frontMost (function) [lines 318-323] — Creates a predicate selecting elements touching the shape's maximum Y…
-fuse2D (function) [lines 325-326]
-fuseBlueprints (function) [lines 328-329]
-GCWithObject (function) [lines 331-332]
-GCWithScope (function) [lines 334-335]
-getFont (function) [lines 337-338]
-getManifold (function) [lines 340-341]
-getOC (function) [lines 343-344]
-intersectBlueprints (function) [lines 346-347]
-leftMost (function) [lines 349-353] — Creates a predicate selecting elements touching the shape's minimum X…
-localGC (function) [lines 355-356]
-loft (function) [lines 358-359]
-makeAx1 (function) [lines 361-362]
-makeAx2 (function) [lines 364-365]
-makeAx3 (function) [lines 367-368]
-makeBaseBox (function) [lines 370-376] — Builds a rectangular box of the given lengths
-makeBezierCurve (function) [lines 378-379]
-makeBox (function) [lines 381-383] — Creates a box with the given corner points
-makeBSplineApproximation (function) [lines 385-386]
-makeCircle (function) [lines 388-389]
-makeCompound (function) [lines 391-392]
-makeCylinder (function) [lines 394-396] — Creates a cylinder with the given radius and height
-makeDirection (function) [lines 398-399]
-makeEllipse (function) [lines 401-402]
-makeEllipseArc (function) [lines 404-405]
-makeEllipsoid (function) [lines 407-409] — Creates an ellipsoid with the given lengths of the axes,…
-makeFace (function) [lines 411-412]
-makeHelix (function) [lines 414-415]
-makeLine (function) [lines 417-418]
-makeNewFaceWithinFace (function) [lines 420-421]
-makeNonPlanarFace (function) [lines 423-424]
-makeOffset (function) [lines 426-427]
-makePlaneFromFace (function) [lines 429-430]
-makePolygon (function) [lines 432-433]
-makeSphere (function) [lines 435-437] — Creates a sphere with the given radius, centred on the…
-makeTangentArc (function) [lines 439-440]
-makeThreePointArc (function) [lines 442-443]
-makeVertex (function) [lines 445-446]
-organiseBlueprints (function) [lines 448-451] — Groups an array of blueprints such that blueprints that correspond…
-polysideInnerRadius (function) [lines 453-455] — Helper function to compute the inner radius of a polyside…
-polysidesBlueprint (function) [lines 457-458]
-revolution (function) [lines 460-461]
-rightMost (function) [lines 463-467] — Creates a predicate selecting elements touching the shape's maximum X…
-roundedRectangleBlueprint (function) [lines 469-473]
-setManifold (function) [lines 475-476]
-setOC (function) [lines 478-479]
-shapeType (function) [lines 481-482]
-sketchCircle (function) [lines 484-486] — Creates the `Sketch` of a circle in a defined plane
-sketchEllipse (function) [lines 488-490] — Creates the `Sketch` of an ellispe in a defined plane
-sketchFaceOffset (function) [lines 492-494] — Creates the `Sketch` of an offset of a certain face
-sketchHelix (function) [lines 496-498] — Creates the `Sketch` of a helix
-sketchParametricFunction (function) [lines 500-507] — Creates the `Sketch` of parametric function in a specified plane
-sketchPolysides (function) [lines 509-512] — Creates the `Sketch` of an polygon in a defined plane
-sketchRectangle (function) [lines 514-516] — Creates the `Sketch` of a rectangle in a defined plane
-sketchRoundedRectangle (function) [lines 518-523] — Creates the `Sketch` of a rounded rectangle in a defined…
-supportExtrude (function) [lines 525-526]
-topMost (function) [lines 528-534] — Creates a predicate selecting elements touching the shape's maximum Z…
+deserializeShape (function) [lines 18-19]
+downcast (function) [lines 21-22]
+elementOrdinals (function) [lines 24-26] — Positions of `elements` in the enumeration of `kind` sub shapes…
+exportSTEP (function) [lines 28-32]
+getOperationCache (function) [lines 34-36] — The installed operation cache, if any
+getSingleFace (function) [lines 38-39]
+importSTEP (function) [lines 41-43] — Creates a new shapes from a STEP file (as a…
+importSTL (function) [lines 45-48] — Creates a new shapes from a STL file (as a…
+importSTLAsMesh (function) [lines 50-53] — Imports an STL file (as a Blob or a File)…
+isPoint (function) [lines 55-56]
+isProjectionPlane (function) [lines 58-59]
+isShape3D (function) [lines 61-62]
+isWire (function) [lines 64-65]
+iterTopo (function) [lines 67-68]
+loadFont (function) [lines 70-73] — Import a font in the text system
+lookFromPlane (function) [lines 75-76]
+makeDirVector (function) [lines 78-79]
+makePlane (function) [lines 81-85]
+makePln (function) [lines 87-88]
+measureArea (function) [lines 90-92] — Measure the area of a shape
+measureDistanceBetween (function) [lines 94-96] — Measure the distance between two shapes
+measureLength (function) [lines 98-100] — Measure the length of a shape
+measureShapeLinearProperties (function) [lines 102-103]
+measureShapeSurfaceProperties (function) [lines 105-106]
+measureShapeVolumeProperties (function) [lines 108-109]
+measureVolume (function) [lines 111-113] — Measure the volume of a shape
+mirror (function) [lines 115-116]
+resolveDirection (function) [lines 118-119]
+rotate (function) [lines 121-122]
+scale (function) [lines 124-125]
+setOperationCache (function) [lines 127-130] — Installs an operation cache, or removes it with `undefined`, and…
+translate (function) [lines 132-133]
+addHolesInFace (function) [lines 135-136]
+assembleWire (function) [lines 138-139]
+atShapeExtremum (function) [lines 141-153] — Creates a predicate for a finder's `when` method that selects…
+axis2d (function) [lines 155-156]
+backMost (function) [lines 158-163] — Creates a predicate selecting elements touching the shape's minimum Y…
+basicFaceExtrusion (function) [lines 165-166]
+bottomMost (function) [lines 168-172] — Creates a predicate selecting elements touching the shape's minimum Z…
+cast (function) [lines 174-175]
+combineFinderFilters (function) [lines 177-183] — Combine a set of finder filters (defined with radius) to…
+complexExtrude (function) [lines 185-187]
+compoundShapes (function) [lines 189-190]
+createNamedPlane (function) [lines 192-193]
+cut2D (function) [lines 195-196]
+cutBlueprints (function) [lines 198-199]
+deserializeDrawing (function) [lines 201-203] — Deserializes a drawing from a string
+draw (function) [lines 205-207] — Creates a drawing pen to programatically draw in 2D
+drawCircle (function) [lines 209-212] — Creates the `Drawing` of a circle
+drawEllipse (function) [lines 214-217] — Creates the `Drawing` of an ellipse
+drawFaceOutline (function) [lines 219-221] — Creates the `Drawing` out of a face
+drawParametricFunction (function) [lines 223-231] — Creates the `Drawing` of parametric function
+drawPointsInterpolation (function) [lines 233-238] — Creates the `Drawing` by interpolating points as a curve
+drawPolysides (function) [lines 240-243] — Creates the `Drawing` of an polygon in a defined plane
+drawProjection (function) [lines 245-251] — Creates the `Drawing` of a projection of a shape on…
+drawRectangle (function) [lines 253-257]
+drawRoundedRectangle (function) [lines 259-265] — Creates the `Drawing` of a rectangle with (optional) rounded corners
+drawSingleCircle (function) [lines 267-270] — Creates the `Drawing` of a circle as one single curve
+drawSingleEllipse (function) [lines 272-275] — Creates the `Drawing` of an ellipse as one single curve
+drawText (function) [lines 277-284] — Creates the `Drawing` of a text, in a defined font…
+frontMost (function) [lines 286-291] — Creates a predicate selecting elements touching the shape's maximum Y…
+fuse2D (function) [lines 293-294]
+fuseBlueprints (function) [lines 296-297]
+GCWithObject (function) [lines 299-300]
+GCWithScope (function) [lines 302-303]
+genericSweep (function) [lines 305-307]
+getFont (function) [lines 309-310]
+getManifold (function) [lines 312-313]
+getOC (function) [lines 315-316]
+intersect2D (function) [lines 318-319]
+intersectBlueprints (function) [lines 321-322]
+leftMost (function) [lines 324-328] — Creates a predicate selecting elements touching the shape's minimum X…
+localGC (function) [lines 330-331]
+loft (function) [lines 333-334]
+makeAx1 (function) [lines 336-337]
+makeAx2 (function) [lines 339-340]
+makeAx3 (function) [lines 342-343]
+makeBaseBox (function) [lines 345-351] — Builds a rectangular box of the given lengths
+makeBezierCurve (function) [lines 353-354]
+makeBox (function) [lines 356-358] — Creates a box with the given corner points
+makeBSplineApproximation (function) [lines 360-361]
+makeCircle (function) [lines 363-364]
+makeCompound (function) [lines 366-367]
+makeCylinder (function) [lines 369-371] — Creates a cylinder with the given radius and height
+makeDirection (function) [lines 373-374]
+makeEllipse (function) [lines 376-377]
+makeEllipseArc (function) [lines 379-380]
+makeEllipsoid (function) [lines 382-384] — Creates an ellipsoid with the given lengths of the axes,…
+makeFace (function) [lines 386-387]
+makeHelix (function) [lines 389-390]
+makeLine (function) [lines 392-393]
+makeNewFaceWithinFace (function) [lines 395-396]
+makeNonPlanarFace (function) [lines 398-399]
+makeOffset (function) [lines 401-402]
+makePlaneFromFace (function) [lines 404-405]
+makePolygon (function) [lines 407-408]
+makeProjectedEdges (function) [lines 410-414]
+makeSolid (function) [lines 416-419] — Welds faces and shells into a single shell and then…
+makeSphere (function) [lines 421-423] — Creates a sphere with the given radius, centred on the…
+makeTangentArc (function) [lines 425-426]
+makeThreePointArc (function) [lines 428-429]
+makeVertex (function) [lines 431-432]
+organiseBlueprints (function) [lines 434-437] — Groups an array of blueprints such that blueprints that correspond…
+polysideInnerRadius (function) [lines 439-441] — Helper function to compute the inner radius of a polyside…
+polysidesBlueprint (function) [lines 443-444]
+revolution (function) [lines 446-447]
+rightMost (function) [lines 449-453] — Creates a predicate selecting elements touching the shape's maximum X…
+roundedRectangleBlueprint (function) [lines 455-459]
+setManifold (function) [lines 461-462]
+setOC (function) [lines 464-465]
+shapeType (function) [lines 467-468]
+sketchCircle (function) [lines 470-472] — Creates the `Sketch` of a circle in a defined plane
+sketchEllipse (function) [lines 474-476] — Creates the `Sketch` of an ellispe in a defined plane
+sketchFaceOffset (function) [lines 478-480] — Creates the `Sketch` of an offset of a certain face
+sketchHelix (function) [lines 482-484] — Creates the `Sketch` of a helix
+sketchParametricFunction (function) [lines 486-493] — Creates the `Sketch` of parametric function in a specified plane
+sketchPolysides (function) [lines 495-498] — Creates the `Sketch` of an polygon in a defined plane
+sketchRectangle (function) [lines 500-502] — Creates the `Sketch` of a rectangle in a defined plane
+sketchRoundedRectangle (function) [lines 504-509] — Creates the `Sketch` of a rounded rectangle in a defined…
+sketchText (function) [lines 511-521] — Creates the `Sketches` of a text, in a defined font…
+supportExtrude (function) [lines 523-524]
+textBlueprints (function) [lines 526-533] — Creates the `Blueprints` of a text, in a defined font…
+topMost (function) [lines 535-541] — Creates a predicate selecting elements touching the shape's maximum Z…
+twistExtrude (function) [lines 543-545]
+weldShellsAndFaces (function) [lines 547-551] — Welds faces and shells into a single shell
 
 ## Classes — `api-classes.md`
 
@@ -648,16 +652,17 @@ ManifoldBox (type) [lines 52-56] [2 members]
 ManifoldInstance (type) [lines 58-58]
 ManifoldMesh (type) [lines 60-60]
 ManifoldVec3 (type) [lines 62-62]
-PlaneName (type) [lines 64-64]
-PlaneSide (type) [lines 66-66]
-Point (type) [lines 68-71]
-Point2D (type) [lines 73-73]
-ProjectionPlane (type) [lines 75-75]
-RadiusConfig (type) [lines 77-83] — A generic way to define radii for fillet or chamfer…
-ScaleMode (type) [lines 85-85]
-Shape2D (type) [lines 87-87]
-Shape3D (type) [lines 89-89]
-ShapeConfig (type) [lines 91-119] [7 members]
+OperationEffect (type) [lines 64-66] — How an operation treats its receiver
+PlaneName (type) [lines 68-68]
+PlaneSide (type) [lines 70-70]
+Point (type) [lines 72-75]
+Point2D (type) [lines 77-77]
+ProjectionPlane (type) [lines 79-79]
+RadiusConfig (type) [lines 81-87] — A generic way to define radii for fillet or chamfer…
+ScaleMode (type) [lines 89-89]
+Shape2D (type) [lines 91-91]
+Shape3D (type) [lines 93-93]
+ShapeConfig (type) [lines 95-123] [7 members]
   ShapeConfig.shape (property)
   ShapeConfig.color (property)
   ShapeConfig.alpha (property)
@@ -665,19 +670,23 @@ ShapeConfig (type) [lines 91-119] [7 members]
   ShapeConfig.metalness (property) — PBR metalness factor (0 = dielectric, 1 = metal)
   ShapeConfig.roughness (property) — PBR roughness factor — threaded to GLTF only (not STEP
   ShapeConfig.density (property) — Material density in g/cm3, written as the shape's STEP material
-SimplePoint (type) [lines 121-121]
-SingleFace (type) [lines 123-123]
-SplineConfig (type) [lines 125-130]
-SupportedUnit (type) [lines 132-132]
-SurfaceType (type) [lines 134-134]
-TopoEntity (type) [lines 136-136]
+SimplePoint (type) [lines 125-125]
+SingleFace (type) [lines 127-127]
+SplineConfig (type) [lines 129-134]
+SupportedUnit (type) [lines 136-136]
+SurfaceType (type) [lines 138-138]
+TopoEntity (type) [lines 140-140]
 
 ## Constants — `api-constants.md`
 
 AXIS_NAMES (constant) [lines 5-5]
 DEG2RAD (constant) [lines 7-7]
-HASH_CODE_MAX (constant) [lines 9-9]
-RAD2DEG (constant) [lines 11-11]
+finderClauses (constant) [lines 9-20] [3 members] — Finder clauses by how their arguments describe them, for a…
+  finderClauses.value (property)
+  finderClauses.combinator (property)
+  finderClauses.predicate (property)
+HASH_CODE_MAX (constant) [lines 22-22]
+RAD2DEG (constant) [lines 24-24]
 
 ## Interfaces — `api-interfaces.md`
 
@@ -780,14 +789,39 @@ MeshShapeMesh (interface) [lines 297-307] [5 members]
   MeshShapeMesh.normals (property)
   MeshShapeMesh.vertProperties (property)
   MeshShapeMesh.numProp (property)
-PlaneFace (interface) [lines 309-315] [2 members]
+OperationCache (interface) [lines 309-321] [3 members] — A host cache
+  OperationCache.operation (method)
+  OperationCache.step (method)
+  OperationCache.elements (method) — Topological elements that user code took from `owner` (the `edges`,…
+OperationRequest (interface) [lines 323-356] [10 members] — One public operation, described lazily
+  OperationRequest.op (property) — `Class.method`, `set:Class.property` or the exported function name
+  OperationRequest.effect (property)
+  OperationRequest.receiver (property) — `this` of a method
+  OperationRequest.args (property) — The arguments as passed
+  OperationRequest.finderArgs (property) — Positions of finder arguments among `args`
+  OperationRequest.returnsBuilder (property) — The result is a mutable builder (a pen from `draw()`)
+  OperationRequest.deterministicErrors (property) — The operation's errors are a deterministic function of its inputs…
+  OperationRequest.freshState (property) — For a builder (pen, sketcher) the cache has not seen
+  OperationRequest.compute (method) — Runs the operation
+  OperationRequest.consume (method) — Deletes what the operation would have deleted
+OperationStep (interface) [lines 358-376] [6 members] — The part of an operation that depends on a callback…
+  OperationStep.op (property)
+  OperationStep.receiver (property)
+  OperationStep.deterministicErrors (property) — See {@link OperationRequest.deterministicErrors}
+  OperationStep.values (method) — The inputs known after the callback ran (selected element ordinals…
+  OperationStep.compute (method)
+  OperationStep.consume (method)
+PlaneConfig (interface) [lines 378-382] [2 members]
+  PlaneConfig.plane (property)
+  PlaneConfig.origin (property)
+PlaneFace (interface) [lines 384-390] [2 members]
   PlaneFace.pointOnSurface (method)
   PlaneFace.normalAt (method)
-PlaneSplitResult (interface) [lines 317-324] [3 members] — Pieces grouped by their position relative to an oriented plane
+PlaneSplitResult (interface) [lines 392-399] [3 members] — Pieces grouped by their position relative to an oriented plane
   PlaneSplitResult.positive (property)
   PlaneSplitResult.negative (property)
   PlaneSplitResult.on (property)
-Shape3DLike (interface) [lines 326-362] [12 members]
+Shape3DLike (interface) [lines 401-437] [12 members]
   Shape3DLike.fuse (method)
   Shape3DLike.cut (method)
   Shape3DLike.intersect (method)
@@ -800,22 +834,22 @@ Shape3DLike (interface) [lines 326-362] [12 members]
   Shape3DLike.mirror (method)
   Shape3DLike.mesh (method)
   Shape3DLike.boundingBox (property)
-ShapeEdgeMesh (interface) [lines 364-372] [2 members]
+ShapeEdgeMesh (interface) [lines 439-447] [2 members]
   ShapeEdgeMesh.lines (property)
   ShapeEdgeMesh.edgeGroups (property)
-ShapeMesh (interface) [lines 374-386] [4 members]
+ShapeMesh (interface) [lines 449-461] [4 members]
   ShapeMesh.triangles (property)
   ShapeMesh.vertices (property)
   ShapeMesh.normals (property)
   ShapeMesh.faceGroups (property)
-SketchInterface (interface) [lines 388-414] [4 members]
+SketchInterface (interface) [lines 463-489] [4 members]
   SketchInterface.face (method) — Transforms the lines into a face
   SketchInterface.revolve (method) — Revolves the drawing on an axis (defined by its direction…
   SketchInterface.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction…
   SketchInterface.loftWith (method) — Loft between this sketch and another sketch (or an array…
-STLExportOptions (interface) [lines 416-418] [1 members]
+STLExportOptions (interface) [lines 491-493] [1 members]
   STLExportOptions.binary (property)
-TopologyMap (interface) [lines 420-438] [9 members]
+TopologyMap (interface) [lines 495-513] [9 members]
   TopologyMap.vertex (property)
   TopologyMap.edge (property)
   TopologyMap.wire (property)

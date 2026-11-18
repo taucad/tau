@@ -15,7 +15,10 @@ import { cookieName } from '@taucad/ui-core/constants/cookie.constants';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 import type { PendingProjectRecovery } from '@taucad/files-ui/types/pending-project-operation.types';
-import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#runtime/project-library-storage.js';
+import type {
+  ProjectDiscoveryConflict,
+  WorkspaceBindingRepairGroup,
+} from '@taucad/files-ui/runtime/project-library-storage';
 
 const routerContent = createContext<React.ReactNode>(null);
 

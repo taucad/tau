@@ -64,7 +64,7 @@ import { createRevisionLoadReporter } from '#machines/revision-load-telemetry.js
 import { summarizeLast, withPendingGauge, workerSpanTotals } from '@taucad/ui-core/lib/worker-timing-report';
 import { createProjectOpenTimer, markProjectOpen } from '@taucad/project-workspace/utils/project-open-timer';
 import type { ProjectOpenTimer } from '@taucad/project-workspace/utils/project-open-timer';
-import { createRevisionCompute } from '#machines/revision-compute.js';
+import { createRevisionCompute } from '@taucad/revisions-ui/machines/revision-compute';
 import { linkedImportPort, stageLinkedImport } from '@taucad/ui-core/machines/import-linked';
 import { importConnectMessageType, serveImportChannel } from '@taucad/ui-core/machines/import-staging';
 import { systemSkillsOverlay } from '@taucad/ui-core/workers/system-skills-overlay';

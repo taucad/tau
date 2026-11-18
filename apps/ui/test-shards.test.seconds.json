@@ -374,7 +374,6 @@
     "app/hooks/use-project-manager.duplicate.test.ts": 2,
     "app/hooks/use-project-manager.recovery.test.ts": 2.9,
     "app/hooks/use-project-manager.test.ts": 14.6,
-    "app/hooks/use-project-manager.watch-kinds.test.ts": 0.6,
     "app/hooks/use-project-slug-route.test.ts": 1.9,
     "app/hooks/use-project-thumbnail.health.test.ts": 1.4,
     "app/hooks/use-project-thumbnail.test.ts": 1.7,

@@ -841,6 +841,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly middlewareDependencyCache = new Map<string, Promise<MiddlewareDependencySet>>();
   /** Paths each settled dependency set above was resolved from; a cached set absent here is still pending. */
   private readonly settledDependencyPaths = new WeakMap<Promise<unknown>, DependencyPaths>();
+  /** Paths a read was refused `PENDING` on (a tree write's or fill's): watched, so a render follows them (STO-25). */
+  private readonly refusedReads = new Set<string>();
 
   /**
    * Dynamically loaded middleware instances with their resolved configs.
@@ -6483,8 +6485,25 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   private async reconcileObservedPaths(): Promise<void> {
     const allDeps = new Map<string, number>();
+    const refused = [...this.refusedReads].flatMap((path) => {
+      try {
+        return [assertRootedPath(path)];
+      } catch {
+        return [];
+      }
+    });
+    this.refusedReads.clear();
+    /* The render observed each as not there yet: its landing is a change from that, never a first baseline. */
+    for (const path of refused) {
+      if (!this.fileHashCache.has(path)) {
+        this.fileHashCache.set(path, 'missing');
+      }
+    }
     for (const document of this.documents.values()) {
       if (document.watch && !document.closed) {
+        for (const path of refused) {
+          document.watchPaths.add(path);
+        }
         for (const path of document.watchPaths) {
           allDeps.set(path, fileChangeDebounce);
         }
@@ -7171,9 +7190,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   private createFileSystem(): KernelFileSystem {
     const fileSystem = this.fileSystem!;
-    const { tracer } = this;
+    const { tracer, refusedReads } = this;
     const checkOperationAbort = (): void => {
       (this.operationSignal ?? neverAbortedSignal).throwIfAborted();
+    };
+    /* A read refused while its file is still arriving names a file the render must run again for once it lands. */
+    const follow = async <Value>(path: string, read: Promise<Value>): Promise<Value> => {
+      try {
+        return await read;
+      } catch (error) {
+        if ((error as { code?: unknown } | undefined)?.code === 'PENDING') {
+          refusedReads.add(path);
+        }
+        throw error;
+      }
     };
 
     function readFile(path: string, encoding: 'utf8'): Promise<string>;
@@ -7182,7 +7212,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       checkOperationAbort();
       const span = tracer.startSpan('fs.read', { path });
       try {
-        const data = encoding ? await fileSystem.readFile(path, encoding) : await fileSystem.readFile(path);
+        const data = await follow<string | Uint8Array<ArrayBuffer>>(
+          path,
+          encoding ? fileSystem.readFile(path, encoding) : fileSystem.readFile(path),
+        );
         checkOperationAbort();
         return data;
       } finally {
@@ -7217,7 +7250,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         checkOperationAbort();
         const span = tracer.startSpan('fs.exists', { path });
         try {
-          const fileExists = await fileSystem.exists(path);
+          const fileExists = await follow(path, fileSystem.exists(path));
           checkOperationAbort();
           return fileExists;
         } finally {
@@ -7229,7 +7262,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         checkOperationAbort();
         const span = tracer.startSpan('fs.readdir', { path });
         try {
-          const entries = await fileSystem.readdir(path);
+          const entries = await follow(path, fileSystem.readdir(path));
           checkOperationAbort();
           return entries;
         } finally {
@@ -7264,13 +7297,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
       async stat(path: string) {
         checkOperationAbort();
-        const result = await fileSystem.stat(path);
+        const result = await follow(path, fileSystem.stat(path));
         checkOperationAbort();
         return result;
       },
       async lstat(path: string) {
         checkOperationAbort();
-        const result = await fileSystem.lstat(path);
+        const result = await follow(path, fileSystem.lstat(path));
         checkOperationAbort();
         return result;
       },

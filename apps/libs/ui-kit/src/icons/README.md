@@ -52,6 +52,11 @@ pnpm nx run ui-kit:generate-svg-sprite
 
 ## Attribution
 
+- `platform-logos.tsx` holds the Apple, Windows and Linux marks from Font Awesome Free 6.7.2
+  (<https://github.com/FortAwesome/Font-Awesome/tree/6.7.2/svgs/brands>), Copyright Fonticons, Inc.,
+  licensed under CC BY 4.0, path geometry unchanged. They are React components rather than sprite
+  symbols because only the desktop offer and the marketing site's download buttons use them. Brand
+  icons are trademarks of their respective owners; no endorsement is implied.
 - `kimi.svg` is sourced from Lobe Icons' `kimi-color.svg` at commit
   `fbd2d56e3f734e889f1373e71c8368cc4e60e0d7`, licensed under MIT (Copyright 2023 LobeHub).
 - `build123d.svg` is sourced from build123d's `docs/assets/build123d_logo/logo.svg` at

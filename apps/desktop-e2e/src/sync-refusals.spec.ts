@@ -592,12 +592,12 @@ describe('a free-tier owner (W8)', () => {
 
     await openBackupChooser(client.page);
     const region = backupLine(client.page);
-    const choice = region.getByRole('radio', { name: 'Tau Cloud' });
+    const choice = region.getByRole('radio', { name: 'Tau', exact: true });
     await expect.poll(async () => choice.isEnabled(), { timeout: 60_000 }).toBe(true);
     expect(await regionText(client), 'D16: the chooser says what Free includes').toContain('1 GB included');
     await choice.click();
     /* C4 (dbee175fd2): the chooser's apply verb names the destination. */
-    await region.getByRole('button', { name: 'Back up to Tau Cloud', exact: true }).click();
+    await region.getByRole('button', { name: 'Back up to the cloud', exact: true }).click();
     await expect.poll(async () => backupText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
     await expect.poll(async () => figureText(client), { message: 'D18: x of 1 GB', timeout: 120_000 }).toMatch(figure);
 

@@ -385,9 +385,9 @@ const openHostedShare = async (client: PageClient): Promise<void> => {
   await page.getByRole('button', { name: 'Share', exact: true }).first().click({ timeout: 120_000 });
   await page.getByRole('region', { name: 'Share project' }).first().waitFor({ state: 'visible', timeout: 60_000 });
   const method = page.getByRole('button', { name: /^Share with /u }).first();
-  if ((await method.getAttribute('aria-label')) !== 'Share with Tau Cloud link') {
+  if ((await method.getAttribute('aria-label')) !== 'Share with Cloud link') {
     await method.click();
-    await page.getByText('Tau Cloud link', { exact: true }).last().click();
+    await page.getByText('Cloud link', { exact: true }).last().click();
   }
   await page
     .getByRole('combobox', { name: /Version name/iu })
@@ -776,7 +776,7 @@ describe('a project on the browser client', () => {
       .poll(
         async () => {
           const text = await syncRegionText(client);
-          return text.includes('Tau Cloud') && (await settings.isVisible());
+          return text.includes('Cloud') && (await settings.isVisible());
         },
         {
           message: 'W11b (DEF-8): the connected Tau Cloud remote must reach the Sync region',
@@ -2852,7 +2852,7 @@ describe('backup by default and one library', () => {
     await expect
       .poll(async () => cloudCard.count(), { message: 'D20: one list names Tau Cloud’s project', timeout: 60_000 })
       .toBe(1);
-    expect(await cloudCard.textContent()).toContain('Tau Cloud');
+    expect(await cloudCard.textContent()).toContain('Cloud');
 
     const destinationSlug = await openCloudOnlyProject(second.page, { projectsUrl, name, message: 'D20 open' });
     const root = join(second.homeRoot, destinationSlug);

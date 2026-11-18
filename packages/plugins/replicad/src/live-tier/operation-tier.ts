@@ -9,8 +9,9 @@
  * OCCT reference-counts the shared `TShape`, so no ownership bookkeeping exists here.
  *
  * Retention: every entry records the generation (successful build) that last used it. An entry unused for
- * `decayGenerations` builds is evicted, and the entry count is capped; evicting deletes the alias the
- * entry owns, exactly once. A worker recycle remains the backstop for memory (audit Q5).
+ * `decayGenerations` builds is evicted. The entry count and the entries' estimated resident bytes are capped:
+ * under pressure the least recently used entries without live dependents go first (`entry-cost.ts`). Evicting
+ * deletes the alias the entry owns, exactly once. A worker recycle remains the backstop for memory (audit Q5).
  *
  * @internal
  */
@@ -18,6 +19,7 @@ import type * as ReplicadModule from 'replicad';
 import type { OperationCache, OperationRequest, OperationStep } from 'replicad';
 import { isWebAssemblyException } from '@taucad/runtime/kernel';
 import { sha256BytesSync, sha256StringSync } from '@taucad/utils/hash';
+import { createEntryCost } from '#live-tier/entry-cost.js';
 
 type ReplicadLibrary = typeof ReplicadModule;
 
@@ -25,8 +27,16 @@ type ReplicadLibrary = typeof ReplicadModule;
 type Retained =
   | { readonly kind: 'value'; readonly value: unknown }
   | { readonly kind: 'failure'; readonly error: unknown };
-/** A kept lineage: what it retains, the build that last used it, and the entries whose results it was made from. */
-type Entry = { readonly retained: Retained; generation: number; readonly parents: ReadonlySet<string> };
+/**
+ * A kept lineage: what it retains, its estimated resident bytes, the build that last used it, and the entries whose
+ * results it was made from.
+ */
+type Entry = {
+  readonly retained: Retained;
+  readonly bytes: number;
+  generation: number;
+  readonly parents: ReadonlySet<string>;
+};
 type Frame = { partial: string; pending: boolean; stepKey?: string; parents: Set<string> };
 type ElementGroup = {
   readonly ownerId: string;
@@ -59,9 +69,19 @@ export type OperationTierOptions = {
   readonly decayGenerations?: number;
   /** Entries kept at most; beyond it the least recently used goes first. */
   readonly entryCap?: number;
+  /**
+   * Estimated resident bytes kept at most, shared by every document's tier of a kernel; beyond it the least recently
+   * used entries without live dependents go first. Unbounded when omitted.
+   */
+  readonly byteBudget?: ByteBudget;
+  /** Estimated resident bytes of a retained value; defaults to the topology estimate of `entry-cost.ts`. */
+  readonly estimateBytes?: (value: unknown) => number;
   /** Interned lineages kept at most; beyond it the table restarts and old entries decay. */
   readonly lineageCap?: number;
 };
+
+/** A byte budget the tiers of one kernel share: its limit and the estimated bytes their entries hold. @internal */
+export type ByteBudget = { readonly limit: number; used: number };
 
 /** Counters of the current build and the tier's size. @internal */
 export type OperationTierStats = {
@@ -76,6 +96,8 @@ export type OperationTierStats = {
   pending: number;
   evicted: number;
   entries: number;
+  /** Estimated resident bytes of every entry. */
+  bytes: number;
   /** Most frequent reasons a call could not be keyed. */
   opaqueReasons: Record<string, number>;
 };
@@ -92,6 +114,8 @@ export type OperationTier = {
   stats(): OperationTierStats;
   /** Identity the tier gave a value, if any. */
   idOf(value: unknown): string | undefined;
+  /** Evicts this tier's least recently used entries while the shared byte budget is exceeded. */
+  relieve(): void;
   /** Deletes everything the tier owns. */
   dispose(): void;
 };
@@ -108,6 +132,7 @@ const freshStats = (): OperationTierStats => ({
   pending: 0,
   evicted: 0,
   entries: 0,
+  bytes: 0,
   opaqueReasons: {},
 });
 
@@ -168,6 +193,8 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
   const { library } = options;
   const decayGenerations = options.decayGenerations ?? 3;
   const entryCap = options.entryCap ?? 16_384;
+  const byteBudget = options.byteBudget ?? { limit: Number.POSITIVE_INFINITY, used: 0 };
+  const estimateBytes = options.estimateBytes ?? createEntryCost(library);
   const lineageCap = options.lineageCap ?? 65_536;
   const { finderClauses } = library;
   const valueClauses = new Set<string>(finderClauses.value);
@@ -176,6 +203,7 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
   const ids = new WeakMap<WeakKey, string>();
   const elementOf = new WeakMap<WeakKey, { readonly group: ElementGroup; readonly index: number }>();
   const entries = new Map<string, Entry>();
+  let bytes = 0;
   /** Live entries made from each entry. An entry with live dependents is never evicted alone (see `evict`). */
   const dependents = new Map<string, Set<string>>();
   /** Entries the arguments of the call being keyed refer to. */
@@ -317,6 +345,8 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
   const evictable = (key: string): boolean => (dependents.get(key)?.size ?? 0) === 0;
   const evict = (key: string, entry: Entry): void => {
     entries.delete(key);
+    bytes -= entry.bytes;
+    byteBudget.used -= entry.bytes;
     dependents.delete(key);
     for (const parent of entry.parents) {
       dependents.get(parent)?.delete(key);
@@ -324,26 +354,33 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
     release(entry);
   };
 
-  /** Evicts least recently used entries without live dependents until the table is within its cap. */
+  /** Evicts least recently used entries without live dependents until the table is within its cap and budget. */
   const evictToCap = (): void => {
-    while (entries.size > entryCap) {
-      let evicted = false;
+    const over = (): boolean => entries.size > entryCap || byteBudget.used > byteBudget.limit;
+    for (let progress = true; progress && over(); ) {
+      progress = false;
       for (const [key, entry] of entries) {
+        if (!over()) {
+          return;
+        }
         if (evictable(key)) {
           evict(key, entry);
-          evicted = true;
-          break;
+          progress = true;
+          // Evicting a dependent can free an older parent: rescan from the least recently used.
+          if (entry.parents.size > 0) {
+            break;
+          }
         }
-      }
-      if (!evicted) {
-        return;
       }
     }
   };
 
   const admit = (key: string, retained: Retained, parents: ReadonlySet<string>): void => {
     const kept = new Set([...parents].filter((parent) => entries.has(parent) && parent !== key));
-    entries.set(key, { retained, generation, parents: kept });
+    const cost = retained.kind === 'value' ? internal(() => estimateBytes(retained.value)) : 0;
+    entries.set(key, { retained, bytes: cost, generation, parents: kept });
+    bytes += cost;
+    byteBudget.used += cost;
     for (const parent of kept) {
       let children = dependents.get(parent);
       if (!children) {
@@ -806,12 +843,16 @@ export const createOperationTier = (options: OperationTierOptions): OperationTie
       }
       evictToCap();
       stats.entries = entries.size;
+      stats.bytes = bytes;
     },
     stats() {
-      return { ...stats, entries: entries.size, opaqueReasons: { ...stats.opaqueReasons } };
+      return { ...stats, entries: entries.size, bytes, opaqueReasons: { ...stats.opaqueReasons } };
     },
     idOf(value) {
       return value !== null && typeof value === 'object' ? idOf(value) : undefined;
+    },
+    relieve() {
+      evictToCap();
     },
     dispose() {
       active = false;

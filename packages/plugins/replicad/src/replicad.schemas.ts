@@ -44,6 +44,11 @@ export const replicadOptionsSchema = z.object({
    * cache and builds no key.
    */
   computeReuse: z.boolean().optional(),
+  /**
+   * Estimated resident bytes the live operation tier keeps across documents (default 256 MiB). Beyond it the least
+   * recently used entries without live dependents are evicted, and their native shapes deleted.
+   */
+  computeReuseBytes: z.number().int().positive().optional(),
 });
 
 /**

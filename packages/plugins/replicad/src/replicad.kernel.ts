@@ -78,6 +78,8 @@ import type { GlbResources } from '@taucad/geometry-core';
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
 import { createLiveTier, installOperationTier } from '#live-tier/live-tier.js';
 import type { LiveTier } from '#live-tier/live-tier.js';
+import { createHandleEpochs } from '#build-epochs.js';
+import type { HandleEpochs } from '#build-epochs.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
 import { replicadDetectPattern } from '#replicad.constants.js';
@@ -266,6 +268,8 @@ type ReplicadContext = {
   libraryTrace: KernelLibraryTraceHandle<ReplicadLibrary>;
   /** The live tier; undefined when compute reuse is switched off for this kernel. */
   liveTier: LiveTier<BuiltModel> | undefined;
+  /** Build and module epochs: what each delivered handle owns, deleted when the runtime releases it (E12). */
+  epochs: HandleEpochs;
 };
 
 /** What one build delivers: the native handle and the offers derived from it. */
@@ -282,7 +286,7 @@ type ReplicadLibrary = typeof ReplicadModule;
  * cannot read an unexported manifest, so this pins it; `replicad-package-identity.test.ts` fails
  * when it differs from the installed package.
  */
-const replicadPackage = { name: '@taulabs/replicad', version: '1.2.0-beta.0' } as const;
+const replicadPackage = { name: '@taulabs/replicad', version: '1.2.0-beta.1' } as const;
 
 // Match both the public package name (`replicad/`) and the aliased pnpm path
 // (`@taulabs/replicad/`) — the package.json aliases `replicad` to the Tau fork,
@@ -519,6 +523,7 @@ export const replicadKernel = defineKernel({
       tessellationInstancing,
       wasm,
       computeReuse: computeReuseOption,
+      computeReuseBytes,
     } = options;
 
     const wasmLabel = typeof wasm === 'string' ? wasm : 'custom';
@@ -610,7 +615,11 @@ export const replicadKernel = defineKernel({
       const liveTier =
         computeReuseOption === false || !seamPresent
           ? undefined
-          : createLiveTier<BuiltModel>({ library: replicadLibrary, releaseScene: releaseBuiltModel });
+          : createLiveTier<BuiltModel>({
+              library: replicadLibrary,
+              releaseScene: releaseBuiltModel,
+              byteBudget: computeReuseBytes,
+            });
       const libraryTrace = createKernelLibraryTracer({
         library: replicadLibrary,
         tracer,
@@ -650,6 +659,7 @@ export const replicadKernel = defineKernel({
         tracingSummary,
         libraryTrace,
         liveTier,
+        epochs: createHandleEpochs(replicadLibrary),
       };
     } catch (error) {
       occt.release();
@@ -672,7 +682,7 @@ export const replicadKernel = defineKernel({
       }
       bundleSourceMap = bundleResult.sourceMap;
 
-      const executeResult = await runtime.execute(bundleResult.code);
+      const executeResult = await context.epochs.inModuleEpoch(async () => runtime.execute(bundleResult.code));
       if (!executeResult.success) {
         return createKernelError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
       }
@@ -719,12 +729,13 @@ export const replicadKernel = defineKernel({
         return tracedStep(tracer, 'replicad.scene-table-hit', () => {
           const delivered = aliasBuiltModel(revisited);
           tierBuiltHandles.add(delivered.handle);
+          context.epochs.adopt(delivered.handle);
           return delivered;
         });
       }
 
       const buildGeometry = named('Object.createGeometry', async () => {
-        const executeResult = await runtime.execute(bundleResult.code);
+        const executeResult = await context.epochs.inModuleEpoch(async () => runtime.execute(bundleResult.code));
         if (!executeResult.success) {
           throw new ReplicadBuildError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
         }
@@ -761,7 +772,7 @@ export const replicadKernel = defineKernel({
             context.libraryTrace.emitSummary();
             context.tracingSummary?.flush();
             if (documentTier) {
-              const { hits, misses, opaque, failureHits, evicted, entries } = documentTier.operations.stats();
+              const { hits, misses, opaque, failureHits, evicted, entries, bytes } = documentTier.operations.stats();
               mainSpan.end({
                 tierHits: hits,
                 tierMisses: misses,
@@ -769,6 +780,7 @@ export const replicadKernel = defineKernel({
                 tierFailureHits: failureHits,
                 tierEvicted: evicted,
                 tierEntries: entries,
+                tierBytes: bytes,
               });
             } else {
               mainSpan.end();
@@ -841,6 +853,7 @@ export const replicadKernel = defineKernel({
         tierBuiltHandles.add(built.handle);
       }
       documentTier?.scenes.admit(bundleResult.code, parameters, aliasBuiltModel(built));
+      context.epochs.adopt(built.handle);
       return built;
     } catch (error) {
       if (error instanceof ReplicadBuildError) {
@@ -1192,7 +1205,7 @@ export const replicadKernel = defineKernel({
     if (serialized.format !== replicadSnapshotFormat) {
       throw new Error(`Unsupported replicad native-handle snapshot format: ${String(serialized.format)}`);
     }
-    return {
+    return context.epochs.adopt({
       ...serialized,
       shapes: serialized.shapes.map((entry) => ({
         shape:
@@ -1201,7 +1214,12 @@ export const replicadKernel = defineKernel({
             : readBinaryBrep(context.replicadLibrary, entry.brep),
         ...entry.metadata,
       })),
-    };
+    });
+  },
+
+  // E12: the runtime releases a handle once nothing it keeps reaches it; its build epoch deletes what it alone owns.
+  releaseHandle({ handle }, _runtime, context) {
+    context.epochs.release(handle);
   },
 
   // D-RT-03: the realm's one OCCT instance; the host recycles the worker when this outgrows its device.

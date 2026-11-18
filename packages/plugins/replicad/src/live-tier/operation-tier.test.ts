@@ -48,6 +48,23 @@ const build = async <T>(tier: OperationTier, model: () => T): Promise<T> => buil
 
 const brep = (shape: { serialize(): string }): string => shape.serialize();
 
+/**
+ * What a render delivers from a shape: its triangles, normals, face ranges and edge lines. Under eviction a kept
+ * operand can carry pcurves an earlier destructive boolean added in place (catalogue N7), so its B-rep text may
+ * differ from reuse off while the delivered geometry does not.
+ */
+const delivered = (shape: Shape3D): string => {
+  const mesh = shape.mesh({ tolerance: 0.01, angularTolerance: 0.1 });
+  const edges = shape.meshEdges({ tolerance: 0.01, angularTolerance: 0.1 });
+  return JSON.stringify([
+    [...mesh.vertices],
+    [...mesh.triangles],
+    [...mesh.normals],
+    mesh.faceGroups.map(({ start, count }) => [start, count]),
+    [...edges.lines],
+  ]);
+};
+
 const tierWith = (options: Partial<Omit<OperationTierOptions, 'library'>> = {}): OperationTier =>
   createOperationTier({ library, ...options });
 
@@ -320,6 +337,57 @@ describe('live operation tier', () => {
       expect(tier.stats().evicted).toBe(0);
       await build(tier, () => bracket(10));
       expect(tier.stats()).toMatchObject({ misses: 0, hits: entries });
+      tier.dispose();
+    });
+
+    it('should estimate each entry, keep the shared byte budget, and evict what it no longer fits', async () => {
+      const reference = delivered(bracket(10));
+      const budget = { limit: Number.POSITIVE_INFINITY, used: 0 };
+      const unbounded = tierWith({ byteBudget: budget });
+      await build(unbounded, () => bracket(10));
+      const full = unbounded.stats();
+      expect(full.bytes).toBeGreaterThan(0);
+      expect(budget.used).toBe(full.bytes);
+      unbounded.dispose();
+      expect(budget.used).toBe(0);
+
+      // Half of what one build keeps: pressure evicts least recently used entries without live dependents.
+      const tight = { limit: full.bytes / 2, used: 0 };
+      const tier = tierWith({ byteBudget: tight });
+      const deleted = deletions();
+      const first = await build(tier, () => bracket(10));
+      const second = await build(tier, () => bracket(10));
+
+      expect(tier.stats().bytes).toBe(tight.used);
+      expect(tight.used).toBeLessThanOrEqual(tight.limit);
+      expect(tier.stats().evicted).toBeGreaterThan(0);
+      expect(deleted).toHaveBeenCalled();
+      expect([delivered(first), delivered(second)]).toStrictEqual([reference, reference]);
+      tier.dispose();
+      expect(tight.used).toBe(0);
+    });
+
+    it('should relieve the shared budget from another tier on demand', async () => {
+      const budget = { limit: Number.POSITIVE_INFINITY, used: 0 };
+      const older = tierWith({ byteBudget: budget });
+      await build(older, () => bracket(10));
+      const kept = budget.used;
+
+      Object.assign(budget, { limit: kept / 4 });
+      older.relieve();
+
+      expect(budget.used).toBeLessThanOrEqual(kept / 4);
+      expect(older.stats().evicted).toBeGreaterThan(0);
+      older.dispose();
+    });
+
+    it('should cost a retained value with the estimator it is given', async () => {
+      const estimateBytes = vi.fn(() => 100);
+      const tier = tierWith({ estimateBytes });
+      await build(tier, () => bracket(10));
+
+      expect(tier.stats().bytes).toBe(100 * tier.stats().entries);
+      expect(estimateBytes).toHaveBeenCalledTimes(tier.stats().entries);
       tier.dispose();
     });
 

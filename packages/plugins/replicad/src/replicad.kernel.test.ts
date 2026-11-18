@@ -17,6 +17,7 @@ import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { evaluatePose, resolveMechanismComponents, sampleAnimation } from '@taucad/kinematics';
+import { createHandleEpochs } from '#build-epochs.js';
 import { offersFor, replicadKernel } from '#replicad.kernel.js';
 import { normalizeRenderShapes } from '#utils/render-output.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
@@ -4705,7 +4706,7 @@ describe('serializeNativeHandle', () => {
     const restored = replicadDefinition.deserializeHandle!(
       { serialized: structuredClone(snapshot) },
       createMockKernelRuntime(),
-      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad }, epochs: createHandleEpochs({ ...replicad }) }),
     );
 
     expect(snapshot.mechanism).toEqual(mechanism);
@@ -4727,7 +4728,7 @@ describe('serializeNativeHandle', () => {
     const restored = replicadDefinition.deserializeHandle!(
       { serialized: structuredClone(snapshot) },
       createMockKernelRuntime(),
-      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad }, epochs: createHandleEpochs({ ...replicad }) }),
     );
     const [entry] = restored.shapes;
     try {
@@ -4773,7 +4774,7 @@ describe('serializeNativeHandle', () => {
     const restored = replicadDefinition.deserializeHandle!(
       { serialized: structuredClone(snapshot) },
       createMockKernelRuntime(),
-      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad }, epochs: createHandleEpochs({ ...replicad }) }),
     );
 
     expect(snapshot.shapes[0]).toMatchObject({ drawing: drawing.serialize() });

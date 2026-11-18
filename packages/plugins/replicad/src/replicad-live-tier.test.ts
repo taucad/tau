@@ -73,13 +73,15 @@ const retainedOperand = `
 `;
 
 type ParameterSet = Readonly<Record<string, unknown>>;
-type Arm = { readonly compute: 'off' | 'memory'; readonly computeReuse?: false };
+type Arm = { readonly compute: 'off' | 'memory'; readonly computeReuse?: false; readonly computeReuseBytes?: number };
 type Lifecycle = 'live' | 'fresh';
 /** What a build delivers: the GLB of the model view and, when asked, the STEP export. */
 type Delivered = { readonly glb: string; readonly step?: string };
 
 const tierOn: Arm = { compute: 'memory' };
 const tierOff: Arm = { compute: 'memory', computeReuse: false };
+/** About half of what one bracket build keeps: builds evict under byte pressure (E12). */
+const tierPressed: Arm = { compute: 'memory', computeReuseBytes: 64 * 1024 };
 
 const sha = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex').slice(0, 16);
 
@@ -102,7 +104,13 @@ const inSequence = async <Item, Result>(
 const session = (input: { source: string; arm: Arm; lifecycle?: Lifecycle; cached?: boolean }) => {
   const { source, arm, lifecycle = 'live' } = input;
   const runtime = defineRuntime({
-    kernels: [replicadKernel({ wasm: 'single', ...(arm.computeReuse === false ? { computeReuse: false } : {}) })],
+    kernels: [
+      replicadKernel({
+        wasm: 'single',
+        ...(arm.computeReuse === false ? { computeReuse: false } : {}),
+        ...(arm.computeReuseBytes === undefined ? {} : { computeReuseBytes: arm.computeReuseBytes }),
+      }),
+    ],
     bundlers: [esbuildBundler()],
     ...(input.cached === true ? { middleware: [geometryCache()] } : {}),
   });
@@ -218,12 +226,16 @@ const combinations = (values: Readonly<Record<string, readonly unknown[]>>): Par
  * History-independence gate (I1): ten randomized histories with the tier on; every build delivers the GLB reuse off
  * delivers for its parameters, and the last build of each history exports the same STEP.
  */
-const expectHistoryIndependence = async (source: string, sets: readonly ParameterSet[], seed: number) => {
+const expectHistoryIndependence = async (
+  source: string,
+  sets: readonly ParameterSet[],
+  { seed, arm = tierOn }: { readonly seed: number; readonly arm?: Arm },
+) => {
   const reference = await referenceOf(source, sets);
   const next = random(seed);
   const histories = Array.from({ length: 10 }, () => Array.from({ length: 6 }, () => Math.floor(next() * sets.length)));
   await inSequence(histories, async (history) => {
-    const opened = session({ source, arm: tierOn });
+    const opened = session({ source, arm });
     try {
       const delivered = await inSequence(history, async (index) =>
         opened.build(sets[index]!, index === history.at(-1)),
@@ -247,7 +259,7 @@ describe('replicad live tier', () => {
     it(
       'should deliver what reuse off delivers for every build of ten randomized cache histories',
       async () => {
-        const reference = await expectHistoryIndependence(bracket, sets, 5);
+        const reference = await expectHistoryIndependence(bracket, sets, { seed: 5 });
 
         // The finder closure selects different edges for `top`: the gate covers both values.
         expect(new Set(reference.map(({ glb }) => glb)).size).toBe(sets.length);
@@ -258,11 +270,21 @@ describe('replicad live tier', () => {
     it(
       'should deliver what reuse off delivers when a retained operand meets a different boolean (N7)',
       async () => {
-        await expectHistoryIndependence(
-          retainedOperand,
-          combinations({ finished: [true, false], height: [10, 12] }),
-          11,
-        );
+        await expectHistoryIndependence(retainedOperand, combinations({ finished: [true, false], height: [10, 12] }), {
+          seed: 11,
+        });
+      },
+      renderTimeout,
+    );
+
+    it(
+      'should deliver what reuse off delivers while byte pressure evicts entries in every build (E12)',
+      async () => {
+        await expectHistoryIndependence(bracket, sets, { seed: 7, arm: tierPressed });
+        await expectHistoryIndependence(retainedOperand, combinations({ finished: [true, false], height: [10, 12] }), {
+          seed: 13,
+          arm: tierPressed,
+        });
       },
       renderTimeout,
     );

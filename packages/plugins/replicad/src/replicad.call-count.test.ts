@@ -328,7 +328,9 @@ describe('Replicad ocTracing summary', () => {
       'kernel.export-compute',
     ]);
     // The anisotropic material makes render read surface coordinates through OpenCASCADE, so each phase has calls.
-    // Render's count includes one identity `TopLoc_Location` per shape for its partner hash.
-    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([12, 9, 13]);
+    // Render's count includes one identity `TopLoc_Location` per shape for its partner hash. Run-main makes 10 calls
+    // since `@taulabs/replicad` 1.2.0-beta.1 builds each operation once (taucad/replicad#9), and the live tier's cost
+    // estimate of the entry it stores walks its faces (a `TopExp_Explorer`, `More` and `Next`: 3 more).
+    expect(summaries.map((entry) => entry.detail?.['total.calls'])).toEqual([13, 9, 13]);
   });
 });

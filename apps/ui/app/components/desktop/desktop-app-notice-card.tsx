@@ -17,13 +17,12 @@ export const tauDownloadsPath = '/download';
  * @param props - The visitor's platform and the dismissal.
  * @returns The card.
  */
-export default function DesktopAppNoticeCard({
-  platform,
-  onDismiss,
-}: {
+export type DesktopAppNoticeCardProps = {
   readonly platform: DesktopPlatform;
   readonly onDismiss: () => void;
-}): React.JSX.Element {
+};
+
+export default function DesktopAppNoticeCard({ platform, onDismiss }: DesktopAppNoticeCardProps): React.JSX.Element {
   return (
     <SidebarNoticeCard
       title='Try Tau on desktop'

@@ -1,7 +1,9 @@
 import { lazy, Suspense, useSyncExternalStore } from 'react';
+import type { ComponentType } from 'react';
 import type { DesktopPlatform } from '@taucad/ui-kit/icons/platform-logos';
+import type { DesktopAppNoticeCardProps } from '#components/desktop/desktop-app-notice-card.js';
 import { useSidebarNoticeDismissal } from '#components/nav/sidebar-notices.js';
-import { isTauDesktopReleased } from '#components/desktop/open-in-desktop.js';
+import { isTauDesktopReleased } from '#lib/desktop-release.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { osClass } from '#telemetry/platform-class.js';
 
@@ -10,7 +12,7 @@ import { osClass } from '#telemetry/platform-class.js';
  * (a released build, a computer that runs Tau Desktop, not dismissed), which is never during SSR or hydration. A failed
  * load shows nothing: the offer is optional, and the next page load tries again.
  */
-const DesktopAppNoticeCard = lazy(async () => {
+const DesktopAppNoticeCard = lazy<ComponentType<DesktopAppNoticeCardProps>>(async () => {
   try {
     return await import('#components/desktop/desktop-app-notice-card.js');
   } catch {

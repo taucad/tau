@@ -1,26 +1,25 @@
 {
-  "$comment": "Uncached `test` task seconds per Nx project for the CI test-shard dealer (scripts/src/test-shard-dealer.ts). Source: era-D successful runs on hosted ubuntu runners at --parallel=1, tau-brain research/ci-decomposition-blueprint.md Part 1 F1/F2 and Part 2 F5 (median uncached task seconds). A project not listed weighs defaultSeconds: the queue run 42571800530 test-2 lane spent about 300 s on some 26 unlisted projects, near 12 s each, rounded up. The `ui:test:shard-<n>` tasks, which the test lanes deal in place of `ui` (CI throughput review ST-1), weigh a sixth of `ui:test` at 952 s (the review's 2026-11-18 p50) plus about 15 s of Vitest start-up each; `ui` stays for the release gate's sweep, which deals whole projects. Refresh when a listed project's median moves by more than a quarter, when a project is split, or when this snapshot is older than 60 days.",
-  "measuredAt": "2026-11-09",
-  "runs": [
-    42553976937, 42554401756, 42557046236, 42557064444, 42559901402, 42560078587, 42560329307, 42563569538, 42563887258,
-    42566340858, 42570950818, 42574381883, 42571800530
-  ],
+  "$comment": "Uncached `test` task seconds per Nx project for the CI test-shard dealer (scripts/src/test-shard-dealer.ts). Source: the uncached `test` tasks of the 216 sampled affected-lane jobs of green merge-group runs of ci.yml, 2026-11-16 to 2026-11-17, on hosted ubuntu runners at --parallel=1 (tau-brain research/artifacts/ci-throughput-review/runs/2026-11-17-cloud/mq/structural/cache-tasks-sample.tsv); a task's seconds are the gap from the previous task header in the job log, and each value is the median of its samples (the 2026-11-09 era-D snapshot had cli at 854 s; it now takes about 104 s). A project not listed weighs defaultSeconds, the median sampled project. The `revisions:test:shard-<k>` units are the three parts of the revisions suite (410 s uncached; packages/revisions/test-shards.test-utils.ts balances them by test-shards.test.seconds.json), each about a third of it plus Vitest's start. Refresh when a listed project's median moves by more than a quarter, when a project is split, or when this snapshot is older than 60 days.",
+  "measuredAt": "2026-11-18",
   "defaultSeconds": 15,
   "seconds": {
-    "build123d": 154,
-    "cli": 854,
-    "desktop": 47,
-    "host": 206,
-    "runtime": 113,
-    "ui": 804,
+    "build123d": 126,
+    "cli": 104,
+    "desktop": 27,
+    "host": 209,
+    "revisions:test:shard-1": 150,
+    "revisions:test:shard-2": 150,
+    "revisions:test:shard-3": 150,
+    "runtime": 80,
+    "ui": 952,
     "ui:test:shard-1": 175,
     "ui:test:shard-2": 175,
     "ui:test:shard-3": 175,
     "ui:test:shard-4": 175,
     "ui:test:shard-5": 175,
     "ui:test:shard-6": 175,
-    "ui-e2e": 185,
-    "viewer": 91,
-    "zoo": 139
+    "ui-e2e": 11,
+    "viewer": 92,
+    "zoo": 109
   }
 }

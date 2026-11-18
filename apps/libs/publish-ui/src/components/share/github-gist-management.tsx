@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 import { Loader } from '@taucad/ui/components/loader';
-import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { EllipsisVertical, RefreshCw, Trash2 } from 'lucide-react';
@@ -25,17 +24,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { useAuthLinks } from '#hooks/use-auth-links.js';
-import {
-  awaitGithubGistConnection,
-  connectGithubGist,
-  getGithubGistConnectionStatus,
-  parseGithubGistAuthorizationReturn,
-  shareProviderRegistry,
-  withBrowserShareProviderContext,
-} from '#lib/share-providers.js';
-import type { GithubGistAuthorizationSurface } from '#lib/share-providers.js';
 import { toast } from '@taucad/ui/components/sonner';
+import { useGithubGistServices } from '#components/share/github-gist-services.js';
+import type { GithubGistAuthorizationSurface } from '#components/share/github-gist-services.js';
 
 type GithubGistManagementProps = {
   readonly locator: ShareLocator;
@@ -47,7 +38,11 @@ type GithubGistManagementProps = {
   readonly surface?: GithubGistAuthorizationSurface;
 };
 
-/** Owner lifecycle controls for a canonical Tau project stored in a GitHub Gist. */
+/**
+ * Owner lifecycle controls for a canonical Tau project stored in a GitHub Gist.
+ *
+ * Reads the app's Gist services from the nearest `GithubGistServicesProvider` and needs a TanStack Query client.
+ */
 export function GithubGistManagement({
   locator,
   protection,
@@ -56,9 +51,22 @@ export function GithubGistManagement({
   onUnpublished,
   surface = 'share-page',
 }: GithubGistManagementProps): React.JSX.Element {
+  const {
+    awaitGithubGistConnection,
+    connectGithubGist,
+    getGithubGistConnectionStatus,
+    parseGithubGistAuthorizationReturn,
+    shareProviderRegistry,
+    useAuthLinks,
+    useSettingsDialog,
+    withBrowserShareProviderContext,
+  } = useGithubGistServices();
   const location = useLocation();
   const navigate = useNavigate();
-  const authorizationReturn = useMemo(() => parseGithubGistAuthorizationReturn(location.search), [location.search]);
+  const authorizationReturn = useMemo(
+    () => parseGithubGistAuthorizationReturn(location.search),
+    [parseGithubGistAuthorizationReturn, location.search],
+  );
   const { signIn } = useAuthLinks({
     redirectTo: `${location.pathname}${authorizationReturn?.remainingSearch ?? location.search}`,
   });

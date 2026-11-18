@@ -3,9 +3,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ShareProviderContext } from '@taucad/share/provider';
+import type { ShareProvider, ShareProviderContext } from '@taucad/share/provider';
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import { GithubGistManagement } from '#components/share/github-gist-management.js';
+import { GithubGistServicesProvider } from '#components/share/github-gist-services.js';
+import type { GithubGistServices } from '#components/share/github-gist-services.js';
 
 const mocks = vi.hoisted(() => ({
   connect: vi.fn(async (): Promise<'redirect' | 'system-browser'> => 'redirect'),
@@ -21,7 +23,21 @@ const mocks = vi.hoisted(() => ({
 }));
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 
-vi.mock('#lib/share-providers.js', () => ({
+vi.mock('@taucad/ui/components/sonner', () => ({ toast }));
+
+const snapshot: ShareProjectSnapshot = { entryPath: 'main.ts', files: [], warnings: [] };
+const context = {
+  origin: 'https://tau.new',
+  fetch: vi.fn(),
+  artifactCodec: {
+    pack: vi.fn(),
+    openPlain: vi.fn(),
+    sealWithPassword: vi.fn(),
+    openWithPassword: vi.fn(),
+  },
+} as unknown as ShareProviderContext;
+
+const services: GithubGistServices = {
   connectGithubGist: mocks.connect,
   awaitGithubGistConnection: mocks.awaitConnection,
   getGithubGistConnectionStatus: mocks.getStatus,
@@ -37,26 +53,16 @@ vi.mock('#lib/share-providers.js', () => ({
     const remaining = parameters.toString();
     return { outcome, remainingSearch: remaining ? `?${remaining}` : '' };
   },
-  withBrowserShareProviderContext: async (operation: (context: ShareProviderContext) => Promise<unknown>) =>
-    operation(context),
+  withBrowserShareProviderContext: async <Result,>(
+    operation: (providerContext: ShareProviderContext) => Promise<Result>,
+  ): Promise<Result> => operation(context),
   shareProviderRegistry: {
-    load: vi.fn(async () => ({ republish: mocks.republish, unpublish: mocks.unpublish })),
+    load: vi.fn(async () => ({ republish: mocks.republish, unpublish: mocks.unpublish }) as unknown as ShareProvider),
   },
-}));
-
-vi.mock('@taucad/ui/components/sonner', () => ({ toast }));
-
-const snapshot: ShareProjectSnapshot = { entryPath: 'main.ts', files: [], warnings: [] };
-const context = {
-  origin: 'https://tau.new',
-  fetch: vi.fn(),
-  artifactCodec: {
-    pack: vi.fn(),
-    openPlain: vi.fn(),
-    sealWithPassword: vi.fn(),
-    openWithPassword: vi.fn(),
-  },
-} as unknown as ShareProviderContext;
+  /* The app's `useAuthLinks` sign-in link for an explicit `redirectTo`. */
+  useAuthLinks: ({ redirectTo }) => ({ signIn: `/auth/sign-in?redirectTo=${encodeURIComponent(redirectTo)}` }),
+  useSettingsDialog: () => ({ open: vi.fn() }),
+};
 
 function LocationProbe(): React.JSX.Element {
   const location = useLocation();
@@ -74,13 +80,15 @@ const renderManagement = (
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
       <MemoryRouter initialEntries={[path]}>
         <LocationProbe />
-        <GithubGistManagement
-          locator={{ providerId: 'github-gist', reference: 'abc123' }}
-          protection={{ kind: 'none' }}
-          collectSnapshot={async () => snapshot}
-          onRepublished={properties?.onRepublished ?? vi.fn()}
-          onUnpublished={properties?.onUnpublished ?? vi.fn()}
-        />
+        <GithubGistServicesProvider value={services}>
+          <GithubGistManagement
+            locator={{ providerId: 'github-gist', reference: 'abc123' }}
+            protection={{ kind: 'none' }}
+            collectSnapshot={async () => snapshot}
+            onRepublished={properties?.onRepublished ?? vi.fn()}
+            onUnpublished={properties?.onUnpublished ?? vi.fn()}
+          />
+        </GithubGistServicesProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );

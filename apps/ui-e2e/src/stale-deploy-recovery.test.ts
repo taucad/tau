@@ -25,9 +25,14 @@
  * so a page opened from it must carry its own deploy's build id for the guard
  * to tell that a newer deploy replaced it.
  *
- * The web app's service worker (PL7) is served per deploy too
- * (`support/two-deploys.ts`), so these pages install it as they would on the
- * site. What a worker-controlled tab does across a deploy is
+ * These pages run without the web app's service worker (PL7): their contexts
+ * block service workers. This suite is the recovery of a page whose chunks
+ * the network no longer serves. A page the worker controls asks for such a
+ * chunk again without its deploy cookie (`retryUnpinnedMiss`), and here the
+ * next deploy is a byte-identical copy that has every previous chunk, so
+ * whether a page reached recovery depended on whether the worker, registered
+ * once the page is idle, had taken it before the deploy (a flake, merge queue
+ * job 135169781115). What a worker-controlled tab does across a deploy is
  * `service-worker-deploy.test.ts`'s, in the nightly suite until it ratchets.
  *
  * A page fully loaded on the previous deploy, whose chunks the next deploy still
@@ -115,7 +120,8 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
       { hold, retain },
     );
     server = live;
-    context = await browser.newContext();
+    // No worker (see the file comment): recovery must not depend on whether one took the page first.
+    context = await browser.newContext({ serviceWorkers: 'block' });
     const page = await context.newPage();
     const errors: string[] = [];
     page.on('console', (message) => {

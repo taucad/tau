@@ -2,10 +2,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { withCrossTabLocks } from '#cross-tab-coordinator.js';
 import {
   createWorkerTimings,
+  formatMeasureBreakdown,
   formatWorkerTimingSummary,
+  forwardWorkerTimings,
+  isWorkerTimingsMessage,
+  receiveWorkerTimings,
+  summarizeMeasures,
   workerTimingCounters,
   workerTimings,
+  workerTimingsMessageType,
 } from '#worker-timings.js';
+import type { WorkerTimingsMessage } from '#worker-timings.js';
 import { ResourceQueue } from '#resource-queue.js';
 
 /** A recorder on a clock the test moves. */
@@ -152,5 +159,108 @@ describe('cross-tab lock timings', () => {
     expect(counters['locks.set']?.total).toBe(2);
     expect(counters['locks.token']?.total).toBe(3);
     expect(request).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('worker spans readable from the page (tau #2014)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    performance.clearMeasures();
+  });
+
+  it('should post the spans a worker records, batched, on the worker clock with its origin', async () => {
+    vi.useFakeTimers();
+    const { timings, advance } = recorder();
+    const posted: WorkerTimingsMessage[] = [];
+    const stop = forwardWorkerTimings((message) => posted.push(message), timings);
+    advance(10);
+    await timings.span('apply.hold', async () => {
+      advance(40);
+    });
+    await timings.span('queue.wait', async () => {
+      advance(5);
+    });
+    expect(posted).toEqual([]);
+
+    vi.advanceTimersByTime(250);
+    expect(posted).toEqual([
+      {
+        type: workerTimingsMessageType,
+        timeOrigin: performance.timeOrigin,
+        spans: [
+          ['apply.hold', 10, 50],
+          ['queue.wait', 50, 55],
+        ],
+      },
+    ]);
+
+    vi.advanceTimersByTime(1000);
+    expect(posted).toHaveLength(1);
+    await timings.span('fill.flush', async () => {
+      advance(1);
+    });
+    stop();
+    expect(posted.at(-1)?.spans).toEqual([['fill.flush', 55, 56]]);
+    await timings.span('fill.flush', async () => {
+      advance(1);
+    });
+    vi.advanceTimersByTime(250);
+    expect(posted).toHaveLength(2);
+  });
+
+  it('should write forwarded spans as tau.worker measures on the page clock and drop names outside the vocabulary', () => {
+    const target = new EventTarget();
+    const stop = receiveWorkerTimings(target as unknown as Worker, 'file-manager');
+    /* A worker whose clock began 1,000 ms after the page's. */
+    const message = {
+      type: workerTimingsMessageType,
+      timeOrigin: performance.timeOrigin + 1000,
+      spans: [
+        ['lfs.store', 20, 70],
+        ['not.a.span', 0, 1],
+      ],
+    };
+    target.dispatchEvent(new MessageEvent('message', { data: message }));
+    target.dispatchEvent(new MessageEvent('message', { data: { type: 'other' } }));
+    stop();
+    target.dispatchEvent(new MessageEvent('message', { data: message }));
+
+    const measures = performance.getEntriesByType('measure').filter((entry) => entry.name.startsWith('tau.'));
+    expect(measures).toHaveLength(1);
+    expect(measures[0]).toMatchObject({ name: 'tau.worker.lfs.store', startTime: 1020, duration: 50 });
+    expect((measures[0] as PerformanceMeasure).detail).toEqual({
+      schemaVersion: 1,
+      span: 'lfs.store',
+      worker: 'file-manager',
+      realm: 'dedicated-worker',
+    });
+  });
+
+  it('should recognise only a timings message', () => {
+    expect(isWorkerTimingsMessage({ type: workerTimingsMessageType, timeOrigin: 1, spans: [] })).toBe(true);
+    expect(isWorkerTimingsMessage({ type: workerTimingsMessageType, spans: [] })).toBe(false);
+    expect(isWorkerTimingsMessage(undefined)).toBe(false);
+  });
+
+  it('should name its own measures tau.worker.<span> in the worker realm too', async () => {
+    const timings = createWorkerTimings();
+    await timings.span('records.project', async () => undefined);
+    expect(performance.getEntriesByName('tau.worker.records.project', 'measure')).toHaveLength(1);
+  });
+
+  it('should break measures down by name, the largest total first, for a failed budget', () => {
+    const rows = summarizeMeasures([
+      { name: 'tau.worker.queue.wait', duration: 10.4 },
+      { name: 'tau.load.tree.list', duration: 300 },
+      { name: 'tau.worker.queue.wait', duration: 30.2 },
+    ]);
+    expect(rows).toEqual([
+      { name: 'tau.load.tree.list', count: 1, totalMilliseconds: 300, maxMilliseconds: 300 },
+      { name: 'tau.worker.queue.wait', count: 2, totalMilliseconds: 41, maxMilliseconds: 30 },
+    ]);
+    expect(formatMeasureBreakdown(rows)).toBe(
+      'tau.load.tree.list 1× 300 ms max 300 ms\ntau.worker.queue.wait 2× 41 ms max 30 ms',
+    );
+    expect(formatMeasureBreakdown([])).toBe('no tau.* measures recorded');
   });
 });

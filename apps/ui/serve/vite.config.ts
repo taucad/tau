@@ -99,7 +99,8 @@ export default defineConfig({
   },
   // The same browser stubs as the web and desktop builds (`@resvg/resvg-js`).
   resolve: { alias: [...uiResolveAlias] },
-  ssr: uiSsrOptions,
+  // The server environment's own `resolve`, where the Environment API reads it (the web config's `uiSsrOptions`).
+  environments: { ssr: { resolve: { ...uiSsrOptions } } },
   server: {
     // 3000 is the web dev server and 3001 the desktop one.
     port: 3002,

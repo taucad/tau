@@ -4,8 +4,8 @@ on:
   push:
     branches: [main] # Only run on pushes to main branch
   pull_request:
-    # PRs vs `main`: the fast lanes (plan, workspace, the seven affected lanes and the
-    # PR-only reports); the merge queue runs everything but viewer parity, which a pull request
+    # PRs vs `main`: the fast lanes (plan, workspace, the affected lanes, the package checks
+    # and the PR-only reports); the merge queue runs everything but viewer parity, which a pull request
     # runs when its own diff touches a parity input (VP-1). A draft runs nothing until it is
     # marked ready (`ready_for_review`). PRs targeting `production` only (trail PR): skip
     # checks — release gate is staging smoke + human merge.
@@ -51,9 +51,9 @@ concurrency:
 
 jobs:
   # One affected computation for the lanes that need a project list or a flag: the
-  # service, browser, formal, GeoSpec, native-host, viewer-parity and end-to-end ratchet lanes,
-  # the PR-only reports, and
-  # `staging.yml` (the `ci-plan` artifact). The seven `affected-lane` jobs do not wait
+  # service, browser, formal, GeoSpec, native-host, viewer-parity, end-to-end ratchet and
+  # package-check lanes, the PR-only reports, and
+  # `staging.yml` (the `ci-plan` artifact). The `affected-lane` jobs do not wait
   # for it: they run their own `nx affected` and read the queue verdict themselves.
   # Every selector here is a tag, a target name or a project type — no job in this
   # workflow may name a project, except the shell lane's path check below, which names
@@ -82,7 +82,6 @@ jobs:
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
       native-hosts: ${{ steps.plan.outputs.native-hosts }}
-      native-intel: ${{ steps.plan.outputs.native-intel }}
       native-darwin: ${{ steps.plan.outputs.native-darwin }}
       native-darwin-projects: ${{ steps.plan.outputs.native-darwin-projects }}
       native-linux: ${{ steps.plan.outputs.native-linux }}
@@ -93,6 +92,8 @@ jobs:
       shell-projects: ${{ steps.plan.outputs.shell-projects }}
       e2e-queue: ${{ steps.plan.outputs.e2e-queue }}
       e2e-queue-suites: ${{ steps.plan.outputs.e2e-queue-suites }}
+      pkgcheck: ${{ steps.plan.outputs.pkgcheck }}
+      pkgcheck-shards: ${{ steps.plan.outputs.pkgcheck-shards }}
       compute-qualify: ${{ steps.plan.outputs.compute-qualify }}
       reused: ${{ steps.queue.outputs.run-id }}
       affected-base: ${{ steps.queue.outputs.affected-base }}
@@ -141,7 +142,7 @@ jobs:
           # does not rebuild the production image.
           # Native host rows (`native-hosts.yml`): a `tag:ci:native-hosts` project (Build123d, PicoGK,
           # the CLI) or a `test:native-linux` project is affected; the latter are also the linux-x64
-          # native rows it runs, and the former start its Intel row (`native-intel`).
+          # native rows it runs. Its Intel rows run at the desktop candidate gate, never here (INTEL-1).
           # Native darwin rows (`native-darwin.yml`): a `test:native-darwin` project (Build123d, PicoGK, the
           # CLI) is affected; `native-darwin-projects` names the rows. NATIVE_DARWIN_LANE_PATHS select every
           # such project: that workflow and the nuget standalone oracle's sources outside the native closure,
@@ -419,7 +420,6 @@ jobs:
           browser_projects=$(jq -c '.browser' <<< "$lanes")
           native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")
           native_hosts=$(jq -r 'if .["native-hosts"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")
-          native_intel=$(flag native-hosts)
           native_darwin=$(flag native-darwin)
           native_darwin_projects=$(jq -r '."native-darwin" | join(",")' <<< "$lanes")
           viewer_parity=$(flag viewer-parity)
@@ -440,6 +440,20 @@ jobs:
                   elif ($targets[.].metadata.shards // 1) > 1 then
                     error("\($project):\(.) declares shards; the e2e-queue lane runs a suite as one job")
                   else {project: $project, target: ., label: "\($project) \(.)", slug: ("\($project)-\(.)" | gsub(":"; "-"))} end]' <<< "$lanes")
+          # Package checks (`pkgcheck`): every affected project with a `pkgcheck`, `audit-public-surface` or
+          # `readme-quickstart` target, under no pull-request or merge-queue rule (as the lane ran them before it
+          # waited for this plan), dealt by measured seconds into one shard per 600 s, at most four. A push that
+          # reuses the merge-queue run selects none, as every lane.
+          pkgcheck_projects='[]'
+          if [ -z "$REUSED" ]; then
+            pkgcheck_projects=$(jq -c --argjson affected "$affected" '
+              .graph.nodes as $nodes
+              | [$affected[] | select($nodes[.].data.targets // {}
+                  | has("pkgcheck") or has("audit-public-surface") or has("readme-quickstart"))] | sort' "$RUNNER_TEMP/graph.json")
+          fi
+          pkgcheck_shards=$(echo "$pkgcheck_projects" | node scripts/src/test-shard-dealer.ts --shard all --shards auto \
+            --max-shards 4 --shard-seconds 600 --durations scripts/src/pkgcheck-shard-durations.json)
+          echo "Package-check shards: $pkgcheck_shards"
           # `api-image` keeps the PR-only Docker smoke test on the PRs that affect the API image.
           api_image=$(flag api-image)
           {
@@ -456,7 +470,6 @@ jobs:
             echo "browser=$browser"
             echo "geospec-examples=$geospec_examples"
             echo "native-hosts=$native_hosts"
-            echo "native-intel=$native_intel"
             echo "native-darwin=$native_darwin"
             echo "native-darwin-projects=$native_darwin_projects"
             echo "native-linux=$native_linux"
@@ -467,6 +480,8 @@ jobs:
             echo "shell-projects=$shell_projects"
             echo "e2e-queue=$e2e_queue"
             echo "e2e-queue-suites=$e2e_queue_suites"
+            echo "pkgcheck=$(if [ "$pkgcheck_shards" = '[]' ]; then echo false; else echo true; fi)"
+            echo "pkgcheck-shards=$pkgcheck_shards"
             echo "compute-qualify=$(flag compute-qualify)"
           } >> "$GITHUB_OUTPUT"
           # `staging.yml` reads which service lanes `nx affected` selected (`api`, `billing-e2e`,
@@ -543,11 +558,13 @@ jobs:
             node scripts/src/picogk-browser-host-pin.ts check --pin "$PIN"
           fi
 
-  # The affected tasks run as parallel lanes on separate standard runners: lint,
-  # typecheck, build, three package-check shards and six test shards. One runner running every
-  # task in turn took 1 h 40 min on a full graph (run 37221169741, 2026-10-04); the
-  # lanes bring that down to the longest lane. Each lane keeps `--parallel=1`, which
-  # its own 16 GB runner still needs (see `Run the lane's tasks`).
+  # The affected tasks run as parallel lanes on separate standard runners: two lint, two typecheck,
+  # two build and six test shards, and the package-check shards (`pkgcheck` below). One runner running
+  # every task in turn took 1 h 40 min on a full graph (run 37221169741, 2026-10-04); the lanes bring
+  # that down to the longest lane. Each lane keeps `--parallel=1`, which its own 16 GB runner still
+  # needs (see `Run the lane's tasks`). Lint, typecheck and build each ended past 10 min at p90 as one
+  # job (13.3, 17.8 and 13.4 min over 60 green queue runs), so each is two shards dealt by measured
+  # task seconds (Brain research/ci-structural-decomposition-blueprint.md, ST-3).
   #
   # No `needs: plan`: every lane selects its own projects with `nx affected`, and the only
   # thing it read from the plan was the queue verdict, which it now finds itself, as
@@ -570,7 +587,10 @@ jobs:
       fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
         lane:
-          [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3, test-4, test-5, test-6]
+          [lint-1, lint-2, typecheck-1, typecheck-2, build-1, build-2, test-1, test-2, test-3, test-4, test-5, test-6]
+    env:
+      # The build lanes' targets, in `nx affected` and the deal alike.
+      BUILD_TARGETS: build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch
     steps:
       # Two commits in a queue run, full history otherwise (see `plan`).
       - name: Checkout
@@ -603,7 +623,7 @@ jobs:
       # `push`, where the release commit itself touches every manifest after consuming
       # the plans.
       - name: Check version plans
-        if: matrix.lane == 'build' && github.event_name == 'pull_request'
+        if: matrix.lane == 'build-1' && github.event_name == 'pull_request'
         run: pnpm nx release plan:check
 
       # Pinned third-party downloads come from the Actions cache, so only a pin change asks their
@@ -611,11 +631,12 @@ jobs:
       # wasi-sdk of `prepare` and the CPython of `seed` failed 34 lane jobs in two days). The lane's
       # task graph, for the same targets as the step below, decides which entries it needs, so a
       # lane that runs neither task restores nothing (the kernel seeds are about 350 MB, the
-      # wasi-sdk archive 125 MB); the test shards read the whole affected `test` graph, as the
-      # deal happens in the step below. Keys digest the pins themselves
-      # (scripts/src/ci-pinned-downloads.ts). The consumers re-verify every byte against its pin,
-      # and on a miss they download as before; `ci-pinned-downloads.yml` saves the entries from
-      # `main`, whose cache scope pull requests and the merge queue restore from.
+      # wasi-sdk archive 125 MB); a shard reads its lane's whole affected graph, as the deal
+      # happens in the step below (which the lint, typecheck and build shards read too).
+      # Keys digest the pins themselves (scripts/src/ci-pinned-downloads.ts). The consumers
+      # re-verify every byte against its pin, and on a miss they download as before;
+      # `ci-pinned-downloads.yml` saves the entries from `main`, whose cache scope pull requests
+      # and the merge queue restore from.
       - name: Find the lane's pinned downloads
         id: pins
         if: steps.queue.outputs.run-id == ''
@@ -624,10 +645,10 @@ jobs:
         run: |
           graph="$RUNNER_TEMP/lane-graph.json"
           case "$LANE" in
-            lint) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
-            typecheck) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
-            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch --graph="$graph" > /dev/null ;;
-            pkgcheck-*) pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$graph" > /dev/null ;;
+            lint-*) pnpm nx affected -t lint --graph="$graph" > /dev/null ;;
+            typecheck-*) pnpm nx affected -t typecheck --graph="$graph" > /dev/null ;;
+            # shellcheck disable=SC2086 # BUILD_TARGETS is a word list
+            build-*) pnpm nx affected -t $BUILD_TARGETS --graph="$graph" > /dev/null ;;
             test-*) pnpm nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="$graph" > /dev/null ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac
@@ -658,6 +679,14 @@ jobs:
       # refuse rather than skip when they are absent. The whole of `test` for that tag
       # runs in the `api` lane below, which has both; these lanes stay hermetic.
       #
+      # The lint, typecheck and build shards deal from the graph the step above wrote (one `nx affected` per job,
+      # ST-4), never from this file: it holds the lane's affected tasks and the project graph without running
+      # anything (X8). Each shard computes the same deal, so the shards partition the lane's projects and the task
+      # each project owns runs in exactly one shard (scripts/src/test-shard-dealer.test.ts and
+      # scripts/src/affected-shard-union.test.ts). They deal projects by measured task seconds with the tasks
+      # they depend on (`--graph`), so `ui` and the desktop build its payload check needs share a build shard
+      # instead of building it twice. A task another shard's project also depends on may run in both; Nx caches it.
+      #
       # The six test shards split the affected projects with a `test` target by
       # measured uncached test seconds (scripts/src/test-shard-dealer.ts and its
       # duration snapshot). The project list comes from the graph at run time,
@@ -678,13 +707,13 @@ jobs:
       # `test` needs the same cap: overlapping WASM suites lost the VM the same way
       # a few minutes into `test` (tau#306 and tau#299, 2026-10-04).
       #
-      # The build lane also runs `ui:check-desktop-payload`, the desktop renderer ownership
+      # The build lanes also run `ui:check-desktop-payload`, the desktop renderer ownership
       # gate, whenever `ui` is affected: a renderer-only change no longer selects `desktop`,
       # so the desktop `package-*` targets that also depend on it never run for it (Brain
       # research/desktop-split-blueprint.md, D-DS2). Its `ui:build:desktop` and
       # `desktop:build` dependencies stay serial here under the same `--parallel=1`.
       #
-      # It also runs `ui:check-critical-budget`, the critical-path budget (progressive loading
+      # They also run `ui:check-critical-budget`, the critical-path budget (progressive loading
       # guard G3): each route class's interactive tier in the client build `ui:build` just made,
       # with no build of its own. Its source guards (G1 lint, G2 graph test) run in the lint and
       # test lanes. `ui:check-static-shells` (PL3) renders each static shell through that build's
@@ -705,52 +734,23 @@ jobs:
           LANE: ${{ matrix.lane }}
         run: |
           set -o pipefail
+          graph="$RUNNER_TEMP/lane-graph.json"
           case "$LANE" in
-            lint) pnpm nx affected -t lint --parallel=1 ;;
-            typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
-            build) pnpm nx affected -t build size check-desktop-payload check-critical-budget check-static-shells check-server-output check-route-module-patch --parallel=1 ;;
-            pkgcheck-*)
-              # The three package-check shards deal the affected projects with a package
-              # check by measured uncached `pkgcheck` seconds, with the test shards' dealer
-              # and its own snapshot (scripts/src/pkgcheck-shard-durations.json): on a root
-              # package change about 47 checks of 40 to 330 s ran on one runner for up to
-              # 35 min. As for the test shards, the graph names the projects and every lane
-              # computes the same deal, so the shards partition them.
-              pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --graph="$RUNNER_TEMP/pkgcheck-graph.json" > /dev/null
-              projects=$(jq -c '
-                [.tasks.tasks[] | select(.target.target | IN("pkgcheck", "audit-public-surface", "readme-quickstart")) | .target.project]
-                | unique' "$RUNNER_TEMP/pkgcheck-graph.json")
-              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#pkgcheck-}" --shards 3 \
-                --durations scripts/src/pkgcheck-shard-durations.json)
+            lint-* | typecheck-* | build-*)
+              kind=${LANE%-*}
+              targets=$kind
+              if [ "$kind" = build ]; then targets=$(tr ' ' ',' <<< "$BUILD_TARGETS"); fi
+              projects=$(jq -c --arg targets "$targets" '
+                ($targets | split(",")) as $mine
+                | [.tasks.tasks[] | select(.target.target | IN($mine[])) | .target.project] | unique' "$graph")
+              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE##*-}" --shards 2 \
+                --durations "scripts/src/$kind-shard-durations.json" --graph "$graph" --targets "$targets")
               if [ -z "$shard" ]; then
-                echo "No affected package checks in this shard."
+                echo "No affected $kind projects in this shard."
                 exit 0
               fi
               echo "Shard projects: $shard"
-              # publint, attw, madge and the surface checks are light, so they run three at
-              # a time once their builds exist. The builds stay serial and land in the local
-              # cache, so the checks reuse them.
-              built=$(jq -r --arg shard "$shard" '
-                ($shard | split(",")) as $mine
-                | [.tasks.tasks[] | select(.target.target == "pkgcheck") | .target.project]
-                | unique | map(select(IN($mine[]))) | join(",")' "$RUNNER_TEMP/pkgcheck-graph.json")
-              # A `build` without `^build` may run before the libraries its package bundles and
-              # keep their specifiers in its declarations, and the local cache hands that build
-              # to its check. The builds its checks depend on run first, and the shard's own
-              # builds skip the remote cache, which may still hold such a build from before
-              # this order: the hash does not see whether a dependency was built.
-              deps=$(jq -r --arg built "$built" '
-                ($built | split(",")) as $mine
-                | [$mine[] as $p | .tasks.dependencies["\($p):pkgcheck"][]? | select(endswith(":build"))
-                   | split(":")[0] | select(IN($mine[]) | not)]
-                | unique | join(",")' "$RUNNER_TEMP/pkgcheck-graph.json")
-              if [ -n "$deps" ]; then
-                pnpm nx run-many -t build --projects "$deps" --parallel=1
-              fi
-              if [ -n "$built" ]; then
-                pnpm nx run-many -t build --projects "$built" --parallel=1 --skip-remote-cache
-              fi
-              pnpm nx run-many -t pkgcheck audit-public-surface readme-quickstart --projects "$shard" --parallel=3
+              pnpm nx run-many -t "$targets" --projects "$shard" --parallel=1
               ;;
             test-*)
               # GeoSpec suites run here against the published `geospec-engine` prebuild for
@@ -832,11 +832,108 @@ jobs:
 
       # The M3 verdict helpers left with `geospec` for taucad/geospec, which runs them in its own CI.
       - name: Check the affected GeoSpec consumer
-        if: matrix.lane == 'build' && steps.queue.outputs.run-id == ''
+        if: matrix.lane == 'build-1' && steps.queue.outputs.run-id == ''
         run: pnpm nx affected -t check-geospec-test-consumer
 
       - name: Check workspace root hygiene
         if: always() && steps.queue.outputs.run-id == ''
+        run: pnpm nx run scripts:validate-workspace-root
+
+  # The package checks (publint, attw, madge, the public-surface audit and the README quickstart) of the
+  # affected projects that have one. The plan deals them by measured uncached `pkgcheck` seconds
+  # (scripts/src/pkgcheck-shard-durations.json, with the test shards' dealer), one shard per 600 s and at most
+  # four (`pkgcheck-shards`), so a narrow entry runs one job and a root package change four: as three fixed
+  # shards each ended past 10 min at p90 (15.4, 12.5 and 14.8 min over 60 green queue runs) while a narrow
+  # entry still started all three (Brain research/ci-structural-decomposition-blueprint.md, ST-3 and ST-4
+  # "fewer jobs"). The plan's one graph names the projects, so this job builds no affected graph of its own;
+  # it waits for the plan, which ends at about 2 min. The shards partition the selected projects
+  # (scripts/src/test-shard-dealer.test.ts), and the required gate needs every shard.
+  pkgcheck:
+    name: Affected (pkgcheck-${{ matrix.shard.shard }})
+    needs: [plan]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.pkgcheck == 'true' }}
+    runs-on: ubuntu-latest
+    environment: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'merge_group' && startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/'))) && 'nx-cache-write' || null }}
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      id-token: 'write' # CP-5b: a pull request job trades its OIDC token for its own cache session (setup-nx nx-guard)
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
+    strategy:
+      fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.pkgcheck-shards) }}
+    steps:
+      # Two commits in a queue run, full history otherwise (see `plan`).
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: ${{ github.event_name == 'merge_group' && 2 || 0 }}
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+          affected-base: ${{ needs.plan.outputs.affected-base }}
+
+      # The shard's task graph, for its pinned downloads (as in the affected lanes) and its builds below.
+      - name: Find the shard's pinned downloads
+        id: pins
+        env:
+          PROJECTS: ${{ matrix.shard.projects }}
+        run: |
+          graph="$RUNNER_TEMP/pkgcheck-graph.json"
+          pnpm nx run-many -t pkgcheck audit-public-surface readme-quickstart --projects "$PROJECTS" --graph="$graph" > /dev/null
+          node scripts/src/ci-pinned-downloads.ts --graph "$graph" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Python kernel seeds
+        if: steps.pins.outputs.kernel-seeds-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.kernel-seeds-path }}
+          key: ${{ steps.pins.outputs.kernel-seeds-key }}
+
+      - name: Restore the wasi-sdk archive
+        if: steps.pins.outputs.wasi-sdk-key != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pins.outputs.wasi-sdk-path }}
+          key: ${{ steps.pins.outputs.wasi-sdk-key }}
+
+      - name: Run the shard's package checks
+        env:
+          PROJECTS: ${{ matrix.shard.projects }}
+        run: |
+          set -o pipefail
+          graph="$RUNNER_TEMP/pkgcheck-graph.json"
+          echo "Shard projects: $PROJECTS"
+          # publint, attw, madge and the surface checks are light, so they run three at
+          # a time once their builds exist. The builds stay serial and land in the local
+          # cache, so the checks reuse them.
+          built=$(jq -r --arg shard "$PROJECTS" '
+            ($shard | split(",")) as $mine
+            | [.tasks.tasks[] | select(.target.target == "pkgcheck") | .target.project]
+            | unique | map(select(IN($mine[]))) | join(",")' "$graph")
+          # A `build` without `^build` may run before the libraries its package bundles and
+          # keep their specifiers in its declarations, and the local cache hands that build
+          # to its check. The builds its checks depend on run first, and the shard's own
+          # builds skip the remote cache, which may still hold such a build from before
+          # this order: the hash does not see whether a dependency was built.
+          deps=$(jq -r --arg built "$built" '
+            ($built | split(",")) as $mine
+            | [$mine[] as $p | .tasks.dependencies["\($p):pkgcheck"][]? | select(endswith(":build"))
+               | split(":")[0] | select(IN($mine[]) | not)]
+            | unique | join(",")' "$graph")
+          if [ -n "$deps" ]; then
+            pnpm nx run-many -t build --projects "$deps" --parallel=1
+          fi
+          if [ -n "$built" ]; then
+            pnpm nx run-many -t build --projects "$built" --parallel=1 --skip-remote-cache
+          fi
+          pnpm nx run-many -t pkgcheck audit-public-surface readme-quickstart --projects "$PROJECTS" --parallel=3
+
+      - name: Check workspace root hygiene
+        if: always()
         run: pnpm nx run scripts:validate-workspace-root
 
   browser:
@@ -903,9 +1000,10 @@ jobs:
 
   # The native host rows (`native-hosts.yml`), in the merge queue and on a push the queue did not
   # prove, when the plan finds a `tag:ci:native-hosts` or `test:native-linux` project affected: the
-  # Linux rows with the affected `test:native-linux` projects, and the Intel row when a
-  # `tag:ci:native-hosts` project is affected (CI throughput review Q-3). Its plan job is skipped when
-  # called; the nightly and a dispatch run that workflow on their own. The required check waits for it.
+  # Linux rows (`hosts: linux`) with the affected `test:native-linux` projects (CI throughput review Q-3).
+  # The darwin-x64 rows run at the desktop candidate gate (`release-desktop-staging.yml` job `Intel native
+  # gate`, INTEL-1), not here. Its plan job is skipped when called; a dispatch runs that workflow on its
+  # own. The required check waits for it.
   native-hosts:
     name: Native hosts
     needs: [plan]
@@ -914,8 +1012,8 @@ jobs:
       contents: 'read'
     uses: ./.github/workflows/native-hosts.yml
     with:
+      hosts: linux
       native-linux: ${{ needs.plan.outputs.native-linux }}
-      intel: ${{ needs.plan.outputs.native-intel }}
 
   # The darwin-arm64 native rows (`native-darwin.yml`), in the merge queue and on a push the queue did
   # not prove, when the plan finds a `test:native-darwin` project affected or a native darwin lane path
@@ -1131,12 +1229,12 @@ jobs:
         run: pnpm nx run-many -t compute-qualify-ci --parallel=1 --outputStyle=stream
 
   # The required check. It passes only when the plan and every affected lane passed, and every
-  # lane the plan selects too when this run needed it (browser, GeoSpec example contracts, CLI
-  # end-to-end, the end-to-end ratchet, compute reuse qualification, native hosts, viewer parity, formal, API tests, billing contracts, and the shell
-  # rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected fails it. Viewer parity is
-  # planned on pull requests and pushes only (VP-1), so on a pull request that touches its inputs this check, which the
-  # queue's auto-merge waits for, holds the pull request until parity passes. It waits for every
-  # lane, so a merge-queue run whose gate passed proves every lane it selected, which is the one
+  # lane the plan selects too when this run needed it (every package-check shard, browser, GeoSpec example
+  # contracts, CLI end-to-end, the end-to-end ratchet, compute reuse qualification, native hosts, viewer parity, formal, API tests, billing
+  # contracts, and the shell rows and formal nightly tiers in the merge queue): a skip of a lane the plan selected
+  # fails it. Viewer parity is planned on pull requests and pushes only (VP-1), so on a pull request that touches
+  # its inputs this check, which the queue's auto-merge waits for, holds the pull request until parity passes. It
+  # waits for every lane, so a merge-queue run whose gate passed proves every lane it selected, which is the one
   # proof `queue-verdict` reuses on the push (Brain ci-audit 2026-11-12, F1). API tests are a
   # required check of their own as well, so the queue already waited for them; in the ten latest
   # queue runs that ran formal and billing contracts (2026-11-12), both finished before the gate
@@ -1153,6 +1251,7 @@ jobs:
       [
         plan,
         affected-lane,
+        pkgcheck,
         browser,
         geospec-examples,
         cli-e2e,
@@ -1174,6 +1273,8 @@ jobs:
         env:
           PLAN_RESULT: ${{ needs.plan.result }}
           LANES_RESULT: ${{ needs.affected-lane.result }}
+          PKGCHECK_REQUIRED: ${{ needs.plan.outputs.pkgcheck }}
+          PKGCHECK_RESULT: ${{ needs.pkgcheck.result }}
           BROWSER_REQUIRED: ${{ needs.plan.outputs.browser }}
           BROWSER_RESULT: ${{ needs.browser.result }}
           GEOSPEC_EXAMPLES_REQUIRED: ${{ needs.plan.outputs.geospec-examples }}
@@ -1214,6 +1315,7 @@ jobs:
             exit 0
           fi
           test "$LANES_RESULT" = success
+          if [ "$PKGCHECK_REQUIRED" = true ]; then test "$PKGCHECK_RESULT" = success; fi
           if [ "$BROWSER_REQUIRED" = true ]; then test "$BROWSER_RESULT" = success; fi
           if [ "$GEOSPEC_EXAMPLES_REQUIRED" = true ]; then test "$GEOSPEC_EXAMPLES_RESULT" = success; fi
           if [ "$CLI_E2E_REQUIRED" = true ]; then test "$CLI_E2E_RESULT" = success; fi
@@ -1274,6 +1376,15 @@ jobs:
     name: Fail fast (affected-lane)
     needs: [affected-lane]
     if: ${{ failure() && github.event_name == 'merge_group' && needs.affected-lane.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: *fail-fast-permissions
+    steps: *fail-fast-steps
+
+  fail-fast-pkgcheck:
+    name: Fail fast (pkgcheck)
+    needs: [pkgcheck]
+    if: ${{ failure() && github.event_name == 'merge_group' && needs.pkgcheck.result == 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: *fail-fast-permissions

@@ -185,7 +185,7 @@ export function WorkspaceUnavailableRecovery({
 
               <WorkspaceDirectoryPanel
                 variant='inline'
-                status={reason}
+                status={reason === 'missing' ? 'none' : reason}
                 workspaceId={workspaceId}
                 workspaceName={workspaceName}
                 isBusy={isBusy}

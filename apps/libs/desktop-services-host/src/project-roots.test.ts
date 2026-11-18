@@ -103,6 +103,13 @@ describe('createProjectRootRegistry', () => {
     expect(registry.isTrusted('/etc/passwd')).toBe(false);
   });
 
+  it('admits descendants of a filesystem root, which already ends in a separator', () => {
+    const registry = createProjectRootRegistry();
+    registry.admit('/');
+    expect(registry.isTrusted('/')).toBe(true);
+    expect(registry.isTrusted('/projects/widget')).toBe(true);
+  });
+
   it('remembers a granted folder across launches', () => {
     /* The renderer keeps a picked folder's workspace record in IndexedDB and
      * offers it again next launch, so a grant main forgot would answer EACCES

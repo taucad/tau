@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
@@ -24,6 +25,10 @@ type Step = {
 type Job = {
   readonly name?: string;
   readonly if?: string;
+  readonly uses?: string;
+  readonly with?: Record<string, string>;
+  readonly secrets?: unknown;
+  readonly env?: Record<string, string>;
   readonly needs?: string | readonly string[];
   readonly 'runs-on'?: string;
   readonly strategy?: {
@@ -38,6 +43,7 @@ const workflow = (name: string): Workflow =>
   load(readFileSync(resolve(root, `.github/workflows/${name}.yml`), 'utf8')) as Workflow;
 const hosts = workflow('native-hosts');
 const darwin = workflow('native-darwin');
+const staging = workflow('release-desktop-staging');
 
 /**
  * Whether a step runs in a matrix row, reading only its `matrix.*` comparisons joined by `&&`; any other
@@ -185,6 +191,104 @@ describe('native host rows, one job per host and project', () => {
     expect(run?.run).toContain('pnpm nx run-many -t test:native-linux --projects "$PROJECTS"');
     // No Build123d row runs the native-linux projects any more.
     expect(linuxRows.flatMap((row) => row.steps)).not.toContain('Run the linux-x64 native rows');
+  });
+});
+
+/**
+ * Whether a job of `native-hosts.yml` runs when called with `inputs`: its `if` evaluated with the plan job
+ * skipped (a call skips it, so its outputs are empty) and `native-linux-rows` succeeding with one project when
+ * it runs. Only the expression forms this workflow uses are supported; anything else fails the evaluation.
+ */
+const runsWhenCalled = (name: string, inputs: Record<string, string>): boolean => {
+  const job = hosts.jobs[name];
+  const listRuns = name === 'native-linux' ? runsWhenCalled('native-linux-rows', inputs) : true;
+  const source = (job?.if ?? 'true')
+    .replaceAll(/^\$\{\{\s*|\s*\}\}$/gu, '')
+    .replaceAll('!cancelled()', 'true')
+    .replaceAll(/inputs\.([\w-]+)/gu, (_, key: string) => JSON.stringify(inputs[key] ?? ''))
+    .replaceAll(/needs\.plan\.outputs\.[\w-]+/gu, "''")
+    .replaceAll('needs.native-linux-rows.result', listRuns ? "'success'" : "'skipped'")
+    .replaceAll('needs.native-linux-rows.outputs.projects', `'["picogk"]'`)
+    .replaceAll('==', '===');
+  expect(source, `${name}: ${source}`).toMatch(/^[\s\w'"[\]&|()!=]*$/u);
+  // The pinned workflow's own `if`, checked above to hold only literals, comparisons and logic.
+  const result: unknown = runInNewContext(source);
+  return Boolean(result);
+};
+
+/** The `<host> (<project>)` rows and their steps that run when `native-hosts.yml` is called with `inputs`. */
+const rowsWhenCalled = (inputs: Record<string, string>) => [
+  ...(runsWhenCalled('linux', inputs) ? linuxRows : []),
+  ...(runsWhenCalled('intel', inputs) ? intelRows : []),
+  ...(runsWhenCalled('native-linux', inputs)
+    ? [{ key: 'linux-x64-glibc (native-linux)', target: 'native-linux' }]
+    : []),
+];
+
+/*
+ * INTEL-1 (operator approval 2026-11-18, ping 2, as MAC-X left the queue in tau #2505): the darwin-x64 rows were the
+ * merge queue's slowest jobs (cli 33.2, build123d 29.6, picogk 25.6 min p95) and leave it for the desktop candidate
+ * gate, which runs every one of their checks on the candidate's own commit before its tag exists.
+ */
+describe('darwin-x64 rows at the desktop candidate gate, not in the merge queue (INTEL-1)', () => {
+  const call = Object.values(workflow('ci').jobs).filter((job) => job.uses === './.github/workflows/native-hosts.yml');
+  const gate = staging.jobs['intel-native'];
+
+  it('should call the Linux rows alone from ci.yml, so the merge queue runs no darwin-x64 row', () => {
+    expect(call).toHaveLength(1);
+    expect(call[0]?.with?.['hosts']).toBe('linux');
+    expect(call[0]?.with).not.toHaveProperty('intel');
+    const rows = rowsWhenCalled(call[0]?.with ?? {});
+    expect(rows.map((row) => row.key)).toEqual([...linuxRows.map((row) => row.key), 'linux-x64-glibc (native-linux)']);
+    expect(rows.filter((row) => row.target === 'darwin-x64')).toEqual([]);
+    expect(hosts.jobs['intel']?.['runs-on']).toBe('macos-26-intel');
+    expect(hosts.jobs['linux']?.['runs-on']).not.toContain('macos');
+  });
+
+  it('should run every darwin-x64 check of the old queue job exactly once at the candidate gate, and nothing else', () => {
+    expect(gate?.uses).toBe('./.github/workflows/native-hosts.yml');
+    const rows = rowsWhenCalled(gate?.with ?? {});
+    expect(rows.map((row) => row.key)).toEqual(intelProjects.map((project) => `darwin-x64 (${project})`));
+    const steps = intelRows.flatMap((row) => row.steps);
+    for (const check of checks['darwin-x64'] ?? []) {
+      expect(
+        steps.filter((name) => name === check),
+        check,
+      ).toHaveLength(1);
+    }
+    expect(intelProjects).toEqual(['build123d', 'cli', 'picogk']);
+  });
+
+  it('should check out the candidate commit, uncached, beside the shell gate', () => {
+    expect(gate?.name).toBe('Intel native gate');
+    expect(gate?.needs).toEqual(['prerelease']);
+    expect(gate?.if).toBe("needs.prerelease.outputs.release == 'true'");
+    expect(gate?.with).toEqual({ hosts: 'intel', ref: `\${{ needs.prerelease.outputs.sha }}` });
+    // No cache token: the called workflow has no remote cache server, and every Nx task runs fresh.
+    expect(gate?.secrets).toBeUndefined();
+    expect(hosts.jobs['intel']?.env?.['NX_SKIP_NX_CACHE']).toBe(`\${{ inputs.hosts == 'intel' }}`);
+    for (const job of ['plan', 'linux', 'native-linux', 'intel']) {
+      const checkout = hosts.jobs[job]?.steps?.find((step) => step.name === 'Checkout') as
+        | { readonly with?: Record<string, unknown> }
+        | undefined;
+      expect(checkout?.with?.['ref'], job).toBe(`\${{ inputs.ref }}`);
+    }
+  });
+
+  it('should tag no candidate without a green Intel native gate on its own commit', () => {
+    const { tag } = staging.jobs;
+    expect(tag?.needs).toContain('intel-native');
+    expect(tag?.if).toContain("needs.intel-native.result == 'success'");
+    expect(tag?.steps?.find((step) => step.id === 'release')?.run).toMatch(
+      /^\s*Intel native gate: run \$\{RUN_ID\}$/mu,
+    );
+  });
+
+  it('should keep every row on a dispatch', () => {
+    const plan = hosts.jobs['plan']?.steps?.find((step) => step.id === 'plan')?.run ?? '';
+    expect(plan).toContain('echo "linux=true"');
+    expect(plan).toContain('echo "intel=true"');
+    expect(hosts.jobs['intel']?.if).toContain("needs.plan.outputs.intel == 'true'");
   });
 });
 

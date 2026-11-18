@@ -178,9 +178,9 @@ describe('release-desktop-staging.yml candidate gates', () => {
 
   it('should tag a candidate only when every gate is green', () => {
     const { tag } = staging.jobs;
-    expect(tag?.needs).toEqual(['prerelease', 'shell', 'packaged', 'benchmarks', 'rehearsal']);
+    expect(tag?.needs).toEqual(['prerelease', 'shell', 'packaged', 'benchmarks', 'intel-native', 'rehearsal']);
     expect(tag?.if).toBe(
-      "needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success' && needs.rehearsal.result == 'success'",
+      "needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success' && needs.intel-native.result == 'success' && needs.rehearsal.result == 'success'",
     );
     expect(tag?.steps?.find((step) => step.id === 'release')?.run).toMatch(
       /^\s*Packaged desktop gate: run \$\{RUN_ID\}$/mu,

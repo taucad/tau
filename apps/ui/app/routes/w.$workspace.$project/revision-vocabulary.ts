@@ -30,7 +30,7 @@ import type { RemoteFacet, RevisionGitOperation, RevisionStatusProjection, SyncF
 import type { SidebarMark } from '#hooks/use-sidebar-status.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import { useRevisionCards, useRevisions } from '#hooks/use-revisions.js';
-import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '@taucad/revisions-ui/hooks/use-revisions';
 import { useProjectRole, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import { entryTitleOf } from '@taucad/revisions-ui/lib/revision-entry-title';

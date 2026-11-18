@@ -256,6 +256,7 @@ export const createProjectManifestChangeObserver = ({
 /**
  * Read the open route's manifest: strict, or degraded with its issue. The
  * established route binding supplies identity independently of the declaration.
+ * The bytes read come back too, so what the project was parsed from can be named.
  */
 export async function resolveScopedProjectManifest({
   contentService,
@@ -263,7 +264,11 @@ export async function resolveScopedProjectManifest({
 }: {
   readonly contentService: FileContentService;
   readonly projectId: string;
-}): Promise<{ readonly project: Project; readonly issue?: ProjectManifestParseIssue }> {
+}): Promise<{
+  readonly project: Project;
+  readonly issue?: ProjectManifestParseIssue;
+  readonly bytes: Uint8Array<ArrayBuffer>;
+}> {
   const outcome = await contentService.resolve('tau.json', { forceText: true });
   if (outcome.kind !== 'text') {
     throw new Error(`Cannot read tau.json for ${projectId}: ${outcome.kind}`);
@@ -273,5 +278,9 @@ export async function resolveScopedProjectManifest({
   if (!read.success) {
     throw new Error(`Invalid tau.json for ${projectId}: ${describeProjectManifestIssue(read.issue).join(' ')}`);
   }
-  return { project: { ...read.data, id: projectId }, ...(read.issue === undefined ? {} : { issue: read.issue }) };
+  return {
+    project: { ...read.data, id: projectId },
+    ...(read.issue === undefined ? {} : { issue: read.issue }),
+    bytes: outcome.content,
+  };
 }

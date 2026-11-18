@@ -53,7 +53,6 @@
   "apps/ui/app/routes/loader/route.tsx": 1,
   "apps/ui/app/routes/loader_.glass/route.tsx": 1,
   "apps/ui/app/routes/parts/route.tsx": 1,
-  "apps/ui/app/routes/usage/reserved-table.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/chat-agents.tsx": 1,
   "apps/ui/app/routes/w.$workspace.$project/chat-converter.tsx": 2,
   "apps/ui/app/routes/w.$workspace.$project/chat-editor-file-tree.tsx": 1,

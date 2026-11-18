@@ -25,29 +25,9 @@ import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '@taucad/ui-kit/components/spinner';
 import { osClass } from '#telemetry/platform-class.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { isTauDesktopReleased, tauDesktopDownloadUrl } from '#lib/desktop-release.js';
 import { desktopDeepLink } from '@taucad/ui-core/lib/desktop-deep-link';
 import { browserDesktopScheme, useDesktopScheme } from '#hooks/use-desktop-scheme.js';
-
-/**
- * Where "Get Tau Desktop" goes.
- *
- * The same destination the in-app `Get Tau Desktop` action already opens
- * (`routes/w.$workspace.$project/project-route-notices.tsx`). The release
- * workflow marks only a desktop release "latest", and only once its archives
- * are attached, so this page always offers a complete download.
- */
-export const tauDesktopDownloadUrl = 'https://github.com/taucad/tau/releases/latest';
-
-/**
- * Whether a non-prerelease desktop release exists to download (charter Q56, go-live DSK-7).
- *
- * `releases/latest` answers 404 until the first one is published, so every "Get Tau Desktop" offer stays hidden
- * until the build says otherwise: `TAU_DESKTOP_RELEASED=true` at build time, substituted by `define` in
- * `vite.config.ts`. A function, not a constant, so tests can `vi.stubEnv` both branches.
- *
- * @returns Whether to offer the desktop download.
- */
-export const isTauDesktopReleased = (): boolean => import.meta.env.TAU_DESKTOP_RELEASED === 'true';
 
 /**
  * The browser's own preference, per the Figma pattern the canvas copies.

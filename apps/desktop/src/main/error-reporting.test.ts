@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
+import { bootUnhealthySignal } from '#main/desktop-signals.js';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
 
 const { initialize, isInitialized, captureMessage, addEventProcessor } = vi.hoisted(() => ({
@@ -146,8 +147,21 @@ it('sends a desktop signal as one message event once Sentry is running', async (
   expect(captureMessage).toHaveBeenCalledWith('Renderer unresponsive', {
     level: 'warning',
     fingerprint: ['desktop-renderer-hang'],
-    tags: { hang_seconds: '12' },
+    tags: { hang_seconds: '12', tau_event: 'desktop-renderer-hang' },
     contexts: { hang: { milliseconds: 12_000 } },
+  });
+});
+
+it('tags every desktop signal with its name as tau_event, which the alerts search by (D5, T-R9.3)', async () => {
+  const { reportDesktopSignal } = await import('#main/error-reporting.js');
+  isInitialized.mockReturnValue(true);
+
+  reportDesktopSignal(bootUnhealthySignal({ stage: 'window-loaded', ended: 'crash', mode: 'normal' }, 2));
+
+  expect(captureMessage).toHaveBeenCalledWith('Unhealthy launch: window-loaded', {
+    level: 'error',
+    fingerprint: ['desktop-boot-unhealthy', 'window-loaded'],
+    tags: { stage: 'window-loaded', ended: 'crash', count: '2', mode: 'normal', tau_event: 'desktop-boot-unhealthy' },
   });
 });
 
@@ -170,7 +184,7 @@ it('sends a revision-engine failure redacted, once per window for the same failu
     {
       level: 'error',
       fingerprint: ['desktop-revision-engine-failed', 'ENGINE_FAILED', 'worktree'],
-      tags: { error_code: 'ENGINE_FAILED', git_subcommand: 'worktree' },
+      tags: { error_code: 'ENGINE_FAILED', git_subcommand: 'worktree', tau_event: 'desktop-revision-engine-failed' },
       contexts: {
         revision_engine: { code: 'ENGINE_FAILED', subcommand: 'worktree', git_error: 'fatal: path already exists' },
       },

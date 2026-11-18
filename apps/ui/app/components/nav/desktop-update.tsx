@@ -45,7 +45,7 @@ export function DesktopUpdateControl({
     // async-iife: bootstrap — hydrate the external subscription; cleanup ignores late results.
     void (async () => {
       try {
-        // Hydration restores status, not a historical request to open the popover.
+        // Hydration restores status, not a historical request to open the details.
         receive(await bridge.snapshot(), false);
       } catch {
         if (!subscriptionLifetime.signal.aborted) {
@@ -156,7 +156,6 @@ export function DesktopUpdateControl({
       detail={detail}
       icon={Icon}
       isFailed={failed}
-      isProminent={phase === 'ready' && !actionFailed}
       releasePage={snapshot.releasePage}
       isOpen={open}
       action={

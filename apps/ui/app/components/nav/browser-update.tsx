@@ -11,7 +11,7 @@ import {
 import { UpdateControl } from '#components/nav/update-control.js';
 import { useReloadOffered, useSupersedingBuild } from '#hooks/use-superseding-build.js';
 
-/** Set by {@link BrowserUpdateReveal} when writes stop; the next {@link BrowserUpdate} to look opens its popover. */
+/** Set by {@link BrowserUpdateReveal} when writes stop; the next {@link BrowserUpdate} to look opens its details. */
 let pendingReveal = false;
 const revealTopic = new Topic<void>({ name: 'browser-update-reveal' });
 
@@ -60,13 +60,11 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
   const superseded = useReloadOffered();
   const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
   const [open, setOpen] = useState(false);
-  const [revealed, setRevealed] = useState(false);
   useEffect(() => {
-    // Opens the popover for a reveal, including one requested before this control mounted.
+    // Opens the details for a reveal, including one requested before this control mounted.
     const consumeReveal = (): void => {
       if (pendingReveal) {
         pendingReveal = false;
-        setRevealed(true);
         setOpen(true);
       }
     };
@@ -82,9 +80,7 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
       version={builtAt(supersedingBuildId, isRolledBack)}
       detail={describeSupersession(supersedingBuildId)}
       icon={ArrowUpCircle}
-      isProminent
       isOpen={open}
-      shouldFocusOnOpen={!revealed}
       action={{
         label: 'Reload now',
         variant: 'default',
@@ -92,10 +88,7 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
           globalThis.location.reload();
         },
       }}
-      onOpenChange={(next) => {
-        setRevealed(false);
-        setOpen(next);
-      }}
+      onOpenChange={setOpen}
     />
   );
 }

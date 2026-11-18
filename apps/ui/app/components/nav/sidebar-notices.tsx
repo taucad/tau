@@ -2,6 +2,7 @@ import { useCallback, useId, useSyncExternalStore } from 'react';
 import { Topic } from '@taucad/events';
 import { ArrowUpRight, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 
 /**
  * The one place the sidebar shows notices: the band between the navigation and the account
@@ -10,9 +11,8 @@ import { Button } from '@taucad/ui/components/button';
  * the most persistent notice goes first and the most urgent (an update) sits last, nearest the
  * footer, where it has always been.
  *
- * A new notice is a component that gates itself and renders a {@link SidebarNoticeCard} (or,
- * for a status control such as the update row, its own sidebar row); it is added here, not
- * placed beside the footer on its own.
+ * A new notice is a component that gates itself and composes {@link SidebarNotice} (directly, or through
+ * {@link SidebarNoticeCard}); it is added here, not placed beside the footer on its own.
  */
 export function SidebarNotices({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   return (
@@ -21,6 +21,85 @@ export function SidebarNotices({ children }: { readonly children: React.ReactNod
     </div>
   );
 }
+
+/*
+ * Every notice is composed from the same three parts, so the stack reads as one family and lines up by construction:
+ * - SidebarNotice, the bordered shell with a 4px inset;
+ * - SidebarNoticeTile, the accent tile, its corners concentric with the shell's (the shell's radius less inset and border);
+ * - SidebarNoticeCorner, the shell's top-right 24px slot, one inset from the top and the right, which holds the card's
+ *   close button and the update row's chevron alike, so the two always share a column.
+ */
+
+/** The shell every notice uses. Children are laid out by the notice; the corner slot is absolutely placed. */
+export function SidebarNotice({
+  labelledBy,
+  className,
+  children,
+}: {
+  readonly labelledBy: string;
+  readonly className?: string;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <section
+      aria-labelledby={labelledBy}
+      className={cn(
+        'relative rounded-lg border border-sidebar-border bg-background p-(--notice-inset) text-sidebar-foreground [--notice-inset:0.25rem]',
+        className,
+      )}
+    >
+      {children}
+    </section>
+  );
+}
+
+/** The radius of anything that sits one inset inside the shell, concentric with the shell's border. */
+export const sidebarNoticeInnerRadius = 'rounded-[calc(var(--radius-lg)-var(--notice-inset)-1px)]';
+
+/** The accent tile behind a notice's glyph. Size it from the notice: a square spanning the card, or one row high. */
+export function SidebarNoticeTile({
+  className,
+  children,
+}: {
+  readonly className?: string;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        'flex shrink-0 items-center justify-center bg-sidebar-accent text-foreground',
+        sidebarNoticeInnerRadius,
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** The shell's top-right slot: equally inset from the top and the right, holding a 16px glyph centred in 24px. */
+export function SidebarNoticeCorner({
+  className,
+  children,
+}: {
+  readonly className?: string;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <div
+      className={cn(
+        'absolute top-(--notice-inset) right-(--notice-inset) flex size-6 items-center justify-center text-muted-foreground [&_svg]:size-4',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A notice's title: medium text, the same in every notice; one truncated line unless a notice lets it wrap. */
+export const sidebarNoticeTitle = 'truncate text-sm leading-5 font-medium';
 
 export type SidebarNoticeAction = {
   readonly label: string;
@@ -31,9 +110,8 @@ export type SidebarNoticeAction = {
 };
 
 /**
- * The promotional card shape: an icon tile, a title, an optional line of detail, one action and
- * a dismiss button. Status notices with their own popover (the update row) keep their row
- * shape instead.
+ * The call-to-action notice: a square tile, a title, an optional line of detail, one link action and a close button
+ * in the corner slot.
  */
 export function SidebarNoticeCard({
   title,
@@ -53,20 +131,13 @@ export function SidebarNoticeCard({
 }): React.JSX.Element {
   const titleId = useId();
   return (
-    <section
-      aria-labelledby={titleId}
-      className='relative flex items-stretch gap-3 rounded-lg border border-sidebar-border bg-background p-(--notice-inset) text-sidebar-foreground [--notice-inset:0.25rem]'
-    >
-      {/* Full height, its corners concentric with the card's: the card's radius less its border and inset. */}
-      <div
-        aria-hidden
-        className='flex w-12 shrink-0 items-center justify-center rounded-[calc(var(--radius-lg)-var(--notice-inset)-1px)] bg-sidebar-accent text-foreground [&_svg]:size-5'
-      >
-        {icon}
-      </div>
-      <div className='flex min-w-0 flex-1 flex-col items-start gap-1.5 py-1'>
-        <div className='min-w-0 pr-5'>
-          <p id={titleId} className='text-sm leading-5 font-medium'>
+    <SidebarNotice labelledBy={titleId} className='flex items-center gap-3'>
+      {/* A fixed square that sets the card's height: a two-line title and the action (70px) fit beside it, so the tile
+          spans the card without its width depending on how the title wraps. */}
+      <SidebarNoticeTile className='size-18 [&_svg]:size-6'>{icon}</SidebarNoticeTile>
+      <div className='flex min-w-0 flex-1 flex-col items-start gap-1.5 pr-6'>
+        <div className='max-w-full min-w-0'>
+          <p id={titleId} className={cn(sidebarNoticeTitle, 'whitespace-normal')}>
             {title}
           </p>
           {detail ? <p className='text-xs leading-4 text-muted-foreground'>{detail}</p> : undefined}
@@ -83,18 +154,18 @@ export function SidebarNoticeCard({
           </a>
         </Button>
       </div>
-      <Button
-        variant='ghost'
-        size='icon-xs'
-        /* Centred on the title line, and in one column with the update row's chevron below: the row's 1px border and
-           6px padding put its 16px chevron's centre 15px in, so this 24px button sits 2px inside the border. */
-        className='absolute top-1.5 right-0.5 text-muted-foreground'
-        aria-label={dismissLabel}
-        onClick={onDismiss}
-      >
-        <X />
-      </Button>
-    </section>
+      <SidebarNoticeCorner>
+        <Button
+          variant='ghost'
+          size='icon-xs'
+          className='text-muted-foreground'
+          aria-label={dismissLabel}
+          onClick={onDismiss}
+        >
+          <X className='size-4' />
+        </Button>
+      </SidebarNoticeCorner>
+    </SidebarNotice>
   );
 }
 

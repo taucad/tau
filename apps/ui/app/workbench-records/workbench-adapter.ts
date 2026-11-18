@@ -148,6 +148,8 @@ export type WorkbenchAdapterPorts = Readonly<{
   dock: WorkbenchDockOperations;
   /** Connect the desktop Browser's tabs, which must not follow a record's apply; absent where there is no Browser. */
   connectBrowser: ((api: DockviewApi, isRestoring: () => boolean) => () => void) | undefined;
+  /** Connect the external-agent sign-in tabs, which no record holds; absent where Tau cannot run a sign-in. */
+  connectAgentSignIns?: ((api: DockviewApi, isRestoring: () => boolean) => () => void) | undefined;
 }>;
 
 /** A workbench adapter's input. The `DockviewApi` lives only here and in the closure built from it (D4). */
@@ -429,6 +431,9 @@ function runWorkbenchAdapter(
   function attach(): void {
     if (ports.connectBrowser !== undefined) {
       disposers.push(ports.connectBrowser(api, () => isRestoring));
+    }
+    if (ports.connectAgentSignIns !== undefined) {
+      disposers.push(ports.connectAgentSignIns(api, () => isRestoring));
     }
 
     // Only a person-edited semantic projection writes layout.json.

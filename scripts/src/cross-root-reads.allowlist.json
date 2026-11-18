@@ -960,6 +960,11 @@
     "reason": "imports another project's source by relative path instead of its package"
   },
   {
+    "file": "scripts/src/formal-nightly-mutants-workflow.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
     "file": "scripts/src/formal-toolchain-cache-workflow.test.ts",
     "target": ".github/actions/setup-formal/action.yml",
     "reason": "reads the composite action whose cache steps it checks; .github is not an Nx project"
@@ -1028,6 +1033,11 @@
     "file": "scripts/src/telemetry-release-partition.test.ts",
     "target": "packages/telemetry",
     "reason": "enumerates or probes sibling project directories"
+  },
+  {
+    "file": "scripts/src/test-shard-dealer.test.ts",
+    "target": "apps/ui/project.json",
+    "reason": "reads another project's configuration it checks"
   },
   {
     "file": "scripts/src/test-shard-dealer.test.ts",

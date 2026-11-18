@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import path from 'node:path';
+import type { MutantSeconds, MutantShard } from '#mutant-shard.js';
+import { dealMutants, mutantKey, readMutantSeconds } from '#mutant-shard.js';
 import type { Slots } from '#slots.js';
 import { mapBounded, processSlots } from '#slots.js';
 import type { FormalContext } from '#toolchain.js';
@@ -177,11 +179,32 @@ const failingBaselines = async (
   return new Set(controls.filter((_control, index) => verdicts[index]?.verdict !== 'survived').map(([key]) => key));
 };
 
+/** The keys of one shard's mutants, dealt over every `mutants.json` of the project. */
+const shardKeys = (
+  context: FormalContext,
+  options: { readonly projectRoot: string; readonly seconds?: MutantSeconds },
+  shard: MutantShard,
+): Set<string> => {
+  const files = findMutantFiles(options.projectRoot).map((file) => ({
+    file: path.relative(context.root, file),
+    mutants: JSON.parse(readFileSync(file, 'utf8')) as Mutant[],
+  }));
+  const dealt = dealMutants(files, shard.count, options.seconds ?? readMutantSeconds());
+  return new Set(dealt[shard.index - 1] ?? []);
+};
+
 export type MutantOptions = {
   readonly projectRoot: string;
   /** Checks a Lean mutant (FM-S7), starting its processes in `slots`; machine mutants use Vitest. */
   readonly lean?: (mutant: Mutant, mutated: string, slots: Slots) => Promise<MutantResult>;
   readonly log?: (line: string) => void;
+  /**
+   * One of several runners: only this shard's mutants run, with their controls (`dealMutants`, by the
+   * measured seconds in `seconds`, default `mutant-seconds.json`). The shards partition the mutants, so
+   * all of them together run every mutant once, each with the verdict an unsharded run gives it.
+   */
+  readonly shard?: MutantShard;
+  readonly seconds?: MutantSeconds;
   /**
    * The bound on child processes at once, shared by every mutant's control, build, oracle and Vitest
    * runs; at most this many mutants are in flight. Default: one per core of the runner.
@@ -207,7 +230,12 @@ export const runMutants = async (
   const log = options.log ?? ((line: string) => process.stdout.write(`${line}\n`));
   const slots = options.slots ?? processSlots(availableParallelism());
   mkdirSync(cacheDirectory(context), { recursive: true });
-  const files = findMutantFiles(options.projectRoot).map((file) => JSON.parse(readFileSync(file, 'utf8')) as Mutant[]);
+  const mine = options.shard ? shardKeys(context, options, options.shard) : undefined;
+  const files = findMutantFiles(options.projectRoot).map((file) =>
+    (JSON.parse(readFileSync(file, 'utf8')) as Mutant[]).filter(
+      (_mutant, index) => mine?.has(mutantKey(path.relative(context.root, file), index)) ?? true,
+    ),
+  );
   const failing = await Promise.all(
     files.map(async (mutants) => failingBaselines(context, { projectRoot: options.projectRoot, mutants, slots })),
   );

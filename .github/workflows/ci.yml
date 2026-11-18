@@ -514,7 +514,7 @@ jobs:
           fi
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
-  # typecheck, build, three package-check shards and three test shards. One runner running every
+  # typecheck, build, three package-check shards and six test shards. One runner running every
   # task in turn took 1 h 40 min on a full graph (run 37221169741, 2026-10-04); the
   # lanes bring that down to the longest lane. Each lane keeps `--parallel=1`, which
   # its own 16 GB runner still needs (see `Run the lane's tasks`).
@@ -539,7 +539,8 @@ jobs:
     strategy:
       fail-fast: ${{ github.event_name == 'merge_group' }} # Merge queue: a failed row cancels its siblings (see `fail-fast-*`)
       matrix:
-        lane: [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3]
+        lane:
+          [lint, typecheck, build, pkgcheck-1, pkgcheck-2, pkgcheck-3, test-1, test-2, test-3, test-4, test-5, test-6]
     steps:
       # Two commits in a queue run, full history otherwise (see `plan`).
       - name: Checkout
@@ -627,12 +628,18 @@ jobs:
       # refuse rather than skip when they are absent. The whole of `test` for that tag
       # runs in the `api` lane below, which has both; these lanes stay hermetic.
       #
-      # The three test shards split the affected projects with a `test` target by
+      # The six test shards split the affected projects with a `test` target by
       # measured uncached test seconds (scripts/src/test-shard-dealer.ts and its
       # duration snapshot). The project list comes from the graph at run time,
       # never from this file: one `nx affected -t test --graph=<file>` writes the affected
-      # `test` tasks and the project graph (each project's tags) without running
+      # `test` tasks and the project graph (each project's tags and targets) without running
       # anything, in place of an `nx show projects --affected` and an `nx graph` (X8).
+      # A project that declares `test:shard-<n>` targets is dealt as those tasks instead of
+      # its whole `test`: `ui:test`, about 950 s uncached, is six `ui:test:shard-<n>` tasks of
+      # about 160 s, so it no longer sets one lane's floor (CI throughput review ST-1,
+      # decomposition rows DC-9/DC-10). Each is cacheable and keyed on its own `--shard`; its
+      # Vitest config deals the files by measured seconds, and the six run every file once
+      # (apps/ui/test-shards.test.ts). Locally, `ui:test` still runs every file.
       #
       # `--parallel=1`: ui:lint and ui:typecheck each peak near 9.5 GB, so any two of
       # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
@@ -724,19 +731,41 @@ jobs:
                 .graph.nodes as $nodes
                 | [.tasks.tasks[] | select(.target.target == "test") | .target.project] | unique
                 | map(select($nodes[.].data.tags // [] | any(. == "scope:api" or . == "ci:quarantined") | not))' "$RUNNER_TEMP/test-graph.json")
+              # A project with `test:shard-<n>` targets enters the deal as its `<project>:test:shard-<n>`
+              # tasks, every one of them, in place of the project; the rest enter as projects.
+              units=$(jq -c --argjson projects "$projects" '
+                .graph.nodes as $nodes
+                | [$projects[] as $project
+                   | ([$nodes[$project].data.targets // {} | keys[] | select(test("^test:shard-[1-9][0-9]*$"))]) as $shards
+                   | if ($shards | length) > 0 then $shards[] | "\($project):\(.)" else $project end]' "$RUNNER_TEMP/test-graph.json")
               # Every lane deals the same list heaviest first to the lightest shard by
               # duration, so the shards partition it and the slowest suites land apart.
-              shard=$(echo "$projects" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 3)
+              # `--shards` is the number of `test-<n>` rows in the matrix above.
+              shard=$(echo "$units" | node scripts/src/test-shard-dealer.ts --shard "${LANE#test-}" --shards 6)
               if [ -z "$shard" ]; then
                 echo "No affected test projects in this shard."
                 exit 0
               fi
-              echo "Shard projects: $shard"
+              echo "Shard projects and tasks: $shard"
+              projects=$(echo "$shard" | tr ',' '\n' | grep -v ':' | paste -sd, - || true)
+              tasks=$(echo "$shard" | tr ',' '\n' | grep ':' || true)
+              : > "$RUNNER_TEMP/affected-test.log"
+              status=0
               # Streamed, not `static`: Nx holds a static task's output until the task ends and then
               # prints only its first 64–128 KiB into a pipe, so a long suite lost its Vitest summary and
               # every failing test's name (F3; `ui:test` in queue runs 43990460984, 44048796415,
               # 44050273147 and 44062740359 stopped mid-run in both the job log and this file).
-              pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=stream 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
+              if [ -n "$projects" ]; then
+                pnpm nx run-many -t test --projects "$projects" --parallel=1 --outputStyle=stream 2>&1 | tee -a "$RUNNER_TEMP/affected-test.log" || status=1
+              fi
+              # A project's dealt shard tasks run in one `run-many`, and every project's run even when
+              # another failed, so a failed shard hides no other result.
+              for project in $(echo "$tasks" | cut -d: -f1 | sort -u); do
+                targets=$(echo "$tasks" | grep "^$project:" | cut -d: -f2- | paste -sd' ' -)
+                # shellcheck disable=SC2086 # one word per target
+                pnpm nx run-many -t $targets --projects "$project" --parallel=1 --outputStyle=stream 2>&1 | tee -a "$RUNNER_TEMP/affected-test.log" || status=1
+              done
+              exit "$status"
               ;;
             *) echo "Unknown lane $LANE" >&2; exit 1 ;;
           esac

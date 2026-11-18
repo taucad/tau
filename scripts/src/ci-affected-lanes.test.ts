@@ -1739,7 +1739,7 @@ describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {
 
   it('should take ref, projects and seed as workflow_call inputs and give each caller its own group', () => {
     const inputs = nightly.on.workflow_call?.inputs ?? {};
-    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'seed']);
+    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref', 'seed', 'uncached']);
     expect(inputs['ref']).toMatchObject({ type: 'string', required: true });
     expect(inputs['projects']).toMatchObject({ type: 'string', required: false });
     expect(inputs['seed']).toMatchObject({ type: 'string', required: false });
@@ -1785,5 +1785,138 @@ describe('ci.yml formal nightly lane (CI throughput review Q-4 step 2)', () => {
       expect(seedOf(source)).toBeLessThan(2_147_483_647);
     }
     expect(run?.run).toContain('if [ -n "$TAU_FORMAL_SEED" ]; then');
+  });
+});
+
+describe('ci.yml test lanes (CI throughput review ST-1)', () => {
+  const lane = ci.jobs['affected-lane'];
+  const rows = ((lane?.strategy?.matrix?.['lane'] ?? []) as readonly string[]).filter((row) => row.startsWith('test-'));
+  const script = lane?.steps?.find((step) => step.name === "Run the lane's tasks")?.run ?? '';
+  const uiTargets = Object.keys(
+    (JSON.parse(read('apps/ui/project.json')) as { targets: Record<string, unknown> }).targets,
+  ).filter((target) => /^test:shard-\d+$/u.test(target));
+
+  it('should deal over exactly the test rows of the matrix', () => {
+    // A row the deal does not know runs nothing; a deal over more shards than rows drops their projects.
+    expect(rows).toEqual(Array.from({ length: rows.length }, (_, index) => `test-${index + 1}`));
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(script).toContain(
+      `node scripts/src/test-shard-dealer.ts --shard "\${LANE#test-}" --shards ${String(rows.length)})`,
+    );
+    expect(uiTargets.length).toBeGreaterThanOrEqual(4);
+  });
+
+  /** Run every test row's script against a task graph of `projects`; returns each row's `nx run-many` calls. */
+  const runRows = (
+    projects: Readonly<Record<string, { readonly tags?: readonly string[]; readonly targets: readonly string[] }>>,
+  ): string[][] => {
+    const directory = mkdtempSync(join(tmpdir(), 'ci-test-lanes-'));
+    try {
+      writeFileSync(
+        join(directory, 'graph.json'),
+        JSON.stringify({
+          graph: {
+            nodes: Object.fromEntries(
+              Object.entries(projects).map(([name, { tags = [], targets }]) => [
+                name,
+                { data: { tags, targets: Object.fromEntries(targets.map((target) => [target, {}])) } },
+              ]),
+            ),
+          },
+          tasks: {
+            tasks: Object.fromEntries(
+              Object.keys(projects).flatMap((name) => [
+                [`${name}:test`, { target: { project: name, target: 'test' } }],
+                [`${name}:copy-assets`, { target: { project: name, target: 'copy-assets' } }],
+              ]),
+            ),
+          },
+        }),
+      );
+      writeFileSync(
+        join(directory, 'pnpm'),
+        [
+          '#!/usr/bin/env bash',
+          'set -euo pipefail',
+          'case "$*" in',
+          '  "nx affected -t test --exclude tag:scope:api,tag:ci:quarantined --graph="*) cp "$FIXTURES/graph.json" "$(cut -d= -f2- <<< "$7")" ;;',
+          '  "nx run-many "*) echo "$*" >> "$FIXTURES/calls" ;;',
+          '  *) echo "unexpected pnpm $*" >&2; exit 1 ;;',
+          'esac',
+          '',
+        ].join('\n'),
+        { mode: 0o700 },
+      );
+      return rows.map((row) => {
+        writeFileSync(join(directory, 'calls'), '');
+        const result = spawnSync('bash', ['-e', '-c', script], {
+          cwd: root,
+          encoding: 'utf8',
+          env: Object.fromEntries([
+            ['PATH', `${directory}:${process.env['PATH'] ?? ''}`],
+            ['FIXTURES', directory],
+            ['RUNNER_TEMP', directory],
+            ['LANE', row],
+          ]),
+        });
+        expect(result.status, result.stderr).toBe(0);
+        return readFileSync(join(directory, 'calls'), 'utf8')
+          .split('\n')
+          .filter((line) => line !== '');
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  };
+
+  /** The `<project>:<target>` tasks one `nx run-many -t <targets> --projects <projects>` call runs. */
+  const tasksOf = (call: string): string[] => {
+    const match =
+      /^nx run-many -t (?<targets>.+?) --projects (?<projects>\S+) --parallel=1 --outputStyle=stream$/u.exec(call);
+    expect(match, call).not.toBeNull();
+    const targets = match?.groups?.['targets']?.split(' ') ?? [];
+    return (match?.groups?.['projects']?.split(',') ?? []).flatMap((project) =>
+      targets.map((target) => `${project}:${target}`),
+    );
+  };
+
+  const ui = { targets: ['test', 'test:e2e', ...uiTargets] };
+
+  it('should run every ui shard once across the rows and never the whole ui:test', { timeout: 60_000 }, () => {
+    const calls = runRows({
+      ui,
+      cli: { targets: ['test'] },
+      host: { targets: ['test'] },
+      scripts: { targets: ['test'] },
+      viewer: { targets: ['test'] },
+      'small-a': { targets: ['test'] },
+      'small-b': { targets: ['test'] },
+      'api-like': { tags: ['scope:api'], targets: ['test'] },
+    });
+    const tasks = calls.flat().flatMap((call) => tasksOf(call));
+    expect(tasks.toSorted()).toEqual(
+      [
+        ...uiTargets.map((target) => `ui:${target}`),
+        'cli:test',
+        'host:test',
+        'scripts:test',
+        'viewer:test',
+        'small-a:test',
+        'small-b:test',
+      ].toSorted(),
+    );
+    expect(tasks).not.toContain('ui:test');
+  });
+
+  it('should spread ui alone over the rows, one shard per row while the rows last', { timeout: 60_000 }, () => {
+    const perRow = runRows({ ui }).map((row) => row.flatMap((call) => tasksOf(call)));
+    expect(perRow.flat().toSorted()).toEqual(uiTargets.map((target) => `ui:${target}`).toSorted());
+    expect(Math.max(...perRow.map((row) => row.length))).toBe(Math.ceil(uiTargets.length / rows.length));
+  });
+
+  it('should run a project without shard targets as its whole test', { timeout: 60_000 }, () => {
+    expect(runRows({ scripts: { targets: ['test'] } }).flat()).toEqual([
+      'nx run-many -t test --projects scripts --parallel=1 --outputStyle=stream',
+    ]);
   });
 });

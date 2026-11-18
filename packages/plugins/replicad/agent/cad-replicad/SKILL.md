@@ -56,15 +56,15 @@ The symbols real Tau models use most, as verbatim declarations. Anything not sho
 
 ```ts
 // Creates a drawing pen to programatically draw in 2D
-export declare function draw(initialPoint?: Point2D): DrawingPen;
+declare function draw(initialPoint?: Point2D): DrawingPen;
 
 Point2D: [number, number]
 
 // Creates the `Drawing` of a circle
-export declare function drawCircle(radius: number): Drawing;
+declare function drawCircle(radius: number): Drawing;
 
 // Creates the `Drawing` of a rectangle with (optional) rounded corners
-export declare function drawRoundedRectangle(width: number, height: number, r?: number | {
+declare function drawRoundedRectangle(width: number, height: number, r?: number | {
     rx?: number;
     ry?: number;
 }): Drawing;
@@ -88,7 +88,9 @@ AxisName: (typeof AXIS_NAMES)[number]
 export declare function makeBox(corner1: Point, corner2: Point): Solid;
 
 // Creates the `Drawing` of an polygon in a defined plane
-export declare function drawPolysides(radius: number, sidesCount: number, sagitta?: number): Drawing;
+declare function drawPolysides(radius: number, sidesCount: number, sagitta?: number): Drawing;
+
+export declare function makeLine(v1: Point, v2: Point): Edge;
 ```
 
 ### Classes
@@ -416,7 +418,7 @@ ManifoldBox: Box
 
 ## API reference
 
-To read any other signature, find its name in `api-index.md`, which lists all 804 symbols by file with the lines that hold each, and read that range of the named file.
+To read any other signature, find its name in `api-index.md`, which lists all 838 symbols by file with the lines that hold each, and read that range of the named file.
 
 - `api-functions.md` — Functions
 - `api-classes.md` — Classes

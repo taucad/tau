@@ -44,6 +44,7 @@ import {
   FolderOpen,
   History,
   Info,
+  KeyRound,
   Plus,
   Printer,
   Rotate3d,
@@ -112,6 +113,9 @@ import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor
 import { EditorSymbolPathProvider } from '#routes/w.$workspace.$project/editor-symbol-path.js';
 import type { EditorSymbolCrumb } from '@taucad/editor-ui/components/code/editor-language-features';
 import { useReportHistoryPaneShown } from '#routes/w.$workspace.$project/revision-pane-requests.js';
+import { desktopAgentSignInBridge } from '#components/terminal/agent-sign-ins.js';
+import { agentSignInComponent, connectAgentSignInWorkbench } from '#components/terminal/agent-sign-in-workbench.js';
+import type { AgentSignInPanelParameters } from '#components/terminal/agent-sign-in-workbench.js';
 import { isTerminalSurfaceOffered } from '#components/terminal/terminal-availability.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { WorkbenchToggleSlot } from '#routes/w.$workspace.$project/project-workspace-actions.js';
@@ -206,6 +210,10 @@ const ChatConsole = lazy(async () => {
 const ProjectTerminalPane = lazy(async () => {
   const module = await import('#components/terminal/terminal-pane.js');
   return { default: module.ProjectTerminalPane };
+});
+const AgentSignInTab = lazy(async () => {
+  const module = await import('#components/terminal/agent-sign-in-tab.js');
+  return { default: module.AgentSignInTab };
 });
 const ProjectShareWorkbenchPanel = lazy(async () => {
   const module = await import('#routes/w.$workspace.$project/project-share-action.js');
@@ -481,6 +489,28 @@ function TerminalWorkbenchPanel(): React.JSX.Element {
   return (
     <PaneBody>
       <ProjectTerminalPane profile={profile} />
+    </PaneBody>
+  );
+}
+
+/** One external agent's sign-in, a top-level tab of its own beside the Terminal (ACP agent policy rule 10). */
+function AgentSignInWorkbenchPanel({
+  api,
+  params,
+}: IDockviewPanelProps<AgentSignInPanelParameters>): React.JSX.Element | undefined {
+  const bridge = desktopAgentSignInBridge();
+  if (bridge === undefined) {
+    return undefined;
+  }
+  return (
+    <PaneBody>
+      <AgentSignInTab
+        agentId={params.agentId}
+        bridge={bridge}
+        onClose={() => {
+          api.close();
+        }}
+      />
     </PaneBody>
   );
 }
@@ -970,6 +1000,7 @@ const components = {
   kernel: TelemetryWorkbenchPanel,
   console: ConsoleWorkbenchPanel,
   terminal: TerminalWorkbenchPanel,
+  [agentSignInComponent]: AgentSignInWorkbenchPanel,
 };
 
 export const workbenchPanels = {
@@ -1003,13 +1034,15 @@ export const getWorkbenchTabIcon: DockviewTabIconRenderer = (properties) => {
   );
   const filePath = getFileParameters(properties)?.filePath;
   const Icon =
-    mode === 'open-file'
-      ? FolderOpen
-      : mode === 'launcher'
-        ? Plus
-        : filePath !== undefined && isPrinterFileName(filePath)
-          ? Printer
-          : surface?.icon;
+    properties.api.component === agentSignInComponent
+      ? KeyRound
+      : mode === 'open-file'
+        ? FolderOpen
+        : mode === 'launcher'
+          ? Plus
+          : filePath !== undefined && isPrinterFileName(filePath)
+            ? Printer
+            : surface?.icon;
   if (surface?.id === 'export' && Icon !== undefined) {
     return <ExportTabIcon icon={Icon} />;
   }
@@ -1321,6 +1354,12 @@ const workbenchDockOperations: Readonly<Record<WorkbenchProfile, WorkbenchDockOp
 };
 
 /** The desktop Browser's tabs follow the workbench while it is not showing a record. */
+/** External-agent sign-ins open as tabs beside the Terminal, where this desktop can run one. */
+const connectWorkbenchAgentSignIns: NonNullable<WorkbenchAdapterPorts['connectAgentSignIns']> = (api, isRestoring) =>
+  desktopAgentSignInBridge() === undefined
+    ? () => undefined
+    : connectAgentSignInWorkbench({ api, isRestoring, terminalPanelId: workbenchPanels.terminal.id });
+
 const connectWorkbenchBrowser: NonNullable<WorkbenchAdapterPorts['connectBrowser']> = (api, isRestoring) => {
   const bridge = getBrowserBridge();
   if (!bridge) {
@@ -2125,6 +2164,7 @@ export const WorkbenchDockview = memo(function ({
       navigate: requestEditorNavigation,
       dock: workbenchDockOperations[profile],
       connectBrowser: profile === 'shared' ? undefined : connectWorkbenchBrowser,
+      connectAgentSignIns: profile === 'shared' ? undefined : connectWorkbenchAgentSignIns,
     }),
     [connectWorkbench, editorRef, isMobile, layoutController, profile, projectId, setWorkbenchOpen],
   );

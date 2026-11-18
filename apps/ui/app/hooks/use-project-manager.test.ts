@@ -35,7 +35,7 @@ import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library
 import type { ProjectCreationLocation } from '@taucad/ui-core/types/project-creation-location.types';
 import type { ConnectedWorkspace } from '#runtime/project-library-workspace.js';
 import type { CreateProjectOptions, ProjectLibraryChatSessions } from '#runtime/project-library-commands.js';
-import type { ProjectListing } from '#runtime/project-library-storage.js';
+import type { ProjectListing } from '@taucad/files-ui/runtime/project-library-storage';
 import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';

@@ -1,6 +1,6 @@
 # replicad — Types
 
-30 top-level symbols. Signatures are verbatim typescript.
+31 top-level symbols. Signatures are verbatim typescript.
 
 AnyShape: Vertex | Edge | Wire | Face | Shell | Solid | CompSolid | Compound
 
@@ -60,6 +60,10 @@ ManifoldInstance: Manifold
 ManifoldMesh: Mesh
 
 ManifoldVec3: Vec3
+
+// How an operation treats its receiver
+// Remarks: - `pure`: the receiver is unchanged; the result may be reused. - `consumes`: the operation deletes its receiver (and possibly some of its arguments). A cache that reuses a result calls `consume` so the caller sees the same deletions as when the operation runs. - `mutates`: the operation changes its receiver (pens, sketchers, finders, setters). It always runs; the receiver's identity advances. - `alias`: the result is a new handle on the receiver's geometry (`clone`).
+OperationEffect: "pure" | "consumes" | "mutates" | "alias"
 
 PlaneName: "XY" | "YZ" | "ZX" | "XZ" | "YX" | "ZY" | "front" | "back" | "left" | "right" | "top" | "bottom"
 

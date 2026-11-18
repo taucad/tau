@@ -86,19 +86,19 @@ describe('extract-replicad-types', () => {
   // ---------------------------------------------------------------------------
 
   it('exports draw function', () => {
-    expect(output).toContain('export declare function draw(');
+    expect(output).toContain('export declare const draw: typeof drawModule.draw;');
   });
 
   it('exports drawCircle function', () => {
-    expect(output).toContain('export declare function drawCircle(');
+    expect(output).toContain('export declare const drawCircle: typeof drawModule.drawCircle;');
   });
 
   it('exports drawRoundedRectangle function', () => {
-    expect(output).toContain('export declare function drawRoundedRectangle(');
+    expect(output).toContain('export declare const drawRoundedRectangle: typeof drawModule.drawRoundedRectangle;');
   });
 
   it('exports makeSolid function', () => {
-    expect(output).toContain('export declare function makeSolid(');
+    expect(output).toContain('export declare const makeSolid: typeof shapeHelpers.makeSolid;');
   });
 
   it('exports cast function', () => {

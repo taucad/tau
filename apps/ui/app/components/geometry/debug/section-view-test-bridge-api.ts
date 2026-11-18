@@ -206,8 +206,13 @@ export type SectionViewTestBridgeApi = Readonly<{
   getRendererGeneration(): number;
   /** Identity from this viewport's renderer, never a separately created probe context. */
   getRendererIdentity(): WorkspaceRendererIdentity;
-  /** Warmed full R3F frame submission and completion latency, in milliseconds; excludes RAF/vsync. */
-  measureRenderFrames(options?: Readonly<{ gpuTiming?: boolean; orbit?: boolean }>): Promise<
+  /**
+   * Warmed full R3F frame submission and completion latency, in milliseconds; excludes RAF/vsync. Renders `warmup`
+   * unrecorded frames (default 20), then records `samples` frames (default 120).
+   */
+  measureRenderFrames(
+    options?: Readonly<{ gpuTiming?: boolean; orbit?: boolean; warmup?: number; samples?: number }>,
+  ): Promise<
     Readonly<{
       submission: readonly number[];
       completion: readonly number[];

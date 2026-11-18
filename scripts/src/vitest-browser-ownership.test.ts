@@ -230,6 +230,7 @@ describe('Vitest Browser test-runner ownership', () => {
     // runtime in, which Browser Mode cannot host.
     // The viewer parity workflow installs the Chromium its viewer-reference capture runs in (Vitest Browser Mode), and
     // its real-GPU check installs the same Chromium on the operator's Mac.
+    // The real-GPU viewer smoke's guest installs the Chromium its Browser Mode targets run in on the disposable GPU host.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
@@ -246,6 +247,7 @@ describe('Vitest Browser test-runner ownership', () => {
         '.github/workflows/ui-asset-integrity.yml',
         '.github/workflows/viewer-parity.yml',
         'scripts/spikes/native-deps/linux/s31/run.ts',
+        'apps/desktop/scripts/hosted-linux-gpu-smoke-guest.sh',
         'apps/desktop/scripts/hosted-linux-qualification-guest.sh',
         'apps/docs/project.json',
         'apps/ui/scripts/check-asset-integrity.mts',

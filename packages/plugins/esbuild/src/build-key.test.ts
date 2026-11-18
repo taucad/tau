@@ -1,10 +1,12 @@
 /**
  * Build-key identity through the real esbuild bundler (audit R24, catalogue G1).
  *
- * The runtime keys a build on the bundler's output for every kernel whose `resolve` answers from
- * `runtime.bundler`: comment-only and formatting-only edits print the same bundle, so they hit the
- * previous build. Anything that changes behaviour (code, an import target, an imported asset, a
- * parameter, a render option or content flag, the kernel version) must still change the key.
+ * A kernel that declares `sourceIdentity: 'bundle'` is keyed on the bundler's output: comment-only
+ * and formatting-only edits print the same bundle, so they hit the previous build. Anything that
+ * changes behaviour (code, an import target, an imported asset, a parameter, a content flag, the
+ * kernel version) must still change the key. A kernel that does not opt in, or that resolves on its
+ * own, keeps raw content. Every scenario runs in a fresh runtime client, so equal keys also agree
+ * across workers.
  */
 import { describe, expect, it } from 'vitest';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -51,7 +53,20 @@ const bundledProgram = async (entryPath: string, runtime: KernelServices) => {
   return executed.value as { default: (params: { size: number }) => string };
 };
 
-const keyProbe = (kernelVersion = '1.0.0', resolveThroughBundler = true, detected = false) => {
+type ProbeOptions = {
+  kernelVersion?: string;
+  resolveThroughBundler?: boolean;
+  detected?: boolean;
+  /** Opt into bundle source identity (default on for the probe). */
+  bundleSourced?: boolean;
+};
+
+const keyProbe = ({
+  kernelVersion = '1.0.0',
+  resolveThroughBundler = true,
+  detected = false,
+  bundleSourced = true,
+}: ProbeOptions = {}) => {
   const probe = defineKernel({
     id: 'build-key-probe',
     extensions: ['ts'],
@@ -59,6 +74,7 @@ const keyProbe = (kernelVersion = '1.0.0', resolveThroughBundler = true, detecte
     ...(detected ? { detectImport: /from ['"]probe-lib['"]/u, builtinModuleNames: ['probe-lib'] } : {}),
     name: 'Build key probe',
     version: kernelVersion,
+    sourceIdentity: bundleSourced ? 'bundle' : 'files',
     views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
     exports: {},
     initialize: async (_options, runtime) => {
@@ -98,12 +114,9 @@ const keyProbe = (kernelVersion = '1.0.0', resolveThroughBundler = true, detecte
 
 const evaluateKeys = async (
   files: Files,
-  options: {
+  options: ProbeOptions & {
     parameters?: Record<string, unknown>;
-    kernelVersion?: string;
     content?: { includeEdges?: boolean };
-    resolveThroughBundler?: boolean;
-    detected?: boolean;
   } = {},
 ): Promise<Keys> => {
   const keys: Partial<Keys> = {};
@@ -129,7 +142,7 @@ const evaluateKeys = async (
     wrapRender: async (input, handler) => handler(input),
   });
   const runtime = defineRuntime({
-    kernels: [keyProbe(options.kernelVersion, options.resolveThroughBundler, options.detected)],
+    kernels: [keyProbe(options)],
     bundlers: [esbuildBundler()],
     middleware: [recorder(), edges()],
   });
@@ -239,6 +252,16 @@ describe('build key from the bundled output', () => {
     expect(commented.evaluate).not.toBe(reference.evaluate);
   });
 
+  it('keys raw source content for a kernel that does not opt into bundle source identity', async () => {
+    const reference = await evaluateKeys(base, { bundleSourced: false });
+    const commented = await evaluateKeys(
+      { ...base, 'main.ts': `// A note about the model\n${base['main.ts']}` },
+      { bundleSourced: false },
+    );
+
+    expect(commented.evaluate).not.toBe(reference.evaluate);
+  });
+
   it('keys render content on its effective value, and a changed value misses', async () => {
     const reference = await evaluateKeys(base);
     const explicitDefault = await evaluateKeys(base, { content: { includeEdges: false } });
@@ -282,6 +305,214 @@ describe('module execution across an edit', () => {
       document.close();
       client.terminate();
       Reflect.deleteProperty(globalThis, counter);
+    }
+  });
+});
+
+const emptyParameters = createKernelParameterDeclaration(
+  {},
+  { type: 'object', properties: {} },
+  { id: 'urn:taucad:test:build-key-review', name: 'BuildKeyReviewParameters' },
+);
+
+/**
+ * A kernel that resolves through the bundler (as every first-party JS kernel does) but whose output
+ * also depends on the raw entry text: here the first line, standing in for a header comment, a
+ * `// @param` annotation or a JSDoc label a third-party kernel might read.
+ */
+const rawReadingKernel = defineKernel({
+  id: 'raw-reader',
+  extensions: ['ts'],
+  name: 'Raw reader',
+  version: '1.0.0',
+  views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
+  exports: {},
+  initialize: async () => ({}),
+  resolve: async ({ entryPath }, runtime) => runtime.bundler.resolveDependencies(entryPath),
+  describe: async () => createKernelSuccess({ parameters: emptyParameters }),
+  evaluate: async ({ entryPath }, runtime) => {
+    const bundle = await runtime.bundler.bundle(entryPath);
+    if (!bundle.success) {
+      throw new Error('bundle failed');
+    }
+    const text = await runtime.filesystem.readFile(entryPath, 'utf8');
+    return { handle: text.split('\n', 1)[0] };
+  },
+  render: async ({ handle }) => ({
+    content: `<svg xmlns="http://www.w3.org/2000/svg"><text>${String(handle)}</text></svg>`,
+  }),
+});
+
+/** A bundling kernel whose initialize registers one global built-in. */
+const bundlingKernel = ({
+  id,
+  extension,
+  moduleName,
+  globalName,
+}: Record<'id' | 'extension' | 'moduleName' | 'globalName', string>) =>
+  defineKernel({
+    id,
+    extensions: [extension],
+    name: id,
+    version: '1.0.0',
+    sourceIdentity: 'bundle',
+    views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
+    exports: {},
+    initialize: async (_options, runtime) => {
+      registerKernelModule(runtime, { name: moduleName, exports: { a: 1 }, globalName, version: '1.0.0' });
+      return {};
+    },
+    resolve: async ({ entryPath }, runtime) => runtime.bundler.resolveDependencies(entryPath),
+    describe: async () => createKernelSuccess({ parameters: emptyParameters }),
+    evaluate: async ({ entryPath }, runtime) => {
+      const bundle = await runtime.bundler.bundle(entryPath);
+      const executed = await runtime.execute(bundle.code);
+      if (!executed.success) {
+        throw new Error('execute failed');
+      }
+      return { handle: String((executed.value as { default: () => unknown }).default()) };
+    },
+    render: async ({ handle }) => ({
+      content: `<svg xmlns="http://www.w3.org/2000/svg"><text>${String(handle)}</text></svg>`,
+    }),
+  });
+const tsKernel = bundlingKernel({ id: 'ts-probe', extension: 'ts', moduleName: 'ts-lib', globalName: 'tsLib' });
+const jsKernel = bundlingKernel({ id: 'js-probe', extension: 'js', moduleName: 'js-lib', globalName: 'jsLib' });
+
+const svgText = (rendering: unknown): string => /<text>(.*?)<\/text>/u.exec(JSON.stringify(rendering))?.[1] ?? '';
+
+describe('a kernel that resolves through the bundler but reads raw sources, without the opt-in', () => {
+  it('re-evaluates when the first line of the entry changes', async () => {
+    const runtime = defineRuntime({ kernels: [rawReadingKernel()], bundlers: [esbuildBundler()] });
+    const source = '// title: first\nexport default function main() { return 1; }\n';
+    const client = createRuntimeClient({
+      transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs({ 'main.ts': source }) }),
+    });
+    const document = client.open({ source: { path: 'main.ts' }, parameters: {}, watch: false });
+    const encode = (text: string) => new TextEncoder().encode(text);
+    try {
+      const view = document.view('model');
+      const first = await view.rendering();
+      expect(svgText(first)).toBe('// title: first');
+
+      await document.update({ stage: { 'main.ts': encode(source.replace('first', 'second')) } });
+      const second = await view.rendering();
+      expect(svgText(second)).toBe('// title: second');
+      view.close();
+    } finally {
+      document.close();
+      client.terminate();
+    }
+  });
+});
+
+describe('build key across workers with different kernel histories', () => {
+  const files = {
+    'main.ts': 'export default function main() { return 1; }\n',
+    'other.js': 'export default function main() { return 2; }\n',
+  };
+
+  const keyOf = async (openFirst: readonly string[]): Promise<string> => {
+    let key: string | undefined;
+    const recorder = defineMiddleware({
+      id: 'KeyRecorder',
+      name: 'KeyRecorder',
+      version: '1.0.0',
+      wrapEvaluate: async (input, handler, { dependencyHash }) => {
+        if (input.entryPath === 'main.ts') {
+          key = dependencyHash;
+        }
+        return handler(input);
+      },
+    });
+    const runtime = defineRuntime({
+      kernels: [tsKernel(), jsKernel()],
+      bundlers: [esbuildBundler()],
+      middleware: [recorder()],
+    });
+    const client = createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs(files) }) });
+    try {
+      for (const path of [...openFirst, 'main.ts']) {
+        const document = client.open({ source: { path }, parameters: {}, watch: false });
+        const view = document.view('model');
+        // oxlint-disable-next-line no-await-in-loop -- the order the worker opens files is the history under test
+        const rendered = await view.rendering();
+        if (rendered.superseded || !rendered.rendering.success) {
+          throw new Error(`Render of ${path} failed: ${JSON.stringify(rendered)}`);
+        }
+        view.close();
+        document.close();
+      }
+    } finally {
+      client.terminate();
+    }
+    if (key === undefined) {
+      throw new Error('no key recorded');
+    }
+    return key;
+  };
+
+  it('keys main.ts the same whether or not the worker has initialized another kernel first', async () => {
+    const fresh = await keyOf([]);
+    const warm = await keyOf(['other.js']);
+    // The bundle binds only the selected kernel's globals, so another kernel's registrations do not
+    // reach main.ts's bundle or key.
+    expect(warm).toBe(fresh);
+  });
+});
+
+/**
+ * A kernel that resolves on its own (`resolve` never touches the bundler) but bundles in evaluate,
+ * and whose output also reads the raw entry: it keeps raw content hashes whatever the worker saw.
+ */
+const ownResolveKernel = defineKernel({
+  id: 'own-resolve',
+  extensions: ['ts'],
+  name: 'Own resolve',
+  version: '1.0.0',
+  views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
+  exports: {},
+  initialize: async () => ({}),
+  resolve: async ({ entryPath }) => ({ resolved: [entryPath], unresolved: [] }),
+  describe: async () =>
+    createKernelSuccess({
+      parameters: createKernelParameterDeclaration(
+        { size: 1 },
+        { type: 'object', properties: { size: { type: 'number', default: 1 } } },
+        { id: 'urn:taucad:test:own-resolve', name: 'OwnResolveParameters' },
+      ),
+    }),
+  evaluate: async ({ entryPath, parameters }, runtime) => {
+    await runtime.bundler.bundle(entryPath);
+    const text = await runtime.filesystem.readFile(entryPath, 'utf8');
+    return { handle: `${text.split('\n', 1)[0]}|${String(parameters['size'])}` };
+  },
+  render: async ({ handle }) => ({
+    content: `<svg xmlns="http://www.w3.org/2000/svg"><text>${String(handle)}</text></svg>`,
+  }),
+});
+
+describe('a kernel that resolves on its own', () => {
+  it('re-evaluates a first-line edit after an unrelated file changed', async () => {
+    const runtime = defineRuntime({ kernels: [ownResolveKernel()], bundlers: [esbuildBundler()] });
+    const source = '// title: first\nexport default function main() { return 1; }\n';
+    const client = createRuntimeClient({
+      transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs({ 'main.ts': source, 'notes.txt': 'a' }) }),
+    });
+    const document = client.open({ source: { path: 'main.ts' }, parameters: { size: 1 }, watch: false });
+    const view = document.view('model');
+    try {
+      expect(svgText(await view.rendering())).toBe('// title: first|1');
+      // An unrelated write clears the common dependency cache but not main.ts's bundle, which
+      // evaluate left in the worker; the key must still read the raw entry.
+      await document.update({ stage: { 'notes.txt': 'b' } });
+      expect(svgText(await view.rendering())).toBe('// title: first|1');
+      await document.update({ stage: { 'main.ts': source.replace('first', 'second') } });
+      expect(svgText(await view.rendering())).toBe('// title: second|1');
+    } finally {
+      view.close();
+      document.close();
+      client.terminate();
     }
   });
 });

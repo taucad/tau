@@ -257,11 +257,7 @@ const refusedReplacementAction = (
   refusal.reason === 'notEntitled' || refusal.reason === 'quota' ? syncFailureAction(refusal, remote, viewer) : 'retry';
 
 const connectingCopy = (remote: RemoteFacet): string =>
-  remote.phase === 'disconnecting'
-    ? 'Disconnecting…'
-    : remote.kind === 'tau'
-      ? 'Starting backup to Tau Cloud…'
-      : 'Connecting…';
+  remote.phase === 'disconnecting' ? 'Disconnecting…' : remote.kind === 'tau' ? 'Starting backup…' : 'Connecting…';
 
 /**
  * The most specific true name for a Git remote (R3).
@@ -657,10 +653,14 @@ export function RevisionSyncRegion({
           .split('/')
           .map((segment) => encodeURIComponent(segment))
           .join('/')}`;
-  const connectedLabel = remote.kind === 'tau' ? 'Tau Cloud' : gitRemoteLabel(remote.url, isGithubRemote(remote));
+  /* Rule 10: the label form (`Cloud`) is never the sentence form (`the cloud`). */
+  const connectedRemoteLabel = remote.kind === 'tau' ? undefined : gitRemoteLabel(remote.url, isGithubRemote(remote));
+  const connectedLabel = connectedRemoteLabel ?? 'Cloud';
+  const connectedName = connectedRemoteLabel ?? 'the cloud';
+  const connectedWhere = connectedRemoteLabel === undefined ? 'in the cloud' : `on ${connectedRemoteLabel}`;
   const labelOf = (pending: PendingConnection): string =>
     pending.kind === 'tau'
-      ? 'Tau Cloud'
+      ? 'the cloud'
       : pending.kind === 'github'
         ? pending.repository.fullName
         : gitRemoteLabel(pending.url, isGithubRemoteUrl(pending.url));
@@ -916,7 +916,7 @@ export function RevisionSyncRegion({
           {remote.storage === undefined || !showMeter ? undefined : (
             <div
               role='meter'
-              aria-label='Tau Cloud storage used'
+              aria-label='Cloud storage used'
               aria-valuenow={Math.round(percentage)}
               aria-valuemin={0}
               aria-valuemax={100}
@@ -1012,7 +1012,7 @@ export function RevisionSyncRegion({
             <RadioGroupItem id='remote-tau' value='tau' disabled={!canSyncFiles} />
             <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
             <Label htmlFor='remote-tau' className={cn('font-normal', !canSyncFiles && 'text-muted-foreground')}>
-              Tau Cloud
+              Tau
             </Label>
             {canSyncFiles ? (
               storageLimitBytes === undefined ? null : (
@@ -1053,7 +1053,7 @@ export function RevisionSyncRegion({
                 void applyRemote();
               }}
             >
-              {remote.kind === 'none' ? 'Back up to Tau Cloud' : 'Change backup'}
+              {remote.kind === 'none' ? 'Back up to the cloud' : 'Change backup'}
             </Button>
             {isConnected || remote.kind === 'none' ? (
               <Button
@@ -1120,7 +1120,7 @@ export function RevisionSyncRegion({
 
         {pendingConnection === undefined || pendingLabel === undefined ? null : (
           <div className='flex flex-col gap-2'>
-            <p className='text-xs'>{`Replace ${connectedLabel} with ${pendingLabel}? What’s already on ${connectedLabel} stays there, and your history stays on this device.`}</p>
+            <p className='text-xs'>{`Replace ${connectedName} with ${pendingLabel}? What’s already ${connectedWhere} stays there, and your history stays on this device.`}</p>
             <div className='flex flex-wrap items-center gap-2'>
               <Button
                 autoFocus
@@ -1203,7 +1203,7 @@ export function RevisionSyncRegion({
       <div role='alert' aria-label='Backup not changed' className='flex flex-wrap items-center gap-2 text-xs'>
         <CircleAlert aria-hidden className='size-3.5 shrink-0 text-feature' />
         <span className='min-w-0 flex-1'>
-          {`${remote.refusedReplacement.error} ${connectedLabel} is still this project’s backup.`}
+          {`${remote.refusedReplacement.error} ${connectedRemoteLabel ?? 'The cloud'} is still this project’s backup.`}
         </span>
         {renderFailureAction(refusedReplacementAction(remote.refusedReplacement, remote, viewer), () => {
           setPendingConnection(undefined);
@@ -1315,7 +1315,7 @@ export function RevisionSyncRegion({
             setChangingBackup(true);
           }}
         >
-          Back up to Tau Cloud
+          Back up to the cloud
         </Button>
       ) : undefined}
     </>
@@ -1375,7 +1375,9 @@ export function RevisionSyncRegion({
           }}
         >
           <AlertDialogHeader>
-            <AlertDialogTitle>{`Disconnect ${connectedLabel}?`}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {connectedRemoteLabel === undefined ? 'Disconnect cloud backup?' : `Disconnect ${connectedRemoteLabel}?`}
+            </AlertDialogTitle>
             <AlertDialogDescription>Your history stays on this device.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

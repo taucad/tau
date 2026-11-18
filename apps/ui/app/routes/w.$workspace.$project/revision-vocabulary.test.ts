@@ -286,7 +286,7 @@ describe('the copy table', () => {
 
     it('says the cloud copy is gone without “revision”', () => {
       expect(cloudUnavailableSentence).toBe(
-        'This project was deleted from Tau Cloud, or your access changed. Your history is still on this device.',
+        'This project was deleted from the cloud, or your access changed. Your history is still on this device.',
       );
     });
 

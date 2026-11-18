@@ -358,7 +358,7 @@ describe('RevisionRestore', () => {
     render(<RevisionRestore />);
 
     for (const listener of revisionStatusHarness.toasts) {
-      listener({ type: 'notice', subject: 'remote', tone: 'info', message: 'Backed up to Tau Cloud.' });
+      listener({ type: 'notice', subject: 'remote', tone: 'info', message: 'Backed up to the cloud.' });
       listener({ type: 'notice', subject: 'resolution', tone: 'error', message: 'That file could not be opened.' });
       listener({ type: 'notice', subject: 'remote', tone: 'error', message: 'The backup could not finish.' });
     }

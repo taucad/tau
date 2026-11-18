@@ -299,7 +299,7 @@ function ProjectCommandPaletteItemsReady({ paletteId }: { readonly paletteId: st
         : [
             {
               id: 'connect-tau-cloud',
-              label: 'Back up to Tau Cloud',
+              label: 'Back up to the cloud',
               group: 'History',
               icon: <Cloud />,
               action: handleOpenSync,

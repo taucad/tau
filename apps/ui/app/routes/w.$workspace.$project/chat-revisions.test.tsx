@@ -754,15 +754,15 @@ describe('Revisions pane', () => {
     };
 
     renderPane();
-    expect(screen.queryByRole('radio', { name: 'Tau Cloud' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Tau' })).not.toBeInTheDocument();
     const header = await screen.findByRole('region', { name: 'Where you are' });
     expect(within(header).queryByRole('button', { name: /Back up/u })).not.toBeInTheDocument();
     const line = screen.getByRole('region', { name: 'Backup' });
     expect(line).toHaveTextContent('This device only');
 
-    await user.click(within(line).getByRole('button', { name: 'Back up to Tau Cloud' }));
+    await user.click(within(line).getByRole('button', { name: 'Back up to the cloud' }));
 
-    expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Tau' })).toBeChecked();
   });
 
   it('names no git word in what a person reads (A18, I12)', async () => {
@@ -1514,7 +1514,7 @@ describe('Revisions pane vocabulary and History', () => {
     });
     const backup = screen.getByRole('status', { name: 'Backup status' });
     expect(backup).toHaveTextContent('Backup unavailable');
-    expect(backup).toHaveTextContent('This project was deleted from Tau Cloud, or your access changed.');
+    expect(backup).toHaveTextContent('This project was deleted from the cloud, or your access changed.');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
   });
@@ -1611,7 +1611,7 @@ describe('Backup by default (D19)', () => {
     await waitFor(() => {
       expect(screen.getByRole('status', { name: 'History status' })).toHaveTextContent('Saved · Backed up');
     });
-    expect(screen.queryByText('Backs up to Tau Cloud automatically.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Backs up to the cloud automatically.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Turn off backup' })).not.toBeInTheDocument();
   });
 });

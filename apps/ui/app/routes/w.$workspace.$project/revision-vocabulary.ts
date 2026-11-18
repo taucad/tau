@@ -124,7 +124,7 @@ export const cloudUnavailable = 'Backup unavailable';
  * @public
  */
 export const cloudUnavailableSentence =
-  'This project was deleted from Tau Cloud, or your access changed. Your history is still on this device.';
+  'This project was deleted from the cloud, or your access changed. Your history is still on this device.';
 
 /**
  * A version's number as every surface writes it: `V3` (M11, B6). An entry has

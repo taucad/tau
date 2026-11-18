@@ -126,7 +126,7 @@ const madeWithGitWho = (
     return undefined;
   }
   const lineOf = (name: string, viaDevice = false): string =>
-    [...(name === '' ? [] : [name]), madeWithGit, ...(viaDevice ? ['by an agent on Tau Cloud'] : [])].join(' · ');
+    [...(name === '' ? [] : [name]), madeWithGit, ...(viaDevice ? ['by a cloud agent'] : [])].join(' · ');
   /* Unread, the push record cannot say who pushed it, so the address claims no account yet. */
   if (context.pushRecord === undefined) {
     return { line: lineOf(who.authorName ?? ''), isYou: false, isAgent: false };
@@ -144,7 +144,7 @@ const madeWithGitWho = (
 /**
  * Who a pushed entry reads as: the account the server authenticated, with
  * `recorded as` beside it when the entry names another account in the
- * directory, and `by an agent on Tau Cloud` when a host device pushed it.
+ * directory, and `by a cloud agent` when a host device pushed it.
  *
  * @param input - The entry, the resolver's context, the push that reached it,
  *   the entry's anonymous line and whether the project is shared.
@@ -162,9 +162,7 @@ const pushedWho = (
   const { person, context, pusher } = input;
   const joined = (parts: readonly string[]): string => {
     const named = parts.filter((part) => part !== '');
-    return named.length === 0
-      ? ''
-      : [...named, ...(pusher.viaDevice === true ? ['by an agent on Tau Cloud'] : [])].join(' · ');
+    return named.length === 0 ? '' : [...named, ...(pusher.viaDevice === true ? ['by a cloud agent'] : [])].join(' · ');
   };
   /* A client never shows what it was not given, and never unmasks a pseudonym the record did not mark for the owner. */
   if (pusher.kind === 'anonymous' || (person?.anonymous === true && pusher.recordedAnonymous !== true)) {
@@ -205,7 +203,7 @@ const pushedWho = (
  * directory reads as the pusher with `recorded as` that account beside it,
  * never folded into either; so does the owner's read of an anonymously
  * recorded entry (`recorded as Anonymous`). A push a host device made on the
- * account's behalf adds `by an agent on Tau Cloud` to a line that names someone.
+ * account's behalf adds `by a cloud agent` to a line that names someone.
  *
  * @param entry - The entry's id, source and typed who.
  * @param context - The session, project, push record and debug setting.

@@ -674,7 +674,6 @@
         "serviceEnvironment",
         "reactEventLayer",
         "{workspaceRoot}/.oxlintrc.json",
-        "{workspaceRoot}/packages/plugins/*/package.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ]
     },
@@ -688,7 +687,6 @@
         "serviceEnvironment",
         "reactEventLayer",
         "{workspaceRoot}/.oxlintrc.json",
-        "{workspaceRoot}/packages/plugins/*/package.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
       "metadata": {
@@ -709,7 +707,6 @@
         "serviceEnvironment",
         "reactEventLayer",
         "{workspaceRoot}/.oxlintrc.json",
-        "{workspaceRoot}/packages/plugins/*/package.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
       "metadata": {
@@ -730,7 +727,6 @@
         "serviceEnvironment",
         "reactEventLayer",
         "{workspaceRoot}/.oxlintrc.json",
-        "{workspaceRoot}/packages/plugins/*/package.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
       "metadata": {
@@ -751,7 +747,6 @@
         "serviceEnvironment",
         "reactEventLayer",
         "{workspaceRoot}/.oxlintrc.json",
-        "{workspaceRoot}/packages/plugins/*/package.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
       "metadata": {
@@ -772,7 +767,6 @@
         "serviceEnvironment",
         "reactEventLayer",
         "{workspaceRoot}/.oxlintrc.json",
-        "{workspaceRoot}/packages/plugins/*/package.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
       "metadata": {
@@ -793,7 +787,6 @@
         "serviceEnvironment",
         "reactEventLayer",
         "{workspaceRoot}/.oxlintrc.json",
-        "{workspaceRoot}/packages/plugins/*/package.json",
         "{workspaceRoot}/apps/libs/*/src/**/*.{ts,tsx}"
       ],
       "metadata": {

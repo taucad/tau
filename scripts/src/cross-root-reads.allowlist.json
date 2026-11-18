@@ -545,11 +545,6 @@
     "reason": "test fixture read from another project"
   },
   {
-    "file": "apps/ui/app/runtime/plugin-source-surface.test.ts",
-    "target": "packages/plugins",
-    "reason": "enumerates or probes sibling project directories"
-  },
-  {
     "file": "apps/ui/app/services/chat-session-store.test.ts",
     "target": "packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl",
     "reason": "conformance or recorded corpus read from another project's specs"
@@ -840,11 +835,6 @@
   },
   {
     "file": "packages/runtime/src/kernels/registry-structure.test.ts",
-    "target": "packages/plugins",
-    "reason": "enumerates or probes sibling project directories"
-  },
-  {
-    "file": "packages/runtime/src/plugins/plugin-default-export-surface.test.ts",
     "target": "packages/plugins",
     "reason": "enumerates or probes sibling project directories"
   },

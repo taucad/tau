@@ -1343,7 +1343,8 @@ let snapshotSequence = 0;
  * @returns The binary BRep bytes.
  */
 const writeBinaryBrep = (library: ReplicadLibrary, shape: AnyShape): Uint8Array<ArrayBuffer> => {
-  const oc = library.getOC() as OpenCascadeInstance & { wasmMemory: WebAssembly.Memory };
+  // `getOC()` returns `OpenCascadeInstance`, which `replicad-opencascadejs` types with `wasmMemory`: no cast needed.
+  const oc = library.getOC();
   const data = oc.ReplicadBinaryBrep.Write(shape.wrapped, false, false);
   try {
     const pointer = data.getPtr();

@@ -200,7 +200,9 @@ describe('platform update consent', () => {
     await updater.check();
     await updater.install();
     expect(updater.snapshot()).toMatchObject({ phase: 'restart-blocked' });
-    expect(updater.snapshot().detail).toContain('spawn EAGAIN');
+    // The raw error stays in main's status and log; the renderer words the notice.
+    expect(updater.status()).toContain('spawn EAGAIN');
+    expect(updater.snapshot().detail).toBeUndefined();
     expect(release).toHaveBeenCalledOnce();
   });
   it('APT describes system policy truthfully and never downloads package files', async () => {

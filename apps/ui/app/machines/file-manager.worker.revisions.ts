@@ -549,7 +549,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const candidateRemote = async (publishing: boolean): Promise<string> => {
     if (publishing && published.remote.provider === 'github') {
       throw new Error(
-        'Automatic GeoSpec candidate publication is unavailable for GitHub. Use Tau Cloud for candidate sharing.',
+        'Automatic GeoSpec candidate publication is unavailable for GitHub. Use Tau for candidate sharing.',
       );
     }
     if (isDesktopTarget()) {

@@ -268,7 +268,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await target.navigate('/');
       await waitForSettledHome();
       const record = await keep('k-b-listing-late');
-      const waits = record.cloudStates.filter((state) => state.text.includes('Loading Tau Cloud projects'));
+      const waits = record.cloudStates.filter((state) => state.text.includes('Loading cloud projects'));
       precondition(waits.length > 0, 'K-b: the Tau Cloud wait was never shown');
       const tops = [...new Set(record.gridTops.map((sample) => sample.top))];
       await defect(() => {
@@ -309,7 +309,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       );
       await target.delay(settleWindow);
       await cloud.uiReadCloudRequestCounts(true);
-      await target.click(selectors.getByRole('button', { name: 'Try loading Tau Cloud projects again' }));
+      await target.click(selectors.getByRole('button', { name: 'Try loading cloud projects again' }));
       /* Long enough for react-query's own retries of a failed listing (1, 2 and 4 s) to be counted. */
       await target.delay(retryWatch);
       const counts = await cloud.uiReadCloudRequestCounts();
@@ -319,7 +319,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await defect(() => {
         expect(
           {
-            words: alerts.every((state) => state.text.includes('Couldn’t load Tau Cloud projects')),
+            words: alerts.every((state) => state.text.includes('Couldn’t load cloud projects')),
             inHeader: alerts.every((state) => state.inHeader),
             gridMoved: tops.length > 1,
             retryRequests: counts.projects,
@@ -345,7 +345,7 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       await target.navigate('/');
       await waitForSettledHome();
       const record = await keep('k-d-listing-long');
-      const slow = record.cloudStates.filter((state) => state.text.includes('Still loading Tau Cloud projects'));
+      const slow = record.cloudStates.filter((state) => state.text.includes('Still loading cloud projects'));
       await defect(() => {
         expect(
           slow.some((state) => state.inHeader && state.t >= slowWait && state.text.includes('Try again')),

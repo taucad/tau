@@ -319,7 +319,7 @@ const getSnapshotCopy = (state: 'unpublished' | 'published-current' | 'published
     return 'People who open the link see the published version.';
   }
 
-  return 'Publish a version of this project to Tau Cloud and get a link to it.';
+  return 'Publish a version of this project and get a link to it.';
 };
 
 type PortableMethod = Exclude<ShareMethod, 'tau'>;
@@ -638,7 +638,7 @@ const usePortableShareMethods = (
         id: 'direct',
         label: labelOf('direct'),
         icon: DirectIcon,
-        description: 'Create a self-contained link that works without a Tau account or storage.',
+        description: 'Create a link that carries the whole project. No account needed.',
         notice: {
           icon: <ShieldCheck className='mt-0.5 size-5 text-primary' aria-hidden />,
           title: 'No upload through Tau',
@@ -921,10 +921,10 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
   return () => {
     if (envelopeFailure === 'absent') {
       return (
-        <SharePaneFrame isDisabled={busy} description="This project isn't on Tau Cloud.">
+        <SharePaneFrame isDisabled={busy} description="This project isn't in the cloud.">
           <div className='flex flex-col gap-4'>
             <div className='rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground'>
-              A Tau Cloud link needs the project to be on Tau Cloud. Use a direct link or a GitHub Gist instead, or
+              A cloud link needs the project to be in the cloud. Use a direct link or a GitHub Gist instead, or
               duplicate the project and share the copy.
             </div>
           </div>
@@ -937,7 +937,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
       return (
         <SharePaneFrame
           isDisabled={busy || visibilityMutating}
-          description={signInRequired ? 'Sign in to create a Tau Cloud link.' : "Couldn't reach Tau Cloud."}
+          description={signInRequired ? 'Sign in to create a cloud link.' : "Couldn't load this project's cloud link."}
         >
           <div className='flex flex-col gap-4'>
             <div
@@ -949,7 +949,7 @@ function useTauShareBody(options: TauShareOptions): () => React.JSX.Element {
               )}
             >
               {signInRequired
-                ? `Tau Cloud links are saved to your Tau account.${offersDirectLink ? ' No account? Use a direct link instead.' : ''}`
+                ? `Cloud links are saved to your account.${offersDirectLink ? ' No account? Use a direct link instead.' : ''}`
                 : 'Check your connection, then try again.'}
             </div>
             <div className='flex justify-end'>

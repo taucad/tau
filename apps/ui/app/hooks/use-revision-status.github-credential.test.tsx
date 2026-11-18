@@ -922,7 +922,7 @@ describe('replacing a backup with another remote (R2)', () => {
       phase: 'connected',
       refusedReplacement: {
         kind: 'tau',
-        error: 'Syncing files to Tau Cloud is a paid plan feature.',
+        error: 'Syncing files to the cloud is a paid plan feature.',
         reason: 'notEntitled',
         attempt: 1,
       },

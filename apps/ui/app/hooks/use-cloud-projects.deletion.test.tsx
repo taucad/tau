@@ -90,7 +90,7 @@ describe('cloud project deletion', () => {
     const { result } = renderHook(useDeleteCloudProject, { wrapper });
     await act(async () => {
       await expect(result.current.mutateAsync({ ...project, canDeleteCloud: undefined })).rejects.toThrow(
-        'You can’t delete this project from Tau Cloud right now',
+        'You can’t delete this project’s cloud copy right now',
       );
     });
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
@@ -209,7 +209,7 @@ describe('cloud project deletion', () => {
     const view = renderHook(useDeleteCloudProject, { wrapper });
     await act(async () => {
       await expect(view.result.current.mutateAsync(project)).rejects.toMatchObject({
-        message: 'Couldn’t delete this project from Tau Cloud. Check your connection and try again.',
+        message: 'Couldn’t delete this project’s cloud copy. Check your connection and try again.',
         status: 403,
       });
     });
@@ -246,7 +246,7 @@ describe('cloud project deletion', () => {
       const view = renderHook(useDeleteCloudProject, { wrapper });
       await act(async () => {
         await expect(view.result.current.mutateAsync(project)).rejects.toMatchObject({
-          message: 'Couldn’t delete this project from Tau Cloud. Check your connection and try again.',
+          message: 'Couldn’t delete this project’s cloud copy. Check your connection and try again.',
           status: rejectionStatus,
         });
       });
@@ -270,7 +270,7 @@ describe('cloud project deletion', () => {
     const view = renderHook(useDeleteCloudProject, createWrapper());
     await act(async () => {
       await expect(view.result.current.mutateAsync(project)).rejects.toMatchObject({
-        message: 'Couldn’t delete this project from Tau Cloud. Check your connection and try again.',
+        message: 'Couldn’t delete this project’s cloud copy. Check your connection and try again.',
         status: 403,
       });
     });

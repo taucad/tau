@@ -27,8 +27,8 @@ const comingSoon = (label: string): PlanCatalogFeature => ({ label, isComingSoon
 const backupFeature = (tier: BillingTier): PlanCatalogFeature =>
   included(
     tier === 'enterprise'
-      ? 'Custom Tau Cloud backup and sync'
-      : `${formatStorageLimit(storageLimitBytesByTier[tier])} Tau Cloud backup and sync`,
+      ? 'Custom cloud backup and sync'
+      : `${formatStorageLimit(storageLimitBytesByTier[tier])} cloud backup and sync`,
   );
 
 /**

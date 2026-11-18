@@ -71,7 +71,7 @@ export function ProjectActionMenu({
                 }}
               >
                 <Cloud />
-                {isDeleting ? 'Check Tau Cloud deletion…' : 'Delete from Tau Cloud…'}
+                {isDeleting ? 'Check deletion…' : 'Delete cloud copy…'}
               </DropdownMenuItem>
             </>
           ) : null}
@@ -137,9 +137,9 @@ function CloudDeleteDialog({
         }}
       >
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete “{project.name}” from Tau Cloud?</AlertDialogTitle>
+          <AlertDialogTitle>Delete the cloud copy of “{project.name}”?</AlertDialogTitle>
           <AlertDialogDescription>
-            This removes its backup and published links from Tau Cloud, and people you shared it with lose access.
+            This removes its backup and published links from the cloud, and people you shared it with lose access.
             Copies already on anyone’s devices, and duplicates, are kept. This can’t be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -151,8 +151,8 @@ function CloudDeleteDialog({
         </p>
         {isPending ? (
           <p role='status' aria-busy='true' className='text-sm'>
-            {isChecking ? 'Checking deletion…' : 'Deleting from Tau Cloud…'} You can close this dialog; Tau will check
-            again when you return.
+            {isChecking ? 'Checking deletion…' : 'Deleting cloud copy…'} You can close this dialog; Tau will check again
+            when you return.
           </p>
         ) : null}
         {!isPending && account === undefined ? (
@@ -186,7 +186,7 @@ function CloudDeleteDialog({
               });
             }}
           >
-            Delete from Tau Cloud
+            Delete cloud copy
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

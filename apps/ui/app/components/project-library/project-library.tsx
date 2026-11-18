@@ -634,7 +634,7 @@ export function ProjectLibrary({
     <LibraryStatusSlot
       notice={shownCloudNotice}
       /* A Retry's wait is announced by the slot's status region, there before the press, so the words are heard. */
-      announcement={!isAwaitingListing && cloudWait?.isAnnounced === true ? 'Loading Tau Cloud projects' : undefined}
+      announcement={!isAwaitingListing && cloudWait?.isAnnounced === true ? 'Loading cloud projects' : undefined}
       /* One Retry for Tau Cloud: beside a failure, through the wait it starts, and from the first wait's slow mark, so a
          Retry whose request fails or waits keeps its focus. */
       retry={
@@ -670,8 +670,8 @@ export function ProjectLibrary({
         live={cloudWait?.isAnnounced !== true}
         active={!isAwaitingListing && isAwaitingCloud}
         startedAt={cloudShownFrom}
-        label='Loading Tau Cloud projects'
-        slowLabel='Still loading Tau Cloud projects'
+        label='Loading cloud projects'
+        slowLabel='Still loading cloud projects'
       />
     </LibraryStatusSlot>
   );
@@ -1159,7 +1159,7 @@ function LibraryStatusSlot({
       {notice === 'offline' ? null : notice === 'failed' ? (
         <span role='alert' className='flex min-w-0 items-center gap-1.5'>
           <AlertCircle aria-hidden className='size-3.5 shrink-0 text-warning' />
-          <span className='truncate'>Couldn’t load Tau Cloud projects</span>
+          <span className='truncate'>Couldn’t load cloud projects</span>
         </span>
       ) : (
         children
@@ -1172,7 +1172,7 @@ function LibraryStatusSlot({
           size='xs'
           className={cn('min-w-6 shrink-0', retry.slowDelay !== undefined && 'wait-after-slow')}
           style={retry.slowDelay === undefined ? undefined : retryRevealStyle(retry.slowDelay)}
-          aria-label='Try loading Tau Cloud projects again'
+          aria-label='Try loading cloud projects again'
           onClick={onRetryCloud}
         >
           Try again
@@ -1290,7 +1290,7 @@ function UnifiedProjectList({
           icon={PackageX}
           titleLevel={emptyTitleLevel}
           title={isCatalogUnavailable ? 'No matches on this device' : 'No matching projects'}
-          description={isCatalogUnavailable ? 'Tau Cloud projects are not all available yet.' : undefined}
+          description={isCatalogUnavailable ? 'Cloud projects are not all available yet.' : undefined}
         >
           <Button
             variant='outline'
@@ -1470,7 +1470,7 @@ export function ProjectLibraryCard({
                 <LocationIcon className='size-3 shrink-0' />
                 <span className='truncate'>{slugPath}</span>
                 {project.cloud?.cloudState === 'deleting' ? (
-                  <span role='status'>Deleting from Tau Cloud…</span>
+                  <span role='status'>Deleting cloud copy…</span>
                 ) : project.onCloud === true ? (
                   <OnTauCloudMark />
                 ) : undefined}

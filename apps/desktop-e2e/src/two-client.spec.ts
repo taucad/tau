@@ -2904,7 +2904,7 @@ describe('backup by default and one library', () => {
       await third.page.goto('app://tau/?settings=filesystem', { waitUntil: 'domcontentloaded' });
       /* The setting (d19597bf0b, #1227) is the *Tau Cloud projects* select,
        * whose options are Off, Home and each connected workspace. */
-      const destination = third.page.getByRole('combobox', { name: 'Tau Cloud projects', exact: true });
+      const destination = third.page.getByRole('combobox', { name: 'Cloud projects', exact: true });
       await destination.click({ timeout: 120_000 });
       await third.page.getByRole('option', { name: 'Home', exact: true }).click();
       await expect.poll(async () => destination.textContent(), { timeout: 30_000 }).toBe('Home');

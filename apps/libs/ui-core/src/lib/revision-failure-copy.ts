@@ -32,11 +32,11 @@ export type RevisionFailureSubject =
 
 /** What Tau Cloud's own budgets answer (D22, I11): one sentence each, each saying when to try again. */
 const hostedRemoteCopy: ReadonlyArray<readonly [string, string]> = [
-  ['GIT_RATE_LIMITED', 'Tau Cloud is getting too many requests for this project. Wait a minute, then try again.'],
-  ['GIT_LEASE_OWNER_BUSY', 'Tau Cloud is still busy with this account’s other projects. Try again in a moment.'],
+  ['GIT_RATE_LIMITED', 'Too many requests for this project. Wait a minute, then try again.'],
+  ['GIT_LEASE_OWNER_BUSY', 'Still busy with this account’s other projects. Try again in a moment.'],
   [
     'GIT_HYDRATE_BUDGET_EXHAUSTED',
-    'This account has reached today’s limit for opening projects on Tau Cloud. Try again tomorrow.',
+    'This account has reached today’s limit for opening projects from the cloud. Try again tomorrow.',
   ],
 ];
 
@@ -176,7 +176,7 @@ export const revisionFailureCopy: Readonly<
       /* Terminal (W2a): no retry and no verb clears it; only a repair of the cloud copy does. */
       [
         'REMOTE_DAMAGED',
-        'Tau has to repair this project’s backup on Tau Cloud before it can back up again. Nothing on this device is lost.',
+        'Tau has to repair this project’s cloud backup before it can back up again. Nothing on this device is lost.',
       ],
     ]),
   },

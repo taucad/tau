@@ -106,8 +106,8 @@ export function PublicationTopbar({
         <p className='hidden max-w-1/2 shrink-0 truncate text-xs text-muted-foreground sm:block'>
           {sourceLabel ??
             (publication.visibility === 'private'
-              ? 'Tau Cloud link · Invited people only'
-              : 'Tau Cloud link · Anyone with the link')}
+              ? 'Cloud link · Invited people only'
+              : 'Cloud link · Anyone with the link')}
         </p>
       </div>
       {/* At phone widths the workbench trigger shares this row; desktop also reserves native window controls. */}

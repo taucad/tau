@@ -162,7 +162,7 @@ describe('PublicationTopbar', () => {
       const title = screen.getByText('Topbar fixture');
       expect(title.parentElement).not.toHaveClass('hidden');
       expect(title.parentElement).toHaveClass('order-last', 'w-full', 'sm:order-none');
-      expect(screen.getByText('Tau Cloud link · Anyone with the link')).toHaveClass('hidden', 'sm:block');
+      expect(screen.getByText('Cloud link · Anyone with the link')).toHaveClass('hidden', 'sm:block');
     });
   });
 });

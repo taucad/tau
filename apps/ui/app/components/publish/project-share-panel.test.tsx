@@ -60,7 +60,7 @@ vi.mock('#lib/share-providers.js', async (importOriginal) => {
     shareProviderRegistry: {
       descriptors: [
         { id: 'direct', label: 'Direct link', capabilities: ['project.publish', 'project.resolve'] },
-        { id: 'tau', label: 'Tau Cloud link', capabilities: ['project.publish', 'project.resolve'] },
+        { id: 'tau', label: 'Cloud link', capabilities: ['project.publish', 'project.resolve'] },
         { id: 'github-gist', label: 'GitHub Gist', capabilities: ['project.publish', 'project.resolve'] },
         { id: 'github', label: 'GitHub repository', capabilities: ['project.resolve'] },
       ],
@@ -248,7 +248,7 @@ describe('ProjectSharePanel', () => {
     await userEvent.click(trigger);
 
     const directOption = screen.getByRole('option', { name: 'Direct link' });
-    const tauCloudOption = screen.getByRole('option', { name: 'Tau Cloud link' });
+    const tauCloudOption = screen.getByRole('option', { name: 'Cloud link' });
     const gistOption = screen.getByRole('option', { name: 'GitHub Gist' });
     expect(directOption.querySelector('.lucide-link-2')).not.toBeNull();
     expect(tauCloudOption.querySelector('.lucide-cloud')).not.toBeNull();
@@ -303,7 +303,7 @@ describe('ProjectSharePanel', () => {
     expect(portableContextDispose).toHaveBeenCalledOnce();
   });
 
-  it('should leave sign-in to the Tau Cloud link rather than asking under the direct link (D95)', async () => {
+  it('should leave sign-in to the cloud link rather than asking under the direct link (D95)', async () => {
     renderPanel(
       <ProjectSharePanel projectId='proj_direct' projectName='Direct' entryPath='main.ts' collectSnapshot={vi.fn()} />,
     );
@@ -668,8 +668,8 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_signed_out' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText('Sign in to create a Tau Cloud link.')).toBeInTheDocument();
-    expect(screen.getByText(/saved to your tau account/i)).toBeInTheDocument();
+    expect(await screen.findByText('Sign in to create a cloud link.')).toBeInTheDocument();
+    expect(screen.getByText(/saved to your account/i)).toBeInTheDocument();
     // Without a snapshot collector the pane offers no direct link, so it does not suggest one.
     expect(screen.queryByText(/use a direct link/i)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
@@ -696,7 +696,7 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_offline' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText("Couldn't reach Tau Cloud.")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't load this project's cloud link.")).toBeInTheDocument();
     expect(screen.getByText('Check your connection, then try again.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
@@ -707,7 +707,7 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_cloud_deleted' projectName='Demo' entryPath='main.ts' />);
 
-    expect(await screen.findByText("This project isn't on Tau Cloud.")).toBeInTheDocument();
+    expect(await screen.findByText("This project isn't in the cloud.")).toBeInTheDocument();
     expect(screen.getByText(/duplicate the project and share the copy/u)).toBeInTheDocument();
     expect(screen.queryByText('Check your connection, then try again.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
@@ -1004,7 +1004,7 @@ describe('ProjectSharePanel', () => {
   });
 
   it('offers sign-in only when the sentence asks for it', async () => {
-    publishFacet({ phase: 'error', error: 'Sign in to publish to Tau Cloud.' });
+    publishFacet({ phase: 'error', error: 'Sign in to publish to the cloud.' });
     renderPanel(<ProjectSharePanel projectId='proj_signin' projectName='Demo' entryPath='main.ts' />);
 
     const alert = await screen.findByRole('alert');

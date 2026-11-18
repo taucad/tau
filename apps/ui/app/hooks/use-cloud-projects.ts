@@ -143,7 +143,7 @@ class CloudDeletionRequestError extends Error {
   public readonly status: number;
 
   public constructor(status: number) {
-    super('Couldn’t delete this project from Tau Cloud. Check your connection and try again.');
+    super('Couldn’t delete this project’s cloud copy. Check your connection and try again.');
     this.name = 'CloudDeletionRequestError';
     this.status = status;
   }
@@ -221,7 +221,7 @@ export const useDeleteCloudProject = (): UseMutationResult<
   return useMutation({
     mutationFn: async (project: CloudProject) => {
       if (account === undefined || getRevisionSessionUser()?.id !== account || project.canDeleteCloud !== true) {
-        throw new Error('You can’t delete this project from Tau Cloud right now. Refresh the page and try again.');
+        throw new Error('You can’t delete this project’s cloud copy right now. Refresh the page and try again.');
       }
       await queryClient.cancelQueries({ queryKey: cloudProjectsQueryKeyFor(account), exact: true });
       try {
@@ -287,7 +287,7 @@ export const assertCloudProjectActive = async (projectId: string): Promise<void>
   const account = getRevisionSessionUser()?.id;
   if (getCloudDeletionState(projectId) !== undefined) {
     throw new CloudProjectUnavailableError(
-      'This project is being deleted from Tau Cloud. Copies on your devices are kept.',
+      'This project’s cloud copy is being deleted. Copies on your devices are kept.',
     );
   }
   const projects = await fetchCloudProjects();
@@ -296,7 +296,7 @@ export const assertCloudProjectActive = async (projectId: string): Promise<void>
     !projects.some((entry) => entry.id === projectId && entry.cloudState !== 'deleting') ||
     getCloudDeletionState(projectId) !== undefined
   ) {
-    throw new CloudProjectUnavailableError('This project is no longer on Tau Cloud. Copies on your devices are kept.');
+    throw new CloudProjectUnavailableError('This project is no longer in the cloud. Copies on your devices are kept.');
   }
 };
 
@@ -352,7 +352,7 @@ class CloudListingAnswerError extends Error {
   public readonly status: number;
 
   public constructor(status: number) {
-    super(`Tau Cloud answered ${String(status)}`);
+    super(`Couldn’t load your cloud projects (${String(status)})`);
     this.status = status;
   }
 }
@@ -786,7 +786,7 @@ export const useTauCloudIntentConnection = ({
               ) {
                 tauCloudIntent.set(projectId, undefined);
               }
-              console.error('Could not open the Tau Cloud project:', error);
+              console.error('Could not open the cloud project:', error);
             }
           };
           void connectActiveProject();

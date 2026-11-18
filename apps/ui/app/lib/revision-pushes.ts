@@ -147,11 +147,11 @@ export const fetchPushPage = async (projectId: string, after: number): Promise<P
     return 'notMember';
   }
   if (!response.ok) {
-    throw recordApiRequestId(new Error(`Tau Cloud answered ${String(response.status)}`), response);
+    throw recordApiRequestId(new Error(`Couldn’t read this project’s pushes (${String(response.status)})`), response);
   }
   const page = parsePushPage(await response.json());
   if (page === undefined) {
-    throw recordApiRequestId(new Error('Tau Cloud answered a push page this build does not read'), response);
+    throw recordApiRequestId(new Error('The push page is in a format this build does not read'), response);
   }
   return page;
 };

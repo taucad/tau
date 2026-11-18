@@ -71,7 +71,7 @@ const refusalMessages: Readonly<Record<string, string>> = {
   agentNotFound: 'That computer is no longer paired with your account.',
   busy: 'That computer is busy. Try again in a moment.',
   childUnavailable: 'That computer couldn’t start Tau.',
-  cloudHostUnavailable: 'Tau Cloud is unavailable.',
+  cloudHostUnavailable: 'Couldn’t start the cloud agent.',
   deviceOffline: 'That computer is offline. Start `tau serve` on it and try again.',
   versionMismatch: 'That computer runs a different Tau version. Update it and try again.',
 };

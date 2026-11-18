@@ -250,6 +250,13 @@ export type ObjectStore = Readonly<{
   read: (oid: string) => Promise<StoredObject | undefined>;
   /** Whether the store holds an object, packed or loose. */
   has: (oid: string) => Promise<boolean>;
+  /**
+   * The ids of `oids` the store holds, packed or loose: {@link ObjectStore.has}
+   * for many at once, each loose fan-out directory listed once rather than
+   * each object looked up by its path. A loose object that lands while it
+   * runs may be answered as not held, never one that is not there as held.
+   */
+  heldOf: (oids: Iterable<string>) => Promise<Set<string>>;
   /** The bytes an object takes in the store, deflated, read from its pack index or file size alone; `undefined` when absent. */
   storedSize: (oid: string) => Promise<number | undefined>;
   /** Store objects loose; answers their ids, in order. */
@@ -684,6 +691,45 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     return files.exists(loosePath(oid));
   };
 
+  const heldOf = async (oids: Iterable<string>): Promise<Set<string>> => {
+    const known = await knownPacks();
+    const held = new Set<string>();
+    /* What no pack holds, by the fan-out directory its loose file would be in. */
+    const byFanout = new Map<string, string[]>();
+    for (const oid of new Set(oids)) {
+      if (known.some((pack) => pack.index.offsetOf(oid) !== undefined)) {
+        held.add(oid);
+      } else {
+        const fanout = oid.slice(0, 2);
+        const wanted = byFanout.get(fanout);
+        if (wanted === undefined) {
+          byFanout.set(fanout, [oid]);
+        } else {
+          wanted.push(oid);
+        }
+      }
+    }
+    if (byFanout.size === 0) {
+      return held;
+    }
+    /* A fan-out directory that is not there holds nothing: one listing answers for all of them. */
+    const present = new Set(await files.readdir(`${gitdir}/objects`).catch(() => [] as string[]));
+    await Promise.all(
+      [...byFanout]
+        .filter(([fanout]) => present.has(fanout))
+        .map(async ([fanout, wanted]) => {
+          const names = new Set(await files.readdir(`${gitdir}/objects/${fanout}`).catch(() => [] as string[]));
+          for (const oid of wanted) {
+            /* A loose file is only ever at its name once whole: it lands by rename. */
+            if (names.has(oid.slice(2))) {
+              held.add(oid);
+            }
+          }
+        }),
+    );
+    return held;
+  };
+
   const storedSize = async (oid: string): Promise<number | undefined> => {
     for (const pack of await knownPacks()) {
       const offset = pack.index.offsetOf(oid);
@@ -803,8 +849,8 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
 
   const importObjects = async (objects: Iterable<ImportedObject>): Promise<string[]> => {
     const asked = [...new Map([...objects].map((object) => [object.oid, object])).values()];
-    /* Every lookup at once: an import asks for hundreds, and each may touch a loose file. */
-    const held = await Promise.all(asked.map(async (object) => has(object.oid)));
+    /* One lookup for all of them: an import asks for hundreds, and a lookup each would touch a loose path each. */
+    const holding = await heldOf(asked.map((object) => object.oid));
     const names: string[] = [];
     let batch: ImportedObject[] = [];
     let bytes = 0;
@@ -829,8 +875,8 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
       batch = [];
       bytes = 0;
     };
-    for (const [at, object] of asked.entries()) {
-      if (!held[at]) {
+    for (const object of asked) {
+      if (!holding.has(object.oid)) {
         if (bytes > 0 && bytes + object.data.byteLength > bounds.maxPackBytes) {
           // oxlint-disable-next-line no-await-in-loop -- one bounded pack written before the next is filled.
           await flush();
@@ -1167,6 +1213,7 @@ export const createObjectStore = (options: ObjectStoreOptions): ObjectStore => {
     writeLoose,
     addPack,
     importObjects,
+    heldOf,
     attachSource: (source: ObjectSource) => {
       sources.push(source);
     },

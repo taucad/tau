@@ -538,8 +538,8 @@ const keepStaged = async (importer: Importer): Promise<void> => {
 /* The ids of `oids` the store does not hold yet. */
 const unheld = async (store: ObjectStore, oids: Iterable<string>): Promise<string[]> => {
   const unique = [...new Set(oids)];
-  const held = await Promise.all(unique.map(async (oid) => store.has(oid)));
-  return unique.filter((_oid, at) => !held[at]);
+  const held = await store.heldOf(unique);
+  return unique.filter((oid) => !held.has(oid));
 };
 
 /*

@@ -411,6 +411,55 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
     expect(opened!.report.ranges.rangeRequests).toBe(served.ranges.length);
   });
 
+  it('looks up no loose object by its own path: a fan-out directory is listed once, and one not there is not read', async () => {
+    // An object-by-object `exists` was the largest local cost of a cold open after its last pack byte (SP6-import):
+    // three lookups per object, each a path resolution in the origin's private file system.
+    const compute = countingCompute();
+    const provider = new MemoryProvider();
+    await provider.mkdir('.git/objects/pack', { recursive: true });
+    const files = gitFilesOf(provider, '.git');
+    const asked: string[] = [];
+    const listed: string[] = [];
+    const store = createObjectStore({
+      files: {
+        ...files,
+        exists: async (path) => {
+          asked.push(path);
+          return files.exists(path);
+        },
+        readdir: async (path) => {
+          listed.push(path);
+          return files.readdir(path);
+        },
+      },
+      gitdir: '.git',
+      compute,
+      fenceName: 'cold-no-lookups',
+    });
+    /* A loose object already held is still found, so it is not imported again. */
+    const scad = hosted.git('rev-parse', `${hosted.main}:main.scad`);
+    const [held] = await store.writeLoose([
+      { type: 'blob', data: new TextEncoder().encode(`${hosted.git('cat-file', 'blob', scad)}\n`) },
+    ]);
+    expect(held).toBe(scad);
+    asked.length = 0;
+    listed.length = 0;
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: serve(hosted).fetch, store, compute });
+    expect(opened).toBeDefined();
+    expect(asked.filter((path) => /\/objects\/[\da-f]{2}\/[\da-f]{38}$/u.test(path))).toEqual([]);
+    /* No fan-out directory but the one that is there is listed, whatever the number of objects. */
+    const fanouts = listed.filter((path) => /\/objects\/[\da-f]{2}$/u.test(path));
+    expect(fanouts.filter((path) => path !== `.git/objects/${scad.slice(0, 2)}`)).toEqual([]);
+    const packFiles = await provider.readdir('.git/objects/pack');
+    const indexes = packFiles.filter((name) => name.endsWith('.idx'));
+    expect(indexes.length).toBeGreaterThan(0);
+    const written = await Promise.all(
+      indexes.map(async (name) => readPackIndex(new Uint8Array(await provider.readFile(`.git/objects/pack/${name}`)))),
+    );
+    expect(written.some((index) => index.offsetOf(scad) !== undefined)).toBe(false);
+    expect(written.some((index) => index.offsetOf(hosted.main) !== undefined)).toBe(true);
+  });
+
   it('asks every pack Range past the HTTP cache, so parallel ranges of one pack are not serialised', async () => {
     // Chrome's HTTP cache holds one cache entry lock per URL, so parallel Range reads of one pack link waited on
     // each other: 10 in parallel took 2,057 ms against 230 ms uncached (speed phase SP0).

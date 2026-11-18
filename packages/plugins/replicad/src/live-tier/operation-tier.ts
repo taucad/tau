@@ -20,6 +20,7 @@ import type { OperationCache, OperationRequest, OperationStep } from 'replicad';
 import { isWebAssemblyException } from '@taucad/runtime/kernel';
 import { sha256BytesSync, sha256StringSync } from '@taucad/utils/hash';
 import { createEntryCost } from '#live-tier/entry-cost.js';
+import { isUseAfterRelease } from '#build-epochs.js';
 
 type ReplicadLibrary = typeof ReplicadModule;
 
@@ -145,8 +146,8 @@ type ExceptionRefcount = {
 
 /**
  * Whether a failure of an operation whose errors are deterministic may be reused: an OpenCASCADE exception
- * (raw or decoded) or Replicad's own plain `Error`. Resource exhaustion, cancellation, traps and anything
- * else are never reused.
+ * (raw or decoded) or Replicad's own plain `Error`. Resource exhaustion, cancellation, traps, a use of a
+ * deleted value (it depends on what was released, not on the inputs) and anything else are never reused.
  * @param error - The thrown value.
  * @returns True when the failure is a function of the operation's inputs.
  */
@@ -154,7 +155,7 @@ const reusableFailure = (error: unknown): boolean => {
   if (isWebAssemblyException(error)) {
     return true;
   }
-  if (!(error instanceof Error)) {
+  if (!(error instanceof Error) || isUseAfterRelease(error)) {
     return false;
   }
   if (error.name === 'OcKernelError') {

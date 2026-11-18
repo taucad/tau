@@ -7,7 +7,7 @@ import * as replicad from 'replicad';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { initOcct, wrapOcForExceptions } from '@taucad/occt-core';
 import { loadReplicadSingleWasm } from '#replicad-wasm-single-loader.js';
-import { createHandleEpochs } from '#build-epochs.js';
+import { createHandleEpochs, isUseAfterRelease } from '#build-epochs.js';
 
 const library = { ...replicad };
 
@@ -40,7 +40,14 @@ describe('handle epochs', () => {
     });
     const second = epochs.adopt({ shapes: [{ shape: shared }, { shape: 'not a shape' }, { shape: { plain: true } }] });
     expect(epochs.adopt(first)).toBe(first);
-    expect(epochs.stats()).toStrictEqual({ epochs: 2, liveHandles: 2, liveValues: 5, parked: 0, deleted: 0 });
+    expect(epochs.stats()).toStrictEqual({
+      epochs: 2,
+      liveHandles: 2,
+      liveValues: 5,
+      parked: 0,
+      deleted: 0,
+      collected: 0,
+    });
 
     // Released, nothing is deleted yet: user code may return a shape again from state it keeps.
     epochs.release(first);
@@ -61,7 +68,14 @@ describe('handle epochs', () => {
     expect(epochs.stats()).toMatchObject({ liveHandles: 0, liveValues: 0, parked: 3 });
     epochs.dispose();
     expect([shared, kept].map((shape) => isDeleted(shape))).toStrictEqual([true, true]);
-    expect(epochs.stats()).toStrictEqual({ epochs: 3, liveHandles: 0, liveValues: 0, parked: 0, deleted: 4 });
+    expect(epochs.stats()).toStrictEqual({
+      epochs: 3,
+      liveHandles: 0,
+      liveValues: 0,
+      parked: 0,
+      deleted: 4,
+      collected: 0,
+    });
   });
 
   it('keeps what a module builds at its top level, and marks nothing outside module execution', async () => {
@@ -101,5 +115,52 @@ describe('handle epochs', () => {
     epochs.dispose();
     expect(isDeleted(nested!)).toBe(false);
     nested!.delete();
+  });
+
+  it('leaves a collector handle to the registry, and remembers what it deleted', () => {
+    const epochs = createHandleEpochs(library);
+    const memo = replicad.makeCylinder(1, 2);
+    const user = replicad.makeCylinder(3, 2);
+    epochs.release(epochs.adopt({ shapes: [{ shape: memo }] }));
+    expect(epochs.wasReleased(memo)).toBe(false);
+
+    // A collector delivery still settles what other handles parked, but holds nothing itself.
+    const fresh = replicad.makeCylinder(1, 2);
+    const collected = epochs.adopt({ shapes: [{ shape: fresh }] }, { collector: true });
+    expect(isDeleted(memo)).toBe(true);
+    expect(epochs.wasReleased(memo)).toBe(true);
+    expect(epochs.stats()).toMatchObject({ epochs: 1, liveHandles: 0, parked: 0, deleted: 1, collected: 1 });
+
+    // Releasing it, or a managed handle delivering the same value later, never deletes the value.
+    epochs.release(collected);
+    epochs.release(epochs.adopt({ shapes: [{ shape: fresh }] }));
+    epochs.adopt({ shapes: [] });
+    epochs.dispose();
+    expect(isDeleted(fresh)).toBe(false);
+    expect(epochs.wasReleased(fresh)).toBe(false);
+
+    // A shape the user deleted was not released by an epoch.
+    user.delete();
+    expect(epochs.wasReleased(user)).toBe(false);
+    expect(epochs.wasReleased('not a shape')).toBe(false);
+    fresh.delete();
+  });
+
+  it('recognizes a use-after-release failure and nothing else', () => {
+    const shape = replicad.makeBaseBox(1, 1, 1);
+    shape.delete();
+    let thrown: unknown;
+    try {
+      shape.translate([1, 0, 0]);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(isUseAfterRelease(thrown)).toBe(true);
+    expect(isUseAfterRelease(new Error('Cannot pass deleted object as a pointer of type TopoDS_Shape'))).toBe(true);
+    expect(isUseAfterRelease(new Error('TopoDS_Shape instance already deleted'))).toBe(true);
+    expect(isUseAfterRelease(new Error('This finder has been deleted'))).toBe(true);
+    expect(isUseAfterRelease(new Error('Gear ratio out of range'))).toBe(false);
+    expect(isUseAfterRelease(new Error('The deleted face count must be positive'))).toBe(false);
+    expect(isUseAfterRelease('This object has been deleted')).toBe(false);
   });
 });

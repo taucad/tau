@@ -83,7 +83,7 @@ import type { ReplicadMeshMemo } from '#utils/mesh-memo.js';
 import { createToleranceLadder } from '#utils/tolerance-ladder.js';
 import type { ToleranceLadder } from '#utils/tolerance-ladder.js';
 import type { LiveTier } from '#live-tier/live-tier.js';
-import { createHandleEpochs } from '#build-epochs.js';
+import { createHandleEpochs, isUseAfterRelease } from '#build-epochs.js';
 import type { HandleEpochs } from '#build-epochs.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
@@ -275,6 +275,12 @@ type ReplicadContext = {
   liveTier: LiveTier<BuiltModel> | undefined;
   /** Build and module epochs: what each delivered handle owns, deleted when the runtime releases it (E12). */
   epochs: HandleEpochs;
+  /**
+   * Release fallback: bundled code of each module that returned or used a value its epochs had deleted, mapped to the
+   * code of its fresh instance. Builds of such a module run the fresh instance and leave its handles to the collector
+   * for the worker's life; a code edit is a new module and starts with deterministic release again.
+   */
+  collectorModules: Map<string, string>;
   /** Meshes and boxes kept across renders (E7, N2); made by the first render with the live tier, never without it. */
   meshMemo?: ReplicadMeshMemo;
   /** Display tolerance ladder (E8); only with the `tessellationLadder` option. */
@@ -673,6 +679,7 @@ export const replicadKernel = defineKernel({
         libraryTrace,
         liveTier,
         epochs: createHandleEpochs(replicadLibrary),
+        collectorModules: new Map(),
         toleranceLadder: tessellationLadder ? createToleranceLadder() : undefined,
       };
     } catch (error) {
@@ -696,7 +703,8 @@ export const replicadKernel = defineKernel({
       }
       bundleSourceMap = bundleResult.sourceMap;
 
-      const executeResult = await context.epochs.inModuleEpoch(async () => runtime.execute(bundleResult.code));
+      const moduleCode = collectorModuleCode(context, bundleResult.code) ?? bundleResult.code;
+      const executeResult = await context.epochs.inModuleEpoch(async () => runtime.execute(moduleCode));
       if (!executeResult.success) {
         return createKernelError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
       }
@@ -748,8 +756,8 @@ export const replicadKernel = defineKernel({
         });
       }
 
-      const buildGeometry = named('Object.createGeometry', async () => {
-        const executeResult = await context.epochs.inModuleEpoch(async () => runtime.execute(bundleResult.code));
+      const buildGeometry = named('Object.createGeometry', async (moduleCode: string) => {
+        const executeResult = await context.epochs.inModuleEpoch(async () => runtime.execute(moduleCode));
         if (!executeResult.success) {
           throw new ReplicadBuildError(convertRawIssuesToKernelIssues(executeResult.issues, relativeFilePath));
         }
@@ -854,6 +862,11 @@ export const replicadKernel = defineKernel({
         });
 
         runtime.signal.throwIfAborted();
+        // A shape kept in module state and returned after the build that delivered it was released is deleted: fail
+        // here, where the release fallback can answer, rather than when the render reads it.
+        if (entries.some(({ shape }) => context.epochs.wasReleased(shape))) {
+          throw new Error('This object has been deleted: main returned a shape released with an earlier build.');
+        }
         const handle: NativeHandle = {
           shapes: entries,
           mechanism,
@@ -862,14 +875,30 @@ export const replicadKernel = defineKernel({
         return { handle, issues, ...offersFor(handle) };
       });
 
-      const built = await buildGeometry();
+      let collectorCode = collectorModuleCode(context, bundleResult.code);
+      let built: BuiltModel;
+      try {
+        built = await buildGeometry(collectorCode ?? bundleResult.code);
+      } catch (error) {
+        // Release fallback: the module kept a value its epochs deleted. Run it fresh, once, in this build, and leave
+        // its values to the collector from now on. A second failure, or any other error, is the build's.
+        if (collectorCode !== undefined || !isUseAfterRelease(error)) {
+          throw error;
+        }
+        collectorCode = `${bundleResult.code}\n// taucad: fresh module instance released by the collector\n`;
+        context.collectorModules.set(bundleResult.code, collectorCode);
+        runtime.logger.warn('Replicad module kept a released shape; running it fresh with collector release', {
+          data: { filePath: relativeFilePath },
+        });
+        built = await buildGeometry(collectorCode);
+      }
       if (documentTier) {
         // Fail closed (catalogue N7): any build delivered with a tier installed shares native shapes with tier
         // entries that a later build's destructive boolean may change in place, so it has no exact snapshot.
         tierBuiltHandles.add(built.handle);
       }
       documentTier?.scenes.admit(bundleResult.code, parameters, aliasBuiltModel(built));
-      context.epochs.adopt(built.handle);
+      context.epochs.adopt(built.handle, { collector: collectorCode !== undefined });
       return built;
     } catch (error) {
       if (error instanceof ReplicadBuildError) {
@@ -1263,6 +1292,16 @@ export const replicadKernel = defineKernel({
     }
   },
 });
+
+/**
+ * The fresh module code a module runs after the release fallback, if it fell back. The map is empty unless a module
+ * did, so the normal path reads no key.
+ * @param context - The kernel context.
+ * @param code - The module's bundled code.
+ * @returns Its fresh instance's code, or undefined.
+ */
+const collectorModuleCode = (context: ReplicadContext, code: string): string | undefined =>
+  context.collectorModules.size === 0 ? undefined : context.collectorModules.get(code);
 
 type Aliasable = { delete?: () => void; innerShape?: { delete?: () => void }; clone(): Aliasable };
 

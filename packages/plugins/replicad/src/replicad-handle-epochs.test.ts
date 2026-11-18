@@ -141,6 +141,182 @@ const memoized = `
   }
 `;
 
+/**
+ * Module sources for the release fallback. Each counts its own executions on `globalThis` under `counter`, so a test
+ * sees whether the kernel ran the module fresh.
+ * @param counter - Global the module increments when it executes.
+ * @param body - The module's `main`.
+ * @returns The module source.
+ */
+const counted = (counter: string, body: string): string => `
+  import { makeCylinder } from 'replicad';
+  globalThis.${counter} = (globalThis.${counter} ?? 0) + 1;
+  export const defaultParams = { key: 1, tag: 0 };
+  ${body}
+`;
+const executions = (counter: string): number => Number((globalThis as Record<string, unknown>)[counter] ?? 0);
+
+/** The memo of {@link memoized}, keyed by `key`; `tag` changes nothing but misses the scene table. */
+const memoBody = `
+  const cache = new Map();
+  export default function main(p = defaultParams) {
+    let shape = cache.get(p.key);
+    if (!shape) {
+      shape = makeCylinder(p.key, 8);
+      cache.set(p.key, shape);
+    }
+    return shape;
+  }
+`;
+
+/** One build per key of a cold reuse-off session each: the bytes every revisit must reproduce (I1). */
+const coldGlbs = async (source: string, keys: readonly number[]): Promise<Map<number, string>> => {
+  const glbs = new Map<number, string>();
+  for (const key of keys) {
+    const opened = session(source, { computeReuse: false });
+    try {
+      glbs.set(key, await opened.build({ key, tag: 0 }));
+    } finally {
+      await opened.close();
+    }
+  }
+  return glbs;
+};
+
+/** The build's error message, or undefined when it rendered. */
+const failureOf = async (build: Promise<string>): Promise<string | undefined> => {
+  try {
+    await build;
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
+
+describe('replicad release fallback', () => {
+  /**
+   * A slider drag cycles a memo through three keys and back: the third build deletes the first key's shape, parked
+   * when its build was replaced, so the fourth build returns a deleted shape. The kernel runs the module fresh once in
+   * that build and releases its shapes by the collector from then on.
+   */
+  it(
+    'should rebuild a module-state memo cycling 1, 2, 3, 1 with the bytes of a cold build, reuse off and on',
+    async () => {
+      const keys = [1, 2, 3, 1, 2, 3, 1, 3, 2, 1];
+      for (const [arm, options] of [
+        ['off', { computeReuse: false }],
+        ['on', {}],
+      ] as const) {
+        const counter = `__replicadFallbackMemo_${arm}`;
+        const source = counted(counter, memoBody);
+        const cold = await coldGlbs(source, [1, 2, 3]);
+        const opened = session(source, options);
+        try {
+          const glbs: string[] = [];
+          for (const [index, key] of keys.entries()) {
+            // A new tag every build: the scene table never answers, so the memo does.
+            glbs.push(await opened.build({ key, tag: index }));
+          }
+          expect(glbs, arm).toStrictEqual(keys.map((key) => cold.get(key)));
+          // Three cold sessions, the session's first execution and one fresh run: the switch to the collector holds
+          // for the later cycles.
+          expect(executions(counter), arm).toBe(3 + 2);
+        } finally {
+          await opened.close();
+        }
+      }
+    },
+    renderTimeout,
+  );
+
+  it(
+    'should neither double-delete nor leak across the fresh run',
+    async () => {
+      const counter = '__replicadFallbackLedger';
+      const opened = session(counted(counter, memoBody), { computeReuse: false });
+      try {
+        await opened.build({ key: 1, tag: 0 });
+        const ledger = ledgerOf();
+        await collect();
+        const before = ledger.snapshot();
+        const alive: number[] = [];
+        for (let step = 1; step <= 30; step += 1) {
+          await opened.build({ key: (step % 3) + 1, tag: step });
+          await collect();
+          alive.push(ledger.since(before).length);
+        }
+        expect(executions(counter)).toBe(2);
+        const settled = alive.slice(9);
+        expect(settled, JSON.stringify(summarizeLeaks(ledger.since(before)))).toStrictEqual(
+          Array.from({ length: settled.length }, () => settled[0]),
+        );
+        expect(ledger.stats().doubleDeletes).toBe(0);
+      } finally {
+        await opened.close();
+      }
+    },
+    renderTimeout,
+  );
+
+  it(
+    'should not run a module fresh when its build throws any other error',
+    async () => {
+      const counter = '__replicadFallbackOther';
+      const opened = session(
+        counted(
+          counter,
+          `export default function main(p = defaultParams) {
+            if (p.key === 2) throw new Error('Gear ratio out of range');
+            return makeCylinder(p.key, 8);
+          }`,
+        ),
+        { computeReuse: false },
+      );
+      try {
+        await opened.build({ key: 1, tag: 0 });
+        expect(await failureOf(opened.build({ key: 2, tag: 0 }))).toContain('Gear ratio out of range');
+        expect(executions(counter)).toBe(1);
+      } finally {
+        await opened.close();
+      }
+    },
+    renderTimeout,
+  );
+
+  it(
+    'should surface a deleted-object error that the fresh run throws again, without another retry',
+    async () => {
+      for (const [arm, options] of [
+        ['off', { computeReuse: false }],
+        ['on', {}],
+      ] as const) {
+        const counter = `__replicadFallbackAgain_${arm}`;
+        const opened = session(
+          counted(
+            counter,
+            `export default function main(p = defaultParams) {
+              const shape = makeCylinder(p.key, 8);
+              shape.delete();
+              return shape.translate([1, 0, 0]);
+            }`,
+          ),
+          options,
+        );
+        try {
+          expect(await failureOf(opened.build({ key: 1, tag: 0 })), arm).toContain('This object has been deleted');
+          expect(executions(counter), arm).toBe(2);
+          // The module now releases by the collector: a later build runs it as it is and fails the same way.
+          expect(await failureOf(opened.build({ key: 2, tag: 1 })), arm).toContain('This object has been deleted');
+          expect(executions(counter), arm).toBe(2);
+        } finally {
+          await opened.close();
+        }
+      }
+    },
+    renderTimeout,
+  );
+});
+
 describe('replicad build epochs', () => {
   it(
     'should delete what a replaced build delivered without the collector',
@@ -220,7 +396,7 @@ describe('replicad build epochs', () => {
   );
 
   /**
-   * T6 for E12: a 40-step drag through distinct values. After the first ten steps, collection leaves exactly as many
+   * T6 for E12: a 40-step drag through distinct values. After the first twenty steps, collection leaves exactly as many
    * live handles and the same WebAssembly heap as at the end: nothing accumulates per edit.
    */
   const expectFlatDrag = async (options: Options): Promise<{ tierBytes: number[]; evicted: number }> => {
@@ -239,11 +415,13 @@ describe('replicad build epochs', () => {
         heaps.push(heapBytes());
       }
 
-      const settled = handles.slice(9);
+      // The mesh memo keeps a partner for 16 renders after its last use (decayRenders), so the live tier's arms
+      // settle once that window has passed; reuse off builds no memo and settles sooner.
+      const settled = handles.slice(19);
       expect(settled, JSON.stringify(summarizeLeaks(ledger.since(before)).slice(0, 10))).toStrictEqual(
         Array.from({ length: settled.length }, () => settled[0]),
       );
-      expect(heaps.at(-1)).toBe(heaps[9]);
+      expect(heaps.at(-1)).toBe(heaps[19]);
       expect(ledger.stats().doubleDeletes).toBe(0);
       return { tierBytes: opened.tierBytes, evicted: opened.evicted() };
     } finally {

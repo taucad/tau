@@ -19,6 +19,13 @@
  * What a build creates and does not return (the intermediates of `main`) is still freed by the registry: without a
  * handle registry in the OpenCascade glue, nothing finds them deterministically.
  *
+ * Release fallback. A module that keeps shapes `main` built in module state (a memo keyed by a parameter) may return
+ * one after its build was released and the shape deleted: a drag through three values and back does. The kernel then
+ * runs that module fresh, once, in the same build, and adopts its handles for the collector from then on
+ * (`adopt(handle, { collector: true })`): their values are never parked or deleted here, and Replicad's finalization
+ * registry frees them as it did before epochs. The epochs remember what they deleted (`wasReleased`), so the kernel
+ * can tell a returned released value from a shape the user deleted.
+ *
  * @internal
  */
 import type * as ReplicadModule from 'replicad';
@@ -40,6 +47,17 @@ export type HandleEpochStats = {
   readonly parked: number;
   /** Values deleted by released epochs. */
   readonly deleted: number;
+  /** Handles adopted for the collector (release fallback). */
+  readonly collected: number;
+};
+
+/** How a handle is adopted. @internal */
+export type AdoptOptions = {
+  /**
+   * Leave the handle's values to Replicad's finalization registry: no epoch holds, parks or deletes them. The kernel
+   * adopts a module's handles this way once the module returned a value its epochs had deleted.
+   */
+  readonly collector?: boolean;
 };
 
 /** The kernel's build and module epochs. @internal */
@@ -53,15 +71,34 @@ export type HandleEpochs = {
    * Open the build epoch of a handle about to be delivered. Parked values it delivers again are its own; the other
    * parked values are deleted.
    */
-  adopt<Handle extends EpochHandle>(handle: Handle): Handle;
+  adopt<Handle extends EpochHandle>(handle: Handle, options?: AdoptOptions): Handle;
   /** End a delivered handle's epoch, parking each value it alone owns. A second release is a no-op. */
   release(handle: EpochHandle): void;
+  /** Whether an epoch deleted `value`: user code returned or used a shape after its build was released. */
+  wasReleased(value: unknown): boolean;
   /** Delete every parked value, when the kernel is disposed. */
   dispose(): void;
   stats(): HandleEpochStats;
 };
 
 type Deletable = { delete(): void };
+
+/**
+ * Messages of a value used after it was deleted: Replicad's wrappers and finders, and embind's own checks.
+ */
+const useAfterReleasePattern = /\b(?:has been deleted|instance already deleted|deleted object)\b/u;
+
+/**
+ * Whether a build failed because a value it used had been deleted: Replicad's "This object has been deleted", or
+ * embind's "Cannot pass deleted object" and "instance already deleted". Not a function of the build's inputs, so the
+ * live tier never keeps it as a failure, and the kernel answers it with the release fallback.
+ *
+ * @param error - What the build threw.
+ * @returns True for a use-after-release failure.
+ * @internal
+ */
+export const isUseAfterRelease = (error: unknown): boolean =>
+  error instanceof Error && useAfterReleasePattern.test(error.message);
 
 const isDeletable = (value: unknown): value is Deletable =>
   value !== null && typeof value === 'object' && typeof (value as Partial<Deletable>).delete === 'function';
@@ -99,7 +136,10 @@ const markConstruction = (prototype: unknown, property: string, mark: (value: We
  * @internal
  */
 export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
+  /** Values no build epoch deletes: built while a module executed, or delivered by a collector handle. */
   const moduleOwned = new WeakSet();
+  /** Values the epochs deleted. */
+  const released = new WeakSet();
   const live = new Set<EpochHandle>();
   /** Live handles delivering each value. */
   const holders = new Map<WeakKey, number>();
@@ -107,6 +147,7 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
   const parked = new Set<WeakKey>();
   let epochs = 0;
   let deleted = 0;
+  let collected = 0;
   let executing = false;
 
   const valuesOf = (handle: EpochHandle): Set<WeakKey> => {
@@ -123,6 +164,7 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
     for (const value of parked) {
       if (isDeletable(value)) {
         value.delete();
+        released.add(value);
         deleted += 1;
       }
     }
@@ -148,7 +190,16 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
         executing = false;
       }
     },
-    adopt(handle) {
+    adopt(handle, options) {
+      if (options?.collector === true) {
+        collected += 1;
+        for (const value of valuesOf(handle)) {
+          moduleOwned.add(value);
+          parked.delete(value);
+        }
+        deleteParked();
+        return handle;
+      }
       if (!live.has(handle)) {
         live.add(handle);
         epochs += 1;
@@ -176,7 +227,15 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
         }
       }
     },
+    wasReleased: (value) => value !== null && typeof value === 'object' && released.has(value),
     dispose: deleteParked,
-    stats: () => ({ epochs, liveHandles: live.size, liveValues: holders.size, parked: parked.size, deleted }),
+    stats: () => ({
+      epochs,
+      liveHandles: live.size,
+      liveValues: holders.size,
+      parked: parked.size,
+      deleted,
+      collected,
+    }),
   };
 };

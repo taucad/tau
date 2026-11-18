@@ -250,6 +250,7 @@ describe('live operation tier', () => {
       ['a cancellation', new Aborted('superseded'), true],
       ['a resource error', new RangeError('Maximum call stack size exceeded'), true],
       ['a trap', new WebAssembly.RuntimeError('unreachable'), true],
+      ['a use of a deleted value', new Error('This object has been deleted'), true],
     ])('should run the operation again after %s', async (_case, error, deterministicErrors) => {
       expect(await twice(error, deterministicErrors)).toBe(2);
     });

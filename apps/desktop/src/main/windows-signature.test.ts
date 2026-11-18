@@ -166,18 +166,18 @@ describe('Windows Authenticode verdict', () => {
 
   const verifyOutput = (timestamp: string): string =>
     [
-      'Verifying: D:\\a\\tau\\tau\\out\\installer-output\\app\\d3dcompiler_47.dll',
+      String.raw`Verifying: D:\a\tau\tau\out\installer-output\app\d3dcompiler_47.dll`,
       '',
       'Signature Index: 0 (Primary Signature)',
       'Hash of file (sha256): 0F1E',
       '',
       'Signing Certificate Chain:',
       '    Issued to: Microsoft Identity Verification Root Certificate Authority 2020',
-      `    Issued to: ${'TAUCAD LIMITED'}`,
+      '    Issued to: TAUCAD LIMITED',
       '',
       timestamp,
       '',
-      'Successfully verified: D:\\a\\tau\\tau\\out\\installer-output\\app\\d3dcompiler_47.dll',
+      String.raw`Successfully verified: D:\a\tau\tau\out\installer-output\app\d3dcompiler_47.dll`,
       '',
       'Number of files successfully Verified: 1',
       'Number of warnings: 0',
@@ -197,7 +197,7 @@ describe('Windows Authenticode verdict', () => {
       'catalog-verified',
       verifyOutput('The signature is timestamped: Tue Nov 18 22:56:55 2026').replace(
         'Signature Index: 0 (Primary Signature)',
-        'File is signed in catalog: C:\\Windows\\system32\\CatRoot\\x.cat',
+        String.raw`File is signed in catalog: C:\Windows\system32\CatRoot\x.cat`,
       ),
       { verified: false, timestamped: false },
     ],

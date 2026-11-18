@@ -149,7 +149,7 @@ const main = async (): Promise<void> => {
       { stdio: 'inherit', timeout: 120_000 },
     );
     // Electron ships Windows components (d3dcompiler_47.dll) that Windows verifies by its OS catalog.
-    await verifyWindowsSignature({ path, publisher, allowWindowsComponent: path !== join(stage, 'Tau.exe') });
+    await verifyWindowsSignature({ path, publisher, allowWindowsComponent: true, signtool: signing.tool });
     signed.push({ path, sha256: await sha256(path) });
   };
   const peFiles: string[] = [];

@@ -237,6 +237,23 @@ jobs:
     secrets:
       NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN }}
 
+  # INTEL-1 (operator approval 2026-11-18, ping 2, as MAC-X left the queue in tau #2505): the darwin-x64 native
+  # rows (`native-hosts.yml`, `macos-26-intel`: the Build123d suites, `tau prepare build123d` with the built CLI and
+  # PicoGK's typed refusals) left the merge queue, where they were its slowest jobs, and pass here on the candidate's
+  # own commit before its tag exists. Every Nx task runs fresh (`NX_SKIP_NX_CACHE`) and no cache token is passed.
+  # They run beside the shell gate on a runner of their own, so they add no wall time before the packaged suite ends.
+  # A red row means no candidate this time.
+  intel-native:
+    name: Intel native gate
+    needs: [prerelease]
+    if: needs.prerelease.outputs.release == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/native-hosts.yml
+    with:
+      hosts: intel
+      ref: ${{ needs.prerelease.outputs.sha }}
+
   # Operator decision D-DS1 (b) (desktop split blueprint DS-3): the packaged desktop suite passes on the
   # candidate's own commit after the shell gate and before the tag exists, so a packaged regression is
   # found hours after it merged, never on the merge queue's path. A red suite means no candidate this
@@ -272,8 +289,8 @@ jobs:
 
   tag:
     name: Tag the staging desktop candidate
-    needs: [prerelease, shell, packaged, benchmarks, rehearsal]
-    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success' && needs.rehearsal.result == 'success'
+    needs: [prerelease, shell, packaged, benchmarks, intel-native, rehearsal]
+    if: needs.prerelease.outputs.release == 'true' && needs.shell.result == 'success' && needs.packaged.result == 'success' && needs.benchmarks.result == 'success' && needs.intel-native.result == 'success' && needs.rehearsal.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -325,6 +342,7 @@ jobs:
 
           Shell conformance gate: run ${RUN_ID}
           Packaged desktop gate: run ${RUN_ID}
+          Intel native gate: run ${RUN_ID}
           Rehearsal gate (T-REH.2): run ${RUN_ID}
           NOTES
           sed -i 's/^          //' "$RUNNER_TEMP/notes.md"

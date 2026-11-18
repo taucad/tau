@@ -82,7 +82,6 @@ jobs:
       browser: ${{ steps.plan.outputs.browser }}
       browser-projects: ${{ steps.plan.outputs.browser-projects }}
       native-hosts: ${{ steps.plan.outputs.native-hosts }}
-      native-intel: ${{ steps.plan.outputs.native-intel }}
       native-darwin: ${{ steps.plan.outputs.native-darwin }}
       native-darwin-projects: ${{ steps.plan.outputs.native-darwin-projects }}
       native-linux: ${{ steps.plan.outputs.native-linux }}
@@ -143,7 +142,7 @@ jobs:
           # does not rebuild the production image.
           # Native host rows (`native-hosts.yml`): a `tag:ci:native-hosts` project (Build123d, PicoGK,
           # the CLI) or a `test:native-linux` project is affected; the latter are also the linux-x64
-          # native rows it runs, and the former start its Intel row (`native-intel`).
+          # native rows it runs. Its Intel rows run at the desktop candidate gate, never here (INTEL-1).
           # Native darwin rows (`native-darwin.yml`): a `test:native-darwin` project (Build123d, PicoGK, the
           # CLI) is affected; `native-darwin-projects` names the rows. NATIVE_DARWIN_LANE_PATHS select every
           # such project: that workflow and the nuget standalone oracle's sources outside the native closure,
@@ -421,7 +420,6 @@ jobs:
           browser_projects=$(jq -c '.browser' <<< "$lanes")
           native_linux=$(jq -r '."native-linux" | join(",")' <<< "$lanes")
           native_hosts=$(jq -r 'if .["native-hosts"] == [] and .["native-linux"] == [] then "false" else "true" end' <<< "$lanes")
-          native_intel=$(flag native-hosts)
           native_darwin=$(flag native-darwin)
           native_darwin_projects=$(jq -r '."native-darwin" | join(",")' <<< "$lanes")
           viewer_parity=$(flag viewer-parity)
@@ -472,7 +470,6 @@ jobs:
             echo "browser=$browser"
             echo "geospec-examples=$geospec_examples"
             echo "native-hosts=$native_hosts"
-            echo "native-intel=$native_intel"
             echo "native-darwin=$native_darwin"
             echo "native-darwin-projects=$native_darwin_projects"
             echo "native-linux=$native_linux"
@@ -1003,9 +1000,10 @@ jobs:
 
   # The native host rows (`native-hosts.yml`), in the merge queue and on a push the queue did not
   # prove, when the plan finds a `tag:ci:native-hosts` or `test:native-linux` project affected: the
-  # Linux rows with the affected `test:native-linux` projects, and the Intel row when a
-  # `tag:ci:native-hosts` project is affected (CI throughput review Q-3). Its plan job is skipped when
-  # called; the nightly and a dispatch run that workflow on their own. The required check waits for it.
+  # Linux rows (`hosts: linux`) with the affected `test:native-linux` projects (CI throughput review Q-3).
+  # The darwin-x64 rows run at the desktop candidate gate (`release-desktop-staging.yml` job `Intel native
+  # gate`, INTEL-1), not here. Its plan job is skipped when called; a dispatch runs that workflow on its
+  # own. The required check waits for it.
   native-hosts:
     name: Native hosts
     needs: [plan]
@@ -1014,8 +1012,8 @@ jobs:
       contents: 'read'
     uses: ./.github/workflows/native-hosts.yml
     with:
+      hosts: linux
       native-linux: ${{ needs.plan.outputs.native-linux }}
-      intel: ${{ needs.plan.outputs.native-intel }}
 
   # The darwin-arm64 native rows (`native-darwin.yml`), in the merge queue and on a push the queue did
   # not prove, when the plan finds a `test:native-darwin` project affected or a native darwin lane path

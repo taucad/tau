@@ -46,14 +46,6 @@ const matrix: ReadonlyArray<{
   { name: 'planetary-gear-system', a: { inputAngle: 15 }, b: { faceWidth: 16 } },
 ];
 
-/**
- * Leaks in `@taulabs/replicad` itself, not in Tau. `drawFaceOutline` (the planetary gears' tooth profiles) keeps the
- * `Geom2d_Curve` handle `edgeToCurve` reads from `BRepAdaptor_Curve2d.Curve()`, one per edge and build, which nothing
- * frees. The live tier hides it by reusing the outline. Expected to fail until the fork releases the fix; then the
- * entry goes.
- */
-const libraryLeaks = new Set(['planetary-gear-system:off']);
-
 const base: ParameterSet = {};
 // The document opens at the base parameters, so the first edit moves away from them.
 const steps = ['a', base, 'b', base, 'a', base, 'b', base] as const;
@@ -62,8 +54,7 @@ describe('Replicad handle ledger over the editing matrix', () => {
   for (const { name, a, b } of matrix) {
     for (const computeReuse of [false, true]) {
       const arm = computeReuse ? 'on' : 'off';
-      const test = libraryLeaks.has(`${name}:${arm}`) ? it.fails : it;
-      test(`${name} leaks no handle across rebuilds, live tier ${arm}`, async () => {
+      it(`${name} leaks no handle across rebuilds, live tier ${arm}`, async () => {
         const fixture = loadFixture('replicad', name);
         const client = createRuntimeClient({
           transport: inProcessTransport({

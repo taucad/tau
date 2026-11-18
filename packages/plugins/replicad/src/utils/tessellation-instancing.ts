@@ -1,7 +1,6 @@
 import type { GlbMaterial } from '@taucad/geometry-core';
 import type { AnyShape } from 'replicad';
 import type { OpenCascadeInstance, TopoDS_Shape } from 'replicad-opencascadejs';
-import type { SetRequired } from 'type-fest';
 import type { GeometryReplicad } from '#replicad.types.js';
 
 /* oxlint-disable new-cap -- OCJS embind exposes C++ PascalCase methods as callable JavaScript functions. */
@@ -15,7 +14,9 @@ export type Tessellation = {
 
 /**
  */
-export type Meshable = SetRequired<AnyShape, 'mesh' | 'meshEdges'>;
+// Spelled without `type-fest`: the kernel's context type reaches this, and a `type-fest` type in it would make the
+// declaration bundler ship a copy of `type-fest` in `dist/node_modules`.
+export type Meshable = AnyShape & Required<Pick<AnyShape, 'mesh' | 'meshEdges'>>;
 
 /**
  * Where one occurrence of a shape sits: the key shared by its OCCT partners (same `TShape`), its orientation and its

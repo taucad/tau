@@ -146,7 +146,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../node_modules/.bin/vitest run",
+        "command": "vitest run",
         "env": {
           "TAU_SCRIPTS_TEST_SET": "workspace"
         }
@@ -167,7 +167,7 @@
       "inputs": ["default", "^production"],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../node_modules/.bin/vitest run",
+        "command": "vitest run",
         "env": {
           "TAU_SCRIPTS_TEST_SET": "browser"
         }

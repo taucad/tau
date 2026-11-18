@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier, the mesh memo and kept pack facts — measured 27.98 kB brotlied on 2026-11-18, after the kept glTF pack facts (N6)",
+    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier, the mesh memo, kept pack facts and partner-less prototypes — measured 28.10 kB brotlied on 2026-11-18, after partner-less shapes became prototypes with a placement-free memo key (N5)",
     "path": ["dist/**/*.mjs"],
-    "limit": "28 kB"
+    "limit": "28.2 kB"
   },
   {
     "name": "font + sourcemap payload — measured 1.43 MB on 2026-08-23",

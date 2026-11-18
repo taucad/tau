@@ -78,6 +78,10 @@ import type { GlbResources } from '@taucad/geometry-core';
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
 import { installNativeUserBreak } from '#utils/native-user-break.js';
 import { createLiveTier, installOperationTier } from '#live-tier/live-tier.js';
+import { createReplicadMeshMemo } from '#utils/mesh-memo.js';
+import type { ReplicadMeshMemo } from '#utils/mesh-memo.js';
+import { createToleranceLadder } from '#utils/tolerance-ladder.js';
+import type { ToleranceLadder } from '#utils/tolerance-ladder.js';
 import type { LiveTier } from '#live-tier/live-tier.js';
 
 import type { GeometryReplicad } from '#replicad.types.js';
@@ -267,6 +271,10 @@ type ReplicadContext = {
   libraryTrace: KernelLibraryTraceHandle<ReplicadLibrary>;
   /** The live tier; undefined when compute reuse is switched off for this kernel. */
   liveTier: LiveTier<BuiltModel> | undefined;
+  /** Meshes and boxes kept across renders (E7, N2); made by the first render with the live tier, never without it. */
+  meshMemo?: ReplicadMeshMemo;
+  /** Display tolerance ladder (E8); only with the `tessellationLadder` option. */
+  toleranceLadder: ToleranceLadder | undefined;
 };
 
 /** What one build delivers: the native handle and the offers derived from it. */
@@ -520,6 +528,7 @@ export const replicadKernel = defineKernel({
       tessellationInstancing,
       wasm,
       computeReuse: computeReuseOption,
+      tessellationLadder,
     } = options;
 
     const wasmLabel = typeof wasm === 'string' ? wasm : 'custom';
@@ -654,6 +663,7 @@ export const replicadKernel = defineKernel({
         tracingSummary,
         libraryTrace,
         liveTier,
+        toleranceLadder: tessellationLadder ? createToleranceLadder() : undefined,
       };
     } catch (error) {
       occt.release();
@@ -899,22 +909,30 @@ export const replicadKernel = defineKernel({
       }));
 
       let renderMode: 'flat' | 'tessellation-instanced' | 'mixed' = 'flat';
+      // E7: meshes are kept across renders only with the live tier; with reuse off every render meshes (I2).
+      const meshMemo =
+        runtime.compute.status === 'on' && context.liveTier
+          ? (context.meshMemo ??= createReplicadMeshMemo({ openCascade: context.openCascade }))
+          : undefined;
       // One pass at the requested tessellation: nothing coarsens a mesh (no triangle budget).
       const rendered = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
         const renderOutputSpan = tracer.startSpan('replicad.render-output', {
           phase: 'computingGeometry',
           stage: 'render-output',
         });
+        meshMemo?.beginRender();
         try {
           return context.libraryTrace.runInScope({
             scope: 'render-output',
             operation: () =>
               renderTessellated(namedShapes, {
                 request: { tessellation, explicitDefaults: occtExplicitTessellationDefaults.preview },
+                ladder: context.toleranceLadder,
                 collectBrepEdges: includeEdges || includeTopology,
                 openCascade: context.openCascade,
                 tessellationInstancing: context.tessellationInstancing,
                 tracer,
+                meshMemo,
                 onRenderMode(mode) {
                   renderMode = mode;
                 },
@@ -923,7 +941,8 @@ export const replicadKernel = defineKernel({
         } finally {
           // Render's OC calls get their own `oc.summary`, not the next evaluation's.
           context.tracingSummary?.flush();
-          renderOutputSpan.end({ renderMode });
+          const memo = meshMemo ? memoAttributes(meshMemo) : {};
+          renderOutputSpan.end({ renderMode, ...memo });
         }
       });
 
@@ -1216,6 +1235,7 @@ export const replicadKernel = defineKernel({
 
   async onDispose(context) {
     try {
+      context.meshMemo?.dispose();
       context.liveTier?.dispose();
     } finally {
       context.occt.release();
@@ -1224,6 +1244,25 @@ export const replicadKernel = defineKernel({
 });
 
 type Aliasable = { delete?: () => void; innerShape?: { delete?: () => void }; clone(): Aliasable };
+
+/**
+ * End a render in the mesh memo and report it on the render span.
+ * @param meshMemo - The memo the render used.
+ * @returns The memo's counters for the span.
+ */
+const memoAttributes = (meshMemo: ReplicadMeshMemo): Record<string, number> => {
+  meshMemo.endRender();
+  const { hits, misses, boxHits, boxMisses, evicted, partners, bytes } = meshMemo.stats();
+  return {
+    meshMemoHits: hits,
+    meshMemoMisses: misses,
+    meshMemoBoxHits: boxHits,
+    meshMemoBoxMisses: boxMisses,
+    meshMemoEvicted: evicted,
+    meshMemoPartners: partners,
+    meshMemoBytes: bytes,
+  };
+};
 
 /**
  * Delete the aliases a copy of a build owns. A drawing has no `delete`; its blueprint owns the native curves.
@@ -1295,33 +1334,22 @@ const replicadSnapshotFormat = 'occt-bintools';
 let snapshotSequence = 0;
 
 /**
- * Write one shape as binary BRep through MEMFS.
+ * Write one shape as binary BRep without its triangulation (G4). The live shape is read, never changed: a displayed
+ * shape keeps its display mesh (mesh-state rule, E10), and the bytes do not depend on whether it was meshed.
  *
- * The shipped binding cannot write binary without triangles: its six-argument `BinTools.Write` needs
- * the unbound `BinTools_FormatVersion` enum. So the display triangulation a render cached on the
- * live shape is dropped first. It is a cache, and the replicad mesher re-meshes on every render.
- *
- * @param library - The replicad library bound to this realm's OpenCASCADE instance.
+ * @param library - The replicad library bound to this realm's OpenCascade instance.
  * @param shape - The live shape to snapshot.
  * @returns The binary BRep bytes.
  */
 const writeBinaryBrep = (library: ReplicadLibrary, shape: AnyShape): Uint8Array<ArrayBuffer> => {
-  const oc = library.getOC();
-  const path = `/tmp/tau_replicad_native_handle_${++snapshotSequence}.bin`;
-  const progress = new oc.Message_ProgressRange();
+  const oc = library.getOC() as OpenCascadeInstance & { wasmMemory: WebAssembly.Memory };
+  const data = oc.ReplicadBinaryBrep.Write(shape.wrapped, false, false);
   try {
-    oc.BRepTools.Clean(shape.wrapped, false);
-    if (!oc.BinTools.Write(shape.wrapped, path, progress)) {
-      throw new Error('Replicad native-handle snapshot write failed.');
-    }
-    return new Uint8Array(oc.FS.readFile(path));
+    const pointer = data.getPtr();
+    // A copy, not a view: the buffer is freed below and a later memory.grow() would detach a view.
+    return new Uint8Array(oc.wasmMemory.buffer).slice(pointer, pointer + data.getSize());
   } finally {
-    progress.delete();
-    try {
-      oc.FS.unlink(path);
-    } catch {
-      // A failed write may leave no file; MEMFS cleanup is best-effort.
-    }
+    data.delete();
   }
 };
 

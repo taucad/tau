@@ -230,7 +230,7 @@ describe('native-hosts row selection', () => {
       readonly jobs: Record<string, { readonly if?: string; readonly steps?: readonly Step[] }>;
     };
     expect(Object.keys(workflow.on).sort()).toEqual(['workflow_call', 'workflow_dispatch']);
-    expect(workflow.jobs['plan']?.if).toBe("inputs.intel == ''");
+    expect(workflow.jobs['plan']?.if).toBe("inputs.hosts == ''");
     expect(workflow.jobs['plan']?.steps?.some((candidate) => candidate.id === 'push-base')).toBe(false);
   });
 });

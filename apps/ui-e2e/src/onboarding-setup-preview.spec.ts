@@ -22,8 +22,6 @@ type CameraReading = Readonly<{
   zoom?: number;
   revision: number;
 }>;
-type BridgeWindow = Window & { __TAU_SECTION_VIEW_TEST__?: { getCamera(): CameraReading } };
-
 type Gesture = 'orbit' | 'pan' | 'zoom';
 /** One legend binding, read back from its key caps. */
 type Binding = Readonly<{
@@ -68,7 +66,7 @@ const openStepThree = async (): Promise<void> => {
 
 const readCamera = async (): Promise<CameraReading> =>
   target.evaluate(() => {
-    const bridge = (globalThis as unknown as BridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const bridge = globalThis.__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('The viewer e2e bridge is not installed: the preview has not rendered.');
     }
@@ -81,8 +79,7 @@ const settleCamera = async (): Promise<void> => {
   await target.evaluate(
     async () =>
       new Promise<void>((resolve) => {
-        const read = (): number | undefined =>
-          (globalThis as unknown as BridgeWindow).__TAU_SECTION_VIEW_TEST__?.getCamera().revision;
+        const read = (): number | undefined => globalThis.__TAU_SECTION_VIEW_TEST__?.getCamera().revision;
         let last = read();
         let quiet = 0;
         const tick = (): void => {
@@ -216,7 +213,7 @@ const perform = async (binding: Binding): Promise<void> => {
 
 const expectPreviewRendered = async (): Promise<void> => {
   await target.expectVisible(selectors.getByCss(previewCanvas), 120_000);
-  await target.waitFor(() => (globalThis as unknown as BridgeWindow).__TAU_SECTION_VIEW_TEST__ !== undefined);
+  await target.waitFor(() => globalThis.__TAU_SECTION_VIEW_TEST__ !== undefined);
   await settleCamera();
 };
 
@@ -313,9 +310,7 @@ describe.runIf(runsInFlagStates(['all-on', 'viewer-controls-onboarding']))('setu
     await target.click(continueButton());
     await target.expectVisible(stepHeading('Design, verify, build'));
     await expect.poll(async () => target.evaluate(() => document.querySelectorAll('canvas').length)).toBe(0);
-    expect(
-      await target.evaluate(() => (globalThis as unknown as BridgeWindow).__TAU_SECTION_VIEW_TEST__ === undefined),
-    ).toBe(true);
+    expect(await target.evaluate(() => globalThis.__TAU_SECTION_VIEW_TEST__ === undefined)).toBe(true);
   });
 
   flagTest('shows the diagram when the context is lost, and setup carries on (f)', async ({ skip }) => {

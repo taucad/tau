@@ -269,7 +269,7 @@ describe('viewer-parity.yml', () => {
 
   it('deals the viewer shards with this script and the capture-seconds snapshot', () => {
     expect(steps.find((step) => step.name === "Deal this shard's fixtures")?.run).toMatch(
-      /node scripts\/src\/test-shard-dealer\.ts --shard "\$SHARD" --shards 4 \\\n\s+--durations libs\/tau-examples\/fixtures\/viewer-parity\/capture-seconds\.json/u,
+      /node scripts\/src\/test-shard-dealer\.ts --shard "\$SHARD" --shards 8 \\\n\s+--durations libs\/tau-examples\/fixtures\/viewer-parity\/capture-seconds\.json/u,
     );
     const capture = steps.find((step) => step.name === "Capture the viewer's frames");
     expect(capture?.env?.['PARITY_FIXTURES']).toMatch(/^\$\{\{ steps\.deal\.outputs\.fixtures \}\}$/u);
@@ -283,7 +283,7 @@ describe('viewer-parity.yml', () => {
   });
 
   it('gives every shard fixtures and keeps the slowest shard within one fixture of the fastest', () => {
-    const dealt = deal(fixtures, 4, captureSeconds);
+    const dealt = deal(fixtures, 8, captureSeconds);
     expectPartition(fixtures, dealt);
     const loads = dealt.map((shard) => shard.reduce((sum, fixture) => sum + weightOf(fixture, captureSeconds), 0));
     expect(dealt.every((shard) => shard.length > 0)).toBe(true);

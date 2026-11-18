@@ -41,9 +41,20 @@ export default {
    * `v8_passThroughRequests` is React Router 8's behaviour (blueprint B4): loaders and actions get the request as
    * sent, so a client navigation's `request.url` is `<path>.data?_routes=…`. Anything that means the page's own URL
    * reads the `url` argument.
+   *
+   * `v8_splitRouteModules` is React Router 8's default (blueprint B8, RR6): a route's `clientLoader`, `clientAction`,
+   * `clientMiddleware` and `HydrateFallback` load as their own chunks. No route has one that splits today, and
+   * `scripts/check-critical-budget.mts` fails when a split module first appears in the manifest, because split chunks
+   * load outside the patched `loadRouteModule` stale-build fallback.
    */
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's flag names.
-  future: { unstable_optimizeDeps: true, v8_passThroughRequests: true, v8_middleware: true },
+  /* eslint-disable @typescript-eslint/naming-convention -- React Router's flag names. */
+  future: {
+    unstable_optimizeDeps: true,
+    v8_passThroughRequests: true,
+    v8_middleware: true,
+    v8_splitRouteModules: true,
+  },
+  /* eslint-enable @typescript-eslint/naming-convention -- React Router's flag names. */
   /**
    * Every route is known on boot, so no navigation waits on `/__manifest`.
    *

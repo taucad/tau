@@ -90,8 +90,6 @@ type ReplicadInstancingBindings = {
   ReplicadPrototypeMeshExtractor?: {
     ExtractFaces(shape: unknown, tolerance: number, angularTolerance: number, skipNormals: boolean): NativeFaceMesh;
     ExtractEdges(shape: unknown, tolerance: number, angularTolerance: number): NativeEdgeMesh;
-    ExtractFaceIds(shape: unknown): NativeIdArray;
-    ExtractEdgeIds(shape: unknown, tolerance: number, angularTolerance: number): NativeIdArray;
   };
 };
 
@@ -127,12 +125,6 @@ type NativeEdgeMesh = {
   delete(): void;
 };
 
-type NativeIdArray = {
-  getIdsPtr(): number;
-  getIdsSize(): number;
-  delete(): void;
-};
-
 type ReplicadInstancingOrientations = {
   TopAbs_Orientation: {
     TopAbs_FORWARD: unknown;
@@ -157,12 +149,6 @@ type ExtractPrototypeEdgesOptions = {
   openCascade: OpenCascadeInstance;
   shape: Meshable;
   tessellation: Tessellation;
-};
-
-type ExtractTopologyIdsOptions = {
-  openCascade: OpenCascadeInstance;
-  shape: Meshable;
-  tessellation?: Tessellation;
 };
 
 type TransformReplicadGeometryInstanceOptions = {
@@ -523,52 +509,6 @@ export function extractPrototypeEdges({
       lines: readFloat64Array(oc, raw.getLinesPtr(), raw.getLinesSize()),
       edgeGroups: readEdgeGroups(oc, raw.getEdgeGroupsPtr(), raw.getEdgeGroupsSize()),
     };
-  } finally {
-    raw.delete();
-  }
-}
-
-/**
- */
-export function extractInstanceFaceIds({ openCascade, shape }: ExtractTopologyIdsOptions): number[] {
-  const oc = asInstancingOc(openCascade);
-  const extractor = asInstancingBindings(openCascade).ReplicadPrototypeMeshExtractor;
-  if (!extractor) {
-    throw new Error(
-      'Replicad tessellation instancing bindings are unavailable: ReplicadPrototypeMeshExtractor is missing',
-    );
-  }
-
-  const raw = extractor.ExtractFaceIds(shapeHandle(shape));
-  try {
-    return readInt32Array(oc, raw.getIdsPtr(), raw.getIdsSize());
-  } finally {
-    raw.delete();
-  }
-}
-
-/**
- */
-export function extractInstanceEdgeIds({ openCascade, shape, tessellation }: ExtractTopologyIdsOptions): number[] {
-  if (!tessellation) {
-    return [];
-  }
-
-  const oc = asInstancingOc(openCascade);
-  const extractor = asInstancingBindings(openCascade).ReplicadPrototypeMeshExtractor;
-  if (!extractor) {
-    throw new Error(
-      'Replicad tessellation instancing bindings are unavailable: ReplicadPrototypeMeshExtractor is missing',
-    );
-  }
-
-  const raw = extractor.ExtractEdgeIds(
-    shapeHandle(shape),
-    tessellation.linearTolerance,
-    angularToleranceToRad(tessellation),
-  );
-  try {
-    return readInt32Array(oc, raw.getIdsPtr(), raw.getIdsSize());
   } finally {
     raw.delete();
   }

@@ -15,12 +15,12 @@ Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` t
 - Prefer voxel booleans, offsets, ShapeKernel and LatticeLibrary over manual triangles. Output is mesh, not BRep.
 - Prefer an `SdfExpression` (`['max', ['abs', 'x'], ['abs', 'y']]`) over a JS `sdf` callback: expressions fill in parallel, callbacks run serially.
 - Stylised characters (mascots, chess pieces, toy creatures) are one blended SDF field: read [characters-reference.md](characters-reference.md) for the smooth-union and ellipsoid helpers.
-- Free each large intermediate at its last use: the garbage collector cannot free a grid in the middle of one synchronous `main()`. Call `dispose()`, pass `{ consume: true }` to a boolean or offset whose receiver is finished (`a.union(b, { consume: true })`), or build a stage in `pico.scope(() => …)`, which frees everything the stage created except what it returns.
+- Free each large intermediate at its last use. Tau pages idle grids out of the heap, so a model that frees nothing usually still builds with byte-identical output, but every dropped grid stays alive until `main()` returns: the garbage collector cannot free one in the middle of a synchronous `main()`. Paged grids still take memory, so a model that keeps enough of them alive can still fail with `PICO_OUT_OF_MEMORY`. Freeing cuts peak memory about threefold and makes it less likely that Tau recycles the runtime after the render; the heap never shrinks, so it cannot rule that out. Call `dispose()`, pass `{ consume: true }` to a boolean or offset whose receiver is finished (`a.union(b, { consume: true })`), or build a stage in `pico.scope(() => …)`, which frees everything the stage created except what it returns.
 - The viewer shows a fast preview; exports and GeoSpec checks replay the model exactly, so they can differ by about one voxel. Never request `lane: 'fast'` for manufacturing exports.
 
 Route TypeScript PicoGK requests here; native C# `main.cs` uses desktop `cad-picogk`.
 
-Check a missing default export, a wrong return type and a non-positive `voxelSize` first. `PICO_OUT_OF_MEMORY` means the model cannot be built at this `voxelSize` and bounds: coarsen `voxelSize` only while the thinnest wall still spans about three voxels, or shrink the bounds to the part, and tell the author. A GeoSpec limit is different: keep the model and report the claim as not decided.
+Check a missing default export, a wrong return type and a non-positive `voxelSize` first. `PICO_OUT_OF_MEMORY` means the model cannot be built at this `voxelSize` and bounds: first free intermediates the model leaves alive, then coarsen `voxelSize` only while the thinnest wall still spans about three voxels, or shrink the bounds to the part, and tell the author. A GeoSpec limit is different: keep the model and report the claim as not decided.
 
 ## Part names
 

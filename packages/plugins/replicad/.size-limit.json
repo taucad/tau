@@ -1,6 +1,6 @@
 [
   {
-    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier and its byte budget, the native user break, build epochs with the release fallback, and the mesh memo — measured 29.53 kB brotlied on 2026-11-18, after the release fallback (a module that returns a released shape runs fresh once, then releases by the collector)",
+    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier and its byte budget, the native user break, build epochs with the release fallback, the mesh memo and kept pack facts — measured 29.57 kB brotlied on 2026-11-18, after merging the kept glTF pack facts (N6)",
     "path": ["dist/**/*.mjs"],
     "limit": "30 kB"
   },

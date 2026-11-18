@@ -115,6 +115,25 @@ const measureStop = async (call: () => unknown, abortDelay: number): Promise<{ e
   return { error: stopError, latency: stoppedAt - (await aborter.storedAt()) };
 };
 
+/**
+ * Time `call`.
+ *
+ * @param call - The work to time.
+ * @returns What `call` returned and its duration in milliseconds.
+ */
+const timed = <T>(call: () => T): { value: T; elapsed: number } => {
+  const started = performance.now();
+  const value = call();
+  return { value, elapsed: performance.now() - started };
+};
+
+/**
+ * The share of the work left at the abort that a stop may take. A stop latency is a fraction of the remaining
+ * unwired work measured in the same run, not a fixed wall time: on a loaded machine both slow down together, while a
+ * break that never fires runs the remainder to the end (a ratio near 1).
+ */
+const stopShare = 0.5;
+
 afterEach(() => {
   Atomics.store(abortWord, 0, 0);
 });
@@ -122,37 +141,50 @@ afterEach(() => {
 describe('native user break (N1)', { timeout: 120_000 }, () => {
   let oc: OpenCascadeInstance;
   let plainCutHash: string;
+  // The unwired baselines: the same work through the plain entry points, timed in this run.
+  /** Milliseconds. */
+  let plainCut: number;
+  /** Milliseconds. */
+  let plainMesh: number;
   const shapeHash = (shape: replicad.Shape3D): string => oc.ReplicadBinaryBrep.IdentityHash(shape.wrapped);
+  // About 167k triangles and 6 s unstopped: bounded, unlike a finer tolerance.
+  const sphereMesh = (sphere: replicad.Solid) => (): unknown =>
+    sphere.mesh({ tolerance: 0.003, angularTolerance: 0.1 });
 
   beforeAll(async () => {
     oc = await initOcct(singleWasmUrl, await loadReplicadSingleWasm());
     // The kernel's shape: the library sees the exception proxy over the realm's raw instance.
     replicad.setOC(wrapOcForExceptions(oc));
-    plainCutHash = shapeHash(longCut().run());
+    const cut = timed(longCut().run);
+    plainCutHash = shapeHash(cut.value);
+    plainCut = cut.elapsed;
+    plainMesh = timed(sphereMesh(replicad.makeSphere(50))).elapsed;
     installNativeUserBreak(oc);
   }, 120_000);
 
-  it('stops a superseded batch cut within a second of the abort instead of finishing it', async () => {
+  it('stops a superseded batch cut long before the unwired cut would finish', async () => {
     const cut = longCut();
-    const { error, latency } = await measureStop(cut.run, 300);
+    const abortDelay = 300;
+    const { error, latency } = await measureStop(cut.run, abortDelay);
 
-    console.info(`N1 stop latency, ${cut.tools}-tool cutAll, single: ${latency.toFixed(1)} ms`);
+    console.info(
+      `N1 stop latency, ${cut.tools}-tool cutAll, single: ${latency.toFixed(1)} ms; unwired ${plainCut.toFixed(0)} ms`,
+    );
     expect(error).toBeInstanceOf(RenderAbortedError);
-    expect(latency).toBeLessThan(1000);
+    expect(latency).toBeLessThan(stopShare * (plainCut - abortDelay));
   });
 
   it('gives the same shape as the plain entry point when the abort word never moves', () => {
     expect(shapeHash(longCut().run())).toBe(plainCutHash);
   });
 
-  it('stops a superseded mesh and throws the abort error the hook saw', async () => {
-    // About 167k triangles and 6 s unstopped: bounded, unlike a finer tolerance.
-    const sphere = replicad.makeSphere(50);
-    const { error, latency } = await measureStop(() => sphere.mesh({ tolerance: 0.003, angularTolerance: 0.1 }), 200);
+  it('stops a superseded mesh long before the unwired mesh would finish and throws the abort error the hook saw', async () => {
+    const abortDelay = 200;
+    const { error, latency } = await measureStop(sphereMesh(replicad.makeSphere(50)), abortDelay);
 
-    console.info(`N1 stop latency, sphere mesh, single: ${latency.toFixed(1)} ms`);
+    console.info(`N1 stop latency, sphere mesh, single: ${latency.toFixed(1)} ms; unwired ${plainMesh.toFixed(0)} ms`);
     expect(error).toBeInstanceOf(RenderAbortedError);
-    expect(latency).toBeLessThan(1000);
+    expect(latency).toBeLessThan(stopShare * (plainMesh - abortDelay));
   });
 });
 

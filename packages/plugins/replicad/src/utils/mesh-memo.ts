@@ -16,6 +16,8 @@
  */
 import type { Bnd_Box, OpenCascadeInstance, TopoDS_Shape } from 'replicad-opencascadejs';
 import type { GeometryReplicad } from '#replicad.types.js';
+import { createReplicadPackFacts } from '#utils/replicad-to-gltf.js';
+import type { ReplicadPackFacts } from '#utils/replicad-to-gltf.js';
 import { createReplicadOccurrenceReader, createReplicadPartnerTable } from '#utils/tessellation-instancing.js';
 import type {
   Meshable,
@@ -63,6 +65,8 @@ export type ReplicadMeshMemoOptions = {
 export type ReplicadMeshMemo = {
   /** Occurrence reader whose partner keys stay valid across renders. */
   readonly readOccurrence: ReplicadOccurrenceReader;
+  /** Pack facts (glTF) of the kept meshes (N6), keyed by their `faces`: a fact is dropped with its mesh. */
+  readonly packFacts: ReplicadPackFacts;
   /** The mesh kept for an occurrence under a key, if any. */
   lookup(info: ReplicadShapeOccurrenceInfo, key: string): MemoMesh | undefined;
   /** Keeps an occurrence's mesh under a key. */
@@ -233,6 +237,7 @@ export function createReplicadMeshMemo({
 
   return {
     readOccurrence,
+    packFacts: createReplicadPackFacts(),
     lookup(info, key) {
       const mesh = partnerOf(info)?.meshes.get(key) as MemoMesh | undefined;
       if (mesh) {

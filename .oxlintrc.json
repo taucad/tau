@@ -1555,11 +1555,7 @@
     },
     {
       // Current revision inversions. -- W8
-      "files": [
-        "apps/ui/app/hooks/use-restore-to-point.ts",
-        "apps/ui/app/hooks/use-revisions.test.tsx",
-        "apps/ui/app/hooks/use-revisions.ts"
-      ],
+      "files": ["apps/ui/app/hooks/use-restore-to-point.ts"],
       "rules": { "no-restricted-imports": "off" }
     },
     {

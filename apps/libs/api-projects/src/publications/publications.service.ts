@@ -247,7 +247,7 @@ export class PublicationsService {
     if (!publishEntitlements.canSyncFiles) {
       throw new ForbiddenException({
         code: 'GIT_SYNC_NOT_ENTITLED',
-        message: 'Syncing files to Tau Cloud is a paid plan feature.',
+        message: 'Syncing files to the cloud is a paid plan feature.',
       });
     }
 

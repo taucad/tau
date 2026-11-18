@@ -146,7 +146,7 @@ export class GitBasicAuthMiddleware implements NestMiddleware {
       const refusal = await this.admitHostDevice(request, bearer).catch(() => ({
         status: 503,
         retryAfterSeconds: 5,
-        body: { code: 'SERVICE_UNAVAILABLE', message: 'Tau Cloud could not check this credential; retry shortly.' },
+        body: { code: 'SERVICE_UNAVAILABLE', message: "Couldn't check this credential. Try again in a moment." },
       }));
       if (refusal !== undefined) {
         response.statusCode = refusal.status;

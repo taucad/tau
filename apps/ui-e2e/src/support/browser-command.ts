@@ -455,7 +455,15 @@ export const uiReadTauVertexOperations: BrowserCommand<[email: string], TargetTa
 };
 
 export const uiOpenTarget: BrowserCommand<
-  [options?: { deviceScaleFactor?: number; hasTouch?: boolean; isMobile?: boolean; consentBanner?: boolean }]
+  [
+    options?: {
+      deviceScaleFactor?: number;
+      hasTouch?: boolean;
+      isMobile?: boolean;
+      consentBanner?: boolean;
+      serviceWorker?: boolean;
+    },
+  ]
 > = async (commandContext, options) => {
   if (commandContext.provider.name !== 'playwright') {
     throw new TypeError(`UI E2E requires the Playwright provider, received '${commandContext.provider.name}'.`);
@@ -469,8 +477,11 @@ export const uiOpenTarget: BrowserCommand<
   if (!browser) {
     throw new Error('Vitest Playwright browser is unavailable.');
   }
-  const { consentBanner = false, ...contextOptions } = options ?? {};
-  const context = await browser.newContext(contextOptions);
+  const { consentBanner = false, serviceWorker = false, ...contextOptions } = options ?? {};
+  /* The web app's service worker (PL7) stays out of every spec that did not ask for it: once installed it answers
+     shells and precached chunks itself, so a spec's request holds, delays and failures would stop applying from its
+     second navigation on, depending on when the install finished. */
+  const context = await browser.newContext({ ...contextOptions, serviceWorkers: serviceWorker ? 'allow' : 'block' });
   context.setDefaultTimeout(10_000);
   if (!consentBanner) {
     /* The app's first-visit analytics banner stays out of every spec that did not ask for it: Do Not Track

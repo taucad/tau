@@ -340,6 +340,8 @@ export type UiBrowserCommands = {
     readonly isMobile?: boolean;
     /** Show the app's first-visit analytics banner; other specs open with Do Not Track, which hides it. */
     readonly consentBanner?: boolean;
+    /** Let the web app's service worker register; other specs open with service workers blocked. */
+    readonly serviceWorker?: boolean;
   }): Promise<void>;
   uiPressTarget(selector: string, key: string, surface?: TargetSurface): Promise<void>;
   uiSetFlagState(state: FlagStateName): Promise<void>;

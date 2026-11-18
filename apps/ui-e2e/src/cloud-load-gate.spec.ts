@@ -362,9 +362,10 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
       title: `U24: paints the usage shell within ${String(shellPaintBound)} ms while its document is stalled ${String(documentStall)} ms, the service worker installed`,
     },
     async (defect) => {
+      await target.commands.uiOpenTarget({ serviceWorker: true });
       await openSignedIn();
       await target.navigate('/usage');
-      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-offline-shell-/u);
+      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-precache-/u);
       const load = await stalledDocument(target.commands).uiOpenWithStalledDocument('/usage', documentStall);
       await target.writeArtifact('cloud-load-gate/u24-document-stalled.json', `${JSON.stringify(load, null, 2)}\n`);
       expect(load.stalledRequests, 'the usage document was never held, so nothing forced the stall').toBeGreaterThan(0);
@@ -390,10 +391,16 @@ describe.runIf(cloudLoadTier)('cloud-build tier: load gate', () => {
         'F14: an offline reload of a project on this device renders the workspace frame and the workspace, the service worker installed',
     },
     async (defect) => {
+      await target.commands.uiOpenTarget({ serviceWorker: true });
       await openSignedIn();
       const route = await seedLocalProject();
       await waitForSettledProject();
-      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-offline-shell-/u);
+      /* The page registers the service worker outside a project workspace (B-27); the project then opens under it,
+         which caches its deferred files on first use. */
+      await target.navigate('/projects');
+      expect(await waitForOfflineShell(), 'the offline shell never installed').toMatch(/^tau-precache-/u);
+      await target.navigate(route);
+      await waitForSettledProject();
       await setTargetOffline(true);
       let reloadError = '';
       let offline: OfflineRead;

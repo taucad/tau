@@ -94,14 +94,14 @@
     "test:e2e:deploy-skew": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "TAU-UI-6: serves one ui:build as two deploys and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page. Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
+        "description": "TAU-UI-6: serves one ui:build as two deploys and checks that a page whose lazy chunks the newer deploy no longer serves reloads into it instead of reaching the error page, and that a tab the service worker controls keeps working and opens the new deploy once the update rule fires (progressive loading PL7, ruling OD3). service-worker.test.ts serves the same build as one deploy and checks the worker's offline opens of Home and a local project, their cross-origin isolation, that API, auth, data and marketing requests pass through, and its precache list (shell invariants 8 and 9). Drives Playwright's Chromium from Node; set TAU_E2E_CHROMIUM_EXECUTABLE to use another installed Chromium."
       },
       "options": {
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
           "pnpm exec nx run ui:build",
-          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/stale-deploy-recovery.test.ts --environment=node"
+          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/stale-deploy-recovery.test.ts apps/ui-e2e/src/service-worker.test.ts --environment=node"
         ],
         "env": {
           "TAU_CLOUD_ENABLED": "false",

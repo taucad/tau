@@ -3,7 +3,9 @@
  * global so it is unit-tested without one. `service-worker-kill-switch.ts` binds it to the worker's lifecycle.
  *
  * A build with `TAU_SERVICE_WORKER_KILL_SWITCH=true` (`apps/ui/build-environment.ts`) ships this worker at
- * `/service-worker.js` instead of the web app's worker (`service-worker.ts`). A browser that has the web app's worker
+ * `/service-worker.js` instead of the web app's worker (`service-worker.ts`). Every PL7 build also ships it at
+ * `/offline-shell-worker.js`, the retired `/usage` worker's URL (scope `/`), so a browser still holding that worker
+ * retires it on its next update check, kill switch or not, and its caches go with it. A browser that has the web app's worker
  * fetches the new script on its next update check (every navigation, since `/service-worker.js` is never stored by the
  * browser or the CDN: `netlify.toml`, `server.ts`) and installs it. It skips waiting ({@link activateRetirement} runs
  * on `install`), so the browser activates it as soon as the worker it replaces has no event in flight, without waiting
@@ -14,7 +16,7 @@
  * at the latest the second page load after the deploy is the live deploy's with no worker at all. One deploy of a
  * build without the switch restores the web app's worker.
  */
-import { cachePrefix } from '#offline/pwa-messages.js';
+import { assetCacheName, cachePrefix, retiredCachePrefix } from '#offline/pwa-messages.js';
 
 /** The IndexedDB database Workbox's expiration plugin keeps its timestamps in (`workbox-expiration`'s `CacheTimestampsModel`). */
 export const workboxExpirationDatabase = 'workbox-expiration';
@@ -29,13 +31,27 @@ export type RetiringWorkerScope = {
 };
 
 /**
- * Whether a Cache Storage cache belongs to the web app's worker: its precache, runtime and asset caches and the retired
- * `/usage` worker's all start with the worker's prefix.
+ * Whether a Cache Storage cache is the retired `/usage` worker's (`tau-offline-shell-<version>`), which the web app's
+ * worker deletes when it activates.
+ *
+ * @param name - The cache name.
+ * @returns `true` for one of the retired worker's caches.
+ */
+export const isRetiredWorkerCache = (name: string): boolean => name.startsWith(retiredCachePrefix);
+
+/**
+ * Whether a Cache Storage cache belongs to the web app's worker or the retired `/usage` worker, and so goes with the
+ * kill switch: Workbox's precache and runtime caches under the worker's prefix (`tau-precache-…`, `tau-runtime-…`), its
+ * asset cache, and the retired worker's caches. Nothing else on the origin.
  *
  * @param name - The cache name.
  * @returns `true` for a cache the kill switch deletes.
  */
-export const isWorkerCache = (name: string): boolean => name.startsWith(`${cachePrefix}-`);
+export const isWorkerCache = (name: string): boolean =>
+  name.startsWith(`${cachePrefix}-precache-`) ||
+  name.startsWith(`${cachePrefix}-runtime-`) ||
+  name === assetCacheName ||
+  isRetiredWorkerCache(name);
 
 /**
  * On `install`: skip waiting, so activation never waits for the pages of the worker being replaced to close.

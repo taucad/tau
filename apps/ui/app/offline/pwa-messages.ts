@@ -8,6 +8,18 @@
 /** The cache-name prefix of every cache the worker owns (`setCacheNameDetails`). */
 export const cachePrefix = 'tau';
 
+/** The runtime cache the worker fills with immutable files on first use (`service-worker-routing.ts`). */
+export const assetCacheName = `${cachePrefix}-assets`;
+
+/**
+ * The caches of the retired `/usage` worker (B5, `offline-shell-worker.js`, shipped up to PL7): one per shell version,
+ * `tau-offline-shell-<version>`. Deleted when the web app's worker activates and by the kill switch.
+ */
+export const retiredCachePrefix = `${cachePrefix}-offline-shell-`;
+
+/** Where the retired `/usage` worker was served (scope `/`); every PL7 build ships the retiring worker there. */
+export const retiredServiceWorkerUrl = '/offline-shell-worker.js';
+
 /** `type` of the message the page sends a waiting worker to activate it (workbox-window's `messageSkipWaiting`). */
 export const skipWaitingMessageType = 'SKIP_WAITING';
 

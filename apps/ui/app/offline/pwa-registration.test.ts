@@ -34,12 +34,14 @@ const setVerdict = (next: ServerVerdict): void => {
 const createRegistration = (): {
   registration: ServiceWorkerRegistration;
   waiting: { postMessage: ReturnType<typeof vi.fn> } | null;
+  active: { scriptURL: string } | null;
   update: ReturnType<typeof vi.fn>;
   installNewWorker: () => void;
 } => {
   const updateListeners: Array<() => void> = [];
   const state = {
     waiting: null as { postMessage: ReturnType<typeof vi.fn> } | null,
+    active: null as { scriptURL: string } | null,
     installing: null as EventTarget | null,
   };
   const update = vi.fn().mockResolvedValue(undefined);
@@ -49,6 +51,9 @@ const createRegistration = (): {
     },
     get installing() {
       return state.installing;
+    },
+    get active() {
+      return state.active;
     },
     update,
     addEventListener: (type: string, listener: () => void) => {
@@ -64,6 +69,12 @@ const createRegistration = (): {
     },
     set waiting(value) {
       state.waiting = value;
+    },
+    get active() {
+      return state.active;
+    },
+    set active(value) {
+      state.active = value;
     },
     update,
     installNewWorker: () => {
@@ -119,6 +130,14 @@ describe('updateAction (ruling OD3)', () => {
   ] as const)('should answer verdict %s with a waiting worker %s by %s', (verdict, hasWaiting, action) => {
     expect(updateAction(verdict, hasWaiting)).toBe(action);
   });
+
+  it.each(['live', 'unknown', 'replaced'] as const)(
+    'should activate a worker waiting behind the retired /usage worker at once, the verdict %s',
+    (verdict) => {
+      expect(updateAction(verdict, true, true)).toBe('activate');
+      expect(updateAction(verdict, false, true)).toBe(updateAction(verdict, false));
+    },
+  );
 });
 
 describe('startServiceWorker', () => {
@@ -170,6 +189,18 @@ describe('startServiceWorker', () => {
     await vi.runAllTimersAsync();
 
     expect(register).not.toHaveBeenCalled();
+    expect(waiting.postMessage).toHaveBeenCalledExactlyOnceWith({ type: skipWaitingMessageType });
+    stop();
+  });
+
+  it('should activate the web app’s worker waiting behind the retired /usage worker while this build is live', async () => {
+    const waiting = { postMessage: vi.fn() };
+    current.waiting = waiting;
+    current.active = { scriptURL: 'https://tau.new/offline-shell-worker.js' };
+    skew.verdict = 'live';
+    const stop = startServiceWorker({ inWorkspace: false, verdict, onInstallStatus });
+    await vi.runAllTimersAsync();
+
     expect(waiting.postMessage).toHaveBeenCalledExactlyOnceWith({ type: skipWaitingMessageType });
     stop();
   });

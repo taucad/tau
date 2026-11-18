@@ -244,6 +244,15 @@ Cache-Control = "no-cache, no-store, must-revalidate"
 CDN-Cache-Control = "no-store"
 Netlify-CDN-Cache-Control = "no-store"
 
+# The retiring worker at the retired /usage worker's URL (ui@0.3.0 and earlier registered
+# /offline-shell-worker.js at scope /), stored nowhere for the same reason.
+[[headers]]
+for = "/offline-shell-worker.js"
+[headers.values]
+Cache-Control = "no-cache, no-store, must-revalidate"
+CDN-Cache-Control = "no-store"
+Netlify-CDN-Cache-Control = "no-store"
+
 # Content-hashed Vite bundles + WASM (immutable filenames)
 [[headers]]
 for = "/assets/*"

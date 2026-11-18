@@ -38,11 +38,12 @@ export const serviceWorkerInjectionPoint = 'globalThis.__WB_MANIFEST';
 export const serviceWorkerFile = 'service-worker.js';
 
 /**
- * Build the service worker into the client output.
- *
- * @param options - The build directory (`build`, holding `client/`), the worker source and the classes it answers.
- * @returns The precache list and its size, for build logging.
+ * Where the retired `/usage` worker was served from (B5, up to ui@0.3.0, scope `/`). Every build writes the retiring
+ * worker (`app/offline/service-worker-kill-switch.ts`) here, so a browser still holding that worker retires it and its
+ * caches on its next update check, including under the kill switch, whose pages only `update()` a registration.
  */
+export const retiredServiceWorkerFile = 'offline-shell-worker.js';
+
 /**
  * Bundle a worker source into one classic script with the modules it imports (Workbox's runtime modules for the web
  * app's worker).
@@ -66,9 +67,18 @@ export const bundleServiceWorker = async (source: string, outfile: string): Prom
   });
 };
 
+/**
+ * Build the service worker into the client output.
+ *
+ * @param options - The build directory (`build`, holding `client/`), the worker source, the retiring worker's source
+ *   and the classes it answers.
+ * @returns The precache list and its size, for build logging.
+ */
 export const buildServiceWorker = async (options: {
   readonly buildDirectory: string;
   readonly workerSourcePath: string;
+  /** The retiring worker (`app/offline/service-worker-kill-switch.ts`), written at {@link retiredServiceWorkerFile}. */
+  readonly retiringWorkerSourcePath: string;
   readonly classes: readonly WorkerRouteClass[];
   /**
    * The kill switch (`TAU_SERVICE_WORKER_KILL_SWITCH`, `build-environment.ts`): `workerSourcePath` is the retiring
@@ -78,6 +88,7 @@ export const buildServiceWorker = async (options: {
 }): Promise<{ readonly entries: readonly PrecacheEntry[]; readonly bytes: number }> => {
   const clientDirectory = join(options.buildDirectory, 'client');
   const resolvePath = (relativePath: string): string => join(clientDirectory, relativePath);
+  await bundleServiceWorker(options.retiringWorkerSourcePath, resolvePath(retiredServiceWorkerFile));
   if (options.killSwitch === true) {
     await bundleServiceWorker(options.workerSourcePath, resolvePath(serviceWorkerFile));
     writeFileSync(join(options.buildDirectory, precacheListFile), '[]\n');

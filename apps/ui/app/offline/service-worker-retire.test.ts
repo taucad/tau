@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   activateRetirement,
+  isRetiredWorkerCache,
   isWorkerCache,
   retireServiceWorker,
   workboxExpirationDatabase,
@@ -100,10 +101,20 @@ describe('the service worker kill switch (PL7)', () => {
     },
   );
 
-  it('should own only the caches named with the worker’s prefix', () => {
-    expect(isWorkerCache('tau-precache-v2-https://tau.new/')).toBe(true);
-    expect(isWorkerCache('tau-offline-shell-v3')).toBe(true);
-    expect(isWorkerCache('taunt')).toBe(false);
-    expect(isWorkerCache('workbox-precache-v2')).toBe(false);
+  it('should own exactly the web app’s worker’s caches and the retired /usage worker’s', () => {
+    for (const name of [
+      'tau-precache-v2-https://tau.new/',
+      'tau-runtime-https://tau.new/',
+      'tau-assets',
+      // The retired worker's cache for one shell version (`offlineShellCacheName`, shipped up to ui@0.3.0).
+      'tau-offline-shell-3f9a2c1d0b7e',
+    ]) {
+      expect(isWorkerCache(name), name).toBe(true);
+    }
+    for (const name of ['taunt', 'tau-billing', 'tau-assets-old', 'workbox-precache-v2', 'tau-offline']) {
+      expect(isWorkerCache(name), name).toBe(false);
+    }
+    expect(isRetiredWorkerCache('tau-offline-shell-3f9a2c1d0b7e')).toBe(true);
+    expect(isRetiredWorkerCache('tau-precache-v2-https://tau.new/')).toBe(false);
   });
 });

@@ -32,15 +32,14 @@ import type { RouteHandlerCallbackOptions, RouteMatchCallbackOptions } from 'wor
 import { CacheFirst, NetworkFirst } from 'workbox-strategies';
 import {
   answerNavigation,
-  assetCacheName,
   installMessage,
   isCachedOnFirstUse,
   navigationCandidate,
   navigationNetworkTimeout,
-  retiredCachePrefix,
   retryUnpinnedMiss,
 } from '#offline/service-worker-routing.js';
-import { cachePrefix, skipWaitingMessageType } from '#offline/pwa-messages.js';
+import { assetCacheName, cachePrefix, skipWaitingMessageType } from '#offline/pwa-messages.js';
+import { isRetiredWorkerCache } from '#offline/service-worker-retire.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
 /** The worker global, as far as this file uses it (the DOM library has no `ServiceWorkerGlobalScope`). */
@@ -111,7 +110,7 @@ scope.addEventListener('activate', (event) => {
     (async () => {
       await precache.activate(asWorkboxEvent(event));
       const names = await scope.caches.keys();
-      const retired = names.filter((name) => name.startsWith(retiredCachePrefix));
+      const retired = names.filter((name) => isRetiredWorkerCache(name));
       await Promise.all(retired.map(async (name) => scope.caches.delete(name)));
     })(),
   );

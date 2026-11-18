@@ -121,6 +121,8 @@ export default {
       classes: workerRouteClasses().filter(
         (workerClass) => tauCloudEnabled || workerClass.routeClass.id !== 'offline-shell',
       ),
+      // Also written at /offline-shell-worker.js, retiring the /usage worker that ui@0.3.0 and earlier registered.
+      retiringWorkerSourcePath: `${reactRouterConfig.appDirectory}/offline/service-worker-kill-switch.ts`,
       killSwitch: serviceWorkerKillSwitch,
     });
     console.log(

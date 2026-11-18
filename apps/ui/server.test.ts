@@ -169,18 +169,18 @@ describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
     });
   });
 
-  /* PL7: a new build's worker, the kill switch's included, must reach a visitor on their next page load. */
+  /* PL7: a new build's worker, the kill switch's included, and the retiring worker at the retired /usage worker's URL
+   * must reach a visitor on their next page load. */
   it.runIf(existsSync(resolve(buildClient, 'service-worker.js')))(
-    'should serve the service worker for the browser never to store',
+    'should serve the service workers for the browser never to store',
     async () => {
-      const responses = await Promise.all(
-        ['identity', 'br'].map(async (encoding) =>
-          fetch(baseUrl + '/service-worker.js', { headers: { 'Accept-Encoding': encoding } }),
-        ),
+      const requests = ['/service-worker.js', '/offline-shell-worker.js'].flatMap((path) =>
+        ['identity', 'br'].map(async (encoding) => fetch(baseUrl + path, { headers: { 'Accept-Encoding': encoding } })),
       );
+      const responses = await Promise.all(requests);
       await Promise.all(responses.map(async (response) => response.arrayBuffer()));
       for (const response of responses) {
-        expect(response.status).toBe(200);
+        expect(response.status, response.url).toBe(200);
         expect(response.headers.get('Content-Type')).toMatch(/javascript/u);
         expect(response.headers.get('Cache-Control')).toBe('no-cache, no-store, must-revalidate');
         expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');

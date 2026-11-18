@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildServiceWorker, serviceWorkerFile } from '#scripts/build-service-worker.js';
+import { buildServiceWorker, retiredServiceWorkerFile, serviceWorkerFile } from '#scripts/build-service-worker.js';
 import { precacheListFile } from '#scripts/precache-list.js';
 
 type Listener = (event: { waitUntil(promise: Promise<unknown>): void }) => void;
@@ -23,6 +23,7 @@ describe('the kill switch build (PL7)', () => {
     result = await buildServiceWorker({
       buildDirectory,
       workerSourcePath: resolve(import.meta.dirname, '../app/offline/service-worker-kill-switch.ts'),
+      retiringWorkerSourcePath: resolve(import.meta.dirname, '../app/offline/service-worker-kill-switch.ts'),
       classes: [],
       killSwitch: true,
     });
@@ -35,6 +36,10 @@ describe('the kill switch build (PL7)', () => {
   it('should write the retiring worker and an empty precache list, needing no build manifest', () => {
     expect(result).toStrictEqual({ entries: [], bytes: 0 });
     expect(existsSync(join(buildDirectory, 'client', serviceWorkerFile))).toBe(true);
+    // The retired /usage worker's URL carries the same retiring worker.
+    expect(readFileSync(join(buildDirectory, 'client', retiredServiceWorkerFile), 'utf8')).toBe(
+      readFileSync(join(buildDirectory, 'client', serviceWorkerFile), 'utf8'),
+    );
     expect(JSON.parse(readFileSync(join(buildDirectory, precacheListFile), 'utf8'))).toStrictEqual([]);
   });
 
@@ -54,7 +59,7 @@ describe('the kill switch build (PL7)', () => {
       skipWaiting: record('skipWaiting'),
       clients: { claim: record('claim') },
       caches: {
-        keys: async () => ['tau-precache-v2-http://localhost/', 'tau-assets', 'other'],
+        keys: async () => ['tau-precache-v2-http://localhost/', 'tau-assets', 'tau-offline-shell-3f9a2c1d', 'other'],
         delete: record('delete'),
       },
       registration: { unregister: record('unregister') },
@@ -76,6 +81,7 @@ describe('the kill switch build (PL7)', () => {
       'claim',
       'delete tau-precache-v2-http://localhost/',
       'delete tau-assets',
+      'delete tau-offline-shell-3f9a2c1d',
       'unregister',
     ]);
   });

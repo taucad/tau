@@ -18,17 +18,11 @@
  */
 import { homeAppEntry, workerRouteClasses } from '#lib/route-classes.js';
 import type { WorkerRouteClass } from '#lib/route-classes.js';
-import { cachePrefix, serviceWorkerMessageType } from '#offline/pwa-messages.js';
+import { serviceWorkerMessageType } from '#offline/pwa-messages.js';
 import type { ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
 /** Milliseconds a network-first document waits for the network before the precached one answers (B5's bound). */
 export const navigationNetworkTimeout = 3000;
-
-/** The runtime cache {@link cacheOnFirstUse} fills. */
-export const assetCacheName = `${cachePrefix}-assets`;
-
-/** The caches of the retired `/usage` worker (B5), deleted when this one activates. */
-export const retiredCachePrefix = 'tau-offline-shell-';
 
 /** The classes the worker answers, from the registry. */
 export const workerClasses: readonly WorkerRouteClass[] = workerRouteClasses();

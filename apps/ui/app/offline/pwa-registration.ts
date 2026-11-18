@@ -16,9 +16,15 @@
  * | `replaced` | no | Check for the new worker (`registration.update()`), once per verdict; it activates when installed |
  * | `unknown` | yes | Ask the server now (`queryLiveBuild`), so the rule can decide |
  * | `live`, or `unknown` with none | either | Nothing |
+ *
+ * One exception: a waiting worker that would replace the retired `/usage` worker (`/offline-shell-worker.js`, which
+ * ui@0.3.0 and earlier registered at the same scope) activates at once, whatever the verdict. That worker serves no
+ * deploy the page could be on, and once this page registers `/service-worker.js` the browser checks only the new
+ * script for updates, so the retiring worker every build ships at the old URL would never reach it: left to the rule,
+ * the old worker would keep its pages and its caches for as long as a tab stays open.
  */
 import type { ServerVerdict } from '#filesystem/build-skew.js';
-import { serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
+import { retiredServiceWorkerUrl, serviceWorkerMessageType, skipWaitingMessageType } from '#offline/pwa-messages.js';
 import type { ServiceWorkerInstallStatus, ServiceWorkerMessage } from '#offline/pwa-messages.js';
 
 /** Where the build writes the worker (`scripts/build-service-worker.ts`); its scope is the whole origin. */
@@ -32,9 +38,17 @@ export type UpdateAction = 'activate' | 'check-for-update' | 'ask-server' | 'non
  *
  * @param verdict - What the server last said about this build.
  * @param hasWaiting - Whether a newer worker is installed and waiting.
+ * @param replacesRetiredWorker - Whether the active worker is the retired `/usage` worker.
  * @returns What to do.
  */
-export const updateAction = (verdict: ServerVerdict, hasWaiting: boolean): UpdateAction => {
+export const updateAction = (
+  verdict: ServerVerdict,
+  hasWaiting: boolean,
+  replacesRetiredWorker = false,
+): UpdateAction => {
+  if (hasWaiting && replacesRetiredWorker) {
+    return 'activate';
+  }
   if (verdict === 'replaced') {
     return hasWaiting ? 'activate' : 'check-for-update';
   }
@@ -86,7 +100,10 @@ export const startServiceWorker = (
       checkedForVerdict = false;
     }
     const { waiting } = registration;
-    const action = updateAction(verdict, waiting !== null);
+    const activeScript = registration.active?.scriptURL;
+    const replacesRetiredWorker =
+      activeScript !== undefined && new URL(activeScript).pathname === retiredServiceWorkerUrl;
+    const action = updateAction(verdict, waiting !== null, replacesRetiredWorker);
     if (action === 'activate') {
       waiting?.postMessage({ type: skipWaitingMessageType });
     } else if (action === 'check-for-update' && !checkedForVerdict) {

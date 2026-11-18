@@ -32,6 +32,8 @@ const projectShellFile = join(clientRoot, 'w/__shell/__shell/index.html');
 /** Where the service worker precaches the project shell from, and the worker itself. */
 export const projectShellUrl = '/w/__shell/__shell/index.html';
 const serviceWorkerUrl = '/service-worker.js';
+/** The retired `/usage` worker's URL, where every PL7 build ships the retiring worker. */
+const retiredServiceWorkerUrl = '/offline-shell-worker.js';
 const projectUrl = /^\/w\/[^/.]+\/[^/.]+\/?$/u;
 const heldChunk = /^\/assets\/example-command-items-[\w-]+\.js$/u;
 /** Milliseconds between the two deploys' build ids. */
@@ -128,11 +130,18 @@ export type DeployServer = {
 
 export const startDeployServer = async (
   builds: Readonly<Record<Deploy, ServerBuild>>,
-  files?: Readonly<{ shells: Readonly<Record<Deploy, string>>; workers: Readonly<Record<Deploy, string>> }>,
+  files?: Readonly<{
+    shells: Readonly<Record<Deploy, string>>;
+    /** Each deploy's `/service-worker.js`; an empty script is a 404, as for a build that has none. */
+    workers: Readonly<Record<Deploy, string>>;
+    /** Each deploy's `/offline-shell-worker.js` (the retired `/usage` worker's URL); unset serves the build's file. */
+    retiredWorkers?: Readonly<Record<Deploy, string>>;
+  }>,
   { hold = true, retain = false }: { readonly hold?: boolean; readonly retain?: boolean } = {},
 ): Promise<DeployServer> => {
   const shells = files?.shells;
   const workers = files?.workers;
+  const retiredWorkers = files?.retiredWorkers;
   let live: Deploy = 'previous';
   let buildChecks = 0;
   const documents: Deploy[] = [];
@@ -168,13 +177,21 @@ export const startDeployServer = async (
     }
     serveAsset(request, response, next);
   });
-  app.get(serviceWorkerUrl, (_request: Request, response: Response, next) => {
-    if (workers === undefined) {
-      next();
-      return;
-    }
-    response.status(200).type('text/javascript').set('Cache-Control', 'no-cache').send(workers[live]);
-  });
+  const serveWorker =
+    (scripts: Readonly<Record<Deploy, string>> | undefined) =>
+    (_request: Request, response: Response, next: () => void): void => {
+      if (scripts === undefined) {
+        next();
+        return;
+      }
+      if (scripts[live] === '') {
+        sendDeletedAsset(response);
+        return;
+      }
+      response.status(200).type('text/javascript').set('Cache-Control', 'no-cache').send(scripts[live]);
+    };
+  app.get(serviceWorkerUrl, serveWorker(workers));
+  app.get(retiredServiceWorkerUrl, serveWorker(retiredWorkers));
   app.get(projectShellUrl, (_request: Request, response: Response, next) => {
     if (shells === undefined) {
       next();

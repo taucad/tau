@@ -605,7 +605,8 @@ export const replicadKernel = defineKernel({
 
       // Explicit off constructs nothing: no tier, no cache installed, no key built (I2). A Replicad build without
       // the operation cache seam runs without the tier.
-      const seamPresent = typeof (replicadModule as Partial<ReplicadLibrary>).setOperationCache === 'function';
+      const seamProbe: Partial<ReplicadLibrary> = replicadModule;
+      const seamPresent = typeof seamProbe.setOperationCache === 'function';
       const liveTier =
         computeReuseOption === false || !seamPresent
           ? undefined
@@ -1226,7 +1227,8 @@ type Aliasable = { delete?: () => void; innerShape?: { delete?: () => void }; cl
  */
 const deleteAliases = (entries: readonly NativeHandleEntry[]): void => {
   for (const { shape } of entries) {
-    const owned = shape as unknown as Aliasable;
+    // Typed as `AnyShape`, but a drawing entry has no `delete` at runtime.
+    const owned: Aliasable = shape;
     if (typeof owned.delete === 'function') {
       owned.delete();
     } else {
@@ -1238,7 +1240,7 @@ const aliasEntries = (entries: readonly NativeHandleEntry[]): NativeHandleEntry[
   const aliases: NativeHandleEntry[] = [];
   try {
     for (const entry of entries) {
-      aliases.push({ ...entry, shape: (entry.shape as unknown as Aliasable).clone() as unknown as AnyShape });
+      aliases.push({ ...entry, shape: entry.shape.clone() });
     }
   } catch (error) {
     deleteAliases(aliases);

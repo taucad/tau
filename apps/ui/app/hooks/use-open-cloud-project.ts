@@ -18,6 +18,9 @@ import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { withNamedLock } from '#lib/named-lock.js';
 import { getRevisionSessionUser } from '#lib/revision-actor.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
+import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
+import { selectRuntimeOpenAhead } from '#runtime/app-runtime.js';
+import type { AppRuntime } from '#runtime/app-runtime.js';
 import type { CreateProjectOptions } from '#runtime/project-library-commands.js';
 
 /**
@@ -50,6 +53,35 @@ export const cloudProjectStub = (entry: CloudProject): CreateProjectOptions => (
 });
 
 /**
+ * Navigate to the project, with its open started first (STO-25 SP6): the registry's early open connects the project's
+ * revision client, and its Tau Cloud open when one is owed, while the route's code loads; the project's session takes
+ * both. A navigation that fails releases it. Outside an app runtime it navigates alone.
+ *
+ * @param input - The runtime, the project, its slugs, whether the gesture asserted it active, and the navigation.
+ */
+const navigateWithOpenAhead = async (
+  input: Readonly<{
+    runtime: AppRuntime | undefined;
+    projectId: string;
+    slugs: Readonly<{ workspaceSlug: string; projectSlug: string }>;
+    asserted: boolean;
+    navigate: () => Promise<void>;
+  }>,
+): Promise<void> => {
+  const { runtime, projectId, slugs, asserted, navigate } = input;
+  const release =
+    runtime === undefined
+      ? undefined
+      : selectRuntimeOpenAhead(runtime)({ projectId, slugs, ...(asserted ? { asserted: true } : {}) });
+  try {
+    await navigate();
+  } catch (error) {
+    release?.();
+    throw error;
+  }
+};
+
+/**
  * Open a Tau Cloud project on this device.
  *
  * Three things in one gesture, none of them new: the project is created locally
@@ -69,6 +101,7 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
   const { projects } = useProjects({ scope: 'all' });
   const { createProject, getProjects } = useProjectManager();
   const navigate = useNavigate();
+  const runtime = useOptionalAppRuntime();
 
   return useCallback(
     async (entry: CloudProject): Promise<void> => {
@@ -87,7 +120,14 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
         return;
       }
       if (held?.slugs !== undefined) {
-        await navigate(projectUrl(held.slugs));
+        const { slugs } = held;
+        await navigateWithOpenAhead({
+          runtime,
+          projectId: entry.id,
+          slugs,
+          asserted: false,
+          navigate: async () => navigate(projectUrl(slugs)),
+        });
         return;
       }
       const created = await withNamedLock(`tau:open-cloud-project:${entry.id}`, async () => {
@@ -97,7 +137,7 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
           throw new Error('Restore this project from Trash before opening it.');
         }
         if (current?.slugs !== undefined) {
-          return { slugs: current.slugs };
+          return { slugs: current.slugs, asserted: false };
         }
         await assertCloudProjectActive(entry.id);
         if (getRevisionSessionUser()?.id !== account) {
@@ -113,7 +153,8 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
           if (getRevisionSessionUser()?.id !== account) {
             throw new Error('Your account changed. Refresh the project before opening it.');
           }
-          return created;
+          /* Asserted active just now, after its stub was created: the early open need not ask again. */
+          return { slugs: created.slugs, asserted: true };
         } catch (error) {
           if (error instanceof CloudProjectUnavailableError) {
             if (getRevisionSessionUser()?.id === account && tauCloudIntent.get(entry.id) === 'open') {
@@ -137,12 +178,18 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
           throw error;
         }
       });
-      /* The library owns the root file-manager worker, while the project route
-         owns a project-scoped worker. Carry the gesture across navigation so
-         the owning worker records and opens the remote; sending it here loses
-         the command when the project client replaces the root client. */
-      await navigate(projectUrl(created.slugs));
+      /* The intent carries the gesture across navigation; the registry's early
+         open starts the project's client and its Tau remote on the shared
+         worker its session uses, so the session takes the same connection
+         (STO-25 SP6) instead of a second root. */
+      await navigateWithOpenAhead({
+        runtime,
+        projectId: entry.id,
+        slugs: created.slugs,
+        asserted: created.asserted,
+        navigate: async () => navigate(projectUrl(created.slugs)),
+      });
     },
-    [createProject, getProjects, navigate, projects],
+    [createProject, getProjects, navigate, projects, runtime],
   );
 };

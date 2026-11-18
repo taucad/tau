@@ -157,6 +157,14 @@
         }
       }
     },
+    "typecheck": {
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/tools/formal.plugin.ts",
+        "{workspaceRoot}/tools/tsgo.plugin.ts"
+      ]
+    },
     "test:e2e:queue": {
       "executor": "nx:noop",
       "dependsOn": ["test:e2e"],

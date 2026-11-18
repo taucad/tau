@@ -856,7 +856,8 @@
   {
     "file": "scripts/spikes/native-deps/fetch-payloads.mts",
     "target": "apps/desktop/resources/python/manifest.json",
-    "reason": "reads another project's configuration it checks"
+    "reason": "reads another project's configuration it checks",
+    "unscheduled": "Run by the spike-wave0-macos workflow's `spike fetch-payloads` step, not by an Nx target."
   },
   {
     "file": "scripts/spikes/native-deps/linux/s11/fixtures-check.ts",

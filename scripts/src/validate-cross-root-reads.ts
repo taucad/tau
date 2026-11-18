@@ -42,6 +42,8 @@ import { createProjectGraphAsync } from '@nx/devkit';
 import type { ProjectGraph } from '@nx/devkit';
 import ts from 'typescript';
 
+import { browserTests, workspaceTests } from '#test-sets.js';
+
 /** A workspace project: its Nx name and its workspace-relative root. */
 export type ProjectRoot = {
   readonly name: string;
@@ -831,6 +833,17 @@ export type CoverageContext = {
   readonly namedInputs: Readonly<Record<string, readonly unknown[]>>;
   /** Workspace-relative paths of the files git tracks. */
   readonly tracked: readonly string[];
+  /**
+   * The targets that run a test file, by its workspace-relative path, for a project that partitions
+   * its suites into test sets; such a file is run by these targets alone.
+   */
+  readonly testRunners?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * The uncached targets CI runs on every landing, as `project:target`. Nx neither skips nor caches
+   * them, so a read they run is never stale; another target that runs the same file still needs
+   * coverage.
+   */
+  readonly everyLanding?: readonly string[];
 };
 
 /** A cross-root read that neither a graph edge nor a declared input covers. */
@@ -1027,12 +1040,20 @@ const listingPattern = (directory: string, entries: readonly string[]): string =
     : `${directory}/**/*`;
 };
 
-/** The targets that run a file: those naming it, else the test targets for a test file, else every target. */
+/**
+ * The targets that run a file: those its test set assigns it to, else those naming it, else the test
+ * targets for a test file, else every target.
+ */
 const runningTargets = (
   read: CrossRootRead,
   reader: GraphProject,
+  testRunners: Readonly<Record<string, readonly string[]>> = {},
 ): { readonly running: ReadonlyArray<readonly [string, TargetConfig]>; readonly named: boolean } => {
   const targets = Object.entries(reader.targets);
+  const assigned = testRunners[read.file];
+  if (assigned !== undefined) {
+    return { running: targets.filter(([name]) => assigned.includes(name)), named: true };
+  }
   const naming = targets.filter(([, target]) => targetMentions(target, read.file, reader.root));
   if (naming.length > 0) {
     return { running: naming, named: true };
@@ -1070,13 +1091,15 @@ const fixTarget = (
  *   a directory listing needs a fileset that names its entries by a wildcard, or one per entry;
  * - for an untracked target (build output), a fileset matching its path, or a running target that
  *   builds its owner first (`dependsOn`, `nx run <owner>:…`, `dependentTasksOutputFiles`);
+ * - for a target CI runs uncached on every landing (`everyLanding`), nothing: Nx never skips it;
  * - an allowlist entry's `unscheduled` reason, only for a runtime read by a file that no target of
  *   its project names and that is not a test file: an operator script no CI task runs.
  *
  * Exempt: `nx.json` (every project's hash includes it), the workspace root directory itself,
  * `realpath`, installed dependencies, local `.env` files, untracked files outside every project and
- * paths outside the workspace. The targets that run a file are those whose options name it; for a
- * test file, those naming its directory, else its `test*` and `e2e*` targets; else every target.
+ * paths outside the workspace. The targets that run a file are those its test set assigns it to
+ * (`testRunners`), else those whose options name it; for a test file, its `test*` and `e2e*` targets;
+ * else every target.
  * A module read is also run by `typecheck`.
  *
  * @param reads - The cross-root reads found.
@@ -1104,7 +1127,7 @@ export const checkCoverage = (
       return [];
     }
     const uncovered = coverageOf(read, reader, workspace);
-    return uncovered && !isUnscheduled(read, reader, allowlist) ? [uncovered] : [];
+    return uncovered && !isUnscheduled(read, allowlist, workspace) ? [uncovered] : [];
   });
 };
 
@@ -1119,22 +1142,33 @@ type Workspace = {
 };
 
 /** Does an `unscheduled` allowlist entry excuse the read: a runtime read by a script no target names? */
-const isUnscheduled = (read: CrossRootRead, reader: GraphProject, allowlist: readonly AllowlistEntry[]): boolean =>
-  !runningTargets(read, reader).named &&
-  !isTestFile(read.file, reader.root) &&
-  !moduleKinds.has(read.kind) &&
-  allowlist.some((entry) => entry.unscheduled !== undefined && entryMatches(entry, read));
+const isUnscheduled = (read: CrossRootRead, allowlist: readonly AllowlistEntry[], workspace: Workspace): boolean => {
+  const reader = workspace.projects.get(read.project.name);
+  return (
+    reader !== undefined &&
+    !runningTargets(read, reader, workspace.context.testRunners).named &&
+    !isTestFile(read.file, reader.root) &&
+    !moduleKinds.has(read.kind) &&
+    allowlist.some((entry) => entry.unscheduled !== undefined && entryMatches(entry, read))
+  );
+};
 
 /** The read as uncovered, with its fix, or undefined when an edge or a declared input covers it. */
 const coverageOf = (read: CrossRootRead, reader: GraphProject, workspace: Workspace): UncoveredRead | undefined => {
   const named = { ...workspace.context.namedInputs, ...reader.namedInputs };
-  const { running: baseRunning, named: isNamed } = runningTargets(read, reader);
+  const { running: baseRunning, named: isNamed } = runningTargets(read, reader, workspace.context.testRunners);
   const typecheck = moduleKinds.has(read.kind)
     ? Object.entries(reader.targets).filter(
         ([name]) => name === 'typecheck' && !baseRunning.some(([other]) => other === name),
       )
     : [];
-  const running = [...baseRunning, ...typecheck];
+  const everyLanding = new Set(workspace.context.everyLanding);
+  const unskipped = (name: string): boolean => everyLanding.has(`${reader.name}:${name}`);
+  // A target CI runs uncached on every landing never runs stale; the others still need coverage.
+  const running = [...baseRunning, ...typecheck].filter(([name]) => !unskipped(name));
+  if (running.length === 0 && baseRunning.length > 0) {
+    return undefined;
+  }
   const runningNames = running.map(([name]) => name);
   const patterns = running.flatMap(([, target]) => workspaceFilesets(target.inputs, named));
   const deps = reachable(reader.name, workspace.context.dependencies, workspace.closures);
@@ -1293,6 +1327,43 @@ export const trackedPaths = (workspaceRoot: string): string[] =>
     .filter((path) => path !== '');
 
 /**
+ * The targets that run each suite of `scripts`, which `scripts/vitest.config.ts` partitions by
+ * `TAU_SCRIPTS_TEST_SET`: `test:e2e` the browser set, `validate-workspace-tests` the workspace set.
+ * Its other suites run under `test`, which the default rule already finds.
+ */
+export const scriptsTestRunners: Readonly<Record<string, readonly string[]>> = Object.fromEntries(
+  [
+    ...browserTests.map((path): [string, string[]] => [path, ['test:e2e']]),
+    ...workspaceTests.map((path): [string, string[]] => [path, ['validate-workspace-tests']]),
+  ].map(([path, targets]): [string, string[]] => [`scripts/${path}`, targets]),
+);
+
+/** The target CI's Validate workspace job runs on every landing (`.github/workflows/ci.yml`). */
+const landingGate = { project: 'scripts', target: 'validate' } as const;
+
+/**
+ * The uncached targets the landing gate runs: its same-project `dependsOn` entries, by name or glob,
+ * whose `cache` is `false`. A cached one can be skipped on a cache hit, so it needs coverage.
+ *
+ * @param graph - The Nx project graph.
+ * @returns Each such target as `project:target`.
+ */
+export const everyLandingTargets = (graph: Pick<ProjectGraph, 'nodes'>): string[] => {
+  const targets = graph.nodes[landingGate.project]?.data.targets ?? {};
+  const patterns = (targets[landingGate.target]?.dependsOn ?? []).flatMap((entry): string[] => {
+    if (typeof entry === 'string') {
+      return entry.startsWith('^') || entry.includes(':') ? [] : [entry];
+    }
+    return entry.projects === undefined && entry.dependencies !== true && typeof entry.target === 'string'
+      ? [entry.target]
+      : [];
+  });
+  return Object.entries(targets)
+    .filter(([name, config]) => config.cache === false && patterns.some((pattern) => matches(name, pattern)))
+    .map(([name]) => `${landingGate.project}:${name}`);
+};
+
+/**
  * The coverage context from a project graph and `nx.json`.
  *
  * @param graph - The Nx project graph.
@@ -1318,6 +1389,8 @@ export const coverageContext = (
     ),
     namedInputs,
     tracked,
+    testRunners: scriptsTestRunners,
+    everyLanding: everyLandingTargets(graph),
   };
 };
 

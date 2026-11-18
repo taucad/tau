@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   checkAllowlist,
   checkCoverage,
+  everyLandingTargets,
   coverageContext,
   findCrossRootReads,
   formatCoverage,
@@ -306,6 +307,64 @@ describe('checkCoverage()', () => {
       'libs/c/scripts/check.ts infra/policy.json: add "{workspaceRoot}/infra/policy.json" to the inputs of c:check-x',
       'libs/c/scripts/check.ts x/other.json: add "{workspaceRoot}/x/other.json" to the inputs of c:check-x',
     ]);
+  });
+
+  it('runs a test file in a test set by its assigned targets alone, and needs nothing for one CI runs uncached on every landing', () => {
+    const suite = read('libs/a/src/policy.test.ts', 'fs.readFileSync', 'x/other.json');
+    const module = read('libs/a/src/plugin.test.ts', 'import', 'plugins/p/src/index.js');
+    const partitioned: CoverageContext = {
+      ...context,
+      projects: graphProjects.map((project) =>
+        project.name === 'a'
+          ? {
+              ...project,
+              targets: {
+                test: { inputs: ['default', '{workspaceRoot}/x/other.json'] },
+                typecheck: {},
+                'validate-suites': { options: { command: 'vitest run' } },
+              },
+            }
+          : project,
+      ),
+      testRunners: {
+        'libs/a/src/policy.test.ts': ['validate-suites'],
+        'libs/a/src/plugin.test.ts': ['validate-suites'],
+      },
+    };
+    // `a:test` declares the file, but excludes this suite, so its input selects nothing for it.
+    expect(checkCoverage([suite], partitioned).map(({ fix, runningTargets }) => [fix, runningTargets])).toEqual([
+      ['add "{workspaceRoot}/x/other.json" to the inputs of a:validate-suites', ['validate-suites']],
+    ]);
+    const landing = { ...partitioned, everyLanding: ['a:validate-suites'] };
+    expect(checkCoverage([suite], landing)).toEqual([]);
+    // The type check still compiles an imported module, and caches.
+    expect(checkCoverage([module], landing).map(({ fix }) => fix)).toEqual([
+      'add "{workspaceRoot}/plugins/p/src/index.ts" to the inputs of a:typecheck, or add "plugin-p" to the implicitDependencies of a',
+    ]);
+  });
+
+  it('takes the uncached targets the landing gate depends on as run on every landing', () => {
+    expect(
+      everyLandingTargets({
+        nodes: {
+          scripts: {
+            name: 'scripts',
+            type: 'lib',
+            data: {
+              root: 'scripts',
+              targets: {
+                validate: { dependsOn: [{ target: 'validate-*' }, 'lint', '^build', { target: 'x', projects: ['b'] }] },
+                'validate-suites': { cache: false },
+                'validate-cached': {},
+                lint: { cache: false },
+                test: { cache: false },
+              },
+            },
+          },
+        },
+      }),
+    ).toEqual(['scripts:validate-suites', 'scripts:lint']);
+    expect(everyLandingTargets({ nodes: {} })).toEqual([]);
   });
 
   it('covers a directory listing by an edge to every entry or a fileset with a wildcard entry', () => {

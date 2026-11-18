@@ -320,7 +320,7 @@ catalog:
   # 1.23.5 carries libheif 1.23.5 and libde265 1.0.15.
   libheif-js: 1.23.5
   # Exact: @taucad/picovoxel's kernel version carries this release's build-time digests.
-  picovoxel: 0.2.1
+  picovoxel: 0.3.0
   # Exact: @taucad/smlib's kernel version and compute identity carry this release's WASM.
   '@classcad/smlibwasm': 0.6.2
   n8ao: 1.10.2

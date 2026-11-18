@@ -253,6 +253,8 @@ const lifecycleEventSchema = z.looseObject({
   placement: turnPlacementSchema.optional(),
   storageDurability: z.enum(storageDurabilityClasses).optional(),
   detail: runFailureDetailSchema.optional(),
+  /* I3: an open string, so a mode a newer build names keeps the row known; the host refuses a mode it cannot read. */
+  deployment: nonEmptyString.optional(),
 });
 const committedHistoryEventSchema = z.looseObject({
   ...eventBase,

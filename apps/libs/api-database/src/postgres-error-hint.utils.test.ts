@@ -23,6 +23,11 @@ describe('mapPostgresErrorToHint', () => {
       expect(mapPostgresErrorToHint(error)).toContain('Authentication failed');
     });
 
+    it('should return server-terminated hint when code is 57P01', () => {
+      const error = Object.assign(new Error('terminating connection due to administrator command'), { code: '57P01' });
+      expect(mapPostgresErrorToHint(error)).toContain('Server terminated the session');
+    });
+
     it('should return privilege hint when code is 42501', () => {
       const error = Object.assign(new Error('permission denied for database'), { code: '42501' });
       expect(mapPostgresErrorToHint(error)).toContain('Insufficient privilege');

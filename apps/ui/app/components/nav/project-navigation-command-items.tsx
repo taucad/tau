@@ -6,8 +6,8 @@ import { useAllChats } from '#hooks/use-all-chats.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 import { formatRelativeTime } from '@taucad/ui-core/utils/date.utils';
-import { projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
-import type { ProjectListItem } from '#types/project-library.types.js';
+import { projectChatUrl, projectUrl } from '@taucad/files-ui/utils/project-url.utils';
+import type { ProjectListItem } from '@taucad/files-ui/types/project-library.types';
 import { compareChatsByRecency } from '@taucad/chat-ui/utils/chat-recency.utils';
 
 const hasSlugs = (

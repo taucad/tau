@@ -74,7 +74,7 @@ const handler = createRequestHandler(
     future: {
       /* eslint-disable @typescript-eslint/naming-convention -- React Router's flag names. */
       v8_middleware: false,
-      v8_trailingSlashAwareDataRequests: false,
+      v8_trailingSlashAwareDataRequests: config.future.v8_trailingSlashAwareDataRequests,
       v8_passThroughRequests: config.future.v8_passThroughRequests,
       /* eslint-enable @typescript-eslint/naming-convention -- The flag names end here. */
     },
@@ -86,10 +86,18 @@ const handler = createRequestHandler(
   'production',
 );
 
+/**
+ * The `.data` path the client asks for at `pathname`: React Router's `singleFetchUrl` under the site's
+ * trailing-slash-aware data requests, which the test below holds on. A path ending in `/` gets `<path>_.data`, so `/`
+ * gets `/_.data`.
+ */
+const dataRequestPath = (pathname: string): string =>
+  pathname.endsWith('/') ? `${pathname}_.data` : `${pathname}.data`;
+
 /** The per-route results of the `.data` request a client navigation to `path` sends. */
 const navigate = async (path: string): Promise<Readonly<Record<string, { data?: { path?: string } }>>> => {
   const url = new URL(path, 'https://tau.new');
-  url.pathname = url.pathname === '/' ? '/_root.data' : `${url.pathname.replace(/\/$/u, '')}.data`;
+  url.pathname = dataRequestPath(url.pathname);
   url.searchParams.set('_routes', pageRoutes.map((route) => route.id).join(','));
   const response = await handler(new Request(url));
   if (response.body === null) {
@@ -110,6 +118,12 @@ const loadedPath = (results: Awaited<ReturnType<typeof navigate>>): string | und
 describe('client navigation', () => {
   test('passes loaders the raw request, as React Router 8 does', () => {
     expect(config.future.v8_passThroughRequests).toBe(true);
+  });
+
+  test("names data requests trailing-slash aware, as React Router 8 does, so the home's is `/_.data`", () => {
+    expect(config.future.v8_trailingSlashAwareDataRequests).toBe(true);
+    expect(dataRequestPath('/')).toBe('/_.data');
+    expect(dataRequestPath('/pricing/')).toBe('/pricing/_.data');
   });
 
   test.each([

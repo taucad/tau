@@ -18,7 +18,7 @@ import { personRecordStores } from '#preferences/person-record.store.js';
 import { useDeviceRecord } from '#preferences/use-device-record.js';
 import { usePersonRecord } from '#preferences/use-person-record.js';
 import { useOnboardingTelemetry } from '#telemetry/onboarding-telemetry.js';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 
 /** What Help's tour item does now. */
 export type TourMenuItem = Readonly<{

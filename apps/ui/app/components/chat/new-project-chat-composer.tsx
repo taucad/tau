@@ -11,7 +11,7 @@ import { useModels } from '#hooks/use-models.js';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
 import { reportProjectCreationFailure } from '#lib/project-creation-failure-reporting.js';
 
 type NewProjectChatComposerProperties = {

@@ -52,7 +52,7 @@
     "better-auth": "catalog:",
     "drizzle-orm": "^0.45.2",
     "fastify": "catalog:",
-    "postgres": "^3.4.9"
+    "postgres": "4.1.1"
   },
   "devDependencies": {
     "@nestjs/testing": "catalog:",

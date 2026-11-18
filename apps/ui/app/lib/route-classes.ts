@@ -87,9 +87,9 @@ export const shellSentinel = '__shell';
 
 /**
  * The one-segment grammar a shell parameter matches: any segment without a dot. Every slug and id the app writes is one
- * (percent escapes included); a dot marks React Router's `<path>.data` requests and file names, which stay on the
- * function. Used as the URLPattern group of the function's `excludedPaths`, so a data request is never excluded. The
- * slash is escaped because a URLPattern group, unlike a regular expression, rejects a bare one.
+ * (percent escapes included); a dot marks React Router's `<path>.data` and `<path>/_.data` requests and file names,
+ * which stay on the function. Used as the URLPattern group of the function's `excludedPaths`, so a data request is never
+ * excluded. The slash is escaped because a URLPattern group, unlike a regular expression, rejects a bare one.
  */
 export const shellSegment = String.raw`[^\/.]+`;
 
@@ -127,7 +127,8 @@ const projectClass: StaticShellClass = {
  * The Home shell (PL4): `/` is marketing or Home by the visitor's `tau-entry` preference, so the marketing edge function
  * chooses per request and rewrites a `tau-entry=app` visit to this document. Home has no server loader and the root
  * loader reads no visitor (PL2), so the function's Home was already a function of the deploy only. Every other answer at
- * `/` (no preference, `?website`, a write, the `www` alias) and `/_root.data` stay where they were.
+ * `/` (no preference, `?website`, a write, the `www` alias) and the root data request (`/_root.data` or `/_.data`) stay
+ * where they were.
  */
 const homeClass: StaticShellClass = {
   id: 'home',
@@ -317,9 +318,9 @@ export type PrerenderedFiles = Readonly<{ document: string; data: readonly strin
 
 /**
  * The files the prerender pass writes for a path (`@react-router/dev` `prerenderRoute` and `prerenderData`): the
- * document at `<path>/index.html`, and the root loader's data at `<path>.data`. For `/` the data file is `_root.data`
- * on React Router 7, and `_.data` under the trailing-slash-aware data requests React Router 8 makes the default, so both
- * are named.
+ * document at `<path>/index.html`, and the root loader's data at `<path>.data`. For `/` the data file is `_.data` under
+ * the trailing-slash-aware data requests the app builds with (React Router 8's default), and `_root.data` without them,
+ * so both are named.
  *
  * @param path - A prerender path.
  * @returns The document file and the candidate data files.

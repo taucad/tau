@@ -7,7 +7,7 @@
  */
 
 import type { ProjectLocator } from '@taucad/filesystem';
-import type { Workspace } from '@taucad/files-ui/filesystem/handle-store';
+import type { Workspace } from '#filesystem/handle-store.js';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 
 /** The two segments of a canonical project URL. */

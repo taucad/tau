@@ -1,6 +1,6 @@
 import type { DesktopScheme } from '@taucad/ui-core/lib/desktop-deep-link';
-import { projectUrl } from '#utils/project-url.utils.js';
-import type { ProjectSlugs } from '#utils/project-url.utils.js';
+import { projectUrl } from '@taucad/files-ui/utils/project-url.utils';
+import type { ProjectSlugs } from '@taucad/files-ui/utils/project-url.utils';
 import { searchParameterName } from '@taucad/ui-core/constants/search-parameter.constants';
 
 /** Identity links contain no machine address, credential or command. */

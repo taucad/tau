@@ -1026,6 +1026,11 @@
   },
   {
     "file": "scripts/src/test-shard-dealer.test.ts",
+    "target": "apps/ui/project.json",
+    "reason": "reads another project's configuration it checks"
+  },
+  {
+    "file": "scripts/src/test-shard-dealer.test.ts",
     "target": "libs/tau-examples/**",
     "reason": "reads a Tau example from tau-examples as a fixture or source"
   },
@@ -1103,5 +1108,10 @@
     "file": "scripts/src/desktop-platform-scope-workflow.test.ts",
     "target": "apps/desktop/scripts/desktop-receipt-provenance.mts",
     "reason": "binds the workflow's artifact names to the names the desktop script admits; the replay test owns that cross-file contract"
+  },
+  {
+    "file": "packages/agent-host/src/log/chat-ledger.differential.test.ts",
+    "target": "out/test-results/formal/packages/agent-host/lean",
+    "reason": "lists the fresh-differential corpus directory this test writes, to clear the files no other part writes"
   }
 ]

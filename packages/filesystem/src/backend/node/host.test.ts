@@ -50,7 +50,9 @@ type Served = {
 };
 
 const serve = (options: { authority?: boolean } = {}): Served => {
-  const sandbox = realpathSync(mkdtempSync(join(tmpdir(), 'tau-node-host-')));
+  // The native realpath, as the host's `fs.promises.realpath` spells it: the JavaScript `realpathSync` keeps a Windows
+  // 8.3 short name (`C:\Users\RUNNER~1\...`), which the host refuses as AUTHORITY_ROOT_NOT_CANONICAL.
+  const sandbox = realpathSync.native(mkdtempSync(join(tmpdir(), 'tau-node-host-')));
   const root = join(sandbox, 'root');
   const alias = join(sandbox, 'alias');
   const authorityRoot = join(sandbox, 'authority');
@@ -1039,7 +1041,7 @@ describe('NodeFsProviderClient.applyBatch', () => {
 
 describe('a large-object batch write across the port (EQ13)', () => {
   it('is resolved by the host against the store it holds for the root, and answers the verified id', async () => {
-    const sandbox = realpathSync(mkdtempSync(join(tmpdir(), 'tau-node-host-lfs-')));
+    const sandbox = realpathSync.native(mkdtempSync(join(tmpdir(), 'tau-node-host-lfs-')));
     const root = join(sandbox, 'root');
     const store = join(sandbox, 'store');
     mkdirSync(root);

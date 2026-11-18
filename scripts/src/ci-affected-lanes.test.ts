@@ -168,6 +168,7 @@ describe('ci.yml affected-only lanes', () => {
       'viewer-parity': { targets: ['test:viewer-parity'], pr: 'queue' },
       desktop: { tags: ['ci:desktop'] },
       shell: { tags: ['ci:shell'], pr: 'queue', queue: 'any-touched' },
+      'windows-unit': { tags: ['ci:windows-unit'], pr: 'touched' },
       'e2e-queue': { targets: ['test:e2e:queue'], pr: 'touched' },
     });
   });
@@ -230,6 +231,7 @@ describe('ci.yml affected-only lanes', () => {
       'api',
       'billing-e2e',
       'shell',
+      'windows-unit',
       'formal-nightly',
       'e2e-queue',
     ]);
@@ -511,6 +513,7 @@ describe('ci.yml native-host and viewer-parity lanes', () => {
       ['FORMAL', 'formal', 'formal'],
       ['API', 'api', 'api'],
       ['BILLING', 'billing-e2e', 'billing'],
+      ['WINDOWS_UNIT', 'windows-unit', 'windows-unit'],
     ] as const) {
       expect(gateStep?.env?.[`${key}_REQUIRED`]).toBe(expression(`needs.plan.outputs.${output}`));
       expect(gateStep?.env?.[`${key}_RESULT`]).toBe(expression(`needs.${job}.result`));
@@ -1165,7 +1168,7 @@ describe('plan lane selection', () => {
     host: {
       root: 'packages/host',
       type: 'lib',
-      tags: ['ci:shell'],
+      tags: ['ci:shell', 'ci:windows-unit'],
       targets: ['test:shell-conformance', 'formal:nightly'],
     },
   };
@@ -1353,6 +1356,19 @@ describe('plan lane selection', () => {
     expect(own.stdout).toContain('Pull request (touched) api: ["api"]');
   });
 
+  it('should run the Windows unit rows of every affected project in the queue and of touched ones on a pull request', () => {
+    const queue = plan('merge_group', { affected: everything, files: ['packages/core/src/index.ts'] });
+    expect(queue.status, queue.stderr).toBe(0);
+    expect(queue.outputs['windows-unit']).toBe('true');
+    expect(queue.outputs['windows-unit-projects']).toBe('["host"]');
+    const through = plan('pull_request', { affected: everything, files: ['packages/core/src/index.ts'] });
+    expect(through.outputs['windows-unit']).toBe('false');
+    expect(through.outputs['windows-unit-projects']).toBe('[]');
+    const touched = plan('pull_request', { affected: everything, files: ['packages/host/src/index.ts'] });
+    expect(touched.outputs['windows-unit']).toBe('true');
+    expect(touched.outputs['windows-unit-projects']).toBe('["host"]');
+  });
+
   it('should run the affected shell projects in the merge queue and none on a pull request', () => {
     const queue = plan('merge_group', { affected: ['host'], files: ['packages/host/src/acp/server.ts'] });
     expect(queue.status, queue.stderr).toBe(0);
@@ -1538,6 +1554,53 @@ describe('plan lane selection', () => {
     const { status, stderr } = plan('merge_group', { affected: ['ui-e2e'], files: [], graphNodes });
     expect(status).not.toBe(0);
     expect(stderr).toContain(message);
+  });
+});
+
+describe('ci.yml Windows unit lane (Windows desktop production readiness R2)', () => {
+  type WindowsUnitWorkflow = {
+    readonly on: Record<string, unknown> & {
+      readonly workflow_call?: {
+        readonly inputs?: Record<string, { readonly type?: string; readonly required?: boolean }>;
+      };
+    };
+    readonly concurrency?: { readonly group?: string };
+    readonly jobs: Record<string, Job & { readonly 'runs-on'?: string }>;
+  };
+  const windows = load(read('.github/workflows/windows-unit.yml')) as WindowsUnitWorkflow;
+  const lane = ci.jobs['windows-unit'];
+
+  it('should plan the lane from tag:ci:windows-unit, for touched projects on a pull request', () => {
+    expect(laneSelectors['windows-unit']).toEqual({ tags: ['ci:windows-unit'], pr: 'touched' });
+    expect(planScript).toContain('windows_unit=$(flag windows-unit)');
+    expect(planScript).toContain(`windows_unit_projects=$(jq -c '."windows-unit"' <<< "$lanes")`);
+    expect(planScript).toContain('echo "windows-unit-projects=$windows_unit_projects"');
+    expect(ci.jobs['plan']?.outputs?.['windows-unit-projects']).toBe(
+      expression('steps.plan.outputs.windows-unit-projects'),
+    );
+    expect(lane?.if).toBe("needs.plan.outputs.windows-unit == 'true'");
+  });
+
+  it('should call the Windows rows with the planned projects on the run commit', () => {
+    expect(lane?.uses).toBe('./.github/workflows/windows-unit.yml');
+    expect(lane?.needs).toEqual(['plan']);
+    expect(lane?.with).toEqual({
+      ref: expression('github.sha'),
+      projects: expression('needs.plan.outputs.windows-unit-projects'),
+    });
+  });
+
+  it('should take ref and projects as workflow_call inputs, run each row on windows-2025, and never cancel a call', () => {
+    const inputs = windows.on.workflow_call?.inputs ?? {};
+    expect(Object.keys(inputs).toSorted()).toEqual(['projects', 'ref']);
+    expect(inputs['ref']).toMatchObject({ type: 'string', required: true });
+    expect(inputs['projects']).toMatchObject({ type: 'string', required: true });
+    expect(windows.jobs['unit']?.['runs-on']).toBe('windows-2025');
+    expect(windows.concurrency?.group).toContain("inputs.ref != '' && github.run_id");
+  });
+
+  it('should plan a called run without the label, since a call from a pull request sees the pull_request event', () => {
+    expect(windows.jobs['plan']?.if?.trimStart().startsWith("inputs.ref != '' ||")).toBe(true);
   });
 });
 

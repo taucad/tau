@@ -230,7 +230,8 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
     if (current !== undefined) {
       return current.connection.compute;
     }
-    return workerOnly.has(method) ? undefined : options.fallback;
+    /* A fallback without an optional method (`inflateObject`) answers it unavailable, typed, never a TypeError. */
+    return workerOnly.has(method) || typeof options.fallback?.[method] !== 'function' ? undefined : options.fallback;
   };
 
   const slot = async (): Promise<void> => {
@@ -271,7 +272,12 @@ export const createSupervisedComputeWorker = (options: SupervisorOptions): Super
           return await (compute[method] as (...input: readonly unknown[]) => Promise<unknown>)(...args);
         } catch (error) {
           const { fallback } = options;
-          if (fallback === undefined || !(error instanceof Error) || !unloaded.has(error)) {
+          if (
+            fallback === undefined ||
+            typeof fallback[method] !== 'function' ||
+            !(error instanceof Error) ||
+            !unloaded.has(error)
+          ) {
             throw error;
           }
           /* Bytes the dead worker took are gone: the fallback would measure an empty buffer, so the call fails typed. */

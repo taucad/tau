@@ -172,13 +172,13 @@ describe('the compute worker seam', () => {
     const oid = digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(body.byteLength)}\0`), ...body]));
     for (const compute of [remoteCompute(), createInlineCompute()]) {
       // oxlint-disable-next-line no-await-in-loop -- one compute at a time.
-      const inflated = await compute.inflateObject('blob', deflated, body.byteLength);
+      const inflated = await compute.inflateObject!('blob', deflated, body.byteLength);
       expect(inflated.oid).toBe(oid);
       expect(new Uint8Array(inflated.data)).toStrictEqual(body);
       /* The caller's deflated bytes are cloned to the worker, never detached. */
       expect(deflated.byteLength).toBeGreaterThan(0);
     }
-    const empty = await remoteCompute().inflateObject(
+    const empty = await remoteCompute().inflateObject!(
       'tree',
       new Uint8Array(await createInlineCompute().deflate(new Uint8Array(0))),
       0,
@@ -198,7 +198,7 @@ describe('the compute worker seam', () => {
       peak = Math.max(peak, process.memoryUsage().arrayBuffers);
     }, 1);
     try {
-      const refusing = compute.inflateObject('blob', deflated, 1000 * 1024 * 1024);
+      const refusing = compute.inflateObject!('blob', deflated, 1000 * 1024 * 1024);
       /* Whatever ran before the first wait has allocated what it allocates up front. */
       peak = Math.max(peak, process.memoryUsage().arrayBuffers);
       const refusal = await refusing.catch((error: unknown) => error);
@@ -227,9 +227,9 @@ describe('the compute worker seam', () => {
           [deflated, -1],
         ] as const) {
           // oxlint-disable-next-line no-await-in-loop -- one refusal at a time.
-          const refusal = await compute
-            .inflateObject('blob', new Uint8Array(bytes), declared)
-            .catch((error: unknown) => error);
+          const refusal = await compute.inflateObject!('blob', new Uint8Array(bytes), declared).catch(
+            (error: unknown) => error,
+          );
           expect(refusal).toBeInstanceOf(CorruptBytesError);
         }
       }

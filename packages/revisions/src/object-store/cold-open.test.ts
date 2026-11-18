@@ -14,6 +14,8 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import type { RevisionHttpClient } from '#http-client.js';
 import { revisionId } from '#algorithms/index.js';
+import { digestHex } from '#object-hash.js';
+import { frameObject } from '#git-objects.js';
 import { coldOpenFromCatalogue, importReachableFromCatalogue, parseHeadListing } from '#object-store/cold-open.js';
 import type { CatalogueFamily } from '#object-store/cold-open.js';
 import { createObjectStore, gitFilesOf, PackCeilingError } from '#object-store/object-store.js';
@@ -498,6 +500,42 @@ describe.runIf(gitToolchainOnPath)('the cold open from a hosted catalogue (D8)',
       hosted.git('rev-parse', `${hosted.tagged}^{tree}`),
     ]);
     expect(deflated).toBe([...closure].filter((oid) => deltas.has(oid)).length);
+  });
+
+  it('imports and repacks through a compute that has no inflateObject, checking each object by its own hash', async () => {
+    // `inflateObject` is optional on the exported contract: a compute built before it inflates and hashes in two
+    // calls, and a repack never takes its absence for a corrupt pack (SP6-import review).
+    const { inflateObject: _absent, ...older } = createInlineCompute();
+    const compute: ComputeWorker = older;
+    const provider = new MemoryProvider();
+    await provider.mkdir('.git/objects/pack', { recursive: true });
+    const store = createObjectStore({
+      files: gitFilesOf(provider, '.git'),
+      gitdir: '.git',
+      compute,
+      fenceName: 'cold-older',
+    });
+    const opened = await coldOpenFromCatalogue({ catalogueUrl, fetch: serve(hosted).fetch, store, compute });
+    expect(opened).toBeDefined();
+    expect(opened!.report.packsWritten).toBeGreaterThan(0);
+    expect(await store.repack(true)).toBe(true);
+    const closure = [
+      hosted.main,
+      hosted.git('rev-parse', `${hosted.main}^{tree}`),
+      ...lines(hosted.git('ls-tree', '-r', '-t', hosted.main)).map((line) => line.split(/\s+/u)[2]!),
+    ];
+    const reopened = createObjectStore({
+      files: gitFilesOf(provider, '.git'),
+      gitdir: '.git',
+      compute,
+      fenceName: 'cold-older-reopened',
+    });
+    for (const oid of closure) {
+      // oxlint-disable-next-line no-await-in-loop -- one object at a time.
+      const object = await reopened.read(oid);
+      expect(object).toBeDefined();
+      expect(digestHex('sha1', frameObject(object!.type, object!.data))).toBe(oid);
+    }
   });
 
   it('asks every pack Range past the HTTP cache, so parallel ranges of one pack are not serialised', async () => {

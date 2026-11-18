@@ -304,13 +304,14 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
     return inflated;
   };
 
+  /* Only where `compute.inflateObject` is there: called on the compute, so a method that reads `this` keeps it. */
   const inflateObject = async (
     type: GitObjectKind,
     compressed: Uint8Array<ArrayBuffer>,
     declared: number,
   ): Promise<Readonly<{ data: Uint8Array<ArrayBuffer>; oid: string }>> => {
     try {
-      return await compute.inflateObject(type, compressed, declared);
+      return await compute.inflateObject!(type, compressed, declared);
     } catch (error) {
       /* As {@link inflateExactly}: only a verdict on the bytes is a corrupt entry. */
       if (error instanceof CorruptBytesError) {
@@ -332,13 +333,14 @@ export const createPackReader = (options: PackReaderOptions): PackReader => {
     let at = bodyAt;
     if (kind in kinds) {
       const compressed = entry.subarray(at);
-      if (keepCompressed) {
+      if (keepCompressed && typeof compute.inflateObject === 'function') {
         /* Inflated and hashed in one call: the object crosses back once, with the id its bytes are. */
         const { data, oid } = await inflateObject(kinds[kind]!, compressed, declared);
         return { type: kinds[kind]!, data, compressed, oid };
       }
+      /* A compute without `inflateObject` inflates here, and the reader hashes what it answers. */
       const data = await inflateExactly(compressed, declared);
-      return { type: kinds[kind]!, data };
+      return keepCompressed ? { type: kinds[kind]!, data, compressed } : { type: kinds[kind]!, data };
     }
     if (kind !== ofsDelta && kind !== refDelta) {
       throw new TypeError(`A pack entry has an unknown type ${String(kind)}.`);

@@ -369,6 +369,25 @@ describe('the supervised compute worker (W5)', () => {
     expect(await supervised.inflate(await inline.deflate(data))).toStrictEqual(data);
   });
 
+  it('answers a method its fallback lacks as unavailable, typed, never a TypeError', async () => {
+    const { inflateObject: _absent, ...older } = createInlineCompute();
+    const supervised = createSupervisedComputeWorker({
+      spawn: () => {
+        throw new Error('no workers');
+      },
+      maxRestarts: 0,
+      fallback: older,
+    });
+    const inline = createInlineCompute();
+    const data = encoder.encode('cube(1);\n');
+    const refusal = await supervised.inflateObject!('blob', await inline.deflate(data), data.byteLength).catch(
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(ComputeWorkerCrashedError);
+    expect(refusal).toMatchObject({ failure: 'unavailable', method: 'inflateObject' });
+    expect(await supervised.inflate(await inline.deflate(data))).toStrictEqual(data);
+  });
+
   it('keeps a pack whose read failed because the worker crashed, and reads it once restarted', async () => {
     /* The first worker dies the moment it is asked to inflate; its successor does not. */
     let spawned = 0;

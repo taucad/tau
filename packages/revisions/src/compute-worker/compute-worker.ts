@@ -49,9 +49,11 @@ export type ComputeWorker = Readonly<{
    * crosses back once, with the id its bytes hash to, for the caller to
    * compare with the id it asked for. Inflating stops at the declared size.
    *
+   * Optional: a compute without it is asked to `inflate` and then `sha1`.
+   *
    * @throws CorruptBytesError when the body is not zlib or inflates to another size.
    */
-  inflateObject: (
+  inflateObject?: (
     type: 'commit' | 'tree' | 'blob' | 'tag',
     compressed: Uint8Array<ArrayBuffer>,
     declared: number,

@@ -176,6 +176,17 @@ const occurrences = (copies: number): Counts => ({
   'gp_Trsf.Value': 12 * copies,
 });
 
+/**
+ * A GLB export after a render at the same tolerances (compute reuse on) composes the meshes the memo kept (N14): no
+ * extraction and no surface-coordinate read, only the occurrence reads, with one more `IsPartner` check against the
+ * memo's kept representative.
+ */
+const keptOccurrences = (copies: number): Counts => ({
+  ...none,
+  ...occurrences(copies),
+  'ReplicadShapeIdentity.IsPartner': copies,
+});
+
 describe('Replicad kernel call counts', () => {
   let small: Measured;
   let large: Measured;
@@ -189,7 +200,7 @@ describe('Replicad kernel call counts', () => {
     texturedFine = await measureCylinders({ copies: 2, anisotropic: true }, fine);
   });
 
-  it('should mesh faces and edges once per prototype on the render-with-edges and GLB export paths', () => {
+  it('should mesh faces and edges once per prototype on render with edges, and compose them on the GLB export', () => {
     // The copies share one prototype, so faces and edges are one native extraction each whatever
     // the copy count; only the per-shape occurrence reads (A19) grow with it.
     const meshed = {
@@ -201,7 +212,7 @@ describe('Replicad kernel call counts', () => {
       small: { ...meshed, ...occurrences(2) },
       large: { ...meshed, ...occurrences(6) },
     });
-    expect({ small: small.glb, large: large.glb }).toEqual({ small: small.render, large: large.render });
+    expect({ small: small.glb, large: large.glb }).toEqual({ small: keptOccurrences(2), large: keptOccurrences(6) });
   });
 
   it('should export STL with no per-element binding call and STEP with only the identity reads', () => {
@@ -226,8 +237,8 @@ describe('Replicad kernel call counts', () => {
       coarse: { ...meshed, 'Poly_Triangulation.UVNode': 290, 'BRepAdaptor_Surface.EvalD1': 290 },
       fine: { ...meshed, 'Poly_Triangulation.UVNode': 578, 'BRepAdaptor_Surface.EvalD1': 578 },
     });
-    expect(texturedCoarse.glb).toEqual(texturedCoarse.render);
-    expect(texturedFine.glb).toEqual(texturedFine.render);
+    expect(texturedCoarse.glb).toEqual(keptOccurrences(2));
+    expect(texturedFine.glb).toEqual(keptOccurrences(2));
   });
 });
 

@@ -1,6 +1,6 @@
 [
   {
-    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier, the mesh memo and kept pack facts — measured 27.98 kB brotlied on 2026-11-18, after the kept glTF pack facts (N6); 28.5 kB: the build report (operation meter) and exports composing kept meshes (G3, N14), measured MEASURED on 2026-11-18",
+    "name": "total (ESM JS) with physical materials, the realm hold, tessellation presets, drawing STEP faces, the live operation tier, the mesh memo and kept pack facts — measured 27.98 kB brotlied on 2026-11-18, after the kept glTF pack facts (N6); 28.5 kB: the build report (operation meter) and exports composing kept meshes (G3, N14), measured 28.44 kB on 2026-11-18",
     "path": ["dist/**/*.mjs"],
     "limit": "28.5 kB"
   },

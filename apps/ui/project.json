@@ -130,7 +130,7 @@
           "env": "STATS"
         }
       ],
-      "command": "node ../../tools/build-lock.mjs build -- sh -c \"'react-router build --sourcemapClient hidden --sourcemapServer hidden && node scripts/compress-static-assets.mts && rm -rf build/server-sourcemaps && cp -R build/server build/server-sourcemaps && find build/server -name \\*.map -delete && find build/server-sourcemaps -type f ! -name \\*.map -delete'\"",
+      "command": "node ../../tools/build-lock.mjs build -- \"react-router build --sourcemapClient hidden --sourcemapServer hidden && node scripts/compress-static-assets.mts && node scripts/split-server-sourcemaps.mts\"",
       "options": {
         "cwd": "{projectRoot}",
         "env": {
@@ -366,7 +366,7 @@
       "outputs": ["{projectRoot}/build"],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "node ../../tools/build-lock.mjs build -- sh -c \"'react-router build && node scripts/check-ssr-bundle-budget.mts --client && node scripts/compress-static-assets.mts'\"",
+        "command": "node ../../tools/build-lock.mjs build -- \"react-router build && node scripts/check-ssr-bundle-budget.mts --client && node scripts/compress-static-assets.mts\"",
         "env": {
           "NODE_OPTIONS": "--max-old-space-size=8192",
           "TAU_API_URL": "http://localhost:4000",
@@ -456,12 +456,12 @@
         "description": "Real-browser source editor, chat lane and composer image conversion acceptance (raster host parity over the web-worker transport) on the affected CI browser lane."
       },
       "options": {
-        "cwd": "{projectRoot}",
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
         "parallel": false,
         "commands": [
-          "../../node_modules/.bin/vitest run --config app/components/code/code-editor.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts'",
-          "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project chromium"
+          "vitest run --config ../../components/code/code-editor.vitest.browser.config.ts",
+          "vitest run --config chat-history.vitest.browser.config.ts",
+          "vitest run --config ../../hooks/attachment-image.vitest.browser.config.ts --project chromium"
         ]
       }
     },
@@ -490,8 +490,8 @@
         "description": "The CAD viewer's real Dockview header and viewer bar suite (chat-viewer.vitest.browser.config.ts). One task of test:e2e."
       },
       "options": {
-        "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts'"
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
+        "command": "vitest run --config chat-viewer.vitest.browser.config.ts"
       }
     },
     "test:e2e:agent-host": {
@@ -503,7 +503,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts"
+        "command": "vitest run --config app/workers/agent-host.vitest.browser.config.ts"
       }
     },
     "test:e2e:editor-layout": {
@@ -515,7 +515,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts"
+        "command": "vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts"
       }
     },
     "test:e2e:chat-message-queue": {
@@ -527,7 +527,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts"
+        "command": "vitest run --config app/components/chat/chat-message-queue.vitest.browser.config.ts"
       }
     },
     "test:e2e:viewer-resize": {
@@ -539,7 +539,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts"
+        "command": "vitest run --config app/components/geometry/viewer-resize.vitest.browser.config.ts"
       }
     },
     "test:e2e:chat-print": {
@@ -550,8 +550,8 @@
         "description": "The chat print suite (chat-print.vitest.browser.config.ts). One task of test:e2e."
       },
       "options": {
-        "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
+        "command": "vitest run --config chat-print.vitest.browser.config.ts"
       }
     },
     "test:e2e:follow-latest-output": {
@@ -562,8 +562,8 @@
         "description": "The follow-latest-output suite (use-follow-latest-output.vitest.browser.config.ts). One task of test:e2e."
       },
       "options": {
-        "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/use-follow-latest-output.vitest.browser.config.ts'"
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
+        "command": "vitest run --config use-follow-latest-output.vitest.browser.config.ts"
       }
     },
     "test:e2e:terminal-renderer": {
@@ -575,7 +575,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/components/terminal/terminal-renderer.vitest.browser.config.ts"
+        "command": "vitest run --config app/components/terminal/terminal-renderer.vitest.browser.config.ts"
       }
     },
     "test:e2e:history-lanes": {
@@ -586,8 +586,8 @@
         "description": "History's lanes suite (history-lanes.vitest.browser.config.ts). One task of test:e2e."
       },
       "options": {
-        "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/history-lanes.vitest.browser.config.ts'"
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
+        "command": "vitest run --config history-lanes.vitest.browser.config.ts"
       }
     },
     "test:e2e:queue": {
@@ -605,7 +605,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project firefox --project webkit"
+        "command": "vitest run --config app/hooks/attachment-image.vitest.browser.config.ts --project firefox --project webkit"
       }
     },
     "sourcemaps": {
@@ -636,8 +636,8 @@
       "executor": "nx:run-commands",
       "dependsOn": ["copy-assets", "^copy-assets"],
       "options": {
-        "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts'"
+        "cwd": "{projectRoot}/app/routes/w.$workspace.$project",
+        "command": "vitest run --config chat-print.vitest.browser.config.ts"
       }
     },
     "test": {
@@ -653,7 +653,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=1/6"
+        "command": "vitest run --config test-shards.test.config.ts --shard=1/6"
       }
     },
     "test:shard-2": {
@@ -666,7 +666,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=2/6"
+        "command": "vitest run --config test-shards.test.config.ts --shard=2/6"
       }
     },
     "test:shard-3": {
@@ -679,7 +679,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=3/6"
+        "command": "vitest run --config test-shards.test.config.ts --shard=3/6"
       }
     },
     "test:shard-4": {
@@ -692,7 +692,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=4/6"
+        "command": "vitest run --config test-shards.test.config.ts --shard=4/6"
       }
     },
     "test:shard-5": {
@@ -705,7 +705,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=5/6"
+        "command": "vitest run --config test-shards.test.config.ts --shard=5/6"
       }
     },
     "test:shard-6": {
@@ -718,7 +718,7 @@
       },
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config test-shards.test.config.ts --shard=6/6"
+        "command": "vitest run --config test-shards.test.config.ts --shard=6/6"
       }
     },
     "formal:wide": {

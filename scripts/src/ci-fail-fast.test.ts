@@ -183,7 +183,9 @@ describe('ci.yml merge-queue fail-fast (MQ-7)', () => {
     const matrixLanes = requiredLanes.filter((lane) => ci.jobs[lane]?.strategy?.matrix !== undefined);
     expect(matrixLanes.toSorted()).toEqual(['affected-lane', 'cli-e2e', 'e2e-queue', 'formal']);
     for (const lane of matrixLanes) {
-      expect(ci.jobs[lane]?.strategy?.['fail-fast'], lane).toBe(expression("github.event_name != 'merge_group'"));
+      // `fail-fast: true` cancels the other rows once one fails: true in the merge queue, false on pull requests and
+      // pushes, which keep every row's result. (The first version had it inverted, so queue runs held their slot.)
+      expect(ci.jobs[lane]?.strategy?.['fail-fast'], lane).toBe(expression("github.event_name == 'merge_group'"));
     }
   });
 

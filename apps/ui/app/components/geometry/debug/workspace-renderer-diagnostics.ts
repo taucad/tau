@@ -7,6 +7,11 @@ export type WorkspaceRendererIdentity = Readonly<{
   api: 'webgl' | 'webgpu' | 'unknown';
   effectiveBackend: 'webgl-classic' | 'webgl2-node' | 'webgpu-native' | 'unknown';
   name: string;
+  /**
+   * Render calls since the renderer started; it moves only when the renderer draws. The node renderer's own
+   * `info.frame` counts display refreshes of its internal animation loop, which runs whether or not anything is
+   * drawn, so an idle on-demand canvas advanced it about 60 times a second.
+   */
   frame: number;
   drawingBuffer: Readonly<{ width: number; height: number }>;
   cssSize: Readonly<{ width: number; height: number }>;
@@ -31,7 +36,7 @@ export function getWorkspaceRendererIdentity(renderer: RendererInstance): Worksp
     api,
     effectiveBackend,
     name: debug ? String(context?.getParameter(debug.UNMASKED_RENDERER_WEBGL) ?? '') : '',
-    frame: classic ? renderer.info.render.frame : renderer.info.frame,
+    frame: classic ? renderer.info.render.frame : renderer.info.render.calls,
     drawingBuffer: { width: renderer.domElement.width, height: renderer.domElement.height },
     cssSize: { width: size.x, height: size.y },
     pixelRatio: renderer.getPixelRatio(),

@@ -9,7 +9,7 @@
 import { squarePixelStripCoverage } from '#graphics/three/materials/line-coverage.js';
 import type { Node, Line2NodeMaterialParameters as ThreeLine2NodeMaterialParameters } from 'three/webgpu';
 import { NoBlending, NormalBlending } from 'three';
-import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
+import { Line2NodeMaterial as ThreeLine2NodeMaterial, PropertyNode } from 'three/webgpu';
 import {
   attribute,
   cameraNear,
@@ -43,6 +43,32 @@ import {
   viewport,
   viewportTexture,
 } from 'three/tsl';
+
+/**
+ * Half-extent, in viewports, of the clip-space band each screen-space segment is cut to before its
+ * quad is extruded (Divergence 5). Larger than one viewport so caps and coverage at the edge keep
+ * their full footprint; small enough that every vertex stays well inside any rasterizer's range.
+ */
+export const lineClipGuardBand = 2;
+
+/**
+ * A named varying that every vertex of a primitive writes with the same value, read unchanged by the
+ * fragment stage. Interpolating such a value is not free of error: a rasterizer derives its plane
+ * equation from the triangle, and a long, thin segment quad turns float noise in that derivation into
+ * a fraction of a pixel (SwiftShader moved the coverage of a 5K axis by about 4% with the quad's
+ * offscreen length). Flat interpolation hands the fragment the provoking vertex's exact value.
+ */
+class FlatVaryingPropertyNode extends PropertyNode {
+  public override generate(builder: any): string {
+    const nodeVarying = builder.getVaryingFromNode(this, this.name);
+    nodeVarying.needsInterpolation = true;
+    nodeVarying.interpolationType = 'flat';
+    nodeVarying.interpolationSampling = 'either';
+    return builder.getPropertyName(nodeVarying);
+  }
+}
+
+const flatVaryingProperty = (type: string, name: string): any => new FlatVaryingPropertyNode(type, name, true);
 
 // Setup outputs are generated from the semantic inputs below. Their fresh node ids must not
 // become inputs to the next program lookup. Keep this out of NodeMaterial's own-property scan.
@@ -105,6 +131,13 @@ export const compositeOverViewportSrgb = (rgb: unknown, alpha: unknown, viewport
  * hemisphere (viewport axes at `size ≈ 50_000`, typical CAD camera distances). This subclass
  * uses TSL **`cameraNear`** so the near estimate stays **`-camera.near`** in camera space for
  * both standard and reversed depth buffers.
+ *
+ * **Divergence 5 — guard-band clip and flat segment varyings.** The screen-space quad is extruded
+ * from the segment after it is cut to {@link lineClipGuardBand} viewports in clip space, and the
+ * analytic-coverage segment varyings are flat. Upstream extrudes from the raw endpoints, so a
+ * 50 000-unit axis or a near-trimmed endpoint put vertices hundreds of viewports away, which a
+ * fixed-point rasterizer (SwiftShader) drops, and long thin quads made the interpolated "constant"
+ * varyings drift by a fraction of a pixel. Dash distances follow the cut.
  *
  * **Depth follows NodeMaterial.** Reversed and standard depth use the rasterizer's
  * geometric sample depth. Reconstructing view Z and writing fragment depth here hid
@@ -275,21 +308,6 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
       const start = vec4(modelViewMatrix.mul(vec4(instanceStart, 1.0))).toVar('start');
       const end = vec4(modelViewMatrix.mul(vec4(instanceEnd, 1.0))).toVar('end');
 
-      if (useDash) {
-        const dashScaleNode = self.dashScaleNode ? float(self.dashScaleNode) : materialLineScale;
-        const offsetNode = self.offsetNode ? float(self.offsetNode) : materialLineDashOffset;
-
-        const instanceDistanceStart = attribute('instanceDistanceStart');
-        const instanceDistanceEnd = attribute('instanceDistanceEnd');
-
-        let lineDistance = positionGeometry.y
-          .lessThan(0.5)
-          .select(dashScaleNode.mul(instanceDistanceStart), dashScaleNode.mul(instanceDistanceEnd));
-        lineDistance = lineDistance.add(offsetNode);
-
-        varyingProperty('float', 'lineDistance').assign(lineDistance);
-      }
-
       if (useWorldUnits) {
         varyingProperty('vec3', 'worldStart').assign(start.xyz);
         varyingProperty('vec3', 'worldEnd').assign(end.xyz);
@@ -307,8 +325,62 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
         });
       });
 
-      const clipStart = cameraProjectionMatrix.mul(start);
-      const clipEnd = cameraProjectionMatrix.mul(end);
+      const clipStart = vec4(cameraProjectionMatrix.mul(start)).toVar('clipStart');
+      const clipEnd = vec4(cameraProjectionMatrix.mul(end)).toVar('clipEnd');
+      // Divergence 5: clip the segment to a guard band in the vertex stage. Upstream extrudes the
+      // quad from the raw endpoints, so a CAD-scale segment (an axis at 50 000 units, or an endpoint
+      // trimmed onto the near plane) puts vertices hundreds of viewports away. Hardware rasterizers
+      // absorb that; fixed-point rasterizers such as SwiftShader lose the stroke (the 5K long-axis
+      // rows of #2280). The guard band is twice the viewport, so caps and coverage at the screen
+      // edge are untouched, and clip space is linear along the segment, so the cut is exact.
+      const segmentEnter = float(0.0).toVar('segmentEnter');
+      const segmentExit = float(1.0).toVar('segmentExit');
+      if (!useWorldUnits) {
+        for (const [axis, sign] of [
+          ['x', 1],
+          ['x', -1],
+          ['y', 1],
+          ['y', -1],
+        ] as const) {
+          // Inside the guard band where guard * w - sign * axis >= 0.
+          const inStart = clipStart.w.mul(lineClipGuardBand).sub(clipStart[axis].mul(sign));
+          const inEnd = clipEnd.w.mul(lineClipGuardBand).sub(clipEnd[axis].mul(sign));
+          If(inStart.lessThan(0.0).and(inEnd.lessThan(0.0)), () => {
+            segmentEnter.assign(1.0);
+            segmentExit.assign(0.0);
+          })
+            .ElseIf(inStart.lessThan(0.0), () => {
+              segmentEnter.assign(segmentEnter.max(inStart.div(inStart.sub(inEnd))));
+            })
+            .ElseIf(inEnd.lessThan(0.0), () => {
+              segmentExit.assign(segmentExit.min(inStart.div(inStart.sub(inEnd))));
+            });
+        }
+        const clippedStart = mix(clipStart, clipEnd, segmentEnter);
+        const clippedEnd = mix(clipStart, clipEnd, segmentExit);
+        clipStart.assign(clippedStart);
+        clipEnd.assign(clippedEnd);
+      }
+      const segmentRejected = segmentEnter.greaterThanEqual(segmentExit);
+
+      if (useDash) {
+        const dashScaleNode = self.dashScaleNode ? float(self.dashScaleNode) : materialLineScale;
+        const offsetNode = self.offsetNode ? float(self.offsetNode) : materialLineDashOffset;
+
+        const instanceDistanceStart = attribute('instanceDistanceStart');
+        const instanceDistanceEnd = attribute('instanceDistanceEnd');
+
+        // Clip space is linear along the segment, so the clipped endpoints carry the
+        // distances at the same parameters and the dash pattern does not move.
+        const clippedDistanceStart = mix(instanceDistanceStart, instanceDistanceEnd, segmentEnter);
+        const clippedDistanceEnd = mix(instanceDistanceStart, instanceDistanceEnd, segmentExit);
+        let lineDistance = positionGeometry.y
+          .lessThan(0.5)
+          .select(dashScaleNode.mul(clippedDistanceStart), dashScaleNode.mul(clippedDistanceEnd));
+        lineDistance = lineDistance.add(offsetNode);
+
+        varyingProperty('float', 'lineDistance').assign(lineDistance);
+      }
 
       const ndcStart = clipStart.xyz.div(clipStart.w);
       const ndcEnd = clipEnd.xyz.div(clipEnd.w);
@@ -329,10 +401,10 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
         const endPx = toTargetPx(ndcEnd);
         const lengthPx = endPx.sub(startPx).length();
         const anchorIsStart = ndcStart.xy.length().lessThan(ndcEnd.xy.length());
-        varyingProperty('vec4', 'tauLineScreenPx').assign(
+        flatVaryingProperty('vec4', 'tauLineScreenPx').assign(
           vec4(anchorIsStart.select(startPx, endPx), endPx.sub(startPx).div(lengthPx)),
         );
-        varyingProperty('vec2', 'tauLineExtentPx').assign(
+        flatVaryingProperty('vec2', 'tauLineExtentPx').assign(
           anchorIsStart.select(vec2(0.0, lengthPx), vec2(lengthPx.negate(), 0.0)),
         );
       }
@@ -403,6 +475,8 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
         offset.assign(offset.mul(clip.w));
 
         clip.assign(clip.add(vec4(offset, 0, 0)));
+        // A segment wholly outside the guard band collapses every vertex outside the depth range.
+        clip.assign(segmentRejected.select(vec4(0.0, 0.0, 2.0, 1.0), clip));
       }
 
       return clip;
@@ -492,8 +566,8 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
         // clipped far off screen has vertices so distant that its interpolants lose precision.
         // Distance to the segment (round caps included) from the fragment position alone.
         const halfWidthPx = materialLineWidth.mul(lineDpr).mul(0.5);
-        const screenLine = varyingProperty('vec4', 'tauLineScreenPx');
-        const extent = varyingProperty('vec2', 'tauLineExtentPx');
+        const screenLine = flatVaryingProperty('vec4', 'tauLineScreenPx');
+        const extent = flatVaryingProperty('vec2', 'tauLineExtentPx');
         const relative = screenCoordinate.sub(screenLine.xy);
         const across = relative.x.mul(screenLine.w).sub(relative.y.mul(screenLine.z));
         const along = relative.dot(screenLine.zw);

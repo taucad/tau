@@ -23,6 +23,9 @@ name: Release gate
 # Every workflow the gate calls takes an `uncached` input, and the gate passes `true`: a caller's workflow-level
 # `env` (this file's `NX_SKIP_NX_CACHE`) does not reach a called workflow, so the called workflow sets
 # `NX_SKIP_NX_CACHE` and omits the remote cache server itself.
+# - Viewer parity: `viewer-parity.yml` with `uncached`, every fixture captured in its eight shards and gated once,
+#   from GLBs generated on this commit (VP-1: the merge queue no longer runs it; a pull request runs it on its own
+#   inputs).
 #
 # When (event-driven, nothing waits on a timer):
 # - A desktop candidate: when `release-build.yml` is requested for a `desktop-staging@*` or `desktop@*` tag,
@@ -427,12 +430,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Viewer parity (VP-1): the merge queue never runs it, and a pull request runs it only when its own diff touches a
+  # parity input, so every candidate captures and gates every fixture here, from GLBs generated fresh from this commit
+  # (`uncached`: no Actions cache read or saved, no Nx cache, no secrets).
+  viewer-parity:
+    name: Release viewer parity
+    needs: [reuse]
+    if: needs.reuse.result == 'success' && needs.reuse.outputs.run-id == ''
+    permissions:
+      contents: 'read'
+    uses: ./.github/workflows/viewer-parity.yml
+    with:
+      ref: ${{ needs.reuse.outputs.ref }}
+      uncached: true
+
   # The verdict a promotion reads. Its name carries the commit, which is what `release-gate-verdict` looks for;
-  # it passes on a reused verdict, or when the sweep, the formal matrix, the API tests and the end-to-end rows all
-  # passed, and fails otherwise.
+  # it passes on a reused verdict, or when the sweep, the formal matrix, the API tests, the end-to-end rows and
+  # viewer parity all passed, and fails otherwise.
   verdict:
     name: Release gate verdict (${{ inputs.ref || github.event.workflow_run.head_sha || github.sha }})
-    needs: [reuse, sweep, formal, api, e2e]
+    needs: [reuse, sweep, formal, api, e2e, viewer-parity]
     if: ${{ !cancelled() && needs.reuse.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -445,6 +462,7 @@ jobs:
           FORMAL_RESULT: ${{ needs.formal.result }}
           API_RESULT: ${{ needs.api.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
+          VIEWER_PARITY_RESULT: ${{ needs.viewer-parity.result }}
         run: |
           set -euo pipefail
           test "$REUSE_RESULT" = success
@@ -456,4 +474,5 @@ jobs:
           test "$FORMAL_RESULT" = success || { echo "::error::The release formal matrix did not pass ($FORMAL_RESULT)."; exit 1; }
           test "$API_RESULT" = success || { echo "::error::The release API tests did not pass ($API_RESULT)."; exit 1; }
           test "$E2E_RESULT" = success || { echo "::error::The release end-to-end rows did not pass ($E2E_RESULT)."; exit 1; }
+          test "$VIEWER_PARITY_RESULT" = success || { echo "::error::Release viewer parity did not pass ($VIEWER_PARITY_RESULT)."; exit 1; }
           echo "Release gate passed."

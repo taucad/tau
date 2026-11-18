@@ -93,7 +93,7 @@ const codeMessages: ReadonlyMap<string, string> = new Map([
   ['GITHUB_CONNECTION_NOT_FOUND', 'This GitHub account is no longer connected. Refresh and choose another account.'],
   ['GITHUB_CONNECTION_WRITE_FAILED', 'Tau could not save the GitHub connection. Try again.'],
   ['GITHUB_RECONNECT_REQUIRED', 'Your GitHub connection needs to be renewed. Connect GitHub again.'],
-  ['GITHUB_REPOSITORY_WRITE_DISABLED', 'Enable writes for this repository before pushing.'],
+  ['GITHUB_REPOSITORY_WRITE_DISABLED', 'Allow backups to this repository first.'],
   [
     'GITHUB_REPOSITORY_WRITE_DENIED',
     'GitHub has not granted write access to this repository. Review its access on GitHub.',

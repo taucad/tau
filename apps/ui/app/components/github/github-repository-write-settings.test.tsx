@@ -42,10 +42,11 @@ beforeEach(() => {
 describe('repository write approval and first push', () => {
   it('should require approval and then a separate push gesture', async () => {
     const push = show();
-    await userEvent.click(await screen.findByRole('button', { name: 'Enable writes' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Allow backups to this repository' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Allow backups to studio/bracket?');
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Nothing is backed up now');
     expect(push).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole('button', { name: 'Enable repository writes' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Allow backups' }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Back up to GitHub' })).toBeEnabled();
     });
@@ -57,7 +58,7 @@ describe('repository write approval and first push', () => {
   });
   it('should cancel enablement without changing permissions or pushing', async () => {
     const push = show();
-    await userEvent.click(await screen.findByRole('button', { name: 'Enable writes' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Allow backups to this repository' }));
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(fixture.setWrite).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
@@ -66,7 +67,7 @@ describe('repository write approval and first push', () => {
   it('should disable writes while retaining reads', async () => {
     fixture.access.mockResolvedValue({ ...access, writeEnabled: true });
     const push = show();
-    await userEvent.click(await screen.findByRole('button', { name: 'Disable writes' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop allowing backups' }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Back up to GitHub' })).toBeDisabled();
     });
@@ -76,14 +77,14 @@ describe('repository write approval and first push', () => {
   it('should explain denied provider writes without enabling them', async () => {
     fixture.access.mockResolvedValue({ ...access, canWrite: false });
     show();
-    expect(await screen.findByRole('button', { name: 'Enable writes' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Allow backups to this repository' })).toBeDisabled();
     expect(screen.getByText(/GitHub has not granted write access/u)).toBeVisible();
   });
   it('should show an approval failure inside the open confirmation', async () => {
     fixture.setWrite.mockRejectedValue(new Error('Repository access changed. Refresh and try again.'));
     const push = show();
-    await userEvent.click(await screen.findByRole('button', { name: 'Enable writes' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Enable repository writes' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Allow backups to this repository' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Allow backups' }));
     const dialog = screen.getByRole('alertdialog');
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('Repository access changed');
     expect(push).not.toHaveBeenCalled();

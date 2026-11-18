@@ -6577,7 +6577,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           throw new RevisionPortError(
             'INVALID_TRANSPORT',
             refused.reason === 'leaseLost'
-              ? 'Someone else changed this project in the cloud. Open it again before publishing.'
+              ? 'This project changed somewhere else. Open it again before publishing.'
               : 'Couldn’t back up this project before publishing. Try again.',
           );
         }

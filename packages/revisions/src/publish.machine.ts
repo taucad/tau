@@ -467,7 +467,7 @@ const publishMachineDefinition = setup({
               context,
               enq,
               event.outcome === 'conflicted'
-                ? 'Someone else changed this project in the cloud. Open it, resolve the conflict, then publish again.'
+                ? 'This project changed here and somewhere else. Choose what to keep, then publish again.'
                 : 'This project isn’t backed up to Tau Cloud yet. Publish again when you’re back online.',
             ),
           };

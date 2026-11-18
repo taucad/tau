@@ -85,11 +85,11 @@ export function GithubRepositoryWriteSettings({
               </div>
               <div className='flex flex-wrap items-center gap-3 border-t p-4'>
                 <div className='min-w-0 flex-1 basis-52'>
-                  <p className='text-sm font-medium'>Writes from Tau</p>
+                  <p className='text-sm font-medium'>Backing up to this repository</p>
                   <p className='text-xs text-muted-foreground'>
                     {enabled
-                      ? 'Enabled for this repository. Tau backs up to GitHub only when you choose to.'
-                      : 'Off for this repository. Reading and importing remain available.'}
+                      ? 'On. Tau backs up to GitHub only when you choose to.'
+                      : 'Off. Tau can still read and import from this repository.'}
                   </p>
                 </div>
                 <Button
@@ -103,14 +103,14 @@ export function GithubRepositoryWriteSettings({
                     }
                   }}
                 >
-                  {enabled ? 'Disable writes' : 'Enable writes'}
+                  {enabled ? 'Stop allowing backups' : 'Allow backups to this repository'}
                 </Button>
               </div>
             </CardContent>
           </Card>
           <p className='text-xs text-muted-foreground'>
             {access.data.canWrite
-              ? 'GitHub permits read and write access. Turning off writes in Tau blocks new write credentials; it does not revoke the GitHub grant or credentials already issued.'
+              ? 'GitHub lets Tau read and change this repository. Turning this off stops Tau backing up to it. It doesn’t change what GitHub allows.'
               : 'GitHub has not granted write access to this repository. Review the installation and your repository role on GitHub.'}
           </p>
           {onPush ? (
@@ -144,10 +144,10 @@ export function GithubRepositoryWriteSettings({
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Enable writes to {access.data?.fullName}?</AlertDialogTitle>
+            <AlertDialogTitle>Allow backups to {access.data?.fullName}?</AlertDialogTitle>
             <AlertDialogDescription>
-              GitHub already permits writes for this repository. This lets Tau request write credentials until you turn
-              it off. Nothing is backed up now. You choose each time, and protected branches still apply.
+              GitHub already lets Tau change this repository. This lets Tau back up to it until you turn it off. Nothing
+              is backed up now. You choose each time, and protected branches still apply.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {change.error ? (
@@ -163,7 +163,7 @@ export function GithubRepositoryWriteSettings({
                 change.mutate(true);
               }}
             >
-              Enable repository writes
+              Allow backups
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -319,7 +319,10 @@ export const projectFilesCopy = (
     return ['Couldn’t back up this project', 'Changes from this device weren’t backed up. Open History to see why.'];
   }
   if (status?.sync.state === 'conflicted') {
-    return ['Needs your decision', 'This device and Tau Cloud both changed it. Open History to choose what to keep.'];
+    return [
+      'Needs your decision',
+      'This project changed here and somewhere else. Open History to choose what to keep.',
+    ];
   }
   if (reason === 'quota') {
     return [

@@ -727,7 +727,7 @@ const refusalSaid = (
     refused.ref.startsWith('refs/heads/') && refused.ref !== historyRefOf(branch)
       ? refused.ref.slice('refs/heads/'.length)
       : undefined;
-  return `${other ?? 'This branch'} changed on the remote; this project will catch up and try again.`;
+  return `${other ?? 'This branch'} changed somewhere else. Tau will get those changes and try again.`;
 };
 
 /**
@@ -1795,7 +1795,7 @@ const syncMachineDefinition = setup({
               }
               const conflict = {
                 conflictRef: `refs/heads/${event.output.branch}`,
-                error: 'The remote and this device changed the same files.',
+                error: 'This project changed here and somewhere else. Choose what to keep, then back up again.',
               };
               /* A re-pull that lands on the conflict already waiting (D55) is
                * not news: announcing it again toasted on every retry. */
@@ -2512,7 +2512,7 @@ const syncMachineDefinition = setup({
         enq.emit({
           type: 'syncConflict',
           ref: context.conflictRef ?? historyRefOf(context.branch),
-          reason: context.error ?? 'The remote has work this device has not seen.',
+          reason: context.error ?? 'This project changed somewhere else. Tau will get those changes first.',
         });
         return { context: settleEveryPush(context, enq, 'conflicted') };
       },
@@ -2784,7 +2784,7 @@ const facetStateOf = (value: string, withinPullWindow: boolean): SyncFacet['stat
  *
  * A lost lease is caught up by the next pull's merge, except on a branch whose
  * merge recorded a conflict: that branch moves only once the person decides,
- * so "will catch up and try again" would be false. The conflicts are the
+ * so "will get those changes and try again" would be false. The conflicts are the
  * root's (read from the conflict lines, so they survive a reload); this
  * machine keeps no copy.
  *

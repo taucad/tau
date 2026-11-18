@@ -1471,7 +1471,7 @@ export default function ImportRoute(): React.JSX.Element {
                   <p className='text-xs text-muted-foreground'>
                     Tau keeps the branch’s commits and files, and stays connected to this repository.
                     {linkedSelection.repository.access === 'write'
-                      ? ' Importing does not push to GitHub. Enable writes for this repository in Settings, then choose Push to upload your history.'
+                      ? ' Importing doesn’t back anything up to GitHub. To back up to it, allow backups to this repository in Settings.'
                       : ' This repository is read-only, so Tau won’t back up to it. Your history stays on this device.'}
                   </p>
                 </div>

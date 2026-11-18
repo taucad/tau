@@ -79,7 +79,7 @@
  * | 72 | `opening.fetching(merged linked) → pushing` | **D87**: another checkout's diverged branch merged on the pull re-heads its actor and the merge revision is pushed |
  * | 73 | `opening.fetching(linked conflict) → backedUp` + parent `mergeConflicted` | **D87**: another checkout's conflict is announced without entering `conflicted`; this branch stays in sync |
  * | 74 | `queued(leaseLost on another branch) --syncBackoff--> opening → pushing` offering both sets | **D87**: a lost lease never narrows the retry away from this branch's own revisions |
- * | 75 | `selectSyncFacet(queued(leaseLost on another branch), undecided)` | **D90**: a branch whose conflict waits on the person says so instead of "will catch up and try again" |
+ * | 75 | `selectSyncFacet(queued(leaseLost on another branch), undecided)` | **D90**: a branch whose conflict waits on the person says so instead of "will get those changes and try again" |
  * | 76 | `pushing → recording → backedUp` over a leftover `projection` or another remote's entry | an accepted push is judged on what this remote is owed: `ok` with its lag and no backoff, and the entry it could not settle stays queued |
  * | 77 | `pushing → recording → queued` (refused chat ref beside a leftover `projection`) | a ref this push offered and the remote refused is still a `retry` |
  * | 78 | `backedUp --sessionChanged--> opening` (stream unwatched and watched again) | **audit R6**: a session change re-reads a refused stream and pulls at once from an idle state |
@@ -765,7 +765,7 @@ describe('syncMachine', () => {
       {
         type: 'syncConflict',
         ref: syncRef,
-        reason: 'The remote and this device changed the same files.',
+        reason: 'This project changed here and somewhere else. Choose what to keep, then back up again.',
       } satisfies SyncMachineEmitted,
     ]);
     expect(harness.parent.events).toContainEqual({
@@ -2138,7 +2138,7 @@ describe('syncMachine', () => {
 
     await vi.waitFor(() => {
       expect(harness.actor.getSnapshot().context.error).toBe(
-        'This branch changed on the remote; this project will catch up and try again.',
+        'This branch changed somewhere else. Tau will get those changes and try again.',
       );
     });
     harness.stop();
@@ -2165,7 +2165,7 @@ describe('syncMachine', () => {
 
     await vi.waitFor(() => {
       expect(harness.actor.getSnapshot().context.error).toBe(
-        'feature changed on the remote; this project will catch up and try again.',
+        'feature changed somewhere else. Tau will get those changes and try again.',
       );
     });
     harness.stop();
@@ -3599,7 +3599,7 @@ describe('syncMachine, live and automatic (W5b: D12, D13)', () => {
     );
     /* Another branch's waiting conflict says nothing about `feature`. */
     expect(selectSyncFacet(harness.actor.getSnapshot(), ['other']).error).toBe(
-      'feature changed on the remote; this project will catch up and try again.',
+      'feature changed somewhere else. Tau will get those changes and try again.',
     );
 
     harness.stop();

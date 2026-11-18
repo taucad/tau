@@ -12,7 +12,7 @@ function syncFailureIndicator(sync: SyncFacet | undefined, isCloudPending: boole
   if (sync?.state === 'conflicted') {
     return {
       label: 'Needs your decision',
-      detail: 'This device and the cloud copy changed the same files. Open History to choose.',
+      detail: 'This project changed here and somewhere else. Open History to choose what to keep.',
       kind: 'attention',
     };
   }
@@ -69,7 +69,7 @@ export function projectSyncIndicator(sync: SyncFacet | undefined, isCloudPending
     return { label: 'Opening project…', detail: 'Your files will appear when they are ready.', kind: 'busy' };
   }
   if (sync?.state === 'checking') {
-    return { label: 'Checking for changes…', detail: 'Checking the cloud copy for changes.', kind: 'busy' };
+    return { label: 'Checking for changes…', detail: 'Checking for new changes.', kind: 'busy' };
   }
   if (sync?.state === 'pending') {
     return {

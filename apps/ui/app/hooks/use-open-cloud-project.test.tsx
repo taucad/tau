@@ -137,6 +137,24 @@ describe('useOpenCloudProject', () => {
     expect(mockRelease).not.toHaveBeenCalled();
   });
 
+  it('should still navigate when the early open throws as it starts (STO-25 SP6 review)', async () => {
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockOpenAhead.mockImplementationOnce(() => {
+      throw new Error('composition not ready');
+    });
+    const entry: CloudProject = { id: 'proj_bbbbbbbbbbbbbbbbbbbbb', name: 'Bracket Beta', role: 'owner' };
+    const { result } = renderOpen();
+
+    await act(async () => result.current.open(entry));
+
+    expect(result.current.location.pathname).toBe('/w/home/bracket-beta');
+    expect(reported).toHaveBeenCalledWith(
+      expect.stringContaining('could not start'),
+      expect.objectContaining({ message: 'composition not ready' }),
+    );
+    reported.mockRestore();
+  });
+
   it('should start the open ahead of the route for a project this device holds, asserting nothing (STO-25 SP6)', async () => {
     const { result } = renderOpen();
 

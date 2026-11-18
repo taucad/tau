@@ -17,6 +17,7 @@ import { assertCloudProjectActive, CloudProjectUnavailableError } from '#hooks/u
 import { tauCloudIntent } from '#lib/tau-cloud-intent.js';
 import { withNamedLock } from '#lib/named-lock.js';
 import { getRevisionSessionUser } from '#lib/revision-actor.js';
+import { reportUiError } from '#lib/error-reporting.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOptionalAppRuntime } from '#runtime/app-runtime-provider.js';
 import { selectRuntimeOpenAhead } from '#runtime/app-runtime.js';
@@ -69,10 +70,17 @@ const navigateWithOpenAhead = async (
   }>,
 ): Promise<void> => {
   const { runtime, projectId, slugs, asserted, navigate } = input;
-  const release =
-    runtime === undefined
-      ? undefined
-      : selectRuntimeOpenAhead(runtime)({ projectId, slugs, ...(asserted ? { asserted: true } : {}) });
+  /* Best effort: whatever the early open does, the click navigates, and the session opens the project itself. */
+  let release: (() => void) | undefined;
+  try {
+    release =
+      runtime === undefined
+        ? undefined
+        : selectRuntimeOpenAhead(runtime)({ projectId, slugs, ...(asserted ? { asserted: true } : {}) });
+  } catch (error) {
+    console.error('[revisions] the open could not start ahead of its route:', error);
+    void reportUiError(error);
+  }
   try {
     await navigate();
   } catch (error) {

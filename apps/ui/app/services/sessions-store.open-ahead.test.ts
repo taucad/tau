@@ -142,6 +142,40 @@ describe('createSessionsOpenAhead (STO-25 SP6)', () => {
     release();
     expect(harness.released).toStrictEqual([]);
   });
+  it('survives a focus port that calls back as it is subscribed to, and releases what it took', async () => {
+    const released: string[] = [];
+    const module = {
+      openRevisionsAheadOfSession: () => (input: SessionRevisionsAheadInput) => () => {
+        released.push(input.projectId);
+      },
+      createSessionRevisionsAheadPorts: () => ({}),
+    } as unknown as SessionRevisionsAheadModule;
+    let view: SessionsAheadFocusView = { request: { requestId: 'r0', home: true } };
+    let subscribed = 0;
+    const openAhead = createSessionsOpenAhead({
+      loadRevisions: async () => module,
+      worker: () => worker,
+      desktop: false,
+      focus: {
+        get: () => view,
+        subscribe: (listener) => {
+          subscribed += 1;
+          /* The person is already elsewhere when the gesture subscribes. */
+          view = { request: { requestId: 'r1', home: true } };
+          listener();
+          return () => {
+            subscribed -= 1;
+          };
+        },
+      },
+      registry: { get: () => ({ refs: {}, status: {} }), subscribe: () => () => undefined },
+    });
+    expect(() => openAhead({ projectId: 'p1', slugs: slugsOf('one') })).not.toThrow();
+    await settle();
+    expect(subscribed).toBe(0);
+    expect(released).toStrictEqual([]);
+  });
+
   /* Review of d158d3e7 (MEDIUM): an open that settles without a session leaves no connection or download behind. */
   describe('releases when the open settles without a session', () => {
     const onTheRoute = async () => {

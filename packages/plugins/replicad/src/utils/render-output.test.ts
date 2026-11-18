@@ -107,6 +107,22 @@ describe('tessellation instancing detection', () => {
     expect(meshes(geometries).map((geometry) => geometry.name)).toEqual(['box', 'translated', 'rotated', 'cylinder']);
   });
 
+  it('labels every instance with the prototype face and edge groups, reading no per-instance ids (N5)', () => {
+    const faceIds = vi.spyOn(oc.ReplicadPrototypeMeshExtractor, 'ExtractFaceIds');
+    const edgeIds = vi.spyOn(oc.ReplicadPrototypeMeshExtractor, 'ExtractEdgeIds');
+
+    const [box, translated, rotated] = meshes(
+      render(instancedScene(), { openCascade: oc, tessellationInstancing: true, collectBrepEdges: true }),
+    );
+
+    expect(faceIds).not.toHaveBeenCalled();
+    expect(edgeIds).not.toHaveBeenCalled();
+    for (const instance of [translated!, rotated!]) {
+      expect(instance.faces.faceGroups).toEqual(box!.faces.faceGroups);
+      expect(instance.edges.edgeGroups).toEqual(box!.edges.edgeGroups);
+    }
+  });
+
   it('reads the same partner grouping, orientation and placement as the native inspector', () => {
     const box = keep(makeBox([0, 0, 0], [10, 6, 4]));
     const shapes: Meshable[] = [

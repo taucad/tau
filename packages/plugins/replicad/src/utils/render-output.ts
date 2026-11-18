@@ -15,8 +15,6 @@ import { getOC } from 'replicad';
 
 import {
   createReplicadOccurrenceReader,
-  extractInstanceEdgeIds,
-  extractInstanceFaceIds,
   extractPrototypeEdges,
   extractPrototypeFaces,
   transformReplicadGeometryInstance,
@@ -607,17 +605,17 @@ function detectInstancingGroups({
   }
 }
 
-function instanceFromConfig({
-  config,
-  info,
-  faceIds,
-  edgeIds,
-}: {
-  config: MeshableConfiguration;
-  info: ReplicadShapeOccurrenceInfo;
-  faceIds: number[];
-  edgeIds: number[];
-}): ReplicadTessellationInstance {
+/**
+ * An instance's placement and appearance. No per-instance face or edge ids (catalogue N5): the glTF packer numbers
+ * face and edge groups by their index, so an instance keeps the prototype's labels and the GLB is the same.
+ * @param config - The instance's configuration.
+ * @param info - The instance's occurrence.
+ * @returns The instance.
+ */
+function instanceFromConfig(
+  config: MeshableConfiguration,
+  info: ReplicadShapeOccurrenceInfo,
+): ReplicadTessellationInstance {
   return {
     name: config.name,
     color: config.color,
@@ -627,8 +625,6 @@ function instanceFromConfig({
     material: config.material,
     locationMatrix: info.locationMatrix,
     determinant: info.determinant,
-    faceIds,
-    edgeIds,
   };
 }
 
@@ -737,19 +733,13 @@ function meshPrototypeGroup({
       linePointCount: prototypeGeometry.edges.lines.length / 3,
     },
     operation: () =>
-      group.instances.map((instance) => {
-        const faceIds = extractInstanceFaceIds({ openCascade, shape: instance.config.shape, tessellation });
-        const edgeIds = collectBrepEdges
-          ? extractInstanceEdgeIds({ openCascade, shape: instance.config.shape, tessellation })
-          : [];
-        return [
-          instance.config,
-          transformReplicadGeometryInstance({
-            prototype: prototypeGeometry,
-            instance: instanceFromConfig({ config: instance.config, info: instance.info, faceIds, edgeIds }),
-          }),
-        ];
-      }),
+      group.instances.map((instance) => [
+        instance.config,
+        transformReplicadGeometryInstance({
+          prototype: prototypeGeometry,
+          instance: instanceFromConfig(instance.config, instance.info),
+        }),
+      ]),
   });
 }
 

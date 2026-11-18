@@ -75,12 +75,8 @@ describe('the early open’s cloud-open port (STO-25 SP6)', () => {
     expect(sent[0]).toMatchObject({ command: 'connectRemote', kind: 'tau' });
     expect(sent[0]?.url).toContain(projectId);
     /* Held until the open lands; the gesture's end lets it go first. */
-    let settled = false;
-    void held.then(() => {
-      settled = true;
-    });
-    await Promise.resolve();
-    expect(settled).toBe(false);
+    const pending = Symbol('pending');
+    expect(await Promise.race([held, Promise.resolve(pending)])).toBe(pending);
     ended.abort();
     await held;
 
@@ -89,7 +85,7 @@ describe('the early open’s cloud-open port (STO-25 SP6)', () => {
       status = {
         remote: { kind: 'tau', phase: 'connected' },
         sync: { hasAppliedRemote: true },
-      } as RevisionStatusProjection;
+      } as unknown as RevisionStatusProjection;
     });
     expect(await continueCloudOpen({ projectId, account: 'usr_ada', connect, asserted: true })).toBe(true);
     expect(connect).toHaveBeenCalledOnce();

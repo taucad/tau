@@ -1,22 +1,32 @@
 /**
  * Lane B probe: the `globalThis.__laneB` seam the loader hook patches call into.
  * Import this module BEFORE any runtime/kernel module.
+ *
+ * Replicad is measured at the live tier's own seams: the operation cache it installs through the library
+ * facade (`liveTierLibrary`), the counters it reports on the `replicad.run-main` span, and the kernel's
+ * `computeReuse` option for the off arm.
  */
 export type Counter = { calls: number; ms: number; bytes: number };
 export type ProbeState = {
   semanticDisabled: boolean;
   /**
-   * Fault injection (W0 red-first): when set, every session lookup reports a hit
-   * carrying these BRep bytes, so the kernel restores a *wrong* shape and skips
-   * the native solve entirely. The honest arms leave it undefined.
+   * Fault injection (W0 red-first): when set, the live tier's operation cache answers
+   * every poisonable operation with a shape restored from these BRep bytes, so the
+   * kernel builds a *wrong* shape and skips the native solve entirely. The honest
+   * arms leave it undefined.
    */
   poisonBytes: Uint8Array<ArrayBuffer> | undefined;
   poisonedLookups: number;
-  /** Keep the first BRep the session records, so a second process can replay it as a wrong cache. */
+  /** Keep the first shape an operation returns, as BRep, so a second process can replay it as a wrong cache. */
   captureRecordedBrep: boolean;
   capturedBrep: Uint8Array<ArrayBuffer> | undefined;
   counters: Record<string, Counter>;
+  /**
+   * The live tier's lookups in this step, from the `replicad.run-main` span: every hit is resident in this
+   * process (`session`); nothing is restored from a store (`cache` stays 0, since snapshots are refused).
+   */
   lookups: { hit: number; miss: number; session: number; cache: number };
+  /** Operation results the live tier admitted (native clones: no bytes, nothing rejected). */
   records: { staged: number; rejected: number; bytes: number };
 };
 
@@ -30,9 +40,6 @@ const state: ProbeState = {
   lookups: { hit: 0, miss: 0, session: 0, cache: 0 },
   records: { staged: 0, rejected: 0, bytes: 0 },
 };
-
-/** Stable fake digest for poisoned hits; never collides with a real action digest. */
-const poisonDigest = `sha256:${'0'.repeat(64)}`;
 
 const note = (key: string, ms: number, bytes = 0): void => {
   const counter = (state.counters[key] ??= { calls: 0, ms: 0, bytes: 0 });
@@ -109,58 +116,78 @@ const wrapFilesystem = <T extends object>(filesystem: T): T =>
     },
   });
 
-const stubSession = {
-  prepared: () => [],
-  lookup: () => ({ status: 'miss' as const }),
-  record: () => ({ status: 'rejected' as const, reason: 'session-byte-limit' as const }),
-  flush: async () => {},
+type OperationCacheLike = {
+  operation(request: any): unknown;
+  step(request: any): unknown;
+  elements(...arguments_: any[]): void;
+};
+type LiveTierLibrary = {
+  setOperationCache(cache: OperationCacheLike | undefined): OperationCacheLike | undefined;
+  bypassOperationCache<T>(operation: () => T): T;
+  deserializeShape(text: string): unknown;
 };
 
-const openSession = async (open: () => Promise<any>) => {
-  if (state.semanticDisabled) {
-    note('session.open.stub', 0);
-    return stubSession;
-  }
-  const session = await time('session.open', open);
-  const preparedCount = session.prepared().length;
-  note('session.prepared.entries', 0, preparedCount);
-  return new Proxy(session, {
-    get(target, property) {
-      const value = Reflect.get(target, property);
-      if (property === 'lookup')
-        return (input: any) => {
-          const start = performance.now();
-          if (state.poisonBytes) {
-            state.poisonedLookups += 1;
-            state.lookups.hit += 1;
-            state.lookups.cache += 1;
-            note('session.lookup', performance.now() - start);
-            return { status: 'hit', source: 'cache', bytes: state.poisonBytes, actionDigest: poisonDigest };
-          }
-          const result = value.call(target, input);
-          note('session.lookup', performance.now() - start);
-          if (result.status === 'hit') {
-            state.lookups.hit += 1;
-            state.lookups[result.source as 'session' | 'cache'] += 1;
-          } else state.lookups.miss += 1;
-          return result;
-        };
-      if (property === 'record')
-        return (input: any) => {
-          const start = performance.now();
-          const result = value.call(target, input);
-          note('session.record', performance.now() - start, input.bytes?.byteLength ?? 0);
-          if (state.captureRecordedBrep && !state.capturedBrep && input.bytes) state.capturedBrep = input.bytes;
-          if (result.status === 'staged') {
-            state.records.staged += 1;
-            state.records.bytes += input.bytes?.byteLength ?? 0;
-          } else state.records.rejected += 1;
-          return result;
-        };
-      if (property === 'flush') return () => time('session.flush', () => value.call(target));
-      return typeof value === 'function' ? value.bind(target) : value;
+const utf8 = new TextEncoder();
+const isShape = (value: unknown): value is { serialize(): string } =>
+  value !== null &&
+  typeof value === 'object' &&
+  typeof (value as { serialize?: unknown }).serialize === 'function' &&
+  typeof (value as { clone?: unknown }).clone === 'function';
+/** The poison arm answers operations that keep their receiver or consume it and return a value, never a builder. */
+const poisonable = (request: { effect?: string; returnsBuilder?: boolean }): boolean =>
+  (request.effect === 'pure' || request.effect === 'consumes') && request.returnsBuilder !== true;
+/** The request with its `compute` timed as `native.solve`: every native computation the cache lets through. */
+const timedCompute = <R extends { compute(): unknown }>(request: R): R =>
+  Object.create(request, {
+    compute: { value: () => time('native.solve', () => request.compute()) },
+  }) as R;
+
+/**
+ * Wrap the operation cache the live tier installs (`installOperationTier` calls `setOperationCache` on the
+ * kernel's library facade). Every routed operation is counted (`tier.operation`) and every computation the
+ * tier lets through is timed (`native.solve`). The tier's own hit, miss and store counts come from the
+ * `replicad.run-main` span. The poison arm answers every poisonable operation with a deliberately wrong shape
+ * restored from captured BRep bytes, before the tier sees it, so nothing is computed natively.
+ */
+const instrumentCache = (cache: OperationCacheLike, library: LiveTierLibrary): OperationCacheLike => {
+  const poisonText = state.poisonBytes ? new TextDecoder().decode(state.poisonBytes) : undefined;
+  return {
+    operation(request) {
+      return time('tier.operation', () => {
+        if (poisonText !== undefined && poisonable(request)) {
+          state.poisonedLookups += 1;
+          request.consume?.();
+          return library.bypassOperationCache(() => library.deserializeShape(poisonText));
+        }
+        const result = cache.operation(timedCompute(request));
+        if (state.captureRecordedBrep && !state.capturedBrep && isShape(result)) {
+          state.capturedBrep = utf8.encode(
+            library.bypassOperationCache(() => result.serialize()),
+          ) as Uint8Array<ArrayBuffer>;
+        }
+        return result;
+      });
     },
-  });
+    step(request) {
+      return cache.step(timedCompute(request));
+    },
+    elements(...arguments_) {
+      cache.elements(...arguments_);
+    },
+  };
+};
+
+/**
+ * The kernel's library facade, with `setOperationCache` instrumented. The live tier installs its cache through
+ * this facade for each build and restores the previous one (none) when the build ends; with compute reuse off
+ * the kernel builds no tier and never calls it.
+ */
+const liveTierLibrary = <T extends object>(facade: T): T => {
+  const library = facade as unknown as LiveTierLibrary;
+  const install = library.setOperationCache;
+  if (typeof install !== 'function') return facade;
+  library.setOperationCache = (cache) => install(cache === undefined ? undefined : instrumentCache(cache, library));
+  return facade;
 };
 
 const build123dCompute = (input: { compute: unknown }) => (state.semanticDisabled ? {} : input);
@@ -191,7 +218,7 @@ export const probe = {
   note,
   time,
   wrapFilesystem,
-  openSession,
+  liveTierLibrary,
   build123dCompute,
   wrapLibrary,
   setLibraryWrapper,
@@ -217,6 +244,14 @@ export const probe = {
   },
   get capturedBrep() {
     return state.capturedBrep;
+  },
+  /** Record the live tier's counters of one build, as the kernel reports them on `replicad.run-main`. */
+  noteTier(detail: Record<string, unknown> | undefined): void {
+    const count = (key: string): number => (typeof detail?.[key] === 'number' ? (detail[key] as number) : 0);
+    state.lookups.hit += count('tierHits');
+    state.lookups.session += count('tierHits');
+    state.lookups.miss += count('tierMisses');
+    state.records.staged += count('tierStored');
   },
   reset(): void {
     state.poisonedLookups = 0;

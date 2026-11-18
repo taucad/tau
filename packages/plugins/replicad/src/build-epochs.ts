@@ -2,9 +2,11 @@
  * Build and module epochs: deterministic ownership of what a Replicad build delivers (memory R5, A3).
  *
  * Every handle the kernel delivers opens a build epoch that owns the values its entries return. When the runtime
- * releases the handle (`releaseHandle`), the epoch ends and deletes each value exactly once, unless another live
- * handle still delivers it or it belongs to a module epoch. So a rebuild frees the shapes it replaces when the
- * runtime drops them, instead of when the collector runs, and a long drag keeps a flat heap.
+ * releases the handle (`releaseHandle`), each value no other live handle delivers and no module epoch owns is parked,
+ * not deleted: user code may keep a shape it returned in module state and return it again. The next delivered handle
+ * settles the parked values: those it delivers again are adopted by it, and the rest are deleted, exactly once.
+ * Disposing the epochs deletes whatever is still parked. So a rebuild frees the shapes it replaced one build later,
+ * instead of whenever the collector runs, and a long drag keeps a flat heap.
  *
  * A module epoch holds what a module's top level creates. The execute cache keeps a module across parameter-only
  * rebuilds, so a shape built at module scope and returned by `main` is delivered by build after build. Values created
@@ -15,9 +17,7 @@
  * would make such a revert throw.)
  *
  * What a build creates and does not return (the intermediates of `main`) is still freed by the registry: without a
- * handle registry in the OpenCascade glue, nothing finds them deterministically. A value user code keeps across builds
- * in module state filled during `main`, and returns, belongs to the build that returned it: after that build is
- * released, using it throws "This object has been deleted" rather than reading freed memory.
+ * handle registry in the OpenCascade glue, nothing finds them deterministically.
  *
  * @internal
  */
@@ -36,6 +36,8 @@ export type HandleEpochStats = {
   readonly liveHandles: number;
   /** Distinct values the live handles deliver. */
   readonly liveValues: number;
+  /** Released values waiting for the next delivered handle. */
+  readonly parked: number;
   /** Values deleted by released epochs. */
   readonly deleted: number;
 };
@@ -47,10 +49,15 @@ export type HandleEpochs = {
    * Nothing is marked when the execute cache answers without running the module.
    */
   inModuleEpoch<T>(execute: () => Promise<T>): Promise<T>;
-  /** Open the build epoch of a handle about to be delivered. */
+  /**
+   * Open the build epoch of a handle about to be delivered. Parked values it delivers again are its own; the other
+   * parked values are deleted.
+   */
   adopt<Handle extends EpochHandle>(handle: Handle): Handle;
-  /** End a delivered handle's epoch, deleting each value it alone owns. A second release is a no-op. */
+  /** End a delivered handle's epoch, parking each value it alone owns. A second release is a no-op. */
   release(handle: EpochHandle): void;
+  /** Delete every parked value, when the kernel is disposed. */
+  dispose(): void;
   stats(): HandleEpochStats;
 };
 
@@ -96,6 +103,8 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
   const live = new Set<EpochHandle>();
   /** Live handles delivering each value. */
   const holders = new Map<WeakKey, number>();
+  /** Released values the next delivered handle settles. */
+  const parked = new Set<WeakKey>();
   let epochs = 0;
   let deleted = 0;
   let executing = false;
@@ -108,6 +117,16 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
       }
     }
     return values;
+  };
+
+  const deleteParked = (): void => {
+    for (const value of parked) {
+      if (isDeletable(value)) {
+        value.delete();
+        deleted += 1;
+      }
+    }
+    parked.clear();
   };
 
   return {
@@ -135,7 +154,9 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
         epochs += 1;
         for (const value of valuesOf(handle)) {
           holders.set(value, (holders.get(value) ?? 0) + 1);
+          parked.delete(value);
         }
+        deleteParked();
       }
       return handle;
     },
@@ -150,12 +171,12 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
           continue;
         }
         holders.delete(value);
-        if (!moduleOwned.has(value) && isDeletable(value)) {
-          value.delete();
-          deleted += 1;
+        if (!moduleOwned.has(value)) {
+          parked.add(value);
         }
       }
     },
-    stats: () => ({ epochs, liveHandles: live.size, liveValues: holders.size, deleted }),
+    dispose: deleteParked,
+    stats: () => ({ epochs, liveHandles: live.size, liveValues: holders.size, parked: parked.size, deleted }),
   };
 };

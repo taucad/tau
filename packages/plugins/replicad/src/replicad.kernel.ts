@@ -1235,6 +1235,8 @@ export const replicadKernel = defineKernel({
 
   async onDispose(context) {
     try {
+      // Released shapes still parked for the next build are deleted with the kernel (E12).
+      context.epochs.dispose();
       context.liveTier?.dispose();
     } finally {
       context.occt.release();

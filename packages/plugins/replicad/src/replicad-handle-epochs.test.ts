@@ -126,6 +126,21 @@ const moduleScope = `
   }
 `;
 
+/** A shape memoized in module state during `main` and returned as it is whenever its key comes back. */
+const memoized = `
+  import { makeCylinder } from 'replicad';
+  const cache = new Map();
+  export const defaultParams = { key: 1 };
+  export default function main(p = defaultParams) {
+    let shape = cache.get(p.key);
+    if (!shape) {
+      shape = makeCylinder(p.key, 8);
+      cache.set(p.key, shape);
+    }
+    return shape;
+  }
+`;
+
 describe('replicad build epochs', () => {
   it(
     'should delete what a replaced build delivered without the collector',
@@ -141,10 +156,9 @@ describe('replicad build epochs', () => {
           alive.push(ledger.since(before).length);
         }
 
-        // Without `releaseHandle` each build adds the cylinder it delivered until the collector runs.
-        expect(alive, JSON.stringify(summarizeLeaks(ledger.since(before)))).toStrictEqual(
-          Array.from({ length: 6 }, () => alive[0]),
-        );
+        // Without `releaseHandle` each build adds the cylinder it delivered until the collector runs. With it, the
+        // replaced build's cylinder stays parked for one more build, then goes.
+        expect(alive, JSON.stringify(summarizeLeaks(ledger.since(before)))).toStrictEqual([1, 2, 2, 2, 2, 2]);
         expect(ledger.stats().doubleDeletes).toBe(0);
       } finally {
         await opened.close();
@@ -164,6 +178,39 @@ describe('replicad build epochs', () => {
             glbs.push(await opened.build({ useBase, radius: glbs.length + 1 }));
           }
           expect(new Set([glbs[0], glbs[3], glbs[5]]).size).toBe(1);
+        } finally {
+          await opened.close();
+        }
+      }
+    },
+    renderTimeout,
+  );
+
+  it(
+    'should deliver a shape kept in module state again after the build that returned it was released',
+    async () => {
+      for (const options of [{ computeReuse: false }, {}] as const) {
+        const opened = session(memoized, options);
+        try {
+          const first = await opened.build({ key: 1 });
+          const ledger = ledgerOf();
+          await collect();
+          const before = ledger.snapshot();
+          const glbs: string[] = [];
+          const alive: number[] = [];
+          for (let step = 1; step <= 40; step += 1) {
+            glbs.push(await opened.build({ key: step % 2 === 0 ? 1 : 2 }));
+            await collect();
+            alive.push(ledger.since(before).length);
+          }
+
+          expect(glbs.filter((_, index) => index % 2 === 1)).toStrictEqual(Array.from({ length: 20 }, () => first));
+          expect(new Set(glbs).size).toBe(2);
+          const settled = alive.slice(9);
+          expect(settled, JSON.stringify(summarizeLeaks(ledger.since(before)))).toStrictEqual(
+            Array.from({ length: settled.length }, () => settled[0]),
+          );
+          expect(ledger.stats().doubleDeletes).toBe(0);
         } finally {
           await opened.close();
         }

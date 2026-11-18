@@ -49,9 +49,14 @@ const session = (source: string, options: Options = {}) => {
     }),
   });
   const tierBytes: number[] = [];
+  /** Attributes of each `replicad.run-main` span, one per run of `main`'s phase. */
+  const mainSpans: Array<Readonly<Record<string, unknown>>> = [];
   let tierEvicted = 0;
   client.on('telemetry', (batch) => {
     for (const entry of batch.entries) {
+      if (entry.name === 'replicad.run-main') {
+        mainSpans.push(entry.detail ?? {});
+      }
       const bytes = entry.name === 'replicad.run-main' ? entry.detail?.['tierBytes'] : undefined;
       if (typeof bytes === 'number') {
         tierBytes.push(bytes);
@@ -63,6 +68,7 @@ const session = (source: string, options: Options = {}) => {
   let live: { document: Document; view: ReturnType<Document['view']> } | undefined;
   return {
     tierBytes,
+    mainSpans,
     evicted: () => tierEvicted,
     async build(parameters: Readonly<Record<string, unknown>>): Promise<string> {
       if (live) {
@@ -221,6 +227,14 @@ describe('replicad release fallback', () => {
           // Three cold sessions, the session's first execution and one fresh run: the switch to the collector holds
           // for the later cycles.
           expect(executions(counter), arm).toBe(3 + 2);
+          // One `main` phase per build, the fourth marked; with the tier, every build advanced it once.
+          expect(
+            opened.mainSpans.map((span) => span['releaseFallback'] ?? '-'),
+            arm,
+          ).toStrictEqual(keys.map((_, index) => (index === 3 ? 'module' : '-')));
+          if (arm === 'on') {
+            expect(opened.tierBytes).toHaveLength(keys.length);
+          }
         } finally {
           await opened.close();
         }
@@ -258,24 +272,107 @@ describe('replicad release fallback', () => {
     renderTimeout,
   );
 
+  /**
+   * The fresh instance stays in the JavaScript module map after its code is edited, and its memo with it: retiring the
+   * module's collector group deletes those shapes, so each edited version leaves nothing behind.
+   */
   it(
-    'should not run a module fresh when its build throws any other error',
+    'should free the fresh instance memo when the module is edited',
+    async () => {
+      const memoVersion = (version: number): string => `
+        import { makeCylinder } from 'replicad';
+        const version = ${version};
+        const cache = new Map();
+        export const defaultParams = { key: 1, tag: 0 };
+        export default function main(p = defaultParams) {
+          let shape = cache.get(p.key);
+          if (!shape) {
+            shape = makeCylinder(p.key + version / 1000, 8);
+            cache.set(p.key, shape);
+          }
+          return shape;
+        }`;
+      const client = createRuntimeClient({
+        transport: inProcessTransport({
+          runtime: defineRuntime({
+            kernels: [replicadKernel({ wasm: 'single', computeReuse: false })],
+            bundlers: [esbuildBundler()],
+          }),
+          fileSystem: fromMemoryFs({ 'main.ts': memoVersion(0) }),
+          compute: { mode: 'memory' },
+        }),
+      });
+      const fallbacks: unknown[] = [];
+      client.on('telemetry', (batch) => {
+        for (const entry of batch.entries) {
+          if (entry.name === 'replicad.run-main' && entry.detail?.['releaseFallback'] !== undefined) {
+            fallbacks.push(entry.detail['releaseFallback']);
+          }
+        }
+      });
+      const document = client.open({ source: { path: 'main.ts' }, parameters: { key: 1, tag: 0 }, watch: false });
+      const view = document.view('model');
+      const counts: number[] = [];
+      let ledger: HandleLedger | undefined;
+      let before: ReadonlySet<WeakKey> | undefined;
+      try {
+        for (let version = 1; version <= 6; version += 1) {
+          // Each version is an edit; 1, 2, 3, 1 falls back and 2, 3 fills the fresh instance's memo with three
+          // cylinders.
+          for (const [index, key] of [1, 2, 3, 1, 2, 3].entries()) {
+            await document.update({
+              parameters: { key, tag: index },
+              ...(index === 0 ? { stage: { 'main.ts': memoVersion(version) } } : {}),
+            });
+            const outcome = await view.rendering();
+            if (outcome.superseded || !outcome.rendering.success) {
+              throw new Error(JSON.stringify(outcome).slice(0, 1000));
+            }
+          }
+          await collect();
+          ledger ??= ledgerOf();
+          before ??= ledger.snapshot();
+          counts.push(ledger.since(before).length);
+        }
+        expect(fallbacks).toStrictEqual(Array.from({ length: 6 }, () => 'module'));
+        // Each version holds at most its own fresh instance's three cylinders (fewer once the collector has run);
+        // before the group was retired on edit, every version added its memo: [0, 3, 6, 8, 11, 13].
+        expect(Math.max(...counts), JSON.stringify(counts)).toBeLessThanOrEqual(4);
+        expect(ledger!.stats().doubleDeletes).toBe(0);
+      } finally {
+        view.close();
+        document.close();
+        await client.shutdown();
+      }
+    },
+    renderTimeout,
+  );
+
+  it(
+    'should not run a module fresh when its build throws any other error, even one that mentions a deletion',
     async () => {
       const counter = '__replicadFallbackOther';
       const opened = session(
         counted(
           counter,
           `export default function main(p = defaultParams) {
+            globalThis.${counter}Mains = (globalThis.${counter}Mains ?? 0) + 1;
             if (p.key === 2) throw new Error('Gear ratio out of range');
+            if (p.key === 3) throw new Error('Gear 3 has been deleted from the BOM; pick another gear');
             return makeCylinder(p.key, 8);
           }`,
         ),
         { computeReuse: false },
       );
       try {
+        // Builds 1 and 4 deliver and replace cylinders, so the epochs have deleted something before key 3 fails.
         await opened.build({ key: 1, tag: 0 });
         expect(await failureOf(opened.build({ key: 2, tag: 0 }))).toContain('Gear ratio out of range');
+        await opened.build({ key: 4, tag: 0 });
+        await opened.build({ key: 5, tag: 0 });
+        expect(await failureOf(opened.build({ key: 3, tag: 0 }))).toContain('has been deleted from the BOM');
         expect(executions(counter)).toBe(1);
+        expect(executions(`${counter}Mains`)).toBe(5);
       } finally {
         await opened.close();
       }
@@ -284,13 +381,13 @@ describe('replicad release fallback', () => {
   );
 
   it(
-    'should surface a deleted-object error that the fresh run throws again, without another retry',
+    'should not retry a deleted-object error when the epochs have deleted nothing',
     async () => {
       for (const [arm, options] of [
         ['off', { computeReuse: false }],
         ['on', {}],
       ] as const) {
-        const counter = `__replicadFallbackAgain_${arm}`;
+        const counter = `__replicadFallbackUser_${arm}`;
         const opened = session(
           counted(
             counter,
@@ -304,13 +401,55 @@ describe('replicad release fallback', () => {
         );
         try {
           expect(await failureOf(opened.build({ key: 1, tag: 0 })), arm).toContain('This object has been deleted');
-          expect(executions(counter), arm).toBe(2);
-          // The module now releases by the collector: a later build runs it as it is and fails the same way.
-          expect(await failureOf(opened.build({ key: 2, tag: 1 })), arm).toContain('This object has been deleted');
-          expect(executions(counter), arm).toBe(2);
+          expect(executions(counter), arm).toBe(1);
+          expect(
+            opened.mainSpans.map((span) => span['releaseFallback']),
+            arm,
+          ).toStrictEqual([undefined]);
         } finally {
           await opened.close();
         }
+      }
+    },
+    renderTimeout,
+  );
+
+  /**
+   * A memo kept outside the bundle (`globalThis`) survives a fresh module, so the fresh run fails the same way: the
+   * worker switches to collector release and runs the module once more. The shape the epochs already deleted cannot
+   * come back, so that build fails; nothing is deleted deterministically afterwards.
+   */
+  it(
+    'should switch the worker to collector release when the fresh run fails the same way',
+    async () => {
+      const counter = '__replicadFallbackGlobal';
+      const opened = session(
+        counted(
+          counter,
+          `const cache = (globalThis.${counter}Cache ??= new Map());
+          export default function main(p = defaultParams) {
+            let shape = cache.get(p.key);
+            if (!shape) {
+              shape = makeCylinder(p.key, 8);
+              cache.set(p.key, shape);
+            }
+            return shape;
+          }`,
+        ),
+        { computeReuse: false },
+      );
+      try {
+        const outcomes: string[] = [];
+        for (const [index, key] of [1, 2, 3, 1, 2, 3, 2, 3, 4, 2, 3, 4].entries()) {
+          outcomes.push((await failureOf(opened.build({ key, tag: index }))) ?? 'ok');
+        }
+        expect(outcomes[3]).toContain('This object has been deleted');
+        expect(outcomes.filter((outcome) => outcome !== 'ok')).toHaveLength(1);
+        // The first execution, the module's fresh run and the worker's: none after the switch.
+        expect(executions(counter)).toBe(3);
+        expect(opened.mainSpans.map((span) => span['releaseFallback']).filter(Boolean)).toStrictEqual(['worker']);
+      } finally {
+        await opened.close();
       }
     },
     renderTimeout,

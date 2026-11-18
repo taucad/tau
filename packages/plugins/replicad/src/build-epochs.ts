@@ -11,20 +11,31 @@
  * A module epoch holds what a module's top level creates. The execute cache keeps a module across parameter-only
  * rebuilds, so a shape built at module scope and returned by `main` is delivered by build after build. Values created
  * while a module executes are marked as they are constructed, and no build epoch deletes them. A module epoch is
- * never deleted by the kernel: the execute cache keeps every module value keyed by its bundle output, so reverting a
- * code edit runs the older module again with the same module-scope shapes. They live as long as the module does and
- * are freed by Replicad's finalization registry with it. (The program's rule A3 released them on re-execution; that
- * would make such a revert throw.)
+ * never deleted by the kernel: the execute cache keeps the module instance keyed by its bundle output until a file it
+ * bundles changes, and a module running again (after an edit, a revert or the release fallback) is a new instance
+ * with new module-scope shapes. Each instance's shapes live as long as it does and are freed by Replicad's
+ * finalization registry with it. (The program's rule A3 released them on re-execution; deleting them would make a
+ * handle still delivered from the old instance throw.)
  *
  * What a build creates and does not return (the intermediates of `main`) is still freed by the registry: without a
  * handle registry in the OpenCascade glue, nothing finds them deterministically.
  *
  * Release fallback. A module that keeps shapes `main` built in module state (a memo keyed by a parameter) may return
- * one after its build was released and the shape deleted: a drag through three values and back does. The kernel then
- * runs that module fresh, once, in the same build, and adopts its handles for the collector from then on
- * (`adopt(handle, { collector: true })`): their values are never parked or deleted here, and Replicad's finalization
- * registry frees them as it did before epochs. The epochs remember what they deleted (`wasReleased`), so the kernel
- * can tell a returned released value from a shape the user deleted.
+ * one after its build was released and the shape deleted: a drag through three values and back does. The kernel
+ * answers when `main` returns a value the epochs deleted (`wasReleased`), or throws Replicad's or embind's exact
+ * use-after-release message after the epochs deleted something:
+ *
+ * 1. Module: it runs the module fresh in the same build (`execute(code, { fresh: true })` replaces the cached
+ *    instance under the same code, so the clear on a file edit still frees it) and adopts that module's handles for
+ *    the collector (`adopt(handle, { collector: true })`) until its bundle code changes.
+ * 2. Worker: if the fresh instance fails the same way, the state lives outside the bundle (`globalThis`, another
+ *    module), so a fresh module cannot drop it. The whole worker switches to collector release, the build runs the
+ *    module once more, and the `replicad.run-main` span records `releaseFallback: 'worker'`.
+ *
+ * A failure after that, or any other error, is the build's error. A value already deleted cannot be recovered: a
+ * memo outside the bundle that still holds one keeps failing for that key until the worker recycles, but nothing is
+ * deleted deterministically after the switch. Collector-adopted values are never parked or deleted here, and
+ * Replicad's finalization registry frees them as it did before epochs.
  *
  * @internal
  */
@@ -51,13 +62,24 @@ export type HandleEpochStats = {
   readonly collected: number;
 };
 
+/**
+ * The values one module instance delivered under collector release. The instance stays reachable from the JavaScript
+ * module map after its code changes, so a memo in it would keep its shapes for the worker's life; retiring the group
+ * deletes the ones still alive once no handle that delivered them is live. @internal
+ */
+export type CollectorGroup = {
+  /** The instance will not run again: delete what it delivered once its handles are released. */
+  retire(): void;
+};
+
 /** How a handle is adopted. @internal */
 export type AdoptOptions = {
   /**
    * Leave the handle's values to Replicad's finalization registry: no epoch holds, parks or deletes them. The kernel
-   * adopts a module's handles this way once the module returned a value its epochs had deleted.
+   * adopts a module's handles this way once the module returned a value its epochs had deleted. With a group, the
+   * values are also deleted when the group is retired and its handles released.
    */
-  readonly collector?: boolean;
+  readonly collector?: boolean | CollectorGroup;
 };
 
 /** The kernel's build and module epochs. @internal */
@@ -74,6 +96,8 @@ export type HandleEpochs = {
   adopt<Handle extends EpochHandle>(handle: Handle, options?: AdoptOptions): Handle;
   /** End a delivered handle's epoch, parking each value it alone owns. A second release is a no-op. */
   release(handle: EpochHandle): void;
+  /** A group for the collector handles of one module instance (release fallback). */
+  collectorGroup(): CollectorGroup;
   /** Whether an epoch deleted `value`: user code returned or used a shape after its build was released. */
   wasReleased(value: unknown): boolean;
   /** Delete every parked value, when the kernel is disposed. */
@@ -84,21 +108,37 @@ export type HandleEpochs = {
 type Deletable = { delete(): void };
 
 /**
- * Messages of a value used after it was deleted: Replicad's wrappers and finders, and embind's own checks.
+ * Exact messages of a value used after it was deleted: Replicad's wrappers and finders, and embind's own checks
+ * (whose `BindingError` may be prefixed with its name).
  */
-const useAfterReleasePattern = /\b(?:has been deleted|instance already deleted|deleted object)\b/u;
+const useAfterReleasePatterns = [
+  /^This object has been deleted$/u,
+  /^This finder has been deleted$/u,
+  /^(?:BindingError: )?Cannot pass deleted object/u,
+  /instance already deleted$/u,
+];
 
 /**
- * Whether a build failed because a value it used had been deleted: Replicad's "This object has been deleted", or
- * embind's "Cannot pass deleted object" and "instance already deleted". Not a function of the build's inputs, so the
- * live tier never keeps it as a failure, and the kernel answers it with the release fallback.
+ * Whether a message is exactly Replicad's or embind's use-after-release message.
  *
- * @param error - What the build threw.
+ * @param message - An error or issue message.
+ * @returns True for "This object has been deleted", "This finder has been deleted", "Cannot pass deleted object …"
+ * and "… instance already deleted".
+ * @internal
+ */
+export const isUseAfterReleaseMessage = (message: string): boolean =>
+  useAfterReleasePatterns.some((pattern) => pattern.test(message));
+
+/**
+ * Whether an error is a use of a deleted value. Not a function of the build's inputs, so the live tier never keeps
+ * it as a failure.
+ *
+ * @param error - What an operation threw.
  * @returns True for a use-after-release failure.
  * @internal
  */
 export const isUseAfterRelease = (error: unknown): boolean =>
-  error instanceof Error && useAfterReleasePattern.test(error.message);
+  error instanceof Error && isUseAfterReleaseMessage(error.message);
 
 const isDeletable = (value: unknown): value is Deletable =>
   value !== null && typeof value === 'object' && typeof (value as Partial<Deletable>).delete === 'function';
@@ -150,6 +190,30 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
   let collected = 0;
   let executing = false;
 
+  type Group = CollectorGroup & {
+    retired: boolean;
+    readonly handles: Set<EpochHandle>;
+    readonly seen: WeakSet<WeakKey>;
+    readonly values: Array<WeakRef<WeakKey>>;
+  };
+  /** The group of each live collector handle. */
+  const groupOf = new WeakMap<EpochHandle, Group>();
+
+  /** Delete what a retired group delivered once none of its handles is live, exactly once. */
+  const settleGroup = (group: Group): void => {
+    if (!group.retired || group.handles.size > 0) {
+      return;
+    }
+    for (const reference of group.values.splice(0)) {
+      const value = reference.deref();
+      if (value !== undefined && !holders.has(value) && !released.has(value) && isDeletable(value)) {
+        value.delete();
+        released.add(value);
+        deleted += 1;
+      }
+    }
+  };
+
   const valuesOf = (handle: EpochHandle): Set<WeakKey> => {
     const values = new Set<WeakKey>();
     for (const { shape } of handle.shapes) {
@@ -190,12 +254,35 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
         executing = false;
       }
     },
+    collectorGroup() {
+      const group: Group = {
+        retired: false,
+        handles: new Set(),
+        seen: new WeakSet(),
+        values: [],
+        retire() {
+          group.retired = true;
+          settleGroup(group);
+        },
+      };
+      return group;
+    },
     adopt(handle, options) {
-      if (options?.collector === true) {
+      const collector = options?.collector;
+      if (collector !== undefined && collector !== false) {
+        const group = collector === true ? undefined : (collector as Group);
         collected += 1;
+        if (group && !group.retired) {
+          group.handles.add(handle);
+          groupOf.set(handle, group);
+        }
         for (const value of valuesOf(handle)) {
           moduleOwned.add(value);
           parked.delete(value);
+          if (group && !group.retired && !group.seen.has(value)) {
+            group.seen.add(value);
+            group.values.push(new WeakRef(value));
+          }
         }
         deleteParked();
         return handle;
@@ -213,6 +300,12 @@ export const createHandleEpochs = (library: ReplicadLibrary): HandleEpochs => {
     },
     release(handle) {
       if (!live.delete(handle)) {
+        const group = groupOf.get(handle);
+        if (group) {
+          groupOf.delete(handle);
+          group.handles.delete(handle);
+          settleGroup(group);
+        }
         return;
       }
       for (const value of valuesOf(handle)) {

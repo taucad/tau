@@ -161,6 +161,39 @@ describe('handle epochs', () => {
     expect(isUseAfterRelease(new Error('This finder has been deleted'))).toBe(true);
     expect(isUseAfterRelease(new Error('Gear ratio out of range'))).toBe(false);
     expect(isUseAfterRelease(new Error('The deleted face count must be positive'))).toBe(false);
+    expect(isUseAfterRelease(new Error('Gear 3 has been deleted from the BOM'))).toBe(false);
+    expect(isUseAfterRelease(new Error('This object has been deleted, says my model'))).toBe(false);
+    expect(isUseAfterRelease(new Error('BindingError: Cannot pass deleted object as a pointer of type Foo'))).toBe(
+      true,
+    );
     expect(isUseAfterRelease('This object has been deleted')).toBe(false);
+  });
+
+  it('deletes what a retired collector group delivered once its handles are released, exactly once', () => {
+    const epochs = createHandleEpochs(library);
+    const group = epochs.collectorGroup();
+    const memo = replicad.makeCylinder(1, 2);
+    const other = replicad.makeCylinder(2, 2);
+    const first = epochs.adopt({ shapes: [{ shape: memo }] }, { collector: group });
+    const second = epochs.adopt({ shapes: [{ shape: memo }, { shape: other }] }, { collector: group });
+    epochs.release(first);
+
+    // Retired while a handle that delivered them is live: nothing is deleted yet.
+    group.retire();
+    expect([memo, other].map((shape) => isDeleted(shape))).toStrictEqual([false, false]);
+
+    epochs.release(second);
+    expect([memo, other].map((shape) => isDeleted(shape))).toStrictEqual([true, true]);
+    expect(epochs.wasReleased(memo)).toBe(true);
+    expect(epochs.stats()).toMatchObject({ deleted: 2, collected: 2, liveHandles: 0 });
+
+    // A retired group adopts nothing more, and a second retire or release deletes nothing twice.
+    const late = replicad.makeCylinder(3, 2);
+    epochs.release(epochs.adopt({ shapes: [{ shape: late }] }, { collector: group }));
+    group.retire();
+    epochs.release(second);
+    expect(isDeleted(late)).toBe(false);
+    expect(epochs.stats()).toMatchObject({ deleted: 2 });
+    late.delete();
   });
 });

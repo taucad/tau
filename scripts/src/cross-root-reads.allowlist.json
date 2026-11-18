@@ -1026,6 +1026,11 @@
   },
   {
     "file": "scripts/src/test-shard-dealer.test.ts",
+    "target": "apps/ui/project.json",
+    "reason": "reads another project's configuration it checks"
+  },
+  {
+    "file": "scripts/src/test-shard-dealer.test.ts",
     "target": "libs/tau-examples/**",
     "reason": "reads a Tau example from tau-examples as a fixture or source"
   },

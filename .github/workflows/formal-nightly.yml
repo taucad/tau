@@ -56,6 +56,12 @@ jobs:
   # durations size the queue lane and the release-gate matrix (RG-1) that follow.
   # A project with a `formal:nightly:check` target runs its nightly configs and Apalache there, in a
   # job of its own (`agent-host`, run 43178267338: 32 min of configs, 17 for the rest).
+  # A project with a `formal:nightly:mutants` target runs its mutant matrix there, split into
+  # `MUTANT_SHARDS` jobs (ST-3, lane budget): each re-runs the same-seed simulation, deals the mutants
+  # by the measured seconds in tools/formal/mutant-seconds.json (`formal nightly --mutants-only --shard
+  # k/N`, a control and its mutants together) and runs its own share, so every mutant is in exactly one
+  # shard, and the caller's required check needs every shard to pass. agent-host's 75 mutants measure
+  # 17.3 min in series; three shards hold about 5.8 min each.
   projects:
     name: List the formal nightly projects
     runs-on: ubuntu-latest
@@ -81,6 +87,7 @@ jobs:
         id: list
         env:
           REQUESTED: ${{ inputs.projects || '' }}
+          MUTANT_SHARDS: 3
         run: |
           # `pipefail` so a failing `nx` call fails the step. `tail -1` keeps the JSON array and drops Nx's log lines.
           set -euo pipefail
@@ -101,17 +108,25 @@ jobs:
             echo "Requested projects: $projects"
           fi
           tiers='[]'
-          for target in formal:nightly formal:nightly:check; do
+          for target in formal:nightly formal:nightly:check formal:nightly:mutants; do
             selected=$(pnpm nx show projects --with-target "$target" --json | tail -1)
+            # One job per project and target; a `formal:nightly:mutants` tier is one job per shard.
+            shards=1
+            if [ "$target" = formal:nightly:mutants ]; then shards=$MUTANT_SHARDS; fi
             tiers=$(jq -c --arg target "$target" --argjson projects "$selected" --argjson requested "$projects" \
-              '. + [$projects[] | select(. as $name | $requested | index([$name]) != null)
-                | {project: ., target: $target, slug: ("\(.)-\($target)" | gsub(":"; "-"))}]' <<< "$tiers")
+              --argjson shards "$shards" \
+              '. + [$projects[] | select(. as $name | $requested | index([$name]) != null) | . as $project
+                | range(1; $shards + 1) | . as $index
+                | {project: $project, target: $target,
+                   shard: (if $shards > 1 then "\($index)/\($shards)" else "" end),
+                   slug: ("\($project)-\($target)" + (if $shards > 1 then "-\($index)-of-\($shards)" else "" end)
+                     | gsub(":"; "-"))}]' <<< "$tiers")
           done
           echo "Formal nightly tiers: $tiers"
           echo "tiers=$tiers" >> "$GITHUB_OUTPUT"
 
   formal-nightly:
-    name: Formal nightly tiers (${{ matrix.tier.project }} ${{ matrix.tier.target }})
+    name: Formal nightly tiers (${{ matrix.tier.project }} ${{ matrix.tier.target }}${{ matrix.tier.shard && format(' {0}', matrix.tier.shard) || '' }})
     needs: projects
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -145,6 +160,7 @@ jobs:
         env:
           PROJECT: ${{ matrix.tier.project }}
           TARGET: ${{ matrix.tier.target }}
+          SHARD: ${{ matrix.tier.shard }}
           TAU_FORMAL_SEED: ${{ inputs.seed || '' }}
         run: |
           set -euo pipefail
@@ -153,7 +169,10 @@ jobs:
             export FORMAL_SEED
             echo "FORMAL_SEED=$FORMAL_SEED from seed source $TAU_FORMAL_SEED"
           fi
-          pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream
+          # A shard's `--shard k/N` reaches the formal runner, which runs only that shard's share.
+          shard=()
+          if [ -n "$SHARD" ]; then shard=(--shard="$SHARD"); fi
+          pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream "${shard[@]}"
 
       - name: Upload formal reports and captured logs
         if: always()

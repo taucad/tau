@@ -950,6 +950,11 @@
     "reason": "imports another project's source by relative path instead of its package"
   },
   {
+    "file": "scripts/src/formal-nightly-mutants-workflow.test.ts",
+    "target": "nx.json",
+    "reason": "reads workspace-root configuration or inventory"
+  },
+  {
     "file": "scripts/src/prepare-geospec-test-consumer.ts",
     "target": ".",
     "reason": "reads workspace-root configuration or inventory"

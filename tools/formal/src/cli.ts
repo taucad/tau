@@ -7,6 +7,8 @@ import type { Tier } from '#expected.js';
 import { describeOutcome, findExpectedFiles, knownFailures, specProjectRoots } from '#expected.js';
 import type { SetupTool } from '#setup.js';
 import { validateCapturedLogs } from '#logs.js';
+import type { MutantShard } from '#mutant-shard.js';
+import { parseMutantShard } from '#mutant-shard.js';
 import { setup } from '#setup.js';
 import type { FormalContext } from '#toolchain.js';
 import { defaultContext, locateTools, toolchainId } from '#toolchain.js';
@@ -15,16 +17,21 @@ const out = (line: string): void => {
   process.stdout.write(`${line}\n`);
 };
 
+/** `nightly`'s parts (`--without-check`, `--without-mutants`, `--mutants-only`) and a mutant shard (`--shard k/N`). */
+type NightlyFlags = {
+  readonly check: boolean;
+  readonly lean: boolean;
+  readonly mutants: boolean;
+  readonly shard?: MutantShard;
+};
+
 /** The commands that take one project root. */
 const projectCommands: Readonly<
-  Record<
-    string,
-    (context: FormalContext, projectRoot: string, options: { readonly check: boolean }) => number | Promise<number>
-  >
+  Record<string, (context: FormalContext, projectRoot: string, options: NightlyFlags) => number | Promise<number>>
 > = {
   update: async (context, projectRoot) => updateProject(context, projectRoot),
-  mutants: async (context, projectRoot) => mutantsProject(context, projectRoot),
-  nightly: async (context, projectRoot, { check }) => nightlyProject(context, projectRoot, { check }),
+  mutants: async (context, projectRoot, { shard }) => mutantsProject(context, projectRoot, shard ? { shard } : {}),
+  nightly: async (context, projectRoot, flags) => nightlyProject(context, projectRoot, flags),
 };
 
 const main = async (argv: readonly string[]): Promise<number> => {
@@ -37,19 +44,31 @@ const main = async (argv: readonly string[]): Promise<number> => {
       from: { type: 'string' },
       tier: { type: 'string' },
       family: { type: 'string' },
+      shard: { type: 'string' },
       'without-check': { type: 'boolean' },
+      'without-mutants': { type: 'boolean' },
+      'mutants-only': { type: 'boolean' },
     },
   });
   const context = defaultContext();
   const projectCommand = command === undefined ? undefined : projectCommands[command];
   if (projectCommand) {
     const [projectRoot] = positionals;
-    if (!projectRoot) {
-      out(`usage: formal ${command} <projectRoot>`);
+    const only = values['mutants-only'] === true;
+    const shard = values.shard === undefined ? undefined : parseMutantShard(values.shard);
+    // A shard deals mutants: `mutants`, or `nightly --mutants-only`, whose other parts run in another job.
+    const shardable = command === 'mutants' || (command === 'nightly' && only);
+    if (!projectRoot || (values.shard !== undefined && (shard === undefined || !shardable))) {
+      out(
+        `usage: formal ${command} ${command === 'nightly' ? '[--without-check] [--without-mutants] [--mutants-only [--shard <k>/<n>]] ' : ''}<projectRoot>`,
+      );
       return 2;
     }
     return projectCommand(context, path.resolve(context.root, projectRoot), {
-      check: values['without-check'] !== true,
+      check: values['without-check'] !== true && !only,
+      lean: !only,
+      mutants: values['without-mutants'] !== true,
+      ...(shard === undefined ? {} : { shard }),
     });
   }
   switch (command) {

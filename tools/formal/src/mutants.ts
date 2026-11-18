@@ -1,6 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import type { MutantSeconds, MutantShard } from '#mutant-shard.js';
+import { dealMutants, mutantKey, readMutantSeconds } from '#mutant-shard.js';
 import type { FormalContext } from '#toolchain.js';
 import { cacheDirectory } from '#toolchain.js';
 
@@ -132,11 +134,32 @@ const failingBaselines = (context: FormalContext, projectRoot: string, mutants: 
   );
 };
 
+/** The keys of one shard's mutants, dealt over every `mutants.json` of the project. */
+const shardKeys = (
+  context: FormalContext,
+  options: { readonly projectRoot: string; readonly seconds?: MutantSeconds },
+  shard: MutantShard,
+): Set<string> => {
+  const files = findMutantFiles(options.projectRoot).map((file) => ({
+    file: path.relative(context.root, file),
+    mutants: JSON.parse(readFileSync(file, 'utf8')) as Mutant[],
+  }));
+  const dealt = dealMutants(files, shard.count, options.seconds ?? readMutantSeconds());
+  return new Set(dealt[shard.index - 1] ?? []);
+};
+
 export type MutantOptions = {
   readonly projectRoot: string;
   /** Checks a Lean mutant (FM-S7); machine mutants use Vitest. */
   readonly lean?: (mutant: Mutant, mutated: string) => Promise<MutantResult>;
   readonly log?: (line: string) => void;
+  /**
+   * One of several runners: only this shard's mutants run, with their controls (`dealMutants`, by the
+   * measured seconds in `seconds`, default `mutant-seconds.json`). The shards partition the mutants, so
+   * all of them together run every mutant once, each with the verdict an unsharded run gives it.
+   */
+  readonly shard?: MutantShard;
+  readonly seconds?: MutantSeconds;
 };
 
 /** `formal mutants <projectRoot>`: every mutant must be caught, and a stale one fails (FM-A11). */
@@ -147,8 +170,11 @@ export const runMutants = async (
   const log = options.log ?? ((line: string) => process.stdout.write(`${line}\n`));
   mkdirSync(cacheDirectory(context), { recursive: true });
   const results: MutantResult[] = [];
+  const mine = options.shard ? shardKeys(context, options, options.shard) : undefined;
   for (const file of findMutantFiles(options.projectRoot)) {
-    const mutants = JSON.parse(readFileSync(file, 'utf8')) as Mutant[];
+    const mutants = (JSON.parse(readFileSync(file, 'utf8')) as Mutant[]).filter(
+      (_mutant, index) => mine?.has(mutantKey(path.relative(context.root, file), index)) ?? true,
+    );
     const failing = failingBaselines(context, options.projectRoot, mutants);
     for (const mutant of mutants) {
       const mutated = applyMutant(readFileSync(path.join(options.projectRoot, mutant.file), 'utf8'), mutant);

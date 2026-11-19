@@ -1048,6 +1048,27 @@ describe('re-brokering project hosts', () => {
     await second.close();
   });
 
+  /* STO-25 SP6: the worker orders a project's calls, so the page connects once its provide is sent, not answered. */
+  it('should send the connect while its provide is still unanswered, and attach once both answer', async () => {
+    const worker = new FakeResidentWorker();
+    const answered = Promise.withResolvers<void>();
+    worker.holdNextProvide = answered.promise;
+    const client = createTestClient(workerOf(worker));
+    const starting = startRun(client, 'chat-1', 'run-1', 'Build it.');
+
+    await vi.waitFor(() => {
+      expect(requestsNamed(worker, 'connect')).toHaveLength(1);
+    });
+    expect(requestsNamed(worker, 'connect')[0]?.args['hostId']).toBe(
+      requestsNamed(worker, 'provide')[0]?.args['hostId'],
+    );
+    answered.resolve();
+
+    await expect(starting).resolves.toMatchObject({ status: 'applied' });
+    expect(requestsNamed(worker, 'provide')).toHaveLength(1);
+    await client.close();
+  });
+
   it('should not let a pending released provide fence a successor during reprovide', async () => {
     const worker = new FakeResidentWorker();
     const createWorker = workerOf(worker);

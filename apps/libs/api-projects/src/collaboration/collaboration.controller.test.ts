@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type { MockProxy } from 'vitest-mock-extended';
 import type { OwnerLockTransaction } from '@taucad/api-database/owner-lock';
 import { ForbiddenException, HttpException, NotFoundException } from '@nestjs/common';
 import type { DatabaseService } from '@taucad/api-database';
@@ -30,7 +31,7 @@ describe('CollaboratorsController', () => {
   let budget: () => Promise<{ allowed: boolean; count: number }>;
   let collaboratorsController: CollaboratorsController;
   let invitationsController: InvitationsController;
-  let inviteEmail: { send: ReturnType<typeof vi.fn> };
+  let inviteEmail: MockProxy<ProjectInviteEmailService>;
 
   const rowsFor = (table: unknown): Array<Record<string, unknown>> =>
     table === projectInvitation ? invitations : table === projectCollaborator ? collaborators : [];
@@ -131,12 +132,9 @@ describe('CollaboratorsController', () => {
     const rateLimiter = mock<PublicationRateLimiterService>({
       consumeDailyBudget: vi.fn(async () => budget()),
     });
-    inviteEmail = { send: vi.fn(async () => ({ status: 'sent' })) };
-    collaboratorsController = new CollaboratorsController(
-      access,
-      rateLimiter,
-      inviteEmail as unknown as ProjectInviteEmailService,
-    );
+    inviteEmail = mock<ProjectInviteEmailService>();
+    inviteEmail.send.mockResolvedValue({ status: 'sent' });
+    collaboratorsController = new CollaboratorsController(access, rateLimiter, inviteEmail);
     invitationsController = new InvitationsController(access);
   });
 

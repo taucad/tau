@@ -121,8 +121,9 @@ export class ProjectInviteEmailService {
       const undeliverable = await this.deliverability.undeliverableAmong([email]);
       return undeliverable.has(normalizeEmailAddress(email));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`Email deliverability lookup failed; treating the invitee as deliverable: ${message}`);
+      /* The error's message can quote the query, and the query names the address. */
+      const name = error instanceof Error ? error.name : 'unknown';
+      this.logger.warn(`Email deliverability lookup failed (${name}); treating the invitee as deliverable`);
       return false;
     }
   }

@@ -36,23 +36,20 @@ function createService(
   ]);
   const sent: EmailService['sendProjectInvite'] = async () => 'sent';
   const sendProjectInvite = vi.fn(overrides.send ?? sent);
-  const emailService = {
-    isDeliveryEnabled: overrides.deliveryEnabled ?? true,
-    sendProjectInvite,
-  } as unknown as EmailService;
+  const emailService = mock<EmailService>({ isDeliveryEnabled: overrides.deliveryEnabled ?? true, sendProjectInvite });
   const outcomes = vi.fn();
-  const metrics = { projectInviteEmailsTotal: { add: outcomes } } as unknown as MetricsService;
+  const metrics = mock<MetricsService>({ projectInviteEmailsTotal: { add: outcomes } });
   const config = mock<ConfigService<Environment, true>>({
     get: vi.fn((key: string) => (key === 'TAU_FRONTEND_URL' ? 'https://tau.new' : '')),
   });
-  const deliverability = {
+  const deliverability = mock<EmailDeliverabilityService>({
     undeliverableAmong: vi.fn(async () => {
       if (overrides.deliverabilityFails === true) {
-        throw new Error('database down');
+        throw new Error('Failed query: select … where email = any($1) params: friend@example.com');
       }
       return new Set(overrides.undeliverable ?? []);
     }),
-  } as unknown as EmailDeliverabilityService;
+  });
   const service = new ProjectInviteEmailService(
     database.databaseService as ConstructorParameters<typeof ProjectInviteEmailService>[0],
     emailService,
@@ -88,10 +85,14 @@ describe('ProjectInviteEmailService', () => {
     expect(outcomes).toHaveBeenCalledExactlyOnceWith(1, { outcome: 'undeliverable' });
   });
 
-  it('treats a failed suppression lookup as deliverable', async () => {
+  it('treats a failed suppression lookup as deliverable, without logging the address the query carried', async () => {
     const { service } = createService({ deliverabilityFails: true });
+    const warn = vi.spyOn(Reflect.get(service, 'logger') as { warn: (message: string) => void }, 'warn');
 
     await expect(service.send(invitation)).resolves.toStrictEqual({ status: 'sent' });
+    const logged = warn.mock.calls.map(([message]) => message).join('\n');
+    expect(logged).toContain('Email deliverability lookup failed');
+    expect(logged.toLowerCase()).not.toContain('friend@example.com');
   });
 
   it('reports email_disabled on a deployment without an email provider', async () => {

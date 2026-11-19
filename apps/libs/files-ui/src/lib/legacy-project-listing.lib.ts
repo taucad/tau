@@ -1,5 +1,5 @@
 import * as Cookies from 'es-cookie';
-import { metaConfig } from '#constants/meta.constants.js';
+import { appMetaConfig } from '@taucad/ui-core/constants/meta.constants';
 
 /**
  * Earlier builds kept a snapshot of this device's project list (names, slugs, chat rows) in `localStorage` and the
@@ -8,12 +8,12 @@ import { metaConfig } from '#constants/meta.constants.js';
  * linger on a shared device.
  */
 const legacyStorageKeys = [
-  `${metaConfig.cookiePrefix}project-listing`,
-  `${metaConfig.cookiePrefix}project-list-count`,
-  `${metaConfig.cookiePrefix}project-list-shape`,
+  `${appMetaConfig.cookiePrefix}project-listing`,
+  `${appMetaConfig.cookiePrefix}project-list-count`,
+  `${appMetaConfig.cookiePrefix}project-list-shape`,
 ] as const;
 
-const legacyCountCookieName = `${metaConfig.cookiePrefix}project-count`;
+const legacyCountCookieName = `${appMetaConfig.cookiePrefix}project-count`;
 
 /**
  * Remove the project listing snapshot and count cookie an earlier build wrote. Safe to call more than once, and on a

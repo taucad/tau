@@ -5,7 +5,7 @@ import { idPrefix } from '@taucad/types/constants';
 import type { Chat } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
-import type { AppUiPreferences } from '#types/storage.types.js';
+import type { AppUiPreferences } from '@taucad/files-ui/types/project-library-io.types';
 import type { EditorState, EditorStateInput, OpenFile } from '@taucad/ui-core/types/editor.types';
 import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
 import type {

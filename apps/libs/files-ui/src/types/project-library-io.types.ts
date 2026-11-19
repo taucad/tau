@@ -124,6 +124,16 @@ export type ProjectDuplicateRequest = {
 };
 
 /**
+ * The device's application chrome preferences: which projects the navigation shows expanded.
+ *
+ * @public
+ */
+export type AppUiPreferences = {
+  readonly id: 'singleton';
+  readonly projectDisclosure: Record<string, boolean>;
+};
+
+/**
  * The object-store worker as the `ProjectLibrary` service and its commands call it: the storage calls' store, plus the
  * journal reads and preparations, the Trash, activity and the editor state. The app passes its
  * `Remote<ObjectStoreWorker>`.
@@ -142,4 +152,18 @@ export type ProjectLibraryWorker = ProjectLibraryObjectStore &
     restoreProject: (projectId: string) => Promise<ProjectLibraryState | undefined>;
     getEditorState: (projectId: string) => Promise<EditorState | undefined>;
     updateEditorState: (editorState: EditorStateInput) => Promise<unknown>;
+  }>;
+
+/**
+ * The object-store worker as the project manager's provider calls it: the library's worker, plus the GeoSpec consent
+ * and the app chrome preferences, whose disclosure write resolves to the preferences. The app passes its
+ * `Remote<ObjectStoreWorker>`.
+ *
+ * @public
+ */
+export type ProjectManagerWorker = Omit<ProjectLibraryWorker, 'setProjectDisclosure'> &
+  Readonly<{
+    setGeoSpecCandidateConsent: (projectId: string, enabled: boolean) => Promise<ProjectLibraryState | undefined>;
+    getAppUiPreferences: () => Promise<AppUiPreferences>;
+    setProjectDisclosure: (projectId: string, expanded: boolean | undefined) => Promise<AppUiPreferences | undefined>;
   }>;

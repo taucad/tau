@@ -1,5 +1,6 @@
 import { convertLegacyProjectManifestBytes } from '@taucad/types';
-import type { AppUiPreferences, StorageProvider } from '#types/storage.types.js';
+import type { StorageProvider } from '#types/storage.types.js';
+import type { AppUiPreferences } from '@taucad/files-ui/types/project-library-io.types';
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import type {
   PendingPermanentDeleteProjectOperation,

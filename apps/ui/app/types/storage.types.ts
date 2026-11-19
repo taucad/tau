@@ -1,11 +1,6 @@
 import type { EditorState, EditorStateInput } from '@taucad/ui-core/types/editor.types';
 import type { ProjectLibraryState } from '@taucad/files-ui/types/project-library.types';
-
-/** Browser/profile-local application chrome state. */
-export type AppUiPreferences = {
-  readonly id: 'singleton';
-  readonly projectDisclosure: Record<string, boolean>;
-};
+import type { AppUiPreferences } from '@taucad/files-ui/types/project-library-io.types';
 
 /**
  * Persistent storage contract for project-local library state and editor state.

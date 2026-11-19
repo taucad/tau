@@ -3002,9 +3002,17 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * A restart in a launch whose shell never mounted asks no page to save (D0): such a page has nothing to save and
    * cannot answer, so waiting on it would end in the saving review. The recovery window's restarts and an update's
    * install, including N1's automatic one, both come through here (T-B22.4).
+   *
+   * The boundary is `shell-mounted`, not `home-ready`. A project session builds its file manager once `rootFiles`
+   * holds the shared worker, which it does before it is `ready` and keeps when it fails, and a link or an opened
+   * file can import into a project before Home is ready. A mounted page may therefore hold edits, so it is still asked
+   * to save, and a page that does not answer still ends in the saving review rather than losing them.
    */
   const prepareToRestart = async (reason: string): Promise<boolean> => {
     restartWithoutPage = bootWatchdog !== undefined && !bootWatchdog.shellMounted();
+    if (restartWithoutPage) {
+      log.log('info', 'main.restart-without-page', { reason });
+    }
     try {
       return await prepareToQuit('restart', reason);
     } finally {

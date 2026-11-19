@@ -280,8 +280,8 @@ const refuseImpossibleSize = (compressed: Uint8Array<ArrayBuffer>, declared: num
 };
 
 /**
- * A compute with `inflateObject`: the one given when it has it, else the
- * same work from its own `inflate` and `sha1`, with the same refusals (an
+ * A compute with `inflateObject`, each of its methods bound to it: its own
+ * when it has one, else the same work from its own `inflate` and `sha1`, with the same refusals (an
  * impossible declared size, a body that is not zlib, one that inflates to
  * another size). For a supervisor's fallback built before the method was.
  *
@@ -290,24 +290,32 @@ const refuseImpossibleSize = (compressed: Uint8Array<ArrayBuffer>, declared: num
  */
 export const withInflateObject = (
   compute: ComputeWorker,
-): ComputeWorker & Required<Pick<ComputeWorker, 'inflateObject'>> =>
-  typeof compute.inflateObject === 'function'
-    ? (compute as ComputeWorker & Required<Pick<ComputeWorker, 'inflateObject'>>)
-    : Object.freeze({
-        ...compute,
-        inflateObject: async (type, compressed, declared) => {
-          refuseImpossibleSize(compressed, declared);
-          const data = await compute.inflate(compressed);
-          if (data.byteLength !== declared) {
-            throw new CorruptBytesError('The entry inflates to a size other than the one it declares.');
-          }
-          const head = frameEncoder.encode(`${type} ${String(declared)}\0`);
-          const framed = new Uint8Array(head.byteLength + declared);
-          framed.set(head);
-          framed.set(data, head.byteLength);
-          return { data, oid: await compute.sha1(framed) };
-        },
-      });
+): ComputeWorker & Required<Pick<ComputeWorker, 'inflateObject'>> => {
+  /* Each method bound to the compute it came from: a class instance keeps its prototype's methods and its `this`. */
+  const bound = Object.fromEntries(
+    computeMethods.flatMap((method) => {
+      const work = compute[method] as ((...input: readonly unknown[]) => Promise<unknown>) | undefined;
+      return typeof work === 'function' ? [[method, work.bind(compute)]] : [];
+    }),
+  ) as unknown as ComputeWorker;
+  return Object.freeze({
+    ...bound,
+    inflateObject:
+      bound.inflateObject ??
+      (async (type, compressed, declared) => {
+        refuseImpossibleSize(compressed, declared);
+        const data = await bound.inflate(compressed);
+        if (data.byteLength !== declared) {
+          throw new CorruptBytesError('The entry inflates to a size other than the one it declares.');
+        }
+        const head = frameEncoder.encode(`${type} ${String(declared)}\0`);
+        const framed = new Uint8Array(head.byteLength + declared);
+        framed.set(head);
+        framed.set(data, head.byteLength);
+        return { data, oid: await bound.sha1(framed) };
+      }),
+  });
+};
 
 /**
  * The compute contract run in the caller's own realm.

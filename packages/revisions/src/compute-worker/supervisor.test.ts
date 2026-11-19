@@ -420,6 +420,69 @@ describe('the supervised compute worker (W5)', () => {
     expect(crashes).toEqual([{ failedCalls: 0, restarts: 1, abandoned: false }]);
   });
 
+  it('serves a fallback that is a class instance through its own prototype methods and `this`', async () => {
+    /* A fallback built as a class, before `inflateObject`: its methods live on its prototype and read `this`. */
+    class OlderCompute {
+      public calls = 0;
+      readonly #inline = createInlineCompute();
+      public async inflate(compressed: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+        this.calls += 1;
+        return this.#inline.inflate(compressed);
+      }
+      public async sha1(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+        this.calls += 1;
+        return this.#inline.sha1(bytes);
+      }
+      public async deflate(raw: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#inline.deflate(raw);
+      }
+      public async sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+        return this.#inline.sha256(bytes);
+      }
+      public async sha256Kept(
+        bytes: Uint8Array<ArrayBuffer>,
+      ): Promise<Readonly<{ sha256: string; data: Uint8Array<ArrayBuffer> }>> {
+        return this.#inline.sha256Kept(bytes);
+      }
+      public async indexPack(pack: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#inline.indexPack(pack);
+      }
+      public async resolveDelta(
+        compressed: Uint8Array<ArrayBuffer>,
+        declared: number,
+        base: Uint8Array<ArrayBuffer>,
+      ): Promise<Uint8Array<ArrayBuffer>> {
+        return this.#inline.resolveDelta(compressed, declared, base);
+      }
+      public async decodeImportEntry(
+        request: Parameters<ComputeWorker['decodeImportEntry']>[0],
+      ): ReturnType<ComputeWorker['decodeImportEntry']> {
+        return this.#inline.decodeImportEntry(request);
+      }
+      public async measureImportBytes(
+        bytes: Uint8Array<ArrayBuffer>,
+        expectedSize: number,
+      ): ReturnType<ComputeWorker['measureImportBytes']> {
+        return this.#inline.measureImportBytes(bytes, expectedSize);
+      }
+    }
+    const older = new OlderCompute();
+    const supervised = createSupervisedComputeWorker({
+      spawn: () => {
+        throw new Error('no workers');
+      },
+      maxRestarts: 0,
+      fallback: older,
+    });
+    const data = encoder.encode('cube(2);\n'.repeat(50));
+    const deflated = await createInlineCompute().deflate(data);
+    const oid = digestHex('sha1', new Uint8Array([...encoder.encode(`blob ${String(data.byteLength)}\0`), ...data]));
+    const answered = await supervised.inflateObject!('blob', new Uint8Array(deflated), data.byteLength);
+    expect(answered.oid).toBe(oid);
+    expect(await supervised.sha1(data)).toBe(digestHex('sha1', data));
+    expect(older.calls).toBe(3);
+  });
+
   it('keeps a pack whose read failed because the worker crashed, and reads it once restarted', async () => {
     /* The first worker dies the moment it is asked to inflate; its successor does not. */
     let spawned = 0;
